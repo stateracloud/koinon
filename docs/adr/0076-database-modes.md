@@ -2,6 +2,8 @@
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)
 - Date: 2026-10-28
+- Area: install-operations
+- Tags: database, install, backup-restore, helm-chart
 - Amends: [0049](0049-v01-scope-decisions.md) ("Postgres: … No bundled StatefulSet")
 - Relates to: [0003](0003-postgres-source-of-truth.md), [0047](0047-repository-scaffold.md), [0060](0060-migrations-as-a-job.md), [0066](0066-triggers-and-scheduling.md), [0075](0075-isolation-tiers.md), [0077](0077-pinned-openshell-and-installer.md)
 
@@ -59,7 +61,7 @@ The maintained Apache-2.0 alternative, CloudPirates' `postgres` chart (`appVersi
 1. **`postgres.mode` takes three values:**
    - `external`: bring your own Postgres 18 or newer, such as RDS, Aurora PostgreSQL, Cloud SQL,
      Azure Database or any other. As today: one URI per role from a Secret,
-     `sslmode=verify-full` recommended.
+     `sslmode=verify-full` recommended. Session-mode connections only (amendment 2026-11-12).
    - `cnpg`: an **existing** CloudNativePG operator. The chart renders the `Cluster` and never
      installs the operator. As today.
    - `standalone`: Koinon's own single-replica Postgres, for small teams (decisions 3 to 7).
@@ -139,6 +141,14 @@ The maintained Apache-2.0 alternative, CloudPirates' `postgres` chart (`appVersi
     - `external`: connects with the migrate role, checks `server_version_num >= 180000` and the
       `CREATE` privilege when durable is on;
     - `standalone`: a storage class or an explicit PV.
+
+## Amendment (2026-11-12): `external` needs session-mode connections
+
+Every `external` URI must reach Postgres through a session-mode connection: direct, or through a
+pooler in session mode. The reconciler's `LISTEN` and its session advisory lock (the leader lock,
+which a follower now waits on with a blocking `pg_advisory_lock`, #573) need one Postgres session for
+as long as the process leads. Transaction and statement pooling (PgBouncer's `pool_mode =
+transaction` or `statement`) do not work.
 
 ## Consequences
 

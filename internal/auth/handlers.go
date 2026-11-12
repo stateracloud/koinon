@@ -8,6 +8,8 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -92,6 +94,19 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A client over the limit for this username, its address or its group is refused
+	// before the password hash runs and before any database read; the refusal is counted, not audited
+	// one by one (loginlimit.go).
+	keys := newLoginKeys(r, req.Username)
+	if nonce := s.deviceNonce(r, req.Username, s.cfg.Now()); nonce != "" {
+		keys.device = deviceLimiterKey(nonce)
+	}
+	if wait := s.loginWait(keys, s.cfg.Now()); wait > 0 {
+		s.limiter.Refuse(keys.user)
+		loginEvents.WithLabelValues(loginEventRefused).Inc()
+		writeLoginLimited(w, wait)
+		return
+	}
 	cred, ok, err := s.checkPassword(r.Context(), req.Username, req.Password)
 	if errors.Is(err, errBusy) {
 		w.Header().Set("Retry-After", "1")
@@ -104,16 +119,34 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.log.Info("password login rejected")
+		if limited, wait := s.loginFailed(r.Context(), keys, req.Username, s.cfg.Now()); limited {
+			writeLoginLimited(w, wait)
+			return
+		}
+		s.log.Info("password login rejected", "client_address", keys.addr)
 		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
 		return
 	}
+	// Failures counted but never written (the client stopped failing, or logged in) are written now.
+	if refused := s.limiter.TakeRefused(keys.user) + s.limiter.TakeRefused(keys.shared); refused > 0 {
+		s.auditLoginFailure(r.Context(), keys, req.Username, refused, map[string]any{"then_succeeded": true})
+	}
+	s.limiter.Succeed(keys.user)
+	if keys.device != "" {
+		s.limiter.Succeed(keys.device)
+	}
 
+	if s.afterPasswordCheck != nil {
+		s.afterPasswordCheck()
+	}
 	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}
 	var token string
 	_, err = audit.InTx(r.Context(), s.pool, func(q *store.Queries, b audit.Batch) error {
+		if err := recheckCredential(r.Context(), q, cred); err != nil {
+			return err
+		}
 		var err error
 		token, _, err = s.createSession(r.Context(), q, b, cred.UserID, store.AuthMethodPassword)
 		return err
@@ -123,17 +156,45 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{installbinding.ErrReleasePending.Error()})
 		return
 	}
+	if errors.Is(err, errCredentialChanged) {
+		s.log.Info("password login rejected", "reason", "password changed during login")
+		writeJSON(w, http.StatusUnauthorized, errorResponse{"invalid username or password"})
+		return
+	}
 	if err != nil {
 		s.log.Error("creating session failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{"internal error"})
 		return
 	}
 	s.setSessionCookie(w, token)
+	s.setDeviceCookie(w, req.Username, s.cfg.Now())
 	s.log.Info("user logged in", "method", "password")
 	writeJSON(w, http.StatusOK, loginResponse{PasswordChangeRequired: cred.MustChangePassword})
 }
 
 var errBusy = errors.New("too many concurrent password checks")
+
+// errCredentialChanged means the password changed (a change or an operator reset) between the
+// password check and the session.
+var errCredentialChanged = errors.New("the password changed during the login")
+
+// recheckCredential share-locks the credential in the session's transaction and refuses the login
+// when its hash is no longer the one checkPassword verified. The lock serializes the session with a
+// password change or reset, which UPDATE the row: either the login sees the new hash here, or the
+// reset waits for the session to commit and then revokes it (RevokeUserSessions).
+func recheckCredential(ctx context.Context, q *store.Queries, verified store.LocalCredential) error {
+	cur, err := q.LockLocalCredentialShare(ctx, verified.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errCredentialChanged
+	}
+	if err != nil {
+		return err
+	}
+	if cur.PasswordHash != verified.PasswordHash {
+		return errCredentialChanged
+	}
+	return nil
+}
 
 // checkPassword verifies a local password. Unknown usernames cost the same
 // as wrong passwords.
@@ -143,6 +204,11 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 		defer func() { <-s.verifySlots }()
 	default:
 		return store.LocalCredential{}, false, errBusy
+	}
+	// A username Postgres text cannot hold (invalid UTF-8, NUL) names nobody; the lookup would fail.
+	if !utf8.ValidString(username) || strings.ContainsRune(username, 0) {
+		_, _ = VerifyPasswordContext(ctx, dummyHash(), password)
+		return store.LocalCredential{}, false, nil
 	}
 	cred, err := s.q.GetLocalCredentialByUsername(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {

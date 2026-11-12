@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
@@ -61,7 +63,7 @@ func newGitHubEnv(ctx context.Context) *ghEnv {
 	DeferCleanup(g.gh.Server.Close)
 	ring := secretstoretest.Keyring()
 	g.ring = ring
-	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+	g.env = newEnvWith(ctx, harness.OpenCode, func(e *env) string {
 		connID := uuid.New()
 		id := pgtype.UUID{Bytes: connID, Valid: true}
 		env, err := connections.SealFields(ring, e.org, id, map[string][]byte{connections.GitHubPrivateKeyField: g.gh.PEM})
@@ -204,7 +206,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
 		Expect(prompts[1]).To(ContainSubstring("create_pull_request (approval id=" + id))
-		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
+		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + strconv.Quote(url)))
 		Expect(loads).To(Equal([]string{"ses_1"}), "the resumed run loads the task's session")
 
 		By("get_approval_status says the same")
@@ -235,7 +237,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
-		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: touch only the docs"))
+		Expect(prompts[1]).To(ContainSubstring(`denied by the approver, who wrote: "touch only the docs"`))
 		Expect(chunks(events(ctx, r))).To(ContainElement(ContainSubstring("status=denied")))
 		Expect(g.gh.Mints()).To(BeZero(), "nothing reached GitHub")
 		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateCompleted))
@@ -291,7 +293,7 @@ var _ = Describe("Parking on approvals", func() {
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
-		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: no"))
+		Expect(prompts[1]).To(ContainSubstring(`denied by the approver, who wrote: "no"`))
 		Expect(g.taskStatus(ctx, t)()).NotTo(Equal(store.TaskStateInputRequired))
 	})
 })

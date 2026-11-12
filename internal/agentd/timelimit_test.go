@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -61,7 +62,7 @@ var _ = Describe("the time limit", func() {
 	}
 
 	It("tells the agent to wrap up before the time limit and posts the reply at the limit", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markWait)
 		r := capped(ctx, e, t, 4)
 		m := agentd.NewMetrics(prometheus.NewRegistry())
@@ -88,8 +89,8 @@ var _ = Describe("the time limit", func() {
 	})
 
 	It("uses the task's notes when the agent said nothing", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.noChunk = true })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.noChunk = true })
 		t := e.task(ctx, markWait)
 		_, err := db.Exec(ctx, `UPDATE tasks SET agent_summary = 'notes text', agent_summary_at = now() WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())
@@ -147,7 +148,7 @@ var _ = Describe("the request and spend limits", func() {
 	}
 
 	It("tells the agent at 80% of its model requests", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markWait)
 		r := limited(ctx, e, t, 10, "")
 		m := agentd.NewMetrics(prometheus.NewRegistry())
@@ -168,7 +169,7 @@ var _ = Describe("the request and spend limits", func() {
 	})
 
 	It("tells the agent at 80% of its spend limit", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markWait)
 		r := limited(ctx, e, t, 1000, "1.00")
 		m := agentd.NewMetrics(prometheus.NewRegistry())

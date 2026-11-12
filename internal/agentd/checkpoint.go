@@ -137,6 +137,7 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	var swept time.Time
 	sweeping := make(chan struct{}, 1)
 	resyncing := make(chan struct{}, 1)
+	probing := make(chan struct{}, 1)
 	for ctx.Err() == nil {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
@@ -151,6 +152,16 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 			wg.Go(func() {
 				defer func() { <-resyncing }()
 				safego.Do(p.log, "checkpoint-resync", func() { p.resyncTick(ctx) })
+			})
+		default:
+		}
+		// Storage probes of keys commands (probe.go), beside the loop: a keys command waits for
+		// the answer, and a slow listing must not delay the ticks nor wait for a backup slot.
+		select {
+		case probing <- struct{}{}:
+			wg.Go(func() {
+				defer func() { <-probing }()
+				safego.Do(p.log, "repository-probe", func() { p.probeTick(ctx) })
 			})
 		default:
 		}
@@ -177,7 +188,8 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 
 func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync.WaitGroup) {
 	c := p.cfg.Checkpoints
-	orgs, err := p.q.ListOrgIDs(ctx)
+	// Only the orgs with an open request or a sandbox due an hourly one (koinon issue 576).
+	orgs, err := p.q.ListOrgIDsWithCheckpointWork(ctx, int32(c.Interval.Seconds()))
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("checkpoints: listing orgs failed", "err", err)
@@ -246,7 +258,7 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 // marks them deleted (ADR 0085 decision 13); their checkpoints are no longer listed for a restore.
 // Several replicas may sweep the same repository: deleting is idempotent, and the mark is set once.
 func (p *Pool) sweepRepositories(ctx context.Context) {
-	orgs, err := p.q.ListOrgIDs(ctx)
+	orgs, err := p.q.ListOrgIDsWithRepositoryDeleteWork(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			p.log.Warn("repository sweep: listing orgs failed", "err", err)

@@ -9,13 +9,13 @@
 for f in "${value_files[@]}"; do
 	r="$out/$(basename "$f" .yaml).yaml"
 	# A value set that turns the policies off (the cluster-scoped objects need admin rights) has none.
-	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | grep -q 'enabled: false' && continue; }
+	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | hit 'enabled: false' && continue; }
 	grep -Eq -- '^  name: koinon-koinon-sandbox-connect$' "$r" || fail "no CONNECT policy with $(basename "$f")"
 	[ "$(grep -c -- '^  name: koinon-koinon-sandbox-connect$' "$r")" = 2 ] || fail "CONNECT policy and binding must both render with $(basename "$f")"
 	grep -Eq -- 'operations: \[CONNECT\]' "$r" || fail "no CONNECT rule with $(basename "$f")"
 	grep -Eq -- 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy\]' "$r" || fail "CONNECT rule lacks a subresource with $(basename "$f")"
 done
-lacks "no CONNECT policy with sandboxPolicy.enabled=false" 'sandbox-connect' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
+lacks "no CONNECT policy with sandboxPolicy.enabled=false" 'sandbox-connect' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
 
 # The sandbox observer (ADR 0078): on by default; renders a get-only ClusterRole, the binder ClusterRole
 # and its binding, and the native policy that fences the reconciler's RoleBindings; off renders none.
@@ -90,10 +90,10 @@ lacks "the preflight does not warn about the observer when it is on" 'sandbox-ob
 has "the preflight warns when the observer is off" '--sandbox-observer-disabled' "${off[@]}" --show-only templates/preflight.yaml
 if render --set sandboxPolicy.enabled=false >/dev/null 2>"$out/obs.err"; then fail "the observer without sandboxPolicy must not render"; fi
 grep -q 'sandboxObserver.enabled needs sandboxPolicy.enabled' "$out/obs.err" || fail "the observer-needs-policy error must name both settings"
-render --set sandboxPolicy.enabled=false "${off[@]}" --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1 || fail "the sandbox policy off with the observer and NetworkPolicy writer off must render"
+render --set sandboxPolicy.enabled=false "${off[@]}" --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1 || fail "the sandbox policy off with the observer and NetworkPolicy writer off must render"
 if render --set 'sandboxPolicy.validationActions={Warn}' >/dev/null 2>&1; then fail "the observer without a Deny validation action must not render"; fi
-# sandboxNetworkPolicy (on by default) also requires Deny; turn both fences off to prove Warn alone can render.
-render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1 || fail "validation actions without Deny and the observer and NetworkPolicy writer off must render"
+# sandboxNetworkPolicy and sandboxLimitRange (on by default) also require Deny; turn those fences off to prove Warn alone can render.
+render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1 || fail "validation actions without Deny and the observer and NetworkPolicy writer off must render"
 if render --set openshell.gatewayId=Not_Valid >/dev/null 2>&1; then fail "an invalid openshell.gatewayId must not render"; fi
 
 
@@ -102,7 +102,7 @@ if render --set openshell.gatewayId=Not_Valid >/dev/null 2>&1; then fail "an inv
 has "the pods policy refuses SPIFFE CSI volumes" "SPIFFE CSI volumes \(csi.spiffe.io\) are not allowed in sandbox pods"
 has "the pods policy refuses the SPIRE agent socket hostPath" "the SPIRE agent socket must not be mounted in sandbox pods"
 has "the pods policy matches the csi.spiffe.io driver" "v.csi.driver != 'csi.spiffe.io'"
-lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
+lacks "no SPIFFE rule without the sandbox policy" 'csi.spiffe.io' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
 
 # Old issue 475: a sandbox pod mounts only the PersistentVolumeClaim its own Sandbox made (the
 # controller names it <volumeClaimTemplate name>-<sandbox name>), and no generic ephemeral volume.
@@ -114,7 +114,7 @@ has "the pods policy refuses a hyphen in a claim volume name" "!v.name.contains\
 has "the pods policy checks claims on CREATE only" "request.operation != 'CREATE' \\|\\| !has\\(object.spec.volumes\\)"
 has "the objects policy refuses hyphens in volumeClaimTemplate names" "must not contain '-'"
 has "the objects policy refuses a volumeClaimTemplate volumeName" "must not set spec.volumeName"
-lacks "no claim rule without the sandbox policy" 'owningSandboxes' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
+lacks "no claim rule without the sandbox policy" 'owningSandboxes' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
 
 # Old issue 475: the namespace label policy. The sandbox policies select namespaces by label, so
 # relabelling a namespace would take it out of all of them; only sandboxPolicy.identities.namespaces
@@ -145,4 +145,4 @@ nsb=$(render --show-only "$nsp" | awk 'BEGIN{RS="\n---\n"} /kind: ValidatingAdmi
 ! grep -Eq -- 'namespaceSelector|objectSelector' <<<"$nsb" || fail "the namespace label policy binds without a selector (it reads the old object itself)"
 grep -Fq -- 'validationActions: ["Deny"]' <<<"$nsb" || fail "the namespace label binding denies"
 [[ $(render --show-only "$nsp" | grep -c -- '^  name: koinon-koinon-sandbox-namespaces$') == 2 ]] || fail "the namespace label policy and binding render once each"
-lacks "no namespace label policy with sandboxPolicy.enabled=false" 'sandbox-namespaces' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false
+lacks "no namespace label policy with sandboxPolicy.enabled=false" 'sandbox-namespaces' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false

@@ -2,10 +2,12 @@
 
 - Status: Accepted (delivery in rc.7)
 - Date: 2026-10-29
+- Area: runtime-sandbox
+- Tags: sandbox, openshell, kubernetes, metrics
 - Amends: [0048](0048-openshell-spike-results.md) (decision 3 and the 2026-10-26 amendment: the reconciler
   holds no access to Agent Sandbox objects), [0066](0066-triggers-and-scheduling.md) (the wait cause set and
-  where its input comes from; amendment 2026-10-28, rc.6). Touches [0045](0045-openshell-hardening-defaults.md)
-  and [0075](0075-isolation-tiers.md) only to leave them as they are (decision 8)
+  where its input comes from; amendment 2026-10-28, rc.6). It leaves ADRs ([0045](0045-openshell-hardening-defaults.md)
+  and [0075](0075-isolation-tiers.md)) as they are (decision 8)
 - Relates to: [0002](0002-namespace-per-org-isolation.md), [0023](0023-observability-and-audit.md),
   [0061](0061-image-pull-secrets-and-registry-mirrors.md), old issue 160
 - Pending verification: the home-lab re-run on a managed cluster (the kind e2e proves the mechanism)

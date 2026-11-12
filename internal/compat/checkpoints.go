@@ -35,13 +35,13 @@ func checkpointsFixtureSQL(envelope []byte) string {
 const checkpointsFixtureFmt = `-- Written for the schema at the recorded version; loaded by internal/compat.
 INSERT INTO orgs (id, slug, display_name, kind, deleted_at)
 VALUES ('0198a000-0000-7000-8000-0000000000d0', 'compat', 'Compat', 'personal', '2026-01-01T00:00:00Z');
-INSERT INTO agents (org_id, id, display_name, flavor) VALUES
+INSERT INTO agents (org_id, id, display_name, harness) VALUES
   ('0198a000-0000-7000-8000-0000000000d0', '0198a000-0000-7000-8000-0000000000d1', 'one', 'opencode'),
   ('0198a000-0000-7000-8000-0000000000d0', '0198a000-0000-7000-8000-0000000000d2', 'two', 'opencode');
 -- The agent whose home the kopia backup holds: its repository row carries the password envelope.
 INSERT INTO orgs (id, slug, display_name, kind, deleted_at)
 VALUES ('0198a000-0000-7000-8000-0000000000c1', 'compat-backup', 'Compat backup', 'personal', '2026-01-01T00:00:00Z');
-INSERT INTO agents (org_id, id, display_name, flavor)
+INSERT INTO agents (org_id, id, display_name, harness)
 VALUES ('0198a000-0000-7000-8000-0000000000c1', '0198a000-0000-7000-8000-0000000000c2', 'backup', 'opencode');
 INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
 VALUES ('0198a000-0000-7000-8000-0000000000c1', '0198a000-0000-7000-8000-0000000000c2', '%[2]s', '%[1]s'::jsonb);

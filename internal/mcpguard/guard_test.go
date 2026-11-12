@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"reflect"
@@ -29,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpguard"
@@ -43,6 +45,15 @@ const secretPage = "Quarterly retention plan for the Northwind accounts: the ren
 	"Halvorsen Freight stays at eleven percent until the board meets in March, and the churn model " +
 	"flags Brightwater Logistics, Okafor Textiles and the three Baltic distributors as at risk. " +
 	"Do not share the per-account margins outside the finance group."
+
+// escapeAll writes every character of s as a JSON \u escape.
+func escapeAll(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		fmt.Fprintf(&b, "\\u%04x", r)
+	}
+	return b.String()
+}
 
 // stubDecider records what reaches it and answers with a fixed outcome.
 type stubDecider struct {
@@ -188,7 +199,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 	BeforeEach(func(ctx SpecContext) {
 		startDB(ctx)
 		org, user, slug = pgtest.NewOrg(ctx, pool)
-		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "helper", Harness: harness.OpenCode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: a.ID, Config: []byte(`{"instructions":"x"}`), CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
@@ -287,6 +298,24 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(reason(leak)).To(ContainSubstring("may send at most 64 bytes"))
 		Expect(approvals(ctx)).To(BeZero())
 	})
+
+	// #684: a tool's text content is often a JSON document of its own, which may write the private
+	// text with escapes. Its strings are decoded before they are fingerprinted, so the text the
+	// agent later sends in plain is caught.
+	DescribeTable("decodes a result's string that is a JSON document before fingerprinting it",
+		func(ctx SpecContext, text string) {
+			Expect(result(ctx, "wiki", "read_page", text).GetPass()).NotTo(BeNil())
+			r := call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+			Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			var risk []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+			Expect(string(risk)).To(ContainSubstring(`"taint"`))
+		},
+		Entry("an object with escaped text", `{"page":"`+escapeAll(secretPage)+`"}`),
+		Entry("an array", `[1, "`+escapeAll(secretPage)+`"]`),
+		Entry("a JSON string", `"`+escapeAll(secretPage)+`"`),
+		Entry("a document inside a document", `{"wrapped":`+strconv.Quote(`{"page":"`+escapeAll(secretPage)+`"}`)+`}`),
+	)
 
 	It("matches private text in a fixed tool's address argument too", func(ctx SpecContext) {
 		Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
@@ -432,6 +461,28 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			sess := mcpguard.Session{Org: org, Agent: agent.ID, Generation: "gen-" + slug}
 			Expect(st.AddFingerprints(ctx, sess, mcpguard.Legs{PrivateData: true}, []leakguard.Fingerprint{5, 6, 5, 5, 7, 6})).To(Succeed())
 			Expect(fpCount(ctx)).To(Equal(3))
+		})
+
+		// #684: an eviction forgets taint, so it is counted, once per eviction and by the
+		// fingerprints it dropped (no label: the session is not a metric label, ADR 0023).
+		It("counts the evictions of a session's taint store and the fingerprints they drop", func(ctx SpecContext) {
+			m := mcpguard.NewMetrics(nil)
+			st := mcpguard.NewState(pool, 4, m)
+			sess := mcpguard.Session{Org: org, Agent: agent.ID, Generation: "gen-" + slug}
+			Expect(st.AddFingerprints(ctx, sess, mcpguard.Legs{PrivateData: true}, []leakguard.Fingerprint{1, 2, 3})).To(Succeed())
+			Expect(testutil.ToFloat64(m.Evictions)).To(BeZero())
+			Expect(testutil.ToFloat64(m.EvictedFingerprints)).To(BeZero())
+			Expect(st.AddFingerprints(ctx, sess, mcpguard.Legs{PrivateData: true}, []leakguard.Fingerprint{4, 5, 6})).To(Succeed())
+			Expect(fpCount(ctx)).To(Equal(4))
+			Expect(testutil.ToFloat64(m.Evictions)).To(Equal(1.0))
+			Expect(testutil.ToFloat64(m.EvictedFingerprints)).To(Equal(2.0))
+			Expect(st.AddFingerprints(ctx, sess, mcpguard.Legs{PrivateData: true}, []leakguard.Fingerprint{7})).To(Succeed())
+			Expect(testutil.ToFloat64(m.Evictions)).To(Equal(2.0))
+			Expect(testutil.ToFloat64(m.EvictedFingerprints)).To(Equal(3.0))
+			var evicted bool
+			Expect(pool.QueryRow(ctx, `SELECT evicted FROM leak_guard_sessions WHERE org_id = $1 AND agent_id = $2`,
+				org, agent.ID).Scan(&evicted)).To(Succeed())
+			Expect(evicted).To(BeTrue())
 		})
 
 		It("takes agentd's report of a tool's content and raw output, and of an edit's two sides", func(ctx SpecContext) {

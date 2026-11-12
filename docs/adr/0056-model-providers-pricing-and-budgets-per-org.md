@@ -1,7 +1,10 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-06 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
+- Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
 - Date: 2026-10-23
+- Area: models-spend
+- Tags: models, pricing, budgets, encryption, credentials, api
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 5 in step 3: the gateway's own cost and catalog fall away)
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
   (connection secrets move into the encrypted store), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (price versions, raw
@@ -28,6 +31,7 @@ usage type, tiers and match patterns.
    org-scoped role tokens that expire. Every call is audited.
 3. **Provider keys** are envelope-encrypted in Postgres. The key-encryption key (KEK) is generated
    by the chart into a Secret, or taken from an existing Secret. A KMS is optional.
+   _(Changed: `koinon-api` creates the KEK on its first start, because the chart cannot render key material; see the amendment of 2026-10-23 (PV1) below. This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job, see the amendment of 2026-11-11 below.)_
 4. **Model names are org-scoped**: `<org>/<model>`.
 5. **Prices** follow the Langfuse style: a price per usage type, with tiers and match patterns.
    Prices are effective-dated. Each ledger entry records the price version it used. Koinon ships a
@@ -172,7 +176,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    [docs/ops/prices.md](../ops/prices.md): a pull request that cites the page, a changed entry becomes
    a new `valid_from`, and the version is bumped.
 5. **Cost truth.** Koinon recomputes the cost of every request from the raw usage and the dated price;
-   that cost counts for limits and reports. agentgateway's own cost from the access log is kept beside
+   that cost counts for limits and reports. _(Changed: an OpenRouter entry settles at the billed cost, see the amendment of 2026-11-06 (issue #47) below.)_ agentgateway's own cost from the access log is kept beside
    it (`gateway_cost_usd`). When both exist and differ by more than 1% of the gateway's cost, the
    entry is flagged and `GET /admin/v1/prices/flagged` lists the price entries with how often. A model
    without a Koinon price is still served only when the gateway can price it; the gateway's cost then
@@ -365,7 +369,8 @@ replaces decision 6.3 for responses cut short.
    (`AmendOnDrop`, `crates/agentgateway/src/llm/mod.rs`) with whatever usage it had seen. For an
    OpenAI chat-completion stream, the format every model is served in today, usage arrives only in
    the final chunk, so a cut stream logs no input and no output usage and a cost of `0`; the input
-   is then estimated from the request bytes as in decision 6.2, and the output is zero. Verified
+   is then estimated from the request bytes as in decision 6.2, and the output is zero (*superseded
+   by the 2026-11-12 amendment below: the output is estimated*). Verified
    against the v1.7.0 container in `internal/ledger/agentgateway_test.go`. The entry is marked
    `estimated` and flagged `usage_missing`.
 2. **The provider's response ID comes from a response header.** OpenRouter returns
@@ -440,7 +445,9 @@ replaces decision 6.3 for responses cut short.
    run it is attributed to (`FindRunAt`) was canceled at or before the record's time. Only that run
    counts, so a later run's complete response is not marked cut by an earlier run's cancel. The
    three fields come with the Messages routes; a record without them is OpenAI, unstreamed and
-   without error, which is today's behaviour. Such an entry is charged as logged and flagged `usage_partial`. Via OpenRouter
+   without error, which is today's behaviour. Such an entry is charged as logged and flagged `usage_partial`
+   (*superseded by the 2026-11-12 amendment below: it is charged the larger of the logged output and
+   the output estimate*). Via OpenRouter
    it is provisional and settled by generation ID like any cut response. From a provider that cannot
    report (direct Anthropic) it is provisional without a lookup: the `max_tokens` reserve is held
    back from the key until the settlement deadline, then released, and the logged usage is final
@@ -731,6 +738,83 @@ The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the
   Admin key goes in `x-api-key` and Bearer carries OAuth tokens only. Koinon sends `x-api-key`, as
   the Admin API page says; the first real-key run confirms it.
 
+## Amendment (2026-11-11, issue #603): koinon-api creates the KEK
+
+Maintainer decision (procoduck, 2026-11-11).
+
+- `koinon-api` keeps creating the KEK on its first start and never overwrites it (decision 3 and the
+  2026-10-23 amendment, item 2).
+- This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
+  Only a creator that can see the database can refuse to make a new key when encrypted data already
+  exists; the hook Job cannot see the database.
+- Hardening (issue #604): a native ValidatingAdmissionPolicy (`kek-guard`, chart template
+  `kek-guard.yaml`) refuses DELETE of the KEK Secret by anyone, and UPDATE by any identity except the
+  koinon-api and key-admin service accounts, so a deleted or overwritten Secret cannot silently
+  become a new key on the next upgrade or GitOps sync. The reconciler's Secret writes are fenced by a
+  second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
+  Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
+  `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
+  when the database holds encrypted values, and a skip would not help the usual restore, where the
+  new install made its first KEK before the hold.
+- Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
+  exists, which is the usual case (a new install made a first KEK on its empty database). The restore
+  therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
+  standard input and merges it into the Secret, as the koinon-api service account, which the
+  guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
+  active and never removes a key; only `keys retire` removes one, with its database check. The add paths (`keys add`,
+  the key-admin Job's plain add and its recovery) refuse any ID the install audit chain ever recorded (a `keys.retire` or
+  `keys.forget` event, or the ID in the KEKs or Retired of a recorded state), besides an ID that stored envelopes carry:
+  IDs are never reused. Import keeps the narrower `keys.retire` rule, because it restores the same bytes. A KEK ID that
+  the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
+  retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
+  removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
+  KEK never becomes the active one, with or without the flag (`keys activate` refuses it too). The rule
+  trusts the explicit `keys.retire` event, which has two costs: a retire whose audit event was lost
+  (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event
+  either (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` there is no chain
+  to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
+  change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
+  a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,
+  so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
+  is configured, also when it creates the Secret. It writes nothing unless every KEK in the manifest opens with the install's key
+  wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
+  of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
+  to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,
+  delete the Secret, apply the backup and turn the guard on again.
+
+## Amendment (2026-11-12, issue #670): a cut response without usage is charged an output estimate
+
+Maintainer decision (procoduck, 2026-11-12, on PR #874). The 2026-10-28 RT1 amendment charged a
+cut chat-completions stream zero output (its point 1) and a cut Messages stream as logged, that is
+`message_start`'s placeholder output of about one token (its point 5). A run could therefore cut
+its streams and pay for input only. Point 2 of the 2026-10-31 amendment already says a cut response
+is charged "its input plus the output actually streamed, estimated when the provider did not report
+usage"; this amendment makes the code follow it, supersedes those two sentences of the 2026-10-28
+amendment, and records the estimate (`estimate.CutOutput`).
+
+1. **The estimate.** A response cut short (aborted: no output usage logged, or a proxy error; not
+   a 4xx refusal and not a 5xx failure, which keep the 2026-10-29 and 2026-10-31 amendments) is
+   charged its input plus an output estimate. `bound` is the existing reserve bound: `max_tokens`
+   capped at the entry's `max_output`, or `max_output` when `max_tokens` was not logged.
+   - Response size measured and above zero: the bytes at the effective bytes-per-token ratio of
+     decision 6.2, at most `bound` (`estimate.output_basis` `response_bytes`).
+   - Response size measured as zero, or a stream that logged no status (the client left before the
+     response headers): nothing was streamed, so no output (point 1 of the 2026-10-31 amendment;
+     `nothing_streamed`). A request not known to stream that logged no status is not in this case:
+     its headers come only once the provider has generated it, so it falls under the next one.
+   - Response size unknown: `min(ceil(bound / 4), 4096)` output tokens (`UnknownOutputDivisor`,
+     `UnknownOutputMax`; `bounded_reserve`). agentgateway v1.7.0 logs no response size, so this is
+     the case that runs today. For RT1's `max_tokens: 32000` a cancel is charged 4,096 output tokens:
+     not 32,000 (the 2026-10-28 problem) and not zero (this issue's).
+2. **A cut Messages stream** (`usage_partial`, point 5 of the 2026-10-28 amendment) is charged the
+   larger of the logged output and the estimate, so the placeholder is not the charge. Only a
+   streamed Anthropic-format record is raised; any other logged usage is the provider's own and
+   stands. The entry records `output_basis`, `output_logged_tokens` and `output_estimated`.
+3. **Unchanged.** The `max_tokens` reserve is still held back from the gateway key (the bound
+   minus the charge, decision 4 of the 2026-10-28 amendment), and a settlement with the provider's
+   own figure (OpenRouter's generation, the 2026-11-06 amendment) still replaces the estimate. The
+   estimate is never `max_tokens`.
+
 ## Open questions
 
 - How often the default price list is refreshed (a monthly review is the intent; the process is in
@@ -738,7 +822,7 @@ The shapes were read on 2026-11-06: OpenRouter's `/generation` (its docs and the
 - The OpenAI tokenizer for the gpt-6 family is not published; `o200k_base` is assumed and calibration
   can only raise estimates.
 - Whether agentgateway should expose response bytes (or Koinon should buffer the stream) so aborted
-  outputs can be estimated from text rather than settled at `max_tokens`.
+  outputs can be estimated from text rather than from the bounded reserve (2026-11-12 amendment).
 - Email delivery for budget alerts.
 
 ## Upstream verification
@@ -759,3 +843,37 @@ Langfuse model and price schema, tokenizer fallback and alerts were read from it
 - ADRs [0013](0013-model-access.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md),
   [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0058](0058-gateway-modes.md)
+
+## Amendment (2026-11-12, issue 17): a provider shows whether the gateway serves it
+
+The Providers page said "available to agents within about 3 minutes" for every new provider and the
+browser e2e slept 240 s. `Provider` now carries `serving_state` (`saved`, `serving`, `failed`), a
+`serving_reason` and a `serving_detail`.
+
+1. **Derived, not probed.** The API reads `gateway_served_models` and never calls the gateway. A
+   provider is `serving` when every enabled model has a row, `saved` when some do not and no failure
+   is recorded (the reconciler has not applied it, or its key file is still reaching the gateway pod),
+   and `failed` with a reason otherwise. A disabled, removed or admin-held provider has no state. The
+   per-model rows stay the source of truth; no per-provider revision is stored.
+2. **Failures need a record.** `gateway_provider_failures` (migration 00082) holds `(org_id,
+   provider_id, reason, detail)`. koinon-reconciler writes it when an Apply fails whole (`upstream
+   unreachable`: the gateway could not be reached or the reload did not finish; `gateway rejected
+   config`: the file or the org's model objects were refused, with the gateway's text as detail), for
+   enabled providers that have an unserved model. An Apply that took effect clears the org's rows. A
+   provider that is fully served keeps `serving` through a later failed Apply, because the gateway keeps
+   the previous config. Pending states are not failures, so `saved` is never a reason.
+3. **`no key` is derived**: a provider whose key was lost (`credential_lost_at`, #85) is `failed`
+   with `no key`. Any other recorded reason maps to `unknown`.
+4. **The page polls** every 5 s while a provider is `saved` and every 15 s while one is `failed`
+   (a failure can pass: an unreachable upstream, a price not added yet); the browser e2e waits for
+   `serving` instead of a fixed sleep and reports a failed status only when the wait times out. Nudging the reconciler on provider writes (the issue's optional item)
+   is not done: the 30 s resync stays.
+5. **Providers the pass leaves out are failed too.** A provider whose URL fails the URL policy, whose
+   key cannot be opened, or that has a model with an unusable price is not rendered, so no Apply
+   result names it. The reconciler records each as `unknown` with the reason as detail, after the
+   org's rows are cleared. A provider with an enabled model that has no price is likewise `failed`
+   `unknown` ("no price: model") even when its other models are served: it is not fully served, and the
+   cause is known but not worth its own reason value yet (a separate `no price` reason is possible
+   later; the API maps unrecorded reasons to `unknown`).
+6. **The admin REST API** (`/providers`) carries the same `servingState`, `servingReason` and
+   `servingDetail`.

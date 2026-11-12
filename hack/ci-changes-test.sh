@@ -35,15 +35,32 @@ jobs_for() {
 	printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
 }
 
-# expect <expected jobs> <path>...: the paths together must turn on exactly these jobs.
+# The path-gate jobs of #572 (tidy: go-tidy and go-lint, shell: lint-shell, scripts) and #579 (vuln: go-vuln) and #684 (fuzz) have their own table in
+# section 1b; `expect` leaves them out of the comparison so the heavy-job table stays about the heavy jobs.
+gate_jobs='tidy|vuln|fuzz|shell|scripts'
+
+# expect <expected jobs> <path>...: the paths together must turn on exactly these jobs (the path-gate jobs aside).
 expect() {
 	local want got
 	want=$(tr ' ' '\n' <<<"$1" | sed '/^$/d' | sort | tr '\n' ' ')
 	shift
 	total=$((total + 1))
-	got=$(jobs_for "$@")
+	got=$(jobs_for "$@" | tr ' ' '\n' | grep -vxE "$gate_jobs" | tr '\n' ' ' || true)
 	if [[ $got != "$want" ]]; then
 		echo "FAIL: $* -> [${got% }] want [${want% }]"
+		fails=$((fails + 1))
+	fi
+}
+
+# expect_gates <expected path-gate jobs> <path>...: of tidy, vuln, fuzz, shell and scripts, exactly these turn on.
+expect_gates() {
+	local want got
+	want=$(tr ' ' '\n' <<<"$1" | sed '/^$/d' | sort | tr '\n' ' ')
+	shift
+	total=$((total + 1))
+	got=$(jobs_for "$@" | tr ' ' '\n' | grep -xE "$gate_jobs" | tr '\n' ' ' || true)
+	if [[ $got != "$want" ]]; then
+		echo "FAIL: $* -> gates [${got% }] want [${want% }]"
 		fails=$((fails + 1))
 	fi
 }
@@ -100,12 +117,14 @@ expect "go generate" third_party/openshell/proto/openshell.proto # buf.gen.opens
 expect "go generate" buf.gen.openshell.yaml                      # buf generate --template
 expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agentgateway.yaml input
 expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
-expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/flavors)
+expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)
 expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "generate" hack/generate.sh         # make generate delegates here (#349)
+expect "generate go" cmd/protoc-gen-koinon-doc/doc.go
+expect "generate" docs/reference/proto/proto-api.md   # buf.gen.docs.yaml output
 # Negative: a hand-written file in the same trees is not a generator input.
 expect "go chartsmoke" api/admin/v1/spec.go
 
@@ -120,7 +139,7 @@ expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
 expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the admission specs import it
 
-# F5, flavors: test/flavors imports these (go list -deps -test ./test/flavors/...).
+# F5, flavors: test/harnesses imports these (go list -deps -test ./test/harnesses/...).
 expect "go chartsmoke flavors" internal/execution/run.go
 expect "go chartsmoke flavors" internal/modelformat/format.go
 expect "go chartsmoke flavors" internal/prices/prices.go
@@ -130,10 +149,11 @@ expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml 
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors" flavors/opencode/Dockerfile
-expect "go flavors" test/flavors/contract_test.go
-expect "go flavors" hack/flavor-tag.sh
+expect "go flavors opencodeplugin" harnesses/opencode/Dockerfile
+expect "go flavors" test/harnesses/contract_test.go
+expect "go flavors" hack/harness-tag.sh
 expect "flavors" hack/probe-tag.sh
+expect "" hack/harness-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
 expect "go flavors" hack/spike/probe/Dockerfile
 # Negative: a package neither suite imports.
 expect "go" internal/zzz-not-imported/x.go
@@ -145,7 +165,7 @@ expect "go" test/e2e/run.sh
 expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke escape flavors generate go web"
+all="chart chartsmoke escape flavors generate go opencodeplugin web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum
@@ -154,18 +174,89 @@ expect "$all" hack/ci-changes.sh
 expect "$all" hack/ci-skip-heavy.sh
 expect "$all" hack/paths.rules
 expect "$all" hack/paths-lib.sh
+# CI_CHANGES_IGNORE_PLUMBING=1 (hack/pr-merge.sh --admin) drops the CI-plumbing rule but keeps the build inputs.
+expect_ignoring() { # <want flavors value> <paths...>
+	local want=$1 got
+	shift
+	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^flavors=//p')
+	total=$((total + 1))
+	if [[ $got != "$want" ]]; then
+		echo "FAIL: ignoring plumbing, flavors for [$*]: want $want, got $got"
+		fails=$((fails + 1))
+	fi
+}
+for f in .github/workflows/ci.yml hack/ci-changes.sh hack/ci-skip-heavy.sh hack/paths.rules hack/paths-lib.sh; do
+	expect_ignoring false "$f"
+done
+expect_ignoring false .github/workflows/ci.yml .github/CODEOWNERS
+expect_ignoring true Makefile
+expect_ignoring true go.mod
+expect_ignoring true go.sum
+expect_ignoring true .github/workflows/ci.yml harnesses/base/Dockerfile
+expect_ignoring true .github/workflows/ci.yml internal/execution/run.go
+expect_ignoring true # an empty change list still fails closed
 # Several paths together: the union.
 expect "go chart chartsmoke escape generate web" charts/koinon/Chart.yaml sqlc.yaml web/src/a.ts
 
+# --- 1b. The path gates of #572: go-tidy and go-lint (tidy), lint-shell (shell) and scripts. -------------------
+# tidy: Go files, go.mod/go.sum and the lint config. shell: shell scripts, .github/, the tool pins.
+# scripts: fail closed; only Markdown, docs/ (except docs/adr and docs/dev/ci.md, which checks read) and web/src
+# cannot affect it (hack/paths.rules says why).
+expect_gates "" README.md
+expect_gates "" docs/design.md
+expect_gates "" docs/dev/other.md
+expect_gates "" web/src/app.ts
+expect_gates "" web/src/gen/koinon/x_pb.ts
+expect_gates "scripts" docs/adr/0001-x.md
+expect_gates "scripts" docs/dev/ci.md
+expect_gates "scripts" AGENTS.md
+expect_gates "scripts" CONTRIBUTING.md
+expect_gates "scripts" web/package.json
+expect_gates "scripts" web/pnpm-lock.yaml
+expect_gates "scripts" charts/koinon/values.yaml
+expect_gates "scripts" test/e2e/commands/quickstart.e1
+expect_gates "scripts" harnesses/opencode/Dockerfile
+expect_gates "scripts" some-new-top-level-file
+expect_gates "tidy scripts" internal/zzz-new/x.go
+expect_gates "tidy scripts" web/webui.go
+expect_gates "tidy scripts" .golangci.yml
+expect_gates "shell scripts" hack/ship.sh
+expect_gates "shell scripts" hack/ci-changes-test.sh
+expect_gates "shell scripts" .github/workflows/e2e-kind.yml
+expect_gates "shell scripts" .github/actions/fetch-pinned/action.yml
+expect_gates "shell scripts" internal/agentd/savework.sh
+expect_gates "tidy scripts" hack/pgserver/main.go
+expect_gates "tidy vuln fuzz shell scripts" go.mod
+expect_gates "tidy vuln fuzz shell scripts" go.sum
+expect_gates "tidy vuln fuzz shell scripts" Makefile
+expect_gates "tidy vuln fuzz shell scripts" .github/workflows/ci.yml
+expect_gates "tidy vuln fuzz shell scripts" hack/paths.rules
+# vuln (go-vuln, govulncheck, #579 part 2): only the module files (and CI plumbing, through `everything`).
+expect_gates "tidy scripts" internal/zzz-new/x.go # a Go file alone does not run govulncheck
+expect_gates "" docs/dev/ci-rules.md # a docs-only change does not
+expect_gates "vuln shell scripts" hack/govulncheck.sh # the check itself
+expect_gates "vuln shell scripts" .github/workflows/govulncheck.yml
+expect_gates "vuln shell scripts" hack/versions.env # accepted cost: every tool bump runs govulncheck
+expect_gates "scripts" hack/spike/acpdrive/go.mod # nested spike modules are not scanned
+expect_gates "scripts" hack/spike/acpdrive/go.sum
+expect_gates "shell scripts" hack/govulncheck-test.sh
+expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
+# fuzz (#684): the fuzzed packages and the script, not every Go file.
+expect_gates "tidy fuzz scripts" internal/tracing/scrub/jsonscrub.go
+expect_gates "tidy fuzz scripts" internal/leakguard/zzz_test.go
+expect_gates "fuzz shell scripts" hack/go-fuzz.sh
+
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
-# Read the script's output fully before grepping: chartsmoke is not the last job, so `grep -q` in
+# Read the script's output fully before grepping: flavors and chartsmoke are not the last jobs, so `grep -q` in
 # a pipefail pipeline would SIGPIPE the script mid-write and look like a miss.
 total=$((total + 4))
-if ! printf 'internal/execution/run.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/execution/run.go\n' | bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: internal/execution/run.go does not turn on flavors"
 	fails=$((fails + 1))
 fi
-if printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin) || true
+if grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: an unrelated package turns on flavors"
 	fails=$((fails + 1))
 fi
@@ -283,11 +374,11 @@ done
 # no path stripping is shared with ci-changes.sh). The packages the audit named, and the suite
 # itself, must be in it; then each package directory (and a file below it) must turn flavors on.
 mod=$(go list -m)
-real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/flavors/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
-for pkg in test/flavors internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
+real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/harnesses/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
+for pkg in test/harnesses internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
 	total=$((total + 1))
 	if ! grep -qxF "$pkg" <<<"$real_dirs"; then
-		echo "FAIL: go list of test/flavors does not contain $pkg (the audit's F5 package)"
+		echo "FAIL: go list of test/harnesses does not contain $pkg (the audit's F5 package)"
 		fails=$((fails + 1))
 	fi
 done
@@ -298,7 +389,8 @@ while IFS= read -r d; do
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
 total=$((total + 1))
-if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
 	fails=$((fails + 1))
 fi

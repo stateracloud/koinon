@@ -10,12 +10,13 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("A refused permission request", func() {
 	It("tells the agent what was refused and continues the run when the harness cancelled the turn", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markRefuse+" write the notes"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -36,8 +37,8 @@ var _ = Describe("A refused permission request", func() {
 	})
 
 	It("fails the run, as a policy failure, when the agent is refused again and again", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.refuseAll = true })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.refuseAll = true })
 		r := e.enqueue(ctx, e.task(ctx, "write the notes"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.MaxRefusedTurns = 2 })
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))

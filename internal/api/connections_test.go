@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
+	guuid "github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -467,6 +470,171 @@ var _ = Describe("ConnectionService", func() {
 		Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND code_host_connection_id IS NULL`, org)).To(Equal(1))
 	})
 
+	Describe("the extra MCP hosts of a connection (#240)", func() {
+		var id string
+		add := func(c *client, host string) (*connectionv1alpha1.Connection, error) {
+			res, err := c.conns.AddConnectionMCPHost(context.Background(), &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: host})
+			return res.GetConnection(), err
+		}
+		remove := func(c *client, host string) (*connectionv1alpha1.Connection, error) {
+			res, err := c.conns.RemoveConnectionMCPHost(context.Background(), &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: host})
+			return res.GetConnection(), err
+		}
+		// audited counts the events of action written by a user (the actor is recorded).
+		audited := func(ctx SpecContext, action string) int {
+			return count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = $2 AND actor_kind = 'user' AND actor_id <> ''`, org, action)
+		}
+		BeforeEach(func(ctx SpecContext) {
+			id = e.githubConnection(ctx, org)
+		})
+
+		It("adds and removes hosts for an admin, lists them sorted, and audits each change with its actor", func(ctx SpecContext) {
+			conn, err := add(owner, " Zeta-MCP.Corp.Example. ")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"zeta-mcp.corp.example"}))
+			conn, err = add(owner, "alpha-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"alpha-mcp", "zeta-mcp.corp.example"}))
+			got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.GetConnection().GetMcpHosts()).To(Equal([]string{"alpha-mcp", "zeta-mcp.corp.example"}))
+			Expect(audited(ctx, "connection.mcp_host.add")).To(Equal(2))
+
+			conn, err = remove(owner, "alpha-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(conn.GetMcpHosts()).To(Equal([]string{"zeta-mcp.corp.example"}))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.mcp_host.add' AND summary->'after'->>'host' = 'zeta-mcp.corp.example'`, org)).To(Equal(1))
+		})
+
+		It("changes and audits nothing when a host is already there or already absent", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "GITEA-MCP")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = remove(owner, "other-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(audited(ctx, "connection.mcp_host.add")).To(Equal(1))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(BeZero())
+		})
+
+		It("needs an admin, and hides other orgs' connections", func(ctx SpecContext) {
+			for _, role := range []store.OrgRole{store.OrgRoleMember, store.OrgRoleViewer} {
+				member := e.userIn(ctx, org, role)
+				_, err := add(member, "gitea-mcp")
+				Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			}
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = remove(e.userIn(ctx, org, store.OrgRoleMember), "gitea-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+			_, err = add(owner, "second-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(Equal(2))
+
+			otherOrg, otherOwner := e.newTeamOrg(ctx)
+			_, err = otherOwner.conns.AddConnectionMCPHost(ctx, &connectionv1alpha1.AddConnectionMCPHostRequest{OrgId: otherOrg, ConnectionId: id, Host: "x-mcp"})
+			Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		})
+
+		DescribeTable("refuses a host that is not a plain host name, and writes nothing",
+			func(ctx SpecContext, host string) {
+				_, err := add(owner, host)
+				Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+				Expect(audited(ctx, "connection.mcp_host.add")).To(BeZero())
+				Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+			},
+			Entry("empty", ""),
+			Entry("with a port", "mcp.example.com:8443"),
+			Entry("a URL", "https://mcp.example.com/mcp"),
+			Entry("a wildcard", "*.example.com"),
+			Entry("an IP address", "10.0.0.5"),
+		)
+
+		It("allows at most 20 hosts", func(ctx SpecContext) {
+			for i := range 20 {
+				_, err := add(owner, fmt.Sprintf("mcp-%02d.example.com", i))
+				Expect(err).NotTo(HaveOccurred())
+			}
+			_, err := add(owner, "one-too-many.example.com")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			_, err = add(owner, "mcp-00.example.com")
+			Expect(err).NotTo(HaveOccurred(), "a present host is still a no-op at the limit")
+		})
+
+		It("refuses a host of another connector, or one that another connection has", func(ctx SpecContext) {
+			for _, host := range []string{"github.com", "api.githubcopilot.com", "API.github.com."} {
+				_, err := add(owner, host)
+				Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), host)
+			}
+			var orgID pgtype.UUID
+			Expect(orgID.Scan(org)).To(Succeed())
+			other, err := store.New(e.pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+				OrgID: orgID, ID: pgtype.UUID{Bytes: guuid.New(), Valid: true}, Connector: "gitea", DisplayName: "forge",
+				Config: []byte(`{"baseUrl":"https://git.corp.example"}`), Source: store.ConfigSourceUi,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "git.corp.example")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "the web host of another connection")
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['shared-mcp'] WHERE org_id = $1 AND id = $2`, org, other.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "shared-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a host already listed on another connection")
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET removed_at = now() WHERE org_id = $1 AND id = $2`, org, other.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "shared-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "a host of a removed connection stays claimed")
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+			Expect(audited(ctx, "connection.mcp_host.add")).To(BeZero())
+		})
+
+		It("refuses an extra host that is the connection's own web or API host", func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `UPDATE connections SET config = '{"baseUrl":"https://ghe.corp.example"}' WHERE org_id = $1 AND id = $2`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "ghe.corp.example")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(BeZero())
+		})
+
+		It("refuses to change the hosts of a removed connection, and writes nothing", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = e.pool.Exec(ctx, `UPDATE connections SET removed_at = now() WHERE org_id = $1 AND id = $2`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = add(owner, "second-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			_, err = remove(owner, "gitea-mcp")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			Expect(count(ctx, e, `SELECT cardinality(mcp_hosts) FROM connections WHERE org_id = $1 AND id = $2`, org, id)).To(Equal(1))
+		})
+
+		It("unlinks, audited, the servers that lose their host on removal, and keeps the others (the link check uses the list)", func(ctx SpecContext) {
+			_, err := add(owner, "gitea-mcp.corp.example")
+			Expect(err).NotTo(HaveOccurred())
+			// One server on the extra host, one on a host the connector declares for github.com.
+			_, err = e.pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES
+				($1, 'extra', 'https://gitea-mcp.corp.example/mcp', $2), ($1, 'declared', 'https://api.githubcopilot.com/mcp/', $2)`, org, id)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a dry run lists the servers and writes nothing")
+			dry, err := owner.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: "gitea-mcp.corp.example", DryRun: true})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(dry.GetUnlinkedServers()).To(HaveLen(1))
+			Expect(dry.GetUnlinkedServers()[0].GetName()).To(Equal("extra"))
+			Expect(dry.GetConnection().GetMcpHosts()).To(Equal([]string{"gitea-mcp.corp.example"}))
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'extra' AND code_host_connection_id IS NOT NULL`, org)).To(Equal(1))
+			Expect(audited(ctx, "connection.mcp_host.remove")).To(BeZero())
+
+			res, err := owner.conns.RemoveConnectionMCPHost(ctx, &connectionv1alpha1.RemoveConnectionMCPHostRequest{OrgId: org, ConnectionId: id, Host: "gitea-mcp.corp.example"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetUnlinkedServers()).To(HaveLen(1))
+			Expect(res.GetUnlinkedServers()[0].GetUrl()).To(Equal("https://gitea-mcp.corp.example/mcp"))
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'extra' AND code_host_connection_id IS NULL`, org)).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND name = 'declared' AND code_host_connection_id IS NOT NULL`, org)).To(Equal(1))
+			Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_server.data_class.reset' AND summary->'after'->>'reason' = 'connection_mcp_host_removed'`, org)).To(Equal(1))
+		})
+	})
+
 	It("deletes a declared connection only after its Secret was deleted", func(ctx SpecContext) {
 		res, err := create(ctx, owner, gh.PEM, false)
 		Expect(err).NotTo(HaveOccurred())
@@ -667,6 +835,27 @@ var _ = Describe("ConnectionService for Gitea", func() {
 		}
 		return c.conns.CreateGiteaConnection(ctx, req)
 	}
+
+	It("refuses a connection whose host is an extra MCP host of another connection, removed ones included (#240)", func(ctx SpecContext) {
+		u, err := url.Parse(gt.URL())
+		Expect(err).NotTo(HaveOccurred())
+		var orgID pgtype.UUID
+		Expect(orgID.Scan(org)).To(Succeed())
+		other, err := store.New(e.pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: orgID, ID: pgtype.UUID{Bytes: guuid.New(), Valid: true}, Connector: "gitea", DisplayName: "forge",
+			Config: []byte(`{"baseUrl":"https://forge.corp.example"}`), Source: store.ConfigSourceUi,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY[$3::text], removed_at = now() WHERE org_id = $1 AND id = $2`, org, other.ID, u.Hostname())
+		Expect(err).NotTo(HaveOccurred())
+		_, err = create(ctx, owner, nil)
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org)).To(Equal(1))
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET mcp_hosts = '{}' WHERE org_id = $1 AND id = $2`, org, other.ID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = create(ctx, owner, nil)
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 	It("creates a connection, tests it and shows what the bot can see", func(ctx SpecContext) {
 		res, err := create(ctx, owner, nil)

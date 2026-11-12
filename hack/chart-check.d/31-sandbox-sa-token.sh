@@ -18,7 +18,7 @@ pol_out=$(render --show-only $pol)
 for msg in \
   "sandbox workload pods must set automountServiceAccountToken to false" \
   "sandbox workload pods must not project a ServiceAccount token"; do
-  if ! grep -B4 -F -- "$msg" <<<"$pol_out" | grep -Fq -- '!variables.workload ||'; then
+  if ! grep -B4 -F -- "$msg" <<<"$pol_out" | hit -F -- '!variables.workload ||'; then
     fail "the workload guard (!variables.workload ||) must scope the validation: $msg"
   fi
 done
@@ -33,19 +33,19 @@ has "supervisorTokenMaxSeconds overrides the bound" 'expirationSeconds <= 7200' 
 has "preflight is told the supervisor token bound" '--supervisor-token-max-seconds=3600' --show-only templates/preflight.yaml
 has "preflight is told an overridden supervisor token bound" '--supervisor-token-max-seconds=7200' --set sandboxPolicy.supervisorTokenMaxSeconds=7200 --show-only templates/preflight.yaml
 has "preflight reads the gateway workload for the token TTL variable" '--openshell-workload=openshell' --show-only templates/preflight.yaml
-lacks "no gateway workload flag when the policy is off" '--openshell-workload' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --show-only templates/preflight.yaml
-lacks "no gateway workload get rule when the policy is off" 'resources: [statefulsets, deployments]' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --show-only templates/preflight.yaml
+lacks "no gateway workload flag when the policy is off" '--openshell-workload' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false --show-only templates/preflight.yaml
+lacks "no gateway workload get rule when the policy is off" 'resources: [statefulsets, deployments]' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false --show-only templates/preflight.yaml
 pf_out=$(render --set preflight.openshell.workload=gw-sts --show-only templates/preflight.yaml)
-grep -A1 -F -- 'resources: [statefulsets, deployments]' <<<"$pf_out" | grep -Fq -- 'resourceNames: [gw-sts]' ||
+grep -A1 -F -- 'resources: [statefulsets, deployments]' <<<"$pf_out" | hit -F -- 'resourceNames: [gw-sts]' ||
 	fail "preflight may get only the gateway workload (resourceNames [gw-sts] on the statefulsets/deployments rule)"
 has "the preflight gets the gateway workload flag" '--openshell-workload=gw-sts' --set preflight.openshell.workload=gw-sts --show-only templates/preflight.yaml
 has "an overridden gateway workload reaches the preflight" '--openshell-workload=gw' --set preflight.openshell.workload=gw --show-only templates/preflight.yaml
-lacks "no token bound to check when the policy is off" '--supervisor-token-max-seconds' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --show-only templates/preflight.yaml
+lacks "no token bound to check when the policy is off" '--supervisor-token-max-seconds' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false --show-only templates/preflight.yaml
 for msg in \
   "sandbox supervisor pods must set automountServiceAccountToken to false" \
   "sandbox supervisor pods may project only a ServiceAccount token for the audience openshell-gateway" \
   "sandbox supervisor pods must bound the ServiceAccount token to 3600 seconds"; do
-  if ! grep -B4 -F -- "$msg" <<<"$pol_out" | grep -Fq -- '!variables.supervisor ||'; then
+  if ! grep -B4 -F -- "$msg" <<<"$pol_out" | hit -F -- '!variables.supervisor ||'; then
     fail "the supervisor guard (!variables.supervisor ||) must scope the validation: $msg"
   fi
 done

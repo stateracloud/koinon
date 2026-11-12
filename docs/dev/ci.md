@@ -5,6 +5,9 @@
 The detail behind the short CI bullets in `AGENTS.md`. The rules an agent must not break stay in
 `AGENTS.md`; this page says how the gates work and why.
 
+The rules a CI check must follow, with their reasons and checks, are in [ci-rules.md](ci-rules.md) (ADR 0111). This page
+describes how the jobs work today. `hack/ci-rules-check.sh` (job `scripts`) checks the rules a script can decide.
+
 ## Go test suites
 
 `hack/go-test.sh` is what `make test` runs: the agentd, api, durable, checkpoint and compat suites under
@@ -18,6 +21,53 @@ test, so the suite reads "partly run" when only that test ran. A plain test that
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
 `go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
 
+### Test result reuse (#43)
+
+In CI (`CI` set) every package runs with `-count=1`, so main and the merge queue run everything every
+time. Locally (`CI` unset) `make test` stays as it was: serial Ginkgo suites run with `-count=1`, plain
+packages as Go decides, so they may print `(cached)`. A pull request run sets `KOINON_GO_TEST_CACHE=1`
+(the `go-test` job, `pull_request` events only) and the
+packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
+test binary, the command line, the environment variables the test read and the size, mode and mtime of
+the files it opened are the same (Go does not hash file content), and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
+the network, a cluster or a binary the test starts, so the three kinds of package split like this:
+
+| Kind | Reuse on a pull request | Why |
+| --- | --- | --- |
+| Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
+| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with N > 0. |
+| Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
+
+A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
+containerhost, agentgatewayimage, cfgdeliver, fakegitea, policycheck, racescale; `fakemodel` is an
+in-process fake and allowed), testcontainers-go or envtest, or when the package or its tests import
+`os/exec`. So every Postgres, Docker, envtest, git or helm package keeps `-count=1` on pull requests
+too. The rule leans to "not cacheable"; a wrongly excluded package loses a hit, a wrongly included one
+could show a stale pass. `hack/go-test-test.sh` pins it.
+
+Where the results come from: the `warm-caches` job on main runs
+`KOINON_GO_TEST_CACHE=1 hack/go-test.sh "$pkgs"` (`pkgs` is the output of `hack/go-test-cacheable.sh`) in its
+own step, after the `go-ci` save, with `continue-on-error`: a failing test loses hits and never costs the
+build cache, and an empty list fails the step instead of running `./...`. It saves `~/.cache/go-build` as
+`go-testres-<os>-<arch>-<go version>-<commit sha>` on every push to main; the `go-test` job of a pull
+request restores the newest entry by the `go-testres-` prefix. The script and flags are the same (they are
+part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
+look for `(cached)` on lines such as `internal/money (cached)`.
+
+Why the mtime step: `actions/checkout` stamps every file and directory with the checkout time, so a package
+that opens a file (testdata, golden files, the chart, templates) or lists a directory (`filepath.Glob`,
+`os.ReadDir`, `WalkDir`: Go hashes an opened directory's stat and the stat of each entry) would never hit
+on a CI run. The `go-test` and `warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It
+sets each tracked file's mtime from its git blob id and each tracked directory's from its tree id, so the
+same content has the same mtime on main and on a pull request, and a changed file (even one of the same
+size) gets another mtime, as does every directory above it. A fixed epoch would show a stale pass for a
+same-size edit. A directory that gets untracked entries (the root: `.git`, `reports/`) still differs, so a
+package that lists it only misses. The script is for a throw-away checkout only. Retention: every
+`go-testres-` entry holds the whole build cache (a few hundred MB), so `warm-caches` deletes the
+`go-testres-` entries created before the one it just saved (`actions: write`, `continue-on-error`; by
+`createdAt`, which follows the save order, not the commit order: a prune keeps the entries saved at or after its own, and the worst case is a lost cache hit, never a stale pass) and the repository
+keeps about one, away from the 10 GB quota that go-ci, envtest and the pnpm stores share.
+
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
 Why: Ryuk exits 10 s after its last client disconnects. On a fresh runner a cold image pull leaves
@@ -28,6 +78,35 @@ pgserver keeps a container, hence a reaper connection, for the whole run, so Ryu
 mid-run and still cleans up after a crashed one. Ryuk stays on everywhere; do not set
 `TESTCONTAINERS_RYUK_DISABLED` in CI. Runs without pgserver (a single-package `go test`) are not
 covered; the upgrade path is #173. `hack/go-test-test.sh` pins the export and its order.
+
+#### Host guards for a Mac (issue 551)
+
+A Mac that sleeps in the middle of a run stalls Docker and its port forwards, and every suite that
+shares the run's Postgres times out together (2026-11-11: 64 of 125 suites, 10186 s). The functions of
+`hack/go-test-host.sh` (sourced by `hack/go-test.sh`, so `make test`, `hack/preflight.sh` and
+`hack/lane-gates.sh` all get them) guard against that; `hack/go-test-host-test.sh` tests each offline
+with stubs for `uname`, `pmset`, `docker` and `caffeinate`.
+
+- **Keep awake.** On macOS the run holds `caffeinate -i -s -w $$`: it ends with the run, with no timer to
+  run out. `-s` works on AC power only; on battery the script warns. Other systems: nothing happens.
+- **Docker and clock.** Before the tests, `docker info` must answer within `KOINON_DOCKER_PING_SECONDS`
+  (default 5) and the daemon's `SystemTime` (the VM clock, shared by every container) must be within
+  `KOINON_CLOCK_SKEW` seconds (default 2) of the host. If not, the run stops with exit 3 and says
+  `orb restart` for OrbStack. No Docker CLI or a daemon that answers with an error is not a stop: the
+  suites skip as before.
+- **Host slept.** After the run, a `Sleep` event in `pmset -g log` between the start and end turns the
+  result into exit 3 with `go-test verdict: notrun reason="host slept"` (lane-gates: `verdict=notrun
+  reason="host slept"`), whatever the suites reported: the results mean nothing.
+- **Deadlines.** `testenv`'s Docker check (`GetProvider()` and `Health`) shares one 30 s deadline.
+  `go test` gets `-timeout` from `GO_TEST_TIMEOUT` (default 20m per package). `ginkgo` gets `--timeout`
+  from `GINKGO_TIMEOUT` (default 1h); Ginkgo applies it to the whole `-p` run, not to each package.
+- **Heavy runs per Mac.** At most `KOINON_GO_SLOTS` (default 2) `go-test.sh` runs at once on one Mac:
+  a slot is a directory under `$TMPDIR/koinon-go-slots` (`KOINON_GO_SLOTS_DIR`) holding the owner's pid;
+  a dead owner's slot is taken over, and a waiting run prints one line. Each run uses `PROCS=4` unless
+  `PROCS` is set. On Linux (CI) there is no cap unless `KOINON_GO_SLOTS` is set. The numbers are a
+  starting point (2 x 4): measure one awake run (`docker stats` plus test process memory) and set
+  `N = floor((VM memory - 2 GiB) / per-run peak)`.
+- Long unattended runs belong on the lab or a cloud host, not the Mac.
 
 ### The gateway behaviour suite (#272, ADR 0097 step 1)
 
@@ -161,8 +240,8 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   (a branch that changes the probe before main has published it) builds the image, with apt, on the same pinned `ARG BASE=` that the tag hashes (kind.sh ignores `KOINON_PROBE_BASE` when
   `PROBE_PULL_REPO` is set), so a tag always names one image. The e2e therefore tests the probe on the pinned base, not on the
   flavor image the run built.
-  The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
-  image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
+  The Gitea read grant cases (label `gitea`) are not in it: they point the OpenShell gateway at a throwaway-CA ConfigMap
+  (`supervisor.network.additionalCaConfigMapName`) by a helm upgrade, which the chart install does not take.
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
   Koinon policy: the quicker loop when you change `test/escape` or the sandbox profile (no Koinon
   images or install), and the only place the Gitea cases run.
@@ -208,10 +287,9 @@ request-log assertion goes red.
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind
-e2e (`test/e2e`, ~12-15 min) runs on a PR whenever `hack/needs-e2e.sh` says the change is e2e-relevant
-(the e2e's own files included) or the PR carries the `e2e` label, in the PR's own run, so a fork PR
-needs nothing from a maintainer to get one (issue #148). A PR nothing in the rule touches does not run
-it. It also runs batched on main (each push that changed something
+e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` label (advisory; ADR 0105
+amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
+`hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
 explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
@@ -224,22 +302,29 @@ seeds a source install, backs it up with the guide's commands, declares it lost,
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
 kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
-`e2e-kind.yml` (`continue-on-error: true`, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
+`e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 110` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
 branch): nightly, on rc tags (`v*-rc.*`) and on `gh workflow run e2e-kind.yml -f suite=drill`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
 merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
-commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). `test/e2e/run.sh` writes
+commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). A red drill opens one issue
+with the label `drill-red`, or comments on the open one (the `drill issue` job, `hack/drill-issue.sh`; it runs only for the nightly schedule and rc tag pushes, never for a
+dispatch on a branch, names the commit the drill tested, and is `continue-on-error`; only that job
+has `issues: write`; close the issue when a nightly run is green). `test/e2e/run.sh` writes
 `junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
+Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session come back; needs the drill's
+SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
+source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
+waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
 
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
 queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts
-(ADR 0105); the PR's own run is advisory feedback and a green one is not merge evidence. The `e2e`
-label is for a change the rule thinks irrelevant but you want tested: the queue reads it when it
-builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
+(ADR 0105); a pull request runs the quickstart only with the `e2e` label (#572), as advisory feedback, and a
+green one is not merge evidence. The `e2e` label is also for a change the rule thinks irrelevant but you want
+tested: the queue reads it when it builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
 merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
 
 ### The `e2e result` gate
@@ -276,15 +361,19 @@ requirement exists. A gate is `notrun` when its log shows the machine denied it 
 marker (`--- FAIL`, `[FAIL]`, a compile error, helm `Error:`, chart-check `assertion(s) failed`,
 gitleaks `leaks found:`) is in it: Docker (daemon down, socket denied), the
 network (proxy refusal, no such host, buf remote unavailable), or the sandbox (`deny(`, `operation not permitted`). A real
-test failure next to such a line stays `fail`. It never says `ok` unless every selected gate passed and at least one ran: a
+test failure next to such a line stays `fail`. The `generate` and `web` gates need `web/node_modules`
+(`buf` runs `web/node_modules/.bin/protoc-gen-es`): `hack/wt.sh new` installs it, preflight tries one
+`pnpm --dir web install --offline --frozen-lockfile` when it is missing, and if that fails the gate is
+`notrun` (`web dependencies missing`), never `fail` (#541). It never says `ok` unless every selected gate passed and at least one ran: a
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
 
 ## The race detector
 
-The `go-race` job (part of the required `go` check, so it is already in `hack/ci-required.txt` through
-its aggregator) runs `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
+The `go-race-serial` and `go-race-parallel` jobs (parts of the required `go` check, so they are already in
+`hack/ci-required.txt` through its aggregator; two jobs so they run side by side, not one after the other,
+issue 572) run `ginkgo -race` on the packages with real concurrency: `internal/reconciler` and
 `internal/ledger` with one process, `internal/agentd` and `internal/durable` with `-p` (the same parallel
 suites as `hack/go-test.sh`). Before issue 44 only the reconciler ran with `-race`; `go-test` still
 runs without it, because the race build is several times slower. Add a package here when it starts
@@ -303,20 +392,38 @@ together, so their ratio holds, `CancelGrace`, `SandboxTimeout`, `ReadyTimeout`,
 checkpoint `Timeout`, the trace `ExportTimeout`). Not scaled: values that are the thing under test (a
 short `Timeout` or `StuckAfter` that must fire, `DrainDeadline`, `time.Since` bounds beside them) and
 fake-clock values. A spec whose deadline the work must beat, such as the late-snapshot one (#235), needs
-a deadline longer than a slow repository connect (a kopia connect took over 25s on the runner).
+a deadline longer than a repository connect. That was 25 s on the runner with scrypt, so the deadline was
+scaled to 50 s and the spec idled for all of it; with the `testing` tag (below) a connect takes a few
+hundred ms under `-race`, and the deadline is a fixed 10 s.
 The suite keeps `-p`: the cause is a window that is too short for the work, not contention between
 processes, and fewer processes would make the job slower for the same risk.
+
+Why a kopia repository was slow under `-race` (#576): kopia derives the repository key from the password
+with scrypt (N=65536) on every open, and a Backup, Restore or Verify opens the repository two or more
+times (connect, open; a new repository also initialises and sets its policy). Scrypt is a tight loop
+over memory, which the race detector slows about 8x: 2 s for a one-byte Verify, 20 s for a seed, on a
+laptop; more on a runner. A longer window would have hidden that. Test binaries build with the `testing`
+tag instead (`GOFLAGS=-tags=testing`, set by `hack/go-test.sh`, the `go-race-parallel` job and the `warm-caches` test compile): kopia's own unit tests do the same (its Makefile, `unit-tests`), and the tag
+makes new repositories use kopia's instant, insecure key derivation. The seed specs of `internal/agentd`
+went from 24 to 35 s each to 2 to 4 s, the whole seed Describe from 44 s to 8 s. The tag is for tests:
+`make build-go` refuses it in `GO_TAGS`, and no release build uses it. `internal/agentd` refuses to
+run without the tag (its BeforeSuite fails, #638: its deadline specs assume fast key derivation); other
+suites still pass without it, only slower. Set `GOFLAGS=-tags=testing` yourself for a quick loop.
+Binaries that tests build themselves (the chart smoke images) do not get the tag: they drop it from `GOFLAGS`.
 
 ## What `ci` runs when
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-test, go-race; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `escape (admission)` and `flavors`. `changes` and
+`go` (go-tidy, go-vuln, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
+`generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
+`lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
+`go.mod`, `go.sum`, the lint config) and `go-vuln` (path rule `vuln`: `go.mod`, `go.sum`; see below). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
-`e2e result`) always run; `lint-shell` and `scripts` run on every pull request (drafts too) and
-are skipped only on a push to main whose heavy jobs are skipped; a draft skips the heavy jobs too. A skipped heavy job reports
+`e2e result`) always run; `lint-shell` and `scripts` run when the path rules say a change can affect them, and
+are skipped on a draft and on a push to main whose heavy jobs are skipped (#572); the heavy jobs follow the
+same draft rule. A skipped heavy job reports
 success, so every required check still reports.
 
 ### Path rules
@@ -332,9 +439,36 @@ that file and nowhere else.
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
   (Markdown, `docs/`, `web/`, `.github/`, top-level `hack/*.sh`, `hack/hooks/`,
   `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
-  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
+  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `harness-tag.sh`) and every
   `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
-  the `scripts` job, which is always on, so a shell-only change runs them and not go-test.
+  the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
+  own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
+  (`.sh` files, `.github/`, the tool pins); a docs-only or web-only pull request runs neither (#572).
+- **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`),
+  the check itself (`hack/govulncheck.sh`, `govulncheck.yml`, `hack/versions.env`) or an `everything` path
+  (`ci.yml`, the Makefile, the setup-go-cache action, `hack/paths.rules`, `hack/paths-lib.sh`) runs
+  `hack/govulncheck.sh`, and so does a push to main, except one whose heavy jobs are switched off because a queue run already tested the same tree (`hack/ci-skip-heavy.sh`; then `go-vuln` is skipped with the rest); any other pull request skips the job. The nested modules
+  under `hack/spike/` are not scanned. The rule does not see new reachability from a code change (a `.go` change
+  that starts to call a vulnerable symbol of a module already required, or of the standard library) nor a new advisory:
+  the nightly run catches those, up to one day later. It is a part of the
+  required `go` check: the `go` gate accepts the skip only when the `vuln` output is false, and fails on a
+  finding. The script installs the version pinned in `hack/versions.env` (`GOVULNCHECK_VERSION`) with `go install`
+  and runs `govulncheck ./...`: exit 0 is a pass, a reachable known vulnerability fails the job (exit 1), and
+  a tool or database (`vuln.go.dev`) that cannot be fetched fails it too (exit 2, "COULD NOT DECIDE"), never
+  a silent pass. There is no automatic retry (T1): re-run the job by hand. On Actions the cause is an
+  `::error title=govulncheck::` annotation, and `hack/ci-fail.sh` sorts "COULD NOT DECIDE" as `infra` (re-run is
+  fair) and a finding as `vuln` (read it). The script scans with the Go toolchain of the `go` line of `go.mod`,
+  and says so when that toolchain is not available (a local run keeps the default one). The nightly `govulncheck.yml` runs
+  the same script on `main`, because a new advisory needs no code change. The preflight gate `vuln` runs it
+  locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
+  the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`
+  (the gate), `hack/ci-changes-test.sh` and `hack/paths-test.sh` (the path rule).
+- **Fuzzing (`fuzz`, #684).** Advisory (`hack/ci-required.txt`), not part of the `go` gate. A change of a
+  package whose input is untrusted text (`internal/leakguard`, `internal/mcpsanitize`, `internal/tracing/scrub`;
+  path rule `job fuzz`) or of `hack/go-fuzz.sh` runs every fuzz target of those packages for 20 s each
+  (`FUZZTIME`). The targets are found by name, so a new `FuzzX` in one of them joins without a CI change. A
+  failing input is uploaded as `fuzz-inputs`; commit it under the package's `testdata/fuzz/` with the fix,
+  so it runs as a seed in every `go-test` run. The preflight gate `fuzz` runs the same script.
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
@@ -342,7 +476,7 @@ that file and nowhere else.
   like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
   `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
-- **Preflight equals CI.** The gates `generate`, `chart` and `web` use the CI job's rule. The
+- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy`, `vuln` and `scripts` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
@@ -367,8 +501,8 @@ skipped `go-test` on main only through the queue build or a change with no Go. T
 
 ### Draft pull request (old issue 593)
 
-A draft runs nothing heavy. Only `changes`, `quick checks`, `lint-shell`, `scripts`, `dco`, `gitleaks` and
-`claim` run; `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
+A draft runs nothing heavy. Only `changes`, `quick checks`, `dco`, `gitleaks` and
+`claim` run (`lint-shell` and `scripts` too until #572); `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
 is green anyway). That green is vacuous, so it must never count as evidence. A draft cannot be enqueued or
 merged (`pr-merge.sh` and `pr-wait.sh --checks` exit 5), and marking it ready fires `ready_for_review`, which
 runs everything on the same head. But between `gh pr ready` and that run's first check the draft run is the
@@ -411,8 +545,8 @@ Tests: `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/ship-te
 Everything runs, except when a successful `merge_group` `ci` run (the merge queue's build) tested a commit with
 the pushed commit's tree (`hack/ci-skip-heavy.sh decide_push` lists the last 30 queue runs and compares trees).
 Then the heavy jobs are skipped: the queue already ran the whole suite on exactly these files. `flavors`
-(advisory, but `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
-it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594).
+(required, and `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
+it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594, #572).
 A pull request head's green never counts (a draft run is green by skipping). Any doubt (an admin or direct push,
 which has no queue run; an API error; no matching run) runs everything. `flavor-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the nightly and
@@ -422,7 +556,7 @@ build (the `merge_group` `ci` run on the tagged commit's tree), never from the P
 ## Cache ownership (#147)
 
 A pull request can read its own caches and the default branch's, never another pull request's, so a
-cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`) run on
+cache only helps a pull request if main saved it. Main owns them all: the `warm-caches` jobs (`warm-caches`, `warm-caches-web`, `warm-caches-opencode-plugins`) run on
 every push to main and is never skipped (`hack/ci-skip-heavy.sh` switches the heavy jobs off on a
 push whose tree the merge queue already tested, which used to leave main without fresh
 entries). For each cache it does a `lookup-only` restore (no download) and, on a miss, the cheapest
@@ -430,14 +564,16 @@ work that fills it, then saves:
 
 | Cache | Key | Filled by |
 | --- | --- | --- |
-| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>` | `go build ./...`, `go test -run '^$' ./...`, one lint run |
+| Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>-<week>` (`<week>` = whole 7-day periods since the epoch; defined once in `.github/actions/setup-go-cache`) | `go build ./...`, `go test -run '^$' ./...`, the same with `-race` for the go-race packages, one lint run |
+| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
-| Playwright browser | `playwright-<os>-<arch>-<@playwright/test version>` | `playwright install chromium` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
-| golangci-lint cache | the action's | a lint run on every push to main, not only on a go-ci miss: the action's key has a 7-day interval (`go-lint` has `skip-save-cache`) |
+| pnpm store (`harnesses/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
+| golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
 
-Every other job restores and never saves: one Go cache scheme (`go-ci`, `setup-go` with
-`cache: false` plus an explicit `actions/cache/restore`), and `e2e-go` is one entry per `go.sum`
+Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
+`setup-go-cache`: `setup-go` with `cache: false` plus the `actions/cache/restore` with the weekly key; a
+week without a go.sum change still gets a fresh build cache, and a pull request falls back to the previous week's entry until main has saved the new one), and `e2e-go` is one entry per `go.sum`
 (no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
 `flavors` and `flavor-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
 reports on pushes only. A new key goes into the warm job and the restoring jobs together;
@@ -447,7 +583,7 @@ reports on pushes only. A new key goes into the warm job and the restoring jobs 
 
 Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
 which fails a pinned checksum. Every Dockerfile download of a release asset goes through
-`flavors/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
+`harnesses/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
 `GITHUB_TOKEN` as the BuildKit secret `github_token`. The github.com web download URL ignores a
 token, so the script resolves the asset id from the release (`api.github.com/.../releases/tags/<tag>`)
 and downloads `.../releases/assets/<id>` with `Accept: application/octet-stream`; the build log
@@ -461,12 +597,12 @@ Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then
 `apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
 later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
 snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
-another tool (`playwright install --with-deps`) writes an `apt.conf.d` snippet with all three
+another tool (for example `playwright install --with-deps` in `hack/e2e-toolchain/web.Dockerfile`) writes an `apt.conf.d` snippet with all three
 settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
-Pinned tools and manifests from GitHub releases (shellcheck, actionlint, gitleaks, kind, ko, the
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, gitleaks, kind, ko, the
 gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
 `hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
 the sha256 check, and a file already there with the right sha256 is not fetched again (#431;
@@ -490,7 +626,7 @@ no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks sou
 module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
 `go mod download` also checks against sum.golang.org (unless GOSUMDB is off; the pin holds either way); `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
-The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
+The flavor layer cache (`flavors-<hash of harnesses/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
 `flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
 skipped by #595 still writes the entry). A pull request never writes it.
@@ -524,8 +660,9 @@ reports on every pull request, push and merge group build); it also runs in `hac
 | `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `contributor-gate.yml` | `pull_request`, `merge_group` (the `contributor gate` job, off by default, #848) | `GITHUB_TOKEN` only; `contents: read` at top level, the job adds `pull-requests: read` (the queued pull request, `check-pr`); no secret, no Environment | ok: checks out the base branch's tip (`pull_request.base.ref`) or `merge_group.base_sha` and runs the base's `hack/contributor-gate.sh`; the PR's code never runs. The workflow file is the PR head's, so the guard is the code-owner review of `.github/`, as for `claims.yml` |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
-| `scorecard.yml`, `govulncheck.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
+| `scorecard.yml`, `govulncheck.yml`, `web-isolated.yml`, `review-prices.yml`, `g2-kind.yml` | schedule, push, dispatch | `govulncheck.yml`, `web-isolated.yml` and `g2-kind.yml` are `contents: read`; `review-prices.yml` has `issues: write`; `scorecard.yml` is `read-all` plus `security-events: write, id-token: write` | ok |
 
 Checks behind the table:
 
@@ -546,8 +683,10 @@ pull request workflows is a setting, not a file; it is tracked as
 
 ## Required status checks
 
-`hack/ci-required.txt` is the list the `main` ruleset mirrors; `flavors` is the only advisory job
-on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` (CI job
+`hack/ci-required.txt` is the list the `main` ruleset mirrors. `flavors` is required but runs only in the merge
+queue and on pushes to main (#572, #128): on a pull request its job-level `if:` skips it, which reports success,
+so the name exists on every build. `flavor-publish` is advisory and push-only. `flavor-repro` (`flavor-repro.yml`, #176) is advisory too: it runs on
+a push to main, nightly and on dispatch, so it is not a `ci.yml` job and has no line in the list. `hack/ci-required-test.sh` (CI job
 `scripts`) fails when a `ci.yml` job is neither required nor advisory;
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
 list in the same PR, and a required job must report on every pull request and push (a job-level
@@ -609,6 +748,27 @@ Limit: on `pull_request` the workflow file is the PR head's, so a PR could edit 
 its own `claim`. `.github/**` needs a CODEOWNERS review and the token is read-only without a secret; a
 ruleset "required workflow" could pin the file, and is a settings change (ADR 0082 amendment).
 
+## Failure classes
+
+`hack/ci-fail.sh <PR|run-id>` prints `class=<category> retry=<yes|no|unknown>` under each failing job
+(grep for `^class=`). The class comes from `hack/ci-fail-classes.tsv`: an ordered table of
+category, retry and regex, where the first row that matches the job log wins and no match is
+`unknown`. Order is the rule: infra rows (DNS, image pull, full disk) sit above `race`, `timeout`,
+`lint`, `build` and `test`, because a broken runner also fails the steps after it. When a failure
+shows as `unknown`, add a row and a recorded log sample under `hack/testdata/ci-fail/` (line 1 is
+`# expect: <category> <retry>`); `hack/ci-fail-test.sh` checks every sample and the table shape.
+`retry=yes` means a plain re-run is a fair first step, not that it is safe to hide the failure.
+
+## Merge-time measurement
+
+`hack/ci-timing.sh [--n 20] [--since ISO] [--until ISO] [--json]` measures the target of #572: the median
+time from the last push of a pull request to merged over the last N merged code pull requests, the
+merge-queue time, the median duration of each CI job (pull request `ci` and merge queue) and the runner
+minutes per merged pull request. Read-only (`gh` and `jq`). Last push is the head commit's earliest check
+suite (the push time to within seconds); a queue merge is one whose last queue removal has reason `merged`,
+all other merges are reported apart as admin merges. The definitions
+are in the script header; `hack/ci-timing-test.sh` runs it offline on `hack/testdata/ci-timing/`.
+
 ## Merging
 
 The only merge method is a merge commit, and the merge queue is the single route to main
@@ -616,7 +776,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
 merges with `--admin`, and opens a `break-glass` issue with the reason.
-`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10). Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
+`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10; a pull request runs the quickstart only with the `e2e` label, so add it with `hack/ship.sh --e2e` or `gh pr edit --add-label e2e`, or use the queue) and for `flavors` (the base's `hack/ci-changes.sh` runs with `CI_CHANGES_IGNORE_PLUMBING=1`, which ignores the CI-plumbing files `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, `paths.rules` and `paths-lib.sh` and decides on the real flavor inputs only; a plumbing-only change is not held, and the push run on main runs `flavors` after the merge, a break is fixed forward. When real flavor inputs changed, the head needs a real, not skipped, `flavors` success, else exit 10: `ci.yml` has no trigger that runs `flavors` for a branch, so split the pull request, the flavor change through the merge queue; see the ADR 0105 amendment of #572) Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`; the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.. Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
 (`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
@@ -687,6 +847,11 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   `ci-supersede.sh`, commit subjects, dependency age and the waiver are pull-request-only steps and are
   skipped (a step skip is green).
 - `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
+  On the push to main that the queue made, `gitleaks` does not scan again (#572): `hack/secrets-skip.sh` finds a
+  successful `merge_group` run of `secrets.yml` whose `head_sha` is the pushed commit (the queue
+  fast-forwards main to that head). It matches the commit, not the tree: gitleaks scans commits, and an equal tree can hide other commits. The job still runs and reports success. An admin or break-glass merge, a
+  direct push and any API doubt scan as before. The workflow runs the script only on a `push` event (an `if:` on the step),
+  so a changed script cannot switch off the scan of a pull request or a queue build.
 - `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
   waited fails the entry. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)
@@ -746,6 +911,15 @@ every required check green. Auto-merge then never fires, and nothing in the chec
 
 ## OpenSSF Scorecard
 
-`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly and on every push to main,
+`.github/workflows/scorecard.yml` runs `ossf/scorecard-action` weekly (and on dispatch; #572 removed the push trigger),
 publishes the result (`publish_results`) and uploads the SARIF to code scanning. It is advisory: not
 in `hack/ci-required.txt` (that file lists `ci.yml` jobs and the external required checks only).
+
+## CodeQL
+
+`.github/workflows/codeql.yml` is CodeQL's advanced setup (#572); the default setup is off. It scans a pull request
+only when it changes Go or web code (a `paths` filter, allowed because the check is advisory), and `main` once a week
+(and on a dispatch). There is no `push` or `merge_group` trigger, and it saves no database or TRAP cache. Languages
+and query suite are the default setup's (actions, go, javascript-typescript, python; `default`). Not in
+`hack/ci-required.txt`. Switching over: merge the workflow, switch the default setup off in Settings right after
+(both cannot upload for one language), then run the workflow once by hand.

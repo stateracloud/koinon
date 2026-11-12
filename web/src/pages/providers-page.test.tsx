@@ -12,6 +12,7 @@ import {
   ModelSchema,
   ProviderSchema,
   ProviderService,
+  ServingState,
   type CreateModelRequest,
   type CreateProviderRequest,
   type DeleteProviderRequest,
@@ -22,7 +23,7 @@ import {
 import { renderApp, whoAmI } from '@/test-utils'
 
 const t = timestampFromMs(Date.now())
-const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: [{ id: 'openai', label: 'OpenAI chat completions' }, { id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
+const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: [{ id: 'openai', label: 'OpenAI chat completions' }, { id: 'anthropic', label: 'Anthropic Messages' }], servingState: ServingState.SERVING, createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
 const claude = create(ProviderSchema, { id: 'p-claude', name: 'claude', type: 'anthropic', url: 'https://api.anthropic.com/v1', source: 'ui', anthropicWorkspaceId: 'wrkspc_01Keep', formats: [{ id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: t })
 const single = [{ id: 'openai', label: 'OpenAI chat completions' }]
 const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'local-ollama', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
@@ -36,7 +37,7 @@ const removedProvider = create(ProviderSchema, {
   removed: true,
   disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry',
 })
-const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', createdAt: t, updatedAt: t })
+const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', servingState: ServingState.SAVED, createdAt: t, updatedAt: t })
 const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'openai', formats: single, url: 'https://api.example.com/v1', source: 'ui', disabledReason: 'shadowed by a provider of the same name declared in a Kubernetes Secret' })
 const adminOff = create(ProviderSchema, { id: 'p-off', name: 'switched-off', type: 'openai', formats: single, url: 'https://api.example.com/v1', hasKey: true, source: 'ui', createdAt: t, updatedAt: t, adminDisabled: create(AdminDisabledSchema, { at: t, by: 'user u-1', note: 'restored copy' }) })
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
@@ -268,22 +269,22 @@ describe('Providers page', () => {
     expect(within(nav).getByRole('link', { name: 'API tokens' })).toBeInTheDocument()
   })
 
-  it('says a just-saved provider is not available yet, and an older one is active', async () => {
+  it('shows each provider\'s serving status: saved, serving, or failed with the reason', async () => {
     setup()
     const list = await screen.findByRole('list', { name: 'Providers' })
-    expect(within(within(list).getByRole('region', { name: 'fresh' })).getByText(/Saved, available to agents within about 3 minutes/)).toBeInTheDocument()
+    expect(within(within(list).getByRole('region', { name: 'fresh' })).getByText('Saved, waiting for the gateway')).toBeInTheDocument()
     const old = within(within(list).getByRole('region', { name: 'openrouter' }))
-    expect(old.getByText('Active')).toBeInTheDocument()
-    expect(old.queryByText(/Saved, available/)).not.toBeInTheDocument()
+    expect(old.getByText('Serving')).toBeInTheDocument()
+    expect(old.queryByText(/Saved, waiting/)).not.toBeInTheDocument()
   })
 
-  it('says the same in the notice after a save', async () => {
+  it('says after a save that the provider shows Serving once the gateway has it', async () => {
     setup()
     await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
     const form = screen.getByRole('form', { name: 'Add provider' })
     await userEvent.type(within(form).getByLabelText('Name'), 'second')
     await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('available to agents within about 3 minutes')
+    expect(await screen.findByRole('status')).toHaveTextContent('shows Serving here once the gateway serves it')
   })
 
   it('asks for the key again when a save fails after the key was cleared', async () => {

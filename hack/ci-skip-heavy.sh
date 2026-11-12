@@ -3,8 +3,8 @@
 #
 # Decides whether the `changes` job of ci.yml switches the heavy jobs off, and applies
 # the decision to the output of hack/ci-changes.sh. The heavy jobs are the ones `changes` gates: go-*
-# (through `go`), web-* (through `web`), generated code, chart, chart smoke, escape (admission)
-# and flavors. A job switched off by its `if:` reports success, so every required check still reports.
+# (through `go`), web-* (through `web`), generated code, chart, chart smoke, escape (admission),
+# flavors and opencode plugin. A job switched off by its `if:` reports success, so every required check still reports.
 # On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (their own `if:`
 # in ci.yml, not an output of this script): the merge queue already ran them on this tree.
 # `quick-checks` and `changes` always run.
@@ -37,7 +37,7 @@
 #                     whole suite on exactly these files. A pull request head's green never counts (a
 #                     draft run is green by skipping), and an admin merge has no queue run, so its push
 #                     runs everything (ADR 0094, amendment);
-#                   - flavors (advisory) succeeded on that queue commit, or nothing the flavors suite
+#                   - flavors (required in the queue) succeeded on that queue commit, or nothing the flavors suite
 #                     builds from changed between the first parent and SHA (hack/ci-changes.sh).
 #                 Only read rights are used (contents, checks, actions). Any doubt (an API error, no
 #                 queue run, a shallow clone, an unknown event) is skip=false.
@@ -55,7 +55,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-heavy=(go web generate chart chartsmoke escape flavors)
+heavy=(go web generate chart chartsmoke escape flavors opencodeplugin tidy vuln fuzz shell scripts)
 
 emit() { echo "skip=$1"; echo "reason=$2"; }
 
@@ -116,7 +116,7 @@ decide_push() {
 		return
 		;;
 	esac
-	# flavors is advisory, so a green queue run does not prove it, but flavor-publish ships what it tested:
+	# flavors is skipped on a pull request and may be skipped on the queue commit when nothing it builds from changed, so a green queue run does not always prove it, and flavor-publish ships what it tested:
 	# an image is published untested unless flavors passed on the queue commit or nothing it builds from changed.
 	if ! runs=$(gh api --paginate "repos/$REPO/commits/$qhead/check-runs?per_page=100" \
 		--jq '.check_runs[] | select(.app.slug == "github-actions") | [.name, .id, .status, (.conclusion // "none")] | @tsv' 2>/dev/null); then

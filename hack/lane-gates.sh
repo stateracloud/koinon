@@ -9,7 +9,7 @@
 #
 # Which gates: the lint, test and consistency gates of hack/preflight.sh (`--list` picks them from
 # the diff) plus the heavy CI jobs hack/ci-changes.sh turns on: chartsmoke (make test-chart-smoke),
-# flavors (make test-flavors) and escape (make test-admission). Neither list is repeated here.
+# flavors (make test-harnesses) and escape (make test-admission). Neither list is repeated here.
 # Gates run one after the other; the e2e gate of preflight is informational and is left out.
 #
 # One line per gate on stdout:
@@ -71,7 +71,11 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 	if [[ -z ${2:-} ]] && has_failure "$log"; then
 		return
 	fi
-	if grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
+	if grep -qF 'reason="host slept"' "$log"; then
+		echo "host slept"
+	elif grep -qE 'Docker did not answer within|the Docker clock differs from this host' "$log"; then
+		echo "docker unhealthy"
+	elif grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
 	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
 		echo "network denied"

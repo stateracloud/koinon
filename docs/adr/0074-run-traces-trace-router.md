@@ -2,6 +2,8 @@
 
 - Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30, 2026-10-31 and 2026-11-11 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
 - Date: 2026-10-28
+- Area: work-model
+- Tags: tracing, runs, agentgateway, audit
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), old issue 213
 - Pending verification: OpenShell passing `traceparent` through, and agentgateway v1.7.0's tracing policy with CEL attributes (both not yet tested)
@@ -105,7 +107,7 @@ procoduck decided the open points on 2026-10-28.
    - **The gateway sends model-call spans only to Koinon.** agentgateway exports through
      `frontendPolicies.tracing` to a receiver on koinon-api's internal OTLP listener (`/v1/traces`
      next to `/v1/logs`). Like the log receiver, it is reachable only from the gateway pods. The gateway
-     never exports to a third party.
+     never exports to a third party. _(Not built: nothing exports model-call spans from the gateway today; see item 6 of the amendment of 2026-11-11 below. The gateway still never exports to a third party.)_
    - **The router** runs in koinon-api. For every span it:
      - attributes the span to an org and a run (decision 4);
      - re-parents it under the turn (decision 2);
@@ -512,7 +514,7 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
    router can therefore name a turn's root (a span link, a parent) from the row alone.
 2. **A turn is one `session/prompt`.** A retry, a refusal note or a wrap-up prompt in the same
    execution each start a turn of their own; the turn row's `end_reason` says how it ended (`end_turn`,
-   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `refused`, `interrupted`, `fenced`, `shutdown`).
+   `park:<reason>`, `failed`, `canceled`, `wrap_up`, `loop`, `refused`, `interrupted`, `fenced`, `shutdown`).
    The `koinon.wait` event is added only when the previous turn ended in a park. A run that fails
    before its first prompt has no turn and so no trace.
 3. **Content is marked.** A span that carries content has `koinon.content.attributes`, a string array
@@ -840,3 +842,16 @@ does not hold.
 6. **Gateway spans.** If the gateway ever exports model-call spans to `/v1/traces` (decision 1 of the
    original text), it needs a third credential of its own for that path; it must not be given agentd's.
    Nothing exports them today.
+
+## Amendment (2026-11-12, issue 684): fixed vendor key shapes are applied without the entropy floor
+
+The scrubber applies a gitleaks rule with its entropy floor, except for the rules whose secret is a
+literal vendor prefix followed by a body of one fixed length (AWS key IDs, the GitHub and GitLab
+tokens, npm and others; `gitleaksNoFloor` in `internal/tracing/scrub/gitleaks.go`). gitleaks uses the
+floor to skip placeholders in source code. In a trace, a real key whose characters happen to repeat
+is still a key: about 2 in 10,000 random AWS key IDs fall under the floor of 3. Redacting a
+placeholder of that shape costs little, and the shape is too specific to match prose. The rules' own
+allowlists still apply. A test derives the shape from each rule's expression and fails when a gitleaks
+bump renames or drops a listed rule, takes its floor away, changes its shape, or adds a fixed-shape
+rule that is not listed. One fixed-shape rule keeps its floor because its prefix is the base64 of
+ordinary text, not a vendor marker.

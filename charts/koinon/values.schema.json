@@ -54,7 +54,7 @@
         "affinity": {"$ref": "#/definitions/map"}
       }
     },
-    "flavor": {
+    "harness": {
       "type": "object",
       "additionalProperties": false,
       "required": ["image"],
@@ -394,12 +394,29 @@
       "additionalProperties": false,
       "properties": {
         "migrateLegacyConnections": {"type": "boolean"},
+        "reconcilerFence": {
+          "description": "The admission policy that limits the reconciler's Secret writes to Secrets it owns (issue #604); separate from kek.guard.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
         "kek": {
           "description": "Key-encryption keys for stored provider keys and connection secrets (ADR 0056).",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "existingSecret": {"type": "string"},
+            "guard": {
+              "description": "Admission policy that guards the KEK Secret (issue #604).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "extraWriters": {"type": "array", "items": {"type": "string", "minLength": 1}}
+              }
+            },
             "activePeriod": {"type": "string", "pattern": "^[0-9]+(h|m|s)$"},
             "kms": {
               "description": "Wrapping the KEKs with a KMS (ADR 0085 decision 12); local by default.",
@@ -501,16 +518,16 @@
         "scratchSize": {"type": "string"}
       }
     },
-    "flavors": {
-      "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
+    "harnesses": {
+      "description": "Harness images (ADR 0035, ADR 0112). Agents of a harness without an image are reported as reconcile errors.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "opencode": {"$ref": "#/definitions/flavor"}
+        "opencode": {"$ref": "#/definitions/harness"}
       }
     },
-    "flavorPrepull": {
-      "description": "Pre-pull the flavor images on the Kata nodes (plan item LT1).",
+    "harnessPrepull": {
+      "description": "Pre-pull the harness images on the Kata nodes (plan item LT1).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -568,6 +585,14 @@
     },
     "sandboxNetworkPolicy": {
       "description": "Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15). On by default; standard networking.k8s.io/v1 only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "sandboxLimitRange": {
+      "description": "LimitRange for OpenShell sandbox namespaces (#76). On by default; sizes supervisor and init containers.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

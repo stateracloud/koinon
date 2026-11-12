@@ -8,7 +8,7 @@ metadata:
   displayName: Fixture
   description: A near-valid template with one mistake.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
   model:

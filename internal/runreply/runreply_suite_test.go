@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -34,7 +35,7 @@ var _ = BeforeSuite(func(ctx context.Context) {
 func newRun(ctx context.Context) (store.Run, pgtype.UUID) {
 	GinkgoHelper()
 	org, user, _ := pgtest.NewOrg(ctx, pool)
-	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: pgtest.Uniq("agent"), Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: pgtest.Uniq("agent"), Harness: harness.OpenCode, CreatedBy: user})
 	Expect(err).NotTo(HaveOccurred())
 	v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: a.ID, Config: []byte(`{"model":"fake/m","instructions":"x"}`), CreatedBy: user})
 	Expect(err).NotTo(HaveOccurred())

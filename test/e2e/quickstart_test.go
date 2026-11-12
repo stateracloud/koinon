@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
@@ -31,6 +33,8 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
@@ -323,8 +327,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: tmpl, DisplayName: "Repo helper",
-			Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
-			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
+			Harness: harness.OpenCode,
+			Grants:  []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		agent = created.GetAgent()
@@ -435,6 +439,36 @@ var _ = Describe("the quickstart", Ordered, func() {
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Pulls).To(BeEmpty())
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
+
+		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		kc := func(args ...string) string {
+			GinkgoHelper()
+			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			return strings.TrimSpace(string(out))
+		}
+		orgID, err := uuid.Parse(org)
+		Expect(err).NotTo(HaveOccurred())
+		ws := execution.WorkspaceName(orgID)
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(Equal("openshell-openshell-" + ws))
+		Expect(kc("-n", ns, "get", "limitrange", "koinon-koinon-sandbox-limitrange", "-o", "jsonpath={.metadata.name}")).
+			To(Equal("koinon-koinon-sandbox-limitrange"))
+		var supervisors corev1.PodList
+		Expect(json.Unmarshal([]byte(kc("-n", ns, "get", "pods", "-l", "openshell.ai/boundary-role=supervisor", "-o", "json")), &supervisors)).To(Succeed())
+		Expect(supervisors.Items).NotTo(BeEmpty(), "OpenShell created at least one supervisor pod")
+		for _, p := range supervisors.Items {
+			for _, c := range append(slices.Clone(p.Spec.InitContainers), p.Spec.Containers...) {
+				Expect(c.Resources.Requests).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange requests")
+				Expect(c.Resources.Limits).NotTo(BeEmpty(), p.Name+"/"+c.Name+": LimitRange limits")
+				cpuReq, memReq := c.Resources.Requests[corev1.ResourceCPU], c.Resources.Requests[corev1.ResourceMemory]
+				cpuLim, memLim := c.Resources.Limits[corev1.ResourceCPU], c.Resources.Limits[corev1.ResourceMemory]
+				Expect((&cpuReq).Cmp(reconciler.LimitRangeCPURequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memReq).Cmp(reconciler.LimitRangeMemoryRequest)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&cpuLim).Cmp(reconciler.LimitRangeCPULimit)).To(Equal(0), p.Name+"/"+c.Name)
+				Expect((&memLim).Cmp(reconciler.LimitRangeMemoryLimit)).To(Equal(0), p.Name+"/"+c.Name)
+			}
+		}
 		t.end("4. Task → run streamed → approval pending")
 	})
 
@@ -948,9 +982,9 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. Gateway header allowlist and key-in-header/URL refusal")
 	})
 
-	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
+	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
-	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
+	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -973,18 +1007,33 @@ var _ = Describe("the quickstart", Ordered, func() {
 			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
 			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
 
-		By("pointing the flavor at an image nobody can pull, and shortening the sandbox wait cap")
+		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
-		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavors/opencode.*$`).ReplaceAllString(cfgYAML, "${1}kind.local/koinon-escape/agent:nope")
-		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
+		broken := regexp.MustCompile(`(?m)^(\s+image: ).*/sandbox[:@].*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
+		Expect(broken).NotTo(Equal(cfgYAML), "the harness image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
 		Expect(err).NotTo(HaveOccurred())
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
+		// 2 minutes, the value with evidence. The cap counts from the run's first claim
+		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.
+		// A 30 s cap failed in CI twice (#572 run 43091299950, #573 run 43134423089): the run ended with
+		// "the sandbox was never rendered" after 30 s. Proven from the second run's logs: the new
+		// reconciler led 0.8 s after it started, but its first pass had begun before the new agent
+		// existed, and in that pass the job of the OLD agent called OpenShell DeleteSandbox (the
+		// spec-change recreate, because the harness image had just changed). That call did not return
+		// within the 30 s (the old pods were Terminating with a 30 s grace period). A pass ends only
+		// when all its jobs end (startJobs(...).wait()), so the next pass, the first that could see
+		// the new agent, started after the cap. The leader hand-over and the gateway Apply were not
+		// the gate. PR 870 made sandbox work per agent, so that pass no longer waits. Exit condition:
+		// lower the cap once the "named the cause image_pull N s" line below stays well under 30 s in
+		// the merge queue (issue 573). The terminal-state line is always about the cap: the run fails
+		// only when the cap runs out.
 		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
 
+		missingImageStart := time.Now()
 		By("a task for a new agent: its sandbox is rendered with the broken image")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -996,7 +1045,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(tmpl).NotTo(BeEmpty())
 		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Harness: harness.OpenCode,
 			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -1014,6 +1063,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return terminal(r.GetState())
 		})
 
+		// The whole wait, which is the cap; the time to the cause is printed further down.
+		By(fmt.Sprintf("the run reached its terminal state %.1f s after the task was created (wait cap 2 minutes)", time.Since(missingImageStart).Seconds()))
 		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
 		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
 		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))
@@ -1023,12 +1074,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 		got, err := c.Tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		var cause string
+		var causeSeenMs float64
+		seen := false
 		for _, ev := range got.GetEvents() {
 			if ev.GetKind() == "run.failed" {
-				cause, _ = ev.GetPayload().AsMap()["sandboxCause"].(string)
+				p := ev.GetPayload().AsMap()
+				cause, _ = p["sandboxCause"].(string)
+				causeSeenMs, seen = p["causeSeenMs"].(float64)
 			}
 		}
 		Expect(cause).To(Equal("image_pull"))
+		// The run fails only when the cap runs out, so the terminal-state time above is the cap. This is
+		// the number that decides when the cap can go down (issue 573): how long the observer took to
+		// name the cause.
+		Expect(seen).To(BeTrue(), "the run.failed payload says when the cause was first seen")
+		By(fmt.Sprintf("the sandbox row named the cause image_pull %.1f s after the wait began", causeSeenMs/1000))
 
 		By("the metrics count it, by cause")
 		metrics := func(target, port string) string {
@@ -1042,7 +1102,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(metrics("deploy/koinon-agentd", "9090")).To(MatchRegexp(`(?m)^koinon_agentd_sandbox_wait_cap_total\{cause="image_pull"\} [1-9]`))
 		Expect(metrics("deploy/koinon-reconciler", "9090")).To(MatchRegexp(`(?m)^koinon_reconciler_sandbox_observer_errors_total\{reason="forbidden"\} 0$`),
 			"the observer read the pod without being refused")
-		t.end("8. Missing flavor image: image_pull from the pod, through the observer")
+		t.end("8. Missing harness image: image_pull from the pod, through the observer")
 	})
 })
 

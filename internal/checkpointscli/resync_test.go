@@ -24,7 +24,7 @@ var _ = Describe("koinon-api checkpoints resync", func() {
 	agentIn := func(ctx context.Context, org pgtype.UUID, repository bool) pgtype.UUID {
 		GinkgoHelper()
 		var a pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
 		if repository {
 			_, err := pool.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 				org, a, "orgs/"+org.String()+"/homes/"+a.String()+"/")

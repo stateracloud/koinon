@@ -8,7 +8,7 @@
 #
 #   1. note the install: the install ID, the number of tasks and runs, the keys and what they wrap;
 #   2. back up the keys and the database (the guide's backup blocks) and read the dump back;
-#   3. change the install after the backup: add a marker table, and delete the KEK Secret;
+#   3. change the install after the backup: add a marker table, and delete the KEK Secret (the guard refuses, then is set to Audit once);
 #   4. stop, hold, restore the database, restore the keys, start held, resync (the guide's restore
 #      blocks), check that nothing acts while held, verify the keys, release (issue #462);
 #   5. verify: the marker is gone, the install ID, the task and run counts and the keys are the ones of
@@ -34,6 +34,7 @@ K=("$OUT/bin/kubectl")
 
 t_start=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) backup/restore: $*"; }
+wait_a_bit() { command sleep "${1:-2}"; }
 fail() { echo "backup/restore FAILED: $*" >&2; exit 1; }
 
 # blk runs one block of the command file, as the guide shows it, in the working directory that holds the
@@ -81,7 +82,31 @@ step "change the install after the backup"
 # (the KEK Secret: without it koinon-api refuses to start).
 sql 'CREATE TABLE public.e2e_after_backup (note text)'
 sql "INSERT INTO public.e2e_after_backup VALUES ('written after the backup')"
-"${K[@]}" -n "$NS" delete secret koinon-kek
+# The KEK Secret is guarded (issue #604): the admission policy refuses a delete. Prove that, then switch the
+# binding to Audit for the one delete that simulates the loss, and back to Deny.
+if "${K[@]}" -n "$NS" delete secret koinon-kek 2>"$work/kek-delete.err"; then
+  fail "the KEK Secret was deleted: kek-guard is not enforced"
+fi
+grep -q 'cannot be deleted' "$work/kek-delete.err" || fail "the KEK delete was refused, but not by kek-guard: $(cat "$work/kek-delete.err")"
+binding=$("${K[@]}" get validatingadmissionpolicybinding -o name | grep -- '-kek-guard$' || true)
+[[ -n $binding ]] || fail "no kek-guard binding found"
+setguard() {
+  "${K[@]}" patch "$binding" --type=json -p "[{\"op\":\"replace\",\"path\":\"/spec/validationActions\",\"value\":[\"$1\"]}]" >/dev/null
+}
+setguard Audit
+deleted=0
+for _ in $(seq 1 30); do # the API server's admission cache needs a few seconds
+  if "${K[@]}" -n "$NS" delete secret koinon-kek 2>/dev/null; then deleted=1; break; fi
+  wait_a_bit
+done
+setguard Deny
+(( deleted )) || fail "could not delete the KEK Secret with the guard in Audit"
+# The usual restore is into a new install that made its own first KEK on its empty database, so the Secret
+# exists and the backup is merged over it (keys import). koinon-api would not make a KEK here (the database
+# holds stored secrets), so stand in for it with a fresh KEK of another ID. A create is not guarded.
+fresh_id="kek-$(date -u +%Y%m%d)-e2e0"
+"${K[@]}" -n "$NS" create secret generic koinon-kek --from-literal="$fresh_id=$(head -c 32 /dev/urandom | base64)" --from-literal=active="$fresh_id" >/dev/null \
+  || fail "could not create the fresh KEK Secret"
 
 step "restore"
 t_restore=$(date +%s)
@@ -117,7 +142,15 @@ step "verify"
 [[ $(sql "SELECT coalesce(to_regclass('public.e2e_after_backup')::text, 'gone')") == gone ]] ||
   fail "the table created after the backup survived the restore"
 "${K[@]}" -n "$NS" get secret koinon-kek >/dev/null || fail "the KEK Secret is not back"
-state | tee "$work/state.after"
+# The guard is back: kubectl cannot change the Secret, and the guide's import (koinon-api's own identity) can.
+wait_a_bit 5
+if "${K[@]}" -n "$NS" annotate secret koinon-kek e2e-probe=1 --overwrite 2>/dev/null; then
+  fail "kubectl changed the KEK Secret: kek-guard is not enforced after the restore"
+fi
+"${K[@]}" -n "$NS" exec -i deploy/koinon-api -- koinon-api keys import --yes <"$work/koinon-kek-backup.yaml" ||
+  fail "koinon-api keys import failed over the existing KEK Secret"
+# The merge keeps the fresh KEK the restore went over (an import removes none); it wraps no value.
+state | grep -v "^kek=$fresh_id " | tee "$work/state.after"
 diff -u "$work/state.before" "$work/state.after" || fail "the restored install differs from the one that was backed up"
 ks=$(keys_status)
 if grep -qiE 'warning|missing' <<<"$ks"; then

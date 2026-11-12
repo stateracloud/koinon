@@ -54,7 +54,7 @@ builds:
 # /agentd). The release workflow sets it from github.repository (the packages belong to the
 # repository that builds them, #167); the default is for local dry runs and for a throwaway
 # registry (hack/mirror-release.sh is tested that way).
-# The flavor image is built by the release workflow's flavor job (hack/release-flavor.sh), not here.
+# The harness image is built by the release workflow's harness job (hack/release-harness.sh), not here.
 kos:
   - &ko
     id: koinon-api

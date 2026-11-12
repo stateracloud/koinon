@@ -4,10 +4,12 @@ package migrations_test
 
 import (
 	"database/sql"
+	"errors"
 	"io/fs"
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/pressly/goose/v3"
@@ -199,5 +201,19 @@ var _ = Describe("the audit hash chain migration", func() {
 			Scan(&seq, &prev)).To(Succeed())
 		Expect(seq).To(BeEquivalentTo(4))
 		Expect(prev).To(Equal(perOrg[a][2].hash))
+	})
+})
+
+var _ = Describe("the named system actor rule on audit_events (#359)", func() {
+	It("refuses a system actor with an empty ID and accepts a named one", func(ctx SpecContext) {
+		_, org := newUser(ctx)
+		const q = `INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind) VALUES ($1, $2, $3, 'test.named', 'test')`
+		_, err := db.ExecContext(ctx, q, org, "system", "")
+		var pgErr *pgconn.PgError
+		Expect(errors.As(err, &pgErr)).To(BeTrue(), "got %v", err)
+		Expect(pgErr.Code).To(Equal("23514"))
+		Expect(pgErr.ConstraintName).To(Equal("audit_events_system_actor_named"))
+		_, err = db.ExecContext(ctx, q, org, "system", "koinon-test:spec")
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

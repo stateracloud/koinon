@@ -30,5 +30,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Files share one module registry and one jsdom per worker (issue 41): PR and
+    // local runs are faster. The nightly workflow (web-isolated.yml) sets
+    // VITEST_ISOLATE=true to run each file in a fresh environment, which catches
+    // module state that one file leaks into the next.
+    isolate: process.env.VITEST_ISOLATE === 'true',
   },
 })

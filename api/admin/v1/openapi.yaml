@@ -1210,7 +1210,7 @@ components:
       description: |
         An error. 400 invalid request, 401 missing, wrong, expired or revoked token, 403 the
         token's role is too low, 404 not found, 409 the entry is declared by a Secret or
-        the name is taken.
+        the name is taken, 503 the service is temporarily unavailable (Retry-After may be set).
       content:
         application/json:
           schema:
@@ -1228,7 +1228,7 @@ components:
             message: {type: string}
     ErrorCode:
       type: string
-      enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, internal]
+      enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, unavailable, internal]
     Source:
       type: string
       enum: [ui, secret]
@@ -1273,6 +1273,20 @@ components:
           type: array
           items: {$ref: "#/components/schemas/ModelFormat"}
           description: The model formats the provider's type offers, preferred first (ADR 0069).
+        servingState:
+          type: string
+          enum: [saved, serving, failed]
+          description: >-
+            Whether the gateway serves the provider, from what the reconciler recorded (it never reads the
+            gateway). `saved`: not served yet, the reconciler applies it on its next pass. `serving`: every
+            enabled model is served. `failed`: the gateway does not serve it and `servingReason` says why.
+            Unset when the provider is disabled, removed or has no enabled model.
+        servingReason:
+          type: string
+          description: Set with `servingState` `failed`; one of `no key`, `gateway rejected config`, `upstream unreachable`, `unknown`.
+        servingDetail:
+          type: string
+          description: What the gateway or the reconciler said about the failure, for an admin; never a key.
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret:
           type: string

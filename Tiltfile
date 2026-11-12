@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Inner loop (ADR 0039, plan item X1): builds koinon-api, koinon-reconciler and koinon-agentd with ko,
-# the flavor images with `make flavor-*`, and deploys charts/koinon (values: hack/dev/values*.yaml)
+# the harness images with `make harness-*`, and deploys charts/koinon (values: hack/dev/values*.yaml)
 # into the namespace `koinon`. Two profiles, chosen by the kube context:
 #
 #   kind     context kind-koinon-*: images loaded into the node, runc, the fake model server and the
@@ -10,10 +10,10 @@
 #            hack/dev/local.example.yaml): your registry, model provider, runtime class and OpenShell.
 #            A maintainer's own lab is one example: keep its profile in the git-ignored local.yaml.
 #
-# `tilt up`, or for example `tilt up -- --flavors=opencode`. See docs/dev/loop.md.
+# `tilt up`, or for example `tilt up -- --harnesses=opencode`. See docs/dev/loop.md.
 
 config.define_string('mode', usage='kind or remote; default: from the kube context')
-config.define_string('flavors', usage='comma-separated flavor images to build (default: opencode)')
+config.define_string('harnesses', usage='comma-separated harness images to build (default: opencode)')
 config.define_string('platform', usage='linux/amd64 or linux/arm64; default: local.yaml platform (else amd64) on remote, the host on kind')
 config.define_string('openshell-tls-secret', usage='Secret in the openshell namespace holding the client certificate (tls.crt, tls.key, ca.crt); copied into koinon. Empty: no mTLS (default: openshell.clientTLSSecret of local.yaml, else openshell-client-tls)')
 config.define_string('openshell-namespace', usage='namespace of the OpenShell gateway (default: openshell.namespace of local.yaml, else openshell)')
@@ -54,26 +54,26 @@ NS = 'koinon'
 KIND = mode == 'kind'
 os_cfg = local_cfg.get('openshell', {})
 platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', quiet=True)).strip() if KIND else local_cfg.get('platform', 'linux/amd64'))
-registry = 'kind.local' if KIND else local_cfg.get('registry', '')
+registry = 'localhost:5001' if KIND else local_cfg.get('registry', '')
 if not KIND and not os_cfg.get('address'):
     fail('%s needs `openshell.address` (the OpenShell gateway, e.g. openshell.openshell.svc:8080)' % LOCAL_FILE)
 if not KIND and not registry:
     fail('%s needs `registry` (the registry and path Tilt pushes images to, e.g. registry.example.com/koinon)' % LOCAL_FILE)
-kind_cluster = ctx[len('kind-'):]
 os_ns = cfg.get('openshell-namespace', os_cfg.get('namespace', 'openshell'))
 os_tls = cfg.get('openshell-tls-secret', os_cfg.get('clientTLSSecret', 'openshell-client-tls'))
 sandbox_policy = KIND or cfg.get('sandbox-policy', local_cfg.get('sandboxPolicy', False))
-flavors = [f for f in cfg.get('flavors', 'opencode').split(',') if f]
-ALL_FLAVORS = ['opencode']
-for f in flavors:
-    if f not in ALL_FLAVORS:
-        fail('unknown flavor %s (known: %s)' % (f, ', '.join(ALL_FLAVORS)))
+harnesses = [f for f in cfg.get('harnesses', 'opencode').split(',') if f]
+ALL_HARNESSES = ['opencode']
+for f in harnesses:
+    if f not in ALL_HARNESSES:
+        fail('unknown harness %s (known: %s)' % (f, ', '.join(ALL_HARNESSES)))
 
 # ---- images ---------------------------------------------------------------------------------
 
 # ko builds a distroless image per binary. The unique tag is what Tilt injects into the pod specs;
-# `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko loads the
-# image into the node itself (KIND_CLUSTER_NAME); on a remote cluster it pushes to your registry.
+# `dev` is the chart's image.tag, which the preflight Job's probe pods use. On kind ko pushes to the
+# local registry that `make dev-kind-up` starts (localhost:5001, test/e2e/kind/registry.sh); on a remote
+# cluster it pushes to your registry.
 def ko_image(name):
     # The chart's images are <image.registry>/api, /reconciler and /agentd (#167); the binary is cmd/koinon-<name>.
     repo = registry + '/' + name
@@ -81,7 +81,7 @@ def ko_image(name):
     custom_build(
         repo,
         'TAG=tilt-$(date +%s) && ' +
-        'KO_DOCKER_REPO="' + repo + '" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'KO_DOCKER_REPO="' + repo + '" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG,dev" ./cmd/koinon-' + name +
         ' >/dev/null && echo "' + repo + ':$TAG" > "$TILT_KO_REF"',
         deps=['cmd', 'internal', 'go.mod', 'go.sum'],
@@ -93,52 +93,52 @@ def ko_image(name):
 for n in ['api', 'reconciler', 'agentd']:
     ko_image(n)
 
-# Flavor images are not in any pod spec Tilt sees (the reconciler starts sandboxes from them), so
-# they are built by a local_resource; the chart gets the content-derived tag (hack/flavor-tag.sh),
-# which changes the reconciler's config and rolls it when a flavor's files change.
-watch_file('flavors')
-flavor_tags = {}
-for f in flavors:
-    # The load-time tag is only the chart's value; the build computes its own, so a flavor edit
+# Harness images are not in any pod spec Tilt sees (the reconciler starts sandboxes from them), so
+# they are built by a local_resource; the chart gets the content-derived tag (hack/harness-tag.sh),
+# which changes the reconciler's config and rolls it when a harness's files change.
+watch_file('harnesses')
+harness_tags = {}
+for f in harnesses:
+    # The load-time tag is only the chart's value; the build computes its own, so a harness edit
     # that has not reloaded the Tiltfile yet is still built and tagged consistently.
-    flavor_tags[f] = str(local('hack/flavor-tag.sh ' + f, quiet=True)).strip()
-    ref = '%s/flavors/%s:$T' % (registry, f)
-    publish = ('kind load docker-image --name %s %s' % (kind_cluster, ref)) if KIND else ('docker push %s' % ref)
+    harness_tags[f] = str(local('hack/harness-tag.sh ' + f, quiet=True)).strip()
+    ref = '%s/sandbox:$T' % registry
+    publish = 'docker push %s' % ref
     local_resource(
-        'flavor-' + f,
-        'T=$(hack/flavor-tag.sh %s) && make flavor-%s FLAVOR_TAG=$T FLAVOR_PLATFORMS=%s && docker tag koinon/flavor-%s:$T %s && %s' %
-        (f, f, platform, f, ref, publish),
-        deps=['flavors/' + f, 'flavors/common'],
-        labels=['flavors'],
+        'harness-' + f,
+        'T=$(hack/harness-tag.sh %s) && make harness-%s HARNESS_TAG=$T HARNESS_PLATFORMS=%s && docker tag koinon/sandbox:$T %s && %s' %
+        (f, f, platform, ref, publish),
+        deps=['harnesses/' + f, 'harnesses/common'],
+        labels=['harnesses'],
     )
 
 if KIND:
-    # kind has no registry: the fakes' images are loaded like the Koinon ones.
+    # The fakes' images are pushed to the local registry like the Koinon ones.
     custom_build(
-        'kind.local/koinon-fakemodel',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakemodel" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakemodel',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakemodel" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakemodel >/dev/null && ' +
-        'echo "kind.local/koinon-fakemodel:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakemodel:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakemodel', 'internal', 'test/fakemodel', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakemodel'},
         outputs_image_ref_to='.tilt-ko-koinon-fakemodel',
         skips_local_docker=True,
     )
     custom_build(
-        'kind.local/koinon-fakegithub',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakegithub" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakegithub',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakegithub" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakegithub >/dev/null && ' +
-        'echo "kind.local/koinon-fakegithub:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakegithub:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakegithub', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakegithub'},
         outputs_image_ref_to='.tilt-ko-koinon-fakegithub',
         skips_local_docker=True,
     )
     custom_build(
-        'kind.local/koinon-fakemcp',
-        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakemcp" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'localhost:5001/koinon-fakemcp',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="localhost:5001/koinon-fakemcp" ' +
         'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakemcp >/dev/null && ' +
-        'echo "kind.local/koinon-fakemcp:$TAG" > "$TILT_KO_REF"',
+        'echo "localhost:5001/koinon-fakemcp:$TAG" > "$TILT_KO_REF"',
         deps=['cmd/koinon-fakemcp', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-koinon-fakemcp'},
         outputs_image_ref_to='.tilt-ko-koinon-fakemcp',
@@ -186,14 +186,16 @@ if not sandbox_policy:
     # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
     # the OpenShell sandbox namespaces the cluster already has.
     sets.append('sandboxPolicy.enabled=false')
-    # The sandbox observer's RoleBinding policy (ADR 0078) needs the sandbox policy: the chart refuses to
-    # render one without the other.
+    # The observer, NetworkPolicy writer and LimitRange writer all need the sandbox policy: the chart
+    # refuses to render any of them without it (ADR 0078, spike 8.15, #76).
     sets.append('sandboxObserver.enabled=false')
-for f in ALL_FLAVORS:
-    if f in flavors:
-        sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
+    sets.append('sandboxNetworkPolicy.enabled=false')
+    sets.append('sandboxLimitRange.enabled=false')
+for f in ALL_HARNESSES:
+    if f in harnesses:
+        sets.append('harnesses.%s.image.tag=%s' % (f, harness_tags[f]))
     else:
-        sets.append('flavors.%s=null' % f)  # not built, so not offered to agents
+        sets.append('harnesses.%s=null' % f)  # not built, so not offered to agents
 if os_tls:
     sets.append('openshell.clientTLSSecret=' + os_tls)
 else:
@@ -264,7 +266,7 @@ k8s_resource('koinon-migrate-install', resource_deps=['postgres'], labels=['data
 k8s_resource('koinon-preflight', resource_deps=['koinon-config'], labels=['platform'])
 k8s_resource('koinon-gateway', resource_deps=['koinon-config'], labels=['koinon'])
 k8s_resource('koinon-api', port_forwards='8080:8080', resource_deps=['koinon-migrate-install'] + cert_dep, labels=['koinon'])
-k8s_resource('koinon-reconciler', resource_deps=['koinon-migrate-install'] + cert_dep + ['flavor-' + f for f in flavors], labels=['koinon'])
+k8s_resource('koinon-reconciler', resource_deps=['koinon-migrate-install'] + cert_dep + ['harness-' + f for f in harnesses], labels=['koinon'])
 k8s_resource('koinon-agentd', resource_deps=['koinon-migrate-install'] + cert_dep, labels=['koinon'])
 
 if cfg.get('web', True):

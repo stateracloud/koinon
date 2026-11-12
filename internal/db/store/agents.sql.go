@@ -19,7 +19,7 @@ WHERE agents.org_id = $3 AND agents.id = $4
   AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM $1
     AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = $3 AND nv.id = $1)
       > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type ActivateAgentParams struct {
@@ -45,7 +45,7 @@ func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (A
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -62,6 +62,11 @@ func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (A
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
@@ -70,7 +75,7 @@ const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agents
 SET status = 'archived', archived_at = now()
 WHERE org_id = $1 AND id = $2 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type ArchiveAgentParams struct {
@@ -86,7 +91,7 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -103,21 +108,26 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
 
 const createAgent = `-- name: CreateAgent :one
 
-INSERT INTO agents (org_id, display_name, flavor, template_id, created_by)
+INSERT INTO agents (org_id, display_name, harness, template_id, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type CreateAgentParams struct {
 	OrgID       pgtype.UUID
 	DisplayName string
-	Flavor      AgentFlavor
+	Harness     string
 	TemplateID  pgtype.UUID
 	CreatedBy   pgtype.UUID
 }
@@ -131,7 +141,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 	row := q.db.QueryRow(ctx, createAgent,
 		arg.OrgID,
 		arg.DisplayName,
-		arg.Flavor,
+		arg.Harness,
 		arg.TemplateID,
 		arg.CreatedBy,
 	)
@@ -141,7 +151,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -158,6 +168,11 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
@@ -204,7 +219,7 @@ func (q *Queries) CreateAgentVersion(ctx context.Context, arg CreateAgentVersion
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
 WHERE org_id = $1 AND id = $2
 `
 
@@ -221,7 +236,7 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -238,12 +253,17 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
 
 const getAgentForUpdate = `-- name: GetAgentForUpdate :one
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -262,7 +282,7 @@ func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdatePa
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -279,6 +299,11 @@ func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdatePa
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
@@ -467,7 +492,7 @@ func (q *Queries) ListAgentVersions(ctx context.Context, arg ListAgentVersionsPa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -486,7 +511,7 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 			&i.ID,
 			&i.DisplayName,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.TemplateID,
 			&i.ActiveVersionID,
 			&i.LatestVersion,
@@ -503,6 +528,11 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 			&i.Model,
 			&i.Thinking,
 			&i.KeepWarm,
+			&i.SandboxCpuRequest,
+			&i.SandboxCpuLimit,
+			&i.SandboxMemoryRequest,
+			&i.SandboxMemoryLimit,
+			&i.KeepWarmGranted,
 		); err != nil {
 			return nil, err
 		}
@@ -518,7 +548,7 @@ const returnAgentToDraft = `-- name: ReturnAgentToDraft :one
 UPDATE agents
 SET status = 'draft'
 WHERE org_id = $1 AND id = $2 AND status = 'active'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type ReturnAgentToDraftParams struct {
@@ -536,7 +566,7 @@ func (q *Queries) ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraft
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -553,15 +583,20 @@ func (q *Queries) ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraft
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
 
 const setAgentKeepWarm = `-- name: SetAgentKeepWarm :one
 UPDATE agents
-SET keep_warm = $1
+SET keep_warm = $1, keep_warm_granted = keep_warm_granted AND $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type SetAgentKeepWarmParams struct {
@@ -572,6 +607,7 @@ type SetAgentKeepWarmParams struct {
 
 // Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 // decides how many of the requests the reconciler grants. Not a new version.
+// Clearing the request clears the grant with it; a new request starts not granted until the next pass.
 func (q *Queries) SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, setAgentKeepWarm, arg.KeepWarm, arg.OrgID, arg.ID)
 	var i Agent
@@ -580,7 +616,7 @@ func (q *Queries) SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmPara
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -597,6 +633,11 @@ func (q *Queries) SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmPara
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
@@ -605,7 +646,7 @@ const setAgentModel = `-- name: SetAgentModel :one
 UPDATE agents
 SET model = $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type SetAgentModelParams struct {
@@ -623,7 +664,7 @@ func (q *Queries) SetAgentModel(ctx context.Context, arg SetAgentModelParams) (A
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -640,6 +681,71 @@ func (q *Queries) SetAgentModel(ctx context.Context, arg SetAgentModelParams) (A
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
+	)
+	return i, err
+}
+
+const setAgentSandboxResources = `-- name: SetAgentSandboxResources :one
+UPDATE agents
+SET sandbox_cpu_request = $1, sandbox_cpu_limit = $2,
+    sandbox_memory_request = $3, sandbox_memory_limit = $4
+WHERE org_id = $5 AND id = $6 AND status <> 'archived'
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+`
+
+type SetAgentSandboxResourcesParams struct {
+	CpuRequest    pgtype.Text
+	CpuLimit      pgtype.Text
+	MemoryRequest pgtype.Text
+	MemoryLimit   pgtype.Text
+	OrgID         pgtype.UUID
+	ID            pgtype.UUID
+}
+
+// An agent's sandbox resource override (NULL: follow the version's template values, then the platform
+// default; ADR 0083). The API checks the platform bounds. Not a new version.
+func (q *Queries) SetAgentSandboxResources(ctx context.Context, arg SetAgentSandboxResourcesParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxResources,
+		arg.CpuRequest,
+		arg.CpuLimit,
+		arg.MemoryRequest,
+		arg.MemoryLimit,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Harness,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
+		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
 }
@@ -648,7 +754,7 @@ const setAgentThinking = `-- name: SetAgentThinking :one
 UPDATE agents
 SET thinking = $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
 `
 
 type SetAgentThinkingParams struct {
@@ -666,7 +772,7 @@ func (q *Queries) SetAgentThinking(ctx context.Context, arg SetAgentThinkingPara
 		&i.ID,
 		&i.DisplayName,
 		&i.Status,
-		&i.Flavor,
+		&i.Harness,
 		&i.TemplateID,
 		&i.ActiveVersionID,
 		&i.LatestVersion,
@@ -683,6 +789,30 @@ func (q *Queries) SetAgentThinking(ctx context.Context, arg SetAgentThinkingPara
 		&i.Model,
 		&i.Thinking,
 		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
 	)
 	return i, err
+}
+
+const setAgentsKeepWarmGranted = `-- name: SetAgentsKeepWarmGranted :exec
+UPDATE agents
+SET keep_warm_granted = $1
+WHERE org_id = $2 AND id = ANY($3::uuid[]) AND keep_warm_granted <> $1
+`
+
+type SetAgentsKeepWarmGrantedParams struct {
+	Granted bool
+	OrgID   pgtype.UUID
+	Ids     []pgtype.UUID
+}
+
+// The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of
+// one org. Only rows that change are written.
+func (q *Queries) SetAgentsKeepWarmGranted(ctx context.Context, arg SetAgentsKeepWarmGrantedParams) error {
+	_, err := q.db.Exec(ctx, setAgentsKeepWarmGranted, arg.Granted, arg.OrgID, arg.Ids)
+	return err
 }

@@ -7,7 +7,7 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: lcm-upgrader
-  version: 0.1.0
+  version: 0.1.1
   displayName: LCM upgrader (Gitea)
   description: >-
     Checks one Gitea repository weekly for outdated Helm charts, images, Argo CD apps and
@@ -15,10 +15,9 @@ metadata:
     request only after you say yes; the pull request needs approval too. To check release notes it
     needs a search or fetch MCP server allowed for the agent.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:
@@ -26,6 +25,9 @@ spec:
     memory: {request: 1Gi, limit: 1536Mi}
   model:
     name: default
+  # The tools the instructions call or describe ("the search and fetch tools you were allowed"); the
+  # legs test reads this list (ADR 0084 decision 9).
+  tools: [ask_user, create_pull_request, gitea_create_pull_request, web_url_read, searxng_web_search]
   questions:
     reminderAfter: 24h
     expireAfter: 144h

@@ -94,7 +94,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
-		"agentgateway's base URL as sandboxes reach it; flavors get <url>/v1 and <url>/mcp")
+		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1 and <url>/mcp")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")

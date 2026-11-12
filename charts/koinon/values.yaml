@@ -11,7 +11,7 @@ fullnameOverride: ""
 clusterDomain: cluster.local
 
 # Settings for every image the chart runs or hands to Koinon: the three Koinon images, the hook
-# Jobs, the preflight probe pods, the flavor images that become sandboxes, agentgateway (standalone
+# Jobs, the preflight probe pods, the harness images that become sandboxes, agentgateway (standalone
 # mode), the CNPG Postgres image and the default sandboxPolicy.supervisorImages. See the guide
 # "Private registries and mirrors". OpenShell, the CNPG operator, Agent Sandbox and agentgateway's
 # controller are separate releases; set the same things on their charts.
@@ -134,10 +134,11 @@ reconciler:
   # agent is activated. An org admin can mark an agent keep-warm; this caps the keep-warm sandboxes
   # per org (the oldest agents win). 0 is the default of 2; a negative value grants none (old issue 315).
   keepWarmPerOrg: 2
-  # A changed sandbox spec (a new OpenShell supervisor image, flavor image or resources) recreates
+  # A changed sandbox spec (a new OpenShell supervisor image, harness image or resources) recreates
   # each sandbox through the usual path: held runs finish, the home gate passes, a checkpoint is taken
-  # first. This caps the recreates per reconcile pass, so an OpenShell upgrade does not recreate the
-  # whole fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
+  # first. This is a token bucket: that many sandboxes may be recreated at once, and the allowance
+  # comes back at this many per resync interval, so an OpenShell upgrade does not recreate the whole
+  # fleet at once (ADR 0085 decision 9). 0 is the default of 4; a negative value is no cap. The
   # supervisor image is read from the OpenShell gateway ConfigMap named by preflight.openshell.
   maxRecreatesPerPass: 4
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
@@ -357,13 +358,34 @@ providers:
   allowedInternalHosts: []
 
 secrets:
+  # A native ValidatingAdmissionPolicy (issue #604) limits the reconciler to Secrets labelled
+  # koinon.dev/managed-by=koinon-reconciler, so it can never change the KEK Secret or the Secrets
+  # koinon-api owns. Its own switch, apart from kek.guard.enabled: turning the KEK guard off to delete
+  # the Secret on purpose does not lift this fence. Turn it off only where the install may not create
+  # cluster-scoped objects (the policy is cluster-scoped).
+  reconcilerFence:
+    enabled: true
   kek:
     # A Secret you manage, with one file per key-encryption key named by its ID (base64 of 32 random
     # bytes) plus a file "active" holding the active ID. Empty: koinon-api creates the Secret
     # "koinon-kek" on its first start and never overwrites it (the chart renders no key material, so
-    # helm template, Argo CD and Flux cannot replace it). Back it up: without it, stored provider keys
+    # helm template, Argo CD and Flux cannot replace it). With existingSecret, whoever updates it (GitOps
+    # or a plain kubectl apply) must be listed in guard.extraWriters below. Back it up: without it, stored provider keys
     # and connection secrets cannot be read.
     existingSecret: ""
+    # A native ValidatingAdmissionPolicy (issue #604) refuses DELETE of the KEK Secret, and UPDATE by
+    # any identity except the koinon-api and key-admin service accounts, so a deleted or replaced
+    # Secret cannot become a new key quietly. extraWriters are further user names (for example
+    # "system:serviceaccount:argocd:argocd-application-controller") that may update it: needed when
+    # a GitOps tool applies a Secret you named in existingSecret. A plain `kubectl apply` or
+    # `helm`-less update of that Secret by your own user is an UPDATE too: add that user name here as
+    # well, or the policy refuses it. The policy that
+    # limits the reconciler to Secrets labelled koinon.dev/managed-by=koinon-reconciler is
+    # secrets.reconcilerFence.enabled, a separate switch. To delete the Secret on purpose, set
+    # enabled=false, upgrade, delete it, then set it back.
+    guard:
+      enabled: true
+      extraWriters: []
     # "koinon-api keys status" warns when the active key is older than this.
     activePeriod: 8760h
     # Wrapping the KEKs with a KMS (optional; ADR 0085 decision 12, https://koinon.stateracloud.com/docs/operate/secret-keys/). The
@@ -524,26 +546,26 @@ checkpoints:
 github:
   apiUrl: https://api.github.com
 
-# Flavor images (ADR 0035): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
-# .Chart.AppVersion. Every entry becomes a flavor the reconciler can run; an agent whose flavor has
-# no entry is reported as a reconcile error. Remove an entry to turn that flavor off.
-flavors:
+# Harness images (ADR 0035, ADR 0112): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
+# .Chart.AppVersion. Every entry becomes a harness the reconciler can run; an agent whose harness
+# has no entry is reported as a reconcile error. Remove an entry to turn that harness off.
+harnesses:
   opencode:
     image:
-      repository: flavors/opencode
+      repository: sandbox
       tag: ""
       digest: ""
 
-# Pre-pull the flavor images on the nodes that run Kata sandboxes (plan item LT1, practice B6), so
+# Pre-pull the harness images on the nodes that run Kata sandboxes (plan item LT1, practice B6), so
 # a sandbox start does not wait for an image pull. A DaemonSet whose init containers each run one
-# flavor image (the image and its pull secrets are rewritten like every other image) and exit, then
+# harness image (the image and its pull secrets are rewritten like every other image) and exit, then
 # a pause container keeps the pod, and so the pulled images' reference, on the node. It runs in the
 # release namespace with the default runtime class, never in a sandbox namespace, and weakens
 # nothing in ADR 0045: sandboxes still run under the kata runtime class and the admission policy.
 # Koinon does not place sandbox pods (the Agent Sandbox controller does, on the runtime class's
 # own node selector), so this cannot prefer nodes for sandboxes; it makes the nodes they land on
 # warm. Turn it on once the Kata nodes carry a label to select them by.
-flavorPrepull:
+harnessPrepull:
   enabled: false
   # Selects the Kata nodes, for example katacontainers.io/kata-runtime: "true" (kata-deploy's
   # label). Required when enabled: without it the images would be pulled onto every node.
@@ -783,10 +805,21 @@ sandboxObserver:
 sandboxNetworkPolicy:
   enabled: true
 
+# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default. OpenShell
+# cannot size the supervisor or its init containers; the reconciler applies a LimitRange named
+# <namespace>-<release>-sandbox-limitrange in each workspace namespace of openshell.gatewayId
+# (defaultRequest 50m/64Mi, default 250m/256Mi for type Container, covering init containers too). The chart renders
+# a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-limitrange.yaml). Off, the
+# chart renders none of it and the reconciler applies nothing new; existing LimitRanges stay until
+# removed (`kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`). Needs
+# sandboxPolicy.enabled.
+sandboxLimitRange:
+  enabled: true
+
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
-# clamped). The supervisor pod of OpenShell 0.1.7 stays unsized (BestEffort): see the ADR. Changing
+# clamped). The supervisor and init containers are sized by sandboxLimitRange (#76). Changing
 # a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
 # Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
 # start on a bad quantity, a minimum above its maximum, or a default request above its limit.

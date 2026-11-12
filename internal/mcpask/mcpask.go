@@ -71,6 +71,10 @@ type Options struct {
 	// on the call's one card, nil for none. Its error refuses the call, and its text is what the
 	// agent reads. Nil adds nothing.
 	Assess func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error)
+	// Execute, if set, is called in its own goroutine for a newly recorded call that an approval
+	// scope covers (recorded approved), so it runs at once like the same code-host call
+	// (githubtools.Options.Execute); the approval sweeper executes it otherwise.
+	Execute func(ctx context.Context, org, id pgtype.UUID)
 }
 
 // Server is the ask-tier proxy.
@@ -81,6 +85,7 @@ type Server struct {
 	ttl    time.Duration
 	now    func() time.Time
 	assess func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error)
+	exec   func(ctx context.Context, org, id pgtype.UUID)
 }
 
 // New returns a Server.
@@ -94,7 +99,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, assess: opts.Assess}
+	return &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, assess: opts.Assess, exec: opts.Execute}
 }
 
 var errNoIdentity = errors.New("this request does not come from an agent of Koinon")
@@ -109,7 +114,7 @@ type caller struct {
 }
 
 func (s *Server) identify(ctx context.Context, header http.Header, serverName string) (caller, error) {
-	ref, err := gateway.ParseAgentRef(header.Get(gateway.AgentHeader))
+	ref, err := gateway.AgentFromHeader(header)
 	if err != nil {
 		return caller{}, errNoIdentity
 	}
@@ -418,6 +423,11 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 	// Arguments are not logged: they can be large and are in the database.
 	s.log.Info("approval requested", "org", c.org.Slug, "agent", c.agent.ID.String(), "run", run.ID.String(), "id", row.ID.String(),
 		"tool", tool, "target", row.Target, "args_sha256", row.ArgsSha256, "new", created)
+	if created && row.Status == store.ApprovalStatusApproved && s.exec != nil {
+		// A fresh context, not this request's: the MCP SDK keeps the inbound call's protocol version
+		// in the request context, and the executor's own MCP client to the gateway would send it.
+		go s.exec(context.Background(), row.OrgID, row.ID) //nolint:contextcheck,gosec // G118: outlives the request on purpose, without its values
+	}
 	return s.reply(row), nil
 }
 

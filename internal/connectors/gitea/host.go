@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -80,18 +81,33 @@ func NewConfig(site codehost.Site, read, write []byte, prev *Config, now time.Ti
 
 // Options configure the provider.
 type Options struct {
-	// HTTPClient is the base client for Gitea calls; default a client with a 30 s timeout. A
+	// HTTPClient is the base client for Gitea calls; default a client with a 30 s timeout that
+	// dials through DialContext and returns a 3xx response instead of following it. A
 	// connection's CA bundle derives a client from it.
 	HTTPClient *http.Client
+	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext): a
+	// Connection's base URL is admin-supplied. It is unused when HTTPClient is set. Nil dials
+	// unchecked, for tests.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// Now defaults to time.Now; a poll's first cursor is taken from it.
+	Now func() time.Time
 }
 
 // Host is Gitea as a code-host provider.
-type Host struct{ tr *transports }
+type Host struct {
+	tr  *transports
+	now func() time.Time
+}
 
 var _ codehost.Provider = (*Host)(nil)
 
 // NewHost returns the Gitea provider.
-func NewHost(o Options) *Host { return &Host{tr: newTransports(o.HTTPClient)} }
+func NewHost(o Options) *Host {
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	return &Host{tr: newTransports(o.HTTPClient, o.DialContext), now: o.Now}
+}
 
 // ID implements codehost.Provider.
 func (*Host) ID() string { return HostID }
@@ -156,6 +172,14 @@ func (*Host) BranchURL(conn codehost.Connection, r codehost.Repo, branch string)
 // MetadataScope implements codehost.Provider: listing and naming repositories is a read.
 func (*Host) MetadataScope(repositories []string) codehost.Scope {
 	return codehost.Scope{Repositories: repositories, Permissions: map[string]string{"repository": "read"}}
+}
+
+// PollScope implements codehost.PollScoper: the issue comments, with the read token.
+func (*Host) PollScope(res codehost.Resource) (codehost.Scope, error) {
+	if res.Kind != codehost.ResourceIssueComments {
+		return codehost.Scope{}, fmt.Errorf("%w: gitea %s", codehost.ErrResourceUnsupported, res.Kind)
+	}
+	return codehost.Scope{Repositories: []string{res.Repo.String()}, Permissions: map[string]string{"repository": "read"}}, nil
 }
 
 // Describe implements codehost.Provider.
@@ -246,12 +270,13 @@ func (h *Host) Open(_ context.Context, conn codehost.Connection, scope codehost.
 	}
 	t := codehost.NewToken(string(tok), time.Time{}, scope.Repositories)
 	t.Revision = "gitea-" + kind + "-" + Fingerprint(tok)
-	return &access{c: c, tok: t}, nil
+	return &access{c: c, tok: t, now: h.now}, nil
 }
 
 type access struct {
 	c   *client
 	tok codehost.Token
+	now func() time.Time
 }
 
 // errPush is returned by the writes that go by git push.

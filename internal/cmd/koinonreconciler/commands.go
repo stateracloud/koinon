@@ -5,6 +5,7 @@ package koinonreconciler
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
 // NewRootCommand is koinon-reconciler's command tree (ADR 0088). A setting comes from the flag,
@@ -27,11 +29,16 @@ func NewRootCommand() *cobra.Command { return newRootCommand(serve) }
 // newRootCommand builds the tree with run as the work of serve, so a test can read the settings
 // the command resolved.
 func newRootCommand(run func(context.Context, config) error) *cobra.Command {
+	return newRootCommandWith(run, listUnmarked)
+}
+
+// newRootCommandWith also takes the work of "unmarked list".
+func newRootCommandWith(run func(context.Context, config) error, list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "koinon-reconciler",
 		Short: "Koinon's reconciler",
 		Long: "koinon-reconciler renders agents into OpenShell sandboxes, provider records and agentgateway keys (serve, " +
-			"also what runs without a subcommand).\n\n" +
+			"also what runs without a subcommand). unmarked lists the OpenShell objects that carry no install mark.\n\n" +
 			"Settings come from the chart's config file (--config, KOINON_CONFIG) and can be overridden by flags; every flag " +
 			"can also be set by an environment variable: KOINON_ plus the flag name in upper case with dashes as underscores " +
 			"(--idle-timeout is KOINON_IDLE_TIMEOUT). Secrets are never flags: the database password comes from PGPASSWORD, " +
@@ -42,6 +49,7 @@ func newRootCommand(run func(context.Context, config) error) *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(v, run))
+	root.AddCommand(newUnmarkedCommand(v, list))
 	return root
 }
 
@@ -59,6 +67,8 @@ var configKeys = map[string]string{
 	"sandbox-observer-service-account":     "sandboxObserver.serviceAccount",
 	"sandbox-network-policy":               "sandboxNetworkPolicy.enabled",
 	"sandbox-network-policy-name":          "sandboxNetworkPolicy.name",
+	"sandbox-limit-range":                  "sandboxLimitRange.enabled",
+	"sandbox-limit-range-name":             "sandboxLimitRange.name",
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-config-map":                   "gateway.configMap",
@@ -141,6 +151,9 @@ func (c *config) finish(v *viper.Viper) error {
 	if c.sandboxNetworkPolicy && c.sandboxNetworkPolicyName == "" {
 		return fmt.Errorf("--sandbox-network-policy-name is required with --sandbox-network-policy")
 	}
+	if c.sandboxLimitRange && c.sandboxLimitRangeName == "" {
+		return fmt.Errorf("--sandbox-limit-range-name is required with --sandbox-limit-range")
+	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return fmt.Errorf("--gateway-config-map is required in standalone mode")
 	}
@@ -148,25 +161,32 @@ func (c *config) finish(v *viper.Viper) error {
 		return fmt.Errorf("--gateway-name is required in kubernetes mode")
 	}
 
-	var sr fileSandboxResources
-	if err := v.UnmarshalKey("sandboxResources", &sr); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
+	policy, err := sandboxres.FromConfig(func(key string, out any) error { return v.UnmarshalKey(key, out) })
+	if err != nil {
+		return err
 	}
-	c.sandboxResources = sr.policy()
-	if err := c.sandboxResources.Validate(); err != nil {
-		return fmt.Errorf("config sandboxResources: %w", err)
+	c.sandboxResources = policy
+	images, err := harnessImages(v)
+	if err != nil {
+		return err
 	}
-	var flavors map[string]struct {
+	c.harnessImages = images
+	return nil
+}
+
+// harnessImages reads the config file's harnesses section: each harness's image.
+func harnessImages(v *viper.Viper) (map[string]string, error) {
+	var harnesses map[string]struct {
 		Image string `mapstructure:"image"`
 	}
-	if err := v.UnmarshalKey("flavors", &flavors); err != nil {
-		return fmt.Errorf("config flavors: %w", err)
+	if err := v.UnmarshalKey("harnesses", &harnesses); err != nil {
+		return nil, fmt.Errorf("config harnesses: %w", err)
 	}
-	c.flavorImages = map[string]string{}
-	for name, f := range flavors {
-		c.flavorImages[name] = f.Image
+	images := map[string]string{}
+	for name, f := range harnesses {
+		images[name] = f.Image
 	}
-	return nil
+	return images, nil
 }
 
 func orDefault[T comparable](v *T, def T) {
@@ -192,6 +212,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
 	fs.BoolVar(&c.sandboxNetworkPolicy, "sandbox-network-policy", false, "apply a default-deny NetworkPolicy in each OpenShell workspace namespace (spike 8.15, ADR 0045)")
 	fs.StringVar(&c.sandboxNetworkPolicyName, "sandbox-network-policy-name", "", "name of the default-deny NetworkPolicy in each workspace namespace")
+	fs.BoolVar(&c.sandboxLimitRange, "sandbox-limit-range", false, "apply a LimitRange in each OpenShell workspace namespace so the supervisor and init containers are sized (#76)")
+	fs.StringVar(&c.sandboxLimitRangeName, "sandbox-limit-range-name", "", "name of the LimitRange in each workspace namespace")
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
@@ -222,7 +244,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.keepWarmPerOrg, "keep-warm-per-org", 0, "keep-warm sandboxes an org may have (default 2; negative grants none)")
-	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes one pass may recreate with a changed spec, such as a new supervisor image (default 4; negative is no cap)")
+	fs.IntVar(&c.maxRecreates, "max-recreates-per-pass", 0, "sandboxes that may be recreated at once with a changed spec, such as a new supervisor image; the allowance comes back at this many per resync interval (default 4; negative is no cap)")
 	fs.StringVar(&c.openshellConfigNS, "openshell-config-namespace", "", "namespace of OpenShell's gateway ConfigMap, to read its supervisor image")
 	fs.StringVar(&c.openshellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty leaves the supervisor image out of the sandbox spec hash")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")

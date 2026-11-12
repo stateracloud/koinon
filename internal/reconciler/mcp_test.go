@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -62,8 +63,8 @@ var _ = Describe("Org MCP servers", func() {
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
 			MCPAskURL: "http://koinon-api-tools.koinon.svc:8081/mcp-ask",
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			Logger: slog.New(slog.DiscardHandler),
 		})
@@ -360,6 +361,37 @@ var _ = Describe("Org MCP servers", func() {
 		_, ok = targetOf(mg.last(), slug+"-bad")
 		Expect(ok).To(BeFalse())
 	})
+
+	// A row saved before ValidateRemote refused '$' (#668) can hold one in its credential header or
+	// prefix. The gateway's config loader would read it as an environment variable, and
+	// gateway.State.Validate refuses such a state as a whole, so the row is left out and the other
+	// orgs' servers are still applied.
+	DescribeTable("does not serve a stored server with '$' in its credential header or prefix, and still applies the other orgs' servers (#668)",
+		func(ctx SpecContext, column, value, reason string) {
+			bad := server(ctx, org, "legacy", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+			_, err := pool.Exec(ctx, `UPDATE mcp_servers SET `+column+` = $1 WHERE id = $2`, value, bad.ID)
+			Expect(err).NotTo(HaveOccurred())
+			other, _ := newOrg(ctx)
+			var otherSlug string
+			Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, other).Scan(&otherSlug)).To(Succeed())
+			good, err := svc.Create(ctx, other, audit.System("koinon-test:spec"), pgtype.UUID{}, mcpservers.Input{
+				Name: "wiki", URL: "https://mcp.example.com/wiki", CredentialHeader: "X-Api-Key", CredentialValue: "koinon_test_not-a-real-token",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, other, audit.System("koinon-test:spec"), good.ID) })
+
+			err = r.ReconcileAll(ctx)
+			Expect(err).To(MatchError(ContainSubstring(slug + "/legacy not served: " + reason + " must not contain '$'")))
+			st := mg.last()
+			Expect(st.Validate()).To(Succeed(), "the applied state is valid")
+			_, ok := targetOf(st, otherSlug+"-wiki")
+			Expect(ok).To(BeTrue(), "the other org's server is applied")
+			_, ok = targetOf(st, slug+"-legacy")
+			Expect(ok).To(BeFalse())
+		},
+		Entry("a header", "credential_header", "X-Api-$HOME", "credential header"),
+		Entry("a prefix", "credential_prefix", "Bearer ${HOME} ", "credential prefix"),
+	)
 
 	It("reserves the approval target names too: one org's server cannot take another's -ask name", func(ctx SpecContext) {
 		// Org "x8a-b" with the server "ask" would be the target x8a-b-ask, the approval target of org

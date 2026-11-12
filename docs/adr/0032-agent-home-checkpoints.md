@@ -3,6 +3,8 @@
 - Status: Accepted
 - Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built)
 - Date: 2026-10-21
+- Area: runtime-sandbox
+- Tags: agent-home, backup-restore, object-storage, encryption
 - Decision: [design.md#32](../design.md)
 
 ## Context
@@ -13,7 +15,7 @@ Agents persist between runs ([0009](0009-agent-runtime.md)). Their durable state
 - memory stores ([0033](0033-file-based-memory.md))
 - self-installed tools and `environment.lock` ([0015](0015-agent-environment-and-browser.md))
 - the browser profile
-- in-sandbox credentials where allowed ([0044](0044-in-sandbox-credential-exception.md))
+- in-sandbox credentials where allowed ([0044](0044-in-sandbox-credential-exception.md); none is allowed today, see its amendment of 2026-11-11 and [0114](0114-model-credentials-by-type.md))
 
 Agent Sandbox keeps the PVC through suspend:
 
@@ -32,10 +34,12 @@ cluster, rolling back a bad self-install, or exporting an agent all need a copy 
   - when a run parks
   - when a run ends
   - periodically during long runs
+
+  _(Changed: a checkpoint every hour while the sandbox is ready, before an idle stop and before a recreation; run park and run end are not separate points. See the amendments below, HC1.)_
 - **Format:** checkpoints are incremental and deduplicated, keep history, and use one of restic or
   kopia (chosen in the follow-up). They are encrypted with a per-org key held outside the sandbox.
 - **Included:** memory, harness sessions, `environment.lock`, the encrypted browser profile, and any
-  allowed in-sandbox credentials. Credentials are always encrypted and treated as secrets.
+  allowed in-sandbox credentials (none today, see [0044](0044-in-sandbox-credential-exception.md)). Credentials are always encrypted and treated as secrets.
 - **Excluded:** repository checkouts, package caches and build outputs, all of which can be
   rebuilt.
 - **Epoch:** each checkpoint carries the agent's ownership epoch
@@ -46,6 +50,7 @@ cluster, rolling back a bad self-install, or exporting an agent all need a copy 
 - **Who runs it:** the checkpoint job runs outside the agent's process, either in a supervisor-side
   sidecar or a short-lived job mounting the PVC. The agent never holds the storage credentials or
   the encryption key _(inferred from [0006](0006-identity-layers.md))_.
+  _(Changed: a sidecar is ruled out; koinon-agentd reads the home over OpenShell exec and writes it to kopia. See the amendments below, HC1.)_
 
 ## Alternatives considered
 

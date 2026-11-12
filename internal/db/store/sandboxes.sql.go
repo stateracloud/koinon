@@ -303,8 +303,59 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 	return i, err
 }
 
+const listAgentsForUnmarked = `-- name: ListAgentsForUnmarked :many
+SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
+FROM agents a
+JOIN orgs o ON o.id = a.org_id
+LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
+WHERE o.deleted_at IS NULL
+ORDER BY a.org_id, a.id
+`
+
+type ListAgentsForUnmarkedRow struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	Status       AgentStatus
+	Harness      string
+	SandboxState NullSandboxState
+	SandboxName  pgtype.Text
+	ProviderName pgtype.Text
+}
+
+// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
+// with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
+// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
+// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
+func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error) {
+	rows, err := q.db.Query(ctx, listAgentsForUnmarked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentsForUnmarkedRow
+	for rows.Next() {
+		var i ListAgentsForUnmarkedRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Status,
+			&i.Harness,
+			&i.SandboxState,
+			&i.SandboxName,
+			&i.ProviderName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
-SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm FROM agents a
+SELECT a.org_id, a.id, a.display_name, a.status, a.harness, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit, a.keep_warm_granted FROM agents a
 WHERE a.org_id = $1
   AND (a.status <> 'archived' OR EXISTS (
       SELECT 1 FROM agent_sandboxes s
@@ -329,7 +380,7 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.ID,
 			&i.DisplayName,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.TemplateID,
 			&i.ActiveVersionID,
 			&i.LatestVersion,
@@ -346,6 +397,11 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.Model,
 			&i.Thinking,
 			&i.KeepWarm,
+			&i.SandboxCpuRequest,
+			&i.SandboxCpuLimit,
+			&i.SandboxMemoryRequest,
+			&i.SandboxMemoryLimit,
+			&i.KeepWarmGranted,
 		); err != nil {
 			return nil, err
 		}
@@ -378,6 +434,42 @@ func (q *Queries) ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.U
 	for rows.Next() {
 		var i ListArchivedAgentSandboxesRow
 		if err := rows.Scan(&i.AgentID, &i.ArchivedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgWorkspacesForUnmarked = `-- name: ListOrgWorkspacesForUnmarked :many
+SELECT o.id AS org_id, w.workspace
+FROM orgs o
+LEFT JOIN org_workspaces w ON w.org_id = o.id
+WHERE o.deleted_at IS NULL
+ORDER BY o.id
+`
+
+type ListOrgWorkspacesForUnmarkedRow struct {
+	OrgID     pgtype.UUID
+	Workspace pgtype.Text
+}
+
+// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
+// unmarked list command (issue 511). An org that is deleted counts as not in the database: the
+// reconciler does not walk it.
+func (q *Queries) ListOrgWorkspacesForUnmarked(ctx context.Context) ([]ListOrgWorkspacesForUnmarkedRow, error) {
+	rows, err := q.db.Query(ctx, listOrgWorkspacesForUnmarked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgWorkspacesForUnmarkedRow
+	for rows.Next() {
+		var i ListOrgWorkspacesForUnmarkedRow
+		if err := rows.Scan(&i.OrgID, &i.Workspace); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -615,6 +707,58 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		arg.OrgID,
 		arg.AgentID,
 	)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+		&i.Reason,
+		&i.HomeDirtiedAt,
+	)
+	return i, err
+}
+
+const setAgentSandboxMessage = `-- name: SetAgentSandboxMessage :one
+UPDATE agent_sandboxes
+SET message = $1
+WHERE org_id = $2 AND agent_id = $3
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+`
+
+type SetAgentSandboxMessageParams struct {
+	Message string
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Stores an operator message and nothing else. A note written from outside the agent's work item
+// (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+// what the agent's own item recorded in the meantime.
+func (q *Queries) SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandboxMessageParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxMessage, arg.Message, arg.OrgID, arg.AgentID)
 	var i AgentSandbox
 	err := row.Scan(
 		&i.OrgID,

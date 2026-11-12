@@ -110,10 +110,10 @@ g merge -q --no-ff feat2 -m "Merge feat2" # main moved after feat2 branched: tre
 merge_diff=$(g rev-parse HEAD)
 plain=$(g rev-parse HEAD~1) # a one-parent commit
 # a merge that brings a file the flavors suite builds from
-g checkout -qb feat3; mkdir -p "$repo/flavors"; echo f >"$repo/flavors/x"; g add flavors; g commit -qm feat3
+g checkout -qb feat3; mkdir -p "$repo/harnesses"; echo f >"$repo/harnesses/x"; g add harnesses; g commit -qm feat3
 g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
-export CI_CHANGES_FLAVORS_DIRS=test/flavors # the directories the flavors suite builds (no go list in the scratch repo)
+export CI_CHANGES_FLAVORS_DIRS=test/harnesses # the directories the flavors suite builds (no go list in the scratch repo)
 
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }
@@ -176,7 +176,7 @@ expect "an API error on the runs list runs everything" false "cannot list" $(pus
 expect "an unknown commit runs everything" false "cannot read" $(push 0000000000000000000000000000000000000000)
 expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push REF=refs/tags/v1 SHA="$merge_same"
 expect "no repo runs everything" false "not a push to main" EVENT_NAME=push REF=refs/heads/main SHA="$merge_same" REPO=
-# flavors is advisory but flavor-publish ships what it tested: judged on the queue head.
+# flavors is required (a queue check, #572) and flavor-publish ships what it tested: judged on the queue head.
 checks flavors:failure
 # shellcheck disable=SC2046
 expect "flavors red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")
@@ -241,9 +241,9 @@ expect_lab "lab: an API error means go-test runs" false EVENT_NAME=pull_request 
 
 # --- apply -----------------------------------------------------------------------------------------
 cd "$tmp"
-input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true'
-want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nflavors=false\nflavors_publish=true'
-want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\nflavors_publish=true'
+input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true'
+want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nflavors=false\ntidy=false\nvuln=false\nfuzz=false\nshell=false\nscripts=false\nflavors_publish=true'
+want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true\nflavors_publish=true'
 check_apply() { # check_apply NAME WANT SKIP INPUT
 	local got
 	got=$(SKIP=$3 "$script" apply <<<"$4")
@@ -256,19 +256,22 @@ check_apply "flavors_publish keeps a false flavors" $'go=false\nflavors=false\nf
 # an unknown name passes through untouched
 check_apply "unknown outputs pass through" $'extra=true\nflavors_publish=true' true $'extra=true'
 
-# --- ci.yml wiring (old issue 594) --------------------------------------------------------------------------
-# `scripts` and `lint-shell` are skipped on a push to main whose heavy jobs are switched off (old issue 595):
-# their job-level `if:` carries the condition. `quick-checks` never waits for `changes`, never skips,
-# and every step after its first check (buf lint) runs even when an earlier one failed.
+# --- ci.yml wiring (old issue 594, #572) --------------------------------------------------------------------
+# `scripts` and `lint-shell` are gated by the path rules and the draft/queue-tested skip, both through the
+# `shell` and `scripts` outputs of `changes` (switched off by `apply` above). Their `if:` runs them
+# unless the output is exactly 'false', so a failed `changes` (empty outputs) cannot turn a required check
+# into a skip. `quick-checks` never waits for `changes`, never skips, and every step after its first
+# check (buf lint) runs even when an earlier one failed.
 ci_yml=$(cd "$(dirname "$script")/.." && pwd)/.github/workflows/ci.yml
 job_block() { awk -v j="$1" '$0 == "  " j ":" { on = 1; next } on && /^  [a-z0-9-]+:/ { exit } on' "$ci_yml"; }
-for j in scripts lint-shell; do
+for pair in scripts:scripts lint-shell:shell; do
+	j=${pair%%:*} out=${pair##*:}
 	b=$(job_block "$j")
 	cond=$(grep -E '^    if:' <<<"$b" || true)
-	if grep -q 'needs: changes' <<<"$b" && grep -q "github.event_name == 'push' && needs.changes.outputs.skip == 'true'" <<<"$cond" && grep -q '!cancelled()' <<<"$cond"; then
-		echo "ok: ci.yml skips $j on a push to main with skip=true"
+	if grep -q 'needs: changes' <<<"$b" && grep -q "needs.changes.outputs.$out != 'false'" <<<"$cond" && grep -q '!cancelled()' <<<"$cond"; then
+		echo "ok: ci.yml gates $j on the $out output of changes (path rules, draft, queue-tested push)"
 	else
-		echo "FAIL: the if: of ci.yml job $j lacks the push/skip/!cancelled() condition (or needs: changes)"
+		echo "FAIL: the if: of ci.yml job $j lacks the !cancelled() and outputs.$out != 'false' condition (or needs: changes)"
 		fails=1
 	fi
 done

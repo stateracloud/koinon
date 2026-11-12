@@ -8,6 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,8 +18,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -89,7 +94,8 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }}
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		freeStorage()
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 	})
 
@@ -332,7 +338,7 @@ var _ = Describe("koinon-api keys", func() {
 
 	It("rewraps and reencrypts home repository passwords, every repository epoch included", func(ctx SpecContext) {
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'a', 'opencode') RETURNING id`, org).Scan(&agent)).To(Succeed())
 		pw := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}
 		e0, err := pw.Current(ctx, org, agent)
 		Expect(err).NotTo(HaveOccurred())
@@ -443,6 +449,210 @@ var _ = Describe("koinon-api keys", func() {
 		openAll(ctx, ring2, ids)
 	})
 
+	Describe("import", func() {
+		// A restored install: koinon-api made its own first KEK on the empty database, then the backup
+		// of the old install is imported over it.
+		var (
+			backup  string
+			orig    keyscli.KeySet
+			ids     []string
+			target  keyscli.KubeStore
+			mineKey keyscli.KeySet
+		)
+		BeforeEach(func(ctx SpecContext) {
+			ids = seed(ctx, 1)
+			Expect(tool.Export(ctx)).To(Succeed())
+			backup = out.String()
+			var err error
+			orig, err = ks.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			target = keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "restored", Name: "koinon-kek"}
+			_, err = target.Ensure(ctx, now, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mineKey, err = target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mineKey.Keys).NotTo(Equal(orig.Keys))
+		})
+		importer := func(in string, yes bool) *keyscli.Tool {
+			return &keyscli.Tool{Store: target, Out: &bytes.Buffer{}, In: strings.NewReader(in), Yes: yes, NoDatabase: true, Now: func() time.Time { return now }}
+		}
+
+		It("merges: the install's own keys stay, the manifest's are added, the manifest's active key becomes active", func(ctx SpecContext) {
+			Expect(importer(backup, true).Import(ctx)).To(Succeed())
+			got, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			for id, key := range orig.Keys {
+				Expect(got.Keys).To(HaveKeyWithValue(id, key))
+			}
+			for id, key := range mineKey.Keys {
+				Expect(got.Keys).To(HaveKeyWithValue(id, key), "an import never removes a key")
+			}
+			Expect(got.Keys).To(HaveLen(len(orig.Keys) + len(mineKey.Keys)))
+			Expect(got.Active).To(Equal(orig.Active))
+			ring, err := secretstore.NewKeyring(got.Keys, got.Active)
+			Expect(err).NotTo(HaveOccurred())
+			openAll(ctx, ring, ids)
+
+			// A second import of the same manifest changes nothing more.
+			Expect(importer(backup, true).Import(ctx)).To(Succeed())
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(got.Keys))
+			Expect(again.Active).To(Equal(got.Active))
+		})
+
+		It("creates the Secret when there is none", func(ctx SpecContext) {
+			empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
+			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, NoDatabase: true}).Import(ctx)).To(Succeed())
+			got, err := empty.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Keys).To(Equal(orig.Keys))
+		})
+
+		It("changes nothing for input it cannot open", func(ctx SpecContext) {
+			bad := importer("kind: Secret\ndata:\n  active: bm9wZQ==\n", true)
+			Expect(bad.Import(ctx)).NotTo(Succeed())
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("refuses a KEK ID that the Secret holds with other key bytes, and changes nothing", func(ctx SpecContext) {
+			var sec corev1.Secret
+			Expect(yaml.Unmarshal([]byte(backup), &sec)).To(Succeed())
+			other := make([]byte, secretstore.KeySize)
+			copy(other, "koinon_test_not-a-real-kek-zzzz")
+			sec.Data[mineKey.Active] = secretstore.EncodeKey(other)
+			raw, err := yaml.Marshal(sec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(importer(string(raw), true).Import(ctx)).To(MatchError(ContainSubstring("IDs are never reused")))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("prints the active KEK change before it saves", func(ctx SpecContext) {
+			t := importer(backup, true)
+			buf := &bytes.Buffer{}
+			t.Out = buf
+			Expect(t.Import(ctx)).To(Succeed())
+			Expect(buf.String()).To(ContainSubstring("The active KEK changes: " + mineKey.Active + " -> " + orig.Active))
+		})
+
+		It("warns that retired KEKs cannot be checked when there is no database", func(ctx SpecContext) {
+			t := importer(backup, true)
+			buf := &bytes.Buffer{}
+			t.Out = buf
+			Expect(t.Import(ctx)).To(Succeed())
+			Expect(buf.String()).To(ContainSubstring("cannot say which KEKs were retired"))
+		})
+
+		It("refuses without a database unless --no-database, and changes nothing", func(ctx SpecContext) {
+			t := importer(backup, true)
+			t.NoDatabase = false
+			Expect(t.Import(ctx)).To(MatchError(And(ContainSubstring("--database-url"), ContainSubstring("--no-database"))))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+			Expect(again.Active).To(Equal(mineKey.Active))
+		})
+
+		It("writes only the key set when it creates the Secret: extra keys of the manifest do not pass through", func(ctx SpecContext) {
+			var sec corev1.Secret
+			Expect(yaml.Unmarshal([]byte(backup), &sec)).To(Succeed())
+			sec.Data["..extra-file"] = []byte("koinon_test_not-a-real-extra")
+			raw, err := yaml.Marshal(sec)
+			Expect(err).NotTo(HaveOccurred())
+			cs := fake.NewClientset()
+			empty := keyscli.KubeStore{Client: cs, Namespace: "n", Name: "koinon-kek"}
+			Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(string(raw)), Yes: true, NoDatabase: true}).Import(ctx)).To(Succeed())
+			got, err := cs.CoreV1().Secrets("n").Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Data).NotTo(HaveKey("..extra-file"))
+			Expect(got.Data).To(HaveKey(orig.Active))
+		})
+
+		Describe("a KEK that keys retire removed", func() {
+			retiredAs := func(ids ...string) func(context.Context, string) (bool, error) {
+				return func(_ context.Context, id string) (bool, error) { return slices.Contains(ids, id), nil }
+			}
+			It("is refused, and nothing changes", func(ctx SpecContext) {
+				t := importer(backup, true)
+				t.Retired = retiredAs(orig.Active)
+				Expect(t.Import(ctx)).To(MatchError(And(ContainSubstring(orig.Active), ContainSubstring("--allow-retired"))))
+				again, err := target.Load(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(again.Keys).To(Equal(mineKey.Keys))
+				Expect(again.Active).To(Equal(mineKey.Active))
+			})
+
+			It("is added inactive with --allow-retired and never becomes active", func(ctx SpecContext) {
+				t := importer(backup, true)
+				t.Retired, t.AllowRetired = retiredAs(orig.Active), true
+				Expect(t.Import(ctx)).To(Succeed())
+				got, err := target.Load(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				for id, key := range orig.Keys {
+					Expect(got.Keys).To(HaveKeyWithValue(id, key))
+				}
+				Expect(got.Active).To(Equal(mineKey.Active))
+			})
+
+			It("is refused on the create path when it is the manifest's active KEK, even with the flag", func(ctx SpecContext) {
+				empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
+				t := &keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, NoDatabase: true, AllowRetired: true, Retired: retiredAs(orig.Active)}
+				Expect(t.Import(ctx)).To(MatchError(ContainSubstring("was retired")))
+				_, err := empty.Load(ctx)
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		It("conflicts instead of losing a KEK when the Secret changed after it was loaded", func(ctx SpecContext) {
+			cs := fake.NewClientset()
+			raw := newKey()
+			_, err := cs.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns, ResourceVersion: "1"},
+				Data:       map[string][]byte{"kek-20261001-aaaa": secretstore.EncodeKey(raw), "active": []byte("kek-20261001-aaaa")},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			// The fake does not check versions, so it answers a stale one with a conflict, as the API server does.
+			cs.PrependReactor("update", "secrets", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				sent := a.(k8stesting.UpdateAction).GetObject().(*corev1.Secret)
+				cur, err := cs.Tracker().Get(corev1.SchemeGroupVersion.WithResource("secrets"), ns, "koinon-kek")
+				if err != nil || cur.(*corev1.Secret).ResourceVersion == sent.ResourceVersion {
+					return false, nil, nil
+				}
+				return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), "koinon-kek", errors.New("the object has been modified"))
+			})
+			store := keyscli.KubeStore{Client: cs, Namespace: ns, Name: "koinon-kek"}
+			loaded, err := store.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(loaded.ResourceVersion).To(Equal("1"))
+			// Another writer adds a KEK meanwhile.
+			s, err := cs.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			s.Data["kek-20261002-bbbb"] = secretstore.EncodeKey(newKey())
+			s.ResourceVersion = "2"
+			Expect(cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("secrets"), s, ns)).To(Succeed())
+
+			loaded.Keys["kek-20261003-cccc"] = newKey()
+			err = store.Save(ctx, loaded)
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "got %v", err)
+			got, err := cs.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Data).To(HaveKey("kek-20261002-bbbb"), "the other writer's KEK stands")
+		})
+
+		It("refuses without --yes and changes nothing", func(ctx SpecContext) {
+			Expect(importer(backup, false).Import(ctx)).To(MatchError(ContainSubstring("--yes")))
+			again, err := target.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Keys).To(Equal(mineKey.Keys))
+		})
+	})
+
 	Describe("with KEKs wrapped by an opted-in KMS", func() {
 		var (
 			kms            *secretstoretest.FakeKMS
@@ -470,21 +680,21 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("adds wrapped KEKs, keeps the local one readable, and moves the values over", func(ctx SpecContext) {
 			ids := seed(ctx, 2)
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			raw, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HavePrefix(`{"fmt":2,"backend":"fakekms","key":"koinon-test"`))
+			Expect(string(raw.Data[kekB])).To(HavePrefix(`{"fmt":2,"backend":"fakekms","key":"koinon-test"`))
 			install, err := installid.Read(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(raw.Data["kek-20261023-bbbb"])).To(HaveSuffix(`"install":"`+install+`"}`), "bound to this database's install ID")
+			Expect(string(raw.Data[kekB])).To(HaveSuffix(`"install":"`+install+`"}`), "bound to this database's install ID")
 			Expect(raw.Data["kek-20260101-aaaa"]).NotTo(HavePrefix("{"), "the local KEK is not rewrapped")
 
 			By("koinon-api, decrypt-only, can activate and rewrap: no KEK is wrapped again")
 			use(service)
 			kms.DecryptOnly.Store(true)
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			Expect(tool.Rewrap(ctx)).To(Succeed())
-			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261023-bbbb": 2}))
+			Expect(usage(ctx)).To(Equal(map[string]int{kekB: 2}))
 			openAll(ctx, ring(ctx), ids)
 
 			out.Reset()
@@ -495,7 +705,7 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("does not open a KEK Secret of another install, and says so (old issue 615)", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			install, err := installid.Read(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -533,7 +743,7 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("shows the bound-only marker, and once it is set refuses a KEK stored unbound (old issue 615)", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			// Its own database: the suite's pool must stay without the marker for the other specs.
 			marked := pgtest.Start(ctx)
 			_, err := installid.SetBoundOnly(ctx, marked, secretstore.BoundOnlyRewrap)
@@ -567,15 +777,15 @@ var _ = Describe("koinon-api keys", func() {
 				ContainSubstring("REFUSED: KEK kek-20261001-old1 is stored unbound"),
 				ContainSubstring("REFUSED: KEK kek-20261001-old2 is stored unbound"),
 				ContainSubstring("rerun the key-admin Job"),
-				Not(ContainSubstring("REFUSED: KEK kek-20261023-bbbb")),
+				Not(ContainSubstring("REFUSED: KEK "+kekB)),
 			))
 		})
 
 		It("koinon-api never wraps a new KEK with the KMS: keys add and the first start point at the key-admin Job", func(ctx SpecContext) {
 			use(service)
 			kms.DecryptOnly.Store(true)
-			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(secretstore.ErrKeyAdminWraps))
-			Expect(tool.Add(ctx, "kek-20261023-cccc")).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
+			Expect(tool.Add(ctx, kekC)).To(MatchError(secretstore.ErrKeyAdminWraps))
+			Expect(tool.Add(ctx, kekC)).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
 
 			fresh := fake.NewClientset()
 			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek", Wrappers: service}
@@ -606,16 +816,45 @@ var _ = Describe("koinon-api keys", func() {
 			Expect(err).To(MatchError(secretstore.ErrUnreachable))
 		})
 
+		It("does not import a backup whose active KEK is local into a KMS install, as activate does not (create and merge)", func(ctx SpecContext) {
+			use(service)
+			out.Reset()
+			Expect(tool.Export(ctx)).To(Succeed())
+			backup := out.String()
+			importAs := func(store keyscli.KubeStore) error {
+				return (&keyscli.Tool{Store: store, Pool: pool, Wrappers: service, Retired: func(context.Context, string) (bool, error) { return false, nil }, Out: &bytes.Buffer{}, In: strings.NewReader(backup), Yes: true, Now: func() time.Time { return now }}).Import(ctx)
+			}
+
+			created := fake.NewClientset()
+			store := keyscli.KubeStore{Client: created, Namespace: ns, Name: "koinon-kek", Wrappers: service}
+			Expect(importAs(store)).To(MatchError(ContainSubstring("is a local key and the KMS")))
+			list, _ := created.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+			Expect(list.Items).To(BeEmpty())
+
+			merged := fake.NewClientset()
+			mstore := keyscli.KubeStore{Client: merged, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			_, err := mstore.Ensure(ctx, now, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mstore.Wrappers = service
+			before, err := mstore.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(importAs(mstore)).To(MatchError(ContainSubstring("is a local key and the KMS")))
+			after, err := mstore.Load(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Keys).To(Equal(before.Keys))
+			Expect(after.Active).To(Equal(before.Active))
+		})
+
 		It("exports a wrapped KEK still wrapped", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			use(service)
 			set, _ := ks.Load(ctx)
 			out.Reset()
 			Expect(tool.Export(ctx)).To(Succeed())
-			Expect(out.String()).To(ContainSubstring("kek-20261023-bbbb fingerprint " + secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]) + ", wrapped by fakekms:koinon-test"))
+			Expect(out.String()).To(ContainSubstring(kekB + " fingerprint " + secretstore.Fingerprint(set.Keys[kekB]) + ", wrapped by fakekms:koinon-test"))
 			var sec corev1.Secret
 			Expect(yaml.Unmarshal(out.Bytes(), &sec)).To(Succeed())
-			Expect(string(sec.Data["kek-20261023-bbbb"])).To(HavePrefix("{"))
+			Expect(string(sec.Data[kekB])).To(HavePrefix("{"))
 		})
 	})
 
@@ -636,15 +875,15 @@ var _ = Describe("koinon-api keys", func() {
 		}
 
 		It("records the fingerprint and activation time when a KEK is activated, and status is quiet", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
-			_, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			_, ok := recorded(ctx, kekB)
 			Expect(ok).To(BeFalse(), "add records nothing")
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			set, err := ks.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			r, ok := recorded(ctx, kekB)
 			Expect(ok).To(BeTrue())
-			Expect(r).To(Equal(row{fp: secretstore.Fingerprint(set.Keys["kek-20261023-bbbb"]), backend: "local", activated: true}))
+			Expect(r).To(Equal(row{fp: secretstore.Fingerprint(set.Keys[kekB]), backend: "local", activated: true}))
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"))
 
 			out.Reset()
@@ -674,6 +913,14 @@ var _ = Describe("koinon-api keys", func() {
 		})
 
 		It("says a KMS key is unreachable, and warns about a local active KEK only when a KMS is configured", func(ctx SpecContext) {
+			// The install audit chain cannot be emptied, and other specs retire the shared IDs; this spec
+			// runs on IDs of its own, so the retired-ID guard sees none of them as retired.
+			fresh, fresh2 := fmt.Sprintf("kek-20260102-%x", newKey()[:4]), fmt.Sprintf("kek-20261023-%x", newKey()[:4])
+			sec, err0 := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err0).NotTo(HaveOccurred())
+			sec.Data = map[string][]byte{fresh: secretstore.EncodeKey(newKey()), "active": []byte(fresh)}
+			_, err0 = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err0).NotTo(HaveOccurred())
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(out.String()).NotTo(ContainSubstring("WARNING"), "a local-only install is never warned")
 
@@ -685,22 +932,22 @@ var _ = Describe("koinon-api keys", func() {
 			tool.Store, tool.Wrappers = ks, admin
 			out.Reset()
 			Expect(tool.Status(ctx)).To(Succeed())
-			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK kek-20260101-aaaa is a local key but a KMS (fakekms)"))
+			Expect(out.String()).To(ContainSubstring("WARNING: the active KEK " + fresh + " is a local key but a KMS (fakekms)"))
 
 			By("activating a local KEK is refused while the KMS is the primary")
-			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
+			Expect(tool.Activate(ctx, fresh)).To(MatchError(ContainSubstring("the KMS fakekms is configured")))
 
 			By("and allowed once the configured primary is local again (the rollback)")
 			localOnly := secretstore.Wrappers{}
 			ks.Wrappers = localOnly
 			tool.Store, tool.Wrappers = ks, localOnly
-			Expect(tool.Activate(ctx, "kek-20260101-aaaa")).To(Succeed())
+			Expect(tool.Activate(ctx, fresh)).To(Succeed())
 			ks.Wrappers = admin
 			tool.Store, tool.Wrappers = ks, admin
 
-			Expect(tool.Add(ctx, "kek-20261023-bbbb")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261023-bbbb")).To(Succeed())
-			r, ok := recorded(ctx, "kek-20261023-bbbb")
+			Expect(tool.Add(ctx, fresh2)).To(Succeed())
+			Expect(tool.Activate(ctx, fresh2)).To(Succeed())
+			r, ok := recorded(ctx, fresh2)
 			Expect(ok).To(BeTrue())
 			Expect(r.backend).To(Equal("fakekms"))
 			out.Reset()
@@ -729,26 +976,28 @@ var _ = Describe("koinon-api keys", func() {
 		}
 
 		It("activate without an ID picks an inactive KEK, with its age and values, and confirms", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			ask("1\nn\n")
 			Expect(tool.Activate(ctx, "")).To(MatchError(cli.ErrCancelled))
-			Expect(asked.String()).To(And(ContainSubstring("kek-20261001-bbbb  added 22 days ago  wraps 0 value(s)"),
-				ContainSubstring("Activate kek-20261001-bbbb?")))
+			Expect(asked.String()).To(And(ContainSubstring(kekB+"  added 22 days ago  wraps 0 value(s)"),
+				ContainSubstring("Activate "+kekB+"?")))
 			Expect(asked.String()).NotTo(ContainSubstring("kek-20260101-aaaa"), "the active KEK is not offered")
 			Expect(active(ctx)).To(Equal("kek-20260101-aaaa"), "declining changes nothing")
 
 			ask("1\ny\n")
 			Expect(tool.Activate(ctx, "")).To(Succeed())
-			Expect(active(ctx)).To(Equal("kek-20261001-bbbb"))
+			Expect(active(ctx)).To(Equal(kekB))
 		})
 
 		It("activate with an ID confirms too, and --yes skips the confirmation", func(ctx SpecContext) {
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
 			ask("n\n")
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(MatchError(cli.ErrCancelled))
+			Expect(tool.Activate(ctx, kekB)).To(MatchError(cli.ErrCancelled))
 			ask("")
 			tool.Yes = true
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			Expect(asked.String()).To(BeEmpty())
 		})
 
@@ -759,24 +1008,26 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("retire without an ID lists KEKs in use as unavailable and confirms with the escrow warning", func(ctx SpecContext) {
 			seed(ctx, 2)
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
-			Expect(tool.Add(ctx, "kek-20261002-cccc")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			kekC = freshKEKOn("20261002", "c")
+			Expect(tool.Add(ctx, kekC)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			now = now.Add(6 * time.Minute)
 
 			ask("1\nn\n")
 			Expect(tool.Retire(ctx, "")).To(MatchError(cli.ErrCancelled))
 			Expect(asked.String()).To(And(
 				ContainSubstring("kek-20260101-aaaa  added"), ContainSubstring("2 value(s) still use KEK kek-20260101-aaaa"),
-				ContainSubstring("kek-20261001-bbbb  added"), ContainSubstring("is the active KEK"),
-				ContainSubstring("1. kek-20261002-cccc"), ContainSubstring("backup escrow")))
+				ContainSubstring(kekB+"  added"), ContainSubstring("is the active KEK"),
+				ContainSubstring("1. "+kekC), ContainSubstring("backup escrow")))
 			set, _ := ks.Load(ctx)
 			Expect(set.Keys).To(HaveLen(3))
 
 			ask("1\ny\n")
 			Expect(tool.Retire(ctx, "")).To(Succeed())
 			set, _ = ks.Load(ctx)
-			Expect(set.Keys).NotTo(HaveKey("kek-20261002-cccc"))
+			Expect(set.Keys).NotTo(HaveKey(kekC))
 		})
 
 		It("retire says so when no KEK can be retired", func(ctx SpecContext) {
@@ -787,15 +1038,16 @@ var _ = Describe("koinon-api keys", func() {
 
 		It("rewrap confirms with the count of values it will change", func(ctx SpecContext) {
 			seed(ctx, 3)
-			Expect(tool.Add(ctx, "kek-20261001-bbbb")).To(Succeed())
-			Expect(tool.Activate(ctx, "kek-20261001-bbbb")).To(Succeed())
+			kekB = freshKEKOn("20261001", "b") // the age the spec prints comes from the date in the ID
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			Expect(tool.Activate(ctx, kekB)).To(Succeed())
 			ask("n\n")
 			Expect(tool.Rewrap(ctx)).To(MatchError(cli.ErrCancelled))
-			Expect(asked.String()).To(ContainSubstring("Rewrap 3 value(s) under kek-20261001-bbbb?"))
+			Expect(asked.String()).To(ContainSubstring("Rewrap 3 value(s) under " + kekB + "?"))
 			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 3}))
 			ask("y\n")
 			Expect(tool.Rewrap(ctx)).To(Succeed())
-			Expect(usage(ctx)).To(Equal(map[string]int{"kek-20261001-bbbb": 3}))
+			Expect(usage(ctx)).To(Equal(map[string]int{kekB: 3}))
 		})
 
 		It("reencrypt wants the active KEK ID typed", func(ctx SpecContext) {

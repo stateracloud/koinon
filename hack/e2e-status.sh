@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): posting a commit status needs write access to the repository; from a fork it
+# posts on the fork.
+#
 # Post the commit status `e2e-lab` on a commit: the record that an external run of the kind e2e passed (or
 # failed) on exactly that commit (old issue 547). The run's own driver calls it after the run; run it by
 # hand to post a result again, for example when the commit was not pushed yet at the time.
@@ -23,6 +26,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 [[ $# -ge 3 ]] || { echo "usage: hack/e2e-status.sh <sha> <success|failure> <description> [target url]" >&2; exit 64; }

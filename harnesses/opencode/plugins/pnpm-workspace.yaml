@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI-only dev project for Koinon's own OpenCode plugins (ADR 0093 decision 4): type-checks and
+# tests the plugin TypeScript against the pinned OpenCode release's types. Nothing here is
+# installed in the image; harnesses/opencode/Dockerfile copies only index.ts. Settings mirror
+# web/pnpm-workspace.yaml (ADR 0079 dependency cooldown), plus autoInstallPeers: false because
+# @opencode/plugin declares optional peers (Electron, Vite, solid-js and others) that must stay
+# uninstalled.
+minimumReleaseAge: 4320
+minimumReleaseAgeStrict: true
+trustPolicy: no-downgrade
+minimumReleaseAgeExcludePrune: true
+minimumReleaseAgeExclude: []
+autoInstallPeers: false
+bootConfig:
+  minimumReleaseAge: 4320
+  minimumReleaseAgeStrict: true
+  trustPolicy: no-downgrade
+# GHSA-g3hv-75wg-m249 (minimatch >= 7.0.0, < 11.0.1), issue #895: pulled in through
+# @opencode/plugin's dependency tree; 11.0.1 is the first patched release. Remove when the tree
+# no longer resolves a vulnerable range.
+overrides:
+  'minimatch@>=7.0.0 <11.0.1': 11.0.1

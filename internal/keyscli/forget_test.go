@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,16 +40,14 @@ import (
 
 // keys forget (issue #216, ADR 0085 decision 13): a KEK of which no copy exists any more.
 var _ = Describe("koinon-api keys forget", func() {
-	const (
-		lostKEK = "kek-20260101-aaaa"
-		nextKEK = "kek-20261023-bbbb"
-	)
+	const lostKEK = "kek-20260101-aaaa"
 	var (
-		kube *fake.Clientset
-		ks   keyscli.KubeStore
-		tool *keyscli.Tool
-		out  *bytes.Buffer
-		now  time.Time
+		nextKEK string
+		kube    *fake.Clientset
+		ks      keyscli.KubeStore
+		tool    *keyscli.Tool
+		out     *bytes.Buffer
+		now     time.Time
 		// lostKey is the lost KEK's bytes, for a spec that restores it from "escrow".
 		lostKey []byte
 	)
@@ -133,7 +132,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
 		return orgRows{org: org, provider: p.ID, work: saveWork(ctx, r, org, user, agent)}
 	}
 	// orgState is whether the org's provider key is lost and its saved work's status.
@@ -168,7 +167,9 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }}
+		nextKEK = freshKEK("n")
+		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		freeStorage()
 	})
 
 	It("refuses a KEK still in the key set and an invalid ID, and has nothing to forget for an unused KEK", func(ctx SpecContext) {
@@ -235,7 +236,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		newAgent := func() pgtype.UUID {
 			GinkgoHelper()
 			var a pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
 			return a
 		}
 		agent1, agent2, agent3 := newAgent(), newAgent(), newAgent()
@@ -445,6 +446,99 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 	})
 
+	Describe("the storage probe of a new repository epoch (#285)", func() {
+		// withLostRepository seals an org's values and an agent's home repository under the KEK that is
+		// then lost, so that forget has an epoch to start.
+		withLostRepository := func(ctx SpecContext) (orgRows, pgtype.UUID) {
+			GinkgoHelper()
+			o := sealOrg(ctx)
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM agents WHERE org_id = $1`, o.org).Scan(&agent)).To(Succeed())
+			_, err := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}.Current(ctx, o.org, agent)
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+			tool.Yes = true
+			return o, agent
+		}
+		unchanged := func(ctx SpecContext, o orgRows, agent pgtype.UUID) {
+			GinkgoHelper()
+			lost, work := orgState(ctx, o)
+			Expect(lost).To(BeFalse(), "nothing of the org is marked lost")
+			Expect(work).NotTo(Equal("expired"))
+			var epochs, probes int
+			Expect(pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM home_repository_epochs WHERE agent_id = $1), (SELECT count(*) FROM home_repository_probes)`, agent).Scan(&epochs, &probes)).To(Succeed())
+			Expect(epochs).To(BeZero(), "no repository epoch was started")
+			Expect(probes).To(BeZero(), "the probe is deleted")
+		}
+
+		It("starts the epoch when the prefix is free", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			var epoch int32
+			Expect(pool.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE agent_id = $1`, agent).Scan(&epoch)).To(Succeed())
+			Expect(epoch).To(Equal(int32(1)))
+			lost, _ := orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+		})
+
+		It("refuses a prefix that holds a repository, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) { return "taken", "" })
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("nothing was changed"), ContainSubstring("already holds a repository the database does not record"))))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses when the check errors, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) { return "error", "could not list" })
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("could not check the storage prefix")))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses when the agent's next epoch changed between the probe and the transaction, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(func(store.HomeRepositoryProbe) (string, string) {
+				// koinon-agentd raised the floor meanwhile: the epoch probed is not the one that would start.
+				_, _ = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 5 WHERE org_id = $1 AND agent_id = $2`, o.org, agent)
+				return "free", ""
+			})
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("changed while the storage was checked (checked 1, would start 5)")))
+			unchanged(ctx, o, agent)
+		})
+
+		It("refuses an agent whose repository came to need an epoch after the probe, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			var other pgtype.UUID
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'late', 'opencode') RETURNING id`, o.org).Scan(&other)).To(Succeed())
+			var lateErr atomic.Pointer[error]
+			answerWith(func(store.HomeRepositoryProbe) (string, string) {
+				// A second agent's repository, sealed with the lost KEK, appears after the probe's
+				// targets were read: the transaction would start an epoch nobody checked.
+				_, err := pool.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope)
+					SELECT org_id, $3, $4, password_envelope FROM home_repositories WHERE org_id = $1 AND agent_id = $2
+					ON CONFLICT DO NOTHING`, o.org, agent, other, checkpoint.Prefix(o.org.String(), other.String()))
+				lateErr.Store(&err)
+				return "free", ""
+			})
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(And(
+				ContainSubstring("agent "+other.String()), ContainSubstring("its storage was not checked"))))
+			Expect(*lateErr.Load()).NotTo(HaveOccurred())
+			unchanged(ctx, o, agent)
+			var lateLost bool
+			Expect(pool.QueryRow(ctx, `SELECT credential_lost_at IS NOT NULL FROM home_repositories WHERE org_id = $1 AND agent_id = $2`, o.org, other).Scan(&lateLost)).To(Succeed())
+			Expect(lateLost).To(BeFalse())
+		})
+
+		It("refuses when koinon-agentd does not answer in time, and marks nothing lost", func(ctx SpecContext) {
+			o, agent := withLostRepository(ctx)
+			answerWith(nil)
+			tool.ProbeTimeout = time.Second
+			Expect(tool.Forget(ctx, lostKEK)).To(MatchError(ContainSubstring("did not check the storage within 1s")))
+			unchanged(ctx, o, agent)
+		})
+	})
+
 	Describe("with a database that limits the run", func() {
 		// poolWith opens a pool on the test database with the connection limit and the server's
 		// idle-in-transaction timeout (0 for none) given.
@@ -475,6 +569,26 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(lost).To(BeFalse())
 			Expect(work).NotTo(Equal("expired"))
 		}, SpecTimeout(10*time.Second))
+
+		It("finishes with a pool of two connections when an agent's repository needs a new epoch", func(ctx SpecContext) {
+			// The probe runs before the org's transaction (#285): the Change holds one connection, and
+			// the probe and then the transaction use the other.
+			o := sealOrg(ctx)
+			var agent pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM agents WHERE org_id = $1`, o.org).Scan(&agent)).To(Succeed())
+			_, err := checkpoint.Passwords{Q: store.New(pool), Keys: ring(ctx), Begin: pool.Begin}.Current(ctx, o.org, agent)
+			Expect(err).NotTo(HaveOccurred())
+			rotateAndLose(ctx)
+			tool.Pool = poolWith(ctx, 2, 0)
+			tool.Yes = true
+
+			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
+			var epoch int32
+			Expect(pool.QueryRow(ctx, `SELECT max(repository_epoch) FROM home_repository_epochs WHERE agent_id = $1`, agent).Scan(&epoch)).To(Succeed())
+			Expect(epoch).To(Equal(int32(1)))
+			lost, _ := orgState(ctx, o)
+			Expect(lost).To(BeTrue())
+		}, SpecTimeout(30*time.Second))
 
 		It("finishes when the server ends idle transactions sooner than the run takes", func(ctx SpecContext) {
 			o := sealOrg(ctx)
@@ -615,7 +729,8 @@ var _ = Describe("koinon-api keys forget", func() {
 	// Issue #322: IDs are never reused on any add path, not only in the recovery from a lost active KEK.
 	Describe("adding a KEK under an ID that database envelopes still carry", func() {
 		It("is refused by keys add and by the key-admin Job, with or without the recovery flag, and changes nothing", func(ctx SpecContext) {
-			const removed, freshKEK = "kek-20251201-eeee", "kek-20261201-ffff"
+			const removed = "kek-20251201-eeee"
+			addedKEK := freshKEK("f")
 			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
 				ON CONFLICT (singleton) DO NOTHING`)
 			Expect(err).NotTo(HaveOccurred())
@@ -632,7 +747,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
 			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
-			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }
 			job := func(add string, recovery bool, used func(context.Context, string) (bool, error)) keyscli.KeyAdmin {
 				return keyscli.KeyAdmin{Store: adminStore, AddID: add, ActivateIfNoActive: recovery, UsedID: used, Out: out, Now: func() time.Time { return now }}
 			}
@@ -655,12 +770,133 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
 
 			By("keys add fails closed without a database")
-			Expect((&keyscli.Tool{Store: ks, Out: out, Now: func() time.Time { return now }}).Add(ctx, freshKEK)).To(MatchError(ContainSubstring("check that KEK ID")))
+			Expect((&keyscli.Tool{Store: ks, Out: out, Now: func() time.Time { return now }}).Add(ctx, addedKEK)).To(MatchError(ContainSubstring("check that KEK ID")))
 			Expect(snapshot()).To(Equal(before))
 
 			By("an unused ID still adds")
-			Expect(job(freshKEK, false, probe).Run(ctx)).To(Succeed())
-			Expect(snapshot()).To(HaveKey(freshKEK))
+			Expect(job(addedKEK, false, probe).Run(ctx)).To(Succeed())
+			Expect(snapshot()).To(HaveKey(addedKEK))
+		})
+	})
+
+	// A retired ID has no envelopes, so the envelope probe alone calls it unused; every add path asks the
+	// audit chain too (review of #604).
+	Describe("adding a KEK under an ID that keys retire removed", func() {
+		It("is refused by keys add, the key-admin Job's plain add and the lost-active recovery, and changes nothing", func(ctx SpecContext) {
+			tool.UsedID = nil // the full probe, which asks the audit chain too
+			// The install audit chain is shared and append-only: the ID is random, so no other spec retires it.
+			retiredID := fmt.Sprintf("kek-20260301-%x", time.Now().UnixNano())
+			tool.Yes = true
+			Expect(tool.Add(ctx, retiredID)).To(Succeed())
+			now = now.Add(6 * time.Minute)
+			Expect(tool.Retire(ctx, retiredID)).To(Succeed())
+			Expect(keyscli.UsedID(ctx, pool, retiredID)).To(BeFalse(), "no envelope carries it")
+
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
+			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }
+			job := func(recovery bool) keyscli.KeyAdmin {
+				return keyscli.KeyAdmin{Store: adminStore, AddID: retiredID, ActivateIfNoActive: recovery, UsedID: probe, Out: out, Now: func() time.Time { return now }}
+			}
+			snapshot := func() map[string][]byte {
+				sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return sec.Data
+			}
+			before := snapshot()
+			retired := ContainSubstring("KEK ID " + retiredID + " was used before; IDs are never reused")
+
+			By("keys add")
+			Expect(tool.Add(ctx, retiredID)).To(MatchError(retired))
+			By("the Job's plain add")
+			Expect(job(false).Run(ctx)).To(MatchError(retired))
+			By("the Job's recovery flag while the active KEK works")
+			Expect(job(true).Run(ctx)).To(MatchError(retired))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+
+			By("the recovery from a lost active KEK")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, lostKEK)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			before = snapshot()
+			Expect(job(true).Run(ctx)).To(MatchError(retired))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+
+		// keys forget NULLs the envelopes and records keys.forget: the ID has no retire event and no envelope.
+		It("is refused after keys forget, in every add path, and changes nothing", func(ctx SpecContext) {
+			tool.UsedID = nil // the full probe, which asks the audit chain too
+			forgotten := fmt.Sprintf("kek-20260302-%x", time.Now().UnixNano())
+			_, err := pool.Exec(ctx, `INSERT INTO platform_trace_destination (backend, endpoint_url) VALUES ('datadog', 'https://otlp.example.com')
+				ON CONFLICT (singleton) DO NOTHING`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = jsonb_build_object('kek_id', $1::text)`, forgotten)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) {
+				_, err := pool.Exec(ctx, `UPDATE platform_trace_destination SET credentials = NULL`)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			tool.Yes = true
+			Expect(tool.Forget(ctx, forgotten)).To(Succeed())
+			Expect(keyscli.UsedID(ctx, pool, forgotten)).To(BeFalse(), "no envelope carries it")
+			retired, err := keyscli.RetiredID(ctx, pool, forgotten)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(retired).To(BeFalse(), "no keys.retire event")
+
+			kms := &secretstoretest.FakeKMS{}
+			admin, err := secretstore.NewKeyAdminWrappers(secretstoretest.BoundOnlyUnset, kms)
+			Expect(err).NotTo(HaveOccurred())
+			admin = admin.WithInstallID(secretstore.StaticInstallID(secretstoretest.InstallA))
+			adminStore := keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek", Wrappers: admin}
+			probe := func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }
+			job := func(recovery bool) keyscli.KeyAdmin {
+				return keyscli.KeyAdmin{Store: adminStore, AddID: forgotten, ActivateIfNoActive: recovery, UsedID: probe, Out: out, Now: func() time.Time { return now }}
+			}
+			snapshot := func() map[string][]byte {
+				sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return sec.Data
+			}
+			refused := ContainSubstring("KEK ID " + forgotten + " was used before; IDs are never reused: pick a new ID")
+			Expect(tool.Add(ctx, forgotten)).To(MatchError(refused))
+			Expect(job(false).Run(ctx)).To(MatchError(refused))
+			Expect(job(true).Run(ctx)).To(MatchError(refused))
+
+			By("the recovery from a lost active KEK")
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, lostKEK)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			before := snapshot()
+			Expect(job(true).Run(ctx)).To(MatchError(refused))
+			Expect(snapshot()).To(Equal(before), "the Secret is unchanged")
+			Expect(kms.Wraps()).To(BeZero(), "nothing was wrapped")
+		})
+
+		// A removal seen only as keys.observed (the retire never ran, or its event was lost) still counts.
+		It("is refused for an ID that only a keys.observed state recorded", func(ctx SpecContext) {
+			tool.UsedID = nil // the full probe, which asks the audit chain too
+			seen := fmt.Sprintf("kek-20260303-%x", time.Now().UnixNano())
+			tool.Yes = true
+			Expect(tool.Add(ctx, seen)).To(Succeed())
+			sec, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			delete(sec.Data, seen)
+			_, err = kube.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			recordLive(ctx, ks.Load)
+			before := sec.Data
+			Expect(tool.Add(ctx, seen)).To(MatchError(ContainSubstring("was used before; IDs are never reused")))
+			after, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Data).To(Equal(before), "the Secret is unchanged")
 		})
 	})
 
@@ -707,7 +943,7 @@ var _ = Describe("koinon-api keys forget", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: otherRemoved, ActivateIfNoActive: true, Out: out,
-				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }, Now: func() time.Time { return now },
 			}).Run(ctx)).To(MatchError(ContainSubstring("seals values in the database")))
 			after, err := kube.CoreV1().Secrets(ns).Get(ctx, "koinon-kek", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -721,14 +957,14 @@ var _ = Describe("koinon-api keys forget", func() {
 			By("with a new ID the recovery goes through")
 			Expect((keyscli.KeyAdmin{
 				Store: ks, AddID: nextKEK, ActivateIfNoActive: true, Out: out,
-				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }, Now: func() time.Time { return now },
+				UsedID: func(ctx context.Context, id string) (bool, error) { return keyscli.AddableID(ctx, pool, id) }, Now: func() time.Time { return now },
 			}).Run(ctx)).To(Succeed())
 			set, err := ks.Load(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(set.Active).To(Equal(nextKEK))
 
 			By("keys status and keys forget now run")
-			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true}
+			tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, Yes: true, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 			Expect(tool.Status(ctx)).To(Succeed())
 			Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 			Expect(usage(ctx)).To(BeEmpty())

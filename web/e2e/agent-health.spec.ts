@@ -31,7 +31,7 @@ function api(role = 'ORG_ROLE_OWNER') {
     orgId: org,
     displayName: 'Repo helper',
     status,
-    flavor: 'FLAVOR_OPENCODE',
+    harness: 'opencode',
     templateSlug: 'repo-helper',
     latestVersion: 2,
     activeVersion: status === 'AGENT_STATUS_DRAFT' ? 1 : 2,

@@ -28,6 +28,7 @@ GO_TAGS ?=
 
 .PHONY: build-go
 build-go: ## Build Go binaries into bin/
+	@case " $$(printf '%s' '$(GO_TAGS)' | tr -d "\"'\\\\" | tr ',' ' ') " in *" testing "*) echo "build-go: the testing tag makes kopia use an insecure key derivation; it is for test binaries only (#576)" >&2; exit 1;; esac
 	$(GO) build -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
 
 .PHONY: build-web
@@ -41,7 +42,7 @@ test: ## Run all unit tests; the web tests run even when the Go run failed or wa
 	exit $$rc
 
 .PHONY: test-go
-test-go: ## Run Go tests like CI (Postgres tests need Docker); test/flavors needs images, see test-flavors
+test-go: ## Run Go tests like CI (Postgres tests need Docker); test/harnesses needs images, see test-harnesses
 	hack/go-test.sh
 
 .PHONY: test-go-suite
@@ -105,44 +106,55 @@ chart-check: ## Lint and render the Helm chart in every mode and validate it wit
 generate: ## Regenerate protobuf, sqlc and admin API code
 	GO=$(GO) hack/generate.sh
 
-# Flavor images build with docker buildx and load into the local Docker image store; nothing is
-# pushed. FLAVOR_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).
-# The tag is dev-<12 hex of a hash of the flavor's build context> (hack/flavor-tag.sh), so worktrees
-# on different branches never overwrite each other's image; test/flavors computes the same tag.
-# FLAVOR_TAG=x forces one tag for every flavor.
-FLAVOR_TAG       ?=
-FLAVOR_PLATFORMS ?=
-flavor_tag        = $(or $(FLAVOR_TAG),$(shell hack/flavor-tag.sh $(1)))
-# FLAVOR_CACHE=<dir> keeps each flavor's build cache in <dir>/<flavor> (CI saves it between runs);
+# Harness images build with docker buildx and load into the local Docker image store; nothing is
+# pushed. HARNESS_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).
+# The tag is dev-<12 hex of a hash of the harness's build context> (hack/harness-tag.sh), so worktrees
+# on different branches never overwrite each other's image; test/harnesses computes the same tag.
+# HARNESS_TAG=x forces one tag for every harness.
+# The FLAVOR_* names are the earlier ones, read until the workflows use the new ones (#610).
+HARNESS_TAG       ?= $(FLAVOR_TAG)
+HARNESS_PLATFORMS ?= $(FLAVOR_PLATFORMS)
+harness_tag        = $(or $(HARNESS_TAG),$(shell hack/harness-tag.sh $(1)))
+# HARNESS_CACHE=<dir> keeps each harness's build cache in <dir>/<harness> (CI saves it between runs);
 # it needs a buildx builder with the docker-container driver.
-FLAVOR_CACHE     ?=
+HARNESS_CACHE     ?= $(FLAVOR_CACHE)
 comma            := ,
-flavor_cache      = $(if $(FLAVOR_CACHE),--cache-from type=local$(comma)src=$(FLAVOR_CACHE)/$(1) --cache-to type=local$(comma)dest=$(FLAVOR_CACHE)/$(1)$(comma)mode=max)
+harness_cache      = $(if $(HARNESS_CACHE),--cache-from type=local$(comma)src=$(HARNESS_CACHE)/$(1) --cache-to type=local$(comma)dest=$(HARNESS_CACHE)/$(1)$(comma)mode=max)
 
 # GITHUB_TOKEN (set in CI) is handed to the build as the BuildKit secret github_token, which the
 # Dockerfile's GitHub release downloads use to authenticate (#145). Unset, they are anonymous.
-flavor_secret     = $(if $(GITHUB_TOKEN),--secret id=github_token$(comma)env=GITHUB_TOKEN)
+harness_secret     = $(if $(GITHUB_TOKEN),--secret id=github_token$(comma)env=GITHUB_TOKEN)
 
-# FLAVOR_BASE=<ref>@sha256:<digest> builds on that base image instead of the Dockerfile's `ARG BASE=`
+# HARNESS_BASE=<ref>@sha256:<digest> builds on that base image instead of the Dockerfile's `ARG BASE=`
 # default (#200), for example the same image through a registry mirror. It must carry the digest the
-# Dockerfile pins: hack/flavor-base.sh checks it and prints the --build-arg (nothing when unset).
-FLAVOR_BASE      ?=
-export FLAVOR_BASE
+# Dockerfile pins: hack/harness-base.sh checks it and prints the --build-arg (nothing when unset).
+HARNESS_BASE      ?= $(FLAVOR_BASE)
+export HARNESS_BASE
 
-FLAVORS          := opencode
+HARNESSES          := opencode
 
-.PHONY: flavor-opencode
-flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>; FLAVOR_BASE=<ref@digest> to set the base)
-	base_args=$$(hack/flavor-base.sh opencode) && \
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) $(flavor_secret) $$base_args \
-		--build-context common=flavors/common --tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
+.PHONY: harness-opencode
+harness-opencode: ## Build the OpenCode harness image (koinon/sandbox:dev-<hash>; HARNESS_BASE=<ref@digest> to set the base)
+	base_args=$$(hack/harness-base.sh opencode) && \
+	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) $(call harness_cache,opencode) $(harness_secret) $$base_args \
+		--build-context common=harnesses/common --tag koinon/sandbox:$(call harness_tag,opencode) harnesses/opencode
 
-.PHONY: flavors
-flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
+.PHONY: harnesses
+harnesses: $(addprefix harness-,$(HARNESSES)) ## Build all harness images
 
-.PHONY: test-flavors
-test-flavors: flavors ## Build the flavor images and run the flavor contract suite
-	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/flavors/...
+# The earlier target names, kept until the workflows use the new ones (#610).
+.PHONY: flavors flavor-opencode test-flavors
+flavors: harnesses
+flavor-opencode: harness-opencode
+test-flavors: test-harnesses
+
+.PHONY: test-harnesses
+test-harnesses: harnesses ## Build the harness images and run the harness contract suite
+	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/harnesses/...
+
+.PHONY: test-opencode-plugin
+test-opencode-plugin: ## Type-check and unit-test Koinon's OpenCode plugins (ADR 0093; needs pnpm, no Docker)
+	cd harnesses/opencode/plugins && $(PNPM) install --frozen-lockfile && $(PNPM) run typecheck && $(PNPM) run test
 
 # The commands of the quickstart and of the backup guide are plain files that test/e2e runs (ADR 0108).
 # The docs site is in stateracloud/koinon-docs.

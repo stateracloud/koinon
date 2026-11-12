@@ -40,15 +40,63 @@
 # events of the go test parts (*.gotest.jsonl), where a plain test's testenv.RequireT skip shows.
 # The reports only record; nothing reruns a failed spec.
 #
+# Host guards (issue 551, hack/go-test-host.sh): on macOS the run holds `caffeinate -i -s -w $$`; Docker
+# must answer and its clock agree with the host's within 2 s (exit 3 otherwise); a run during which
+# `pmset -g log` shows a Sleep ends with exit 3 and `go-test verdict: notrun reason="host slept"`, not
+# with test failures; at most KOINON_GO_SLOTS (default 2) runs share a Mac, with PROCS=4 each unless
+# PROCS is set; `go test` gets -timeout (GO_TEST_TIMEOUT, default 20m per package);
+# ginkgo gets --timeout from GINKGO_TIMEOUT (default 1h), one budget for the whole `ginkgo -p` run.
+#
 # KOINON_RC_FILE: when set, the final exit status is also written to that file. `make` turns every
 # failing recipe into exit 2, so the 3 (incomplete) would not survive `make test-go`; a wrapper
 # script reads the file to tell NOT RUN from a failure.
 
+# Go's test result cache (issue 43). Serial Ginkgo suites always run with -count=1. Plain packages:
+# - locally (CI unset) they run as Go decides, so `make test` may print `(cached)` as before;
+# - in CI (CI set) they run with -count=1, so main and the merge queue never reuse a result;
+# - with KOINON_GO_TEST_CACHE=1 (ci.yml sets it on pull_request runs and in warm-caches only), the
+#   packages that hack/go-test-cacheable.sh lists (no Docker, database, cluster or external binary among
+#   their inputs, which Go's cache key does not cover) run without -count=1, also the Ginkgo suites among
+#   them, and may print `(cached)` when the go-testres cache that warm-caches saves on main holds the result.
+# `ginkgo -p` runs the parallel suites and never uses the cache. Details: docs/dev/ci.md#go-test-suites.
+#
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Tests build with the `testing` tag, as kopia's own unit tests do (its Makefile, unit-tests target):
+# kopia then makes new repositories with an insecure, instant key derivation instead of scrypt-65536.
+# Scrypt costs about 1 s per repository open under -race (every Backup, Restore and Verify opens
+# twice or more), which made one seed 20 s and timed out the agentd specs on CI (#576). The tag is
+# for test binaries only: no release build uses it (the Makefile refuses it in GO_TAGS).
+# Go keeps only the last -tags in GOFLAGS, so the tag is merged into the tags already there (the
+# -tags=a,b form and its quoted and --tags spellings; GOFLAGS has no `-tags a,b` form), once.
+goflags_with_testing_tag() {
+	local w n tags=testing others=()
+	for w in ${GOFLAGS:-}; do
+		n=${w//[\"\']/}
+		case $n in
+		-tags=* | --tags=*) tags+=",${n#*=}" ;;
+		*) others+=("$w") ;;
+		esac
+	done
+	local out=() t seen=,
+	IFS=, read -ra out <<<"$tags"
+	tags=
+	for t in "${out[@]}"; do
+		[[ -n $t && $seen != *",$t,"* ]] || continue
+		seen+="$t,"
+		tags+="${tags:+,}$t"
+	done
+	echo "${others[*]:+${others[*]} }-tags=$tags"
+}
+GOFLAGS="$(goflags_with_testing_tag)"
+export GOFLAGS
+if [[ ${1:-} == "--goflags" ]]; then
+	echo "$GOFLAGS"
+	exit 0
+fi
 # shellcheck disable=SC2317,SC2329 # invoked from the exit trap (SC2317 before shellcheck 0.10)
 write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 
@@ -79,8 +127,33 @@ on_exit() {
 }
 trap 'on_exit $?' EXIT # after --list: a listing is not a run
 
+# shellcheck source=/dev/null
+source "$(dirname "$0")/go-test-host.sh"
+host_caffeinate_pid=
+# shellcheck disable=SC2034 # read by host_release_slot in go-test-host.sh
+host_slot_dir=
+# shellcheck disable=SC2317,SC2329 # invoked from the exit trap
+host_cleanup() {
+	[[ -z $host_caffeinate_pid ]] || kill "$host_caffeinate_pid" 2>/dev/null || true
+	host_release_slot
+}
+# Chain onto the exit trap set above: the guard and the slot go with the run.
+# shellcheck disable=SC2154 # rc_ is set inside the trap string
+trap 'rc_=$?; host_cleanup; on_exit $rc_' EXIT
+
+host_keep_awake $$
+
+# Four processes per run on a Mac (two runs at once), Ginkgo's default (one per core) elsewhere.
 procs=(-p)
-[[ -z ${PROCS:-} ]] || procs=("--procs=$PROCS")
+if [[ -n ${PROCS:-} ]]; then
+	procs=("--procs=$PROCS")
+elif host_is_mac; then
+	procs=("--procs=4")
+fi
+# An explicit timeout so a stall fails as one clear package, not at go test's silent 10 m default.
+go_timeout=${GO_TEST_TIMEOUT:-20m}
+# Ginkgo v2 --timeout is one budget for the whole invocation (all parallel suites), not per package.
+ginkgo_timeout=${GINKGO_TIMEOUT:-1h}
 
 report_dir=${REPORT_DIR:-reports/go}
 mkdir -p "$report_dir"
@@ -104,7 +177,7 @@ dirs=$(go list -f '{{.Dir}}' "${pkgs[@]}") || { echo "go-test.sh: go list ${pkgs
 while IFS= read -r dir; do
 	[[ -n $dir ]] || continue
 	dir=${dir/#"$PWD"/.}
-	[[ $# == 0 && $dir == ./test/flavors ]] && continue # needs the flavor images, see make test-flavors
+	[[ $# == 0 && $dir == ./test/harnesses ]] && continue # needs the harness images, see make test-harnesses
 	is_parallel=0
 	for s in "${PARALLEL_SUITES[@]}"; do
 		[[ $dir == "$s" ]] && is_parallel=1
@@ -117,6 +190,33 @@ while IFS= read -r dir; do
 		plain+=("$dir")
 	fi
 done <<<"$dirs"
+
+# Result reuse: only the packages whose inputs Go's cache key covers, and only when asked (see the header).
+ginkgo_pure=()
+plain_pure=()
+if [[ ${KOINON_GO_TEST_CACHE:-} == 1 ]] && ((${#ginkgo_rest[@]} + ${#plain[@]})); then
+	cacheable=$("$(dirname "$0")/go-test-cacheable.sh" "${pkgs[@]}") || exit 1
+	keep=()
+	for dir in ${ginkgo_rest[@]+"${ginkgo_rest[@]}"}; do
+		if grep -Fxq -- "$dir" <<<"$cacheable"; then ginkgo_pure+=("$dir"); else keep+=("$dir"); fi
+	done
+	ginkgo_rest=(${keep[@]+"${keep[@]}"})
+	keep=()
+	for dir in ${plain[@]+"${plain[@]}"}; do
+		if grep -Fxq -- "$dir" <<<"$cacheable"; then plain_pure+=("$dir"); else keep+=("$dir"); fi
+	done
+	plain=(${keep[@]+"${keep[@]}"})
+fi
+
+# A heavy run (Ginkgo suites, the shared Postgres) takes one of the machine's slots and checks Docker
+# first; a bad package argument or a plain-only run does neither (issue 551).
+if ((${#parallel[@]} + ${#ginkgo_rest[@]})); then
+	host_acquire_slot
+	host_docker_preflight || exit 3
+fi
+# The sleep window starts here, with the suites: waiting for a slot can last as long as another heavy
+# run, and a Sleep in that wait did not touch these results. Keep-awake is held since the start.
+run_start=$(date '+%Y-%m-%d %H:%M:%S')
 
 # One testcontainers session for the whole run (#171). By default every test process is its own
 # session lead and shares the run's single Ryuk reaper by name; Ryuk exits 10 s after its last
@@ -150,26 +250,55 @@ failed=()
 # Run all parts so one CI run reports every failing package.
 if ((${#parallel[@]})); then
 	# shellcheck disable=SC2086 # GINKGO_FLAGS is a word list
-	go tool ginkgo "${procs[@]}" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
+	go tool ginkgo "${procs[@]}" --timeout="$ginkgo_timeout" --junit-report=junit.xml --json-report=report.json --keep-separate-reports --output-dir="$report_dir" --keep-going --randomize-all --fail-on-empty ${GINKGO_FLAGS:-} "${parallel[@]}" || { prc=$?; rc=$prc; failed+=("ginkgo -p (exit $prc)"); }
 fi
-if ((${#ginkgo_rest[@]})); then
-	for dir in "${ginkgo_rest[@]}"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
+# run_ginkgo_go_test NAME COUNTFLAG DIR...: serial Ginkgo suites through gotestsum, one go test run.
+run_ginkgo_go_test() {
+	local name=$1 count=$2
+	shift 2
+	local dir n
+	for dir in "$@"; do rm -f "$dir/junit.xml" "$dir/report.json"; done
 	# Through gotestsum for its go test -json events: a plain test in a suite's package that skips
 	# through testenv.RequireT is seen only there (the chart contract test without helm).
-	go tool gotestsum --jsonfile "$report_dir/ginkgo-rest.gotest.jsonl" --format standard-quiet -- -count=1 "${ginkgo_rest[@]}" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || { prc=$?; rc=$prc; failed+=("serial Ginkgo suites (exit $prc)"); }
-	for dir in "${ginkgo_rest[@]}"; do
-		name=${dir#./}
-		name=${name//\//_}
-		[[ ! -f $dir/junit.xml ]] || mv "$dir/junit.xml" "$report_dir/${name}_junit.xml"
-		[[ ! -f $dir/report.json ]] || mv "$dir/report.json" "$report_dir/${name}_report.json"
+	go tool gotestsum --jsonfile "$report_dir/$name.gotest.jsonl" --format standard-quiet -- ${count:+"$count"} -timeout "$go_timeout" "$@" -args -ginkgo.junit-report=junit.xml -ginkgo.json-report=report.json -ginkgo.fail-on-empty || { prc=$?; rc=$prc; failed+=("serial Ginkgo suites (exit $prc)"); }
+	for dir in "$@"; do
+		n=${dir#./}
+		n=${n//\//_}
+		[[ ! -f $dir/junit.xml ]] || mv "$dir/junit.xml" "$report_dir/${n}_junit.xml"
+		[[ ! -f $dir/report.json ]] || mv "$dir/report.json" "$report_dir/${n}_report.json"
 	done
+}
+# run_plain NAME LABEL COUNTFLAG DIR...: packages run by go test only (plain tests, cacheable suites).
+run_plain() {
+	local name=$1 label=$2 count=$3
+	shift 3
+	go tool gotestsum --junitfile "$report_dir/$name.xml" --jsonfile "$report_dir/$name.gotest.jsonl" --format pkgname -- ${count:+"$count"} -timeout "$go_timeout" "$@" || { prc=$?; rc=$prc; failed+=("$label (exit $prc)"); }
+}
+((${#ginkgo_rest[@]})) && run_ginkgo_go_test ginkgo-rest -count=1 "${ginkgo_rest[@]}"
+# Go caches a result only when every flag is one of its own: any -ginkgo.* flag after -args (the JUnit and
+# JSON report flags, -ginkgo.fail-on-empty) switches the cache off, and a report file written into the
+# package directory changes the file the test is hashed with. So the cacheable Ginkgo suites run as plain
+# `go test` packages: one test row per suite in ginkgo-cached.xml, no per-spec report, no verdict entry.
+((${#ginkgo_pure[@]})) && run_plain ginkgo-cached "cacheable Ginkgo suites" "" "${ginkgo_pure[@]}"
+# -ginkgo.fail-on-empty for them, from the output: Ginkgo prints "Ran N of M Specs" at the end of a
+# suite, and go test replays it on a `(cached)` result. No line, or N = 0 (no spec ran), fails the run.
+if ((${#ginkgo_pure[@]})); then
+	while IFS= read -r ipath; do
+		# One grep, no pipe: grep -q stops early, and pipefail would read the writer's SIGPIPE as a miss.
+		grep -Eq "\"Package\":\"${ipath//./\\.}\",.*Ran [1-9][0-9]* of [0-9]+ Specs" "$report_dir/ginkgo-cached.gotest.jsonl" 2>/dev/null ||
+			{ rc=1; failed+=("cacheable Ginkgo suite $ipath: no 'Ran N of M Specs' line with N > 0 (no specs, or no RunSpecs)"); }
+	done < <(go list -f '{{.ImportPath}}' "${ginkgo_pure[@]}")
 fi
-if ((${#plain[@]})); then
-	go tool gotestsum --junitfile "$report_dir/go-test.xml" --jsonfile "$report_dir/plain.gotest.jsonl" --format pkgname -- "${plain[@]}" || { prc=$?; rc=$prc; failed+=("plain packages (exit $prc)"); }
-fi
+# Plain packages: -count=1 in CI (main and the merge queue never reuse a result), Go's default locally.
+plain_count=
+[[ -z ${CI:-} ]] || plain_count=-count=1
+((${#plain[@]})) && run_plain go-test "plain packages" "$plain_count" "${plain[@]}"
+((${#plain_pure[@]})) && run_plain go-test-cached "cacheable plain packages" "" "${plain_pure[@]}"
 
 # The verdict over every Ginkgo suite of this run; it fails the run for a suite that did not run.
-suites=("${parallel[@]}" "${ginkgo_rest[@]}")
+# ginkgo_pure suites are left out: they run without report flags (see above), so the verdict would read "NOT
+# RUN"; their go test events (ginkgo-cached.gotest.jsonl) still count.
+suites=(${parallel[@]+"${parallel[@]}"} ${ginkgo_rest[@]+"${ginkgo_rest[@]}"})
 events=()
 pflags=()
 # ginkgo -p emits no go test events: the verdict fails a plain RequireT test in these packages.
@@ -186,6 +315,14 @@ if ((${#suites[@]} + ${#events[@]})); then
 	elif [[ $vrc != 0 && $vrc != 3 ]]; then
 		rc=1
 	fi
+fi
+
+# A host that slept makes the run invalid, whatever the suites reported.
+if host_slept_between "$run_start" "$(date '+%Y-%m-%d %H:%M:%S')"; then
+	echo "go-test.sh: the host slept during this run (pmset -g log); the results mean nothing" >&2
+	echo 'go-test verdict: notrun reason="host slept"'
+	rc=3
+	failed=()
 fi
 
 # The verdict above counts Ginkgo specs only: a plain test that failed shows there as "0 failed".

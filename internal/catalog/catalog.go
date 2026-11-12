@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -142,7 +143,9 @@ type Provider struct {
 	// CostKeyLostAt is set when the cost API key was lost with its KEK; it must be entered again.
 	CostKeyLostAt *time.Time `json:"costKeyLostAt,omitempty"`
 	// Formats are the model formats the provider's type offers, preferred first (ADR 0069).
-	Formats   []string  `json:"formats"`
+	Formats []string `json:"formats"`
+	// Serving is whether the gateway serves the provider (issue #17). A provider just written is saved.
+	Serving   Serving   `json:"serving"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -219,6 +222,7 @@ func toProvider(p store.Provider) Provider {
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
 		Removed: p.RemovedAt.Valid, CredentialLostAt: optTime(p.CredentialLostAt), AdminDisabled: outward.FromRow(p.AdminDisabledAt, p.AdminDisabledBy, p.AdminDisabledNote), CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
 		HasCostKey: len(p.CostApiKey) > 0, CostScope: p.CostScope.String, CostKeyLostAt: optTime(p.CostApiKeyLostAt),
+		Serving: Serving{State: ServingSaved},
 	}
 }
 
@@ -261,6 +265,8 @@ func validateTypeURL(typ, rawURL string) error {
 		return invalid("url must not have a query or fragment")
 	case len(rawURL) > 2048:
 		return invalid("url is longer than 2048 characters")
+	case strings.Contains(rawURL, "$"):
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	return nil
 }

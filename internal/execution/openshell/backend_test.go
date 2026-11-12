@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -221,7 +222,7 @@ var _ = Describe("Backend", func() {
 
 		spec := func() execution.SandboxSpec {
 			return execution.SandboxSpec{
-				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon/flavors/opencode:dev",
+				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon/sandbox:dev",
 				Command: []string{"sleep", "infinity"}, Policy: harnessPolicy(),
 				Labels: map[string]string{agentLabel: "a1"}, CPURequest: "250m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi",
 			}
@@ -234,7 +235,7 @@ var _ = Describe("Backend", func() {
 			stored := gw.Sandbox(ws, "agent-1").GetSpec()
 			Expect(stored.GetEnvironment()).To(BeEmpty())
 			Expect(stored.GetTemplate().GetEnvironment()).To(BeEmpty())
-			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon/flavors/opencode:dev"))
+			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon/sandbox:dev"))
 			Expect(stored.GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
 				"requests": map[string]any{"cpu": "250m", "memory": "1Gi"},
 				"limits":   map[string]any{"cpu": "1", "memory": "2Gi"},
@@ -281,8 +282,8 @@ var _ = Describe("Backend", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(sb.Phase).To(Equal(execution.PhaseReady))
 			}
-			Expect(b.DeleteSandbox(ctx, ws, "agent-1")).To(Succeed())
-			Expect(b.DeleteSandbox(ctx, ws, "agent-1")).To(Succeed())
+			Expect(deleteErr(b.DeleteSandbox(ctx, ws, "agent-1"))).To(Succeed())
+			Expect(deleteErr(b.DeleteSandbox(ctx, ws, "agent-1"))).To(Succeed())
 
 			_, err = b.GetSandbox(ctx, ws, "agent-1")
 			Expect(err).To(MatchError(execution.ErrNotFound))
@@ -382,3 +383,47 @@ var _ = Describe("Backend", func() {
 		Expect(errors.Is(err, execution.ErrUnavailable)).To(BeFalse())
 	})
 })
+
+// deleteErr is the error of a DeleteSandbox call, for the specs that check only that.
+func deleteErr(_ execution.DeleteOutcome, err error) error { return err }
+
+var _ = Describe("DeleteSandbox outcome", func() {
+	It("maps the gateway's outcome", func(ctx SpecContext) {
+		b, _ := newBackend()
+		_, err := b.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "agent-1", Image: "img"})
+		Expect(err).NotTo(HaveOccurred())
+		out, err := b.DeleteSandbox(ctx, ws, "agent-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(Equal(execution.DeleteCompleted))
+		out, err = b.DeleteSandbox(ctx, ws, "agent-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(Equal(execution.DeleteAbsent))
+	})
+
+	It("counts a response without an outcome as accepted", func(ctx SpecContext) {
+		gw := fakegateway.New()
+		conn, err := gw.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(gw.Stop)
+		DeferCleanup(conn.Close)
+		b := openshell.New(noOutcomeConn{conn})
+		_, err = b.EnsureWorkspace(ctx, ws, nil)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = b.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "agent-1", Image: "img"})
+		Expect(err).NotTo(HaveOccurred())
+		out, err := b.DeleteSandbox(ctx, ws, "agent-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(Equal(execution.DeleteAccepted))
+	})
+})
+
+// noOutcomeConn answers DeleteSandbox with the gateway's reply minus its outcome.
+type noOutcomeConn struct{ *grpc.ClientConn }
+
+func (c noOutcomeConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
+	err := c.ClientConn.Invoke(ctx, method, args, reply, opts...)
+	if resp, ok := reply.(*openshellv1.DeleteSandboxResponse); ok {
+		resp.Outcome = openshellv1.DeletionOutcome_DELETION_OUTCOME_UNSPECIFIED
+	}
+	return err
+}

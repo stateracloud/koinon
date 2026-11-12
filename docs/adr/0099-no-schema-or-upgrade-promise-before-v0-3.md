@@ -2,6 +2,8 @@
 
 - Status: Accepted (maintainer decision 2026-11-07)
 - Date: 2026-11-06
+- Area: install-operations
+- Tags: migrations, upgrade, release
 - Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 1, 5, 6, 7 and 8: when
   the schema promise and its enforcement start)
 - Relates to: [0027](0027-repo-and-versioning.md), [0060](0060-migrations-as-a-job.md),

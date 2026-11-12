@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
@@ -27,7 +28,7 @@ import (
 // KOINON_OPENSHELL_ENDPOINT is set (host:port, for example a port-forward), with:
 //
 //	KOINON_OPENSHELL_MTLS_DIR   directory with tls.crt, tls.key and ca.crt (required)
-//	KOINON_OPENSHELL_IMAGE      flavor image for the sandbox (required)
+//	KOINON_OPENSHELL_IMAGE      harness image for the sandbox (required)
 //	KOINON_AGENTGATEWAY_HOST    agentgateway host the provider profile binds the key to
 //	                            (default agentgateway.agentgateway.svc.cluster.local, port 8080)
 //	KOINON_E2E_ORG_ID           fixed org UUID, so every run reuses one long-lived workspace
@@ -64,8 +65,8 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 			reconciler.Config{
 				Prices:  prices.NewResolver(pricing.Embedded()),
 				Gateway: reconciler.Endpoint{Host: host, Port: 8080},
-				Flavors: map[store.AgentFlavor]reconciler.Flavor{
-					store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+				Harnesses: map[string]reconciler.Harness{
+					harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},
 				Logger: slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
 				Now: func() time.Time {
@@ -85,7 +86,7 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		ws := execution.WorkspaceName(org.Bytes)
 		DeferCleanup(func(ctx context.Context) error {
-			if err := backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+			if _, err := backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
 			return backend.DeleteProvider(ctx, ws, names.Provider)

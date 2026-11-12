@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -64,7 +65,7 @@ var _ = Describe("metrics", func() {
 	It("counts a claimed run that succeeds and the wait for its sandbox", func(ctx SpecContext) {
 		reg := prometheus.NewRegistry()
 		m := agentd.NewMetrics(reg)
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m))
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -81,7 +82,7 @@ var _ = Describe("metrics", func() {
 
 	It("counts a failed run", func(ctx SpecContext) {
 		m := agentd.NewMetrics(prometheus.NewRegistry())
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateDeleted, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m))
@@ -94,7 +95,7 @@ var _ = Describe("metrics", func() {
 
 	It("counts a takeover by another replica, not as a claim", func(ctx SpecContext) {
 		a, b := agentd.NewMetrics(prometheus.NewRegistry()), agentd.NewMetrics(prometheus.NewRegistry())
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markHang))
 		killA := e.pool("agentd-a", withMetrics(a), func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
 		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())

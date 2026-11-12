@@ -2,8 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-11-10
-- Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, amended here by reference),
-  [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
+- Area: install-operations
+- Tags: backup-restore, testing, e2e
+- Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, by reference)
+- Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
   [0105](0105-merge-queue-route.md) (the only merge evidence is the queue; the drill is not a merge check)
 - Issues: closes #514 (phase 1); refs #275, #516 (held copy has no outward effects), #515 (archive and dead-executor, phase 2), #512 (lab sign-in)
 
@@ -93,7 +95,9 @@ edited.
 ## Consequences
 
 - A release candidate cannot be cut on a restore nobody tested. The drill is repeatable by one command
-  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`.
+  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`. A topology's optional
+  `imageRegistry` is passed to both installs as `image.registry` (run.sh sets it on kind to the cluster's
+  path on the local registry, #45).
 - The suite shows what is missing before the product fixes land. `known gap: #N` is a red line in the
   report on purpose: it is the list of work, and it ends when the issue closes.
 - Each gateway has its own `gatewayId` (`drill-src-<run>`, `drill-dst-<run>`; the gateway chart value and
@@ -110,6 +114,30 @@ edited.
 - Phase 2 adds the archived agent and the dead-executor workflow, which need a fake sink with a release
   endpoint and an object store with checkpoints on; phase 3 (the lab profile and `release-gate.sh`)
   follows.
+
+## Amendment 2026-11-11 (phase 2, #515)
+
+- **Object store.** SeaweedFS (Apache-2.0), image `chrislusf/seaweedfs:4.50` pinned by digest in the topology file
+  (`objectStoreImage`), in the fakes namespace with one fake identity and an `emptyDir`. It is the server the
+  checkpoint writer's own test already uses (`internal/checkpoint/s3_test.go`), plain HTTP and path-style as
+  `checkpoints.s3` requires. MinIO's community edition is AGPL-3.0 and is not used. Both installs share one
+  bucket; the drill creates it over a port-forward with minio-go.
+- **The archive check.** The source runs with `checkpoints.enabled`, `reconciler.idleTimeout: 2m` and
+  `archiveAfter: 1m`. An agent with no trigger gets one task; the fake model's `drill-archive-write` script
+  makes it write `/sandbox/work/drill-marker.txt` with its shell tool. The seed waits for `archived_at`. After
+  the release the check runs the guide's `resync` block, expects the source's snapshot among the target's
+  complete `home_checkpoints`, appends a `drill-archive-read` message to the same task, and expects the run
+  to print `drill-marker-found` (read from `run_events`), the task's harness session ID to be unchanged and
+  `archived_at` to be clear.
+- **The dead-executor check holds the workflow with a row lock, not a sink.** Phase 1 planned a fake HTTP sink
+  with a release endpoint. No Koinon notification kind posts to an HTTP endpoint (`wake.agent` and
+  `question.asked` write to the database), so a sink would have nothing to hold. The drill instead locks the
+  scheduled agent's `agent_sandboxes` row from a database session, creates a task, and the `wake.agent`
+  notification's one step (an `UPDATE` of that row) waits: the workflow is PENDING under the source api's
+  executor ID when the dump runs. The disaster kills the pod and the session. After the release the target's
+  dead-executor job recovers it; the check expects status SUCCESS, another executor, and one `deliver:` step.
+  A webhook notification kind would let a real sink replace the lock; that is a product decision.
+- **RTO** gains the sub-time `dbosRecovery` (release to the recovered workflow).
 
 ## Alternatives considered
 

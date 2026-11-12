@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	corev1 "k8s.io/api/core/v1"
@@ -46,10 +47,10 @@ func TestSpecHashLeavesTheSupervisorImageOut(t *testing.T) {
 	r := testReconciler(src)
 	r.refreshSupervisor(t.Context())
 	names := execution.AgentNames{Sandbox: "sb"}
-	s1, h1 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
+	s1, h1 := r.sandboxSpec(zeroUUID, zeroUUID, names, Harness{Image: "img"}, nil, nil, defaultRes)
 	src.image = "supervisor:2"
 	r.refreshSupervisor(t.Context())
-	s2, h2 := r.sandboxSpec(zeroUUID, zeroUUID, names, Flavor{Image: "img"}, nil, nil, defaultRes)
+	s2, h2 := r.sandboxSpec(zeroUUID, zeroUUID, names, Harness{Image: "img"}, nil, nil, defaultRes)
 	if h1 != h2 {
 		t.Error("a new supervisor image changes the spec hash")
 	}
@@ -94,7 +95,7 @@ func TestSupervisorLabelIsAValidLabelValue(t *testing.T) {
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	r := testReconciler(&stubSupervisor{image: long})
 	r.refreshSupervisor(t.Context())
-	spec, _ := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Flavor{Image: "img"}, nil, nil, defaultRes)
+	spec, _ := r.sandboxSpec(zeroUUID, zeroUUID, execution.AgentNames{Sandbox: "sb"}, Harness{Image: "img"}, nil, nil, defaultRes)
 	v := spec.Labels[LabelSupervisorImage]
 	if errs := validation.IsValidLabelValue(v); len(errs) > 0 || v == "" || len(v) != 16 {
 		t.Errorf("label value %q is not a short valid label value: %v", v, errs)
@@ -119,21 +120,100 @@ func TestNoSupervisorSourceIsAlwaysReady(t *testing.T) {
 	}
 }
 
-func TestTakeRecreateCapsAPass(t *testing.T) {
-	r := testReconciler(nil)
-	got := []bool{r.takeRecreate(), r.takeRecreate(), r.takeRecreate()}
-	if got[0] != true || got[1] != true || got[2] != false {
+func TestTakeRecreateIsATokenBucket(t *testing.T) {
+	now := time.Now()
+	r := testReconciler(nil) // cap 2
+	r.cfg.ResyncInterval = 30 * time.Second
+	r.cfg.Now = func() time.Time { return now }
+	k := func(i byte) agentKey { return agentKey{agent: pgtype.UUID{Bytes: [16]byte{i}, Valid: true}} }
+	take := func(keys ...byte) (got []bool) {
+		for _, i := range keys {
+			got = append(got, r.takeRecreate(k(i)))
+		}
+		return got
+	}
+	if got := take(1, 2, 3); !got[0] || !got[1] || got[2] {
 		t.Errorf("takes = %v, want two then none", got)
 	}
-	r.recreates.Store(0) // the next pass
-	if !r.takeRecreate() {
-		t.Error("a new pass has no slots")
+	if got := take(1, 2); !got[0] || !got[1] {
+		t.Errorf("an agent that holds a token asks again for free: %v", got)
+	}
+	r.recreateStarted(k(1))
+	r.recreateStarted(k(2))
+	now = now.Add(14 * time.Second) // under half an interval: under one token
+	if take(3)[0] {
+		t.Error("a token came back before the refill rate allows")
+	}
+	now = now.Add(2 * time.Second) // one token per 15 s
+	if got := take(3, 4); !got[0] || got[1] {
+		t.Errorf("after 16 s one token is back: %v", got)
+	}
+	r.recreateStarted(k(3))
+	now = now.Add(time.Hour) // the bucket never holds more than the cap
+	if got := take(5, 6, 7); !got[0] || !got[1] || got[2] {
+		t.Errorf("takes after a long idle = %v, want two then none", got)
 	}
 	r.cfg.MaxRecreatesPerPass = -1
-	for range 100 {
-		if !r.takeRecreate() {
+	for i := range 100 {
+		if !r.takeRecreate(k(byte(i))) {
 			t.Fatal("a negative cap limits")
 		}
+	}
+}
+
+func TestRecreateReleasedGivesTheTokenBack(t *testing.T) {
+	now := time.Now()
+	r := testReconciler(nil) // cap 2
+	r.cfg.ResyncInterval = 30 * time.Second
+	r.cfg.Now = func() time.Time { return now }
+	k := func(i byte) agentKey { return agentKey{agent: pgtype.UUID{Bytes: [16]byte{i}, Valid: true}} }
+	holds := func() int {
+		r.bucketMu.Lock()
+		defer r.bucketMu.Unlock()
+		return len(r.recreating)
+	}
+	r.takeRecreate(k(1))
+	r.takeRecreate(k(2))
+	if r.takeRecreate(k(3)) {
+		t.Fatal("the bucket should be empty")
+	}
+	r.recreateReleased(k(1))
+	if holds() != 1 {
+		t.Errorf("holds = %d, want 1", holds())
+	}
+	if !r.takeRecreate(k(3)) {
+		t.Error("the released token did not come back")
+	}
+	r.recreateReleased(k(1)) // no hold: no refund
+	r.recreateReleased(k(9))
+	if r.takeRecreate(k(4)) {
+		t.Error("a release without a hold refunded a token")
+	}
+}
+
+func TestReleaseRecreatesExceptKeepsLiveAndBusyAgents(t *testing.T) {
+	now := time.Now()
+	r := testReconciler(nil) // cap 2
+	r.cfg.ResyncInterval = 30 * time.Second
+	r.cfg.Now = func() time.Time { return now }
+	k := func(i byte) agentKey { return agentKey{agent: pgtype.UUID{Bytes: [16]byte{i}, Valid: true}} }
+	r.takeRecreate(k(1))
+	r.takeRecreate(k(2))
+	// k(1) is live; k(2) left the pass but its item runs.
+	r.releaseRecreatesExcept(map[agentKey]bool{k(1): true}, func(key agentKey) bool { return key == k(2) })
+	if r.takeRecreate(k(3)) {
+		t.Error("a busy agent's token was refunded: the cap can be passed")
+	}
+	// The item ended; the next pass releases the hold.
+	r.releaseRecreatesExcept(map[agentKey]bool{k(1): true}, func(agentKey) bool { return false })
+	if !r.takeRecreate(k(3)) {
+		t.Error("the token of an agent that left was not released")
+	}
+	r.bucketMu.Lock()
+	still := r.recreating[k(1)]
+	r.bucketMu.Unlock()
+	if !still {
+		t.Error("a live agent lost its hold")
 	}
 }
 

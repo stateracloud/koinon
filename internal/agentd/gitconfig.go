@@ -18,7 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// The git setup of a connection's host (ADR 0062). The flavor images configure git for
+// The git setup of a connection's host (ADR 0062). The harness images configure git for
 // github.com; koinon-agentd renders the same for the host of the agent's code-host connection
 // into the home before every harness start: the credential helper scoped to that host and, with
 // a CA bundle, http.sslCAInfo. /etc/gitconfig includes the file. The agent can write the home,

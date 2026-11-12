@@ -32,8 +32,67 @@ done
 # `go list` fail before any test starts, and that exit still goes through the trap.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/rc.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+export KOINON_GO_SLOTS_DIR=$tmp/slots KOINON_DOCKER=koinon-no-such-docker
 REPORT_DIR=$tmp/reports KOINON_RC_FILE=$tmp/rc bash hack/go-test.sh ./internal/contract-missing-package >/dev/null 2>&1 || true
 if [[ -s $tmp/rc && $(<"$tmp/rc") =~ ^[0-9]+$ ]]; then ok "hack/go-test.sh writes the status file on exit"; else bad "hack/go-test.sh does not write KOINON_RC_FILE on exit"; fi
+
+# (#846) The maintainer scripts are labelled and name no org: hack/README.md lists them, each carries the
+# label in its header, and the repository and board come from hack/repo-lib.sh alone.
+# shellcheck disable=SC2016 # backticks are Markdown, not a command
+listed=$(sed -n 's/^| `\([^`]*\.sh\)` |.*/\1/p' hack/README.md | sort)
+labelled=$(cd hack && grep -rl --include='*.sh' -m1 '^# Maintainer script (hack/README.md): ' . | sed 's|^\./||' | sort)
+[[ -n $listed ]] || bad "hack/README.md lists no maintainer scripts"
+if [[ $listed == "$labelled" ]]; then ok "hack/README.md lists exactly the labelled maintainer scripts"; else
+	bad "hack/README.md and the 'Maintainer script' headers disagree: $(diff <(echo "$listed") <(echo "$labelled") | grep '^[<>]' | tr '\n' ' ')"
+fi
+org_ok=1
+for s in $listed; do
+	sed -n '1,8p' "hack/$s" | grep -q '^# Maintainer script (hack/README.md): ' || { bad "hack/$s: the label is not in its header"; org_ok=0; }
+	# Comment lines (indented ones too) may name the org; code may not.
+	if grep -n 'stateracloud' "hack/$s" | grep -vE '^[0-9]+:[[:space:]]*#' >/dev/null; then bad "hack/$s names the org in code; use hack/repo-lib.sh"; org_ok=0; fi
+done
+[[ $org_ok == 0 ]] || ok "maintainer scripts carry the label and name no org outside comments"
+
+# shellcheck source=hack/repo-lib.sh
+(
+	source hack/repo-lib.sh
+	unset KOINON_REPO GH_REPO KOINON_UPSTREAM KOINON_BOARD KOINON_BOARD_OWNER
+	up=$(sed -n 's|^module github\.com/||p' go.mod)
+	chk() { if [[ $2 == "$3" ]]; then ok "repo-lib: $1"; else bad "repo-lib: $1 (got '$2', want '$3')"; fi; }
+	chk "upstream from go.mod" "$(koinon_upstream)" "$up"
+	chk "https remote" "$(koinon_github_slug https://github.com/someone/koinon.git)" someone/koinon
+	chk "scp remote" "$(koinon_github_slug git@github.com:someone/koinon.git)" someone/koinon
+	chk "ssh remote" "$(koinon_github_slug ssh://git@github.com/someone/koinon)" someone/koinon
+	chk "proxy remote is not GitHub" "$(koinon_github_slug http://127.0.0.1:1234/git/someone/koinon)" ""
+	chk "fork repo" "$(KOINON_REPO=someone/koinon koinon_repo)" someone/koinon
+	chk "GH_REPO" "$(GH_REPO=other/koinon koinon_repo)" other/koinon
+	chk "fork has no board" "$(KOINON_REPO=someone/koinon koinon_board)" ""
+	chk "upstream board" "$(KOINON_REPO=$up koinon_board)" "${up%%/*} 1"
+	chk "fork board override" "$(KOINON_REPO=someone/koinon KOINON_BOARD=3 koinon_board)" "someone 3"
+	chk "board owner override" "$(KOINON_REPO=$up KOINON_BOARD_OWNER=acme koinon_board)" "acme 1"
+	chk "board none" "$(KOINON_REPO=$up KOINON_BOARD=none koinon_board)" ""
+	g=$(mktemp -d "${TMPDIR:-/tmp}/rc-remote.XXXXXX")
+	trap 'rm -rf "$g"' EXIT
+	# The caller's git config (url.*.insteadOf in a proxied sandbox) must not rewrite the test remotes.
+	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+	git -C "$g" init -q
+	git -C "$g" remote add origin http://proxy.invalid/git/acme/koinon
+	git -C "$g" remote add fork https://github.com/forker/koinon.git
+	chk "any other GitHub remote after a non-GitHub origin" "$(cd "$g" && koinon_repo)" forker/koinon
+	git -C "$g" remote remove fork
+	git -C "$g" remote set-url origin https://github.com/someone/koinon.git
+	chk "origin remote" "$(cd "$g" && koinon_repo)" someone/koinon
+	git -C "$g" remote add upstream git@github.com:acme/koinon.git
+	chk "upstream remote before origin" "$(cd "$g" && koinon_repo)" acme/koinon
+	git -C "$g" config remote.origin.gh-resolved base
+	chk "gh repo set-default wins" "$(cd "$g" && koinon_repo)" someone/koinon
+	git -C "$g" config remote.origin.gh-resolved other/koinon
+	chk "gh repo set-default to another repository" "$(cd "$g" && koinon_repo)" other/koinon
+	chk "KOINON_REPO sets GH_REPO" "$(KOINON_REPO=someone/koinon GH_REPO=x/y; koinon_use_repo; echo "$GH_REPO")" someone/koinon
+	chk "no KOINON_REPO keeps GH_REPO" "$(GH_REPO=x/y; koinon_use_repo; echo "$GH_REPO")" x/y
+	if (KOINON_BOARD=x koinon_board 2>/dev/null); then bad "repo-lib: a bad KOINON_BOARD is refused"; else ok "repo-lib: a bad KOINON_BOARD is refused"; fi
+	exit "$fail"
+) || fail=1
 
 if [[ $fail -ne 0 ]]; then exit 1; fi
 echo "repo contract ok"

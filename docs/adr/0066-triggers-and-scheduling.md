@@ -2,10 +2,14 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Area: work-model
+- Tags: triggers, eventing, runs, database
+- Amended by: [0078](0078-sandbox-observer.md) (the wait cause set and where its input comes from)
 - Relates to: old issue 146 (rounds 1 and 3, and the
   releases)
 - Amends: [0010](0010-eventing.md) (ingress, subscriptions), [0030](0030-run-state-machine.md)
-  (timers, the sandbox-timeout failure), [0049](0049-v01-scope-decisions.md) (sandbox idle stop)
+  (timers, the sandbox-timeout failure), [0049](0049-v01-scope-decisions.md) (sandbox idle stop),
+  [0018](0018-v1-screens.md) (the trigger and schedule screens)
 - Work model: [0065](0065-work-model-tasks-inbox.md). Trackers: [0064](0064-work-tracker-connectors.md).
 
 ## Context
@@ -62,6 +66,8 @@ than a Postgres row does (`messaging-and-workflows.md` §3.4).
    - **code-host events** from GitHub and Gitea: PR opened or updated, push, comment;
    - **chat events** from Slack and Teams: a channel message matching rules, or an @mention;
    - **direct messages** to an agent in the inbox chat.
+
+   _(Changed: v0.1 builds schedules and direct messages; code-host events and chat events come in v0.2 and are rejected until then. See "Releases" and the TR1 amendment of 2026-10-27 below.)_
 
    Tracker events (Jira, Linear and the rest) come with the tracker connectors
    ([0064](0064-work-tracker-connectors.md)).
@@ -234,10 +240,14 @@ file on 2026-10-26):
 - ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
   the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
-- The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
+- ~~The filter language for rules (CEL was ADR 0010's candidate)~~ Answered by the TR1 amendment of
+  2026-10-27: filters are typed per type, no expression language. Still open: whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
-- Gitea's webhook signature scheme, and the polling interval per provider.
+- ~~Gitea's webhook signature scheme, and the polling interval per provider.~~ Answered by the
+  2026-11-12 (issue #25) amendment: Gitea signs a webhook with a hex HMAC-SHA256 of the body in
+  `X-Gitea-Signature` (and the same value as `X-Hub-Signature-256: sha256=...`); the poll interval
+  is Koinon's floor (1 minute) or the provider's stated interval, whichever is longer.
 - ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since old issue 146
   lists correlation under v0.2.~~ Answered by the 2026-10-27 (TR3) amendment: it ships in v0.1 for the
   inbox chat (old issue 146, procoduck, 2026-10-26); Slack and Teams stay in v0.2.
@@ -513,3 +523,109 @@ cannot be pulled was always `unknown`, because OpenShell replaces the pod's reas
 read the pod when OpenShell's reason says nothing and write the kubelet's reason and message into
 `agent_sandboxes.reason` and `message`; agentd and the classifier are unchanged. The observer is a
 workaround that [0078](0078-sandbox-observer.md) removes once OpenShell surfaces pod failures itself.
+
+## Amendment (2026-11-12, issue 573): a work queue per agent replaces "a pass waits for all jobs"
+
+The section "Per-sandbox jobs (B4)" above says the reconciler runs one job per agent, at most
+`sandboxJobs` at once. It does not say what the pass does while the jobs run. The first build made
+a pass wait for all of its jobs. The logs of e2e run 43134423089 show the cost: the sandbox delete
+of one agent (a recreate after an image change) stayed open for about 30 s, until the pods ended.
+A second agent, created during that pass, could be seen only by the next pass. Its wake-up sat in
+the one-slot NOTIFY channel until the first pass ended. One slow backend call for one agent delayed
+every new agent. The decision below replaces that part; the rest of B4 stands.
+
+- **Per-agent work queue.** The key is (org ID, agent ID). The queue lives as long as the leader
+  (it stops with the lead context) and has at most `sandboxJobs` workers. One key never runs twice at
+  the same time. An item added for a key that is queued replaces the queued item. An item added for a
+  key that is running runs after it (requeue), never in parallel. Each item has its own timeout
+  (`WorkTimeout`, default 5 minutes). Code: `internal/reconciler/workqueue.go`.
+- **A pass does not wait for the queue.** A pass loads the state, runs the gateway step and hands
+  the sandbox work of each agent to the queue. The gateway plan, `gw.Apply` and `recordServed` stay
+  one global step per pass, because an Apply that does not know every agent revokes keys. Agents
+  whose key is served already are queued before the Apply; the others after it. An agent whose new key
+  is not served yet is not queued: it is held back by its own key, not by the other agents' work.
+  `ReconcileAll` (tests, one-shot use) waits for the work of its pass; the loop does not.
+- **Rejection notes** of the gateway are part of the agent's work item: the note is recorded after the
+  agent's own state, by the item or, when the item has ended already, by the pass. A note written by
+  the pass (a held-back agent, a note for an item that has ended) changes only the `message` column
+  (`SetAgentSandboxMessage`). The pass can run while an older item of the same agent still works, and
+  a note that rewrote state, phase and reason from the pass's snapshot could put an old `ready` back.
+  An item re-reads the agent's row when it starts, so an item that waited behind a running one does
+  not act on a row from before that one. When passes record notes for one agent, the newest pass's
+  rejection note is the one recorded.
+- **Recreate cap.** `maxRecreatesPerPass` is now a token bucket: that many tokens, refilled at that
+  many per `ResyncInterval`. That is the rate of the old per-pass cap, because a pass ran at least
+  once per interval. Work items run outside a pass, so a pass is no unit to count in. An agent
+  holds its token from the first request until it has deleted its sandbox, and at most that many
+  agents hold one at a time, so slow home gates cannot pile up a larger group that deletes together.
+  A hold ends without a delete when the agent's item ends with no recreate wanted (spec reverted,
+  archived, deleted, a run holds it); the token then goes back to the bucket. Agents that wait for
+  a failed backup keep their hold until a human acts, as they did with the old per-pass cap.
+- **A delete is requested, then observed.** `execution.Backend.DeleteSandbox` returns OpenShell's
+  outcome (`completed`, `accepted`, `absent`). The reconciler records the sandbox as deleting and
+  observes the end in a later pass (`GetSandbox` reports the phase). The OpenShell `DeleteSandbox`
+  RPC can still block until the pods end (a Terminating pod with a 30 s grace period). The fix is
+  the queue, not the call: that agent and one worker slot stay blocked, and the pass and the other
+  agents go on.
+- **Logs.** A pass logs its start, its end (duration, job count) and, when its jobs have ended, the
+  slowest job. Each delete logs a line before the call and one after it, with the duration.
+
+The model is the Kubernetes controller work queue (per-key dedup with a dirty set and a processing
+set, a key that changes while it runs is requeued). Koinon keeps the item in the queue instead of
+re-reading it from a cache, has no rate-limited requeue (the next pass is the retry), and bounds
+workers with a fixed number.
+
+This amendment fixes one cause of issue 573, the missing-image wait of 30 s. It does not fix the
+other two, which stay open: the first-task wait of about 77 s (only 7.5 s of it is the gateway Apply;
+the new pass and job log lines are the tool to split the rest) and the fixed 90 s settle time behind
+the 110 s wait for a new MCP server (removed by ADR 0097 step 2, where the gateway acknowledges what it
+loaded). The pull request uses "Refs #573", not "Closes".
+
+## Amendment (2026-11-12, issue #25): one shared poller per connection and resource
+
+Polling is the ingress of decision 7 for a code host that cannot reach Koinon. As built
+(`internal/triggers/poll`, table `code_host_pollers`, migration `00083`):
+
+- **One poller per (org, connection, resource), shared by every trigger on it.** A resource is a
+  kind and a repository (`repo_events:acme/app`, `issue_comments:acme/app`). Each sync derives the
+  rows from the triggers in effect: a missing row is inserted, a row no trigger needs is deleted.
+  There is no reference count. Keying by connection is also the per-credential partition: two orgs
+  never share a token, a validator or a cursor. Ten triggers on one repository cost one request per
+  interval.
+- **Conditional requests.** GitHub's first page is sent with `If-None-Match` (or
+  `If-Modified-Since`) and always with the same query, so the validator stays valid. A `304` ends
+  the poll before the body is read and before any trigger work; GitHub does not count it against
+  the primary rate limit. Gitea's API lists carry no ETag and no Last-Modified, so the Gitea adapter
+  hashes the first page and compares it with the stored hash (`page_hash`): an identical first page
+  that is also the last ends the poll the same way. The list runs oldest first, so a full first page
+  is walked further (at most 5 pages); a walk that hits that bound moves `since` to the last comment
+  it read, so a burst of old comments cannot hide new ones. Issue comments are read with `since` (cursor time minus 5 minutes) so the
+  page stays small and the hash stable.
+- **The interval.** `next_poll_at = max(now + floor, now + provider interval, backoff_until)`,
+  computed and stored per row, where `now` is when that row's answer arrived, not when the pass began. The floor is 1 minute (`Config.Floor`, per provider in
+  `Config.Floors`); the provider interval is GitHub's `X-Poll-Interval`, kept until a response
+  states another. Koinon never polls faster than either. The leader never sleeps on a minimum across
+  rows: a row told 120 s does not hold back a row told 60 s.
+- **Failures and rate limits.** A rate limit (`403`/`429` with `Retry-After`, or
+  `X-RateLimit-Remaining: 0` with `X-RateLimit-Reset`) waits until the stated time, at least the
+  floor and at most an hour, and is not counted as a failure. Other errors back off from 1 minute,
+  doubling to an hour (from 4 minutes for `401`, `403`, `404` or an unsupported resource, which a
+  retry rarely fixes), plus up to 10% jitter. `koinon_code_host_polls_total{provider,outcome}` counts the outcomes
+  (`not_modified`, `changed`, `error`, `rate_limited`).
+- **One leader, at-least-once enqueue, once-only delivery.** Every `koinon-api` replica with
+  `api.durable.enabled` runs the loop; a Postgres advisory lock picks the leader, which claims due
+  rows with `FOR UPDATE SKIP LOCKED` and a lease. The first poll of a row records the baseline and
+  delivers nothing. A changed poll enqueues one DBOS workflow `koinon.code-host-poll-event` per new
+  item (workflow ID from the connection, the resource and the item's ID at the provider) and stores
+  the cursor only after every item was enqueued. The workflow delivers inside `durable.Once` with
+  the dedupe source `poll`, so a re-poll, a restart or a second leader deliver an item once. Adding
+  the workflow bumped `durable.WorkflowVersion` to 2 ([0085](0085-upgrade-compatibility-and-recovery-policy.md)).
+- **Not built yet.** The `code_host_event` trigger filter is still rejected by templates, so the API
+  runs the poller with no subscriptions and a delivery that only logs; creating or waking tasks from
+  a polled event comes with that trigger type. Pull-request resources are not polled, and a
+  connection carries no health condition for a failing poller.
+- **Prior art.** The shape (a shared poller per resource, the ETag, the provider's interval honoured)
+  is adapted from hydro-project/infinity (Apache-2.0); infinity sleeps on the smallest interval of
+  all keys, Koinon stores a due time per row. Revalidating every poll and keeping the validator per
+  credential follow Prow's ghcache (kubernetes-sigs/prow, Apache-2.0). No code was copied, and none
+  from Daytona (AGPL).

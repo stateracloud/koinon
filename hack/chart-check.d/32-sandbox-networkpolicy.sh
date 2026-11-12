@@ -12,7 +12,21 @@ has "sandbox NetworkPolicy writer ClusterRole" 'name: koinon-koinon-sandbox-defa
 has "sandbox NetworkPolicy writer may create NetworkPolicies" 'resources: \[networkpolicies\]' --show-only "$np"
 has "sandbox NetworkPolicy writer ValidatingAdmissionPolicy" 'name: koinon-koinon-sandbox-default-deny-binding$' --show-only "$np"
 has "sandbox NetworkPolicy writer policy fails closed" 'failurePolicy: Fail' --show-only "$np"
-has "sandbox NetworkPolicy writer covers CREATE and UPDATE" 'operations: \[CREATE, UPDATE\]' --show-only "$np"
+has "sandbox NetworkPolicy writer covers CREATE, UPDATE and DELETE" 'operations: \[CREATE, UPDATE, DELETE\]' --show-only "$np"
+# Issue 673: in this gateway's sandbox namespaces only the OpenShell gateway changes or deletes the
+# other NetworkPolicies; deleting the default-deny is the reconciler's alone; a namespace being
+# deleted (namespace controller), garbage-collector deletes and metadata-only updates stay open.
+lacks "sandbox NetworkPolicy policy judges every NetworkPolicy in a sandbox namespace (no matchConditions)" '^  matchConditions:' --show-only "$np"
+has "sandbox NetworkPolicy policy keys other policies on the OpenShell gateway" 'request.userInfo.username in \[\\"system:serviceaccount:openshell:openshell\\"\]' --show-only "$np"
+has "a changed gateway identity reaches the sandbox NetworkPolicy policy" 'request.userInfo.username in \[\\"system:serviceaccount:os:gw\\"\]' \
+	--set 'sandboxPolicy.identities.supervisorPods={system:serviceaccount:os:gw}' --show-only "$np"
+has "sandbox NetworkPolicy policy fences other identities" 'only the OpenShell gateway may write or delete NetworkPolicies in sandbox namespaces' --show-only "$np"
+has "sandbox NetworkPolicy policy fences deletes of the default-deny" "'delete' : 'write'" --show-only "$np"
+has "sandbox NetworkPolicy policy lets the namespace controller empty a terminating namespace" 'deletionTimestamp\) && request.userInfo.username in \[\\"system:serviceaccount:kube-system:namespace-controller\\"' --show-only "$np"
+has "sandbox NetworkPolicy policy lets the garbage collector delete" 'request.userInfo.username in \[\\"system:serviceaccount:kube-system:generic-garbage-collector\\"' --show-only "$np"
+lacks "sandbox NetworkPolicy policy does not trust owner references" 'ownerReferences\)' --show-only "$np"
+has "sandbox NetworkPolicy policy takes the sandbox namespaces from sandboxPolicy.namespaceSelector" 'variables.labels\[\\"team\\"\] == \\"sandboxes\\"' \
+	--set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$np"
 has "sandbox NetworkPolicy writer binding denies" 'validationActions: \["Deny"\]' --show-only "$np"
 has "sandbox NetworkPolicy writer keys on the reconciler identity" 'system:serviceaccount:koinon:koinon-reconciler' --show-only "$np"
 has "sandbox NetworkPolicy writer requires the default-deny shape" 'policyTypes Ingress and Egress, and allow no traffic' --show-only "$np"
@@ -20,22 +34,23 @@ has "sandbox NetworkPolicy writer limits to the configured gateway ID" "openshel
 
 # The reconciler is told the writer is on and the fixed NetworkPolicy name.
 cfg=$(render --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | grep -Fq -- 'enabled: true' || fail "the reconciler is told the sandbox NetworkPolicy is on"
-grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | grep -Fq -- 'name: "koinon-koinon-sandbox-default-deny"' || fail "the reconciler is told the sandbox NetworkPolicy name"
+grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'enabled: true' || fail "the reconciler is told the sandbox NetworkPolicy is on"
+grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'name: "koinon-koinon-sandbox-default-deny"' || fail "the reconciler is told the sandbox NetworkPolicy name"
 
 off=(--set sandboxNetworkPolicy.enabled=false)
 lacks "sandboxNetworkPolicy.enabled=false renders no writer" 'sandbox-default-deny' "${off[@]}"
 off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
-grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -Fq -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
-grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | grep -q -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
+grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit -F -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
+grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
-if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+# sandboxLimitRange (on by default) also requires Deny; turn it off for the NetworkPolicy-only checks.
+if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy without a Deny validation action must not render"
 fi
-render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false "${off[@]}" >/dev/null 2>&1 ||
+render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false "${off[@]}" >/dev/null 2>&1 ||
 	fail "validation actions without Deny and the NetworkPolicy writer off must render"
-if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false >/dev/null 2>&1; then
+if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled"
 fi
 

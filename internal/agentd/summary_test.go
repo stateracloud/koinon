@@ -11,13 +11,15 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("The end-of-turn summary", func() {
 	It("asks for a note after the turn, stores it on the task and keeps it out of the timeline", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.summaryReply = "Notes: the build is green; next, open the pull request." })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.summaryReply = "Notes: the build is green; next, open the pull request." })
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -48,8 +50,8 @@ var _ = Describe("The end-of-turn summary", func() {
 	})
 
 	It("cuts a long note to 2,000 tokens (6,000 bytes)", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.summaryReply = strings.Repeat("é", 20000) })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.summaryReply = strings.Repeat("é", 20000) })
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -61,9 +63,9 @@ var _ = Describe("The end-of-turn summary", func() {
 	})
 
 	It("marks the run summarizing, so Koinon's tool servers see no running run, and clears the mark", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		var during error
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.onSummary = func() {
 				_, during = q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
 			}
@@ -76,8 +78,8 @@ var _ = Describe("The end-of-turn summary", func() {
 	})
 
 	It("rejects permission requests during the summary and discards a note from an agent that used a tool", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.summaryTool = true })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.summaryTool = true })
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -94,8 +96,8 @@ var _ = Describe("The end-of-turn summary", func() {
 	})
 
 	It("does not fail the run when the agent does not answer in time", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.summaryHang = true })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.summaryHang = true })
 		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", func(c *agentd.Config) { c.SummaryTimeout = 300 * time.Millisecond })
@@ -107,12 +109,12 @@ var _ = Describe("The end-of-turn summary", func() {
 	})
 
 	It("asks again at the end of every turn and keeps the latest note", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
-		e.harness.set(func(h *harness) { h.summaryReply = "Second note." })
+		e.harness.set(func(h *fakeHarness) { h.summaryReply = "Second note." })
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -126,22 +128,29 @@ var _ = Describe("The end-of-turn summary", func() {
 
 var _ = Describe("A fresh session with a handoff", func() {
 	It("starts a new session instead of loading, with the notes, the last replies and the messages", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.summaryReply = "Notes: waiting on the review." })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.summaryReply = "Notes: waiting on the review." })
 		t := e.task(ctx, "first message")
+		// A direct-message thread of the agent, as services.DirectMessage creates it.
+		dm := services.DirectMessageTriggerID(e.agent.ID)
+		_, err := db.Exec(ctx, `UPDATE tasks SET created_by_kind = 'trigger', created_by_user_id = NULL,
+			created_by_trigger_id = $3 WHERE org_id = $1 AND id = $2`, e.org, t.ID, dm)
+		Expect(err).NotTo(HaveOccurred())
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		// A run that succeeded completed its task (old issue 324); the restart marks open tasks, so a
-		// follow-up reopens it first.
+		// The run that succeeded completed its task (old issue 324). A chat thread sits completed
+		// between turns, and the restart still marks it, because its run completed it (#81).
+		Expect(before.State).To(Equal(store.TaskStateCompleted))
+		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID, DmTriggerID: dm})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(marked).To(ConsistOf(t.ID))
+		// The follow-up reopens it, as the message service does.
 		_, err = db.Exec(ctx, `UPDATE tasks SET state = 'submitted', finished_at = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())
-		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(marked).To(HaveLen(1))
 		e.message(ctx, t, "second message")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -172,7 +181,7 @@ var _ = Describe("A fresh session with a handoff", func() {
 	})
 
 	It("loads the session as usual when nothing was applied", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "one")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -229,6 +238,28 @@ var _ = Describe("The handoff", func() {
 		Expect(out).To(ContainSubstring("[truncated]"))
 		out = agentd.Handoff{Title: "T", Messages: []string{strings.Repeat("m", 40000)}}.Build()
 		Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
+	})
+
+	It("stays within budget with no message at all and oversized fixed parts", func() {
+		for _, x := range []agentd.Handoff{
+			{Title: strings.Repeat("t", 40000)},
+			{Title: "T", Outcomes: strings.Repeat("o", 40000)},
+			{Title: "T", Summary: strings.Repeat("s", 40000), Replies: []string{"r"}, Outcomes: strings.Repeat("o", 40000)},
+			{Title: strings.Repeat("日本語", 9000)},
+		} {
+			var out string
+			Expect(func() { out = x.Build() }).NotTo(Panic())
+			Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
+			Expect(out).To(HaveSuffix("[truncated]"))
+			Expect(strings.ToValidUTF8(out, "")).To(Equal(out))
+		}
+	})
+
+	It("cuts the one message left with a mark when the fixed parts nearly fill the budget", func() {
+		out := agentd.Handoff{Title: strings.Repeat("t", agentd.HandoffMaxBytes-1000), Messages: []string{strings.Repeat("m", 5000)}}.Build()
+		Expect(len(out)).To(BeNumerically("<=", agentd.HandoffMaxBytes))
+		Expect(out).To(ContainSubstring("mmm"))
+		Expect(out).To(HaveSuffix("[truncated]"))
 	})
 
 	It("truncates summaries on a character boundary", func() {

@@ -9,20 +9,28 @@ Agent templates: building blocks for the agent builder; the result is always a d
 - `researcher` and `web-researcher` are split so that no template holds all three legs of ADR 0084
   (untrusted input, private data, an auto-tier `external-high` tool; fetch and search are
   `external-low`, ADR 0091). `legs_test.go` fails if a template combines them, with no exceptions;
-  `testdata/legs/` has the negative fixture.
+  `testdata/legs/` has the negative fixtures. The test takes the legs only from the tools in
+  `spec.tools`, classified with the declarations in `testdata/legs/tool-declarations.json`. A drift
+  check fails when the instructions name a tool in backticks that `spec.tools` does not list. To add
+  a tool to a template, add it to `spec.tools` and, if it is not an unclassified default tool, to
+  that file.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
 - `templates.go`: embeds the templates into the binary, validates them (schema plus the rules a
-  schema cannot express, such as the default flavor being allowed) and computes a content hash over
+  schema cannot express, such as the default harness being allowed) and computes a content hash over
   the canonical JSON form, so comments and formatting do not change it.
 - `testdata/`: a minimal valid template and invalid fixtures; each invalid file names the error it
   must produce on a `# want:` line.
 
 `spec.harness` holds harness settings, all off when omitted. `harness.pluginInstalls: true` lets an
 OpenCode agent install plugins: its sandbox may read the npm registry (GET and HEAD, no credentials)
-from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
-needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` explicitly.
+from the OpenCode binary, and OpenCode loads external plugins (`harnesses/opencode/README.md`). It
+needs `opencode` among the allowed harnesses. `repo-helper` sets it to `false` explicitly.
+
+`spec.tools` (optional) lists the tool names the instructions expect the agent to call, also the ones
+they only describe in prose ("the search and fetch tools"), for example `[ask_user, web_url_read]`.
+It names tools, not MCP servers: an admin allows servers on the agent. The legs check reads it.
 
 `spec.ephemeral: true` makes agents created from the template ephemeral: each task runs in a fresh
 sandbox with no persistent home, deleted when the task ends (ADR 0065 decision 13c). Off when

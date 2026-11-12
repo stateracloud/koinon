@@ -12,6 +12,28 @@ SELECT id, slug FROM orgs
 WHERE deleted_at IS NULL
 ORDER BY id;
 
+-- name: ListOrgWorkspacesForUnmarked :many
+-- The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
+-- unmarked list command (issue 511). An org that is deleted counts as not in the database: the
+-- reconciler does not walk it.
+SELECT o.id AS org_id, w.workspace
+FROM orgs o
+LEFT JOIN org_workspaces w ON w.org_id = o.id
+WHERE o.deleted_at IS NULL
+ORDER BY o.id;
+
+-- name: ListAgentsForUnmarked :many
+-- Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
+-- with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
+-- the agent to change status from one the reconciler claims. The row's own sandbox and provider names
+-- are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
+SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
+FROM agents a
+JOIN orgs o ON o.id = a.org_id
+LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
+WHERE o.deleted_at IS NULL
+ORDER BY a.org_id, a.id;
+
 -- name: GetOrgWorkspace :one
 SELECT * FROM org_workspaces
 WHERE org_id = @org_id;
@@ -163,6 +185,15 @@ ORDER BY CASE
          (r.origin = 'scheduled'), r.ready_at NULLS LAST,
          coalesce(r.finished_at, r.created_at) DESC, r.id
 LIMIT 1;
+
+-- name: SetAgentSandboxMessage :one
+-- Stores an operator message and nothing else. A note written from outside the agent's work item
+-- (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+-- what the agent's own item recorded in the meantime.
+UPDATE agent_sandboxes
+SET message = @message
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
 
 -- name: SetAgentSandboxName :one
 -- Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the

@@ -1,5 +1,10 @@
 # ast-grep trial: code-shape questions, grep against ast-grep
 
+- Status: Complete
+- Date: 2026-11-02
+- Area: engineering-process
+- Tags: tooling, testing
+
 Research date: 2026-11-02, for #528. One cloud session ran four real code-shape questions on this
 repository at `main` (`dc1ebc4`), each once with grep (and the shell tools an agent reaches for next)
 and once with ast-grep, and compared tool calls, output characters, true and false positives and

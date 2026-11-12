@@ -283,7 +283,7 @@ gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list 
       resource: limits.memory
       divisor: "1"
 {{- /* Restore-hold (issue #462): all three Deployments start but act on nothing until the value is false again. */}}
-{{- if .Values.restoreHold }}
+{{- if include "koinon.restoreHold" . }}
 - name: KOINON_RESTORE_HOLD
   value: "true"
 {{- end }}
@@ -603,6 +603,18 @@ helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 {{- include "koinon.componentName" (list . "gateway-config") }}
 {{- end }}
 
+{{/* "true" when the install is held (restoreHold, ADR 0107), else empty. The one test every held-only render uses. */}}
+{{- define "koinon.restoreHold" -}}
+{{- if eq (toString .Values.restoreHold) "true" }}true{{- end }}
+{{- end }}
+
+{{/* The deny-all gateway config a held install mounts instead of the reconciler's (restoreHold, issue #530). */}}
+{{/* The suffix is appended after the base is cut, so the 63-character limit cannot drop it and the name always differs from koinon.gatewayConfigName. */}}
+{{- define "koinon.gatewayHeldConfigName" -}}
+{{- $suffix := "-gateway-config-held" -}}
+{{- printf "%s%s" (include "koinon.fullname" . | trunc (int (sub 63 (len $suffix))) | trimSuffix "-") $suffix }}
+{{- end }}
+
 {{/* The Secret with the key-encryption keys (KEKs) for provider keys and connection secrets (ADR 0056). */}}
 {{- define "koinon.kekSecretName" -}}
 {{- .Values.secrets.kek.existingSecret | default (include "koinon.componentName" (list . "kek")) }}
@@ -789,6 +801,15 @@ creates one of this name in each workspace namespace.
 {{- printf "%s-%s-sandbox-default-deny" .Release.Namespace (include "koinon.fullname" .) -}}
 {{- end }}
 
+{{/*
+The sandbox LimitRange (#76, ADR 0083 follow-up), named
+<namespace>-<fullname>-sandbox-limitrange like the sandbox policies. The reconciler
+creates one of this name in each workspace namespace.
+*/}}
+{{- define "koinon.sandboxLimitRange" -}}
+{{- printf "%s-%s-sandbox-limitrange" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
 {{- if eq (include "koinon.kms" .) "openbao" }}
 {{- $o := .Values.secrets.kek.kms.openbao }}
@@ -851,6 +872,14 @@ creates one of this name in each workspace namespace.
 {{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create NetworkPolicies cluster-wide while the policy only warns or audits. Set sandboxNetworkPolicy.enabled=false to run without the writer" }}
 {{- end }}
 {{- end }}
+{{- if .Values.sandboxLimitRange.enabled }}
+{{- if not .Values.sandboxPolicy.enabled }}
+{{- fail "sandboxLimitRange.enabled needs sandboxPolicy.enabled: the LimitRange writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxLimitRange.enabled=false" }}
+{{- end }}
+{{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
+{{- fail "sandboxLimitRange.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create LimitRanges cluster-wide while the policy only warns or audits. Set sandboxLimitRange.enabled=false to run without the writer" }}
+{{- end }}
+{{- end }}
 {{- if .Values.checkpoints.enabled }}
 {{- if not .Values.checkpoints.s3.existingSecret }}
 {{- fail "checkpoints.s3.existingSecret is required when checkpoints.enabled is true: a Secret with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region" }}
@@ -862,8 +891,8 @@ creates one of this name in each workspace namespace.
 {{- fail "checkpoints.s3.pathStyle=false is not supported: the S3 client addresses buckets path-style except on AWS" }}
 {{- end }}
 {{- end }}
-{{- if and .Values.flavorPrepull.enabled (not .Values.flavorPrepull.nodeSelector) }}
-{{- fail "flavorPrepull.nodeSelector is required when flavorPrepull.enabled is true: select the Kata nodes, or the images are pulled onto every node" }}
+{{- if and .Values.harnessPrepull.enabled (not .Values.harnessPrepull.nodeSelector) }}
+{{- fail "harnessPrepull.nodeSelector is required when harnessPrepull.enabled is true: select the Kata nodes, or the images are pulled onto every node" }}
 {{- end }}
 {{- if not (has .Values.postgres.mode (list "cnpg" "external")) }}
 {{- fail "postgres.mode must be cnpg or external" }}

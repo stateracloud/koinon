@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Go toolchain and the one Go cache (`go-ci`) of ci.yml, in one place (issue 572, refs #43). Replaces the
+# setup-go + cache/restore block that every Go job pasted. The key is
+#   go-ci-<os>-<arch>-<go version>-<hash of go.sum>-<week>
+# where <week> is the number of whole 7-day periods since the Unix epoch: the same interval the
+# golangci-lint action uses for its own cache key (cache-invalidation-interval 7), so one weekly miss in
+# `warm-caches` refreshes both. Without the week the entry only changed with go.sum and the build cache
+# went stale (objects of old commits that nothing reads, none of the new ones) between go.sum changes.
+# Restore order: this week and this go.sum, then any week with this go.sum, then any entry for this Go version.
+# This action only restores. `warm-caches` (lookup-only: true, then actions/cache/save with the `key`
+# output) is the one job that saves it (docs/dev/ci.md#cache-ownership).
+name: setup-go-cache
+description: Install the Go toolchain from go.mod and restore the weekly go-ci cache.
+inputs:
+  lookup-only:
+    description: "'true' checks that the exact key exists without downloading it (warm-caches)."
+    required: false
+    default: "false"
+outputs:
+  go-version:
+    description: The installed Go version.
+    value: ${{ steps.go.outputs.go-version }}
+  key:
+    description: The exact cache key of this run.
+    value: ${{ steps.key.outputs.key }}
+  cache-hit:
+    description: "'true' when the exact key was found."
+    value: ${{ steps.cache.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache: false
+    - id: key
+      shell: bash
+      env:
+        GO_VERSION: ${{ steps.go.outputs.go-version }}
+        GO_SUM: ${{ hashFiles('go.sum') }}
+      run: |
+        prefix="go-ci-${RUNNER_OS}-${RUNNER_ARCH}-${GO_VERSION}-"
+        echo "prefix=$prefix" >>"$GITHUB_OUTPUT"
+        echo "sum=$GO_SUM" >>"$GITHUB_OUTPUT"
+        echo "key=${prefix}${GO_SUM}-$(( $(date -u +%s) / 604800 ))" >>"$GITHUB_OUTPUT"
+    - id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: |
+          ${{ steps.key.outputs.prefix }}${{ steps.key.outputs.sum }}-
+          ${{ steps.key.outputs.prefix }}
+        lookup-only: ${{ inputs.lookup-only }}

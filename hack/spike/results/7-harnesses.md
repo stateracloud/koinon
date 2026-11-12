@@ -6,7 +6,7 @@ per ACP message) and harness stderr are in `raw/7/`; the exec prerequisite is in
 
 Setup:
 
-- Flavor images (`hack/spike/flavors/`): `koinon/spike-opencode:2` (OpenCode 1.19.3, glibc binary
+- Harness images (`hack/spike/harnesses/`): `koinon/spike-opencode:2` (OpenCode 1.19.3, glibc binary
   from npm on the probe base), `koinon/spike-hermes:3` (official `nousresearch/hermes-agent:v0.22.3`),
   `koinon/spike-pi:3` (pi 1.3.0 + pi-acp 0.0.34 on `node:24-bookworm-slim`). Each has read-only
   config in `/etc/koinon/` pointing at agentgateway for chat completions and MCP, with the
@@ -37,21 +37,21 @@ All three harnesses pass 7.1–7.5.
 ## Findings
 
 1. **OpenShell does not pass the image's `ENV` to the processes it starts**, `PATH` included. Only
-   `HOME`, the provider placeholders and OpenShell's own variables arrive. Flavor images must set
-   their environment in an entry script (Koinon's flavor contract, ADR 0048), and call binaries by
+   `HOME`, the provider placeholders and OpenShell's own variables arrive. Harness images must set
+   their environment in an entry script (Koinon's harness contract, ADR 0048), and call binaries by
    absolute path or set `PATH` there.
 2. **ACP over `exec --no-tty` works for all three harnesses** with no relay inside the sandbox;
    `agentd` needs the same non-TTY stdin path through the gateway API.
 3. **pi exposes MCP tools through `codemode` by default** (tools not declared to the model, only
    callable from scripts); the 4B model never found them (attempt 1 explored pi's example files for
-   4 minutes). `"exposure": "direct"` in `mcp.json` fixed it. Koinon's pi flavor sets direct
+   4 minutes). `"exposure": "direct"` in `mcp.json` fixed it. Koinon's pi harness sets direct
    exposure for the approval tools.
 4. **Harnesses phone home and are refused, harmlessly**: OpenCode (`opencode.ai`,
    `models.opencode.ai`, `registry.npmjs.org` for its plugin install), Hermes (model catalog on
-   `nousresearch.com` and GitHub), pi (`pi.dev`). None blocked the run; flavor configs should
+   `nousresearch.com` and GitHub), pi (`pi.dev`). None blocked the run; harness configs should
    still switch them off where a switch exists.
 5. **Hermes and pi-acp don't advertise MCP capabilities**, so per-session MCP servers from ACP clients
-   don't work for them; Koinon configures MCP in each flavor's own config, which all three honour.
+   don't work for them; Koinon configures MCP in each harness's own config, which all three honour.
 6. Hermes asks for edit permission over ACP; OpenCode and pi did not for these tool calls. Koinon's
    `agentd` answers permission requests from the agent's tier policy.
 7. agentgateway passed two upstream `503`s from Ollama through as-is; pi retried them, which is

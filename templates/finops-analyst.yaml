@@ -6,17 +6,16 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: finops-analyst
-  version: 0.1.0
+  version: 0.1.1
   displayName: FinOps analyst
   description: >-
     Reports each morning on yesterday's cloud and service costs and flags anomalies. It reads costs
     through the MCP servers you allow for the agent (billing, cost or metrics servers); allow them
     on the agent's page after you create it.
 spec:
-  flavors:
+  harness:
     allowed: [opencode]
     default: opencode
-  harness:
     pluginInstalls: false
   # Sandbox size (ADR 0083): an estimate for this agent's work; the platform bounds clamp it.
   resources:
@@ -24,6 +23,7 @@ spec:
     memory: {request: 1536Mi, limit: 2Gi}
   model:
     name: default
+  tools: [ask_user]
   grants: []
   triggers:
     # UTC keeps the template neutral. On the agent's Edit triggers page change the time and zone, and

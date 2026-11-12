@@ -107,3 +107,15 @@ RETURNING *;
 SELECT DISTINCT org_id FROM connections
 WHERE connector = ANY(@connectors::text[]) AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY org_id;
+
+-- name: SetConnectionMCPHosts :one
+-- The admin's extra MCP hosts of a connection (#240). The caller holds the row (GetConnectionForUpdate)
+-- and has validated and de-duplicated the hosts.
+UPDATE connections SET mcp_hosts = @mcp_hosts::text[]
+WHERE org_id = @org_id AND id = @id
+RETURNING *;
+
+-- name: LockOrgMCPHosts :exec
+-- Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
+-- cannot be added to two connections at once. Held until the transaction ends.
+SELECT pg_advisory_xact_lock(hashtextextended('connection_mcp_hosts:' || (sqlc.arg(org_id)::uuid)::text, 0));

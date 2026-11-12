@@ -29,17 +29,19 @@ stub() { # <name> <body>: a stub that logs its call (with KUBECONFIG) and then r
 }
 stub go 'case "$1 $2" in
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
-"list ./...") echo example.com/m/a; echo example.com/m/test/flavors ;;
-"list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/flavors" ;; # go list -f {{.Dir}} ./...: absolute directories
+"list ./...") echo example.com/m/a; echo example.com/m/test/harnesses ;;
+"list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/harnesses" ;; # go list -f {{.Dir}} ./...: absolute directories
 "test "*) [[ ${FAKE_GO_TEST_RC:-0} -eq 0 ]] || echo "--- FAIL: TestX"; exit "${FAKE_GO_TEST_RC:-0}" ;;
 "run mvdan.cc/gofumpt@v0.12.0") [[ -z ${FAKE_GOFUMPT_OUT:-} ]] || echo "$FAKE_GOFUMPT_OUT" ;;
 esac
 exit 0'
 stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
-stub pnpm 'exit 0'
+# `pnpm --dir web install` makes web/node_modules/.bin/protoc-gen-es unless FAKE_PNPM_INSTALL_FAIL is set.
+stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
+stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
 export PATH="$tmp/bin:$PATH"
@@ -54,17 +56,19 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/internal/foo" "$seed/charts/koinon" "$seed/web" "$seed/docs/adr" "$seed/internal/db/queries" "$seed/internal/db/migrations"
-for s in migrate-lint adr-lint adr-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test; do
+for s in migrate-lint adr-lint adr-lint-test doc-meta-lint doc-meta-lint-test chart-check dep-age-check script-check-fake mktemp-lint mktemp-lint-test runner-lint runner-lint-test fetch-pinned-test pinned-download-lint bash5-lint bash5-lint-test audit-batch-lint audit-batch-lint-test versions-check versions-check-test govulncheck govulncheck-test go-fuzz; do
 	printf '#!/usr/bin/env bash\necho "%s $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\nexit "${FAKE_%s_RC:-0}"\n' "$s.sh" "$(tr a-z- A-Z_ <<<"$s")" >"$seed/hack/$s.sh"
 done
 # The Go gate runs hack/go-test.sh (and its verdict, old issue 507), not bare go test.
 printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\ncase ${FAKE_GO_TEST_RC:-0} in 0) ;; 3) echo "go-test verdict: INCOMPLETE (missing docker): 1 passed, 0 partly skipped, 0 failed, 0 not run, 1 skipped (of 2 suites)" ;; *) echo "--- FAIL: TestX" ;; esac\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 cp "$repo/hack/golangci-lint.sh" "$seed/hack/golangci-lint.sh" # the real wrapper; it execs the golangci-lint stub
+cp "$repo/hack/buf-breaking-against.sh" "$seed/hack/buf-breaking-against.sh" # real helper (#542); needs only git
 chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
 echo "package foo" >"$seed/internal/foo/a.go"
 echo base >"$seed/README.txt"
+echo 'lockfileVersion: 1' >"$seed/web/pnpm-lock.yaml"
 for d in internal/foo charts/koinon web docs/adr internal/db/queries internal/db/migrations; do : >"$seed/$d/.gitkeep"; done
 (cd "$seed" && git add -A && git commit -q -m seed && git remote add origin "$tmp/origin.git" && git push -q origin main)
 
@@ -90,7 +94,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC || true; rm -rf "$tmp/tmpdir"/*; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC FAKE_GOVULNCHECK_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
 fail=0 pass=0
 check() { # <description> <command...>
@@ -140,6 +144,24 @@ pf "$tmp/l2" --list >/dev/null
 for g in chart web generate migrate adr shell mktemp pinned bash5; do check "$g selected by its path" has "^$g:" "$tmp/l2"; done
 check "no Go files: go not selected" hasnt '^go:' "$tmp/l2"
 check "no Go files: tidy not selected" hasnt '^tidy:' "$tmp/l2"
+check "no go.mod change: vuln not selected" hasnt '^vuln:' "$tmp/l2"
+check "a Go file change alone does not select vuln" hasnt '^vuln:' "$tmp/l1"
+
+# govulncheck (#579 part 2): a go.mod change selects the vuln gate, which runs the pinned-version wrapper
+reset_state
+w=$(fresh); cd "$w"
+echo "// require changed" >>go.mod
+commit_all
+pf "$tmp/lv" --list >/dev/null
+check "go.mod change selects vuln" has '^vuln: go.mod or go.sum changed' "$tmp/lv"
+rc=$(pf "$tmp/rv" --only vuln)
+check "vuln gate: exit 0" eq "$rc" 0
+check "vuln gate ran the test and the wrapper" has '^govulncheck.sh' "$FAKE_LOG"
+export FAKE_GOVULNCHECK_RC=1
+rc=$(pf "$tmp/rvf" --only vuln)
+check "a failing govulncheck fails preflight" eq "$rc" 1
+check "vuln FAIL line" has '^vuln FAIL' "$tmp/rvf"
+unset FAKE_GOVULNCHECK_RC
 
 # a workflow-only change selects the mktemp and actionlint gates but not the shell gate
 reset_state
@@ -150,6 +172,7 @@ commit_all
 pf "$tmp/l3" --list >/dev/null
 check "workflow change selects mktemp" has '^mktemp:' "$tmp/l3"
 check "workflow change selects actionlint" has '^actionlint:' "$tmp/l3"
+check "workflow change selects zizmor" has '^zizmor:' "$tmp/l3"
 check "workflow change selects runnerlint" has '^runnerlint:' "$tmp/l3"
 check "go change does not select runnerlint" hasnt '^runnerlint:' "$tmp/l1"
 check "workflow change selects versions" has '^versions:' "$tmp/l3"
@@ -222,7 +245,7 @@ check "falls back to go vet" has '^go vet ./internal/foo ' "$FAKE_LOG"
 check "no golangci-lint call" hasnt '^golangci-lint' "$FAKE_LOG"
 
 # 3b. no Go file changed (--only go): golangci-lint and go-test.sh get ./-relative directories, never
-# import paths (golangci-lint reads each as a directory: "directory not found"), and not test/flavors
+# import paths (golangci-lint reads each as a directory: "directory not found"), and not test/harnesses
 reset_state
 w=$(fresh); cd "$w"
 echo "x" >>README.txt; commit_all
@@ -230,7 +253,7 @@ echo "x" >>README.txt; commit_all
 check "no Go file: go gate exit 0" eq "$(pf "$tmp/r3b" --only go)" 0
 check "no Go file: lint gets directories" has '^golangci-lint run [.] [.]/internal/foo ' "$FAKE_LOG"
 check "no Go file: no import path" hasnt 'example[.]com/m' "$FAKE_LOG"
-check "no Go file: no test/flavors" hasnt 'test/flavors' "$FAKE_LOG"
+check "no Go file: no test/harnesses" hasnt 'test/harnesses' "$FAKE_LOG"
 check "no Go file: go-test.sh gets the same directories" has '^go-test.sh [.] [.]/internal/foo ' "$FAKE_LOG"
 
 # 4. failures: exit 1, the gate is named, the log path is shown, at most 5 error lines, other gates still run
@@ -299,6 +322,26 @@ check "generate leaves a diff: exit 1" eq "$rc" 1
 rm -f generated.txt
 unset FAKE_GEN_CHANGE
 
+# 6b. a fresh worktree has no web/node_modules (#541): one offline install, then the gate runs; if the
+# store cannot serve it the gate is a skip (lane-gates: notrun), never a failure
+reset_state
+w=$(fresh); cd "$w"
+echo "-- q" >internal/db/queries/q.sql; echo "x" >web/app.ts; commit_all
+check "fresh worktree has no node_modules" hasnt 'x' <(ls web/node_modules 2>/dev/null)
+rc=$(pf "$tmp/n1" --only generate)
+check "generate in a fresh worktree: exit 0" eq "$rc" 0
+check "offline frozen install ran" has '^pnpm --dir web install --offline --frozen-lockfile' "$FAKE_LOG"
+check "make generate ran after the install" has '^make generate' "$FAKE_LOG"
+rm -rf web/node_modules; reset_state
+export FAKE_PNPM_INSTALL_FAIL=1
+for g in generate web; do
+	rc=$(pf "$tmp/n2$g" --only "$g")
+	check "$g without deps: exit 0 (skip, not fail)" eq "$rc" 0
+	check "$g without deps: skip line says why" has "^$g skip (web dependencies missing" "$tmp/n2$g"
+done
+check "make generate not run without deps" hasnt '^make generate' "$FAKE_LOG"
+unset FAKE_PNPM_INSTALL_FAIL
+
 # 7. the checker gates run their scripts with the right arguments
 reset_state
 w=$(fresh); cd "$w"
@@ -316,10 +359,13 @@ check "multi-area change passes: exit 0" eq "$rc" 0
 check "migrate-lint gets the base" has '^migrate-lint.sh origin/main' "$FAKE_LOG"
 check "adr-lint ran" has '^adr-lint.sh' "$FAKE_LOG"
 check "adr-lint-test ran" has '^adr-lint-test.sh' "$FAKE_LOG"
+check "doc-meta-lint ran" has '^doc-meta-lint.sh' "$FAKE_LOG"
+check "doc-meta-lint-test ran" has '^doc-meta-lint-test.sh' "$FAKE_LOG"
 check "chart-check ran" has '^chart-check.sh' "$FAKE_LOG"
 check "pnpm ran for web" has '^pnpm ' "$FAKE_LOG"
 check "shellcheck on the changed script" has '^shellcheck .*hack/new.sh' "$FAKE_LOG"
 check "actionlint ran for the workflow change" has '^actionlint' "$FAKE_LOG"
+check "zizmor ran for the workflow change" has '^zizmor --offline' "$FAKE_LOG"
 check "runner-lint (with the trigger rule) ran" has '^runner-lint.sh' "$FAKE_LOG"
 check "mktemp-lint ran" has '^mktemp-lint.sh' "$FAKE_LOG"
 check "mktemp-lint-test ran" has '^mktemp-lint-test.sh' "$FAKE_LOG"
@@ -347,6 +393,15 @@ rc=$(pf "$tmp/c4")
 check "a failing actionlint fails preflight" eq "$rc" 1
 check "actionlint FAIL line" has '^actionlint FAIL' "$tmp/c4"
 unset FAKE_ACTIONLINT_RC
+export FAKE_ZIZMOR_RC=1
+rc=$(pf "$tmp/c4z")
+check "a failing zizmor fails preflight" eq "$rc" 1
+check "zizmor FAIL line" has '^zizmor FAIL' "$tmp/c4z"
+check "no version warning when zizmor is the pinned version" hasnt '^zizmor warn' "$tmp/c4z"
+export FAKE_ZIZMOR_VERSION=0.0.1
+pf "$tmp/c4w" >/dev/null
+check "a zizmor other than the pinned one warns" has '^zizmor warn: CI pins ' "$tmp/c4w"
+unset FAKE_ZIZMOR_RC FAKE_ZIZMOR_VERSION
 export FAKE_CHART_CHECK_RC=1
 rc=$(pf "$tmp/c2")
 check "a failing checker fails preflight" eq "$rc" 1
@@ -374,7 +429,7 @@ rc=$(pf "$tmp/d2" --only deps,proto)
 check "deps and proto pass: exit 0" eq "$rc" 0
 check "dep-age-check gets the base" has '^dep-age-check.sh origin/main' "$FAKE_LOG"
 check "buf lint ran" has '^buf lint' "$FAKE_LOG"
-check "buf breaking against the base branch" has '^buf breaking --against .git#branch=main' "$FAKE_LOG"
+check "buf breaking against the merge base" has '^buf breaking --against .git#ref=' "$FAKE_LOG"
 export FAKE_DEP_AGE_CHECK_RC=1
 rc=$(pf "$tmp/d3" --only deps)
 check "dep-age failure fails preflight" eq "$rc" 1
@@ -408,9 +463,12 @@ check "scripts FAIL line" has '^scripts FAIL' "$tmp/s2"
 unset FAKE_SCRIPT_CHECK_FAKE_RC
 reset_state
 w=$(fresh); cd "$w"
-echo "package foo // y" >>internal/foo/a.go; commit_all
+mkdir -p docs/dev; echo "# notes" >docs/dev/notes.md; commit_all
 pf "$tmp/s3" --list >/dev/null
-check "a Go-only change does not select scripts" hasnt '^scripts:' "$tmp/s3"
+check "a Markdown-only change does not select scripts (the job rule, #572)" hasnt '^scripts:' "$tmp/s3"
+echo "package foo // y" >>internal/foo/a.go; commit_all
+pf "$tmp/s3b" --list >/dev/null
+check "a Go change selects scripts (the checks read Go sources, #572)" has '^scripts:' "$tmp/s3b"
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

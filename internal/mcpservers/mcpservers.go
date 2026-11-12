@@ -25,6 +25,7 @@
 package mcpservers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -392,9 +393,14 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return invalid("url must not have a query or fragment, which could carry a secret; use a credential header")
 	case len(rawURL) > 2048:
 		return invalid("url is longer than 2048 characters")
+	case strings.Contains(rawURL, "$"):
+		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	if transport != TransportStreamableHTTP && transport != TransportSSE {
 		return invalid("transport must be %q or %q", TransportStreamableHTTP, TransportSSE)
+	}
+	if err := CheckCredentialLoader(header, prefix); err != nil {
+		return err
 	}
 	if header != "" {
 		if !headerPattern.MatchString(header) {
@@ -406,6 +412,20 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	}
 	if !prefixPattern.MatchString(prefix) {
 		return invalid("credential prefix must be at most 32 printable ASCII characters, for example \"Bearer \"")
+	}
+	return nil
+}
+
+// CheckCredentialLoader refuses a credential header name or prefix with '$', which the gateway's
+// config loader reads as an environment variable (#668). ValidateRemote calls it when a server is
+// saved, and the reconciler calls it for each stored server, so a row saved before the rule is left
+// out of the gateway's config instead of failing the config every org shares.
+func CheckCredentialLoader(header, prefix string) error {
+	if strings.Contains(header, "$") {
+		return invalid("credential header must not contain '$': the gateway's config loader reads $NAME as an environment variable")
+	}
+	if strings.Contains(prefix, "$") {
+		return invalid("credential prefix must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	return nil
 }
@@ -872,6 +892,28 @@ func ContentHash(description string, schema json.RawMessage) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// ToolContentHash is the hash SyncTools keeps for a tool: of what it stores and offers (the
+// sanitised description and schema) and of what the server published. A tool's published text
+// reaches the model unchanged where Koinon does not serve it (agentgateway federates an auto tool's
+// tools/list as is, ADR 0057), so a change only in what sanitising removes or cuts (an invisible
+// character, text past the cap) is a change of the tool too. A tool whose published text needed no
+// sanitising has the ContentHash of its text, as before.
+func ToolContentHash(publishedDesc string, publishedSchema json.RawMessage, desc string, schema json.RawMessage) string {
+	stored := ContentHash(desc, schema)
+	pubSchema := canonicalJSON(publishedSchema)
+	if publishedDesc == desc && bytes.Equal(pubSchema, canonicalJSON(schema)) {
+		return stored
+	}
+	h := sha256.New()
+	h.Write([]byte("published\x00"))
+	h.Write([]byte(stored))
+	h.Write([]byte{0})
+	h.Write([]byte(publishedDesc))
+	h.Write([]byte{0})
+	h.Write(pubSchema)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // canonicalJSON re-encodes a JSON document with sorted keys and no insignificant space.
 func canonicalJSON(raw json.RawMessage) []byte {
 	if len(raw) == 0 {
@@ -925,13 +967,18 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			if len(schema) == 0 || !json.Valid(schema) || schema[0] != '{' {
 				schema = json.RawMessage(`{"type":"object"}`)
 			}
-			// The description and the schema's strings reach the model verbatim, so what is stored,
-			// hashed and offered is the sanitised text (ADR 0057 amendment, #52).
+			published := schema
+			if len(lt.InputSchema) > 0 {
+				published = lt.InputSchema
+			}
+			// The description and the schema's strings reach the model verbatim, so what is stored
+			// and offered is the sanitised text (ADR 0057 amendment, #52); the hash covers the
+			// published text as well (#684).
 			desc, rep := mcpsanitize.Description(lt.Description)
 			schema, srep := mcpsanitize.Schema(schema)
 			rep.Capped, rep.Cleaned = rep.Capped || srep.Capped, rep.Cleaned || srep.Cleaned
 			names = append(names, lt.Name)
-			hash := ContentHash(desc, schema)
+			hash := ToolContentHash(lt.Description, published, desc, schema)
 			cur, ok := have[lt.Name]
 			switch {
 			case !ok:

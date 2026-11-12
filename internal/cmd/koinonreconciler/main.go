@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -175,6 +176,7 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	netpol := newSandboxNetworkPolicy(cfg, kube, log)
+	limitRange := newSandboxLimitRange(cfg, kube, log)
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -216,6 +218,8 @@ func serve(ctx context.Context, cfg config) error {
 	if cfg.openshellConfigMap != "" {
 		gatewayIDs = reconciler.KubeGatewayID{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
 	}
+	// One egress policy; the GitHub client (and its derived per-CA clients) dials through it.
+	urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
@@ -224,9 +228,9 @@ func serve(ctx context.Context, cfg config) error {
 			Keys:                keyring,
 			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:      cfg.providerKeysDir,
-			URLPolicy:           catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
+			URLPolicy:           urlPolicy,
 			ProviderKeySettle:   cfg.keySettle,
-			Flavors:             cfg.flavors(),
+			Harnesses:           cfg.harnesses(),
 			RuntimeClassName:    cfg.runtimeClass,
 			SandboxResources:    &cfg.sandboxResources,
 			IdleTimeout:         cfg.idleTimeout,
@@ -248,10 +252,11 @@ func serve(ctx context.Context, cfg config) error {
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
 				Keys:   keyring,
-				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
+				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}),
 			},
 			Observer:      observer,
 			NetworkPolicy: netpol,
+			LimitRange:    limitRange,
 			Logger:        log,
 			Metrics:       reconciler.NewMetrics(reg),
 		})
@@ -322,6 +327,17 @@ func newSandboxNetworkPolicy(cfg config, kube kubernetes.Interface, log *slog.Lo
 	}
 	return &reconciler.SandboxNetworkPolicy{
 		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxNetworkPolicyName, Log: log,
+	}
+}
+
+// newSandboxLimitRange builds the sandbox LimitRange writer (#76), or nil when it is off.
+func newSandboxLimitRange(cfg config, kube kubernetes.Interface, log *slog.Logger) *reconciler.SandboxLimitRange {
+	if !cfg.sandboxLimitRange {
+		log.Warn("the sandbox LimitRange is off: OpenShell supervisor and init containers stay BestEffort")
+		return nil
+	}
+	return &reconciler.SandboxLimitRange{
+		Kube: kube, GatewayID: cfg.openshellGateway, Name: cfg.sandboxLimitRangeName, Log: log,
 	}
 }
 

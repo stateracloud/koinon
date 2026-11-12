@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
+# Maintainer script (hack/README.md): part of the maintainers' merge loop. It only reads, so it works from a fork.
+#
 # Show why CI failed, in a few lines. For a PR it finds the failing checks; for a run id it takes the
 # run's failed jobs. Per failing GitHub Actions job it prints at most 30 lines: the job name, the
 # link, then the useful lines of `gh run view --log-failed` (ANSI codes and timestamps stripped;
 # `--- FAIL`, `[FAIL]`/`[FAILED]` with their Expected/to equal lines, `panic:`, `##[error]`,
 # `FAIL<TAB>pkg` and compiler errors `file.go:12:3:` kept; `go: downloading` dropped).
+# After the link it prints one greppable line `class=<category> retry=<yes|no|unknown>`: the first row
+# of hack/ci-fail-classes.tsv (ordered; CI_FAIL_CLASSES overrides the path) that matches the log, else
+# `class=unknown retry=unknown` so a new failure shows up and the table can grow.
 #
 # Usage: hack/ci-fail.sh <PR|run-id> [--job NAME]
 #   A number of 9 digits or more is a run id, a shorter one a PR number. --job keeps the jobs whose
@@ -16,6 +21,10 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
+# KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
+koinon_use_repo
 export GH_PAGER=cat PAGER=cat
 
 usage() {
@@ -54,6 +63,21 @@ filter() {
     awk '!seen[$0]++'
 }
 
+# classify: stdin is the filtered log; prints "<category> <retry>" of the first table row (in table
+# order, not log order) with a matching line, or "unknown unknown".
+classify() {
+  local table=${CI_FAIL_CLASSES:-$(dirname "${BASH_SOURCE[0]}")/ci-fail-classes.tsv} log klass retry re
+  log=$(cat)
+  while IFS=$'\t' read -r klass retry re; do
+    case $klass in '' | '#'*) continue ;; esac
+    if grep -Eq -e "$re" <<<"$log"; then
+      echo "$klass $retry"
+      return 0
+    fi
+  done <"$table"
+  echo "unknown unknown"
+}
+
 useful() { # stdin: filtered log
   grep -E -e '--- FAIL' -e '\[FAIL(ED)?\]' -e 'panic:' -e '##\[error\]' \
     -e '^FAIL([[:space:]]|$)' -e '^[[:space:]]*(Expected|to equal|to be |to match|to contain|to have|to succeed|<[^>]+>:)' \
@@ -84,13 +108,22 @@ while IFS=$'\t' read -r name run job url; do
   echo "job $name"
   if [ "$run" = "-" ]; then
     echo "no GitHub Actions run: $url"
+    echo "class=unknown retry=unknown"
     continue
   fi
   echo "run $url"
   args=(run view "$run" --log-failed)
   [ "$job" = "-" ] || args+=(--job "$job")
-  log=$(gh "${args[@]}" 2>&1 | filter) || true
-  out=$(useful <<<"$log" | head -n 28) || true
+  ghrc=0
+  raw=$(gh "${args[@]}" 2>&1) || ghrc=$?
+  log=$(filter <<<"$raw") || true
+  if [ "$ghrc" -ne 0 ]; then
+    cls=unknown retry=unknown # gh's own error text is not a CI log
+  else
+    read -r cls retry <<<"$(classify <<<"$log")"
+  fi
+  echo "class=$cls retry=$retry"
+  out=$(useful <<<"$log" | head -n 27) || true
   if [ -z "$out" ]; then
     out=$(printf '%s\n' "$log" | tail -n 10)
   fi

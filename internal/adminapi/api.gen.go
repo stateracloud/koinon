@@ -123,6 +123,7 @@ const (
 	NotFound         ErrorCode = "not_found"
 	PermissionDenied ErrorCode = "permission_denied"
 	Unauthenticated  ErrorCode = "unauthenticated"
+	Unavailable      ErrorCode = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -139,6 +140,8 @@ func (e ErrorCode) Valid() bool {
 	case PermissionDenied:
 		return true
 	case Unauthenticated:
+		return true
+	case Unavailable:
 		return true
 	default:
 		return false
@@ -364,6 +367,27 @@ func (e PriceInputTokenizer) Valid() bool {
 	case PriceInputTokenizerTiktokenCl100kBase:
 		return true
 	case PriceInputTokenizerTiktokenO200kBase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderServingState.
+const (
+	Failed  ProviderServingState = "failed"
+	Saved   ProviderServingState = "saved"
+	Serving ProviderServingState = "serving"
+)
+
+// Valid indicates whether the value is a known member of the ProviderServingState enum.
+func (e ProviderServingState) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Saved:
+		return true
+	case Serving:
 		return true
 	default:
 		return false
@@ -1363,6 +1387,15 @@ type Provider struct {
 	ManagedBySecret *string `json:"managedBySecret,omitempty"`
 	Name            string  `json:"name"`
 
+	// ServingDetail What the gateway or the reconciler said about the failure, for an admin; never a key.
+	ServingDetail *string `json:"servingDetail,omitempty"`
+
+	// ServingReason Set with `servingState` `failed`; one of `no key`, `gateway rejected config`, `upstream unreachable`, `unknown`.
+	ServingReason *string `json:"servingReason,omitempty"`
+
+	// ServingState Whether the gateway serves the provider, from what the reconciler recorded (it never reads the gateway). `saved`: not served yet, the reconciler applies it on its next pass. `serving`: every enabled model is served. `failed`: the gateway does not serve it and `servingReason` says why. Unset when the provider is disabled, removed or has no enabled model.
+	ServingState *ProviderServingState `json:"servingState,omitempty"`
+
 	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 	Source Source `json:"source"`
 
@@ -1371,6 +1404,9 @@ type Provider struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	Url       string    `json:"url"`
 }
+
+// ProviderServingState Whether the gateway serves the provider, from what the reconciler recorded (it never reads the gateway). `saved`: not served yet, the reconciler applies it on its next pass. `serving`: every enabled model is served. `failed`: the gateway does not serve it and `servingReason` says why. Unset when the provider is disabled, removed or has no enabled model.
+type ProviderServingState string
 
 // ProviderCreate defines model for ProviderCreate.
 type ProviderCreate struct {

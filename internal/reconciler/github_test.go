@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/policycheck"
@@ -87,7 +88,7 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 		raw, err := c.Marshal()
 		Expect(err).NotTo(HaveOccurred())
 		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-			OrgID: org, DisplayName: "Repo helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+			OrgID: org, DisplayName: "Repo helper", Harness: harness.OpenCode, CreatedBy: user,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
@@ -126,8 +127,8 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 		cfg = reconciler.Config{
 			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Flavors: map[store.AgentFlavor]reconciler.Flavor{
-				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
 			GitHub: reconciler.GitHubApps{
 				Keys:   ring,

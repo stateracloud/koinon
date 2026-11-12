@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -39,7 +40,7 @@ var _ = Describe("Runs without prompt caching", func() {
 	}
 
 	It("records run.uncached with the model and the reason for an unmapped provider format", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		setup(ctx, e, "mystery", modelformat.OpenAI)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -50,7 +51,7 @@ var _ = Describe("Runs without prompt caching", func() {
 	})
 
 	It("records nothing for a direct Anthropic model: its harness places the markers", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		setup(ctx, e, "anthropic", modelformat.Anthropic)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -59,12 +60,12 @@ var _ = Describe("Runs without prompt caching", func() {
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(HaveLen(1))
 		Expect(args[0]).To(Equal([]string{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "anthropic", "--thinking", "none", "--no-web-tools",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "anthropic", "--thinking", "none", "--compaction-tokens", "170000", "--no-web-tools",
 		}), "no --cache-* switch: OpenCode places the Messages cache_control itself")
 	})
 
 	It("starts an anthropic-format model with the koinon-anthropic entry", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		setup(ctx, e, "anthropic", modelformat.Anthropic)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -73,7 +74,7 @@ var _ = Describe("Runs without prompt caching", func() {
 	})
 
 	It("records nothing for a provider that caches by itself", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		setup(ctx, e, "openai", modelformat.OpenAI)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")

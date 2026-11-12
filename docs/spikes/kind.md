@@ -1,5 +1,10 @@
 # Spike S1: OpenShell on kind
 
+- Status: Complete
+- Date: 2026-10-22
+- Area: engineering-process
+- Tags: e2e, ci, kubernetes
+
 Plan item S1 (`docs/plans/v0.1.md`): can a single-node kind cluster carry Agent Sandbox v1.0.7
 and OpenShell 0.1.7 with a `runc` RuntimeClass, so that E1 (quickstart e2e) and E2 (escape
 suite on `runc`) can run on GitHub's free `ubuntu-latest` runners?

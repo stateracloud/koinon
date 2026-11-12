@@ -30,6 +30,19 @@ updates:
     groups:
       web:
         patterns: ["*"]
+  # The CI-only dev project of Koinon's OpenCode plugins (ADR 0093). @opencode/plugin moves only with
+  # the image's OpenCode re-pin (the `opencode plugin` job checks the two match), never on its own.
+  - package-ecosystem: npm
+    directory: /flavors/opencode/plugins
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    cooldown: {default-days: 3}
+    ignore:
+      - dependency-name: "@opencode/plugin"
+    groups:
+      opencode-plugins:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly, day: monday}
@@ -39,21 +52,17 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # One entry and one group for the three Dockerfile directories: one pull request a week, not three
+  # (issue 572).
   - package-ecosystem: docker
-    directory: /flavors/opencode
+    directories:
+      - /flavors/opencode
+      - /test/fixtures/rt1/motherduck
+      - /test/fixtures/rt1/prometheus
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
     commit-message: {prefix: "chore(deps)"}
     cooldown: {default-days: 3}
-  - package-ecosystem: docker
-    directory: /test/fixtures/rt1/motherduck
-    schedule: {interval: weekly, day: monday}
-    open-pull-requests-limit: 5
-    commit-message: {prefix: "chore(deps)"}
-    cooldown: {default-days: 3}
-  - package-ecosystem: docker
-    directory: /test/fixtures/rt1/prometheus
-    schedule: {interval: weekly, day: monday}
-    open-pull-requests-limit: 5
-    commit-message: {prefix: "chore(deps)"}
-    cooldown: {default-days: 3}
+    groups:
+      docker:
+        patterns: ["*"]

@@ -5,6 +5,8 @@
   truth, `LISTEN/NOTIFY` is only a hint, and the `runs` table is the queue for runs. Work arrives
   as tasks ([0065](0065-work-model-tasks-inbox.md)) through triggers ([0066](0066-triggers-and-scheduling.md)).
 - Date: 2026-10-21
+- Area: work-model
+- Tags: eventing, triggers, tasks
 - Decision: [design.md#10](../design.md)
 
 ## Context
@@ -98,3 +100,11 @@ subscriptions were not built. Tasks and triggers replace both (amendment below).
 
 - [0003](0003-postgres-source-of-truth.md), [0011](0011-agent-to-agent.md),
   [0017](0017-board-and-chat-interaction-model.md), [0022](0022-frontend-architecture.md)
+
+## Note (2026-11-12, issue 573): the wake-up channel and the work queue
+
+The reconciler's wake-up stays a one-slot channel that a burst of NOTIFYs fills once. That is correct
+only while a pass is short. Since issue 573 a pass does not wait for the sandbox work of any agent
+(a per-agent work queue runs it, [0066](0066-triggers-and-scheduling.md)), so a slow backend call for
+one agent cannot keep a wake-up for another agent waiting. Postgres is still the source of truth and
+the NOTIFY payload is still empty.

@@ -11,34 +11,40 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/agentresources"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
-	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/templates"
 )
 
-// Flavor is what the reconciler needs to know about a harness flavor (ADR 0035).
-type Flavor struct {
-	// Image is the flavor image reference.
+// Harness is what the reconciler needs to know about a harness (ADR 0035).
+type Harness struct {
+	// Image is the harness image reference.
 	Image string
 	// Binaries are the absolute paths of the executables that call agentgateway; only they
 	// may use the provider record's credential.
 	Binaries []string
 }
 
-// DefaultBinaries are the network-calling executables of each flavor Koinon ships
-// (flavor.Descriptor.DefaultBinaries).
-var DefaultBinaries = func() map[store.AgentFlavor][]string {
-	m := map[store.AgentFlavor][]string{}
-	for _, d := range flavor.All() {
+// rendered reports whether the reconciler renders the harness: it has an image and binaries. Only a
+// rendered harness gets a profile (koinon-agentgateway-<harness>), so only its profile is claimed.
+func (f Harness) rendered() bool { return f.Image != "" && len(f.Binaries) > 0 }
+
+// DefaultBinaries are the network-calling executables of each harness Koinon ships
+// (harness.Descriptor.DefaultBinaries).
+var DefaultBinaries = func() map[string][]string {
+	m := map[string][]string{}
+	for _, d := range harness.All() {
 		m[d.Name] = d.DefaultBinaries
 	}
 	return m
 }()
 
 // GatewayKeyEnvVar holds the credential each sandbox gets: the agent's agentgateway key, as
-// the OpenAI-compatible key every flavor reads (flavors/opencode/README.md).
+// the OpenAI-compatible key every harness reads (harnesses/opencode/README.md).
 const GatewayKeyEnvVar = "OPENAI_API_KEY"
 
 const (
@@ -47,22 +53,22 @@ const (
 	profilePrefix = "koinon-agentgateway-"
 )
 
-// profile is the workspace-scoped provider profile for one flavor: a bearer credential bound
+// profile is the workspace-scoped provider profile for one harness: a bearer credential bound
 // to agentgateway's chat completions route. The endpoint is inspected at L7 and enforced
 // (ADR 0045), and its stable placeholder lets a rotated key reach running processes without a
 // restart (ADR 0048). This profile is also what lets the sandbox reach agentgateway at all:
 // OpenShell adds a provider profile's endpoints to the sandbox's network allowlist (spike
 // steps 5 and 7), so the sandbox policy itself needs no rule for it.
-func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.ProviderProfile {
-	return GatewayProfile(flavor, f, r.cfg.Gateway, len(r.cfg.ToolServers) > 0)
+func (r *Reconciler) profile(harness string, f Harness) execution.ProviderProfile {
+	return GatewayProfile(harness, f, r.cfg.Gateway, len(r.cfg.ToolServers) > 0)
 }
 
-// GatewayProfile is the profile the reconciler renders for flavor, with agentgateway at gw and
+// GatewayProfile is the profile the reconciler renders for harness, with agentgateway at gw and
 // the /mcp route allowed when tools is set. Exported for the escape suite, which attaches the
 // same profile to a sandbox on a real gateway.
-func GatewayProfile(flavor store.AgentFlavor, f Flavor, gw Endpoint, tools bool) execution.ProviderProfile {
+func GatewayProfile(harness string, f Harness, gw Endpoint, tools bool) execution.ProviderProfile {
 	// One route per model format (ADR 0069 decision 6), from the same table the gateway renders:
-	// the same host, credential and enforcement. The profile is per flavor, so adding a model changes
+	// the same host, credential and enforcement. The profile is per harness, so adding a model changes
 	// nothing here. Anything else on the gateway (/v1/messages/count_tokens included) stays closed.
 	var allow []execution.L7Rule
 	for _, p := range gateway.RoutePaths() {
@@ -78,8 +84,8 @@ func GatewayProfile(flavor store.AgentFlavor, f Flavor, gw Endpoint, tools bool)
 			execution.L7Rule{Method: "DELETE", Path: "/mcp"})
 	}
 	return execution.ProviderProfile{
-		ID:          profilePrefix + string(flavor),
-		DisplayName: "agentgateway (" + string(flavor) + ")",
+		ID:          profilePrefix + harness,
+		DisplayName: "agentgateway (" + harness + ")",
 		Description: "Per-agent agentgateway key, rendered by koinon-reconciler",
 		Category:    execution.CategoryInference,
 		Credentials: []execution.ProfileCredential{{
@@ -137,7 +143,7 @@ func SandboxPolicy(network map[string]execution.NetworkRule) execution.Policy {
 // grant-derived policy entries, updated in place. res are the effective resources (sandboxResources);
 // they are part of the hash, so a changed template or platform setting recreates the sandbox, as a
 // changed image does (ADR 0083).
-func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor, providers []string, network map[string]execution.NetworkRule, res templates.Resources) (execution.SandboxSpec, string) {
+func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Harness, providers []string, network map[string]execution.NetworkRule, res templates.Resources) (execution.SandboxSpec, string) {
 	spec := execution.SandboxSpec{
 		Name:             names.Sandbox,
 		Image:            f.Image,
@@ -184,11 +190,12 @@ func specHash(s execution.SandboxSpec) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// sandboxResources is the agent's effective sandbox size: its version's template values or the
-// platform default, clamped to the platform bounds (sandboxres). A clamp is logged once per
-// change, not once per pass.
+// sandboxResources is the agent's effective sandbox size: the agent's own override, else its
+// version's template values, else the platform default, clamped to the platform bounds (sandboxres;
+// ADR 0083). The bounds are applied again here although the API checked the override, because the
+// bounds can change after it was stored. A clamp is logged once per change, not once per pass.
 func (r *Reconciler) sandboxResources(w *work) templates.Resources {
-	res, clamps := r.cfg.SandboxResources.Effective(w.cfg.Resources)
+	res, clamps := r.cfg.SandboxResources.Effective(sandboxres.Overlay(w.cfg.Resources, agentresources.OverrideOf(w.agent)))
 	id := execution.UUIDString(w.agent.ID.Bytes)
 	var msg string
 	for _, c := range clamps {

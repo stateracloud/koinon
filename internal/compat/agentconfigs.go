@@ -44,7 +44,7 @@ func FullConfig(noTemplate bool) agentconfig.Config {
 			ID: "nightly", Type: templates.TriggerSchedule, Filter: templates.TriggerFilter{Cron: "0 3 * * *", Timezone: "Europe/Tallinn"},
 			Instruction: "Do the nightly thing.", Notify: &templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin},
 		}},
-		Harness:   templates.Harness{PluginInstalls: true},
+		Harness:   templates.HarnessSettings{PluginInstalls: true},
 		Ephemeral: true,
 		Questions: templates.QuestionTimers{ReminderAfter: templates.Duration{Duration: time.Hour}, ExpireAfter: templates.Duration{Duration: 48 * time.Hour}},
 		Resources: templates.Resources{

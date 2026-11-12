@@ -47,7 +47,7 @@ const (
 // gh read GITHUB_TOKEN or GH_TOKEN.
 var GitHubTokenEnvVars = []string{"GITHUB_TOKEN", "GH_TOKEN"}
 
-// DefaultGitBinaries may use the GitHub endpoints besides the flavor's own binaries. git's
+// DefaultGitBinaries may use the GitHub endpoints besides the harness's own binaries. git's
 // git-remote-https helper matches as a child of git.
 var DefaultGitBinaries = []string{"/usr/bin/git"}
 
@@ -223,8 +223,8 @@ func (r *Reconciler) baseURLOf(ctx context.Context, w *work) (string, error) {
 	return site.BaseURL, nil
 }
 
-// githubBinaries are the executables that may reach GitHub: git and the flavor's binaries.
-func (r *Reconciler) githubBinaries(f Flavor) []string {
+// githubBinaries are the executables that may reach GitHub: git and the harness's binaries.
+func (r *Reconciler) githubBinaries(f Harness) []string {
 	out := slices.Clone(r.cfg.GitBinaries)
 	for _, b := range f.Binaries {
 		if !slices.Contains(out, b) {
@@ -236,7 +236,7 @@ func (r *Reconciler) githubBinaries(f Flavor) []string {
 
 // ensureGitHub mints (or reuses) the agent's token and ensures its profile and provider record. claim
 // lets it recreate a record made before the install label existed (execution.Provider.ClaimLegacy).
-func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names execution.AgentNames, f Flavor, read GitHubRead, claim bool) error {
+func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names execution.AgentNames, f Harness, read GitHubRead, claim bool) error {
 	if r.cfg.GitHub == nil {
 		return errors.New("the agent has a GitHub read grant, but no GitHub token minter is configured")
 	}
@@ -277,6 +277,9 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	}); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	delete(r.draftGitHubDropped, names.GitHubProvider)
+	r.mu.Unlock()
 	if r.noteGitHubRevision(names.GitHubProvider, rev) {
 		what := "installation token"
 		if tok.Revision != "" {

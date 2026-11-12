@@ -32,8 +32,13 @@ You may use AI tools. The rules are the same as for any contribution:
 
 - The human author signs off the commits (DCO above) and is responsible for the change: you must
   understand it, have run it, and be able to answer review questions about it.
-- Disclose the tool with a `Co-Authored-By:` trailer on the commit. Never add an AI as
-  `Signed-off-by`: only a person can certify the DCO.
+- Disclose the tool in the pull request: fill in the "AI use" field of the template (which tool,
+  and what it did). That field is the disclosure; no trailer is required. A pull request body you
+  write yourself (for example `hack/ship.sh --pr-body`) skips the template, so copy the section in.
+- You may also add an `Assisted-by:` trailer to a commit, naming the tool (for example
+  `Assisted-by: <tool> <version>`). It is optional, and it is the preferred form: `Co-Authored-By:`
+  is for people. Never add an AI as `Signed-off-by`: only a
+  person can certify the DCO, so only a human signs off.
 - Maintainers may close a pull request that shows no understanding of the change, however
   well-formed it looks.
 
@@ -45,8 +50,8 @@ uses; newer patch releases usually work, but if something differs from CI, match
 
 | Tool | Version | Used for |
 | --- | --- | --- |
-| Go | `go.mod` (1.27.3) | build, tests, code generators (pinned as `go tool` entries) |
-| Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
+| Go | `go.mod` (1.27.4) | build, tests, code generators (pinned as `go tool` entries) |
+| Docker | any recent, with buildx | Postgres tests (testcontainers), harness images, kind |
 | Node | 24 | web UI |
 | pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |
 | buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
@@ -64,7 +69,7 @@ Code generators (protoc-gen-go, protoc-gen-connect-go, sqlc, goose, oapi-codegen
 tools in `go.mod` and run through `go tool`. `setup-envtest` for the admission tests is fetched by
 `make test-admission`.
 
-Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint,
+Tool versions live in `hack/versions.env`: kind, ko, Helm, kubectl, gitleaks, shellcheck, actionlint, zizmor,
 goreleaser, cosign, kubeconform and golangci-lint, with the sha256 of each release asset the e2e image
 or a workflow downloads (Go stays in `go.mod`). Scripts source the file and workflows load it into the
 job environment; the copies that cannot (the `hack/e2e-toolchain/Dockerfile` ARGs, the `version:` input
@@ -78,8 +83,8 @@ release at least 3 days old, ADR 0079), run `hack/versions-check.sh`, and update
 ```sh
 make web-deps   # install web dependencies (once; run it before make generate and make lint)
 make build      # build Go binaries and the web UI
-make test       # Go and web unit tests, the same set CI runs (without test/flavors)
-make test-flavors # build the flavor images, then run the flavor contract suite (Docker)
+make test       # Go and web unit tests, the same set CI runs (without test/harnesses)
+make test-harnesses # build the harness images, then run the harness contract suite (Docker)
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
 make generate   # regenerate protobuf and sqlc code; commit the result
 make breaking   # buf breaking against main
@@ -99,7 +104,7 @@ including how to point Tilt at a remote cluster of your own.
   `buf breaking`, generated code up to date, migration lint, DCO, and the gitleaks secret scan.
   The full list of required checks is `hack/ci-required.txt` (it also covers the docs build, the
   chart smoke test, the dependency age check and the script tests); a check that does not apply to
-  your change reports success. `flavors` is the only advisory job on pull requests (`flavor-publish` is advisory and push-only). `hack/ci-required-test.sh` keeps
+  your change reports success. `flavors` is required but runs only in the merge queue and on main (on a pull request its job is skipped, which reports success); `flavor-publish` is advisory and push-only. `hack/ci-required-test.sh` keeps
   the list and `ci.yml` in step.
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
@@ -116,7 +121,9 @@ including how to point Tilt at a remote cluster of your own.
   names the holder and what to do. There is no updater bot: merge `main` into
   your branch only when GitHub reports a conflict (the merge queue tests the pull request on main's tip). For an `--admin` merge, merge
   `origin/main` and wait for green first.
-- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
+- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it. An ADR that
+  amends another is named in that one's header, and it puts a one-line marker at each decision it changes
+  (ADR 0046 decision 4); the lint checks the links both ways, review checks the markers.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
   published.

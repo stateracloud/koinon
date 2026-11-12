@@ -398,7 +398,8 @@ var _ = Describe("Service", func() {
 			Expect(got.DescriptionCapped).To(BeTrue())
 			Expect(got.DescriptionCleaned).To(BeTrue())
 			stored, _ := mcpsanitize.Schema(schema)
-			Expect(got.ContentHash).To(Equal(mcpservers.ContentHash(got.Description, stored)))
+			Expect(got.ContentHash).To(Equal(mcpservers.ToolContentHash(poison, schema, got.Description, stored)))
+			Expect(got.ContentHash).NotTo(Equal(mcpservers.ContentHash(got.Description, stored)))
 
 			By("the same poisoned list again is not a change")
 			res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{{Name: "search", Description: poison, InputSchema: schema}})
@@ -413,6 +414,47 @@ var _ = Describe("Service", func() {
 			Expect(got.ReviewReason).To(Equal(mcpservers.ReviewChanged))
 			Expect(got.DescriptionCapped).To(BeTrue())  // the schema string is still over its cap
 			Expect(got.DescriptionCleaned).To(BeTrue()) // and still needs cleaning
+		})
+
+		It("flags a tool whose published text changed only where sanitising removes or cuts it (#684)", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "")
+			sid := uuidOf(s.ID)
+			desc := "Search the wiki." + strings.Repeat(" pad", 300)
+			schema := json.RawMessage(`{"type":"object","properties":{"q":{"type":"string","enum":["a","b"]}}}`)
+			_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{
+				{Name: "search", Description: desc, InputSchema: schema},
+				{Name: "list", Description: "List pages.", InputSchema: schema},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+			Expect(err).NotTo(HaveOccurred())
+			By("a tool whose text needed no sanitising keeps the hash of its text")
+			clean := tiers(ctx, s)["list"]
+			Expect(clean.ContentHash).To(Equal(mcpservers.ContentHash("List pages.", schema)))
+
+			for _, tc := range []struct {
+				name   string
+				desc   string
+				schema json.RawMessage
+			}{
+				{"an invisible character in the description", "Search\u200b the wiki." + strings.Repeat(" pad", 300), schema},
+				{"text past the cap", desc + " and more", schema},
+				{"an invisible character in an enum value", desc, json.RawMessage(`{"type":"object","properties":{"q":{"type":"string","enum":["a\u2060","b"]}}}`)},
+			} {
+				By(tc.name)
+				before := tiers(ctx, s)["search"].ContentHash
+				res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{
+					{Name: "search", Description: tc.desc, InputSchema: tc.schema},
+					{Name: "list", Description: "List pages.", InputSchema: schema},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				got := tiers(ctx, s)["search"]
+				Expect(got.ContentHash).NotTo(Equal(before))
+				Expect(got.ReviewReason).NotTo(BeEmpty())
+			}
+			By("the first change demoted the auto tool")
+			Expect(tiers(ctx, s)["search"].Tier).To(Equal("ask"))
 		})
 
 		It("keeps an admin's tier, enters later tools in the ask tier and flags a changed tool", func(ctx SpecContext) {
@@ -643,7 +685,7 @@ var _ = Describe("Service", func() {
 		It("wakes it when an agent's server allowlist changes (#249)", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			var agent pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness, created_by) VALUES ($1, 'Wake agent', 'opencode', $2) RETURNING id`, org, user).Scan(&agent)).To(Succeed())
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
 
 			_, err := svc.SetAgentServers(ctx, org, actor, agent, []mcpservers.Allowance{{ServerID: s.ID}})
@@ -705,4 +747,28 @@ var _ = Describe("Service", func() {
 			Expect(got.Health).To(Equal("unknown"))
 		})
 	})
+})
+
+// agentgateway's config loader expands $NAME and ${NAME} over the whole standalone config file, so
+// the strings of a server that Koinon writes into it refuse '$' (#668).
+var _ = DescribeTable("ValidateRemote refuses '$'",
+	func(rawURL, header, prefix, want string) {
+		err := mcpservers.ValidateRemote(rawURL, mcpservers.TransportStreamableHTTP, header, prefix)
+		var inv *mcpservers.InvalidError
+		Expect(err).To(BeAssignableToTypeOf(inv))
+		Expect(err).To(MatchError(ContainSubstring(want)))
+		Expect(err).To(MatchError(ContainSubstring("environment variable")))
+	},
+	Entry("a variable in the URL path", "https://mcp.example.com/$HOME/mcp", "", "", "url must not contain '$'"),
+	Entry("a braced variable in the URL path", "https://mcp.example.com/${HOME}", "", "", "url must not contain '$'"),
+	Entry("a trailing dollar in the URL", "https://mcp.example.com/mcp$", "", "", "url must not contain '$'"),
+	Entry("a dollar in the header name", "https://mcp.example.com/mcp", "X-Api-$HOME", "", "credential header must not contain '$'"),
+	Entry("an escaped dollar in the header name", "https://mcp.example.com/mcp", "X-$$", "", "credential header must not contain '$'"),
+	Entry("a variable in the prefix", "https://mcp.example.com/mcp", "Authorization", "Bearer ${HOME} ", "credential prefix must not contain '$'"),
+	Entry("a lone dollar as the prefix", "https://mcp.example.com/mcp", "Authorization", "$", "credential prefix must not contain '$'"),
+)
+
+var _ = It("ValidateRemote accepts a server without '$'", func() {
+	Expect(mcpservers.ValidateRemote("https://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "Token ")).To(Succeed())
+	Expect(mcpservers.ValidateRemote("https://mcp.example.com/%24mcp", mcpservers.TransportSSE, "", "")).To(Succeed())
 })

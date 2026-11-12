@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -46,7 +48,7 @@ func newGiteaEnv(ctx context.Context) *ghEnv {
 	g.gt.AddRepo("secrets")
 	g.gt.Collaborate("koinon-bot", "widgets", "write")
 	ring := secretstoretest.Keyring()
-	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+	g.env = newEnvWith(ctx, harness.OpenCode, func(e *env) string {
 		connID := uuid.New()
 		id := pgtype.UUID{Bytes: connID, Valid: true}
 		envelope, err := connections.SealFields(ring, e.org, id, map[string][]byte{
@@ -171,7 +173,7 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
-		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
+		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + strconv.Quote(url)))
 		Expect(g.gt.Snapshot("secrets").Calls).To(BeEmpty(), "no other repository was touched")
 
 		By("the instructions list the granted repository with the connection's clone URL")

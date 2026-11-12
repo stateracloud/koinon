@@ -68,15 +68,15 @@ want() {
 }
 summary_has() { grep -q -- "$1" "$tmp/summary" || { echo "FAIL: summary lacks '$1'" >&2; fail=1; }; }
 
-want true "PR touching the e2e's files runs" EVENT=pull_request STUB_FORCED=0
+# #572 (ADR 0105 amendment): a pull request runs the e2e only with the label; the rule scripts are not asked.
+want false "PR touching the e2e's files does not run unlabelled" EVENT=pull_request STUB_FORCED=0
 want true "PR with the e2e label runs" EVENT=pull_request 'LABELS=["bug","e2e"]'
+want true "PR with the e2e label runs although nothing is relevant" EVENT=pull_request 'LABELS=["e2e"]' STUB_FORCED=1 STUB_FULL=1
 want false "PR with other labels and nothing relevant does not run" EVENT=pull_request 'LABELS=["bug"]'
-want true "PR that is e2e-relevant but unlabelled runs (fork PRs cannot label, issue #148)" EVENT=pull_request STUB_FULL=0
-summary_has "e2e-relevant"
-want true "PR: full-rule failure runs the e2e" EVENT=pull_request STUB_FULL=2
-want true "PR: a rule failure fails closed" EVENT=pull_request STUB_FORCED=2
-want false "PR: nothing relevant says so" EVENT=pull_request
-summary_has "nothing in this pull request"
+want false "PR that is e2e-relevant but unlabelled does not run (the queue runs it)" EVENT=pull_request STUB_FULL=0
+want false "PR: a full-rule failure does not run it either" EVENT=pull_request STUB_FULL=2 STUB_FORCED=2
+want false "PR: no labels, nothing relevant" EVENT=pull_request
+summary_has "only with the"
 # old issue 468: `gh pr create --label e2e` fires `opened` without the label, then `labeled`.
 PRV=(PR=524 GH_REPO=o/r)
 want true "opened: the label added after the event counts" EVENT=pull_request ACTION=opened "${PRV[@]}" 'STUB_LABELS=["e2e"]'
@@ -120,12 +120,12 @@ out=$(env "${MG[@]}" hack/e2e-decide.sh)
 if grep -q '^required=' <<<"$out"; then echo "FAIL: decide still prints required=" >&2; fail=1; else echo "ok: no required= output"; fi
 want true "nightly always runs (drift detection)" EVENT=schedule STUB_COVERED=abc123 STUB_FULL=1
 
-# Fork pull requests (ADR 0105): the flavor images are private until v0.3, so the advisory run needs the label.
+# Fork pull requests: the same rule, the label decides (the flavor images are private until v0.3).
 FORK=(EVENT=pull_request HEAD_REPO=fork/r BASE_REPO=o/r)
 want false "fork PR that is e2e-relevant does not run unlabelled" "${FORK[@]}" STUB_FULL=0
 want false "fork PR touching the e2e's files does not run unlabelled" "${FORK[@]}" STUB_FORCED=0
 want true "fork PR with the e2e label runs" "${FORK[@]}" 'LABELS=["e2e"]'
-want true "same-repo PR (head repo = base repo) still runs unlabelled when relevant" EVENT=pull_request HEAD_REPO=o/r BASE_REPO=o/r STUB_FULL=0
+want false "same-repo PR (head repo = base repo) does not run unlabelled although relevant" EVENT=pull_request HEAD_REPO=o/r BASE_REPO=o/r STUB_FULL=0
 want true "queue entry in the middle of the fork logic is unaffected" "${MG[@]}" STUB_FULL=0
 
 [[ $fail -eq 0 ]] && echo "e2e-decide tests passed"

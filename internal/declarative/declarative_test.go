@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -940,6 +941,62 @@ var _ = Describe("Importer", func() {
 				Expect(ev).To(HaveLen(1))
 				Expect(string(ev[0].Summary)).To(ContainSubstring("connection_host_changed"))
 				Expect(ev[0].ActorID).To(Equal("gt"), "the Secret that moved the connection")
+			})
+
+			Describe("the extra MCP hosts of connections (#240)", func() {
+				// other is a UI connection of the org that lists extra as an extra MCP host.
+				other := func(ctx SpecContext, extra string) {
+					_, err := store.New(pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+						OrgID: org, ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, Connector: "gitea", DisplayName: "forge",
+						Config: []byte(`{"baseUrl":"https://forge.example.test"}`), Source: store.ConfigSourceUi,
+					})
+					Expect(err).NotTo(HaveOccurred())
+					_, err = pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY[$2::text] WHERE org_id = $1 AND display_name = 'forge'`, org, extra)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				refused := func(ctx SpecContext) bool {
+					for _, e := range events(ctx) {
+						if strings.Contains(e.Message, "extra MCP host") {
+							return true
+						}
+					}
+					return false
+				}
+
+				It("refuses a new connection whose host is an extra host of another connection, and creates nothing", func(ctx SpecContext) {
+					other(ctx, "git.example.test")
+					put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+					Expect(imp.Sync(ctx)).To(Succeed())
+					rows, _ := store.New(pool).ListConnections(ctx, org)
+					Expect(rows).To(HaveLen(1), "only the UI connection")
+					Expect(refused(ctx)).To(BeTrue())
+				})
+
+				It("refuses a base URL change onto an extra host of another connection, or onto its own extra host", func(ctx SpecContext) {
+					put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+					Expect(imp.Sync(ctx)).To(Succeed())
+
+					By("another connection lists the new host")
+					other(ctx, "git2.example.test")
+					d := giteaConn()
+					d["baseUrl"] = "https://git2.example.test"
+					put(ctx, "gt", declarative.TypeConnection, slug, d)
+					Expect(imp.Sync(ctx)).To(Succeed())
+					Expect(refused(ctx)).To(BeTrue())
+
+					By("the connection's own list holds the new host")
+					_, err := pool.Exec(ctx, `UPDATE connections SET mcp_hosts = '{}' WHERE org_id = $1 AND display_name = 'forge'`, org)
+					Expect(err).NotTo(HaveOccurred())
+					_, err = pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['git3.example.test'] WHERE org_id = $1 AND source = 'secret'`, org)
+					Expect(err).NotTo(HaveOccurred())
+					d["baseUrl"] = "https://git3.example.test"
+					put(ctx, "gt", declarative.TypeConnection, slug, d)
+					Expect(imp.Sync(ctx)).To(Succeed())
+
+					var base string
+					Expect(pool.QueryRow(ctx, `SELECT config->>'baseUrl' FROM connections WHERE org_id = $1 AND source = 'secret'`, org).Scan(&base)).To(Succeed())
+					Expect(base).To(Equal("https://git.example.test/gitea"), "the row keeps its old host")
+				})
 			})
 
 			It("refuses to change a declared connection's connector, leaving the row as it was", func(ctx SpecContext) {

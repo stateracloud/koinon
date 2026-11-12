@@ -245,3 +245,29 @@ func (f *Fake) createIssue(w http.ResponseWriter, r *http.Request, rp *repo, log
 	writeJSON(w, http.StatusCreated, map[string]any{"id": i.index + 2000, "number": i.index, "title": i.title, "body": i.body, "state": "open", "html_url": html})
 	return nil
 }
+
+// listRepoComments answers GET issues/comments: every comment of the repository, oldest first,
+// filtered by since and before and paginated with page and limit as Gitea's is. Like Gitea's it
+// sends no ETag and no Last-Modified. Each GET counts as "GET repo comments" in Snapshot.Calls.
+func (f *Fake) listRepoComments(w http.ResponseWriter, r *http.Request, rp *repo, _ string) error {
+	parse := func(k string) (time.Time, bool) {
+		t, err := time.Parse(time.RFC3339, r.URL.Query().Get(k))
+		return t, err == nil
+	}
+	since, hasSince := parse("since")
+	before, hasBefore := parse("before")
+	var all []map[string]any
+	for _, c := range rp.comments {
+		if (hasSince && c.created.Before(since)) || (hasBefore && !c.created.Before(before)) {
+			continue
+		}
+		all = append(all, f.commentJSON(baseURL(r), rp, c))
+	}
+	rp.calls["GET repo comments"]++
+	out := paginate(w, r, all)
+	if out == nil {
+		out = []map[string]any{}
+	}
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}

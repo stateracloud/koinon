@@ -24,7 +24,8 @@ v0.1 ships `github/` (ADR 0036, 0049) and `gitea/` (ADR 0062, 0063).
   API hosts (GitHub: `api.githubcopilot.com`). An MCP server may be linked to a code-host connection
   (ADR 0091) only when its URL names the connection's web or API host or, for a connection on the
   default host, one of these; a connection on its own host (GitHub Enterprise Server, Gitea) accepts
-  only that host. Not allowed with `selfHosted`.
+  only that host. Not allowed with `selfHosted`. An org admin can add further hosts to one connection
+  (#240; `connections.mcp_hosts`, not part of the connector).
 - `spec.hosts`: every host the connector talks to; scope network rules may only name these.
 - `spec.targets`: what grants are narrowed to (GitHub: `owner/name` repositories).
 - `spec.scopes`: each with a risk tier (ADR 0008), the provider permissions a credential for it is
@@ -61,7 +62,7 @@ bound to repositories:
   OpenShell sends a static credential only to its profile's endpoints, so the profile cannot be
   shared between agents bound to different repositories;
 - the same endpoints as the sandbox policy entry `github_read`, `protocol: rest`,
-  `enforcement: enforce`, for `/usr/bin/git` and the flavor's binaries.
+  `enforcement: enforce`, for `/usr/bin/git` and the harness's binaries.
 
 Allowed: `GET /{owner}/{repo}[.git]/info/refs?service=git-upload-pack` and
 `POST /{owner}/{repo}[.git]/git-upload-pack` on `github.com` (clone and fetch over smart HTTP),
@@ -95,8 +96,8 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
   keeps a `GET` under `/repos/{owner}/{repo}/**` to data the token may read.
 - **Credential placement.** OpenShell 0.1.7 injects static credentials only by rewriting the
   placeholder where the client puts it (headers, including Basic and Bearer, and URL path and
-  query values; `crates/openshell-core/src/secrets.rs`, unchanged since 0.1.5). Every flavor image
-  therefore ships `koinon-git-credential` (`flavors/common`), configured for
+  query values; `crates/openshell-core/src/secrets.rs`, unchanged since 0.1.5). Every harness image
+  therefore ships `koinon-git-credential` (`harnesses/common`), configured for
   `https://github.com` in the read-only `/etc/koinon/git/config` (included from
   `/etc/gitconfig`): it answers `x-access-token` and the placeholder from `$GITHUB_TOKEN`, git
   sends it as Basic auth and OpenShell substitutes the token on the wire. It stores nothing.

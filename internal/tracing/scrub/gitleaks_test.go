@@ -33,10 +33,9 @@ func TestGitleaksRulesCompile(t *testing.T) {
 	}
 }
 
-// Fake credentials for the tests. A vendor rule has an entropy floor and a fixed length, so a
-// fixture like "ghp_aaaa..." is rightly not a key; these are built at run time from a fixed
-// alphabet of distinct characters (about five bits each), so the source holds no key-shaped literal
-// for gitleaks to find in this repository.
+// Fake credentials for the tests, built at run time from a fixed alphabet of distinct characters
+// (about five bits each), so they pass the entropy floor of the rules that keep one and the source
+// holds no key-shaped literal for gitleaks to find in this repository.
 const (
 	fakeAlnum = "Kq7ZvLm2XpR9wTy4NbCj8dFhGs3AeUx5" // 32 distinct characters
 	fakeHex   = "3fa9c07e5d1b8246"                 // 16 distinct hex digits

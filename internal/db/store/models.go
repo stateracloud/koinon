@@ -11,47 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AgentFlavor string
-
-const (
-	AgentFlavorOpencode AgentFlavor = "opencode"
-)
-
-func (e *AgentFlavor) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = AgentFlavor(s)
-	case string:
-		*e = AgentFlavor(s)
-	default:
-		return fmt.Errorf("unsupported scan type for AgentFlavor: %T", src)
-	}
-	return nil
-}
-
-type NullAgentFlavor struct {
-	AgentFlavor AgentFlavor
-	Valid       bool // Valid is true if AgentFlavor is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullAgentFlavor) Scan(value interface{}) error {
-	if value == nil {
-		ns.AgentFlavor, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.AgentFlavor.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullAgentFlavor) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.AgentFlavor), nil
-}
-
 type AgentStatus string
 
 const (
@@ -1098,6 +1057,7 @@ const (
 	RunFailureClassPolicy             RunFailureClass = "policy"
 	RunFailureClassFatal              RunFailureClass = "fatal"
 	RunFailureClassSandboxUnavailable RunFailureClass = "sandbox_unavailable"
+	RunFailureClassLoop               RunFailureClass = "loop"
 )
 
 func (e *RunFailureClass) Scan(src interface{}) error {
@@ -1538,27 +1498,32 @@ func (ns NullTraceContentLevel) Value() (driver.Value, error) {
 }
 
 type Agent struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	DisplayName     string
-	Status          AgentStatus
-	Flavor          AgentFlavor
-	TemplateID      pgtype.UUID
-	ActiveVersionID pgtype.UUID
-	LatestVersion   int32
-	Epoch           int64
-	CreatedBy       pgtype.UUID
-	ActivatedBy     pgtype.UUID
-	ActivatedAt     pgtype.Timestamptz
-	ArchivedAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
-	UnhealthyAt     pgtype.Timestamptz
-	UnhealthyReason pgtype.Text
-	ResumedAt       pgtype.Timestamptz
-	Model           pgtype.Text
-	Thinking        pgtype.Text
-	KeepWarm        bool
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	DisplayName          string
+	Status               AgentStatus
+	Harness              string
+	TemplateID           pgtype.UUID
+	ActiveVersionID      pgtype.UUID
+	LatestVersion        int32
+	Epoch                int64
+	CreatedBy            pgtype.UUID
+	ActivatedBy          pgtype.UUID
+	ActivatedAt          pgtype.Timestamptz
+	ArchivedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	UnhealthyAt          pgtype.Timestamptz
+	UnhealthyReason      pgtype.Text
+	ResumedAt            pgtype.Timestamptz
+	Model                pgtype.Text
+	Thinking             pgtype.Text
+	KeepWarm             bool
+	SandboxCpuRequest    pgtype.Text
+	SandboxCpuLimit      pgtype.Text
+	SandboxMemoryRequest pgtype.Text
+	SandboxMemoryLimit   pgtype.Text
+	KeepWarmGranted      bool
 }
 
 type AgentBudget struct {
@@ -1628,19 +1593,20 @@ type AgentVersion struct {
 }
 
 type ApiToken struct {
-	OrgID         pgtype.UUID
-	ID            pgtype.UUID
-	Name          string
-	Prefix        string
-	TokenHash     []byte
-	Role          OrgRole
-	CreatedBy     pgtype.UUID
-	ParentTokenID pgtype.UUID
-	ExpiresAt     pgtype.Timestamptz
-	RevokedAt     pgtype.Timestamptz
-	LastUsedAt    pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	InstallMark   pgtype.Text
+	OrgID                 pgtype.UUID
+	ID                    pgtype.UUID
+	Name                  string
+	Prefix                string
+	TokenHash             []byte
+	Role                  OrgRole
+	CreatedBy             pgtype.UUID
+	ParentTokenID         pgtype.UUID
+	ExpiresAt             pgtype.Timestamptz
+	RevokedAt             pgtype.Timestamptz
+	LastUsedAt            pgtype.Timestamptz
+	CreatedAt             pgtype.Timestamptz
+	InstallMark           pgtype.Text
+	RequiresPlatformAdmin bool
 }
 
 type ApprovalRequest struct {
@@ -1716,6 +1682,25 @@ type AuditEvent struct {
 	Hash       []byte
 }
 
+type CodeHostPoller struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	ConnectionID        pgtype.UUID
+	Resource            string
+	ValidatorKind       string
+	Validator           string
+	Cursor              string
+	BaselineAt          pgtype.Timestamptz
+	ProviderIntervalS   int32
+	NextPollAt          pgtype.Timestamptz
+	BackoffUntil        pgtype.Timestamptz
+	ConsecutiveFailures int32
+	LastStatus          string
+	LastError           string
+	LastPolledAt        pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+}
+
 type Connection struct {
 	OrgID                  pgtype.UUID
 	ID                     pgtype.UUID
@@ -1741,6 +1726,7 @@ type Connection struct {
 	AdminDisabledNote      pgtype.Text
 	AdminDisabledUnderBy   pgtype.Text
 	AdminDisabledUnderNote pgtype.Text
+	McpHosts               []string
 }
 
 type DedupeRecord struct {
@@ -1759,6 +1745,14 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type GatewayProviderFailure struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type GatewayServedModel struct {
 	OrgID       pgtype.UUID
 	ModelID     pgtype.UUID
@@ -1766,6 +1760,20 @@ type GatewayServedModel struct {
 	KeyFile     pgtype.Text
 	ServedSince pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+}
+
+type GatewayStateAck struct {
+	CopyID   string
+	Revision int64
+	Half     string
+	AckedAt  pgtype.Timestamptz
+}
+
+type GatewayStateRevision struct {
+	Revision  int64
+	Snapshot  []byte
+	Digest    string
+	CreatedAt pgtype.Timestamptz
 }
 
 type HomeCheckpoint struct {
@@ -1839,6 +1847,19 @@ type HomeRepositoryEpoch struct {
 	SeededAt         pgtype.Timestamptz
 	SeedFailedAt     pgtype.Timestamptz
 	PrefixTakenAt    pgtype.Timestamptz
+}
+
+type HomeRepositoryProbe struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	AgentID         pgtype.UUID
+	RepositoryEpoch int32
+	RequestedAt     pgtype.Timestamptz
+	ExpiresAt       pgtype.Timestamptz
+	ProbeAfter      pgtype.Timestamptz
+	AnsweredAt      pgtype.Timestamptz
+	Outcome         pgtype.Text
+	Message         pgtype.Text
 }
 
 type InstallAuditAnchorHead struct {
@@ -2055,6 +2076,49 @@ type OidcLoginFlow struct {
 	ReturnTo     string
 	CreatedAt    pgtype.Timestamptz
 	ExpiresAt    pgtype.Timestamptz
+}
+
+type OpenrouterCatalog struct {
+	Singleton   bool
+	Source      string
+	FetchedAt   pgtype.Timestamptz
+	ModelCount  int32
+	Sha256      string
+	InUseModels []string
+}
+
+type OpenrouterLimitProposal struct {
+	ID            pgtype.UUID
+	Model         string
+	Field         string
+	CurrentValue  pgtype.Int4
+	ProposedValue int32
+	Source        string
+	State         string
+	CreatedAt     pgtype.Timestamptz
+	DecidedAt     pgtype.Timestamptz
+	DecidedBy     string
+}
+
+type OpenrouterLimitValue struct {
+	Model      string
+	Field      string
+	Value      int32
+	AcceptedAt pgtype.Timestamptz
+	AcceptedBy string
+	ProposalID pgtype.UUID
+}
+
+type OpenrouterModel struct {
+	Model              string
+	Display            []byte
+	ContextLength      int32
+	MaxOutput          int32
+	Source             string
+	FetchedAt          pgtype.Timestamptz
+	Endpoints          []byte
+	EndpointsSource    string
+	EndpointsFetchedAt pgtype.Timestamptz
 }
 
 type Org struct {
@@ -2379,6 +2443,15 @@ type QuestionRecipient struct {
 	WaitingSince pgtype.Timestamptz
 	RemovedAt    pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
+}
+
+type RestoreAcceptedRemoval struct {
+	Kind       string
+	OrgSlug    string
+	SecretName string
+	ReleaseID  pgtype.UUID
+	State      string
+	CreatedAt  pgtype.Timestamptz
 }
 
 type Run struct {
