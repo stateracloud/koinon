@@ -363,6 +363,16 @@ func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
 
 // Validate reports why the gateway cannot take the limit, or nil. A limit that fails it is
 // quarantined with its key by drivers that can (standalone: one bad limit must not freeze the file).
+// AppliedWindow is the window a gateway applies: agentgateway takes whole seconds at the smallest, so a
+// positive window below that rounds up to the next second and 0 stays "no window". Rendering and the
+// State snapshot (internal/gateway/staterev) both use it, so what is stored is what is applied.
+func (l Limit) AppliedWindow() time.Duration {
+	if l.Window <= 0 {
+		return 0
+	}
+	return (l.Window + time.Second - 1) / time.Second * time.Second
+}
+
 func (l Limit) Validate() error {
 	switch {
 	case l.Unit != USD:
@@ -552,7 +562,9 @@ type MCPState struct {
 // WithoutInvalidLimits returns s without the keys and limits of agents whose Limit fails
 // Limit.Validate, and one Rejection per dropped key. A driver that serves the rest of the state
 // uses it so that one agent's bad limit fails that agent's key (it is not served: fail closed)
-// and not the whole config.
+// and not the whole config. A key is shared by both halves, so the dropped key also takes the agent
+// off the MCP path (its tool grants stay, but name no key); a spec pins this. ADR 0097 does not say
+// otherwise.
 func (s State) WithoutInvalidLimits() (State, []Rejection) {
 	var bad map[AgentRef]error
 	for a, l := range s.Limits {

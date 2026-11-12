@@ -414,7 +414,7 @@ var _ = Describe("home checkpoints", func() {
 		Consistently(runState(ctx, r2)).WithTimeout(1500 * time.Millisecond).ShouldNot(Or(Equal(store.RunStateSucceeded), Equal(store.RunStateFailed)))
 
 		By("the reconciler creates the sandbox for the run and records it ready: the archive ends, the restore is still owed")
-		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/sandbox:dev"})
 		Expect(err).NotTo(HaveOccurred())
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is owed until the run does it")

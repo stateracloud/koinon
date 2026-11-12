@@ -525,7 +525,7 @@ github:
 harnesses:
   opencode:
     image:
-      repository: flavors/opencode
+      repository: sandbox
       tag: ""
       digest: ""
 

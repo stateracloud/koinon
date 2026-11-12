@@ -44,7 +44,7 @@ var DefaultBinaries = func() map[string][]string {
 }()
 
 // GatewayKeyEnvVar holds the credential each sandbox gets: the agent's agentgateway key, as
-// the OpenAI-compatible key every flavor reads (flavors/opencode/README.md).
+// the OpenAI-compatible key every harness reads (harnesses/opencode/README.md).
 const GatewayKeyEnvVar = "OPENAI_API_KEY"
 
 const (

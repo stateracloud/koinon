@@ -319,6 +319,26 @@ var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() 
 				Entry("a host that only ends like the connection's", "github", "https://ghe.example.com", "https://notghe.example.com/mcp", "an MCP server at notghe.example.com"),
 			)
 
+			It("accepts a server at one of the connection's own extra hosts, and only on that connection (#240)", func(ctx SpecContext) {
+				const gitea = "https://gitea-mcp.corp.example/mcp"
+				conn := connAt(ctx, org, "gitea", "https://git.example.com")
+				other := connAt(ctx, org, "gitea", "https://git.example.com/forge")
+				s := createAt(ctx, "forge", gitea, nil)
+				_, err := svc.SetDataClass(ctx, org, actor, s.ID, linkTo(conn))
+				expectInvalid(err, "accepts MCP servers at git.example.com")
+
+				_, err = pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['gitea-mcp.corp.example'] WHERE org_id = $1 AND id = $2`, org, conn)
+				Expect(err).NotTo(HaveOccurred())
+				got, err := svc.SetDataClass(ctx, org, actor, s.ID, linkTo(conn))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.CodeHostConnectionID).To(Equal(conn))
+
+				_, err = svc.SetDataClass(ctx, org, actor, s.ID, linkTo(other))
+				expectInvalid(err, "accepts MCP servers at git.example.com)")
+				created := createAt(ctx, "forge-2", gitea, &mcpservers.Declaration{Kind: "other", Legs: mcpservers.Legs, CodeHostConnection: conn})
+				Expect(created.CodeHostConnectionID).To(Equal(conn))
+			})
+
 			It("refuses a connection that is not a code host", func(ctx SpecContext) {
 				conn := connAt(ctx, org, "slack", "")
 				s := createAt(ctx, "forge", "https://slack.example.com/mcp", nil)
@@ -358,7 +378,8 @@ var _ = Describe("the data class of a server (ADR 0084, old issue 350)", func() 
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = audit.InTx(ctx, pool, func(q *store.Queries, b audit.Batch) error {
-					return mcpservers.UnlinkMismatchedServers(ctx, q, b, audit.Secret("forge"), row)
+					_, err := mcpservers.UnlinkMismatchedServers(ctx, q, b, audit.Secret("forge"), row, "connection_host_changed")
+					return err
 				})
 				Expect(err).NotTo(HaveOccurred())
 				got, err := svc.Get(ctx, org, moved.ID)

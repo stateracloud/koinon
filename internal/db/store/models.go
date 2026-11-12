@@ -1707,6 +1707,7 @@ type Connection struct {
 	AdminDisabledNote      pgtype.Text
 	AdminDisabledUnderBy   pgtype.Text
 	AdminDisabledUnderNote pgtype.Text
+	McpHosts               []string
 }
 
 type DedupeRecord struct {
@@ -1732,6 +1733,20 @@ type GatewayServedModel struct {
 	KeyFile     pgtype.Text
 	ServedSince pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+}
+
+type GatewayStateAck struct {
+	CopyID   string
+	Revision int64
+	Half     string
+	AckedAt  pgtype.Timestamptz
+}
+
+type GatewayStateRevision struct {
+	Revision  int64
+	Snapshot  []byte
+	Digest    string
+	CreatedAt pgtype.Timestamptz
 }
 
 type HomeCheckpoint struct {

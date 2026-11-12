@@ -46,7 +46,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Tool | Version | Used for |
 | --- | --- | --- |
 | Go | `go.mod` (1.27.4) | build, tests, code generators (pinned as `go tool` entries) |
-| Docker | any recent, with buildx | Postgres tests (testcontainers), flavor images, kind |
+| Docker | any recent, with buildx | Postgres tests (testcontainers), harness images, kind |
 | Node | 24 | web UI |
 | pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |
 | buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
@@ -78,8 +78,8 @@ release at least 3 days old, ADR 0079), run `hack/versions-check.sh`, and update
 ```sh
 make web-deps   # install web dependencies (once; run it before make generate and make lint)
 make build      # build Go binaries and the web UI
-make test       # Go and web unit tests, the same set CI runs (without test/flavors)
-make test-flavors # build the flavor images, then run the flavor contract suite (Docker)
+make test       # Go and web unit tests, the same set CI runs (without test/harnesses)
+make test-harnesses # build the harness images, then run the harness contract suite (Docker)
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
 make generate   # regenerate protobuf and sqlc code; commit the result
 make breaking   # buf breaking against main

@@ -5812,6 +5812,15 @@
           "deprecated": false,
           "methods": [
             {
+              "name": "AddConnectionMCPHost",
+              "description": "AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server\nwhose https URL names that exact host may then be linked to this connection as its code host\n(ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP\naddress (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is\nalready there changes nothing. Audited (connection.mcp_host.add). Admins and owners.",
+              "requestType": "koinon.connection.v1alpha1.AddConnectionMCPHostRequest",
+              "responseType": "koinon.connection.v1alpha1.AddConnectionMCPHostResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "CreateGitHubConnection",
               "description": "CreateGitHubConnection creates a GitHub App connection. The private key\nis stored encrypted and never returned. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.CreateGitHubConnectionRequest",
@@ -5875,6 +5884,15 @@
               "deprecated": false
             },
             {
+              "name": "RemoveConnectionMCPHost",
+              "description": "RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server\nlinked to the connection that it no longer serves loses the link (and its code-host tool class),\neach audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response\nlists them. With dry_run nothing is written: the response lists the servers a removal would\nunlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host\nadded again does not restore a link. Admins and owners.",
+              "requestType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest",
+              "responseType": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetConnectionSecret",
               "description": "SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private\nkey, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is\nentered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector\nis required; the other settings stay. It clears the lost mark and the last test result. A\ndeclared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).\nAudited without the secret. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.SetConnectionSecretRequest",
@@ -5896,6 +5914,60 @@
         }
       ],
       "messages": [
+        {
+          "name": "AddConnectionMCPHostRequest",
+          "fullName": "koinon.connection.v1alpha1.AddConnectionMCPHostRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "connection_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AddConnectionMCPHostResponse",
+          "fullName": "koinon.connection.v1alpha1.AddConnectionMCPHostResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "AddConnectionMCPHostResponse holds the connection with its new list.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "connection",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.Connection",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "BoundAgent",
           "fullName": "koinon.connection.v1alpha1.BoundAgent",
@@ -6127,6 +6199,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is\nnot called, probed or offered to runs. Unset otherwise."
+            },
+            {
+              "name": "mcp_hosts",
+              "number": 17,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "mcp_hosts are the extra host names an admin added for MCP servers that act on this connection\n(#240), sorted. They come on top of the connection's own hosts and the connector's declared ones."
             }
           ]
         },
@@ -6858,6 +6939,78 @@
           ]
         },
         {
+          "name": "RemoveConnectionMCPHostRequest",
+          "fullName": "koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "connection_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "dry_run",
+              "number": 4,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "dry_run reports the servers the removal would unlink and writes nothing."
+            }
+          ]
+        },
+        {
+          "name": "RemoveConnectionMCPHostResponse",
+          "fullName": "koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)\nand the MCP servers the removal unlinked (with dry_run: would unlink).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "connection",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.Connection",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "unlinked_servers",
+              "number": 2,
+              "type": "koinon.connection.v1alpha1.UnlinkedMCPServer",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "Scope",
           "fullName": "koinon.connection.v1alpha1.Scope",
           "file": "koinon/connection/v1alpha1/connection.proto",
@@ -7036,6 +7189,42 @@
               "description": ""
             }
           ]
+        },
+        {
+          "name": "UnlinkedMCPServer",
+          "fullName": "koinon.connection.v1alpha1.UnlinkedMCPServer",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "UnlinkedMCPServer is an MCP server that lost its link to a connection.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
         }
       ],
       "enums": [
@@ -7106,6 +7295,854 @@
             {
               "name": "TIER_FORBIDDEN",
               "number": 4,
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "koinon.gateway.v1alpha1",
+      "files": [
+        "koinon/gateway/v1alpha1/state.proto"
+      ],
+      "services": [
+        {
+          "name": "GatewayStateService",
+          "fullName": "koinon.gateway.v1alpha1.GatewayStateService",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "GatewayStateService is the State stream of ADR 0097 decision 2.1: koinon-api sends a gateway copy\nthe full desired state of the gateway, one revision at a time, and the copy confirms each half of a\nrevision once it serves it. It is the config delivery of Koinon's own gateway; the agentgateway\ndrivers keep rendering files and CRDs. It is internal: only a gateway copy calls it.\n\nNothing here carries secret material: a StateUpdate holds key ids and key hashes, never a key, and\nnames the file a credential is mounted at, never its content (ADR 0097 decision 5, the secret store).",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "AckRevision",
+              "description": "AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model\nhalf and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An\nack of a revision covers every earlier one for that half. Idempotent.",
+              "requestType": "koinon.gateway.v1alpha1.AckRevisionRequest",
+              "responseType": "koinon.gateway.v1alpha1.AckRevisionResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "StreamState",
+              "description": "StreamState sends the latest revision at once and every later one when it is published. Each\nmessage is a full snapshot (state of the world), not a delta, so a copy that reconnects needs\nnothing but the next message.\nbuf:lint:ignore RPC_RESPONSE_STANDARD_NAME\nThe stream message is StateUpdate, the name ADR 0097 and the State types use for a revision.",
+              "requestType": "koinon.gateway.v1alpha1.StreamStateRequest",
+              "responseType": "koinon.gateway.v1alpha1.StateUpdate",
+              "clientStreaming": false,
+              "serverStreaming": true,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "AckRevisionRequest",
+          "fullName": "koinon.gateway.v1alpha1.AckRevisionRequest",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "copy_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "revision",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "half",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.Half",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AckRevisionResponse",
+          "fullName": "koinon.gateway.v1alpha1.AckRevisionResponse",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "AgentLimit",
+          "fullName": "koinon.gateway.v1alpha1.AgentLimit",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.AgentRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "limit",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.Limit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AgentModels",
+          "fullName": "koinon.gateway.v1alpha1.AgentModels",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.AgentRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AgentRef",
+          "fullName": "koinon.gateway.v1alpha1.AgentRef",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "AgentRef names an agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AgentTools",
+          "fullName": "koinon.gateway.v1alpha1.AgentTools",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.AgentRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "grants",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.ToolGrant",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "Key",
+          "fullName": "koinon.gateway.v1alpha1.Key",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Key is the gateway-side record of an API key: id, owner and hash. The key itself never enters it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.AgentRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "hash",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "hash is \"sha256:<hex>\" of the key material."
+            }
+          ]
+        },
+        {
+          "name": "Limit",
+          "fullName": "koinon.gateway.v1alpha1.Limit",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Limit is a per-agent spend limit (gateway.Limit).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "unit",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unit is \"USD\", the only unit."
+            },
+            {
+              "name": "amount_pico_usd",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "amount_pico_usd is the exact amount in pico-USD (money.USD)."
+            },
+            {
+              "name": "window_seconds",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "window_seconds is 0 for no window."
+            },
+            {
+              "name": "generation",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "MCPState",
+          "fullName": "koinon.gateway.v1alpha1.MCPState",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "targets",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.MCPTarget",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tools",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.AgentTools",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "MCPTarget",
+          "fullName": "koinon.gateway.v1alpha1.MCPTarget",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in\nthe gateway, not the credential; credential_header and credential_prefix say how it is sent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "url",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "sse",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_header",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_prefix",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_file",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "Model",
+          "fullName": "koinon.gateway.v1alpha1.Model",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "format",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "thinking",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.Thinking",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "guard",
+              "number": 4,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price",
+              "number": 5,
+              "type": "koinon.gateway.v1alpha1.Price",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "price is unset for a model without one; the gateway does not serve it."
+            }
+          ]
+        },
+        {
+          "name": "ModelState",
+          "fullName": "koinon.gateway.v1alpha1.ModelState",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.AgentLimit",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "providers",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.Provider",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.AgentModels",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "Price",
+          "fullName": "koinon.gateway.v1alpha1.Price",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Price is per million tokens in USD, as decimal strings.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "input",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "output",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_read",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_write",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reasoning",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tiers",
+              "number": 6,
+              "type": "koinon.gateway.v1alpha1.PriceTier",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PriceTier",
+          "fullName": "koinon.gateway.v1alpha1.PriceTier",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "context_over",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "input",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "output",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_read",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_write",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reasoning",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "Provider",
+          "fullName": "koinon.gateway.v1alpha1.Provider",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Provider is an org's OpenAI-compatible upstream. api_key_file is where the provider key is mounted\nin the gateway, not the key.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "type",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "base_url",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "api_key_file",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "anthropic_workspace_id",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "models",
+              "number": 7,
+              "type": "koinon.gateway.v1alpha1.Model",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StateUpdate",
+          "fullName": "koinon.gateway.v1alpha1.StateUpdate",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "StateUpdate is one revision of the gateway's desired state: the keys both halves need, then the\nmodel half and the MCP half (gateway.State, ADR 0097 decision 2.1). The keys are at the top level\nso neither half is a copy of them.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "revision",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "revision grows by one per published change of the state and is the number the copy acks. 0 only\nin a snapshot that has not been stored yet."
+            },
+            {
+              "name": "keys",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.Key",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.ModelState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "mcp",
+              "number": 4,
+              "type": "koinon.gateway.v1alpha1.MCPState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StreamStateRequest",
+          "fullName": "koinon.gateway.v1alpha1.StreamStateRequest",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "copy_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),\n1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and\nan ack under a reused id would count for a process that has not loaded the revision."
+            }
+          ]
+        },
+        {
+          "name": "Thinking",
+          "fullName": "koinon.gateway.v1alpha1.Thinking",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Thinking is internal/thinking.Capability as the table records it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "thinks",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "on",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "off",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "betas",
+              "number": 5,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "usage_split",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ToolGrant",
+          "fullName": "koinon.gateway.v1alpha1.ToolGrant",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "target",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tools",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "all",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "enums": [
+        {
+          "name": "Half",
+          "fullName": "koinon.gateway.v1alpha1.Half",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "Half is one of the two paths a gateway copy serves.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "HALF_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "HALF_MODEL",
+              "number": 1,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "HALF_MCP",
+              "number": 2,
               "deprecated": false,
               "description": ""
             }

@@ -50,6 +50,12 @@ const (
 	// ConnectionServiceDeleteConnectionProcedure is the procedure name of the ConnectionService's
 	// DeleteConnection RPC.
 	ConnectionServiceDeleteConnectionProcedure = "/koinon.connection.v1alpha1.ConnectionService/DeleteConnection"
+	// ConnectionServiceAddConnectionMCPHostProcedure is the procedure name of the ConnectionService's
+	// AddConnectionMCPHost RPC.
+	ConnectionServiceAddConnectionMCPHostProcedure = "/koinon.connection.v1alpha1.ConnectionService/AddConnectionMCPHost"
+	// ConnectionServiceRemoveConnectionMCPHostProcedure is the procedure name of the
+	// ConnectionService's RemoveConnectionMCPHost RPC.
+	ConnectionServiceRemoveConnectionMCPHostProcedure = "/koinon.connection.v1alpha1.ConnectionService/RemoveConnectionMCPHost"
 	// ConnectionServiceListInstallationReposProcedure is the procedure name of the ConnectionService's
 	// ListInstallationRepos RPC.
 	ConnectionServiceListInstallationReposProcedure = "/koinon.connection.v1alpha1.ConnectionService/ListInstallationRepos"
@@ -115,6 +121,20 @@ var (
 			Procedure:  ConnectionServiceDeleteConnectionProcedure,
 		}
 	})
+	connectionServiceAddConnectionMCPHostSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("AddConnectionMCPHost"),
+			Procedure:  ConnectionServiceAddConnectionMCPHostProcedure,
+		}
+	})
+	connectionServiceRemoveConnectionMCPHostSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("RemoveConnectionMCPHost"),
+			Procedure:  ConnectionServiceRemoveConnectionMCPHostProcedure,
+		}
+	})
 	connectionServiceListInstallationReposSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -156,6 +176,19 @@ type ConnectionServiceClient interface {
 	// here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
 	// bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
 	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
+	// AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server
+	// whose https URL names that exact host may then be linked to this connection as its code host
+	// (ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP
+	// address (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is
+	// already there changes nothing. Audited (connection.mcp_host.add). Admins and owners.
+	AddConnectionMCPHost(context.Context, *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error)
+	// RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
+	// linked to the connection that it no longer serves loses the link (and its code-host tool class),
+	// each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+	// lists them. With dry_run nothing is written: the response lists the servers a removal would
+	// unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+	// added again does not restore a link. Admins and owners.
+	RemoveConnectionMCPHost(context.Context, *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
 	// asks GitHub with a metadata-read installation token; nothing is written.
@@ -202,6 +235,19 @@ type ConnectionServiceHandler interface {
 	// here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
 	// bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
 	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
+	// AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server
+	// whose https URL names that exact host may then be linked to this connection as its code host
+	// (ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP
+	// address (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is
+	// already there changes nothing. Audited (connection.mcp_host.add). Admins and owners.
+	AddConnectionMCPHost(context.Context, *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error)
+	// RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server
+	// linked to the connection that it no longer serves loses the link (and its code-host tool class),
+	// each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response
+	// lists them. With dry_run nothing is written: the response lists the servers a removal would
+	// unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host
+	// added again does not restore a link. Admins and owners.
+	RemoveConnectionMCPHost(context.Context, *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
 	// asks GitHub with a metadata-read installation token; nothing is written.
@@ -222,6 +268,8 @@ func RegisterConnectionServiceHandler(server *connect.Server, svc ConnectionServ
 		connect.Method{Spec: connectionServiceListConnectionsSpec(), Handler: adapter.listConnections},
 		connect.Method{Spec: connectionServiceTestConnectionSpec(), Handler: adapter.testConnection},
 		connect.Method{Spec: connectionServiceDeleteConnectionSpec(), Handler: adapter.deleteConnection},
+		connect.Method{Spec: connectionServiceAddConnectionMCPHostSpec(), Handler: adapter.addConnectionMCPHost},
+		connect.Method{Spec: connectionServiceRemoveConnectionMCPHostSpec(), Handler: adapter.removeConnectionMCPHost},
 		connect.Method{Spec: connectionServiceListInstallationReposSpec(), Handler: adapter.listInstallationRepos},
 	)
 }
@@ -259,6 +307,14 @@ func (UnimplementedConnectionServiceHandler) TestConnection(context.Context, *v1
 
 func (UnimplementedConnectionServiceHandler) DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.DeleteConnection is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) AddConnectionMCPHost(context.Context, *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.AddConnectionMCPHost is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) RemoveConnectionMCPHost(context.Context, *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.RemoveConnectionMCPHost is not implemented")
 }
 
 func (UnimplementedConnectionServiceHandler) ListInstallationRepos(context.Context, *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error) {
@@ -328,6 +384,22 @@ func (c *connectionServiceClient) TestConnection(ctx context.Context, req *v1alp
 func (c *connectionServiceClient) DeleteConnection(ctx context.Context, req *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error) {
 	var res v1alpha1.DeleteConnectionResponse
 	if err := c.client.CallUnary(ctx, connectionServiceDeleteConnectionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) AddConnectionMCPHost(ctx context.Context, req *v1alpha1.AddConnectionMCPHostRequest) (*v1alpha1.AddConnectionMCPHostResponse, error) {
+	var res v1alpha1.AddConnectionMCPHostResponse
+	if err := c.client.CallUnary(ctx, connectionServiceAddConnectionMCPHostSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) RemoveConnectionMCPHost(ctx context.Context, req *v1alpha1.RemoveConnectionMCPHostRequest) (*v1alpha1.RemoveConnectionMCPHostResponse, error) {
+	var res v1alpha1.RemoveConnectionMCPHostResponse
+	if err := c.client.CallUnary(ctx, connectionServiceRemoveConnectionMCPHostSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -433,6 +505,30 @@ func (h connectionServiceHandler) deleteConnection(ctx context.Context, _ connec
 		return err
 	}
 	res, err := h.svc.DeleteConnection(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) addConnectionMCPHost(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.AddConnectionMCPHostRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.AddConnectionMCPHost(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) removeConnectionMCPHost(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.RemoveConnectionMCPHostRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RemoveConnectionMCPHost(ctx, &req)
 	if err != nil {
 		return err
 	}

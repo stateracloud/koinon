@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AckGatewayStateRevision(ctx context.Context, arg AckGatewayStateRevisionParams) error
 	AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeMCPToolReviewParams) (McpTool, error)
 	// draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
 	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
@@ -168,6 +169,9 @@ type Querier interface {
 	CountAutoAppliedPriceProposalsSince(ctx context.Context, arg CountAutoAppliedPriceProposalsSinceParams) (int64, error)
 	// A destination whose credentials were lost (#85) receives nothing, so it does not count.
 	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	// How many of the given copies confirmed @half at @revision or later (an ack covers every earlier
+	// revision of its half).
+	CountGatewayCopiesAcked(ctx context.Context, arg CountGatewayCopiesAckedParams) (int64, error)
 	// The org's resyncs still to do and those given up on, for koinon-agentd's gauge.
 	CountHomeCheckpointResyncs(ctx context.Context, orgID pgtype.UUID) (CountHomeCheckpointResyncsRow, error)
 	// The org's seeds still to do and those given up on, for koinon-agentd's gauge. A superseded epoch
@@ -481,6 +485,7 @@ type Querier interface {
 	// error without a status). Only the statuses in @statuses count. No row when the provider
 	// refused nothing in the window.
 	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
+	GetLatestGatewayStateRevision(ctx context.Context) (GatewayStateRevision, error)
 	GetLeakGuardFeed(ctx context.Context, arg GetLeakGuardFeedParams) (GetLeakGuardFeedRow, error)
 	GetLeakGuardSession(ctx context.Context, arg GetLeakGuardSessionParams) (LeakGuardSession, error)
 	// The agent's running run, during its end-of-turn summary too: its harness runs until the run ends,
@@ -609,6 +614,7 @@ type Querier interface {
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
+	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
@@ -1073,6 +1079,12 @@ type Querier interface {
 	// Serialises the replacements of one connection's repositories until the transaction ends, so a
 	// reading is compared with, and written after, the one stored before it.
 	LockCodeHostConnectionScope(ctx context.Context, arg LockCodeHostConnectionScopeParams) error
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The State stream's revisions and acks (ADR 0097 decision 2.1). Install-wide tables: no org_id.
+	// Serialises publishers for the length of the transaction. The reconciler leads alone, but a lost
+	// lease can leave two for a moment, and "only when it differs from the latest" must not race.
+	LockGatewayStatePublish(ctx context.Context) error
 	// Serializes the start of a repository epoch for the agent.
 	LockHomeRepository(ctx context.Context, arg LockHomeRepositoryParams) (HomeRepository, error)
 	// The budgets of a run, locked for the rest of the transaction so two replicas charging one run at
@@ -1088,6 +1100,9 @@ type Querier interface {
 	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	// Serializes the stores of several replicas for the rest of the transaction.
 	LockOpenRouterCatalog(ctx context.Context) error
+	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
+	// cannot be added to two connections at once. Held until the transaction ends.
+	LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1170,6 +1185,7 @@ type Querier interface {
 	// The files are dropped once they are on GitHub.
 	MarkSavedWorkPushed(ctx context.Context, arg MarkSavedWorkPushedParams) (int64, error)
 	MaxAgentEpoch(ctx context.Context, arg MaxAgentEpochParams) (int64, error)
+	NotifyGatewayStateRevision(ctx context.Context, payload string) error
 	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
 	// starts it (the waiting run is the demand) without waiting for a resync.
@@ -1194,6 +1210,9 @@ type Querier interface {
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
+	// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
+	// Their acks go with them.
+	PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error)
 	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
 	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
@@ -1358,6 +1377,9 @@ type Querier interface {
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
+	// The admin's extra MCP hosts of a connection (#240). The caller holds the row (GetConnectionForUpdate)
+	// and has validated and de-duplicated the hosts.
+	SetConnectionMCPHosts(ctx context.Context, arg SetConnectionMCPHostsParams) (Connection, error)
 	// Names what a claimed key produced, in the same transaction as the claim.
 	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
 	// Changes the format of a model that is still not overridden, so a save that raced the startup

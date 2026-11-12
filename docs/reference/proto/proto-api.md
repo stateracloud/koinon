@@ -1404,6 +1404,7 @@ secret store (ADR 0021, 0056); no response ever contains them.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
+| AddConnectionMCPHost | `koinon.connection.v1alpha1.AddConnectionMCPHostRequest` | `koinon.connection.v1alpha1.AddConnectionMCPHostResponse` | - | AddConnectionMCPHost adds one host name to the connection's extra MCP hosts (#240): an MCP server whose https URL names that exact host may then be linked to this connection as its code host (ADR 0091). The host is a plain DNS host name, lower-cased; no port, scheme, path, wildcard or IP address (INVALID_ARGUMENT). At most 20 per connection (FAILED_PRECONDITION). Adding a host that is already there changes nothing. Audited (connection.mcp_host.add). Admins and owners. |
 | CreateGitHubConnection | `koinon.connection.v1alpha1.CreateGitHubConnectionRequest` | `koinon.connection.v1alpha1.CreateGitHubConnectionResponse` | - | CreateGitHubConnection creates a GitHub App connection. The private key is stored encrypted and never returned. Admins and owners. |
 | CreateGiteaConnection | `koinon.connection.v1alpha1.CreateGiteaConnectionRequest` | `koinon.connection.v1alpha1.CreateGiteaConnectionResponse` | - | CreateGiteaConnection creates a Gitea connection: a bot account on a Gitea server with a read token and a write token (ADR 0063). Both tokens are stored encrypted and never returned. Admins and owners. |
 | DeleteConnection | `koinon.connection.v1alpha1.DeleteConnectionRequest` | `koinon.connection.v1alpha1.DeleteConnectionResponse` | - | DeleteConnection deletes a connection and its stored secret fields for good. A connection entered here can be deleted; a declared one only after its Secret was deleted (removed). While agents are bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners. |
@@ -1411,8 +1412,25 @@ secret store (ADR 0021, 0056); no response ever contains them.
 | ListConnections | `koinon.connection.v1alpha1.ListConnectionsRequest` | `koinon.connection.v1alpha1.ListConnectionsResponse` | - | ListConnections returns the org's connections, oldest first. Viewers and above. |
 | ListConnectorTypes | `koinon.connection.v1alpha1.ListConnectorTypesRequest` | `koinon.connection.v1alpha1.ListConnectorTypesResponse` | - | ListConnectorTypes returns the connector types this install ships, with their scopes and setup guides. Any signed-in user. |
 | ListInstallationRepos | `koinon.connection.v1alpha1.ListInstallationReposRequest` | `koinon.connection.v1alpha1.ListInstallationReposResponse` | - | ListInstallationRepos lists the repositories a GitHub connection's App installation can access, for choosing what to bind an agent to. Koinon asks GitHub with a metadata-read installation token; nothing is written. Admins and owners. |
+| RemoveConnectionMCPHost | `koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest` | `koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse` | - | RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server linked to the connection that it no longer serves loses the link (and its code-host tool class), each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response lists them. With dry_run nothing is written: the response lists the servers a removal would unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host added again does not restore a link. Admins and owners. |
 | SetConnectionSecret | `koinon.connection.v1alpha1.SetConnectionSecretRequest` | `koinon.connection.v1alpha1.SetConnectionSecretResponse` | - | SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector is required; the other settings stay. It clears the lost mark and the last test result. A declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION). Audited without the secret. Admins and owners. |
 | TestConnection | `koinon.connection.v1alpha1.TestConnectionRequest` | `koinon.connection.v1alpha1.TestConnectionResponse` | - | TestConnection runs the setup guide's checks against the provider and records the result. Nothing is written to the provider. Admins and owners. |
+
+### Message AddConnectionMCPHostRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| connection_id | 2 | `string` | singular |  |  |
+| host | 3 | `string` | singular |  |  |
+
+### Message AddConnectionMCPHostResponse
+
+AddConnectionMCPHostResponse holds the connection with its new list.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 
 ### Message BoundAgent
 
@@ -1462,6 +1480,7 @@ Connection is a configured connector instance.
 | gitea | 14 | `koinon.connection.v1alpha1.GiteaConnection` | singular | settings |  |
 | credential_lost_at | 15 | `google.protobuf.Timestamp` | singular |  | credential_lost_at is set when the secret was lost with the key that encrypted it (`koinon-api keys forget`, ADR 0085 decision 13): the connection is not usable (bound agents report it and runs that need it fail) until the secret is entered again. Unset otherwise. |
 | admin_disabled | 16 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
+| mcp_hosts | 17 | `string` | repeated |  | mcp_hosts are the extra host names an admin added for MCP servers that act on this connection (#240), sorted. They come on top of the connection's own hosts and the connector's declared ones. |
 
 ### Message ConnectorType
 
@@ -1659,6 +1678,25 @@ ListInstallationReposResponse is one page, in GitHub's order.
 | next_page_token | 2 | `string` | singular |  | Empty on the last page. A filtered page can hold fewer repositories than an unfiltered one, or none, and still have a next page. |
 | total_count | 3 | `int64` | singular |  | How many repositories the installation can access, before the query. |
 
+### Message RemoveConnectionMCPHostRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| connection_id | 2 | `string` | singular |  |  |
+| host | 3 | `string` | singular |  |  |
+| dry_run | 4 | `bool` | singular |  | dry_run reports the servers the removal would unlink and writes nothing. |
+
+### Message RemoveConnectionMCPHostResponse
+
+RemoveConnectionMCPHostResponse holds the connection with its new list (with dry_run: as it is now)
+and the MCP servers the removal unlinked (with dry_run: would unlink).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
+| unlinked_servers | 2 | `koinon.connection.v1alpha1.UnlinkedMCPServer` | repeated |  |  |
+
 ### Message Scope
 
 Scope is a grantable capability of a connector type.
@@ -1710,6 +1748,16 @@ TestConnectionResponse holds the checks in setup-guide order.
 | connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 | results | 2 | `koinon.connection.v1alpha1.CheckResult` | repeated |  |  |
 
+### Message UnlinkedMCPServer
+
+UnlinkedMCPServer is an MCP server that lost its link to a connection.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+| url | 3 | `string` | singular |  |  |
+
 ### Enum ConnectionStatus
 
 ConnectionStatus is the outcome of the last test.
@@ -1732,6 +1780,217 @@ Tier is a scope's risk tier (ADR 0008).
 | TIER_REVERSIBLE_WRITE | 2 |  |
 | TIER_EXTERNAL_OR_IRREVERSIBLE | 3 |  |
 | TIER_FORBIDDEN | 4 |  |
+
+## koinon.gateway.v1alpha1
+
+Files: `koinon/gateway/v1alpha1/state.proto`
+
+### Service GatewayStateService
+
+GatewayStateService is the State stream of ADR 0097 decision 2.1: koinon-api sends a gateway copy
+the full desired state of the gateway, one revision at a time, and the copy confirms each half of a
+revision once it serves it. It is the config delivery of Koinon's own gateway; the agentgateway
+drivers keep rendering files and CRDs. It is internal: only a gateway copy calls it.
+
+Nothing here carries secret material: a StateUpdate holds key ids and key hashes, never a key, and
+names the file a credential is mounted at, never its content (ADR 0097 decision 5, the secret store).
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| AckRevision | `koinon.gateway.v1alpha1.AckRevisionRequest` | `koinon.gateway.v1alpha1.AckRevisionResponse` | - | AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model half and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An ack of a revision covers every earlier one for that half. Idempotent. |
+| StreamState | `koinon.gateway.v1alpha1.StreamStateRequest` | `koinon.gateway.v1alpha1.StateUpdate` | server | StreamState sends the latest revision at once and every later one when it is published. Each message is a full snapshot (state of the world), not a delta, so a copy that reconnects needs nothing but the next message. buf:lint:ignore RPC_RESPONSE_STANDARD_NAME The stream message is StateUpdate, the name ADR 0097 and the State types use for a revision. |
+
+### Message AckRevisionRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| copy_id | 1 | `string` | singular |  |  |
+| revision | 2 | `int64` | singular |  |  |
+| half | 3 | `koinon.gateway.v1alpha1.Half` | singular |  |  |
+
+### Message AckRevisionResponse
+
+No fields.
+
+### Message AgentLimit
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| limit | 2 | `koinon.gateway.v1alpha1.Limit` | singular |  |  |
+
+### Message AgentModels
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| models | 2 | `string` | repeated |  |  |
+
+### Message AgentRef
+
+AgentRef names an agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+
+### Message AgentTools
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
+
+### Message Key
+
+Key is the gateway-side record of an API key: id, owner and hash. The key itself never enters it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| agent | 2 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| hash | 3 | `string` | singular |  | hash is "sha256:&lt;hex&gt;" of the key material. |
+
+### Message Limit
+
+Limit is a per-agent spend limit (gateway.Limit).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| unit | 1 | `string` | singular |  | unit is "USD", the only unit. |
+| amount_pico_usd | 2 | `int64` | singular |  | amount_pico_usd is the exact amount in pico-USD (money.USD). |
+| window_seconds | 3 | `int64` | singular |  | window_seconds is 0 for no window. |
+| generation | 4 | `string` | singular |  |  |
+
+### Message MCPState
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| targets | 1 | `koinon.gateway.v1alpha1.MCPTarget` | repeated |  |  |
+| tools | 2 | `koinon.gateway.v1alpha1.AgentTools` | repeated |  |  |
+
+### Message MCPTarget
+
+MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in
+the gateway, not the credential; credential_header and credential_prefix say how it is sent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| url | 2 | `string` | singular |  |  |
+| sse | 3 | `bool` | singular |  |  |
+| org | 4 | `string` | singular |  |  |
+| credential_header | 5 | `string` | singular |  |  |
+| credential_prefix | 6 | `string` | singular |  |  |
+| credential_file | 7 | `string` | singular |  |  |
+
+### Message Model
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| format | 2 | `string` | singular |  |  |
+| thinking | 3 | `koinon.gateway.v1alpha1.Thinking` | singular |  |  |
+| guard | 4 | `bool` | singular |  |  |
+| price | 5 | `koinon.gateway.v1alpha1.Price` | singular |  | price is unset for a model without one; the gateway does not serve it. |
+
+### Message ModelState
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.gateway.v1alpha1.AgentLimit` | repeated |  |  |
+| providers | 2 | `koinon.gateway.v1alpha1.Provider` | repeated |  |  |
+| models | 3 | `koinon.gateway.v1alpha1.AgentModels` | repeated |  |  |
+
+### Message Price
+
+Price is per million tokens in USD, as decimal strings.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| input | 1 | `string` | singular |  |  |
+| output | 2 | `string` | singular |  |  |
+| cache_read | 3 | `string` | singular |  |  |
+| cache_write | 4 | `string` | singular |  |  |
+| reasoning | 5 | `string` | singular |  |  |
+| tiers | 6 | `koinon.gateway.v1alpha1.PriceTier` | repeated |  |  |
+
+### Message PriceTier
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| context_over | 1 | `int64` | singular |  |  |
+| input | 2 | `string` | singular |  |  |
+| output | 3 | `string` | singular |  |  |
+| cache_read | 4 | `string` | singular |  |  |
+| cache_write | 5 | `string` | singular |  |  |
+| reasoning | 6 | `string` | singular |  |  |
+
+### Message Provider
+
+Provider is an org's OpenAI-compatible upstream. api_key_file is where the provider key is mounted
+in the gateway, not the key.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+| type | 3 | `string` | singular |  |  |
+| base_url | 4 | `string` | singular |  |  |
+| api_key_file | 5 | `string` | singular |  |  |
+| anthropic_workspace_id | 6 | `string` | singular |  |  |
+| models | 7 | `koinon.gateway.v1alpha1.Model` | repeated |  |  |
+
+### Message StateUpdate
+
+StateUpdate is one revision of the gateway's desired state: the keys both halves need, then the
+model half and the MCP half (gateway.State, ADR 0097 decision 2.1). The keys are at the top level
+so neither half is a copy of them.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| revision | 1 | `int64` | singular |  | revision grows by one per published change of the state and is the number the copy acks. 0 only in a snapshot that has not been stored yet. |
+| keys | 2 | `koinon.gateway.v1alpha1.Key` | repeated |  |  |
+| model | 3 | `koinon.gateway.v1alpha1.ModelState` | singular |  |  |
+| mcp | 4 | `koinon.gateway.v1alpha1.MCPState` | singular |  |  |
+
+### Message StreamStateRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| copy_id | 1 | `string` | singular |  | copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce), 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and an ack under a reused id would count for a process that has not loaded the revision. |
+
+### Message Thinking
+
+Thinking is internal/thinking.Capability as the table records it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| thinks | 1 | `string` | singular |  |  |
+| on | 2 | `string` | singular |  |  |
+| off | 3 | `string` | singular |  |  |
+| display | 4 | `string` | singular |  |  |
+| betas | 5 | `string` | repeated |  |  |
+| usage_split | 6 | `string` | singular |  |  |
+
+### Message ToolGrant
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| target | 1 | `string` | singular |  |  |
+| tools | 2 | `string` | repeated |  |  |
+| all | 3 | `bool` | singular |  |  |
+
+### Enum Half
+
+Half is one of the two paths a gateway copy serves.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| HALF_UNSPECIFIED | 0 |  |
+| HALF_MODEL | 1 |  |
+| HALF_MCP | 2 |  |
 
 ## koinon.leakguard.v1alpha1
 

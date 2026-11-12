@@ -24,9 +24,9 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
 - `koinon-api`, `koinon-reconciler`, `koinon-agentd`: built with ko (`./cmd/...`) on every Go
   change, injected into the chart's pods. Each image also gets the tag `dev`, which the chart uses
   where Tilt cannot inject (the preflight Job's probe pods).
-- `flavor-<name>`: `make flavor-<name>` (tag from `hack/flavor-tag.sh`), then `docker push`
-  (to the local registry on kind). The chart gets that tag, so a flavor change rolls the reconciler. Only `opencode`
-  exists in v0.1 (ADR 0059): `tilt up -- --flavors=opencode`.
+- `harness-<name>`: `make harness-<name>` (tag from `hack/harness-tag.sh`), then `docker push`
+  (to the local registry on kind). The chart gets that tag, so a harness change rolls the reconciler. Only `opencode`
+  exists in v0.1 (ADR 0059): `tilt up -- --harnesses=opencode`.
 - `postgres` (CloudNativePG `Cluster` from the chart), `koinon-migrate-install` (`koinon-api
   migrate`), `koinon-preflight`, `koinon-ensure-secrets` (`koinon-api ensure-secrets`: the generated database and
   bootstrap-admin passwords, created once and never overwritten), `koinon-gateway` (standalone agentgateway), `koinon-config` (the
@@ -68,7 +68,7 @@ and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute wi
 `make dev-kind-up` and the kind e2e (`test/e2e/kind/up.sh`) start, next to the cluster, with
 `test/e2e/kind/registry.sh`:
 
-- `kind-registry` (`127.0.0.1:5001`): the push target. Koinon's images (ko, the OpenCode flavor, the fakes)
+- `kind-registry` (`127.0.0.1:5001`): the push target. Koinon's images (ko, the OpenCode harness, the fakes)
   are pushed to `localhost:5001` and the node pulls them from it, so a layer the registry already has is
   not sent again. `kind load` copied every image into every node on every run. The registry is shared by
   every kind cluster on the Docker host, so the e2e and the drill push to `localhost:5001/<cluster>/...`
@@ -98,8 +98,8 @@ may be using them; `--force` stops them anyway), and `KIND_PROXY_PURGE=1` also r
 the pushed images. Each run overwrites its cluster's tags and a layer is stored once, so the push registry
 grows only by layers no tag names any more; purge it now and then. Running `up.sh`
 again reuses them. The registry port is `KIND_REGISTRY_PORT` (default 5001). The e2e sets the pull policy of
-its images to `Always`, so a reused cluster never runs an older image under the same tag. A flavor changed
-on a reused cluster needs a new tag (the content tag of `hack/flavor-tag.sh` does that).
+its images to `Always`, so a reused cluster never runs an older image under the same tag. A harness changed
+on a reused cluster needs a new tag (the content tag of `hack/harness-tag.sh` does that).
 
 In CI, `e2e-kind.yml` restores the caches' storage with `actions/cache` (key: a hash of the pin files) and
 `main` saves it; a miss only costs the pulls. `test/e2e/run.sh` prints the seconds of every step (registry,
@@ -136,7 +136,7 @@ tilt up --context my-dev-cluster
 The command line overrides the file (`--helm-set`, `--openshell-tls-secret=`, `--openshell-namespace`,
 `--sandbox-policy`, `--platform`).
 
-Tilt builds for the platform you set; images are pushed with `docker push` (flavors) and ko (Koinon).
+Tilt builds for the platform you set; images are pushed with `docker push` (harnesses) and ko (Koinon).
 With `sandboxPolicy` off, nothing at admission enforces the sandbox runtime class: that rests on
 OpenShell's default runtime class and the reconciler's `runtimeClassName`, so the escape suite's
 admission cases do not hold on that cluster. The sandbox observer (ADR 0078) needs the policies, so
@@ -164,7 +164,7 @@ server on http://localhost:5173 (see [web.md](web.md)); the API itself is on htt
 
 ## Overrides
 
-`tilt up -- --help` lists the options: `--mode`, `--flavors`, `--platform`, `--openshell-tls-secret`,
+`tilt up -- --help` lists the options: `--mode`, `--harnesses`, `--platform`, `--openshell-tls-secret`,
 `--openshell-namespace`, `--sandbox-policy`, `--helm-set key=value` (repeatable), `--web`.
 
 ## Troubleshooting
@@ -173,7 +173,7 @@ server on http://localhost:5173 (see [web.md](web.md)); the API itself is on htt
   context under `contexts` in `hack/dev/local.yaml`.
 - `ImagePullBackOff` with 401 on a remote cluster: the pull Secret named by `imagePullSecret` is
   missing or wrong. Sandbox namespaces are created by OpenShell and need their own pull access to
-  `flavor-*` in your registry.
+  `harness-*` in your registry.
 - `koinon-preflight` fails: it names the missing prerequisite (Agent Sandbox, OpenShell, the
   RuntimeClass, CloudNativePG). Its Job is kept for `kubectl --context <your context> -n koinon logs job/koinon-preflight`.
 - `tilt down` deletes the release objects including the database and its volume.

@@ -32,12 +32,12 @@ flavors_dirs() {
 	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
 		dirs=$CI_CHANGES_FLAVORS_DIRS
 	else
-		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/flavors/...) || return 1
+		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/harnesses/...) || return 1
 		dirs=$(strip_mod_dirs <<<"$out")
 	fi
 	# The suite's own directory must be in the list; if not, the strip failed (a path outside
 	# the checkout, a symlink): fail closed instead of reporting "no dependency changed".
-	grep -qxF test/flavors <<<"$dirs" || return 1
+	grep -qxF test/harnesses <<<"$dirs" || return 1
 	printf '%s\n' "$dirs"
 }
 
