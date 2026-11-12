@@ -93,13 +93,16 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A client over the limit for this username is refused before the password hash runs; the
-	// refusal is counted, not audited one by one (loginlimit.go).
+	// A client over the limit for this username, or for its address over all usernames, is refused
+	// before the password hash runs and before any database read; the refusal is counted, not audited
+	// one by one (loginlimit.go).
 	keys := newLoginKeys(r, req.Username)
-	if wait := s.limiter.Blocked(keys.user, s.cfg.Now()); wait > 0 {
-		s.limiter.Refuse(keys.user)
-		writeLoginLimited(w, wait)
-		return
+	for _, k := range []string{keys.wide, keys.user} {
+		if wait := s.limiter.Blocked(k, s.cfg.Now()); wait > 0 {
+			s.limiter.Refuse(k)
+			writeLoginLimited(w, wait)
+			return
+		}
 	}
 	cred, ok, err := s.checkPassword(r.Context(), req.Username, req.Password)
 	if errors.Is(err, errBusy) {

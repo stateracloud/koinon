@@ -9,14 +9,25 @@
 // MaxBackoff. A key that was refused starts afresh only after a quiet FailWindow that follows the end
 // of its block, so a client that waits out each block keeps doubling it. A success resets the key.
 //
-// The state lives in memory, per replica. The address is the connection's peer: behind an ingress
-// that is the ingress, so one noisy client slows its neighbours down (set a NetworkPolicy or an
-// ingress rule for finer control).
+// The state lives in memory, per replica, in at most maxTracked keys (the least recently used key is
+// dropped first). The address is the connection's peer, an IPv6 one masked to its /64;
+// X-Forwarded-For is not trusted.
+//
+// Lockout risk behind an ingress: every client then shares the ingress's address, so one noisy client
+// slows its neighbours down, and anyone who knows a username or a token prefix can lock that
+// credential for the others by failing against it (set a NetworkPolicy or an ingress rule for finer
+// control). The keys hold a hash of the credential name, not the name. The audit event of a failed
+// password login stores the attempted username as typed (cut to a bounded length), so a user who types
+// a password into the username field leaves it in the audit log.
 package ratelimit
 
 import (
+	"container/list"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -29,18 +40,19 @@ const (
 	BaseBackoff = time.Second
 	MaxBackoff  = 15 * time.Minute
 
-	// maxTracked bounds the keys kept; past it, keys idle for forgetAfter are dropped.
-	maxTracked  = 10000
-	forgetAfter = time.Hour
+	// maxTracked is the hard bound on the keys kept; past it the least recently used key is dropped.
+	maxTracked = 10000
 )
 
 // Limiter counts failures per key. The zero value is not usable; call New.
 type Limiter struct {
 	mu   sync.Mutex
-	keys map[string]*attempts
+	keys map[string]*list.Element // value: *attempts
+	lru  *list.List               // front: most recently used
 }
 
 type attempts struct {
+	key     string
 	fails   int
 	first   time.Time
 	blocked time.Time
@@ -50,17 +62,42 @@ type attempts struct {
 }
 
 // New returns an empty Limiter.
-func New() *Limiter { return &Limiter{keys: map[string]*attempts{}} }
+func New() *Limiter { return &Limiter{keys: map[string]*list.Element{}, lru: list.New()} }
+
+// Len is the number of keys tracked.
+func (l *Limiter) Len() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.keys)
+}
 
 // Key is the slot of a client address and the credential it names (a token prefix, a username);
-// part "" is the address's shared slot.
-func Key(addr, part string) string { return addr + "|" + part }
+// part "" is the address's shared slot. The part is client-chosen, so the key holds a truncated
+// SHA-256 of it, which bounds the key's size.
+func Key(addr, part string) string {
+	if part == "" {
+		return addr + "|"
+	}
+	sum := sha256.Sum256([]byte(part))
+	return addr + "|" + hex.EncodeToString(sum[:8])
+}
 
-// ClientAddr is the request's peer address without the port.
+// ClientAddr is the request's peer address without the port. An IPv6 address is masked to its /64,
+// the smallest block a client commonly holds, so rotating the host part does not escape a key; an
+// IPv4 address stays whole. X-Forwarded-For is not read.
 func ClientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip, perr := netip.ParseAddr(host); perr == nil {
+		ip = ip.Unmap()
+		if ip.Is6() {
+			if p, perr := ip.Prefix(64); perr == nil {
+				return p.Masked().Addr().String()
+			}
+		}
+		return ip.String()
 	}
 	return host
 }
@@ -74,35 +111,44 @@ func RetryAfter(d time.Duration) string {
 func (l *Limiter) Blocked(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if a, ok := l.keys[key]; ok && now.Before(a.blocked) {
-		return a.blocked.Sub(now)
+	if e, ok := l.keys[key]; ok {
+		if a := e.Value.(*attempts); now.Before(a.blocked) {
+			return a.blocked.Sub(now)
+		}
 	}
 	return 0
 }
 
-// Fail records a failure for key.
-func (l *Limiter) Fail(key string, now time.Time) {
+// Fail records a failure for key; the key is blocked after FreeFails failures.
+func (l *Limiter) Fail(key string, now time.Time) { l.FailAfter(key, FreeFails, now) }
+
+// FailAfter records a failure for key, which is blocked after freeFails failures within FailWindow.
+func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.keys) >= maxTracked {
-		for k, a := range l.keys {
-			if now.Sub(a.first) > forgetAfter && now.After(a.blocked) {
-				delete(l.keys, k)
-			}
-		}
+	var a *attempts
+	if e, ok := l.keys[key]; ok {
+		l.lru.MoveToFront(e)
+		a = e.Value.(*attempts)
 	}
-	a, ok := l.keys[key]
-	if !ok || now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
+	if a == nil || now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
 		// The refusals not yet taken stay counted when the failures start afresh.
-		fresh := &attempts{first: now}
-		if ok {
+		fresh := &attempts{key: key, first: now}
+		if a != nil {
 			fresh.refused = a.refused
+			*a = *fresh
+		} else {
+			if len(l.keys) >= maxTracked {
+				oldest := l.lru.Back()
+				l.lru.Remove(oldest)
+				delete(l.keys, oldest.Value.(*attempts).key)
+			}
+			a = fresh
+			l.keys[key] = l.lru.PushFront(a)
 		}
-		a = fresh
-		l.keys[key] = a
 	}
 	a.fails++
-	if over := a.fails - FreeFails; over >= 0 {
+	if over := a.fails - freeFails; over >= 0 {
 		d := BaseBackoff << min(over, 20)
 		a.blocked = now.Add(min(d, MaxBackoff))
 	}
@@ -121,8 +167,8 @@ func (a *attempts) quietSince() time.Time {
 func (l *Limiter) Refuse(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if a, ok := l.keys[key]; ok {
-		a.refused++
+	if e, ok := l.keys[key]; ok {
+		e.Value.(*attempts).refused++
 	}
 }
 
@@ -130,10 +176,11 @@ func (l *Limiter) Refuse(key string) {
 func (l *Limiter) TakeRefused(key string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	a, ok := l.keys[key]
+	e, ok := l.keys[key]
 	if !ok {
 		return 0
 	}
+	a := e.Value.(*attempts)
 	n := a.refused
 	a.refused = 0
 	return n
@@ -142,6 +189,9 @@ func (l *Limiter) TakeRefused(key string) int {
 // Succeed forgets key.
 func (l *Limiter) Succeed(key string) {
 	l.mu.Lock()
-	delete(l.keys, key)
-	l.mu.Unlock()
+	defer l.mu.Unlock()
+	if e, ok := l.keys[key]; ok {
+		l.lru.Remove(e)
+		delete(l.keys, key)
+	}
 }

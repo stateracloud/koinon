@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -126,6 +127,18 @@ var _ = Describe("password login limiter (issue 658)", func() {
 		}
 		Expect(login(ctx, "192.0.2.13", "someone-else", "koinon_test_wrong").Code).To(Equal(http.StatusTooManyRequests), "the address is over the limit")
 		Expect(login(ctx, "192.0.2.13", "admin", fakeLimitPassword).Code).To(Equal(http.StatusOK))
+	})
+
+	It("refuses an address that spent its budget over many usernames before the hash and without a database read", func(ctx SpecContext) {
+		for i := range addressFreeFails {
+			Expect(login(ctx, "192.0.2.20", "many-"+strconv.Itoa(i), "koinon_test_wrong").Code).To(BeElementOf(http.StatusUnauthorized, http.StatusTooManyRequests))
+		}
+		fillVerifySlots()
+		before := len(events(ctx))
+		rec := login(ctx, "192.0.2.20", "brand-new-name", fakeLimitPassword)
+		Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
+		Expect(rec.Body.String()).To(ContainSubstring("too many failed login attempts"), "the limiter answered, not the busy hash")
+		Expect(events(ctx)).To(HaveLen(before), "no audit event on the blocked path")
 	})
 
 	It("forgets the failures of a username after a good login", func(ctx SpecContext) {

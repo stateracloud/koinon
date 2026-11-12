@@ -4,6 +4,7 @@ package ratelimit_test
 
 import (
 	"net/http/httptest"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -97,6 +98,29 @@ var _ = Describe("Limiter", func() {
 		r.RemoteAddr = "192.0.2.7:4242"
 		Expect(ratelimit.ClientAddr(r)).To(Equal("192.0.2.7"))
 		r.RemoteAddr = "[2001:db8::1]:4242"
-		Expect(ratelimit.ClientAddr(r)).To(Equal("2001:db8::1"))
+		Expect(ratelimit.ClientAddr(r)).To(Equal("2001:db8::"))
+	})
+
+	It("shares a key between two addresses of one IPv6 /64 and not between IPv4 hosts", func() {
+		a, b := httptest.NewRequest("GET", "/", nil), httptest.NewRequest("GET", "/", nil)
+		a.RemoteAddr, b.RemoteAddr = "[2001:db8:1:2::1]:1", "[2001:db8:1:2:ffff::9]:2"
+		Expect(ratelimit.ClientAddr(a)).To(Equal(ratelimit.ClientAddr(b)))
+		b.RemoteAddr = "[2001:db8:1:3::1]:2"
+		Expect(ratelimit.ClientAddr(a)).NotTo(Equal(ratelimit.ClientAddr(b)))
+		a.RemoteAddr, b.RemoteAddr = "192.0.2.1:1", "192.0.2.2:1"
+		Expect(ratelimit.ClientAddr(a)).NotTo(Equal(ratelimit.ClientAddr(b)))
+	})
+
+	It("never tracks more keys than its cap, and drops the least recently used", func() {
+		l.Fail("first", t0)
+		for i := range 25000 {
+			l.Fail(ratelimit.Key("192.0.2.1", "user:"+strconv.Itoa(i)), t0)
+		}
+		Expect(l.Len()).To(BeNumerically("<=", 10000))
+		Expect(l.TakeRefused("first")).To(BeZero())
+	})
+
+	It("keeps the credential name out of the key", func() {
+		Expect(ratelimit.Key("192.0.2.1", "user:admin")).NotTo(ContainSubstring("admin"))
 	})
 })
