@@ -153,3 +153,6 @@ func WorkingWithData(tools ...string) string { return workingWithDataFor(tools, 
 
 // WorkingWithDataSaved is WorkingWithData for a harness that saves a cut tool result to a file.
 func WorkingWithDataSaved(tools ...string) string { return workingWithDataFor(tools, true) }
+
+// ToolName is the name a tool call is traced under.
+var ToolName = toolName

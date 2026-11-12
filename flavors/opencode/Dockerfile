@@ -204,6 +204,10 @@ RUN set -eux; \
 COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
+# koinon.core (ADR 0093), Koinon's one owned OpenCode plugin: only the module, never its tests or
+# dev project (flavors/opencode/plugins/{package.json,pnpm-*,tsconfig*,koinon-core/test/}). Listed
+# first in the config's plugin list (README.md, "koinon.core") so it wins an ID clash.
+COPY --chmod=0644 plugins/koinon-core/index.ts /usr/local/lib/koinon/opencode/plugins/koinon-core/index.ts
 # Koinon's retry policy for OpenCode's model requests, loaded by the config's plugin list
 # (README.md, "Model retries"); outside every config root, so nothing else loads it.
 COPY --chmod=0644 plugins/koinon-retry/index.js /usr/local/lib/koinon/opencode/plugins/koinon-retry/index.js

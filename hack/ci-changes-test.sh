@@ -234,14 +234,16 @@ expect_gates "tidy shell scripts" hack/paths.rules
 expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
 
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
-# Read the script's output fully before grepping: chartsmoke is not the last job, so `grep -q` in
+# Read the script's output fully before grepping: flavors and chartsmoke are not the last jobs, so `grep -q` in
 # a pipefail pipeline would SIGPIPE the script mid-write and look like a miss.
 total=$((total + 4))
-if ! printf 'internal/execution/run.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/execution/run.go\n' | bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: internal/execution/run.go does not turn on flavors"
 	fails=$((fails + 1))
 fi
-if printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin) || true
+if grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: go list path: an unrelated package turns on flavors"
 	fails=$((fails + 1))
 fi
@@ -374,7 +376,8 @@ while IFS= read -r d; do
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
 total=$((total + 1))
-if ! printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | grep -qx 'flavors=true'; then
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
+if ! grep -qx 'flavors=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
 	fails=$((fails + 1))
 fi

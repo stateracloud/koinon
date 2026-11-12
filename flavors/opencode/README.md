@@ -331,6 +331,65 @@ path (`retryOneShot`, at most 4 tries and only when the provider clearly did not
 429, a 503 or 529, an unreachable host), and an agent plugin loaded with `--plugin-installs` runs in
 the same process and could register its own `session.retry` hook; the request cap still bounds both.
 
+## koinon.core
+
+`koinon.core` is Koinon's one owned OpenCode plugin (ADR 0093), the first entry of the read-only
+config's `plugins` list, before `koinon.retry`
+([`plugins/koinon-core/index.ts`](plugins/koinon-core/index.ts), installed as
+`/usr/local/lib/koinon/opencode/plugins/koinon-core`). A new customisation of OpenCode's behaviour
+goes into this plugin as a module, not as a new ad-hoc plugin. This first slice only registers the
+load report command below; the permission, title, request-label and shell-environment modules of
+ADR 0093 decisions 3.2-3.5 are later PRs. It is advisory only (ADR 0093 decision 2): every boundary
+(egress, credentials, isolation, tool approvals, budgets and request caps) stays in OpenShell and
+agentgateway, not in this plugin.
+
+**Loading.** A configured plugin entry must be a directory; OpenCode's `Host.resolve`
+(`packages/plugin/src/host.ts`) tries `<dir>/server`, then `<dir>/index`, through Bun's own module
+resolution. `index.ts` is therefore the only root module the directory may hold: a later module
+goes in a subdirectory, never a second file at the root (a `server.*`, `tui.*`, `rpc.*` or
+`gui-experimental.*` name, or a `package.json` with `name` and `exports`, changes what loads
+instead). The module uses only `import type` from `@opencode/plugin`, which TypeScript erases at
+compile time, so it is `export default { id, setup } satisfies Plugin.Plugin` with no run-time npm
+dependency and nothing installed in the sandbox: OpenCode's bundled Bun loads the plain `.ts` file.
+
+**Setup failure.** `setup` runs inside OpenCode's own `Effect.promise`
+(`packages/plugin/src/promise/adapter.ts`); a throw (a bad option, or a hook this pin lacks) is
+caught per plugin (`packages/core/src/plugin.ts`), closes that plugin's scope — releasing
+everything it registered — logs `failed to load plugin`, and lets every other plugin keep running.
+A duplicate plugin ID does not stop loading either: the supervisor
+(`packages/core/src/plugin/supervisor.ts`) keeps the first of a duplicate ID and fails only the
+later one, before any `setup` runs, in built-in-then-configured-document order. `koinon.core` is
+listed first and Koinon's config directories hold no other plugin, so an impostor (a user plugin
+reusing a Koinon ID, loaded only with `harness.pluginInstalls`, see [Plugins](#plugins) below)
+always loses.
+
+**Load report.** `setup` registers an ACP command, `koinon-core-ready-v1` (the contract version is
+in the name: agentd keeps only command names from ACP, never descriptions), last, after every
+other module's hooks are registered and awaited. A plugin command reaches ACP's
+`available_commands_update`, sent per session after the `session/new` (or `load`/`resume`/`fork`)
+response and re-sent whenever the command list changes (`packages/cli/src/acp/sessions.ts`,
+`catalog.ts`); this is the same channel and the same kind of wait agentd already uses for
+`koinon:github_koinon-ready` (ADR 0052 decision 4). A missing report therefore means `koinon.core`
+(or a module inside it) failed to load, and agentd's own wait for it (ADR 0093 decision 3.1,
+Delivery step 4) is not part of this PR: today only `test/flavors` checks for the command.
+
+**ADR 0093 corrections**, found reading OpenCode `v2.2.6`
+(`dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06`) for this slice; each gets a dated amendment in the ADR:
+
+1. The shell environment hook (decision 3.5) is `ctx.shell.hook("create.before", ...)`, not
+   `shell.env`: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/plugin/src/promise/shell.ts#L3-L17
+2. A duplicate plugin ID does not stop loading (decisions 4 and the Context section said it did):
+   the later duplicate fails and the first stays, which is why `koinon.core` being listed first is
+   enough: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/plugin/supervisor.ts#L94-L113
+3. The request-purpose hook (decision 3.4) is `model.request` (`kind`, `headers`), not a state kept
+   from the compaction hook; the kind comes ready-made as one of four values, `generate` included:
+   https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/session/model-request.ts#L337-L362
+4. The permission hook (decision 3.2) can loosen a configured `ask` to `allow` (not only tighten
+   `allow` to `ask`); the ADR's module must write only `ask`, never rely on the hook being
+   one-directional: https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/permission.ts#L176-L215
+5. The types package pin (decision 4) is `@opencode/plugin@2.2.6`, matching the image's OpenCode,
+   not `2.2.5`.
+
 ## Plugins
 
 Plugin installs are a template option, off by default (`spec.harness.pluginInstalls`,

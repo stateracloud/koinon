@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // No ambient types for the plugin module itself: it must use no Node or Bun API (ADR 0093
+    // decision 2, "Out of bounds"), only `import type` from @opencode/plugin.
+    "types": []
+  },
+  "include": ["koinon-core/index.ts"]
+}
