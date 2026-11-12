@@ -795,6 +795,16 @@ browser e2e slept 240 s. `Provider` now carries `serving_state` (`saved`, `servi
    the previous config. Pending states are not failures, so `saved` is never a reason.
 3. **`no key` is derived**: a provider whose key was lost (`credential_lost_at`, #85) is `failed`
    with `no key`. Any other recorded reason maps to `unknown`.
-4. **The page polls** every 5 s while a provider is `saved`; the browser e2e waits for `serving`
-   instead of a fixed sleep. Nudging the reconciler on provider writes (the issue's optional item)
+4. **The page polls** every 5 s while a provider is `saved` and every 15 s while one is `failed`
+   (a failure can pass: an unreachable upstream, a price not added yet); the browser e2e waits for
+   `serving` instead of a fixed sleep and reports a failed status only when the wait times out. Nudging the reconciler on provider writes (the issue's optional item)
    is not done: the 30 s resync stays.
+5. **Providers the pass leaves out are failed too.** A provider whose URL fails the URL policy, whose
+   key cannot be opened, or that has a model with an unusable price is not rendered, so no Apply
+   result names it. The reconciler records each as `unknown` with the reason as detail, after the
+   org's rows are cleared. A provider with an enabled model that has no price is likewise `failed`
+   `unknown` ("no price: model") even when its other models are served: it is not fully served, and the
+   cause is known but not worth its own reason value yet (a separate `no price` reason is possible
+   later; the API maps unrecorded reasons to `unknown`).
+6. **The admin REST API** (`/providers`) carries the same `servingState`, `servingReason` and
+   `servingDetail`.

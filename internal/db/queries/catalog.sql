@@ -240,6 +240,14 @@ SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
 WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
    OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail;
 
+-- name: SetGatewayProviderFailure :exec
+-- koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
+-- (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
+-- Runs after ClearGatewayProviderFailures; the first reason of a pass stays.
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+VALUES (@org_id, @provider_id, @reason::text, @detail::text)
+ON CONFLICT (org_id, provider_id) DO NOTHING;
+
 -- name: SetGatewayUnpricedFailures :exec
 -- koinon-reconciler, after an apply that took effect: a provider whose enabled models carry no price
 -- is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ProviderSchema, ServingState } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { anySaved, createdByLabel, formatLabelOf, providerTypeLabel, savedRecently, servingBadge, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { createdByLabel, formatLabelOf, failedPollMs, providerTypeLabel, servingBadge, servingPollInterval, servingPollMs, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
@@ -49,15 +49,6 @@ describe('tokens', () => {
   })
 })
 
-describe('savedRecently', () => {
-  const now = Date.parse('2026-10-24T12:00:00Z')
-  it('holds for three minutes after a save', () => {
-    expect(savedRecently(timestampFromMs(now - 60_000), now)).toBe(true)
-    expect(savedRecently(timestampFromMs(now - 181_000), now)).toBe(false)
-    expect(savedRecently(undefined, now)).toBe(false)
-  })
-})
-
 describe('servingBadge', () => {
   it('words each serving state and the reason of a failure', () => {
     expect(servingBadge({ servingState: ServingState.SERVING, servingReason: '' })?.label).toBe('Serving')
@@ -68,8 +59,10 @@ describe('servingBadge', () => {
     expect(servingBadge({ servingState: ServingState.FAILED, servingReason: 'gateway rejected config' })).toEqual({ state: 'failed', label: 'Not served: gateway rejected config', variant: 'destructive' })
     expect(servingBadge({ servingState: ServingState.UNSPECIFIED, servingReason: '' })).toBeUndefined()
   })
-  it('polls only while a provider waits for the gateway', () => {
-    expect(anySaved([{ servingState: ServingState.SERVING }, { servingState: ServingState.SAVED }])).toBe(true)
-    expect(anySaved([{ servingState: ServingState.SERVING }, { servingState: ServingState.FAILED }])).toBe(false)
+  it('polls fast while saved, slower while failed, and stops when settled', () => {
+    expect(servingPollInterval([{ servingState: ServingState.SERVING }, { servingState: ServingState.SAVED }])).toBe(servingPollMs)
+    expect(servingPollInterval([{ servingState: ServingState.FAILED }, { servingState: ServingState.SAVED }])).toBe(servingPollMs)
+    expect(servingPollInterval([{ servingState: ServingState.SERVING }, { servingState: ServingState.FAILED }])).toBe(failedPollMs)
+    expect(servingPollInterval([{ servingState: ServingState.SERVING }, { servingState: ServingState.UNSPECIFIED }])).toBe(false)
   })
 })

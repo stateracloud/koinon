@@ -728,7 +728,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 	}
 
-	if err := r.recordProviderStatus(ctx, orgRefs, res, applyErr, rejectedReason, outcome.Served); err != nil {
+	if err := r.recordProviderStatus(ctx, orgRefs, res, applyErr, rejectedReason, outcome.Served, served.skipped); err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 		errs = append(errs, err)
 	}

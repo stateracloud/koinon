@@ -3,7 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useState, type Dispatch, type SetStateAction } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
 import { OrgDefaultModel } from '@/components/org-default-model'
@@ -19,7 +19,7 @@ import { ProviderService, type Model, type Provider } from '@/gen/koinon/provide
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
-import { anySaved, availabilityMinutes, savedNotice, savedRecently, servingBadge, servingPollMs, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
+import { servingPollInterval, savedNotice, servingBadge, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -37,8 +37,8 @@ type Editing = { kind: 'new-provider' } | { kind: 'provider'; id: string } | { k
 function ProvidersContent() {
   const { org } = useOrg()
   const orgId = org.orgId
-  // While a provider waits for the gateway, re-read its serving status (issue #17).
-  const providers = useQuery(ProviderService.method.listProviders, { orgId }, { refetchInterval: (q) => (anySaved(q.state.data?.providers ?? []) ? servingPollMs : false) })
+  // While a provider waits for the gateway or is failed (which can pass), re-read its serving status (issue #17).
+  const providers = useQuery(ProviderService.method.listProviders, { orgId }, { refetchInterval: (q) => servingPollInterval(q.state.data?.providers ?? []) })
   const models = useQuery(ProviderService.method.listModels, { orgId })
   const actions = useProviderActions(orgId)
   const [editing, setEditing] = useState<Editing>()
@@ -148,7 +148,6 @@ function ProviderCard({
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
-  const now = useNow()
   const editable = providerEditable(p)
   const systemDisabled = p.disabledReason !== '' || p.removed
   // An admin's outward switch (ADR 0110) also takes the provider out of use: no Active badge and no echo check (the server answers 409).
@@ -270,7 +269,6 @@ function ProviderCard({
                   editing={editing?.kind === 'model' && editing.id === m.id}
                   edit={() => setEditing({ kind: 'model', id: m.id })}
                   done={closeOnly(setEditing, { kind: 'model', id: m.id })}
-                  now={now}
                   actions={actions}
                   onSaved={onSaved}
                   onNotice={onNotice}
@@ -293,7 +291,6 @@ function ModelRow({
   editing,
   edit,
   done,
-  now,
   actions,
   onSaved,
   onNotice,
@@ -305,7 +302,6 @@ function ModelRow({
   editing: boolean
   edit: () => void
   done: () => void
-  now: number
   actions: Actions
   onSaved: (warnings?: string[]) => void
   onNotice: (m: string) => void
@@ -325,9 +321,6 @@ function ModelRow({
         )}
         {m.guard && <Badge variant="secondary">Routing guard</Badge>}
         {m.disabledReason && <Badge variant="destructive">Disabled</Badge>}
-        {!m.disabledReason && m.source === 'ui' && savedRecently(m.updatedAt, now) && (
-          <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
-        )}
       </div>
       <p className="text-muted-foreground text-sm">
         Priced on the <Link to="/settings/prices" className="underline">Prices page</Link>.
@@ -364,14 +357,4 @@ function ServingBadge({ provider }: { provider: Provider }) {
       {b.label}
     </Badge>
   )
-}
-
-/** useNow is the current time, refreshed every 15 s, so "saved a moment ago" notes expire. */
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000)
-    return () => clearInterval(t)
-  }, [])
-  return now
 }

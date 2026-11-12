@@ -1370,6 +1370,10 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
+	// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
+	// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.
+	SetGatewayProviderFailure(ctx context.Context, arg SetGatewayProviderFailureParams) error
 	// koinon-reconciler, after an apply that failed or was rejected: every enabled provider of the org
 	// that has an enabled model the gateway does not serve gets the reason. Providers that are fully
 	// served keep serving with the previous config and get none.

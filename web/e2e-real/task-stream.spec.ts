@@ -80,12 +80,17 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
 
   // A UI-added provider is not served at once: the reconciler picks the row up on its 30 s resync, then
   // the key reaches agentgateway through the kubelet's Secret sync (about 170 s on kind). The Providers
-  // page shows the provider's serving status (issue #17); wait for it to say Serving, and fail early with
-  // the reason if it says the gateway does not serve the provider.
+  // page shows the provider's serving status (issue #17); wait for it to say Serving. A failed status can
+  // be transient (the pass between adding the model and its price), so it is not asserted at once: the
+  // page keeps polling, and the reason is reported only if Serving never comes.
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Providers' }).click()
   const servedProvider = page.getByRole('region', { name: 'fake' })
-  await expect(servedProvider.locator('[data-serving="failed"]')).toHaveCount(0)
-  await expect(servedProvider.locator('[data-serving="serving"]')).toBeVisible({ timeout: 360_000 })
+  try {
+    await expect(servedProvider.locator('[data-serving="serving"]')).toBeVisible({ timeout: 360_000 })
+  } catch (e) {
+    const status = await servedProvider.locator('[data-serving]').first().innerText().catch(() => 'no serving status shown')
+    throw new Error(`the provider did not reach Serving; the page says: ${status}`, { cause: e })
+  }
 
   // 3. GitHub connection to the fake GitHub App.
   const app = (await (await request.get(`${fakeGitHub}/_fake/app`)).json()) as {

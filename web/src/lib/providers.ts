@@ -54,6 +54,9 @@ export const savedNotice = 'Saved. The provider shows Serving here once the gate
 /** servingPollMs is how often the Providers page re-reads while a provider is saved but not served yet. */
 export const servingPollMs = 5_000
 
+/** failedPollMs is the slower interval while a provider is failed: a failure can be transient (an unreachable upstream, a price not added yet). */
+export const failedPollMs = 15_000
+
 /** servingBadge words a provider's serving status (issue #17); undefined for a provider that is not served by design. */
 export function servingBadge(p: Pick<Provider, 'servingState' | 'servingReason'>): { state: 'saved' | 'serving' | 'failed'; label: string; variant: 'secondary' | 'outline' | 'destructive' } | undefined {
   switch (p.servingState) {
@@ -68,14 +71,11 @@ export function servingBadge(p: Pick<Provider, 'servingState' | 'servingReason'>
   }
 }
 
-/** anySaved is true while a provider waits for the gateway, so the page keeps polling. */
-export function anySaved(list: readonly Pick<Provider, 'servingState'>[]): boolean {
-  return list.some((p) => p.servingState === ServingState.SAVED)
-}
-
-/** savedRecently is true while a provider or model saved at ts may not be served yet. */
-export function savedRecently(ts: Timestamp | undefined, now = Date.now()): boolean {
-  return !!ts && now - timestampDate(ts).getTime() < availabilityMinutes * 60_000
+/** servingPollInterval is how often to re-read the providers: fast while one waits for the gateway, slower while one is failed, never when all are settled. */
+export function servingPollInterval(list: readonly Pick<Provider, 'servingState'>[]): number | false {
+  if (list.some((p) => p.servingState === ServingState.SAVED)) return servingPollMs
+  if (list.some((p) => p.servingState === ServingState.FAILED)) return failedPollMs
+  return false
 }
 
 export const defaultTokenDays = 30

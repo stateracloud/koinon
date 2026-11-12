@@ -803,6 +803,32 @@ func (q *Queries) SetDerivedModelFormat(ctx context.Context, arg SetDerivedModel
 	return result.RowsAffected(), nil
 }
 
+const setGatewayProviderFailure = `-- name: SetGatewayProviderFailure :exec
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+VALUES ($1, $2, $3::text, $4::text)
+ON CONFLICT (org_id, provider_id) DO NOTHING
+`
+
+type SetGatewayProviderFailureParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Reason     string
+	Detail     string
+}
+
+// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
+// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
+// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.
+func (q *Queries) SetGatewayProviderFailure(ctx context.Context, arg SetGatewayProviderFailureParams) error {
+	_, err := q.db.Exec(ctx, setGatewayProviderFailure,
+		arg.OrgID,
+		arg.ProviderID,
+		arg.Reason,
+		arg.Detail,
+	)
+	return err
+}
+
 const setGatewayProviderFailures = `-- name: SetGatewayProviderFailures :exec
 INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
 SELECT p.org_id, p.id, $1::text, $2::text

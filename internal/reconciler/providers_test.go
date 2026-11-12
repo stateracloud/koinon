@@ -416,6 +416,33 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).NotTo(HaveKey("unpriced-model"))
 		})
 
+		It("fails a provider the pass leaves out (a blocked URL, an unopenable key) instead of leaving it saved (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			orgB, userB := newOrg(ctx)
+			blocked := addProvider(ctx, org, user, "up", "sk-a", "m1")
+			sealed := addProvider(ctx, orgB, userB, "up", "sk-b", "m2")
+			good := addProvider(ctx, orgB, userB, "up2", "sk-c", "m3")
+			cleanup(ctx, org, blocked.ID)
+			cleanup(ctx, orgB, sealed.ID, good.ID)
+			_, err := pool.Exec(ctx, `UPDATE providers SET url = 'http://169.254.169.254/v1' WHERE org_id = $1 AND id = $2`, org, blocked.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE providers SET api_key = (SELECT api_key FROM providers WHERE org_id = $1 AND id = $2) WHERE org_id = $1 AND id = $3`, orgB, good.ID, sealed.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("not served")))
+			for org, id := range map[pgtype.UUID]string{org: blocked.ID, orgB: sealed.ID} {
+				got, err := svc.GetProvider(ctx, org, id)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.Serving.State).To(Equal(catalog.ServingFailed), "left out of the render: failed, not saved: "+id)
+				Expect(got.Serving.Reason).To(Equal(catalog.ReasonUnknown))
+				Expect(got.Serving.Detail).NotTo(BeEmpty())
+				Expect(got.Serving.Detail).NotTo(ContainSubstring("sk-"))
+			}
+			got, err := svc.GetProvider(ctx, orgB, good.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Serving.State).To(Equal(catalog.ServingServing))
+		})
+
 		It("fails a provider whose model has no price, with a reason, instead of leaving it saved (issue 17)", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			p := addProvider(ctx, org, user, "up", "", "priced")

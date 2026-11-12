@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -27,13 +28,16 @@ const failureDetailMax = 500
 // A provider with an enabled model that has no price is failed as unknown ("no price: model"): the
 // gateway does not serve it by design (ADR 0041), and the page must not show it as waiting forever.
 //
+// A provider the pass left out of the render (its URL is not allowed, its key cannot be opened, a
+// price is unusable) is failed as unknown with the reason as detail.
+//
 // An org whose apply took effect without a rejection has its failures cleared. Only providers with an
 // unserved model get a failure; a fully served provider keeps serving with the previous config.
-func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewayplan.Org, res gatewayplan.ApplyResult, applyErr error, configRejected string, served []gatewayplan.ServedModels) error {
+func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewayplan.Org, res gatewayplan.ApplyResult, applyErr error, configRejected string, served []gatewayplan.ServedModels, skipped []skippedProvider) error {
 	var errs []error
 	set := func(org gatewayplan.Org, reason, detail string) {
 		if len(detail) > failureDetailMax {
-			detail = detail[:failureDetailMax]
+			detail = truncateUTF8(detail, failureDetailMax)
 		}
 		if err := r.q.SetGatewayProviderFailures(ctx, store.SetGatewayProviderFailuresParams{OrgID: org.ID, Reason: reason, Detail: detail}); err != nil {
 			errs = append(errs, fmt.Errorf("reconciler: record provider failures for org %s: %w", org.Slug, err))
@@ -64,6 +68,15 @@ func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewaypla
 			errs = append(errs, fmt.Errorf("reconciler: clear provider failures for org %s: %w", s.Org.Slug, err))
 			continue
 		}
+		// Providers the pass left out of the render are in no Apply result: record them here.
+		for _, k := range skipped {
+			if k.orgID != s.Org.ID {
+				continue
+			}
+			if err := r.q.SetGatewayProviderFailure(ctx, store.SetGatewayProviderFailureParams{OrgID: k.orgID, ProviderID: k.providerID, Reason: k.reason, Detail: truncateUTF8(k.detail, failureDetailMax)}); err != nil {
+				errs = append(errs, fmt.Errorf("reconciler: record skipped provider for org %s: %w", s.Org.Slug, err))
+			}
+		}
 		if len(s.Unpriced) == 0 {
 			continue
 		}
@@ -72,6 +85,17 @@ func (r *Reconciler) recordProviderStatus(ctx context.Context, orgs []gatewaypla
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a rune.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func rejectionText(x gateway.Rejection) string { return x.Kind + " " + x.Name + ": " + x.Reason }
