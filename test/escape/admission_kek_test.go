@@ -20,9 +20,10 @@ import (
 )
 
 // The KEK Secret guard and the reconciler Secret fence (issue #604, ADR 0056 amendment 2026-11-11),
-// as `helm template` renders templates/kek-guard.yaml with default values, against a real API
-// server (envtest). Every identity here holds cluster-admin through RBAC, so only the policies
-// decide.
+// as `helm template` renders templates/kek-guard.yaml with a KMS backend (the key-admin Job, and so
+// its writer entry, renders only then; hack/chart-check.d/46-kek-guard.sh asserts the no-KMS
+// render leaves it out), against a real API server (envtest). Every identity here holds
+// cluster-admin through RBAC, so only the policies decide.
 var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Ordered, ContinueOnFailure, func() {
 	const (
 		apiUser   = "system:serviceaccount:koinon:koinon-api"
@@ -56,7 +57,9 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 
 	BeforeAll(func(ctx SpecContext) {
 		testenv.Require(testenv.Envtest)
-		policies, bindings := renderAdmission(ctx, "koinon", ns, "templates/kek-guard.yaml", nil)
+		policies, bindings := renderAdmission(ctx, "koinon", ns, "templates/kek-guard.yaml", nil,
+			"--set", "secrets.kek.kms.backend=openbao", "--set", "secrets.kek.kms.openbao.address=https://bao.example:8200",
+			"--set", "secrets.kek.kms.openbao.key=koinon-kek")
 		Expect(policies).To(HaveLen(2))
 		Expect(bindings).To(HaveLen(2))
 
