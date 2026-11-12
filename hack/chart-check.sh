@@ -44,8 +44,19 @@ fi
 out=$(mktemp -d "${TMPDIR:-/tmp}/chart-check.XXXXXX")
 trap 'rm -rf "$out"' EXIT
 # A command that fails under set -e names itself, so an exit code alone never ends the log (#608).
-# set -E carries the trap into functions and subshells; BASH_SOURCE is the assertion file.
-trap 'echo "chart-check: ${BASH_SOURCE[0]}:${LINENO}: exit $? in: $BASH_COMMAND" >&2' ERR
+# set -E carries the trap into functions and subshells. The message names the assertion file being
+# sourced (the loop variable part) and the line in it that led to the failure, also when the failing
+# command is inside a helper (found on the call stack), and the innermost location.
+chart_check_err() {
+	local rc=$1 cmd=$2 line=$3 i at=""
+	for ((i = 1; i < ${#BASH_SOURCE[@]}; i++)); do
+		if [[ ${part:-} != "" && ${BASH_SOURCE[i]} == "$part" ]]; then
+			at="$part:${BASH_LINENO[i - 1]}: " # the outermost frame in the file: the line that ran it
+		fi
+	done
+	echo "chart-check: ${at}(${BASH_SOURCE[1]:-?}:$line) exit $rc in: $cmd" >&2
+}
+trap 'chart_check_err "$?" "$BASH_COMMAND" "$LINENO"' ERR
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
 # The chart requires openshell.clientTLSSecret or openshell.insecure=true (old issue 103); the default

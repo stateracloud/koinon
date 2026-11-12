@@ -30,7 +30,7 @@ off=(--set sandboxLimitRange.enabled=false)
 lacks "sandboxLimitRange.enabled=false renders no writer" 'sandbox-limitrange' "${off[@]}"
 off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
 grep -A2 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit -F -- 'enabled: false' || fail "sandboxLimitRange.enabled=false tells the reconciler"
-grep -A3 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit  -- 'name:' && fail "sandboxLimitRange.enabled=false names no LimitRange to the reconciler"
+grep -A3 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit -- 'name:' && fail "sandboxLimitRange.enabled=false names no LimitRange to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
 if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1; then

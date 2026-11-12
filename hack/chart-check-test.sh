@@ -127,8 +127,25 @@ fi
 # #608: an early-exit reader on a pipe fails under pipefail with SIGPIPE (141), depending on timing.
 # Refuse `| grep -q` (any flag cluster with q) and `| head` in the script and its assertion files.
 # Comment lines are ignored; use hit (grep that reads all input) or sed -n 1p instead.
-early_exit='\|[[:space:]]*(grep[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)|head)([[:space:]]|$)'
-hits=$(grep -nE "$early_exit" hack/chart-check.sh hack/chart-check.d/*.sh | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)
+early_exit='\|[[:space:]]*(grep[[:space:]]+([^|;&]*[[:space:]])?(-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)([[:space:]]|$)|head([[:space:]]|$))'
+# early_exit_hits <file>...: file:line:text for each early-exit reader; a line that ends in | is joined
+# with the next one first, so a pipe split over two lines is seen; comment lines are ignored.
+early_exit_hits() {
+	awk '
+		FNR == 1 { if (buf != "") print pf ":" start ":" buf; buf = ""; start = 0 }
+		{ pf = FILENAME }
+		{
+			line = $0
+			if (buf == "") { if (line ~ /^[[:space:]]*#/) next; start = FNR; buf = line }
+			else { sub(/^[[:space:]]+/, "", line); buf = buf " " line }
+			if (buf ~ /\|[[:space:]]*$/) next
+			print FILENAME ":" start ":" buf
+			buf = ""
+		}
+		END { if (buf != "") print pf ":" start ":" buf }
+	' "$@" | grep -E "$early_exit" || true
+}
+hits=$(early_exit_hits hack/chart-check.sh hack/chart-check.d/*.sh)
 if [[ -n $hits ]]; then
 	echo "FAIL: early-exit reader on a pipe in chart-check (use hit or sed -n 1p, #608):"
 	printf '    %s\n' "${hits//$'\n'/$'\n'    }"
@@ -136,16 +153,33 @@ if [[ -n $hits ]]; then
 else
 	echo "ok: no early-exit reader on a pipe in chart-check"
 fi
-# The lint itself must catch the planted forms.
-for planted in 'x | grep -q y' 'x | grep -Fq -- y' 'x | grep -qE y' 'x | head -1' 'x |head'; do
-	if ! grep -qE "$early_exit" <<<"$planted"; then
+# The lint itself must catch the planted forms, and must not flag the allowed ones.
+planted_file="$tmp/planted.sh"
+for planted in 'x | grep -q y' 'x | grep -Fq -- y' 'x | grep -qE y' 'x | head -1' 'x |head' \
+	'x | grep -F -q y' 'x | grep -E --quiet y' $'x |\n\tgrep -q y'; do
+	printf '%s\n' "$planted" >"$planted_file"
+	if [[ -z $(early_exit_hits "$planted_file") ]]; then
 		echo "FAIL: lint misses: $planted"
 		fail=1
 	fi
 done
+for allowed in 'x | hit y' 'x | grep -F y' '# x | grep -q y' $'x |\n\tsed -n 1p' 'x | grep -E "a|b"'; do
+	printf '%s\n' "$allowed" >"$planted_file"
+	if [[ -n $(early_exit_hits "$planted_file") ]]; then
+		echo "FAIL: lint flags an allowed form: $allowed"
+		fail=1
+	fi
+done
+# A failing assertion names its file and line (#608), also when the failure is inside a helper.
+run_case names-failing-helper fail $'h() { false; }\nh'
+grep -q '10-case.sh:2: (' "$tmp/names-failing-helper.log" || {
+	echo "FAIL: names-failing-helper: the log does not name the assertion file and the calling line"
+	sed 's/^/    /' "$tmp/names-failing-helper.log"
+	fail=1
+}
 # A failing assertion names its file and line (#608).
 run_case names-failing-line fail 'false'
-grep -q '10-case.sh:' "$tmp/names-failing-line.log" || {
+grep -q '10-case.sh:[0-9]*: (' "$tmp/names-failing-line.log" || {
 	echo "FAIL: names-failing-line: the log does not name the assertion file"
 	sed 's/^/    /' "$tmp/names-failing-line.log"
 	fail=1

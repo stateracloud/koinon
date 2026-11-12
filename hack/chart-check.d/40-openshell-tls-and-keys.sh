@@ -42,10 +42,10 @@ n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets
 # The saved-work port admits agentd only; the tools port stays agentgateway's alone.
 np=$(render --show-only templates/networkpolicy.yaml)
 sw=$(printf '%s\n' "$np" | grep -A8 -- '- port: savedwork' || true)
-printf '%s\n' "$sw" | hit  'component: agentd' || fail "the saved-work port does not admit koinon-agentd"
-printf '%s\n' "$sw" | hit  'component: gateway' && fail "the saved-work port admits the gateway"
+printf '%s\n' "$sw" | hit 'component: agentd' || fail "the saved-work port does not admit koinon-agentd"
+printf '%s\n' "$sw" | hit 'component: gateway' && fail "the saved-work port admits the gateway"
 tl=$(printf '%s\n' "$np" | grep -A8 -- '- port: tools' || true)
-printf '%s\n' "$tl" | hit  'component: agentd' && fail "the tools port admits koinon-agentd"
+printf '%s\n' "$tl" | hit 'component: agentd' && fail "the tools port admits koinon-agentd"
 # koinon-api cannot delete Secrets unless the legacy connection migration is on.
 lacks "no Secret delete by default" 'verbs: \[delete\]'
 has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true

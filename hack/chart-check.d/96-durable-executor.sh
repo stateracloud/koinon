@@ -8,4 +8,4 @@
 # is no DBOS runtime and no executor ID.
 exec_env() { render --show-only templates/deployments.yaml "$@" | grep -A4 -E -- '- name: KOINON_EXECUTOR_ID$'; }
 exec_env --set api.durable.enabled=true | hit -F 'fieldPath: metadata.name' || fail "KOINON_EXECUTOR_ID is the pod name with api.durable.enabled"
-if exec_env --set api.durable.enabled=false | hit  .; then fail "no KOINON_EXECUTOR_ID with api.durable.enabled=false"; fi
+if exec_env --set api.durable.enabled=false | hit .; then fail "no KOINON_EXECUTOR_ID with api.durable.enabled=false"; fi

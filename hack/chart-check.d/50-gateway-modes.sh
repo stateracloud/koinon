@@ -46,10 +46,10 @@ tools_from() { # prints the 'from' selectors of the ingress rule on the tools po
   awk '/^  ingress:/{i=1} i&&/^    - ports:/{blk=""; grab=1} grab{blk=blk $0 "\n"} /^    # /{if(grab&&blk ~ /- port: tools/){printf "%s", blk; exit} grab=0}' <<<"$np"
 }
 tf=$(tools_from)
-printf '%s\n' "$tf" | hit  'component: gateway' || fail "the tools port does not admit the gateway (standalone)"
+printf '%s\n' "$tf" | hit 'component: gateway' || fail "the tools port does not admit the gateway (standalone)"
 for c in agentd sandbox api reconciler web; do
-  ! printf '%s\n' "$tf" | hit  "component: $c" || fail "the tools port admits $c (standalone)"
+  ! printf '%s\n' "$tf" | hit "component: $c" || fail "the tools port admits $c (standalone)"
 done
 tf=$(tools_from "${k8s[@]}")
-printf '%s\n' "$tf" | hit  'gateway.networking.k8s.io/gateway-name: koinon-gateway' || fail "the tools port does not admit the controller's proxy (kubernetes)"
-! printf '%s\n' "$tf" | hit  'component: agentd' || fail "the tools port admits koinon-agentd (kubernetes)"
+printf '%s\n' "$tf" | hit 'gateway.networking.k8s.io/gateway-name: koinon-gateway' || fail "the tools port does not admit the controller's proxy (kubernetes)"
+! printf '%s\n' "$tf" | hit 'component: agentd' || fail "the tools port admits koinon-agentd (kubernetes)"
