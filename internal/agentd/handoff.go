@@ -60,18 +60,14 @@ func (h handoff) build() string {
 		case len(messages) > 1:
 			messages = messages[1:]
 		case summary != "":
-			summary = cutBytes(summary, max(len(summary)-over-len("\n[truncated]"), 0))
-			if summary != "" {
-				summary += "\n[truncated]"
-			}
-		default:
+			summary = cutMarked(summary, len(summary)-over)
+		case len(messages) == 1 && messages[0] != "":
 			// Only the newest message and the fixed parts are left; cut the message.
-			messages = []string{cutBytes(messages[0], max(len(messages[0])-over, 0))}
-			if out = h.render(summary, replies, messages); len(out) <= handoffMaxBytes {
-				return out
-			}
-			// The fixed parts alone are too long (a huge title or outcome): cut the whole.
-			return cutBytes(out, handoffMaxBytes)
+			messages = []string{cutMarked(messages[0], len(messages[0])-over)}
+		default:
+			// The fixed parts alone are too long (a huge title or outcome), or there is no
+			// message to cut (a fresh session on a task without one): cut the whole.
+			return cutMarked(out, handoffMaxBytes)
 		}
 	}
 }
@@ -103,6 +99,18 @@ func (h handoff) render(summary string, replies, messages []string) string {
 		b.WriteString("\n\n" + parkResumeNote + h.Outcomes)
 	}
 	return b.String()
+}
+
+// truncatedMark ends a part of the handoff that build cut.
+const truncatedMark = "\n[truncated]"
+
+// cutMarked cuts s to at most n bytes, mark included, on a character boundary and ends it with
+// truncatedMark; it returns "" when not even the mark fits.
+func cutMarked(s string, n int) string {
+	if n < len(truncatedMark) {
+		return ""
+	}
+	return cutBytes(s, n-len(truncatedMark)) + truncatedMark
 }
 
 // cutBytes cuts s to at most n bytes on a character boundary.
