@@ -49,7 +49,7 @@ type Serving struct {
 }
 
 // servingOf decides the state of p from the recorded facts.
-func servingOf(p Provider, f store.ListProviderServingRow, now time.Time) Serving {
+func servingOf(p Provider, f store.ListProviderServingRow) Serving {
 	if p.DisabledReason != "" || p.Removed || p.AdminDisabled != nil {
 		return Serving{State: ServingNone}
 	}
@@ -71,9 +71,9 @@ func servingOf(p Provider, f store.ListProviderServingRow, now time.Time) Servin
 		}
 		return Serving{State: ServingFailed, Reason: reason, Detail: f.FailureDetail}
 	}
-	if f.ChangedAt.Valid && now.Sub(f.ChangedAt.Time) > SavedGrace {
-		return Serving{State: ServingFailed, Reason: ReasonUnknown,
-			Detail: fmt.Sprintf("not served %d min after saving; see the reconciler log", int(now.Sub(f.ChangedAt.Time)/time.Minute))}
+	// The age comes from the database clock (saved_age_seconds), the one that stamped updated_at.
+	if age := time.Duration(f.SavedAgeSeconds * float64(time.Second)); age > SavedGrace {
+		return Serving{State: ServingFailed, Reason: ReasonUnknown, Detail: unservedDetail(age)}
 	}
 	return Serving{State: ServingSaved}
 }
@@ -89,7 +89,20 @@ func (s *Service) withServing(ctx context.Context, org pgtype.UUID, list []Provi
 		facts[r.ProviderID.String()] = r
 	}
 	for i := range list {
-		list[i].Serving = servingOf(list[i], facts[list[i].ID], time.Now())
+		list[i].Serving = servingOf(list[i], facts[list[i].ID])
 	}
 	return nil
+}
+
+// unservedDetail says how long a provider has been saved without being served. Past an hour the
+// minute count is no use, so it gives hours and days.
+func unservedDetail(age time.Duration) string {
+	switch {
+	case age < time.Hour:
+		return fmt.Sprintf("not served %d min after saving; see the reconciler log", int(age/time.Minute))
+	case age < 48*time.Hour:
+		return fmt.Sprintf("not served %d h after saving; see the reconciler log", int(age/time.Hour))
+	default:
+		return fmt.Sprintf("not served %d days after saving; see the reconciler log", int(age/(24*time.Hour)))
+	}
 }

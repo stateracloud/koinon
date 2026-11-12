@@ -511,7 +511,7 @@ SELECT p.id AS provider_id,
        count(s.model_id) FILTER (WHERE m.disabled_reason IS NULL)::int AS served,
        coalesce(f.reason, '')::text AS failure_reason,
        coalesce(f.detail, '')::text AS failure_detail,
-       greatest(p.updated_at, coalesce(max(m.updated_at), p.updated_at))::timestamptz AS changed_at
+       extract(epoch from now() - greatest(p.updated_at, coalesce(max(m.updated_at), p.updated_at)))::float8 AS saved_age_seconds
 FROM providers p
 LEFT JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
@@ -521,12 +521,12 @@ GROUP BY p.id, p.updated_at, f.reason, f.detail
 `
 
 type ListProviderServingRow struct {
-	ProviderID    pgtype.UUID
-	Models        int32
-	Served        int32
-	FailureReason string
-	FailureDetail string
-	ChangedAt     pgtype.Timestamptz
+	ProviderID      pgtype.UUID
+	Models          int32
+	Served          int32
+	FailureReason   string
+	FailureDetail   string
+	SavedAgeSeconds float64
 }
 
 // The serving facts of the org's providers: enabled models, how many the gateway serves, and the
@@ -546,7 +546,7 @@ func (q *Queries) ListProviderServing(ctx context.Context, orgID pgtype.UUID) ([
 			&i.Served,
 			&i.FailureReason,
 			&i.FailureDetail,
-			&i.ChangedAt,
+			&i.SavedAgeSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -837,7 +837,7 @@ INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
 SELECT p.org_id, p.id, $1::text, $2::text
 FROM providers p
 WHERE p.org_id = $3 AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
-  AND NOT (p.id = ANY($4::uuid[]))
+  AND NOT (p.id = ANY(coalesce($4::uuid[], '{}')))
   AND EXISTS (
     SELECT 1 FROM models m
     LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
