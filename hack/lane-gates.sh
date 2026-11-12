@@ -89,6 +89,7 @@ case ${1:-} in
 	sdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates-run.XXXXXX") || exit 2
 	self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 	: >"$sdir/verdict"
+	# shellcheck disable=SC2016 # the script is for the child shell: its $1..$3 must not expand here
 	# The detached shell writes rc last and atomically, so --wait never reads a half-written code.
 	run='echo $$ >"$3/pid"; bash "$1" "$2" >"$3/verdict" 2>&1; echo $? >"$3/rc.tmp"; mv "$3/rc.tmp" "$3/rc"'
 	if command -v setsid >/dev/null 2>&1; then
