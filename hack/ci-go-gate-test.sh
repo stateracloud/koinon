@@ -75,6 +75,12 @@ GATE_ENV=(GO=false VULN=true VULN_RESULT=failure)
 gate "go=false does not hide a failed go-vuln" 1 skipped false success skipped skipped skipped skipped skipped failure
 GATE_ENV=(GO=false VULN=true VULN_RESULT=success)
 gate "go=false with go-vuln passed is a pass" 0 skipped false success skipped skipped skipped skipped skipped success
+# Neither go nor vuln (no Go change, or hack/ci-skip-heavy.sh switched every heavy output off): every go-* job
+# is skipped, go-vuln among them, and the gate passes. The skipped go-vuln must stay accepted for this case.
+GATE_ENV=(GO=false TIDY=false TIDY_RESULT=skipped LINT_RESULT=skipped VULN=false VULN_RESULT=skipped)
+gate "neither go nor vuln is a pass" 0 skipped false success skipped skipped skipped skipped skipped skipped
+GATE_ENV=(GO=false TIDY=false TIDY_RESULT=skipped LINT_RESULT=skipped VULN=false VULN_RESULT=failure)
+gate "neither go nor vuln still fails a failed go-vuln" 1 skipped false success skipped skipped skipped skipped skipped failure
 GATE_ENV=()
 grep -qF "if: needs.changes.outputs.vuln == 'true'" <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run on the vuln output only"; exit 1; }
 grep -qF 'run: hack/govulncheck.sh' <(sed -n '/^  go-vuln:$/,/^  [a-z-]*:$/p' "$wf") || { echo "FAIL: go-vuln must run hack/govulncheck.sh (the pinned version, no retry)"; exit 1; }
