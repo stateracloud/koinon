@@ -52,6 +52,7 @@ func (f *fixture) useClock(c *testClock) {
 		Execute: func(ctx context.Context, org, id pgtype.UUID) {
 			_, _ = f.svc.Execute(ctx, org, id)
 		},
+		LeakCheck: cleanLeakCheck,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.tools = httptest.NewServer(tools.Handler())

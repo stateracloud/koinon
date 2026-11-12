@@ -187,6 +187,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 		Execute: func(ctx context.Context, org, id pgtype.UUID) {
 			_, _ = f.svc.Execute(ctx, org, id)
 		},
+		LeakCheck: cleanLeakCheck,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.tools = httptest.NewServer(tools.Handler())
@@ -321,3 +322,7 @@ func kinds(evs []store.TaskEvent) []string {
 	}
 	return out
 }
+
+// cleanLeakCheck stands in for the leak guard (#687): these specs cover how an unattended call
+// runs, so every call is clean. The guard's own verdicts are specified in internal/mcpguard.
+func cleanLeakCheck(context.Context, githubtools.LeakCall) (map[string]any, error) { return nil, nil }

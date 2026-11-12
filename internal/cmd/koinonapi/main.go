@@ -966,6 +966,9 @@ func serve(ctx context.Context, cfg config) error {
 			Keys:  opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
 			Execute: executeAllowed,
+			// A call no person decides (a Trusted preset, an approval scope) runs only when the
+			// leak guard finds it clean; otherwise it goes to a person (ADR 0091, #687).
+			LeakCheck: guard.CheckCodeHost,
 		})
 		if err != nil {
 			return err
