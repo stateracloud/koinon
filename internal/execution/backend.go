@@ -50,9 +50,10 @@ type Backend interface {
 	// StopSandbox stops a sandbox and keeps its home volume. Stopping a stopped one is a no-op.
 	StopSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
 
-	// DeleteSandbox deletes a sandbox. A missing sandbox is not an error. Deletion may finish
-	// asynchronously; GetSandbox reports PhaseDeleting until it does.
-	DeleteSandbox(ctx context.Context, workspace, name string) error
+	// DeleteSandbox requests the deletion of a sandbox. A missing sandbox is not an error
+	// (DeleteAbsent). Deletion may finish asynchronously (DeleteAccepted): the caller does not
+	// wait for it but observes it, because GetSandbox reports PhaseDeleting until it is done.
+	DeleteSandbox(ctx context.Context, workspace, name string) (DeleteOutcome, error)
 
 	// EnsurePolicy makes the sandbox's policy match p and returns the policy version. On a
 	// running sandbox only the network rules may change (OpenShell rejects other changes);
@@ -281,3 +282,16 @@ type Process interface {
 	// Close ends the stream, which ends the command. It is safe to call more than once.
 	Close() error
 }
+
+// DeleteOutcome says what a delete request did.
+type DeleteOutcome string
+
+const (
+	// DeleteCompleted: the sandbox is gone from the gateway.
+	DeleteCompleted DeleteOutcome = "completed"
+	// DeleteAccepted: the delete is under way and the sandbox record still exists; observe it with
+	// GetSandbox until it is gone.
+	DeleteAccepted DeleteOutcome = "accepted"
+	// DeleteAbsent: there was no such sandbox.
+	DeleteAbsent DeleteOutcome = "absent"
+)

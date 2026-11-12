@@ -88,6 +88,7 @@ type Gateway struct {
 	execs                []*openshellv1.ExecSandboxRequest
 	calls                map[string]int
 	faults               map[string][]error
+	blocks               map[string]chan struct{}
 
 	ssh *sshState
 
@@ -106,6 +107,7 @@ func New() *Gateway {
 		commands:   map[string]Command{},
 		calls:      map[string]int{},
 		faults:     map[string][]error{},
+		blocks:     map[string]chan struct{}{},
 		ssh:        newSSHState(),
 	}
 }
@@ -143,6 +145,18 @@ func (g *Gateway) FailNext(method string, err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.faults[method] = append(g.faults[method], err)
+}
+
+// BlockDeletes holds every DeleteSandbox call, from now until release is called, after counting it
+// (Calls) and before it changes anything, like a delete that waits for the pods to end. A call whose
+// context ends returns that context's error.
+func (g *Gateway) BlockDeletes() (release func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ch := make(chan struct{})
+	g.blocks["DeleteSandbox"] = ch
+	var once sync.Once
+	return func() { once.Do(func() { close(ch) }) }
 }
 
 // Calls returns how often method has been called.
@@ -829,12 +843,23 @@ func (g *Gateway) StartSandbox(_ context.Context, req *openshellv1.StartSandboxR
 }
 
 // DeleteSandbox implements openshellv1.OpenShellServer.
-func (g *Gateway) DeleteSandbox(_ context.Context, req *openshellv1.DeleteSandboxRequest) (*openshellv1.DeleteSandboxResponse, error) {
+func (g *Gateway) DeleteSandbox(ctx context.Context, req *openshellv1.DeleteSandboxRequest) (*openshellv1.DeleteSandboxResponse, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if err := g.enter("DeleteSandbox"); err != nil {
+	err := g.enter("DeleteSandbox")
+	block := g.blocks["DeleteSandbox"]
+	g.mu.Unlock()
+	if err != nil {
 		return nil, err
 	}
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	sb, k, err := g.sandbox(req.GetWorkspaceScope(), req.GetName())
 	if err != nil {
 		if req.GetAllowMissing() {

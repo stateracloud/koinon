@@ -97,7 +97,10 @@ func (g *gateway) sandbox(ctx context.Context, spec execution.SandboxSpec) {
 	}
 	_, err := g.b.CreateSandbox(ctx, g.workspace, spec)
 	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error { return g.b.DeleteSandbox(ctx, g.workspace, spec.Name) })
+	DeferCleanup(func(ctx context.Context) error {
+		_, err := g.b.DeleteSandbox(ctx, g.workspace, spec.Name)
+		return err
+	})
 	Eventually(func(gm Gomega) {
 		sb, err := g.b.GetSandbox(ctx, g.workspace, spec.Name)
 		gm.Expect(err).NotTo(HaveOccurred())

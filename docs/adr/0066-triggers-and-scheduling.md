@@ -520,3 +520,60 @@ cannot be pulled was always `unknown`, because OpenShell replaces the pod's reas
 read the pod when OpenShell's reason says nothing and write the kubelet's reason and message into
 `agent_sandboxes.reason` and `message`; agentd and the classifier are unchanged. The observer is a
 workaround that [0078](0078-sandbox-observer.md) removes once OpenShell surfaces pod failures itself.
+
+## Amendment (2026-11-12, issue 573): a work queue per agent replaces "a pass waits for all jobs"
+
+The section "Per-sandbox jobs (B4)" above says the reconciler runs one job per agent, at most
+`sandboxJobs` at once. It does not say what the pass does while the jobs run. The first build made
+a pass wait for all of its jobs. The logs of e2e run 43134423089 show the cost: the sandbox delete
+of one agent (a recreate after an image change) stayed open for about 30 s, until the pods ended.
+A second agent, created during that pass, could be seen only by the next pass. Its wake-up sat in
+the one-slot NOTIFY channel until the first pass ended. One slow backend call for one agent delayed
+every new agent. The decision below replaces that part; the rest of B4 stands.
+
+- **Per-agent work queue.** The key is (org ID, agent ID). The queue lives as long as the leader
+  (it stops with the lead context) and has at most `sandboxJobs` workers. One key never runs twice at
+  the same time. An item added for a key that is queued replaces the queued item. An item added for a
+  key that is running runs after it (requeue), never in parallel. Each item has its own timeout
+  (`WorkTimeout`, default 5 minutes). Code: `internal/reconciler/workqueue.go`.
+- **A pass does not wait for the queue.** A pass loads the state, runs the gateway step and hands
+  the sandbox work of each agent to the queue. The gateway plan, `gw.Apply` and `recordServed` stay
+  one global step per pass, because an Apply that does not know every agent revokes keys. Agents
+  whose key is served already are queued before the Apply; the others after it. An agent whose new key
+  is not served yet is not queued: it is held back by its own key, not by the other agents' work.
+  `ReconcileAll` (tests, one-shot use) waits for the work of its pass; the loop does not.
+- **Rejection notes** of the gateway are part of the agent's work item: the note is recorded after the
+  agent's own state, by the item or, when the item has ended already, by the pass. A note written by
+  the pass (a held-back agent, a note for an item that has ended) changes only the `message` column
+  (`SetAgentSandboxMessage`). The pass can run while an older item of the same agent still works, and
+  a note that rewrote state, phase and reason from the pass's snapshot could put an old `ready` back.
+  An item re-reads the agent's row when it starts, so an item that waited behind a running one does
+  not act on a row from before that one. When passes record notes for one agent, the newest pass's
+  rejection note is the one recorded.
+- **Recreate cap.** `maxRecreatesPerPass` is now a token bucket: that many tokens, refilled at that
+  many per `ResyncInterval`. That is the rate of the old per-pass cap, because a pass ran at least
+  once per interval. Work items run outside a pass, so a pass is no unit to count in. An agent
+  holds its token from the first request until it has deleted its sandbox, and at most that many
+  agents hold one at a time, so slow home gates cannot pile up a larger group that deletes together.
+  A hold ends without a delete when the agent's item ends with no recreate wanted (spec reverted,
+  archived, deleted, a run holds it); the token then goes back to the bucket. Agents that wait for
+  a failed backup keep their hold until a human acts, as they did with the old per-pass cap.
+- **A delete is requested, then observed.** `execution.Backend.DeleteSandbox` returns OpenShell's
+  outcome (`completed`, `accepted`, `absent`). The reconciler records the sandbox as deleting and
+  observes the end in a later pass (`GetSandbox` reports the phase). The OpenShell `DeleteSandbox`
+  RPC can still block until the pods end (a Terminating pod with a 30 s grace period). The fix is
+  the queue, not the call: that agent and one worker slot stay blocked, and the pass and the other
+  agents go on.
+- **Logs.** A pass logs its start, its end (duration, job count) and, when its jobs have ended, the
+  slowest job. Each delete logs a line before the call and one after it, with the duration.
+
+The model is the Kubernetes controller work queue (per-key dedup with a dirty set and a processing
+set, a key that changes while it runs is requeued). Koinon keeps the item in the queue instead of
+re-reading it from a cache, has no rate-limited requeue (the next pass is the retry), and bounds
+workers with a fixed number.
+
+This amendment fixes one cause of issue 573, the missing-image wait of 30 s. It does not fix the
+other two, which stay open: the first-task wait of about 77 s (only 7.5 s of it is the gateway Apply;
+the new pass and job log lines are the tool to split the rest) and the fixed 90 s settle time behind
+the 110 s wait for a new MCP server (removed by ADR 0097 step 2, where the gateway acknowledges what it
+loaded). The pull request uses "Refs #573", not "Closes".

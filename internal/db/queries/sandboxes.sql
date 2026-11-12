@@ -186,6 +186,15 @@ ORDER BY CASE
          coalesce(r.finished_at, r.created_at) DESC, r.id
 LIMIT 1;
 
+-- name: SetAgentSandboxMessage :one
+-- Stores an operator message and nothing else. A note written from outside the agent's work item
+-- (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+-- what the agent's own item recorded in the meantime.
+UPDATE agent_sandboxes
+SET message = @message
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
+
 -- name: SetAgentSandboxName :one
 -- Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 -- new name yet, so the row starts over as pending. The previous sandbox is gone by now (the

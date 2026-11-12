@@ -72,7 +72,7 @@ var _ = Describe("Backend.CountUnmarked", func() {
 		old.ClaimLegacy = true
 		Expect(live.EnsureProvider(ctx, mine, old)).To(Succeed())
 		for _, name := range []string{"ka-old1", "ka-old2"} {
-			Expect(live.DeleteSandbox(ctx, mine, name)).To(Succeed())
+			Expect(deleteErr(live.DeleteSandbox(ctx, mine, name))).To(Succeed())
 		}
 		counts, err = live.CountUnmarked(ctx)
 		Expect(err).NotTo(HaveOccurred())

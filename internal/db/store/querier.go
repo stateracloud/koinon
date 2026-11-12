@@ -1353,6 +1353,10 @@ type Querier interface {
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
+	// Stores an operator message and nothing else. A note written from outside the agent's work item
+	// (a held-back agent, a gateway rejection) must not put an older state, phase or reason back over
+	// what the agent's own item recorded in the meantime.
+	SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandboxMessageParams) (AgentSandbox, error)
 	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 	// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
