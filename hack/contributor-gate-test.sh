@@ -65,16 +65,74 @@ expect "the committed vouch list parses" 0 "reason=in the vouch list" GATE_VOUCH
 out=$("$script" 2>&1) && rc=0 || rc=$?
 if [[ $rc == 2 ]] && grep -qF "usage:" <<<"$out"; then echo "ok: no subcommand"; else echo "FAIL: no subcommand (exit $rc)"; fails=1; fi
 
-# The workflow: exactly one switch line, in a documented form; base checkout; no persisted credentials.
+# check-pr: a fake gh answers `gh api repos/o/r/pulls/<N>` from $FAKE_DIR/pr-<N>.json; a missing file fails.
+mkdir "$tmp/bin"
+cat >"$tmp/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+[[ $1 == api && $2 =~ ^repos/o/r/pulls/([0-9]+)$ && -f $FAKE_DIR/pr-${BASH_REMATCH[1]}.json ]] || { echo "gh: HTTP 404" >&2; exit 1; }
+cat "$FAKE_DIR/pr-${BASH_REMATCH[1]}.json"
+FAKE
+chmod +x "$tmp/bin/gh"
+printf '%s' '{"user":{"login":"Newcomer"},"author_association":"FIRST_TIME_CONTRIBUTOR","labels":[{"name":"area/ci"}]}' >"$tmp/pr-1.json"
+printf '%s' '{"user":{"login":"newcomer"},"author_association":"NONE","labels":[{"name":"vouched"}]}' >"$tmp/pr-2.json"
+printf '%s' '{"user":{"login":"maint"},"author_association":"OWNER","labels":[]}' >"$tmp/pr-3.json"
+printf '%s' '{"user":{"login":"vouched-person"},"author_association":"NONE"}' >"$tmp/pr-4.json"
+printf '%s' '{"message":"Not Found"}' >"$tmp/pr-5.json"
+# expect_pr NAME WANT_EXIT WANT_SUBSTRING ARGS...
+expect_pr() {
+	local name=$1 want=$2 sub=$3 out rc=0
+	shift 3
+	out=$(env -u GATE_AUTHOR -u GATE_ASSOCIATION -u GATE_LABELS PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r GATE_VOUCHED="$tmp/vouched.txt" "$script" "$@" 2>&1) || rc=$?
+	if [[ $rc == "$want" ]] && grep -qF -- "$sub" <<<"$out"; then
+		echo "ok: check-pr: $name"
+	else
+		echo "FAIL: check-pr: $name (want exit $want and '$sub', got exit $rc)"
+		printf '    %s\n' "${out//$'\n'/$'\n    '}"
+		fails=1
+	fi
+}
+expect_pr "first-time contributor fails" 1 "verdict=fail reason=association FIRST_TIME_CONTRIBUTOR" check-pr 1
+expect_pr "vouched label passes" 0 "verdict=pass reason=label vouched" check-pr 2
+expect_pr "owner passes" 0 "verdict=pass reason=association OWNER" check-pr 3
+expect_pr "vouch list, no labels field" 0 "reason=in the vouch list" check-pr 4
+expect_pr "reply without a login fails closed" 1 "verdict=fail reason=no author login" check-pr 5
+expect_pr "failed API read fails closed" 1 "verdict=fail reason=cannot read pull request #9" check-pr 9
+expect_pr "not a number" 2 "usage:" check-pr 1x
+expect_pr "no number" 2 "usage:" check-pr
+out=$(env -u REPO PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" "$script" check-pr 3 2>&1) && rc=0 || rc=$?
+if [[ $rc == 2 ]]; then echo "ok: check-pr: no REPO"; else echo "FAIL: check-pr: no REPO (exit $rc)"; fails=1; fi
+
+# The workflow: exactly one switch line, in a documented form; the base branch checked out (its tip on a pull
+# request, never the recorded base.sha); no persisted credentials; the queued pull request re-judged.
+off="    if: false && (github.event_name == 'merge_group' || github.event_name == 'pull_request')"
+on="    if: true && (github.event_name == 'merge_group' || github.event_name == 'pull_request')"
 switch=$(grep -E '^    if: ' "$workflow" || true)
 case $switch in
-"    if: false && github.event_name == 'pull_request'") echo "ok: workflow switch parses (gate is OFF)" ;;
-"    if: true && github.event_name == 'pull_request'") echo "ok: workflow switch parses (gate is ON)" ;;
+"$off") echo "ok: workflow switch parses (gate is OFF)" ;;
+"$on") echo "ok: workflow switch parses (gate is ON)" ;;
 *) echo "FAIL: the job-level if: of $workflow is not one of the two forms docs/maintainers/contributor-gate.md names: '$switch'"; fails=1 ;;
 esac
-for want in "ref: \${{ github.event.pull_request.base.sha }}" "persist-credentials: false" "run: hack/contributor-gate.sh check" "types: [checks_requested]"; do
+for want in "ref: \${{ github.event.pull_request.base.ref }}" "ref: \${{ github.event.merge_group.base_sha }}" "persist-credentials: false" "run: hack/contributor-gate.sh check" "hack/contributor-gate.sh check-pr \"\$n\"" "gh-readonly-queue/*/pr-" "types: [checks_requested]"; do
 	if grep -qF -- "$want" "$workflow"; then echo "ok: workflow has '$want'"; else echo "FAIL: $workflow lacks '$want'"; fails=1; fi
 done
-if grep -vE '^[[:space:]]*#' "$workflow" | grep -qE 'pull_request_target|secrets\.'; then echo "FAIL: $workflow uses pull_request_target or a secret"; fails=1; else echo "ok: workflow uses no pull_request_target and no secret"; fi
+if grep -vE '^[[:space:]]*#' "$workflow" | grep -qE 'pull_request_target|secrets\.|pull_request\.base\.sha'; then echo "FAIL: $workflow uses pull_request_target, a secret or the recorded base.sha"; fails=1; else echo "ok: workflow uses no pull_request_target, no secret and no recorded base.sha"; fi
+
+# The turn-on path of docs/maintainers/contributor-gate.md, proven now: the switch on and the check required (the
+# header line and `external contributor gate` in hack/ci-required.txt); hack/ci-merge-group-test.sh stays green.
+sim=$tmp/on
+mkdir -p "$sim/hack" "$sim/.github"
+cp -R "$root/.github/workflows" "$sim/.github/workflows"
+cp "$root/hack/ci-merge-group-test.sh" "$sim/hack/"
+sed "s/^    if: false \&\& (/    if: true \&\& (/" "$workflow" >"$sim/.github/workflows/contributor-gate.yml"
+awk '{ print } /^#   claim / { print "#   contributor gate   .github/workflows/contributor-gate.yml" } /^external claim$/ { print "external contributor gate" }' "$root/hack/ci-required.txt" >"$sim/hack/ci-required.txt"
+out=""
+if grep -qxF -- "$on" "$sim/.github/workflows/contributor-gate.yml" && grep -qxF "external contributor gate" "$sim/hack/ci-required.txt" &&
+	out=$("$sim/hack/ci-merge-group-test.sh" 2>&1) && grep -qF "ok: required 'contributor gate' reports on merge_group" <<<"$out"; then
+	echo "ok: switched on and required, hack/ci-merge-group-test.sh passes"
+else
+	echo "FAIL: switched on and required, hack/ci-merge-group-test.sh does not pass:"
+	grep -E 'FAIL|contributor' <<<"$out" | sed 's/^/    /' || true
+	fails=1
+fi
 
 exit $fails
