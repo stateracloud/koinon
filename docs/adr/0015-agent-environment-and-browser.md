@@ -1,6 +1,6 @@
 # 0015. Agent environment and browser
 
-- Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) and [0113](0113-agent-package-access.md)
+- Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) (and its amendment of 2026-11-11), [0113](0113-agent-package-access.md) and [0114](0114-model-credentials-by-type.md)
 - Date: 2026-10-21
 - Decision: [design.md#15](../design.md)
 
@@ -15,7 +15,7 @@ secret model.
 
 - Flavor images are based on OpenShell sandbox images.
 - Agents self-install into `$HOME` (with mise/aqua, uv, npm) from allowlisted sources through a
-  pull-through cache.
+  pull-through cache. _(Changed by [0113](0113-agent-package-access.md): Koinon runs no pull-through cache; see the amendment of 2026-11-11.)_
 - Installs are recorded in `environment.lock` (part of the home, [0032](0032-agent-home-checkpoints.md)).
 - Org admins can promote commonly installed tools (into the org's image or default lock).
 - A browser runs in the sandbox with a per-agent profile:
@@ -24,7 +24,8 @@ secret model.
 
 **Amendment ([0044](0044-in-sandbox-credential-exception.md)).** Human takeover is generalised into
 the *in-sandbox credential exception*. Platform-allowlisted auth types (for example a Copilot
-device-flow login) follow the same rules as the browser profile:
+device-flow login) follow the same rules as the browser profile
+_(Changed 2026-11-11: no auth type is allowlisted today and `copilot-device-flow` does not qualify; GitHub Copilot is a gateway credential. See the amendment of 0044 and [0114](0114-model-credentials-by-type.md).)_:
 - obtained by a human;
 - stored encrypted on the home volume;
 - treated as a secret in checkpoints and excluded from export;

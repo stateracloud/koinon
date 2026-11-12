@@ -2,8 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-10
-- Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, amended here by reference),
-  [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
+- Amends: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (decisions 15 and 18, by reference)
+- Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark), [0107](0107-restore-hold-mode.md) (restore hold),
   [0105](0105-merge-queue-route.md) (the only merge evidence is the queue; the drill is not a merge check)
 - Issues: closes #514 (phase 1); refs #275, #516 (held copy has no outward effects), #515 (archive and dead-executor, phase 2), #512 (lab sign-in)
 
@@ -93,7 +93,9 @@ edited.
 ## Consequences
 
 - A release candidate cannot be cut on a restore nobody tested. The drill is repeatable by one command
-  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`.
+  on kind (`test/drill/run.sh`) and by one more on the lab with `DRILL_TOPOLOGY`. A topology's optional
+  `imageRegistry` is passed to both installs as `image.registry` (run.sh sets it on kind to the cluster's
+  path on the local registry, #45).
 - The suite shows what is missing before the product fixes land. `known gap: #N` is a red line in the
   report on purpose: it is the list of work, and it ends when the issue closes.
 - Each gateway has its own `gatewayId` (`drill-src-<run>`, `drill-dst-<run>`; the gateway chart value and

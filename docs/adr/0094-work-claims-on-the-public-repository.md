@@ -16,7 +16,8 @@
 - Amended by: [0102](0102-merge-queue-runs-the-kind-e2e.md) (decision 4: the queue runs the kind e2e);
   [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
   claims, outsider classes, leases or sweeper);
-  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced)
+  amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced);
+  [0105](0105-merge-queue-route.md) (decision 4: the way in, admin merges and the e2e evidence; the queue is the only route)
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)
@@ -86,6 +87,8 @@ token the bots use, and how pull requests merge.
 
 ### 1. Claims by comment: `/claim` and `/release`
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): no claim by comment; `claim-comment.yml` and the `comment` command are removed. A claim is taken with `hack/claim.sh take`, and the holder is `<login>#<lane>`.)_
+
 A new workflow `.github/workflows/claim-comment.yml` runs on `issue_comment` (`created`) for issues,
 not pull requests (`github.event.issue.pull_request` is empty). It ignores comments by bots. It runs
 the default branch's `hack/claim.sh` with the built-in `GITHUB_TOKEN` (job permissions
@@ -154,6 +157,8 @@ bot does three things:
 
 ### 2. The `claim` check is a conflict check
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): the check fails only when another human holds a claim on a closed issue or an ADR number; a live-claim or lease test does not exist, and the outsider classes are removed.)_
+
 The required check `claim` (`claims.yml`, `pull_request_target`, read-only token, the base branch's
 script) **fails only when someone else holds a live claim** on what the pull request takes:
 
@@ -187,6 +192,8 @@ The success lines name what was checked, for example `claim check: #159 is free`
 is claimed by @procoduck (the author)`, `claim check: no Closes #N; nothing to check`.
 
 ### 3. The sweeper and release-on-close use `GITHUB_TOKEN`; the App is retired
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): there is no sweeper; only the `release` job (`release-merged`) remains, and a close without a merge is released by its human with `release-pr`.)_
 
 The `sweeper` and `release` jobs of `claims.yml` drop `actions/create-github-app-token` and the
 `claims-bot` Environment. They run with `GITHUB_TOKEN`, job permissions `contents: write` (fast-forward
@@ -236,6 +243,7 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
 - **The way in is unchanged.** `gh pr merge --auto --merge` and `hack/pr-merge.sh` put the pull
   request in the queue once its own checks pass. Admin merges (`--admin`, the org-admin bypass of the
   `main` ruleset) still merge directly.
+  _(Changed by [0105](0105-merge-queue-route.md): the queue is the only route; `--admin` is only for a pull request that changes a `.github/**` path.)_
 - **`merge_group` on every required workflow.**
 
   | Workflow | Check | On `merge_group` |
@@ -255,6 +263,7 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
   not the queue commit.
   - A needs-e2e pull request still needs a green `quickstart` or `e2e-lab` on its own head before it
     can be queued, and the queue re-checks that this evidence is there.
+    _(Changed by [0102](0102-merge-queue-runs-the-kind-e2e.md) and [0105](0105-merge-queue-route.md): the `e2e-lab` status no longer counts toward a merge, and the queue's own `quickstart` is the only e2e proof.)_
   - The queue commit itself gets no kind e2e. Fifteen to 25 minutes per entry would hold the queue,
     and the lab cannot test the read-only, short-lived queue ref.
   - The backstop stays as it is: the batched e2e-kind on pushes to main, the nightly run, and
@@ -264,6 +273,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
     needs-e2e entries) once main's e2e goes red on a merge whose PR-head e2e was green.
 
 ### 5. `next` and `take` respect people, outsiders and open pull requests
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): outsider and person claim classes are removed; `next` skips held claims and issues an open pull request closes, and `take` assigns only the human.)_
 
 - **`next` skips** issues with any held claim (as today, which now includes person and outsider
   claims), issues that an open pull request closes (`closingIssuesReferences`, any author), and issues
@@ -279,6 +290,8 @@ So the App, the `claims-bot` Environment and their two secrets are retired, with
 
 ### 6. ADR numbers: the open pull requests count
 
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): an ADR reservation is permanent (`state: reserved`, no lease); the highest-of-three-sets rule stays.)_
+
 `hack/claim.sh adr` takes the highest of three sets, plus one:
 
 - the `docs/adr/NNNN-*.md` files on the default branch;
@@ -293,6 +306,8 @@ both skipped `adr` remain `adr-lint`'s mechanical conflict after the first merge
 as in ADR 0082 decision 8.
 
 ### 7. `beat --mine` drops a claim its own session released
+
+_(Changed by [0104](0104-work-claims-reduced-to-the-lock.md): `beat` is removed with the lease, so this rule no longer applies.)_
 
 A claim that its own holder released is not lost. Today `beat --mine` stops with exit 3 ("lost #140
 #143 #145: stop work") when the same session released those claims itself with `claim.sh release`

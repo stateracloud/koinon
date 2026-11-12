@@ -11,10 +11,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/agentresources"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -188,11 +190,12 @@ func specHash(s execution.SandboxSpec) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// sandboxResources is the agent's effective sandbox size: its version's template values or the
-// platform default, clamped to the platform bounds (sandboxres). A clamp is logged once per
-// change, not once per pass.
+// sandboxResources is the agent's effective sandbox size: the agent's own override, else its
+// version's template values, else the platform default, clamped to the platform bounds (sandboxres;
+// ADR 0083). The bounds are applied again here although the API checked the override, because the
+// bounds can change after it was stored. A clamp is logged once per change, not once per pass.
 func (r *Reconciler) sandboxResources(w *work) templates.Resources {
-	res, clamps := r.cfg.SandboxResources.Effective(w.cfg.Resources)
+	res, clamps := r.cfg.SandboxResources.Effective(sandboxres.Overlay(w.cfg.Resources, agentresources.OverrideOf(w.agent)))
 	id := execution.UUIDString(w.agent.ID.Bytes)
 	var msg string
 	for _, c := range clamps {

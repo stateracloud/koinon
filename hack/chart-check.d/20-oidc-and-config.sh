@@ -19,11 +19,27 @@ if render --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com -
 	>/dev/null 2>&1; then
 	fail "oidc without a redirect or public URL must not render"
 fi
-# config.yaml is the reconciler's alone.
+# config.yaml is read by the reconciler and by the API (its sandboxResources section, ADR 0083: the API
+# refuses a per-agent override outside the bounds), not by koinon-agentd.
 n=$(render --show-only templates/deployments.yaml | grep -c 'KOINON_CONFIG' || true)
-[ "$n" = 1 ] || fail "KOINON_CONFIG set on $n components, want only the reconciler"
+[ "$n" = 2 ] || fail "KOINON_CONFIG set on $n components, want the reconciler and the API"
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /etc/koinon/config$' || true)
-[ "$n" = 1 ] || fail "config.yaml mounted into $n components, want only the reconciler"
+[ "$n" = 2 ] || fail "config.yaml mounted into $n components, want the reconciler and the API"
+n=$(render --show-only templates/deployments.yaml | grep -c 'checksum/config:' || true)
+[ "$n" = 2 ] || fail "checksum/config on $n components, want the reconciler and the API (they roll when the file changes)"
+# The API reads only sandboxResources: its checksum ignores a reconciler-only value, follows a sandbox
+# resources value, and the reconciler's checksum follows both.
+sum_of() { # <component> [helm args]: the checksum/config annotation of one component
+	local c=$1
+	shift
+	render "$@" --show-only templates/deployments.yaml | awk -v c="koinon-$c" '$0 ~ "name: .*" c "$" {f=1} f && /checksum\/config:/ {print $2; exit}'
+}
+api0=$(sum_of api)
+rec0=$(sum_of reconciler)
+[ -n "$api0" ] && [ -n "$rec0" ] || fail "checksum/config not found on the API or the reconciler"
+[ "$(sum_of api --set reconciler.resyncInterval=7m)" = "$api0" ] || fail "a reconciler-only value changed the API checksum/config"
+[ "$(sum_of reconciler --set reconciler.resyncInterval=7m)" != "$rec0" ] || fail "a reconciler value left the reconciler checksum/config unchanged"
+[ "$(sum_of api --set sandbox.resources.default.cpu.limit=3)" != "$api0" ] || fail "a sandbox.resources value left the API checksum/config unchanged"
 # agentgateway's admin listener (config dump and UI) binds to localhost: no Service or container
 # port exposes it (the config the reconciler renders keeps it on localhost: internal/gateway/standalone tests).
 for f in "${value_files[@]}"; do

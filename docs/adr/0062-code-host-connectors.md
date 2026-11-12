@@ -5,7 +5,8 @@
 - Relates to: old issue 144 (decided there and in
   conversation on 2026-10-26)
 - Amends: [0007](0007-connector-model.md) (hosts per connection, provider data in the type),
-  [0049](0049-v01-scope-decisions.md) (v0.1 is no longer GitHub-only; the workflow guard)
+  [0049](0049-v01-scope-decisions.md) (v0.1 is no longer GitHub-only; the workflow guard),
+  [0036](0036-v01-demo.md) (the demo's code host)
 - Credentials: [0063](0063-forge-credential-classes.md). Work trackers: [0064](0064-work-tracker-connectors.md).
 
 ## Context

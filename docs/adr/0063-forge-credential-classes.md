@@ -51,6 +51,7 @@ procoduck decided on 2026-10-26: **allow weaker credentials, with compensation.*
    today. Nothing changes for them.
 3. **Gitea: one bot per connection.**
    - The bot is a collaborator on exactly the connection's repositories.
+     _(Changed: a v0.1 connection declares no repositories and agents bind them; the check reports the repositories the bot can see and fails only when it sees or can push to none. See the CH5 amendment of 2026-10-27 below.)_
    - It has two tokens. The **read token** goes to sandboxes, through an OpenShell provider record
      and a placeholder, as GitHub's read token does. The **write token** is held only by
      koinon-api, which makes the commits, pull requests and comments after approval.

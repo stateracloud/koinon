@@ -24,8 +24,10 @@ could not merge because main moved during the run; each needed a full re-run on 
    cannot run on the read-only, short-lived queue ref, so it stays pre-merge confidence on the PR head.
    The PR-head gate (`quickstart` or `e2e-lab`) still decides whether a PR can be enqueued; the queue
    does not read it again.
+   _(Changed by [0105](0105-merge-queue-route.md): `e2e-lab` is not merge evidence and there is no PR-head e2e gate before the queue; the queue's own `quickstart` is the only e2e proof.)_
 3. **Flow.** An e2e-relevant PR is enqueued, not merged with `--admin`: an admin merge bypasses the
    queue and so the queue-commit run. `hack/pr-merge.sh --admin` warns in that case.
+   _(Changed by [0105](0105-merge-queue-route.md): the queue is the only route; `--admin` is only for a pull request that changes a `.github/**` path, and an e2e-relevant one also needs a green `quickstart` on its head.)_
 4. **Cost.** Each e2e-relevant entry adds about 12 to 15 minutes of queue latency (more for a cold flavor build). Entries build concurrently
    (up to 5), so this is latency per entry, not per queue. The queue check timeout (60 min) is below the
    job timeout (75 min), so the queue gives up first. Measured on 2026-11-09: the slowest `quickstart` job
@@ -44,6 +46,7 @@ could not merge because main moved during the run; each needed a full re-run on 
    by `merge_group` with `required=true` (only an old base's `decide` produces that), in
    `hack/e2e-queue-head.sh`. Exit condition: remove it when main's `decide` is the new one and no entry built
    on an older base can remain (follow-up: #452).
+   _(Changed by [0105](0105-merge-queue-route.md): the shim is removed.)_
 
 ## Prior art
 
