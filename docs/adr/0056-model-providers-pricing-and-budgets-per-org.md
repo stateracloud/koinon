@@ -744,7 +744,40 @@ Maintainer decision (procoduck, 2026-11-11).
 - This is the one exception to the rule that generated secrets come from the ensure-secrets hook Job.
   Only a creator that can see the database can refuse to make a new key when encrypted data already
   exists; the hook Job cannot see the database.
-- Hardening of this path, and the matching text in AGENTS.md, follow in issue #604.
+- Hardening (issue #604): a native ValidatingAdmissionPolicy (`kek-guard`, chart template
+  `kek-guard.yaml`) refuses DELETE of the KEK Secret by anyone, and UPDATE by any identity except the
+  koinon-api and key-admin service accounts, so a deleted or overwritten Secret cannot silently
+  become a new key on the next upgrade or GitOps sync. The reconciler's Secret writes are fenced by a
+  second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
+  Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
+  `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
+  when the database holds encrypted values, and a skip would not help the usual restore, where the
+  new install made its first KEK before the hold.
+- Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
+  exists, which is the usual case (a new install made a first KEK on its empty database). The restore
+  therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
+  standard input and merges it into the Secret, as the koinon-api service account, which the
+  guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
+  active and never removes a key; only `keys retire` removes one, with its database check. The add paths (`keys add`,
+  the key-admin Job's plain add and its recovery) refuse any ID the install audit chain ever recorded (a `keys.retire` or
+  `keys.forget` event, or the ID in the KEKs or Retired of a recorded state), besides an ID that stored envelopes carry:
+  IDs are never reused. Import keeps the narrower `keys.retire` rule, because it restores the same bytes. A KEK ID that
+  the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
+  retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
+  removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired
+  KEK never becomes the active one, with or without the flag (`keys activate` refuses it too). The rule
+  trusts the explicit `keys.retire` event, which has two costs: a retire whose audit event was lost
+  (`ErrNotAudited`) is not seen, and a database restored from a backup taken before the retire has no event
+  either (acceptable: that database may still hold values sealed under that KEK). Without `--database-url` there is no chain
+  to ask: the import prints a warning that retired IDs cannot be checked. It prints the active KEK
+  change (from, to) before it saves, and saves with the version it loaded, so a concurrent writer causes
+  a conflict instead of a lost KEK. It needs `--yes` (the manifest uses standard input,
+  so nobody can be asked) and records a `keys.import` install audit event (ADR 0100) when the database
+  is configured, also when it creates the Secret. It writes nothing unless every KEK in the manifest opens with the install's key
+  wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
+  of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
+  to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,
+  delete the Secret, apply the backup and turn the guard on again.
 
 ## Open questions
 

@@ -32,6 +32,9 @@ type KubeStore struct {
 	// Wrappers unwrap the stored KEKs and wrap new ones; the zero value is the local Secret-held
 	// KEK (secretstore.Local).
 	Wrappers secretstore.Wrappers
+	// UsedID, when set, is the probe the first KEK's ID is drawn against (see [DrawID]); production sets
+	// the same probe as the add paths. Nil accepts the first draw.
+	UsedID func(context.Context, string) (bool, error)
 }
 
 // Load implements Store. When the KEKs cannot be unwrapped it returns the error with the stored
@@ -68,6 +71,7 @@ func (k KubeStore) LoadWithoutActive(ctx context.Context) (KeySet, error) {
 
 // finishLoad adds the activation time of s to ks and names the Secret in err.
 func (k KubeStore) finishLoad(s *corev1.Secret, ks KeySet, err error) (KeySet, error) {
+	ks.ResourceVersion = s.ResourceVersion
 	if v := s.Annotations[ActivatedAnnotation]; v != "" {
 		ks.ActivatedAt, _ = time.Parse(time.RFC3339, v)
 	}
@@ -125,6 +129,11 @@ func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 		return err
 	}
 	s.Data, s.StringData = data, nil
+	// Update with the version this key set was loaded at, so a writer that changed the Secret since
+	// fails the update with a conflict instead of losing its KEK.
+	if ks.ResourceVersion != "" {
+		s.ResourceVersion = ks.ResourceVersion
+	}
 	if s.Annotations == nil {
 		s.Annotations = map[string]string{}
 	}
@@ -133,6 +142,25 @@ func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 	}
 	if _, err := secrets.Update(ctx, s, metav1.UpdateOptions{FieldManager: "koinon-api-keys"}); err != nil {
 		return fmt.Errorf("update the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
+	}
+	return nil
+}
+
+// Import implements Importer: it creates the Secret and refuses to touch one that exists (the merge
+// into an existing Secret goes through Load and Save). It is a writer, besides Save and EnsureWith,
+// that the KEK guard admits (issue #604).
+func (k KubeStore) Import(ctx context.Context, data map[string][]byte, annotations map[string]string) error {
+	_, err := k.Client.CoreV1().Secrets(k.Namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: k.Name, Namespace: k.Namespace,
+			Labels:      map[string]string{project.Domain + "/managed-by": "koinon-api"},
+			Annotations: annotations,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: data,
+	}, metav1.CreateOptions{FieldManager: "koinon-api-keys"})
+	if err != nil {
+		return fmt.Errorf("create the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
 	}
 	return nil
 }
@@ -200,7 +228,7 @@ func (k KubeStore) EnsureWith(ctx context.Context, now time.Time, hasValues func
 			return false, fmt.Errorf("before creating the KEK Secret %s/%s: %w", namespace, name, err)
 		}
 	}
-	id, err := NewID(now)
+	id, err := DrawID(ctx, now, nil, k.UsedID)
 	if err != nil {
 		return false, err
 	}

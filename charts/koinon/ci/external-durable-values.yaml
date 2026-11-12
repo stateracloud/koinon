@@ -15,6 +15,14 @@ networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
+# The KEK guard policy and the reconciler Secret fence are cluster-scoped too (issue #604), so both
+# are off here: this install may not create cluster-scoped objects.
+secrets:
+  reconcilerFence:
+    enabled: false
+  kek:
+    guard:
+      enabled: false
 # The observer, NetworkPolicy writer and LimitRange writer need the policy.
 sandboxObserver:
   enabled: false
