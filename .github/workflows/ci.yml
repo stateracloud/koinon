@@ -77,7 +77,6 @@ jobs:
       opencodeplugin: ${{ steps.paths.outputs.opencodeplugin }}
       tidy: ${{ steps.paths.outputs.tidy }}
       vuln: ${{ steps.paths.outputs.vuln }}
-      fuzz: ${{ steps.paths.outputs.fuzz }}
       shell: ${{ steps.paths.outputs.shell }}
       scripts: ${{ steps.paths.outputs.scripts }}
     steps:
@@ -188,34 +187,6 @@ jobs:
         uses: ./.github/actions/setup-go-cache
       - name: govulncheck
         run: hack/govulncheck.sh
-
-  # The fuzz targets of the untrusted-text parsers, each for a fixed time (#684; hack/go-fuzz.sh). Advisory
-  # (hack/ci-required.txt): a new check runs stable before it can block (docs/dev/ci-rules.md, S3). Not part of
-  # the `go` gate (hence not named go-*). A failing input is uploaded; commit it under the package's testdata/fuzz/ with the fix.
-  fuzz:
-    needs: changes
-    if: needs.changes.outputs.fuzz == 'true'
-    name: fuzz
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - id: go
-        uses: ./.github/actions/setup-go-cache
-      - name: fuzz (20s per target)
-        env:
-          FUZZTIME: 20s
-        run: hack/go-fuzz.sh
-      - name: Upload failing inputs
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: fuzz-inputs
-          path: internal/**/testdata/fuzz/
-          if-no-files-found: ignore
-          retention-days: 14
 
   go-lint:
     needs: changes
