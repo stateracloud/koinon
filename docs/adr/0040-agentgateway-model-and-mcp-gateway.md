@@ -162,6 +162,11 @@ in `docs/dev/releasing.md` and closes this amendment.
 paths can be applied and acknowledged for each path apart. The agentgateway drivers keep
 `ModelGateway.Apply` for both halves. The text above stays as written.
 
+Correction (2026-11-12, #279 slice 2): the note in decision 6, "only `ModelGateway` exists and it
+carries MCP", is out of date. `MCPGateway` exists since #279 slice 1 (`internal/gateway/gateway.go`),
+next to `ModelGateway`, and `gateway.State` is split into the keys, a model half and an MCP half. The
+2026-10-26 amendment above describes the state before that; decision 6's two interfaces now both exist.
+
 ## Links
 
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/upgrade/0-1-0.mdx
