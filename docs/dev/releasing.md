@@ -20,7 +20,24 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 1. Merge everything to `main` and wait for the `ci` and `secrets` checks on the merge commit. `ci`
    cancels a run when a newer commit lands on `main`, so a superseded merge commit can be left with
    cancelled checks: tag the newest commit whose checks are green.
-2. Tag the merge commit and push the tag (signed tags are fine; the workflow only needs the commit):
+2. Re-check the gateway fallback, for every release, rc and final (ADR 0040, amendment 2026-11-12).
+   Do it before you push the tag. Koinon stays on agentgateway behind `ModelGateway`; Agent Router
+   (formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback.
+
+   - Look at the upstream pull request #2834 and at the Agent Router release notes since the last
+     release. Note in the release pull request or the tracking issue whether #2834 is open, merged
+     or closed, and the version of Agent Router you looked at.
+   - Check the three gaps that ADR 0040 gives as reasons not to choose it: budgets are token windows
+     of at most one day with no USD or never-reset budget; quota fails open by default; it needs
+     Envoy Gateway. #2834 matters because it makes metrics survive a stream that ends in the middle
+     of a response, which our spend ledger needs.
+   - Reconsider the fallback only if one of these holds: agentgateway fails a requirement of ADR
+     0040 or ADR 0041 that we cannot fix (USD budgets per key, unpriced models, spend after a
+     streamed response, MCP authorization), or Agent Router closes all three gaps. Then open an
+     issue and write an ADR that amends or supersedes ADR 0040. Otherwise write "no change" and go
+     on.
+
+3. Tag the merge commit and push the tag (signed tags are fine; the workflow only needs the commit):
 
    ```sh
    git switch main && git pull
@@ -28,7 +45,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    git push origin v0.1.0-rc.1
    ```
 
-3. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
+4. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
    `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required status
    check that applies to `main` has not concluded `success`. The gate reads that list at run time from
    `rules/branches/<default>` (every active repository and organization rule for the branch, branch
@@ -69,26 +86,10 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `main` and on `release/*` bases alike, so land the marker change before you cut `release/v0.3`.
    The change that opens the next minor line resets the file to `none`, which lets it contract. The
    file is read at the merge base, so the same change cannot lift the rule.
-4. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
+5. Check that every job succeeded: `release` and `flavor` run side by side after `gate`, so a failed
    `flavor` still leaves a draft release and a chart whose default flavor image does not exist, and
    it skips `sign`. Then open the draft release and read the notes. `-rc.N` releases are already
    marked as a prerelease. Publishing the draft is the only manual step.
-
-Checklist step for every release, rc and final (ADR 0040, amendment 2026-11-12): re-check the gateway
-fallback before you push the tag. Koinon stays on agentgateway behind `ModelGateway`; Agent Router
-(formerly Envoy AI Gateway, `github.com/theagentrouter/agent-router`) is the documented fallback.
-
-- Look at the upstream pull request #2834 and at the Agent Router release notes since the last
-  release. Note in the release pull request or the tracking issue whether #2834 is open, merged or
-  closed, and the version of Agent Router you looked at.
-- Check the three gaps that ADR 0040 gives as reasons not to choose it: budgets are token windows of
-  at most one day with no USD or never-reset budget; quota fails open by default; it needs Envoy
-  Gateway. #2834 matters because it makes metrics survive a stream that ends in the middle of a
-  response, which our spend ledger needs.
-- Reconsider the fallback only if one of these holds: agentgateway fails a requirement of ADR 0040
-  or ADR 0041 that we cannot fix (USD budgets per key, unpriced models, spend after a streamed
-  response, MCP authorization), or Agent Router closes all three gaps. Then open an issue and write
-  an ADR that amends or supersedes ADR 0040. Otherwise write "no change" and tag.
 
 A failed run can be re-run from the Actions page ("Re-run failed jobs" reruns `flavor`, then
 `sign`): the draft release is replaced, the images are pushed again (the flavor under the same tag
@@ -134,7 +135,7 @@ not record a release candidate. Refreshing and what to do when a folder stops lo
 
 ## Release notes: "Upgrading from vX.Y"
 
-The generated notes list commits only. Before you publish the draft (step 4), add an "Upgrading from
+The generated notes list commits only. Before you publish the draft (step 5), add an "Upgrading from
 vX.Y" section by hand, where X.Y is the previous minor line (for `v0.2.0`, "Upgrading from v0.1").
 Operators follow [Upgrading Koinon](https://koinon.stateracloud.com/docs/operate/upgrading/) (ADR 0085); the notes
 say what is specific to this release. Template:
