@@ -13,10 +13,10 @@
 //
 //   - whether the model thinks never, optionally or always ([Thinks]),
 //   - the form a run sends, from the row and the agent's setting ([Capability.Effective]), which the
-//     flavor's entry script renders, and
+//     harness's entry script renders, and
 //   - the anthropic-beta values the gateway pins for the model (Capability.Betas).
 //
-// A new model is one row. A new form is one [Mode], one case in each flavor's entry script and,
+// A new model is one row. A new form is one [Mode], one case in each harness's entry script and,
 // when it needs a beta, the value in the row. Callers never switch on model names; they call this
 // package.
 package thinking
@@ -33,7 +33,7 @@ import (
 // Mode is the form a run's request takes for thinking: what the harness puts in the body.
 type Mode string
 
-// The modes Koinon knows. The strings reach the flavors' entry scripts (--thinking), so a new one
+// The modes Koinon knows. The strings reach the harnesses' entry scripts (--thinking), so a new one
 // needs a case there.
 const (
 	// None sends nothing: the model does not think, or Koinon has not wired its thinking.
@@ -301,7 +301,7 @@ var rows = func() []row {
 		row{Provider: modelformat.ProviderOpenRouter, Format: modelformat.OpenAI, Prefix: "openai/gpt-6-astra", Capability: orAlways},
 		row{Provider: "openai", Format: modelformat.OpenAI, Prefix: "gpt-6-astra", Capability: openaiAlways},
 		// Luna on OpenAI's own API documents reasoning_effort "none", but no live check has covered
-		// it and no flavor sends that field: until one does, Koinon offers no off here.
+		// it and no harness sends that field: until one does, Koinon offers no off here.
 		row{Provider: "openai", Format: modelformat.OpenAI, Prefix: "gpt-6-luna", Capability: openaiAlways},
 		// Local models: thinking depends on the model and is not wired.
 		row{Provider: "ollama", Capability: never},

@@ -107,7 +107,8 @@ message Agent {
   string org_id = 2;
   string display_name = 3;
   AgentStatus status = 4;
-  koinon.template.v1alpha1.Flavor flavor = 5;
+  // Deprecated: use harness. Unspecified when the harness has no Flavor value.
+  koinon.template.v1alpha1.Flavor flavor = 5 [deprecated = true];
   // The template content the agent was created from, if any.
   string template_id = 6;
   string template_slug = 7;
@@ -152,6 +153,9 @@ message Agent {
   // (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new
   // request reads false until the reconciler's next pass.
   bool keep_warm_granted = 27;
+  // The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
+  // agent is created.
+  string harness = 28;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -160,8 +164,8 @@ message CreateAgentFromTemplateRequest {
   // A Template.id from ListTemplates.
   string template_id = 2;
   string display_name = 3;
-  // One of the template's allowed flavors; unspecified picks its default.
-  koinon.template.v1alpha1.Flavor flavor = 4;
+  // Deprecated: use harness. Read only when harness is empty.
+  koinon.template.v1alpha1.Flavor flavor = 4 [deprecated = true];
   // Where the template's grants apply: one entry per grant on a connector
   // type with targets. A grant whose template sets targets min above zero
   // needs one. Stored with the agent's version; ActivateAgent approves it with
@@ -169,6 +173,8 @@ message CreateAgentFromTemplateRequest {
   repeated GrantBinding grants = 5;
   // Overrides the template's ephemeral setting; unset keeps it.
   optional bool ephemeral = 6;
+  // One of the template's allowed harnesses, by name; empty picks its default (ADR 0112).
+  string harness = 7;
 }
 
 // GrantBinding binds a template grant to one of the org's connections and

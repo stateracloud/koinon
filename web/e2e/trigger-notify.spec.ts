@@ -28,7 +28,7 @@ function api() {
     orgId: org,
     displayName: 'Repo helper',
     status: 'AGENT_STATUS_ACTIVE',
-    flavor: 'FLAVOR_OPENCODE',
+    harness: 'opencode',
     latestVersion: 1,
     activeVersion: 1,
     approvedTriggers: triggers,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package acp is Koinon's client for the Agent Client Protocol (ACP), the JSON-RPC protocol
-// koinon-agentd speaks to a flavor's harness over the stdin and stdout of an OpenShell exec
+// koinon-agentd speaks to a harness over the stdin and stdout of an OpenShell exec
 // stream (ADR 0016, 0049).
 //
 // It wraps the community SDK github.com/coder/acp-go-sdk, pinned in go.mod (ADR 0037), so that

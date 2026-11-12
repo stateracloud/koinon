@@ -143,6 +143,13 @@ job escape ^(charts/|test/escape/|internal/testing/testenv/)
 # --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
 job flavors ^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
+# --- opencodeplugin: tsc and node --test of Koinon's OpenCode plugins' CI-only dev project ----------
+# (ADR 0093 decision 4). A change under flavors/opencode/plugins/ also matches `job flavors` above
+# (the Dockerfile COPYs the plugin module, and test/flavors proves it loads), so both jobs run; this
+# one is the fast, Docker-free type-check and unit-test pass. The Dockerfile is a trigger too: the job
+# checks that the types pin equals the image's OpenCode pin, so a re-pin type-checks against new types.
+job opencodeplugin ^flavors/opencode/(plugins/|Dockerfile$)
+
 # --- local gates of the CI jobs (hack/lane-gates.sh) -------------------------------------------------
 # A job without a lane line has no local gate and is reported as not run.
 lane go - preflight
@@ -150,7 +157,9 @@ lane web - preflight
 lane generate - preflight
 lane chart - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
+# hack/flavor-repro-check.sh (two uncached builds, one digest) is the advisory workflow flavor-repro.yml, not a ci.yml job; it has no lane.
 lane flavors docker,go test-flavors
+lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission
 lane tidy - preflight
 lane shell - preflight
@@ -215,6 +224,7 @@ script-check - hack/hooks/agent-spawn-check_test.sh
 script-check - hack/hooks/read-hooks_test.sh
 script-check - hack/agent-state-test.sh
 script-check - hack/dep-age-check-test.sh
+script-check - hack/buf-breaking-against-test.sh
 script-check - hack/lane-gates-test.sh
 script-check - hack/generate-test.sh
 script-check - hack/ci-supersede-test.sh

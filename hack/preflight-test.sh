@@ -63,6 +63,7 @@ done
 printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >>"$FAKE_LOG"\ncase ${FAKE_GO_TEST_RC:-0} in 0) ;; 3) echo "go-test verdict: INCOMPLETE (missing docker): 1 passed, 0 partly skipped, 0 failed, 0 not run, 1 skipped (of 2 suites)" ;; *) echo "--- FAIL: TestX" ;; esac\nexit "${FAKE_GO_TEST_RC:-0}"\n' >"$seed/hack/go-test.sh"
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 cp "$repo/hack/golangci-lint.sh" "$seed/hack/golangci-lint.sh" # the real wrapper; it execs the golangci-lint stub
+cp "$repo/hack/buf-breaking-against.sh" "$seed/hack/buf-breaking-against.sh" # real helper (#542); needs only git
 chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
 echo "package foo" >"$seed/internal/foo/a.go"
@@ -410,7 +411,7 @@ rc=$(pf "$tmp/d2" --only deps,proto)
 check "deps and proto pass: exit 0" eq "$rc" 0
 check "dep-age-check gets the base" has '^dep-age-check.sh origin/main' "$FAKE_LOG"
 check "buf lint ran" has '^buf lint' "$FAKE_LOG"
-check "buf breaking against the base branch" has '^buf breaking --against .git#branch=main' "$FAKE_LOG"
+check "buf breaking against the merge base" has '^buf breaking --against .git#ref=' "$FAKE_LOG"
 export FAKE_DEP_AGE_CHECK_RC=1
 rc=$(pf "$tmp/d3" --only deps)
 check "dep-age failure fails preflight" eq "$rc" 1

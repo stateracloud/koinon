@@ -72,12 +72,22 @@
   // provider is defined below; opencode.provider.opencode cannot be removed), web search, and
   // logins for well-known integrations.
   //
-  // Koinon's retry plugin comes first (ADR 0056 amendment 2026-10-31, point 3): OpenCode is the one
+  // koinon.core (ADR 0093) comes first, before koinon.retry and before anything a later document
+  // (OPENCODE_CONFIG_CONTENT, user plugins) adds: the first of a duplicate plugin ID wins, so this
+  // is what makes koinon.core win an ID clash (README.md, "koinon.core"). It takes no option in
+  // this slice ({} below); a later module's option goes here through {env:KOINON_*}, as
+  // koinon.retry's do.
+  //
+  // Koinon's retry plugin comes next (ADR 0056 amendment 2026-10-31, point 3): OpenCode is the one
   // layer that retries a failed model request, with Koinon's policy, not its own 10 retries. The
   // options are koinon-opencode's --model-tries, --model-retry-backoff-ms and
-  // --model-max-retry-after-ms (README.md, "Model retries"). The directory is outside every config
-  // root, so nothing loads it without these options.
+  // --model-max-retry-after-ms (README.md, "Model retries"). Both directories are outside every
+  // config root, so nothing loads either without being listed here.
   "plugins": [
+    {
+      "package": "/usr/local/lib/koinon/opencode/plugins/koinon-core",
+      "options": {}
+    },
     {
       "package": "/usr/local/lib/koinon/opencode/plugins/koinon-retry",
       "options": {
@@ -110,7 +120,7 @@
     // "Authorization: Bearer", the header OpenShell rewrites the placeholder in and the gateway's
     // key policy reads. Never set apiKey as well: the provider refuses both
     // (packages/ai/src/providers/anthropic.ts). The entry script and koinon-agentd choose the entry
-    // from the model's format (--model-format, internal/flavor).
+    // from the model's format (--model-format, internal/harness).
     "koinon-anthropic": {
       "name": "Koinon agentgateway (Anthropic Messages)",
       "package": "aisdk:@ai-sdk/anthropic",

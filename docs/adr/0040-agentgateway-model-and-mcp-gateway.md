@@ -154,6 +154,14 @@ limits, and it brings several components plus vendor coupling.
 Exit condition: the change that ships ADR 0097 step 3 (agentgateway removed) deletes the release step
 in `docs/dev/releasing.md` and closes this amendment.
 
+## Amendment (2026-11-12): MCPGateway arrives in ADR 0097 step 2
+
+[0097](0097-koinon-owned-gateway.md) decision 2.1 introduces the `MCPGateway` interface in step 2, the point the
+2026-10-26 amendment waited for: Koinon's own gateway is driven for the MCP path apart from models.
+`ApplyMCP(ctx, MCPConfig)` is its own method, not a second `Apply`, so a driver that serves both
+paths can be applied and acknowledged for each path apart. The agentgateway drivers keep
+`ModelGateway.Apply` for both halves. The text above stays as written.
+
 ## Links
 
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/upgrade/0-1-0.mdx

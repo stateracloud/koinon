@@ -7,7 +7,9 @@ Instructions for coding agents working on Koinon.
 - Build: `make build` · Test: `make test` · Lint: `make lint` · Codegen: `make generate`
 - Go only: `hack/go-test.sh` (what `make test` runs; Postgres tests need Docker and skip without it;
   exits 3 when an expected requirement was missing). One package: `go test ./internal/x` or
-  `go tool ginkgo -p ./internal/x`. A new suite joins the parallel list in that script once it shares
+  `GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the tag gives kopia an instant test key
+  derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it).
+  A new suite joins the parallel list in that script once it shares
   no database, fixed port or fixed path between processes. `test/flavors`: `make test-flavors`.
   Details: `docs/dev/ci.md#go-test-suites`.
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`

@@ -26,6 +26,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/test/drill"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
@@ -436,7 +437,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 		Expect(tmpl).NotTo(BeEmpty(), "the web-researcher template")
 		created, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-			OrgId: src.org, TemplateId: tmpl, DisplayName: "Drill agent", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+			OrgId: src.org, TemplateId: tmpl, DisplayName: "Drill agent", Harness: harness.OpenCode,
 		})
 		must(err, "create the agent")
 		src.agent = created.GetAgent().GetId()
@@ -459,7 +460,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 
 		By("an archive agent: no trigger, one task that writes a marker into its home")
 		made, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-			OrgId: src.org, TemplateId: tmpl, DisplayName: "Archive agent", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+			OrgId: src.org, TemplateId: tmpl, DisplayName: "Archive agent", Harness: harness.OpenCode,
 		})
 		must(err, "create the archive agent")
 		archive.agent = made.GetAgent().GetId()

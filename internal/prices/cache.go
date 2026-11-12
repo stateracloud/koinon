@@ -36,7 +36,7 @@ const (
 	CacheUnknown CacheMode = "unknown"
 )
 
-// Marker is the cache-marker format a flavor harness must be told to send, or "" when none.
+// Marker is the cache-marker format a harness must be told to send, or "" when none.
 func (m CacheMode) Marker() string {
 	if m == CacheAnthropic || m == CacheAlibaba {
 		return string(m)

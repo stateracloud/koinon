@@ -1616,6 +1616,53 @@ func (q *Queries) ListHomeRepositoryProbes(ctx context.Context, arg ListHomeRepo
 	return items, nil
 }
 
+const listOrgIDsWithCheckpointWork = `-- name: ListOrgIDsWithCheckpointWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT c.org_id FROM home_checkpoints c WHERE c.status IN ('requested', 'running')
+    UNION
+    SELECT s.org_id FROM agent_sandboxes s
+    JOIN agents a ON a.org_id = s.org_id AND a.id = s.agent_id
+    LEFT JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
+    WHERE s.state = 'ready' AND s.unhealthy_at IS NULL AND s.restore_checkpoint_id IS NULL
+      AND a.status = 'active' AND (v.config->>'ephemeral')::boolean IS NOT TRUE
+      AND NOT EXISTS (
+          SELECT 1 FROM home_checkpoints c
+          WHERE c.org_id = s.org_id AND c.agent_id = s.agent_id
+            AND c.requested_at > now() - make_interval(secs => $1::int))
+  )
+ORDER BY o.id
+`
+
+// The live orgs where the checkpoint tick has work: an open request (to claim, take over or fail,
+// home_checkpoints_open) or a ready sandbox whose agent has had no checkpoint requested for
+// @interval_seconds (the hourly request; agent_sandboxes_checkpointable). The tick runs every
+// checkpoint poll, so its cost follows the orgs with work, not every org that ever existed
+// (koinon issue 576, as ListOrgIDsWithRunWork, koinon issue 378). The sandbox half has the same
+// agent filters as RequestHourlyHomeCheckpoints (active, not ephemeral), so an org whose agents
+// cannot be checkpointed is not returned on every poll. A superset is fine: the hourly request,
+// the fail queries and the claim re-check every condition.
+func (q *Queries) ListOrgIDsWithCheckpointWork(ctx context.Context, intervalSeconds int32) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithCheckpointWork, intervalSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgIDsWithProbeWork = `-- name: ListOrgIDsWithProbeWork :many
 SELECT o.id FROM orgs o
 WHERE o.deleted_at IS NULL
@@ -1636,6 +1683,106 @@ ORDER BY o.id
 // is fine: the claim and the delete re-check every condition.
 func (q *Queries) ListOrgIDsWithProbeWork(ctx context.Context, graceSeconds int32) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listOrgIDsWithProbeWork, graceSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgIDsWithRepositoryDeleteWork = `-- name: ListOrgIDsWithRepositoryDeleteWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT h.org_id FROM home_repositories h WHERE h.deleted_at IS NULL AND h.delete_after <= now()
+    UNION
+    SELECT e.org_id FROM home_repository_epochs e WHERE e.deleted_at IS NULL AND e.delete_after <= now()
+  )
+ORDER BY o.id
+`
+
+// The live orgs with a repository past its deletion deadline (epoch 0 or later), for the sweeper.
+// Indexes home_repositories_delete_due and home_repository_epochs_delete_due (koinon issue 576).
+// A superset is fine: ListDueHomeRepositories re-checks every guard.
+func (q *Queries) ListOrgIDsWithRepositoryDeleteWork(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithRepositoryDeleteWork)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgIDsWithResyncWork = `-- name: ListOrgIDsWithResyncWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (SELECT r.org_id FROM home_checkpoint_resyncs r WHERE r.finished_at IS NULL)
+ORDER BY o.id
+`
+
+// The live orgs with a resync the resync gauge counts: pending (due or not) or given up on. Index
+// home_checkpoint_resyncs_open (koinon issue 576). A superset is fine: the claim and the count
+// re-check every condition.
+func (q *Queries) ListOrgIDsWithResyncWork(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithResyncWork)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgIDsWithSeedWork = `-- name: ListOrgIDsWithSeedWork :many
+SELECT o.id FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND o.id IN (
+    SELECT e.org_id FROM home_repository_epochs e
+    WHERE e.seed_from_epoch IS NOT NULL AND e.seeded_at IS NULL AND e.retired_at IS NULL
+      AND e.credential_lost_at IS NULL
+  )
+ORDER BY o.id
+`
+
+// The live orgs with a seed the seed gauge counts: pending (due or not) or given up on. The tick
+// claims the due ones and sets the gauge from CountHomeRepositorySeeds of each listed org, so an
+// org whose only seed is given up on stays listed (the gauge's failed count). Index
+// home_repository_epochs_seed_open (koinon issue 576). A superset is fine: the claim and the count
+// re-check every condition.
+func (q *Queries) ListOrgIDsWithSeedWork(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDsWithSeedWork)
 	if err != nil {
 		return nil, err
 	}

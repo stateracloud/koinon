@@ -46,7 +46,11 @@ koinon_extra_arg() { return 1; }
 # -- included). The caller then runs `shift "$koinon_shift"`, which leaves the arguments for the
 # harness.
 #
-# A flavor whose harness retries model requests (internal/flavor RetriesModelRequests) also takes
+# --compaction-tokens into compaction_tokens: the context size, in tokens, at which the harness
+# compacts the conversation (internal/agentd compactionTokens, ADR 0070 amendment 2026-11-11); empty
+# leaves the harness's own behaviour.
+#
+# A flavor whose harness retries model requests (internal/harness RetriesModelRequests) also takes
 # Koinon's retry policy, which koinon-agentd always passes (ADR 0056 amendment 2026-10-31, point 3):
 # --model-tries (the first request included), --model-retry-backoff-ms (the first wait; it doubles
 # per retry, up to a minute) and --model-max-retry-after-ms (the longest Retry-After waited out; a
@@ -55,7 +59,7 @@ koinon_extra_arg() { return 1; }
 # 1000, 60000; test/flavors checks they agree), so the harness never runs on its own.
 koinon_parse_args() {
   base_url='' model='' mcp_url='' session_id='' model_format=openai thinking='' koinon_shift=0
-  model_tries=3 model_retry_backoff_ms=1000 model_max_retry_after_ms=60000
+  model_tries=3 model_retry_backoff_ms=1000 model_max_retry_after_ms=60000 compaction_tokens=''
   while [ $# -gt 0 ]; do
     case $1 in
       --model-base-url) [ $# -ge 2 ] || koinon_die "$1 needs a value"; base_url=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
@@ -64,6 +68,7 @@ koinon_parse_args() {
       --model-format) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_format=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --thinking) [ $# -ge 2 ] || koinon_die "$1 needs a value"; thinking=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --session-id) [ $# -ge 2 ] || koinon_die "$1 needs a value"; session_id=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
+      --compaction-tokens) [ $# -ge 2 ] || koinon_die "$1 needs a value"; compaction_tokens=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --model-tries) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_tries=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --model-retry-backoff-ms) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_retry_backoff_ms=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --model-max-retry-after-ms) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_max_retry_after_ms=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
@@ -95,6 +100,9 @@ koinon_parse_args() {
   if [ -n "$session_id" ]; then
     check --session-id "$session_id"
     [ ${#session_id} -le 256 ] || koinon_die "--session-id is longer than 256 characters"
+  fi
+  if [ -n "$compaction_tokens" ]; then
+    koinon_check_count --compaction-tokens "$compaction_tokens" 1000
   fi
   koinon_check_count --model-tries "$model_tries" 1
   koinon_check_count --model-retry-backoff-ms "$model_retry_backoff_ms" 0

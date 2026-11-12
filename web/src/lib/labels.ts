@@ -5,7 +5,7 @@ import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { Flavor, Preset } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { Preset } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 // Every enum the UI names, in one place. The Record types make a new enum value a type error
@@ -76,16 +76,15 @@ export function runFinished(s: RunState): boolean {
   return s === RunState.SUCCEEDED || s === RunState.FAILED || s === RunState.CANCELED
 }
 
-const flavorLabels: Record<Flavor, string> = {
-  [Flavor.UNSPECIFIED]: 'Default',
-  [Flavor.OPENCODE]: 'OpenCode',
-  // Deprecated: dropped before v0.1 (ADR 0059); the API never returns them.
-  [Flavor.HERMES]: 'Hermes',
-  [Flavor.PI]: 'pi',
+// Display names of the built-in harnesses (ADR 0112). A harness an install registers shows under
+// its own name.
+const harnessLabels: Record<string, string> = {
+  opencode: 'OpenCode',
 }
 
-export function flavorLabel(f: Flavor): string {
-  return flavorLabels[f] ?? 'Unknown'
+export function harnessLabel(name: string): string {
+  if (name === '') return 'Default'
+  return harnessLabels[name] ?? name
 }
 
 const presetLabels: Record<Preset, string> = {

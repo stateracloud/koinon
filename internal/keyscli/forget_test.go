@@ -134,7 +134,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		var agent pgtype.UUID
-		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&agent)).To(Succeed())
 		return orgRows{org: org, provider: p.ID, work: saveWork(ctx, r, org, user, agent)}
 	}
 	// orgState is whether the org's provider key is lost and its saved work's status.
@@ -237,7 +237,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		newAgent := func() pgtype.UUID {
 			GinkgoHelper()
 			var a pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, $2, 'opencode') RETURNING id`, org, pgtest.Uniq("a")).Scan(&a)).To(Succeed())
 			return a
 		}
 		agent1, agent2, agent3 := newAgent(), newAgent(), newAgent()
@@ -511,7 +511,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		It("refuses an agent whose repository came to need an epoch after the probe, and marks nothing lost", func(ctx SpecContext) {
 			o, agent := withLostRepository(ctx)
 			var other pgtype.UUID
-			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'late', 'opencode') RETURNING id`, o.org).Scan(&other)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'late', 'opencode') RETURNING id`, o.org).Scan(&other)).To(Succeed())
 			var lateErr atomic.Pointer[error]
 			answerWith(func(store.HomeRepositoryProbe) (string, string) {
 				// A second agent's repository, sealed with the lost KEK, appears after the probe's

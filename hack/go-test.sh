@@ -65,6 +65,38 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Tests build with the `testing` tag, as kopia's own unit tests do (its Makefile, unit-tests target):
+# kopia then makes new repositories with an insecure, instant key derivation instead of scrypt-65536.
+# Scrypt costs about 1 s per repository open under -race (every Backup, Restore and Verify opens
+# twice or more), which made one seed 20 s and timed out the agentd specs on CI (#576). The tag is
+# for test binaries only: no release build uses it (the Makefile refuses it in GO_TAGS).
+# Go keeps only the last -tags in GOFLAGS, so the tag is merged into the tags already there (the
+# -tags=a,b form and its quoted and --tags spellings; GOFLAGS has no `-tags a,b` form), once.
+goflags_with_testing_tag() {
+	local w n tags=testing others=()
+	for w in ${GOFLAGS:-}; do
+		n=${w//[\"\']/}
+		case $n in
+		-tags=* | --tags=*) tags+=",${n#*=}" ;;
+		*) others+=("$w") ;;
+		esac
+	done
+	local out=() t seen=,
+	IFS=, read -ra out <<<"$tags"
+	tags=
+	for t in "${out[@]}"; do
+		[[ -n $t && $seen != *",$t,"* ]] || continue
+		seen+="$t,"
+		tags+="${tags:+,}$t"
+	done
+	echo "${others[*]:+${others[*]} }-tags=$tags"
+}
+GOFLAGS="$(goflags_with_testing_tag)"
+export GOFLAGS
+if [[ ${1:-} == "--goflags" ]]; then
+	echo "$GOFLAGS"
+	exit 0
+fi
 # shellcheck disable=SC2317,SC2329 # invoked from the exit trap (SC2317 before shellcheck 0.10)
 write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 

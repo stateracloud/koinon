@@ -42,13 +42,18 @@ check "warm-caches-web saves no Playwright cache (web-e2e runs in the Playwright
 check "warm-caches-web runs on pushes to main only" has "$warmweb" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
 check "warm-caches-web does not wait for changes" hasnt "$warmweb" 'needs:'
 check "warm-caches-web is advisory" grep -qx "advisory warm-caches-web" "$repo/hack/ci-required.txt"
+warmplug=$(job_body "$wf" warm-caches-opencode-plugins)
+check "warm-caches-opencode-plugins runs on pushes to main only" has "$warmplug" "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
+check "warm-caches-opencode-plugins does not wait for changes" hasnt "$warmplug" 'needs:'
+check "warm-caches-opencode-plugins is advisory" grep -qx "advisory warm-caches-opencode-plugins" "$repo/hack/ci-required.txt"
 
 # setup-node keys its pnpm cache on the hash of every cache-dependency-path entry, so each lockfile
 # list a consumer uses must be warmed by one job with exactly that list (a single path per warm job).
 check "warm-caches-web warms web/pnpm-lock.yaml alone" has "$warmweb" '^          cache-dependency-path: web/pnpm-lock.yaml$'
-warmpaths=$(printf '%s\n' "$warmweb" | grep -E '^          cache-dependency-path: ' | sort -u)
+check "warm-caches-opencode-plugins warms flavors/opencode/plugins/pnpm-lock.yaml alone" test "$(grep -Ec '^          cache-dependency-path: ' <<<"$warmplug")" = 1
+warmpaths=$(printf '%s\n%s\n' "$warmweb" "$warmplug" | grep -E '^          cache-dependency-path: ' | sort -u)
 while read -r job path; do
-  [ "$job" = warm-caches-web ] && continue
+  case $job in warm-caches-web* | warm-caches-opencode-plugins*) continue ;; esac
   if [ "$path" = '|' ] || [ -z "$path" ]; then continue; fi
   check "consumer $job cache-dependency-path '$path' is warmed" has "$warmpaths" "cache-dependency-path: ${path}\$"
 done < <(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /cache-dependency-path:/ { sub(/.*cache-dependency-path: */, ""); print job, $0 }' "$wf")

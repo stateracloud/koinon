@@ -2,7 +2,7 @@
 
 import { create } from '@bufbuild/protobuf'
 import { ConnectionSchema, ConnectionStatus, ConnectorTypeSchema } from '@/gen/koinon/connection/v1alpha1/connection_pb'
-import { Flavor, GrantSchema, Preset, RunLimitsSchema, TemplateSchema } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { GrantSchema, Preset, RunLimitsSchema, TemplateSchema } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { orgId } from '@/test-utils'
 
 export function repoHelperTemplate(targets: { min: number; max: number } = { min: 1, max: 1 }) {
@@ -12,8 +12,8 @@ export function repoHelperTemplate(targets: { min: number; max: number } = { min
     version: '0.1.0',
     displayName: 'Repo helper',
     description: 'Makes small changes to one repository.',
-    allowedFlavors: [Flavor.OPENCODE],
-    defaultFlavor: Flavor.OPENCODE,
+    allowedHarnesses: ['opencode'],
+    defaultHarness: 'opencode',
     model: 'default',
     grants: [
       create(GrantSchema, {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -67,7 +68,7 @@ var _ = Describe("a looping agent", func() {
 	// loops makes the harness play the pattern on its first prompt and, when again is set, on the nudge
 	// that follows it. The nudge then waits for a cancel; otherwise the agent changes course and ends.
 	loops := func(e *env, pattern string, again bool) {
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.holdLoop = again
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
@@ -95,7 +96,7 @@ var _ = Describe("a looping agent", func() {
 
 	DescribeTable("is told once, and the run goes on when it changes course",
 		func(ctx SpecContext, pattern string) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			loops(e, pattern, false)
 			t := e.task(ctx, markWait)
 			r := e.enqueue(ctx, t)
@@ -120,7 +121,7 @@ var _ = Describe("a looping agent", func() {
 
 	DescribeTable("is stopped with failure class loop when the pattern continues after the nudge",
 		func(ctx SpecContext, pattern string) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			loops(e, pattern, true)
 			t := e.task(ctx, markWait)
 			r := e.enqueue(ctx, t)
@@ -149,8 +150,8 @@ var _ = Describe("a looping agent", func() {
 	)
 
 	It("leaves a run alone that stays under the thresholds", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				for range 3 {

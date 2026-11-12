@@ -9,8 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
-	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/thinking"
@@ -44,7 +43,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 				"%s (%s/%s) has a cache_read price but no cache mode: add its provider format to cacheModeOf in internal/prices/cache.go (ADR 0068)",
 				r.Entry.ID, r.Entry.Provider, name)
 			marker := mode.Marker()
-			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
+			cmd, err := agentd.LaunchCommand(harness.OpenCode, agentd.Endpoints{
 				ModelBaseURL: "http://gw.test/v1", Model: name, MCPURL: "http://gw.test/mcp", Format: format, CacheMarker: marker,
 				Retry: agentd.DefaultRetryPolicy(),
 			})
@@ -75,7 +74,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 			format := modelformat.Default(r.Entry.Provider, name)
 			Expect(prices.CacheModeFor(r.Entry.Provider, name, format, r.Price)).To(Equal(prices.CacheNative),
 				"%s is a direct Anthropic model: it must run natively in Messages format with a cache_read price (ADR 0069)", r.Entry.ID)
-			Expect(agentd.ModelOption(store.AgentFlavorOpencode, format, name)).To(Equal("koinon-anthropic/"+name), r.Entry.ID)
+			Expect(agentd.ModelOption(harness.OpenCode, format, name)).To(Equal("koinon-anthropic/"+name), r.Entry.ID)
 		}
 		Expect(n).To(BeNumerically(">", 0), "the default price list has no direct Anthropic entry")
 	})
@@ -106,7 +105,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 	})
 
 	It("launches a direct Anthropic model on the anthropic entry", func() {
-		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
+		cmd, err := agentd.LaunchCommand(harness.OpenCode, agentd.Endpoints{
 			ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic,
 			Retry: agentd.DefaultRetryPolicy(),
 		})
@@ -117,12 +116,12 @@ var _ = Describe("prompt caching of the default price list", func() {
 			"--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000",
 			"--model-format", "anthropic",
 		}))
-		Expect(agentd.ModelOption(store.AgentFlavorOpencode, modelformat.Anthropic, "claude-haiku-5-5")).To(Equal("koinon-anthropic/claude-haiku-5-5"))
+		Expect(agentd.ModelOption(harness.OpenCode, modelformat.Anthropic, "claude-haiku-5-5")).To(Equal("koinon-anthropic/claude-haiku-5-5"))
 	})
 
 	It("passes the thinking mode Koinon decided, and nothing when none was", func() {
 		for _, mode := range thinking.Modes() {
-			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
+			cmd, err := agentd.LaunchCommand(harness.OpenCode, agentd.Endpoints{
 				ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic, Thinking: mode,
 				Retry: agentd.DefaultRetryPolicy(),
 			})
@@ -133,40 +132,40 @@ var _ = Describe("prompt caching of the default price list", func() {
 
 	DescribeTable("selects the entry of the model's format",
 		func(format modelformat.Format, want string) {
-			Expect(agentd.ModelOption(store.AgentFlavorOpencode, format, "m")).To(Equal(want))
+			Expect(agentd.ModelOption(harness.OpenCode, format, "m")).To(Equal(want))
 		},
 		Entry("openai", modelformat.OpenAI, "koinon/m"),
 		Entry("no format is chat completions", modelformat.Format(""), "koinon/m"),
 		Entry("anthropic", modelformat.Anthropic, "koinon-anthropic/m"),
-		Entry("a format the flavor has no entry for", modelformat.Format("gemini"), ""),
+		Entry("a format the harness has no entry for", modelformat.Format("gemini"), ""),
 	)
 
-	It("covers every known format with an entry in every flavor", func() {
-		for _, d := range flavor.All() {
+	It("covers every known format with an entry in every harness", func() {
+		for _, d := range harness.All() {
 			for _, f := range modelformat.All() {
-				Expect(d.ModelEntries).To(HaveKey(f), "flavor %s has no provider entry for the %s format", d.Name, f)
+				Expect(d.ModelEntries).To(HaveKey(f), "harness %s has no provider entry for the %s format", d.Name, f)
 			}
 		}
 	})
 
-	It("refuses a format the flavor has no entry for", func() {
-		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{Format: "gemini", Retry: agentd.DefaultRetryPolicy()})
+	It("refuses a format the harness has no entry for", func() {
+		_, err := agentd.LaunchCommand(harness.OpenCode, agentd.Endpoints{Format: "gemini", Retry: agentd.DefaultRetryPolicy()})
 		Expect(err).To(MatchError(ContainSubstring("no provider entry")))
 	})
 
 	It("passes the run ID as --session-id, and nothing without one", func() {
 		e := agentd.Endpoints{ModelBaseURL: "http://gw.test/v1", Model: "m", MCPURL: "http://gw.test/mcp", SessionID: "run-1", Retry: agentd.DefaultRetryPolicy()}
-		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		cmd, err := agentd.LaunchCommand(harness.OpenCode, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd[len(cmd)-2:]).To(Equal([]string{"--session-id", "run-1"}))
 		e.SessionID = ""
-		cmd, err = agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		cmd, err = agentd.LaunchCommand(harness.OpenCode, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cmd).NotTo(ContainElement("--session-id"))
 	})
 
-	It("refuses a marker the flavor has no switch for", func() {
-		_, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{CacheMarker: "gemini", Retry: agentd.DefaultRetryPolicy()})
+	It("refuses a marker the harness has no switch for", func() {
+		_, err := agentd.LaunchCommand(harness.OpenCode, agentd.Endpoints{CacheMarker: "gemini", Retry: agentd.DefaultRetryPolicy()})
 		Expect(err).To(MatchError(ContainSubstring("cannot send")))
 	})
 })

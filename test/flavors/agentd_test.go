@@ -69,7 +69,7 @@ func describeAgentd(f flavor) bool {
 				_, err := tx.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role) VALUES ($1, $2, 'manual', 'owner')`, org, user)
 				return err
 			})).To(Succeed())
-			a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: f.name, Flavor: f.storeFlavor, CreatedBy: user})
+			a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: f.name, Harness: f.storeFlavor, CreatedBy: user})
 			Expect(err).NotTo(HaveOccurred())
 			v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 				OrgID: org, AgentID: a.ID, CreatedBy: user,

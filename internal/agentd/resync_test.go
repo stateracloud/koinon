@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -204,13 +205,13 @@ var _ = Describe("home checkpoint resync", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = db.Exec(ctx, `UPDATE home_checkpoint_resyncs SET failed_at = NULL WHERE failed_at IS NOT NULL`)
 		Expect(err).NotTo(HaveOccurred())
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		writer = &checkpoint.Writer{Storage: checkpoint.Dir(GinkgoT().TempDir()), Scratch: GinkgoT().TempDir()}
 		current = &atomic.Int32{}
 		lost = map[int32]bool{}
 		m = agentd.NewMetrics(nil)
 		// An agent without a sandbox: no live backup runs beside the resync.
-		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, flavor) VALUES ($1, 'resynced', 'opencode') RETURNING id`, e.org).Scan(&agent)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'resynced', 'opencode') RETURNING id`, e.org).Scan(&agent)).To(Succeed())
 		_, err = db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
 			e.org, agent, checkpoint.Prefix(e.org.String(), agent.String()))
 		Expect(err).NotTo(HaveOccurred())
