@@ -1733,6 +1733,217 @@ Tier is a scope's risk tier (ADR 0008).
 | TIER_EXTERNAL_OR_IRREVERSIBLE | 3 |  |
 | TIER_FORBIDDEN | 4 |  |
 
+## koinon.gateway.v1alpha1
+
+Files: `koinon/gateway/v1alpha1/state.proto`
+
+### Service GatewayStateService
+
+GatewayStateService is the State stream of ADR 0097 decision 2.1: koinon-api sends a gateway copy
+the full desired state of the gateway, one revision at a time, and the copy confirms each half of a
+revision once it serves it. It is the config delivery of Koinon's own gateway; the agentgateway
+drivers keep rendering files and CRDs. It is internal: only a gateway copy calls it.
+
+Nothing here carries secret material: a StateUpdate holds key ids and key hashes, never a key, and
+names the file a credential is mounted at, never its content (ADR 0097 decision 5, the secret store).
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| AckRevision | `koinon.gateway.v1alpha1.AckRevisionRequest` | `koinon.gateway.v1alpha1.AckRevisionResponse` | - | AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model half and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An ack of a revision covers every earlier one for that half. Idempotent. |
+| StreamState | `koinon.gateway.v1alpha1.StreamStateRequest` | `koinon.gateway.v1alpha1.StateUpdate` | server | StreamState sends the latest revision at once and every later one when it is published. Each message is a full snapshot (state of the world), not a delta, so a copy that reconnects needs nothing but the next message. |
+
+### Message AckRevisionRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| copy_id | 1 | `string` | singular |  |  |
+| revision | 2 | `int64` | singular |  |  |
+| half | 3 | `koinon.gateway.v1alpha1.Half` | singular |  |  |
+
+### Message AckRevisionResponse
+
+No fields.
+
+### Message AgentLimit
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| limit | 2 | `koinon.gateway.v1alpha1.Limit` | singular |  |  |
+
+### Message AgentModels
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| models | 2 | `string` | repeated |  |  |
+
+### Message AgentRef
+
+AgentRef names an agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+
+### Message AgentTools
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
+
+### Message Key
+
+Key is the gateway-side record of an API key: id, owner and hash. The key itself never enters it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| agent | 2 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
+| hash | 3 | `string` | singular |  | hash is "sha256:&lt;hex&gt;" of the key material. |
+
+### Message Limit
+
+Limit is a per-agent spend limit (gateway.Limit).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| unit | 1 | `string` | singular |  | unit is "USD", the only unit. |
+| amount_pico_usd | 2 | `int64` | singular |  | amount_pico_usd is the exact amount in pico-USD (money.USD). |
+| window_seconds | 3 | `int64` | singular |  | window_seconds is 0 for no window. |
+| generation | 4 | `string` | singular |  |  |
+
+### Message MCPState
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| targets | 1 | `koinon.gateway.v1alpha1.MCPTarget` | repeated |  |  |
+| tools | 2 | `koinon.gateway.v1alpha1.AgentTools` | repeated |  |  |
+
+### Message MCPTarget
+
+MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in
+the gateway, not the credential; credential_header and credential_prefix say how it is sent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| url | 2 | `string` | singular |  |  |
+| sse | 3 | `bool` | singular |  |  |
+| org | 4 | `string` | singular |  |  |
+| credential_header | 5 | `string` | singular |  |  |
+| credential_prefix | 6 | `string` | singular |  |  |
+| credential_file | 7 | `string` | singular |  |  |
+
+### Message Model
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| format | 2 | `string` | singular |  |  |
+| thinking | 3 | `koinon.gateway.v1alpha1.Thinking` | singular |  |  |
+| guard | 4 | `bool` | singular |  |  |
+| price | 5 | `koinon.gateway.v1alpha1.Price` | singular |  | price is unset for a model without one; the gateway does not serve it. |
+
+### Message ModelState
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.gateway.v1alpha1.AgentLimit` | repeated |  |  |
+| providers | 2 | `koinon.gateway.v1alpha1.Provider` | repeated |  |  |
+| models | 3 | `koinon.gateway.v1alpha1.AgentModels` | repeated |  |  |
+
+### Message Price
+
+Price is per million tokens in USD, as decimal strings.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| input | 1 | `string` | singular |  |  |
+| output | 2 | `string` | singular |  |  |
+| cache_read | 3 | `string` | singular |  |  |
+| cache_write | 4 | `string` | singular |  |  |
+| reasoning | 5 | `string` | singular |  |  |
+| tiers | 6 | `koinon.gateway.v1alpha1.PriceTier` | repeated |  |  |
+
+### Message PriceTier
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| context_over | 1 | `int64` | singular |  |  |
+| input | 2 | `string` | singular |  |  |
+| output | 3 | `string` | singular |  |  |
+| cache_read | 4 | `string` | singular |  |  |
+| cache_write | 5 | `string` | singular |  |  |
+| reasoning | 6 | `string` | singular |  |  |
+
+### Message Provider
+
+Provider is an org's OpenAI-compatible upstream. api_key_file is where the provider key is mounted
+in the gateway, not the key.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+| type | 3 | `string` | singular |  |  |
+| base_url | 4 | `string` | singular |  |  |
+| api_key_file | 5 | `string` | singular |  |  |
+| anthropic_workspace_id | 6 | `string` | singular |  |  |
+| models | 7 | `koinon.gateway.v1alpha1.Model` | repeated |  |  |
+
+### Message StateUpdate
+
+StateUpdate is one revision of the gateway's desired state: the keys both halves need, then the
+model half and the MCP half (gateway.State, ADR 0097 decision 2.1). The keys are at the top level
+so neither half is a copy of them.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| revision | 1 | `int64` | singular |  | revision grows by one per published change of the state and is the number the copy acks. 0 only in a snapshot that has not been stored yet. |
+| keys | 2 | `koinon.gateway.v1alpha1.Key` | repeated |  |  |
+| model | 3 | `koinon.gateway.v1alpha1.ModelState` | singular |  |  |
+| mcp | 4 | `koinon.gateway.v1alpha1.MCPState` | singular |  |  |
+
+### Message StreamStateRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| copy_id | 1 | `string` | singular |  | copy_id names the gateway copy (one replica of koinon-gateway); acks are recorded under it. |
+
+### Message Thinking
+
+Thinking is internal/thinking.Capability as the table records it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| thinks | 1 | `string` | singular |  |  |
+| on | 2 | `string` | singular |  |  |
+| off | 3 | `string` | singular |  |  |
+| display | 4 | `string` | singular |  |  |
+| betas | 5 | `string` | repeated |  |  |
+| usage_split | 6 | `string` | singular |  |  |
+
+### Message ToolGrant
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| target | 1 | `string` | singular |  |  |
+| tools | 2 | `string` | repeated |  |  |
+| all | 3 | `bool` | singular |  |  |
+
+### Enum Half
+
+Half is one of the two paths a gateway copy serves.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| HALF_UNSPECIFIED | 0 |  |
+| HALF_MODEL | 1 |  |
+| HALF_MCP | 2 |  |
+
 ## koinon.leakguard.v1alpha1
 
 Files: `koinon/leakguard/v1alpha1/leakguard.proto`
