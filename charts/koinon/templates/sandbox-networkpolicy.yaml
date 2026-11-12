@@ -15,8 +15,10 @@ Cluster-scoped objects, all prefixed <namespace>-<fullname> like the sandbox pol
 - a ClusterRoleBinding of that role to the reconciler;
 - a native ValidatingAdmissionPolicy (never Kyverno) that bounds the grant: the
   reconciler may write a NetworkPolicy only in a sandbox namespace of this gateway,
-  with the fixed name and the default-deny shape. Nobody else may write that name
-  in a sandbox namespace. failurePolicy Fail.
+  with the fixed name and the default-deny shape. Nobody else may write or delete
+  that name in a sandbox namespace, and in this gateway's sandbox namespaces only
+  the OpenShell gateway (sandboxPolicy.identities.supervisorPods) changes or deletes
+  any other NetworkPolicy (issue 673). failurePolicy Fail.
 
 sandboxNetworkPolicy.enabled=false renders none of it and the reconciler applies nothing.
 sandboxPolicy.enabled and validationActions including Deny are required when this is on
@@ -33,18 +35,18 @@ is only Warn/Audit-fenced.
 {{- $sel := .Values.sandboxPolicy.namespaceSelector }}
 {{- $conds := list }}
 {{- range $k, $v := ($sel.matchLabels | default dict) }}
-{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
+{{- $conds = append $conds (printf "(%s in LBL && LBL[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
 {{- end }}
 {{- range ($sel.matchExpressions | default list) }}
 {{- $k := .key | quote }}
 {{- if eq .operator "In" }}
-{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] in %s)" $k $k (.values | toJson)) }}
+{{- $conds = append $conds (printf "(%s in LBL && LBL[%s] in %s)" $k $k (.values | toJson)) }}
 {{- else if eq .operator "NotIn" }}
-{{- $conds = append $conds (printf "(!(%s in variables.labels) || !(variables.labels[%s] in %s))" $k $k (.values | toJson)) }}
+{{- $conds = append $conds (printf "(!(%s in LBL) || !(LBL[%s] in %s))" $k $k (.values | toJson)) }}
 {{- else if eq .operator "Exists" }}
-{{- $conds = append $conds (printf "(%s in variables.labels)" $k) }}
+{{- $conds = append $conds (printf "(%s in LBL)" $k) }}
 {{- else if eq .operator "DoesNotExist" }}
-{{- $conds = append $conds (printf "(!(%s in variables.labels))" $k) }}
+{{- $conds = append $conds (printf "(!(%s in LBL))" $k) }}
 {{- else }}
 {{- fail (printf "sandboxPolicy.namespaceSelector.matchExpressions: operator %q is not supported by the sandbox NetworkPolicy writer policy (In, NotIn, Exists, DoesNotExist)" .operator) }}
 {{- end }}
@@ -52,6 +54,8 @@ is only Warn/Audit-fenced.
 {{- if not $conds }}
 {{- fail "sandboxPolicy.namespaceSelector selects nothing: the sandbox NetworkPolicy writer policy needs it to say which namespaces are sandbox namespaces" }}
 {{- end }}
+{{- $varConds := replace "LBL" "variables.labels" (join " && " $conds) }}
+{{- $gatewayUsers := .Values.sandboxPolicy.identities.supervisorPods }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -90,19 +94,38 @@ spec:
     resourceRules:
       - apiGroups: [networking.k8s.io]
         apiVersions: [v1]
-        operations: [CREATE, UPDATE]
+        operations: [CREATE, UPDATE, DELETE]
         resources: [networkpolicies]
-  matchConditions:
-    - name: reconciler-or-default-deny
-      expression: >-
-        request.userInfo.username == {{ $user | quote }} || object.metadata.name == {{ $name | quote }}
+  # No matchConditions: they do not see namespaceObject, and the rules below must judge every
+  # NetworkPolicy in a sandbox namespace. Variables are evaluated lazily, so a write outside a
+  # sandbox namespace by any identity but the reconciler reads only its namespace labels.
   variables:
     - name: reconciler
       expression: {{ printf "request.userInfo.username == %s" ($user | quote) | quote }}
+    - name: gateway
+      expression: {{ printf "request.userInfo.username in %s" (toJson ($gatewayUsers | default list)) | quote }}
     - name: labels
       expression: "has(namespaceObject.metadata.labels) ? namespaceObject.metadata.labels : {'koinon.dev/none': ''}"
     - name: sandboxNamespace
-      expression: {{ join " && " $conds | quote }}
+      expression: {{ $varConds | quote }}
+    - name: defaultDenyName
+      expression: {{ printf "request.name == %s" ($name | quote) | quote }}
+    # This gateway's sandbox namespaces, and those no gateway has claimed yet (no gateway-id label),
+    # like the sandbox policies' -unlabelled bindings. Another gateway's namespaces are its own.
+    - name: gatewayNamespace
+      expression: >-
+        variables.sandboxNamespace && (!('openshell.ai/gateway-id' in variables.labels) ||
+          variables.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }})
+    # The namespace is being deleted: the namespace controller empties it, whoever it runs as.
+    - name: terminating
+      expression: "request.operation == 'DELETE' && has(namespaceObject.metadata.deletionTimestamp)"
+    # Metadata-only updates (labels, finalizers, owner references) stay open to system controllers.
+    - name: specUnchanged
+      expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
+    # The garbage collector deletes OpenShell's per-sandbox policies through their owner references.
+    # Deleting an allow policy can only take traffic away while the default-deny stands.
+    - name: ownedDelete
+      expression: "request.operation == 'DELETE' && has(oldObject.metadata.ownerReferences) && size(oldObject.metadata.ownerReferences) > 0"
     - name: ourGateway
       expression: >-
         variables.sandboxNamespace && 'openshell.ai/gateway-id' in variables.labels &&
@@ -119,16 +142,26 @@ spec:
         (!has(object.spec.ingress) || size(object.spec.ingress) == 0) &&
         (!has(object.spec.egress) || size(object.spec.egress) == 0)
   validations:
-    - expression: "variables.reconciler || !variables.sandboxNamespace"
+    - expression: "variables.reconciler || !variables.defaultDenyName || !variables.sandboxNamespace || variables.terminating"
       reason: Forbidden
-      messageExpression: "'only the Koinon reconciler may write the sandbox default-deny NetworkPolicy in sandbox namespaces, not ' + request.userInfo.username"
+      messageExpression: "'only the Koinon reconciler may ' + (request.operation == 'DELETE' ? 'delete' : 'write') + ' the sandbox default-deny NetworkPolicy in sandbox namespaces, not ' + request.userInfo.username"
+    # NetworkPolicies are additive allows: an identity that may write one in a sandbox namespace can
+    # open the sandbox's egress. Only the OpenShell gateway writes or deletes the others there
+    # (OpenShell 0.1.7's namespace and per-sandbox policies, isolation.rs); a metadata-only update,
+    # the garbage collector's delete of an owned policy and the emptying of a namespace being
+    # deleted stay open (issue 673).
+    - expression: >-
+        variables.reconciler || variables.defaultDenyName || !variables.gatewayNamespace ||
+        variables.gateway || variables.specUnchanged || variables.ownedDelete || variables.terminating
+      reason: Forbidden
+      messageExpression: "'only the OpenShell gateway may write or delete NetworkPolicies in sandbox namespaces, not ' + request.userInfo.username"
     - expression: "!variables.reconciler || variables.ourGateway"
       reason: Forbidden
       message: {{ printf "the sandbox default-deny NetworkPolicy may be written only in OpenShell workspace namespaces of gateway %s" $gatewayID | quote }}
-    - expression: {{ printf "!variables.reconciler || object.metadata.name == %s" ($name | quote) | quote }}
+    - expression: "!variables.reconciler || variables.defaultDenyName"
       reason: Forbidden
       message: {{ printf "the sandbox default-deny NetworkPolicy must be named %s" $name | quote }}
-    - expression: "!variables.reconciler || variables.defaultDeny"
+    - expression: "!variables.reconciler || request.operation == 'DELETE' || variables.defaultDeny"
       reason: Forbidden
       message: "the sandbox default-deny NetworkPolicy must select every pod, list policyTypes Ingress and Egress, and allow no traffic"
 ---

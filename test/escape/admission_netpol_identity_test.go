@@ -33,6 +33,7 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		reconcilerUser = otherUser // system:serviceaccount:koinon:koinon-reconciler, release koinon in koinon
 		name           = "koinon-koinon-sandbox-default-deny"
 		openshellOwn   = "openshell-sandbox-workloads" // a namespace policy OpenShell 0.1.7 writes (isolation.rs)
+		owned          = "openshell-sandbox-control"   // a per-sandbox policy with an owner reference
 	)
 	var (
 		admin      *kubernetes.Clientset
@@ -117,6 +118,9 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 			Expect(create(ctx, "admin", n, allowAll(openshellOwn), metav1.CreateOptions{})).To(Succeed())
 		}
 		Expect(create(ctx, "admin", wsB, allowAll(openshellOwn), metav1.CreateOptions{})).To(Succeed())
+		ownedNP := allowAll(owned)
+		ownedNP.OwnerReferences = []metav1.OwnerReference{{APIVersion: "agents.x-k8s.io/v1alpha1", Kind: "Sandbox", Name: "kw-npid", UID: "00000000-0000-0000-0000-000000000673"}}
+		Expect(create(ctx, "admin", ws, ownedNP, metav1.CreateOptions{})).To(Succeed())
 
 		_, err = admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, policies[0], metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
@@ -136,7 +140,7 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 	}, NodeTimeout(3*time.Minute))
 
 	It("denies deleting the default-deny in a workspace namespace to every identity but the reconciler", func(ctx SpecContext) {
-		const msg = "only the Koinon reconciler may write or delete the sandbox default-deny NetworkPolicy"
+		const msg = "only the Koinon reconciler may delete the sandbox default-deny NetworkPolicy"
 		for _, user := range []string{"admin", gatewayUser, gatewayBUser} {
 			By(user)
 			denied(del(ctx, user, ws, name), msg)
@@ -164,7 +168,8 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		cur, err := admin.NetworkingV1().NetworkPolicies(ws).Get(ctx, openshellOwn, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		widened := cur.DeepCopy()
-		widened.Spec.PodSelector = metav1.LabelSelector{}
+		widened.Spec.PolicyTypes = append(widened.Spec.PolicyTypes, networkingv1.PolicyTypeIngress)
+		widened.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{}} // opens every pod's ingress
 		_, err = admin.NetworkingV1().NetworkPolicies(ws).Update(ctx, widened, dryUpdate)
 		denied(err, msg)
 		denied(del(ctx, "admin", ws, openshellOwn), msg)
@@ -179,6 +184,9 @@ var _ = Describe("Sandbox NetworkPolicy identity rule", Label("escape", "admissi
 		labelled.Labels = map[string]string{"koinon.dev/escape": "1"}
 		_, err = admin.NetworkingV1().NetworkPolicies(ws).Update(ctx, labelled, dryUpdate)
 		Expect(err).NotTo(HaveOccurred())
+
+		By("the garbage collector deleting an owned per-sandbox policy (control: with the default-deny in place it only removes allows)")
+		Expect(del(ctx, "admin", ws, owned)).To(Succeed())
 	})
 
 	It("lets a namespace that is being deleted be emptied (control)", func(ctx SpecContext) {
