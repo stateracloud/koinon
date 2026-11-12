@@ -7137,7 +7137,7 @@
             },
             {
               "name": "StreamState",
-              "description": "StreamState sends the latest revision at once and every later one when it is published. Each\nmessage is a full snapshot (state of the world), not a delta, so a copy that reconnects needs\nnothing but the next message.",
+              "description": "StreamState sends the latest revision at once and every later one when it is published. Each\nmessage is a full snapshot (state of the world), not a delta, so a copy that reconnects needs\nnothing but the next message.\nbuf:lint:ignore RPC_RESPONSE_STANDARD_NAME\nThe stream message is StateUpdate, the name ADR 0097 and the State types use for a revision.",
               "requestType": "koinon.gateway.v1alpha1.StreamStateRequest",
               "responseType": "koinon.gateway.v1alpha1.StateUpdate",
               "clientStreaming": false,

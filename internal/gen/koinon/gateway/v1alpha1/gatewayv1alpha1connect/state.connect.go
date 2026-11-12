@@ -58,6 +58,8 @@ type GatewayStateServiceClient interface {
 	// StreamState sends the latest revision at once and every later one when it is published. Each
 	// message is a full snapshot (state of the world), not a delta, so a copy that reconnects needs
 	// nothing but the next message.
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	// The stream message is StateUpdate, the name ADR 0097 and the State types use for a revision.
 	StreamState(context.Context, *v1alpha1.StreamStateRequest) (GatewayStateServiceStreamStateClientStream, error)
 	// AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model
 	// half and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An
@@ -99,6 +101,8 @@ type GatewayStateServiceHandler interface {
 	// StreamState sends the latest revision at once and every later one when it is published. Each
 	// message is a full snapshot (state of the world), not a delta, so a copy that reconnects needs
 	// nothing but the next message.
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	// The stream message is StateUpdate, the name ADR 0097 and the State types use for a revision.
 	StreamState(context.Context, *v1alpha1.StreamStateRequest, GatewayStateServiceStreamStateServerStream) error
 	// AckRevision tells koinon-api that the copy serves one half of a revision. A copy acks the model
 	// half and the MCP half apart, because the two paths are applied apart (MCPGateway.ApplyMCP). An
