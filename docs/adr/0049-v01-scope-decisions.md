@@ -357,7 +357,7 @@ from templates costs nothing until work arrives.
   to pass; the others start on demand. Keep-warm sandboxes count toward resources (old issue 314).
 - **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
-  and the home volume at activation without starting the pod is not built: tracked in #101. A per-org rate limit on
+  and the home volume at activation without starting the pod is not built: tracked in #101 (see the 2026-11-12 note below). A per-org rate limit on
   sandbox starts is tracked in #27.
 - **API and UI (#100).** `AgentService.SetAgentKeepWarm` sets or withdraws the request; admins and
   owners only, audited (`agent.keep_warm.set`), refused on an archived agent. `Agent.keep_warm` is the
@@ -366,3 +366,21 @@ from templates costs nothing until work arrives.
   read it; a new request reads "not granted" until the next pass. The agent page has a "Keep warm"
   control that says whether the cap granted it. The admin REST API (`/admin/v1`) has no keep-warm
   endpoint yet.
+
+## Amendment (2026-11-12): preparing a keep-warm agent at activation (#101)
+
+Decision (maintainer, 2026-11-11): prepare ahead only for keep-warm agents; other agents prepare on
+their first run.
+
+A keep-warm agent already gets its sandbox at activation (the 2026-11-01 amendment): the reconciler
+creates it and starts it, so the image is pulled to the node and the home volume exists before the
+first run. For that agent there is nothing left to prepare, and its first run already skips the pull
+and the volume creation. The storage cost of that prepared volume is the one keep-warm already
+carries: one home volume per granted keep-warm agent, so at most `reconciler.keepWarmPerOrg` volumes
+per org, which exist whether or not the pod runs. Agents that are not keep-warm gain no volume
+before their first run, so bulk-creating agents from templates stays free.
+
+Building "prepare without starting the pod" needs a backend call that creates a sandbox stopped or
+pulls an image alone; OpenShell offers neither (`CreateSandbox` starts the sandbox and the volume
+lives and dies with it, see `RetentionRetain`). This amendment is a draft pending the maintainer's
+answer on what #101 should build.
