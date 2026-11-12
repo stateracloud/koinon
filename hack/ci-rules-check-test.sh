@@ -204,6 +204,63 @@ case_ "T1: react-query retry in web/src passes" 0 'rule=T1 verdict=pass' \
 	'mkdir -p "$r/web/src/lib"; printf "export const q = { retry: 2, retry: (n) => n < 3 };\n" >"$r/web/src/lib/query.ts"'
 case_ "T1: download retries pass" 0 'rule=T1 verdict=pass' \
 	'printf "curl --retry 5 --retry-all-errors -fsSL x\napt-get -o Acquire::Retries=5 update\n" >"$r/hack/fetch.sh"'
+# T1, Vitest forms
+case_ "T1: Vitest per-test retry option fails" 1 'rule=T1 verdict=fail' \
+	'mkdir -p "$r/web/src"; printf "it(\"a\", { retry: 3 }, () => {})\n" >"$r/web/src/a.test.ts"'
+case_ "T1: vitest --retry=2 in package.json fails" 1 'rule=T1 verdict=fail' \
+	'printf "{\"scripts\":{\"test\":\"vitest run --retry=2\"}}\n" >"$r/web/package.json"'
+case_ "T1: pnpm vitest run --retry 2 in a workflow fails" 1 'rule=T1 verdict=fail' \
+	'printf "      - run: pnpm vitest run --retry 2\n" >>"$r/.github/workflows/ci.yml"'
+case_ "T1: retry false in a Vitest config passes" 0 'rule=T1 verdict=pass' \
+	'printf "export default { test: { retry: false } }\n" >"$r/web/vitest.config.ts"'
+case_ "T1: retry 0 in a Vitest config passes" 0 'rule=T1 verdict=pass' \
+	'printf "export default { test: { retry: 0 } }\n" >"$r/web/vitest.config.ts"'
+case_ "T1: retry false in a test helper passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/web/src"; printf "const c = { retry: false }\n" >"$r/web/src/test-utils.tsx"'
+case_ "T1: retry false in a test file passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/web/src"; printf "const c = { retry: false }\n" >"$r/web/src/a.test.tsx"'
+# T1, Go and comments
+case_ "T1: FlakeAttempts set through a pointer in Go code fails" 1 'rule=T1 verdict=fail' \
+	'mkdir -p "$r/internal/x"; printf "func f() {\n\t*cfg = types.SuiteConfig{FlakeAttempts: 2}\n}\n" >"$r/internal/x/x.go"'
+case_ "T1: FlakeAttempts(1) passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "var _ = It(\"x\", FlakeAttempts(1), func() {})\n" >"$r/internal/x/x_test.go"'
+case_ "T1: a Go string and a Go comment that name FlakeAttempts pass" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "var s = \"FlakeAttempts\"\n// FlakeAttempts(3) is banned\n" >"$r/internal/x/x.go"'
+case_ "T1: a shell comment that names --rerun-fails passes" 0 'rule=T1 verdict=pass' \
+	'printf "go test ./... # never use --rerun-fails\n" >"$r/hack/go-test.sh"'
+# T1, scope of the retries key
+case_ "T1: retries in an API client in web/src passes" 0 'rule=T1 verdict=pass' \
+	'mkdir -p "$r/web/src/lib"; printf "export const c = createClient({ retries: 3 })\n" >"$r/web/src/lib/api.ts"'
+case_ "T1: a quoted retries key fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { \"retries\": 2 }\n" >"$r/web/playwright.config.ts"'
+case_ "T1: a retries key with a space before the colon fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { retries : 2 }\n" >"$r/web/playwright.config.ts"'
+case_ "T1: playwright.config.cjs fails" 1 'rule=T1 verdict=fail' \
+	'printf "module.exports = { retries: 2 }\n" >"$r/web/playwright.config.cjs"'
+case_ "T1: playwright.config.cts fails" 1 'rule=T1 verdict=fail' \
+	'printf "export default { retries: 2 }\n" >"$r/web/playwright.config.cts"'
+# T1, command lines
+case_ "T1: --retries with a workflow expression fails" 1 'rule=T1 verdict=fail' \
+	'printf "      - run: pnpm exec playwright test --retries \${{ vars.N }}\n" >>"$r/.github/workflows/ci.yml"'
+case_ "T1: pip install --retries passes" 0 'rule=T1 verdict=pass' \
+	'printf "pip install --retries 5 x\noras pull --retries 3 y\n" >"$r/hack/fetch.sh"'
+case_ "T1: an extensionless script with a shell shebang fails" 1 'rule=T1 verdict=fail' \
+	'printf "#!/usr/bin/env bash\ngotestsum --rerun-fails=2 ./...\n" >"$r/hack/runtests"'
+case_ "T1: an extensionless file without a shebang is not read as a script" 0 'rule=T1 verdict=pass' \
+	'printf "gotestsum --rerun-fails=2 ./...\n" >"$r/hack/notes"'
+case_ "T1: Tiltfile fails" 1 'rule=T1 verdict=fail' \
+	'printf "local(\"go tool ginkgo --flake-attempts=2\")\n" >"$r/Tiltfile"'
+case_ "T1: Dockerfile fails" 1 'rule=T1 verdict=fail' \
+	'printf "RUN gotestsum --rerun-fails=2 ./...\n" >"$r/Dockerfile.test"'
+# Git mode: tracked and untracked files
+case_ "T1: git mode sees a tracked file" 1 'rule=T1 verdict=fail' \
+	'printf "gotestsum --rerun-fails=2 ./...\n" >"$r/hack/go-test.sh"; git -C "$r" init -q; git -C "$r" add -A'
+case_ "T1: git mode sees an untracked file" 1 'rule=T1 verdict=fail' \
+	'git -C "$r" init -q; git -C "$r" add -A; printf "gotestsum --rerun-fails=2 ./...\n" >"$r/hack/new.sh"'
+case_ "T2: git mode sees an expired waiver in an untracked file" 1 'rule=T2 verdict=fail' \
+	'git -C "$r" init -q; git -C "$r" add -A; mkdir -p "$r/internal/x"; printf "// flaky-waiver: #123 until 2000-01-01\n" >"$r/internal/x/x_test.go"'
+case_ "T1: git mode ignores a git-ignored file" 0 'rule=T1 verdict=pass' \
+	'git -C "$r" init -q; printf "build/\n" >"$r/.gitignore"; git -C "$r" add -A; mkdir -p "$r/build"; printf "gotestsum --rerun-fails=2\n" >"$r/build/x.sh"'
 case_ "T1: the word in docs is ignored" 0 'rule=T1 verdict=pass' \
 	'mkdir -p "$r/docs"; printf "no flake-attempts please\n" >"$r/docs/x.md"'
 

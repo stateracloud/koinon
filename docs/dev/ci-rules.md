@@ -158,14 +158,27 @@ Source: Koinon decision (no official text found). Scope: Koinon only. In force: 
 
 ### Tests (T)
 
-**T1. MUST NOT** retry a failed test automatically: no ginkgo flake attempts, no retry action, no Playwright
-`retries` above 0.
+**T1. MUST NOT** retry a failed test automatically: no ginkgo flake attempts above 1, no retry action, no gotestsum
+`--rerun-fails`, no Playwright `retries` above 0, no Vitest `retry` above 0.
 Why: a retry turns a real intermittent defect into a green run, and the retry rate becomes the only number.
-Check: `hack/ci-rules-check.sh` (rule T1). It fails with file and line on: Ginkgo `--flake-attempts` or `FlakeAttempts`;
-gotestsum `--rerun-fails`; a retry action in a workflow; `--retries N` above 0 in `package.json`, a workflow, a script or a
-Makefile; Playwright `retries` above 0 in any `playwright*.config.*` or any `web/` TypeScript or JavaScript file (so also
-`test.describe.configure`); a Vitest `retry` above 0 in a `vite*` or `vitest*` config. It does not fire on download retries
-(`curl --retry`, apt `Acquire::Retries`) or on react-query `retry` settings in `web/src`.
+Check: `hack/ci-rules-check.sh` (rule T1). It reads tracked and untracked, not git-ignored, files and fails with file and
+line on:
+- Ginkgo: `--flake-attempts` above 1 (or an expression), `FlakeAttempts(N)` or `FlakeAttempts: N` with N above 1 in Go
+  (Ginkgo counts attempts, so 1 is a single run; a Go string or comment that only names it is ignored).
+- gotestsum `--rerun-fails`, and a retry action (`nick-fields/retry` and its kin) in a workflow.
+- A command line (`package.json`, workflow, script, Makefile) with `--retries N` above 0 or a `${{` expression on a line
+  that names `playwright`, or `--retry N` on a line that names `vitest`. `curl --retry`, `pip --retries`, `oras --retries`
+  and apt `Acquire::Retries` are downloads, not tests, and pass.
+- Playwright `retries` above 0 in any `playwright*.config.*` and in test files (`*.spec.*`, `*.test.*`, anything under
+  `e2e/`), so also `test.describe.configure`. The key may be quoted or have a space before the colon. A `retries` in
+  other code (an API client) passes.
+- Vitest `retry` above 0 in a `vite*`/`vitest*` config (`false` and `0` pass), and `retry: N` with a digit above 0 in a
+  test file (`it("a", { retry: 3 })`). A react-query `retry` in application code passes.
+Files read: `.go`, `.sh`, `.yml`, `.yaml`, `.mk`, `Makefile`, `Tiltfile`, `Dockerfile*`, `package.json`, TypeScript and
+JavaScript (`.ts .tsx .mts .cts .js .mjs .cjs`), and extensionless files whose first line is a shell shebang.
+Known limits of a text scan (review them, the check does not see them): a shorthand `{ retries }`; a value on the line
+after the key; a Playwright or Vitest command whose `playwright` or `vitest` word is on another line of a multi-line
+`run:`; a retry written as a shell loop around a test command; a retry set in a language or file type not listed.
 Source: [Kubernetes, flaky tests](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/flaky-tests.md)
 (test jobs must not retry automatically); [DORA, test automation](https://dora.dev/capabilities/test-automation/)
 (do not tolerate flaky tests). Maintainer decision 2026-11-11. Scope: general pattern. In force: now.
