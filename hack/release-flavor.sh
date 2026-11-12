@@ -32,9 +32,16 @@ tags=(--tag "$repo:$version")
 secret=()
 [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
 
+# The commit time pins every timestamp (#176): SOURCE_DATE_EPOCH is the build arg BuildKit reads for
+# the image's creation time and rewrite-timestamp clamps the layer files' mtimes to it, so one commit
+# gives the same layers (hack/flavor-repro-check.sh checks it). The attestations still vary.
+epoch=$(git show -s --format=%ct "$commit")
+[[ $epoch =~ ^[0-9]+$ ]] || { echo "no commit time for '$commit'" >&2; exit 1; }
+
 meta=$(mktemp "${TMPDIR:-/tmp}/release-flavor.XXXXXX")
 trap 'rm -f "$meta"' EXIT
-docker buildx build --push --platform linux/amd64,linux/arm64 \
+docker buildx build --output type=registry,rewrite-timestamp=true --platform linux/amd64,linux/arm64 \
+	--build-arg "SOURCE_DATE_EPOCH=$epoch" \
 	--build-context common=flavors/common "${secret[@]}" "${tags[@]}" \
 	--label org.opencontainers.image.source=https://github.com/stateracloud/koinon \
 	--label org.opencontainers.image.version="$version" \

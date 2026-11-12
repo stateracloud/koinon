@@ -226,6 +226,24 @@ builds only the runner's own platform, so the release's QEMU build of the other 
 first one: dry-run it on an x86 host (where arm64 is emulated, as in the release) before an rc that
 changes `flavors/`.
 
+### Reproducible flavor layers
+
+One commit builds the same flavor image layers (#176), as `ko` already does for the Go images.
+`hack/release-flavor.sh` and the `flavor-publish` job set the build arg `SOURCE_DATE_EPOCH` to the
+commit time (`git show -s --format=%ct`) and push with BuildKit's `rewrite-timestamp=true` exporter
+option, which clamps every file time in the layers to that epoch. The base image and every download
+are pinned by digest and the apt packages by the Ubuntu snapshot date, so those inputs do not move.
+
+`hack/flavor-repro-check.sh [flavor [platform [commit]]]` is the check: it builds the flavor twice on
+a fresh builder with no cache, for one platform, and fails when the two image digests differ (it keeps
+both OCI layouts and prints their paths). The `flavors` job in `ci.yml` runs it for the runner's
+platform in the merge queue and on main. Run it by hand after a change to `flavors/`; it needs Docker
+with buildx and the network, and takes as long as two uncached builds.
+
+What it does not cover: the BuildKit SBOM and provenance attestations of a release carry build data,
+so the release's index digest (the one the `sign` job signs) differs between two runs while the image
+manifests under it stay equal. Apt content beyond the snapshot pin is out of scope.
+
 ## Not released yet
 
 - Signatures and attestations (the `sign` job), until `RELEASE_SIGNING` is switched on (when the repository goes
