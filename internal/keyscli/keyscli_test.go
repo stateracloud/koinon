@@ -444,6 +444,43 @@ var _ = Describe("koinon-api keys", func() {
 		openAll(ctx, ring2, ids)
 	})
 
+	It("imports an export over a KEK Secret that already holds other keys, and refuses what it cannot open", func(ctx SpecContext) {
+		ids := seed(ctx, 1)
+		Expect(tool.Export(ctx)).To(Succeed())
+		backup := out.String()
+		orig, _ := ks.Load(ctx)
+
+		// A restored install: koinon-api made its own first KEK on the empty database.
+		target := fake.NewClientset()
+		store := keyscli.KubeStore{Client: target, Namespace: "restored", Name: "koinon-kek"}
+		_, err := store.Ensure(ctx, now, nil)
+		Expect(err).NotTo(HaveOccurred())
+		first, err := store.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first.Keys).NotTo(Equal(orig.Keys))
+
+		imp := &keyscli.Tool{Store: store, Out: &bytes.Buffer{}, In: strings.NewReader(backup)}
+		Expect(imp.Import(ctx)).To(Succeed())
+		got, err := store.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Keys).To(Equal(orig.Keys))
+		Expect(got.Active).To(Equal(orig.Active))
+		ring, err := secretstore.NewKeyring(got.Keys, got.Active)
+		Expect(err).NotTo(HaveOccurred())
+		openAll(ctx, ring, ids)
+
+		// With no Secret yet, import creates it.
+		empty := keyscli.KubeStore{Client: fake.NewClientset(), Namespace: "n", Name: "koinon-kek"}
+		Expect((&keyscli.Tool{Store: empty, Out: &bytes.Buffer{}, In: strings.NewReader(backup)}).Import(ctx)).To(Succeed())
+
+		// Input that is not a key set changes nothing.
+		bad := &keyscli.Tool{Store: store, Out: &bytes.Buffer{}, In: strings.NewReader("kind: Secret\ndata:\n  active: bm9wZQ==\n")}
+		Expect(bad.Import(ctx)).NotTo(Succeed())
+		again, err := store.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again.Keys).To(Equal(orig.Keys))
+	})
+
 	Describe("with KEKs wrapped by an opted-in KMS", func() {
 		var (
 			kms            *secretstoretest.FakeKMS

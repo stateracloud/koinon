@@ -65,6 +65,8 @@ not yet trusted.
    started held and when it was released (ADR 0100).
 6. **Runbook.** The backup and restore guide starts the restored install held, runs the checks (`keys verify`,
    `org-limits`, `checkpoints resync`), then releases. `test/e2e/backup-restore.sh` runs that order.
+   The KEK Secret is guarded (ADR 0056 amendment, issue #604), so its restore is `koinon-api keys import` through
+   `kubectl exec` when the Secret exists, not `kubectl apply`.
 
 ## Amendment 2026-11-11: a held gateway is ready but deny-all (issue #530)
 

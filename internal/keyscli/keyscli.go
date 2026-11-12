@@ -11,7 +11,8 @@
 //	retire      remove a KEK, only when no value uses it
 //	reencrypt   seal every value again under a new data key: the compromise path
 //	forget      give up on a lost KEK: mark what it sealed lost, start new home repositories
-//	export      print the key set as a Secret manifest: the KEK backup and its restore
+//	export      print the key set as a Secret manifest: the KEK backup
+//	import      read that manifest and put it in the KEK Secret: the restore, as koinon-api's own identity
 package keyscli
 
 import (
@@ -121,9 +122,11 @@ type Store interface {
 
 // Tool runs the commands.
 type Tool struct {
-	Pool         *pgxpool.Pool
-	Store        Store
-	Out          io.Writer
+	Pool  *pgxpool.Pool
+	Store Store
+	Out   io.Writer
+	// In is what Import reads (the manifest Export wrote).
+	In           io.Reader
 	ActivePeriod time.Duration
 	Now          func() time.Time
 	// Prompt asks the person for what is missing and confirms what is hard to undo. Nil means do
@@ -523,7 +526,7 @@ func storedName(ks KeySet, id string) string {
 const ExportName = "koinon-kek"
 
 // Export writes the key set as a Kubernetes Secret manifest: the backup of the KEKs, and what a
-// restore applies (kubectl apply -n <namespace> -f). It writes each KEK as the Secret holds it, so
+// restore applies (koinon-api keys import). It writes each KEK as the Secret holds it, so
 // a KMS-wrapped KEK stays wrapped and a local KEK is the key itself: keep the file with your other
 // secrets, apart from the database backups. The manifest has no namespace, so it restores into a
 // fresh one (ADR 0085 decision 15), and a comment line per KEK gives its fingerprint.
@@ -568,13 +571,65 @@ func (t *Tool) Export(ctx context.Context) error {
 		return err
 	}
 	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "# Koinon KEK export, %s. Restore: kubectl apply -n <namespace> -f <this file>\n", t.now().UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(&b, "# Koinon KEK export, %s. Restore: kubectl exec -i deploy/koinon-api -- koinon-api keys import < <this file>\n", t.now().UTC().Format(time.RFC3339))
 	for _, id := range slices.Sorted(maps.Keys(ks.Keys)) {
 		_, _ = fmt.Fprintf(&b, "# %s fingerprint %s, wrapped by %s\n", id, secretstore.Fingerprint(ks.Keys[id]), storedName(ks, id))
 	}
 	_, _ = b.Write(out)
 	_, err = io.WriteString(t.Out, b.String())
 	return err
+}
+
+// Importer is a Store that can replace its whole key set with the content of an exported manifest.
+type Importer interface {
+	Import(ctx context.Context, data map[string][]byte, annotations map[string]string) error
+}
+
+// Import reads the manifest that Export wrote and makes it the KEK Secret, creating the Secret or
+// replacing the one there. This is the restore of the KEKs (ADR 0056 amendment, issue #604): the KEK
+// Secret is guarded against any other writer, and kubectl apply by an operator is one, so the restore
+// runs here, through kubectl exec, as koinon-api's service account. Every KEK in the manifest must
+// unwrap before anything is written, so a manifest this install cannot open changes nothing.
+func (t *Tool) Import(ctx context.Context) error {
+	imp, ok := t.Store.(Importer)
+	if !ok {
+		return errors.New("keys import needs --kek-secret: the key set is a mounted directory here and cannot be changed")
+	}
+	if t.In == nil {
+		return errors.New("keys import reads the manifest from standard input")
+	}
+	raw, err := io.ReadAll(io.LimitReader(t.In, 1<<20))
+	if err != nil {
+		return err
+	}
+	var sec corev1.Secret
+	if err := yaml.Unmarshal(raw, &sec); err != nil {
+		return fmt.Errorf("the input is not a Secret manifest: %w", err)
+	}
+	if sec.Kind != "" && sec.Kind != "Secret" {
+		return fmt.Errorf("the input is a %s, not a Secret", sec.Kind)
+	}
+	data := map[string][]byte{}
+	for k, v := range sec.Data {
+		data[k] = v
+	}
+	for k, v := range sec.StringData {
+		data[k] = []byte(v)
+	}
+	ks, err := openKeySet(ctx, t.Wrappers, data)
+	defer clearKeySet(ks)
+	if err != nil {
+		return fmt.Errorf("the manifest does not open with this install's key wrapping: %w", err)
+	}
+	var ann map[string]string
+	if v := sec.Annotations[ActivatedAnnotation]; v != "" {
+		ann = map[string]string{ActivatedAnnotation: v}
+	}
+	if err := imp.Import(ctx, data, ann); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(t.Out, "Restored the KEK Secret with %d KEK(s); the active one is %s. Check it: koinon-api keys verify\n", len(ks.Keys), ks.Active)
+	return nil
 }
 
 // Add generates a KEK, stores it in the key set (inactive) and prints its ID.

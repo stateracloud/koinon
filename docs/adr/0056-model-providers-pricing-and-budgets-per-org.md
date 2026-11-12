@@ -751,8 +751,17 @@ Maintainer decision (procoduck, 2026-11-11).
   second policy to Secrets that carry its own `managed-by` label (RBAC cannot name per-agent
   Secrets). A spec races two `EnsureWith` callers on Create. Skipping creation under
   `KOINON_RESTORE_HOLD` was considered and left out: `EnsureWith` already refuses to create a key
-  when the database holds encrypted values, which is the case a restore produces, and a held install
-  with an empty database may still create its first key.
+  when the database holds encrypted values, and a skip would not help the usual restore, where the
+  new install made its first KEK before the hold.
+- Restoring the KEKs (ADR 0107): the guard also refuses `kubectl apply` of a backup over a Secret that
+  exists, which is the usual case (a new install made a first KEK on its empty database). The restore
+  therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
+  standard input and creates or replaces the Secret, as the koinon-api service account, which the
+  guard admits. It writes nothing unless every KEK in the manifest opens with the install's key
+  wrapping. The guide's `restore-keys` block uses `apply` when the Secret is gone and `kubectl exec`
+  of `keys import` (one api pod, held) when it exists. A KMS-wrapped KEK that the first install bound
+  to another install ID may keep that pod from starting; then set `secrets.kek.guard.enabled=false`,
+  delete the Secret, apply the backup and turn the guard on again.
 
 ## Open questions
 

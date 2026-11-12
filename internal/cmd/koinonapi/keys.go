@@ -30,6 +30,8 @@ type keysOptions struct {
 	yes                                                 bool
 	// recordStarted writes the .started audit event of rewrap and reencrypt.
 	recordStarted bool
+	// in is what import reads.
+	in io.Reader
 	// all and agents choose the agents of new-repositories.
 	all    bool
 	agents []string
@@ -85,6 +87,7 @@ func newKeysCommand() *cobra.Command {
 				return nil
 			},
 			RunE: func(cmd *cobra.Command, args []string) error {
+				o.in = cmd.InOrStdin()
 				return runKeys(cmd.Context(), o, name, args, cmd.OutOrStdout(), prompterFor(cmd))
 			},
 		}
@@ -116,7 +119,8 @@ func newKeysCommand() *cobra.Command {
 		confirmed(sub("forget [ID]", "Give up on a lost KEK: mark every value it sealed as lost and start new home repositories (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		newRepos,
 		sub("verify", "Open every sealed value with the key set and report what does not open; read-only (the check after a restore)", cobra.NoArgs, true),
-		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore with kubectl apply)", cobra.NoArgs, false),
+		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore it with import)", cobra.NoArgs, false),
+		sub("import", "Read a KEK backup (the output of export) from standard input and make it the KEK Secret; the restore, run through kubectl exec as koinon-api's identity", cobra.NoArgs, false),
 	)
 	return keys
 }
@@ -161,11 +165,11 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return errors.New("set --kek-secret or --kek-dir")
 	}
 
-	tool := &keyscli.Tool{Store: store, Out: out, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
+	tool := &keyscli.Tool{Store: store, Out: out, In: o.in, ActivePeriod: o.period, Prompt: prompt, Yes: o.yes, RecordStarted: o.recordStarted, SecretName: o.kekSecret, Wrappers: wrappers, ProbeTimeout: o.probeTimeout}
 	// activate uses the database to record the activation and to show, in its picker, the values each KEK wraps.
 	// With the database, every command that changes the key set also records it in the install audit chain
 	// (actor cli, "keys <command>").
-	if pool != nil && cmd != "export" {
+	if pool != nil && cmd != "export" && cmd != "import" {
 		tool.Pool = pool
 	}
 	if pool != nil {
@@ -193,6 +197,8 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		return tool.Verify(ctx)
 	case "export":
 		return tool.Export(ctx)
+	case "import":
+		return tool.Import(ctx)
 	}
 	return fmt.Errorf("unknown keys command %q", cmd)
 }
