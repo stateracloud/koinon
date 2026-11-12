@@ -245,7 +245,10 @@ if (( need_gitea )); then
   # ca.crt key in the gateway namespace (supervisor.network.additionalCaConfigMapName, chart README
   # "Additional destination CAs"). The gateway reads it at startup and the chart does not checksum the
   # ConfigMap, so the name carries a digest of the CA: every run makes a new CA, a new name changes the helm
-  # value, and the upgrade (--wait) rolls the gateway. The supervisor image stays the stock one.
+  # value, and the upgrade (--wait) rolls the gateway. The same upgrade resets supervisor.image.* to the
+  # chart's 0.1.7 defaults (values.yaml: registry "" = global registry, repository openshell/supervisor,
+  # tag "" = appVersion, pullPolicy null = global): --reuse-values would otherwise keep the derived
+  # kind.local/koinon/escape-supervisor image that an older kind.sh set on a dev cluster.
   # The chart ref is the one test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")
@@ -257,6 +260,10 @@ if (( need_gitea )); then
   helm --kube-context "$CTX" upgrade openshell "oci://ghcr.io/nvidia/openshell/helm-chart@${os_digest}" \
     --version "$os_version" --namespace openshell --reuse-values \
     --set supervisor.network.additionalCaConfigMapName="$ca_cm" \
+    --set supervisor.image.registry="" \
+    --set supervisor.image.repository=openshell/supervisor \
+    --set supervisor.image.tag="" \
+    --set supervisor.image.pullPolicy=null \
     --wait --timeout 5m
   # Older CA ConfigMaps from earlier runs are no longer referenced.
   "${K[@]}" -n openshell get configmap -o name | grep '^configmap/escape-destination-ca-' |
