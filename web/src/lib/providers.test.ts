@@ -4,9 +4,9 @@ import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ProviderSchema } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ProviderSchema, ServingState } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { createdByLabel, formatLabelOf, providerTypeLabel, savedRecently, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { anySaved, createdByLabel, formatLabelOf, providerTypeLabel, savedRecently, servingBadge, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
@@ -55,5 +55,18 @@ describe('savedRecently', () => {
     expect(savedRecently(timestampFromMs(now - 60_000), now)).toBe(true)
     expect(savedRecently(timestampFromMs(now - 181_000), now)).toBe(false)
     expect(savedRecently(undefined, now)).toBe(false)
+  })
+})
+
+describe('servingBadge', () => {
+  it('words each serving state and the reason of a failure', () => {
+    expect(servingBadge({ servingState: ServingState.SERVING, servingReason: '' })?.label).toBe('Serving')
+    expect(servingBadge({ servingState: ServingState.SAVED, servingReason: '' })?.variant).toBe('outline')
+    expect(servingBadge({ servingState: ServingState.FAILED, servingReason: 'gateway rejected config' })).toEqual({ label: 'Not served: gateway rejected config', variant: 'destructive' })
+    expect(servingBadge({ servingState: ServingState.UNSPECIFIED, servingReason: '' })).toBeUndefined()
+  })
+  it('polls only while a provider waits for the gateway', () => {
+    expect(anySaved([{ servingState: ServingState.SERVING }, { servingState: ServingState.SAVED }])).toBe(true)
+    expect(anySaved([{ servingState: ServingState.SERVING }, { servingState: ServingState.FAILED }])).toBe(false)
   })
 })

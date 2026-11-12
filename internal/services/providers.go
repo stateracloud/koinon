@@ -30,8 +30,21 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 		ManagedBySecret: p.ManagedBySecret, DisabledReason: p.DisabledReason, Removed: p.Removed,
 		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats), CredentialLostAt: optTime(p.CredentialLostAt), AdminDisabled: adminDisabledProto(p.AdminDisabled),
 		HasCostKey: p.HasCostKey, CostScope: p.CostScope, CostKeyLostAt: optTime(p.CostKeyLostAt),
+		ServingState: servingStateProto(p.Serving.State), ServingReason: p.Serving.Reason, ServingDetail: p.Serving.Detail,
 		CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
 	}
+}
+
+func servingStateProto(state string) providerv1alpha1.ServingState {
+	switch state {
+	case catalog.ServingSaved:
+		return providerv1alpha1.ServingState_SERVING_STATE_SAVED
+	case catalog.ServingServing:
+		return providerv1alpha1.ServingState_SERVING_STATE_SERVING
+	case catalog.ServingFailed:
+		return providerv1alpha1.ServingState_SERVING_STATE_FAILED
+	}
+	return providerv1alpha1.ServingState_SERVING_STATE_UNSPECIFIED
 }
 
 func modelProto(m catalog.Model) *providerv1alpha1.Model {

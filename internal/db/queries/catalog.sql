@@ -222,3 +222,39 @@ RETURNING *;
 SELECT * FROM provider_echo_checks
 WHERE org_id = @org_id
 ORDER BY provider_id;
+
+-- name: SetGatewayProviderFailures :exec
+-- koinon-reconciler, after an apply that failed or was rejected: every enabled provider of the org
+-- that has an enabled model the gateway does not serve gets the reason. Providers that are fully
+-- served keep serving with the previous config and get none.
+INSERT INTO gateway_provider_failures (org_id, provider_id, reason, detail)
+SELECT p.org_id, p.id, @reason::text, @detail::text
+FROM providers p
+WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.admin_disabled_at IS NULL AND p.removed_at IS NULL
+  AND EXISTS (
+    SELECT 1 FROM models m
+    LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+    WHERE m.org_id = p.org_id AND m.provider_id = p.id AND m.disabled_reason IS NULL AND s.model_id IS NULL)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET reason = EXCLUDED.reason, detail = EXCLUDED.detail, updated_at = now()
+WHERE gateway_provider_failures.reason IS DISTINCT FROM EXCLUDED.reason
+   OR gateway_provider_failures.detail IS DISTINCT FROM EXCLUDED.detail;
+
+-- name: ClearGatewayProviderFailures :exec
+-- koinon-reconciler, after an apply that took effect: the org's failures are over.
+DELETE FROM gateway_provider_failures WHERE org_id = @org_id;
+
+-- name: ListProviderServing :many
+-- The serving facts of the org's providers: enabled models, how many the gateway serves, and the
+-- recorded failure, if any.
+SELECT p.id AS provider_id,
+       count(m.id) FILTER (WHERE m.disabled_reason IS NULL)::int AS models,
+       count(s.model_id) FILTER (WHERE m.disabled_reason IS NULL)::int AS served,
+       coalesce(f.reason, '')::text AS failure_reason,
+       coalesce(f.detail, '')::text AS failure_detail
+FROM providers p
+LEFT JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
+LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+LEFT JOIN gateway_provider_failures f ON f.org_id = p.org_id AND f.provider_id = p.id
+WHERE p.org_id = @org_id
+GROUP BY p.id, f.reason, f.detail;

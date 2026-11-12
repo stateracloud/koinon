@@ -15,11 +15,11 @@ import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ProviderService, ServingState, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
-import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
+import { anySaved, availabilityMinutes, savedNotice, savedRecently, servingBadge, servingPollMs, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -37,7 +37,8 @@ type Editing = { kind: 'new-provider' } | { kind: 'provider'; id: string } | { k
 function ProvidersContent() {
   const { org } = useOrg()
   const orgId = org.orgId
-  const providers = useQuery(ProviderService.method.listProviders, { orgId })
+  // While a provider waits for the gateway, re-read its serving status (issue #17).
+  const providers = useQuery(ProviderService.method.listProviders, { orgId }, { refetchInterval: (q) => (anySaved(q.state.data?.providers ?? []) ? servingPollMs : false) })
   const models = useQuery(ProviderService.method.listModels, { orgId })
   const actions = useProviderActions(orgId)
   const [editing, setEditing] = useState<Editing>()
@@ -165,10 +166,8 @@ function ProviderCard({
           <Badge variant="destructive">Disabled</Badge>
         ) : p.credentialLostAt ? (
           <Badge variant="destructive">Key lost</Badge>
-        ) : p.source === 'ui' && savedRecently(p.updatedAt, now) ? (
-          <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
         ) : (
-          <Badge variant="secondary">Active</Badge>
+          <ServingBadge provider={p} />
         )}
         <span className="text-muted-foreground ml-auto text-sm">{p.source === 'secret' ? `Managed by Secret ${p.managedBySecret}` : 'Added in the UI'}</span>
       </div>
@@ -353,6 +352,17 @@ function ModelRow({
         </div>
       )}
     </>
+  )
+}
+
+/** ServingBadge shows whether the gateway serves the provider, and the reason when it does not. */
+function ServingBadge({ provider }: { provider: Provider }) {
+  const b = servingBadge(provider)
+  if (!b) return <Badge variant="secondary">Active</Badge>
+  return (
+    <Badge variant={b.variant} title={provider.servingDetail || undefined} data-serving={ServingState[provider.servingState]}>
+      {b.label}
+    </Badge>
   )
 }
 

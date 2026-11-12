@@ -79,10 +79,13 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await expect(cap).toContainText('Spent this month')
 
   // A UI-added provider is not served at once: the reconciler picks the row up on its 30 s resync, then
-  // the key reaches agentgateway through the kubelet's Secret sync. That took about 170 s on kind. A run
-  // that starts first fails with "provider authentication required". Nothing in the UI shows when the
-  // gateway has it yet, so wait it out before the agent's first run.
-  await page.waitForTimeout(240_000)
+  // the key reaches agentgateway through the kubelet's Secret sync (about 170 s on kind). The Providers
+  // page shows the provider's serving status (issue #17); wait for it to say Serving, and fail early with
+  // the reason if it says the gateway does not serve the provider.
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Providers' }).click()
+  const servedProvider = page.getByRole('region', { name: 'fake' })
+  await expect(servedProvider.locator('[data-serving="SERVING_STATE_FAILED"]')).toHaveCount(0)
+  await expect(servedProvider.locator('[data-serving="SERVING_STATE_SERVING"]')).toBeVisible({ timeout: 360_000 })
 
   // 3. GitHub connection to the fake GitHub App.
   const app = (await (await request.get(`${fakeGitHub}/_fake/app`)).json()) as {

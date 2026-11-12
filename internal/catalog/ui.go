@@ -65,6 +65,9 @@ func (s *Service) ListProviders(ctx context.Context, org pgtype.UUID) ([]Provide
 	for _, r := range rows {
 		out = append(out, toProvider(r))
 	}
+	if err := s.withServing(ctx, org, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -78,7 +81,11 @@ func (s *Service) GetProvider(ctx context.Context, org pgtype.UUID, id string) (
 	if err != nil {
 		return Provider{}, mapErr(err)
 	}
-	return toProvider(row), nil
+	out := []Provider{toProvider(row)}
+	if err := s.withServing(ctx, org, out); err != nil {
+		return Provider{}, err
+	}
+	return out[0], nil
 }
 
 // CreateProvider adds a provider entered by a person.

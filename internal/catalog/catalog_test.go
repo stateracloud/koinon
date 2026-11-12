@@ -316,6 +316,8 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.CredentialLostAt).NotTo(BeNil())
 			Expect(got.HasKey).To(BeFalse())
+			Expect(got.Serving.State).To(Equal(catalog.ServingFailed))
+			Expect(got.Serving.Reason).To(Equal(catalog.ReasonNoKey))
 			served, err := q.ListServedCatalog(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(served).To(BeEmpty())

@@ -774,3 +774,27 @@ Langfuse model and price schema, tokenizer fallback and alerts were read from it
 - ADRs [0013](0013-model-access.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md),
   [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0058](0058-gateway-modes.md)
+
+## Amendment (2026-11-12, issue 17): a provider shows whether the gateway serves it
+
+The Providers page said "available to agents within about 3 minutes" for every new provider and the
+browser e2e slept 240 s. `Provider` now carries `serving_state` (`saved`, `serving`, `failed`), a
+`serving_reason` and a `serving_detail`.
+
+1. **Derived, not probed.** The API reads `gateway_served_models` and never calls the gateway. A
+   provider is `serving` when every enabled model has a row, `saved` when some do not and no failure
+   is recorded (the reconciler has not applied it, or its key file is still reaching the gateway pod),
+   and `failed` with a reason otherwise. A disabled, removed or admin-held provider has no state. The
+   per-model rows stay the source of truth; no per-provider revision is stored.
+2. **Failures need a record.** `gateway_provider_failures` (migration 00082) holds `(org_id,
+   provider_id, reason, detail)`. koinon-reconciler writes it when an Apply fails whole (`upstream
+   unreachable`: the gateway could not be reached or the reload did not finish; `gateway rejected
+   config`: the file or the org's model objects were refused, with the gateway's text as detail), for
+   enabled providers that have an unserved model. An Apply that took effect clears the org's rows. A
+   provider that is fully served keeps `serving` through a later failed Apply, because the gateway keeps
+   the previous config. Pending states are not failures, so `saved` is never a reason.
+3. **`no key` is derived**: a provider whose key was lost (`credential_lost_at`, #85) is `failed`
+   with `no key`. Any other recorded reason maps to `unknown`.
+4. **The page polls** every 5 s while a provider is `saved`; the browser e2e waits for `serving`
+   instead of a fixed sleep. Nudging the reconciler on provider writes (the issue's optional item)
+   is not done: the 30 s resync stays.

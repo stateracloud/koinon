@@ -136,6 +136,8 @@ type Querier interface {
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
+	// koinon-reconciler, after an apply that took effect: the org's failures are over.
+	ClearGatewayProviderFailures(ctx context.Context, orgID pgtype.UUID) error
 	// Clears the org's default model when no model of that name is left (it was deleted); the old value
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
@@ -989,6 +991,9 @@ type Querier interface {
 	// A provider's reconciled days from @since, newest first.
 	ListProviderCostReconciliations(ctx context.Context, arg ListProviderCostReconciliationsParams) ([]ProviderCostReconciliation, error)
 	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
+	// The serving facts of the org's providers: enabled models, how many the gateway serves, and the
+	// recorded failure, if any.
+	ListProviderServing(ctx context.Context, orgID pgtype.UUID) ([]ListProviderServingRow, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The active recipients of these questions, with names, for the API.
 	ListQuestionRecipients(ctx context.Context, arg ListQuestionRecipientsParams) ([]ListQuestionRecipientsRow, error)
@@ -1365,6 +1370,10 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// koinon-reconciler, after an apply that failed or was rejected: every enabled provider of the org
+	// that has an enabled model the gateway does not serve gets the reason. Providers that are fully
+	// served keep serving with the previous config and get none.
+	SetGatewayProviderFailures(ctx context.Context, arg SetGatewayProviderFailuresParams) error
 	// Sets the marker unless it is set: the first setting stays (the row is never updated).
 	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	// The worker of epoch has read feed_read finished tool calls from the harness and recorded the first

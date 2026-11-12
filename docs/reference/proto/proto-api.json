@@ -10746,6 +10746,33 @@
               "oneof": "",
               "deprecated": false,
               "description": "admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is\nnot called, probed or offered to runs. Unset otherwise."
+            },
+            {
+              "name": "serving_state",
+              "number": 20,
+              "type": "koinon.provider.v1alpha1.ServingState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "serving says whether the gateway serves the provider (issue #17): saved, serving or failed.\nUnset (SERVING_STATE_UNSPECIFIED) for a provider that is disabled, removed or held off, which\nis not served by design."
+            },
+            {
+              "name": "serving_reason",
+              "number": 21,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "serving_reason is why the gateway does not serve a failed provider: \"no key\", \"gateway rejected\nconfig\", \"upstream unreachable\" or \"unknown\". Empty unless serving_state is FAILED."
+            },
+            {
+              "name": "serving_detail",
+              "number": 22,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "serving_detail is what the gateway or the reconciler said, for an admin. Empty when none. Never a key."
             }
           ]
         },
@@ -11105,6 +11132,39 @@
               "number": 3,
               "deprecated": false,
               "description": "In the reply but not in the line sent."
+            }
+          ]
+        },
+        {
+          "name": "ServingState",
+          "fullName": "koinon.provider.v1alpha1.ServingState",
+          "file": "koinon/provider/v1alpha1/provider.proto",
+          "description": "ServingState is whether agentgateway serves a provider's models. It is derived from the models the\nreconciler recorded as served and from the last gateway apply's failure; the API never calls the gateway.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "SERVING_STATE_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "SERVING_STATE_SAVED",
+              "number": 1,
+              "deprecated": false,
+              "description": "SERVING_STATE_SAVED: saved, not served yet. The reconciler has not applied it, or the provider's\nkey is still reaching the gateway pod (about 3 minutes). Not a failure."
+            },
+            {
+              "name": "SERVING_STATE_SERVING",
+              "number": 2,
+              "deprecated": false,
+              "description": "SERVING_STATE_SERVING: the gateway serves every enabled model of the provider."
+            },
+            {
+              "name": "SERVING_STATE_FAILED",
+              "number": 3,
+              "deprecated": false,
+              "description": "SERVING_STATE_FAILED: the gateway does not serve it and the reason is known."
             }
           ]
         }

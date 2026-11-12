@@ -2602,6 +2602,9 @@ Provider is an upstream model API of the org. It never holds the key.
 | cost_scope | 17 | `string` | singular |  | cost_scope is the part of the provider's account whose cost is this provider key's: the Anthropic workspace ID ("default" for the default workspace), or the OpenAI project ID or API key ID (key_..., the key's ID, never the key). |
 | cost_key_lost_at | 18 | `google.protobuf.Timestamp` | singular |  | cost_key_lost_at is set when the cost API key was lost with the key that encrypted it; it must be entered again. Unset otherwise. |
 | admin_disabled | 19 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
+| serving_state | 20 | `koinon.provider.v1alpha1.ServingState` | singular |  | serving says whether the gateway serves the provider (issue #17): saved, serving or failed. Unset (SERVING_STATE_UNSPECIFIED) for a provider that is disabled, removed or held off, which is not served by design. |
+| serving_reason | 21 | `string` | singular |  | serving_reason is why the gateway does not serve a failed provider: "no key", "gateway rejected config", "upstream unreachable" or "unknown". Empty unless serving_state is FAILED. |
+| serving_detail | 22 | `string` | singular |  | serving_detail is what the gateway or the reconciler said, for an admin. Empty when none. Never a key. |
 
 ### Message ProviderTypeInfoRequest
 
@@ -2686,6 +2689,18 @@ message stays for wire compatibility; the server never fills it and refuses requ
 | OP_EQUAL | 1 | In both. |
 | OP_DELETED | 2 | In the line sent but not in the reply: the provider removed or replaced it. |
 | OP_INSERTED | 3 | In the reply but not in the line sent. |
+
+### Enum ServingState
+
+ServingState is whether agentgateway serves a provider's models. It is derived from the models the
+reconciler recorded as served and from the last gateway apply's failure; the API never calls the gateway.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| SERVING_STATE_UNSPECIFIED | 0 |  |
+| SERVING_STATE_SAVED | 1 | SERVING_STATE_SAVED: saved, not served yet. The reconciler has not applied it, or the provider's key is still reaching the gateway pod (about 3 minutes). Not a failure. |
+| SERVING_STATE_SERVING | 2 | SERVING_STATE_SERVING: the gateway serves every enabled model of the provider. |
+| SERVING_STATE_FAILED | 3 | SERVING_STATE_FAILED: the gateway does not serve it and the reason is known. |
 
 ## koinon.question.v1alpha1
 

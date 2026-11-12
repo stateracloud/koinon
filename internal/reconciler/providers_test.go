@@ -370,6 +370,40 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).To(BeEmpty())
 		})
 
+		It("shows saved, serving and failed with a reason on the provider (issue 17)", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "openrouter", "sk-served", "status-model")
+			cleanup(ctx, org, p.ID)
+			status := func() catalog.Serving {
+				GinkgoHelper()
+				got, err := svc.GetProvider(ctx, org, p.ID)
+				Expect(err).NotTo(HaveOccurred())
+				return got.Serving
+			}
+			Expect(status().State).To(Equal(catalog.ServingSaved), "nothing is applied yet")
+
+			By("a gateway that cannot be reached fails it with that reason")
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingFailed, Reason: catalog.ReasonUnreachable, Detail: status().Detail}))
+
+			By("a refused config fails it with the gateway's reason")
+			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "bad budget"}
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingFailed, Reason: catalog.ReasonGatewayRejects, Detail: "bad budget"}))
+
+			By("an applied state serves it and clears the failure")
+			mg.fail = nil
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			Expect(status()).To(Equal(catalog.Serving{State: catalog.ServingServing}))
+
+			By("a later failure does not fail a provider that is fully served")
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(status().State).To(Equal(catalog.ServingServing))
+			mg.fail = nil
+		})
+
 		It("records a model without a price as not served", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			p := addProvider(ctx, org, user, "up", "", "priced")

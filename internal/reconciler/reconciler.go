@@ -728,6 +728,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 	}
 
+	if err := r.recordProviderStatus(ctx, orgRefs, res, applyErr, rejectedReason, outcome.Served); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
+
 	heldBack := 0
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	for _, w := range workOf(items, outcome.Held) {
