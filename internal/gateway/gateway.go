@@ -47,8 +47,8 @@ type ModelGateway interface {
 	// ModelState.SetLimit).
 	//
 	// Apply converges both halves of s (the model path and the MCP path), as the agentgateway
-	// drivers serve both from one config. A per-half model call, next to [MCPGateway.ApplyMCP],
-	// comes with the stream client slice of ADR 0097 step 2.
+	// drivers serve both from one config. The per-half model call, next to [MCPGateway.ApplyMCP],
+	// is [ModelPathGateway.ApplyModel].
 	//
 	// A driver whose gateway judges objects one by one (Kubernetes mode) may return the
 	// revision together with a *RejectedError: everything but the named objects is live.
@@ -70,6 +70,16 @@ type MCPGateway interface {
 	// key belongs to. It returns the same [Revision] type as [ModelGateway.Apply]; the revision
 	// covers the MCP path only.
 	ApplyMCP(ctx context.Context, c MCPConfig) (Revision, error)
+}
+
+// ModelPathGateway is the model counterpart of [MCPGateway]: a driver that serves the model path and
+// takes it apart from the MCP path. Koinon's own gateway (ADR 0097 step 2) is its first driver, and the
+// State stream client (package gateway/stateclient) applies and acknowledges each half through it.
+type ModelPathGateway interface {
+	// ApplyModel converges the gateway's model path to c and returns once the gateway serves it, or
+	// with an error when the gateway rejected it or ctx expired. ApplyModel is idempotent. The
+	// revision covers the model path only.
+	ApplyModel(ctx context.Context, c ModelConfig) (Revision, error)
 }
 
 // Rejection is one object the gateway refused, with the org it belongs to ("" for a platform
