@@ -14,6 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
+export KOINON_MAINTAINER_HOOKS=1
 
 # decide <hook> <json>: prints allow or deny.
 decide() {
@@ -152,5 +153,19 @@ big=$(jq -nc --arg c "$(printf 'cat a.go b.go\n%.0s' $(seq 6000))" '{tool_input:
 start=$SECONDS
 got=$(decide bash-read-check.sh "$big")
 if [ "$got" = allow ] && [ $((SECONDS - start)) -le 2 ]; then ok "a >64 KiB command allows fast"; else bad "a >64 KiB command: got $got in $((SECONDS - start))s"; fi
+
+# Off unless KOINON_MAINTAINER_HOOKS=1 (issue 843): no output and exit 0 for a call each would refuse.
+for v in unset '' 0 true; do
+  for pair in 'read-result-check.sh|{"tool_input":{"file_path":"/x/tool-results/y.txt"}}' \
+    'bash-read-check.sh|{"tool_input":{"command":"cat a.go b.go"}}'; do
+    h=${pair%%|*} j=${pair#*|} rc=0
+    if [ "$v" = unset ]; then
+      out=$(env -u KOINON_MAINTAINER_HOOKS "$here/$h" <<<"$j") || rc=$?
+    else
+      out=$(KOINON_MAINTAINER_HOOKS=$v "$here/$h" <<<"$j") || rc=$?
+    fi
+    if [ -z "$out" ] && [ "$rc" -eq 0 ]; then ok "$h off with KOINON_MAINTAINER_HOOKS=$v"; else bad "$h, KOINON_MAINTAINER_HOOKS=$v: rc=$rc output: $out"; fi
+  done
+done
 
 exit "$fail"

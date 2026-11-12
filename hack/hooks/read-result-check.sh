@@ -8,6 +8,10 @@
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
 # Needs only bash and jq.
 
+# Maintainer hook: does nothing unless KOINON_MAINTAINER_HOOKS=1 (docs/maintainers/hooks.md). POSIX
+# syntax, so it runs before the bash 5 check and a contributor without the variable sees nothing.
+[ "${KOINON_MAINTAINER_HOOKS:-}" = 1 ] || { cat >/dev/null; exit 0; }
+
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo '{"systemMessage":"Koinon hooks skipped: they need bash 5 or newer; on macOS: brew install bash"}'; exit 0; }
 
