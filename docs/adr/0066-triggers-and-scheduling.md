@@ -244,7 +244,10 @@ file on 2026-10-26):
   2026-10-27: filters are typed per type, no expression language. Still open: whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
-- Gitea's webhook signature scheme, and the polling interval per provider.
+- ~~Gitea's webhook signature scheme, and the polling interval per provider.~~ Answered by the
+  2026-11-12 (issue #25) amendment: Gitea signs a webhook with a hex HMAC-SHA256 of the body in
+  `X-Gitea-Signature` (and the same value as `X-Hub-Signature-256: sha256=...`); the poll interval
+  is Koinon's floor (1 minute) or the provider's stated interval, whichever is longer.
 - ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since old issue 146
   lists correlation under v0.2.~~ Answered by the 2026-10-27 (TR3) amendment: it ships in v0.1 for the
   inbox chat (old issue 146, procoduck, 2026-10-26); Slack and Teams stay in v0.2.
@@ -520,3 +523,50 @@ cannot be pulled was always `unknown`, because OpenShell replaces the pod's reas
 read the pod when OpenShell's reason says nothing and write the kubelet's reason and message into
 `agent_sandboxes.reason` and `message`; agentd and the classifier are unchanged. The observer is a
 workaround that [0078](0078-sandbox-observer.md) removes once OpenShell surfaces pod failures itself.
+
+## Amendment (2026-11-12, issue #25): one shared poller per connection and resource
+
+Polling is the ingress of decision 7 for a code host that cannot reach Koinon. As built
+(`internal/triggers/poll`, table `code_host_pollers`, migration `00083`):
+
+- **One poller per (org, connection, resource), shared by every trigger on it.** A resource is a
+  kind and a repository (`repo_events:acme/app`, `issue_comments:acme/app`). Each sync derives the
+  rows from the triggers in effect: a missing row is inserted, a row no trigger needs is deleted.
+  There is no reference count. Keying by connection is also the per-credential partition: two orgs
+  never share a token, a validator or a cursor. Ten triggers on one repository cost one request per
+  interval.
+- **Conditional requests.** GitHub's first page is sent with `If-None-Match` (or
+  `If-Modified-Since`) and always with the same query, so the validator stays valid. A `304` ends
+  the poll before the body is read and before any trigger work; GitHub does not count it against
+  the primary rate limit. Gitea's API lists carry no ETag and no Last-Modified, so the Gitea adapter
+  hashes the first page and compares it with the stored hash (`page_hash`): an identical page ends
+  the poll the same way. Issue comments are read with `since` (cursor time minus 5 minutes) so the
+  page stays small and the hash stable.
+- **The interval.** `next_poll_at = max(now + floor, now + provider interval, backoff_until)`,
+  computed and stored per row. The floor is 1 minute (`Config.Floor`, per provider in
+  `Config.Floors`); the provider interval is GitHub's `X-Poll-Interval`, kept until a response
+  states another. Koinon never polls faster than either. The leader never sleeps on a minimum across
+  rows: a row told 120 s does not hold back a row told 60 s.
+- **Failures and rate limits.** A rate limit (`403`/`429` with `Retry-After`, or
+  `X-RateLimit-Remaining: 0` with `X-RateLimit-Reset`) waits until the stated time, at least the
+  floor and at most an hour, and is not counted as a failure. Other errors back off from 1 minute,
+  doubling to an hour (from 4 minutes for `401`, `403`, `404` or an unsupported resource, which a
+  retry rarely fixes), plus up to 10% jitter. `koinon_code_host_polls_total{provider,outcome}` counts the outcomes
+  (`not_modified`, `changed`, `error`, `rate_limited`).
+- **One leader, at-least-once enqueue, once-only delivery.** Every `koinon-api` replica with
+  `api.durable.enabled` runs the loop; a Postgres advisory lock picks the leader, which claims due
+  rows with `FOR UPDATE SKIP LOCKED` and a lease. The first poll of a row records the baseline and
+  delivers nothing. A changed poll enqueues one DBOS workflow `koinon.code-host-poll-event` per new
+  item (workflow ID from the connection, the resource and the item's ID at the provider) and stores
+  the cursor only after every item was enqueued. The workflow delivers inside `durable.Once` with
+  the dedupe source `poll`, so a re-poll, a restart or a second leader deliver an item once. Adding
+  the workflow bumped `durable.WorkflowVersion` to 2 ([0085](0085-upgrade-compatibility-and-recovery-policy.md)).
+- **Not built yet.** The `code_host_event` trigger filter is still rejected by templates, so the API
+  runs the poller with no subscriptions and a delivery that only logs; creating or waking tasks from
+  a polled event comes with that trigger type. Pull-request resources are not polled, and a
+  connection carries no health condition for a failing poller.
+- **Prior art.** The shape (a shared poller per resource, the ETag, the provider's interval honoured)
+  is adapted from hydro-project/infinity (Apache-2.0); infinity sleeps on the smallest interval of
+  all keys, Koinon stores a due time per row. Revalidating every poll and keeping the validator per
+  credential follow Prow's ghcache (kubernetes-sigs/prow, Apache-2.0). No code was copied, and none
+  from Daytona (AGPL).
