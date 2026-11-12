@@ -392,6 +392,11 @@ var _ = Describe("home repository seeds", func() {
 	})
 
 	It("records the seed of an agent that has no checkpoint, with nothing to copy", func(ctx SpecContext) {
+		// A ready sandbox whose agent never had a checkpoint is due its hourly one on the first tick,
+		// and that backup goes into epoch 1 as soon as the seed is recorded: it would race the
+		// assertion below. A seed needs no sandbox, so this agent has none running (#576).
+		_, err := db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
 		newRepositories(ctx)
 		e.pool("agentd-a", cps())
 
