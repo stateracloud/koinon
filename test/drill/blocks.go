@@ -24,6 +24,22 @@ func GuideEnv(ns, release string) ([]string, error) {
 	return []string{"NS=" + ns, "REL=" + release}, nil
 }
 
+// GuideSourceEnv is GuideEnv for a block that also reads a live source install (pipe-db, pipe-keys): it adds
+// SRC_NS and SRC_REL. The source's namespace needs the drill prefix too, so a block cannot read a real install.
+func GuideSourceEnv(ns, release, srcNS, srcRelease string) ([]string, error) {
+	env, err := GuideEnv(ns, release)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckNamespace(srcNS); err != nil {
+		return nil, err
+	}
+	if !strings.Contains(srcRelease, "koinon") {
+		return nil, fmt.Errorf("source release %q must contain \"koinon\"", srcRelease)
+	}
+	return append(env, "SRC_NS="+srcNS, "SRC_REL="+srcRelease), nil
+}
+
 var hardcodedRE = []*regexp.Regexp{
 	regexp.MustCompile(`(^|\s)-n koinon(\s|$)`),
 	regexp.MustCompile(`\b(deploy|deployment)/koinon-(api|reconciler|agentd|gateway|pg|kek)\b`),

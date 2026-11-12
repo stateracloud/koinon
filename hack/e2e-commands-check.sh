@@ -8,7 +8,8 @@
 #   0. The offline tests of hack/docs-e1.sh (the reader of the command files) pass.
 #   1. Every block of every command file is valid shell (bash -n).
 #   2. test/e2e/run.sh runs every block of quickstart.e1, and only blocks that exist.
-#   3. test/e2e/backup-restore.sh runs exactly the blocks of backup-restore.e1.
+#   3. test/e2e/backup-restore.sh runs only blocks of backup-restore.e1, and every block it does not run
+#      (the pipe blocks: they need a source and a target install) is run by test/drill/drill_test.go.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -71,9 +72,11 @@ for n in $gused; do
   grep -qx "$n" <<<"$gnames" || fail "test/e2e/backup-restore.sh runs e1 block '$n', which $backupcmds does not have"
 done
 for n in $gnames; do
-  grep -qx "$n" <<<"$gused" || fail "test/e2e/backup-restore.sh does not run e1 block '$n' of $backupcmds"
+  grep -qx "$n" <<<"$gused" && continue
+  # Not run in place: the restore drill (ADR 0109) must run it, by name.
+  grep -q "\"$n\"" test/drill/drill_test.go || fail "neither test/e2e/backup-restore.sh nor test/drill/drill_test.go runs e1 block '$n' of $backupcmds"
 done
-[[ $failures -eq 0 ]] && ok "test/e2e/backup-restore.sh runs every e1 block of the backup file: $(tr '\n' ' ' <<<"$gused")"
+[[ $failures -eq 0 ]] && ok "every e1 block of the backup file is run by test/e2e/backup-restore.sh or the drill: $(tr '\n' ' ' <<<"$gused")"
 
 if [[ $failures -ne 0 ]]; then
   echo "e2e-commands-check: $failures problem(s)" >&2

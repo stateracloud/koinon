@@ -172,6 +172,12 @@ func (k *Kube) Label(ctx context.Context, runID, ns string, args ...string) erro
 // GuideBlock runs one block of the backup and restore guide, as written, for the install in ns with
 // the given release, in workdir (where the dump and the key backup live). It returns the combined output.
 func (k *Kube) GuideBlock(ctx context.Context, repoRoot, workdir, name, ns, release string) (string, error) {
+	return k.GuideBlockFrom(ctx, repoRoot, workdir, name, ns, release, "", "")
+}
+
+// GuideBlockFrom is GuideBlock for a block that streams a live source install (srcNS, srcRelease) into the
+// target: it also sets SRC_NS and SRC_REL. Empty srcNS sets neither.
+func (k *Kube) GuideBlockFrom(ctx context.Context, repoRoot, workdir, name, ns, release, srcNS, srcRelease string) (string, error) {
 	show := exec.CommandContext(ctx, filepath.Join(repoRoot, "hack", "docs-e1.sh"), "show", name) //nolint:gosec // a repository script with fixed arguments
 	show.Env = append(os.Environ(), "E1_FILE="+filepath.Join(repoRoot, "test", "e2e", "commands", "backup-restore.e1"))
 	text, err := run(show)
@@ -181,7 +187,12 @@ func (k *Kube) GuideBlock(ctx context.Context, repoRoot, workdir, name, ns, rele
 	if err := Hardcoded(text); err != nil {
 		return "", fmt.Errorf("guide block %s: %w", name, err)
 	}
-	env, err := GuideEnv(ns, release)
+	var env []string
+	if srcNS != "" {
+		env, err = GuideSourceEnv(ns, release, srcNS, srcRelease)
+	} else {
+		env, err = GuideEnv(ns, release)
+	}
 	if err != nil {
 		return "", fmt.Errorf("guide block %s: %w", name, err)
 	}

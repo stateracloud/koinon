@@ -319,6 +319,11 @@ SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (
 source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
 waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
 
+The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
+from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
+`hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.
+The CloudNativePG backup restore is not covered yet: the chart configures no CNPG backup (ADR 0076 decision 9).
+
 For a risky PR, `hack/needs-e2e.sh` says whether your change touches what only a full install
 observes (the rule is the `e2e-*` lines of `hack/paths.rules`, applied by that script). The merge
 queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proof that counts

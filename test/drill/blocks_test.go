@@ -91,3 +91,20 @@ func TestRenameKEKSecret(t *testing.T) {
 		t.Error("a missing Secret name must be an error")
 	}
 }
+
+func TestGuideSourceEnvAddsTheSourceAndRefusesARealNamespace(t *testing.T) {
+	env, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-src-a1b2c3", "koinon-drill-src-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "NS=koinon-drill-dst-a1b2c3 REL=koinon-drill-dst-a1b2c3 SRC_NS=koinon-drill-src-a1b2c3 SRC_REL=koinon-drill-src-a1b2c3"
+	if strings.Join(env, " ") != want {
+		t.Errorf("env = %v", env)
+	}
+	if _, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon", "koinon"); err == nil {
+		t.Fatal("a source outside the drill prefix must be refused")
+	}
+	if _, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-src-a1b2c3", "prod"); err == nil {
+		t.Fatal("a source release without koinon in its name must be refused")
+	}
+}

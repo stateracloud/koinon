@@ -974,6 +974,48 @@ stringData:
 		AddReportEntry("RPO seconds", t.RPOSeconds)
 		AddReportEntry("phases (seconds)", t.Phases)
 	})
+
+	// The guide's pipe blocks (issue #910): the same restore, streamed from the live source database and
+	// key set instead of from files. The target is restored a second time over its released self, in the
+	// guide's order, and must hold what the source holds. The source database is read only; its api runs
+	// for the key export alone (nothing else of the source starts, so the isolation check above stands).
+	step("pipe: the guide's pipe blocks restore the target again from the live source", func(ctx SpecContext) {
+		needs("release")
+		want := map[string]string{
+			"install": sql(ctx, &src, "SELECT install_id FROM install_identity"),
+			"tasks":   sql(ctx, &src, "SELECT count(*) FROM tasks"),
+			"runs":    sql(ctx, &src, "SELECT count(*) FROM runs"),
+		}
+		Expect(want["install"]).NotTo(BeEmpty())
+		block := func(name string, from bool) {
+			GinkgoHelper()
+			var out string
+			var err error
+			if from {
+				out, err = kube.GuideBlockFrom(ctx, repoRoot, workDir, name, dst.in.Namespace, dst.in.Release, src.in.Namespace, src.in.Release)
+			} else {
+				out, err = kube.GuideBlock(ctx, repoRoot, workDir, name, dst.in.Namespace, dst.in.Release)
+			}
+			must(err, out)
+		}
+		block("stop", false)
+		block("hold", false)
+		block("pipe-db", true)
+		// The source api exports the keys; scale it up only for that block.
+		_, err := kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=1")
+		must(err, "start the source api for the key export")
+		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "rollout", "status", "deployment/"+src.name("api"), "--timeout=5m")
+		must(err, "the source api is ready")
+		block("pipe-keys", true)
+		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=0")
+		must(err, "stop the source api again")
+		for _, b := range []string{"start", "compare-keys", "verify-keys", "release"} {
+			block(b, false)
+		}
+		Expect(sql(ctx, &dst, "SELECT install_id FROM install_identity")).To(Equal(want["install"]), "the install ID after the pipe restore")
+		Expect(sql(ctx, &dst, "SELECT count(*) FROM tasks")).To(Equal(want["tasks"]), "the tasks after the pipe restore")
+		Expect(sql(ctx, &dst, "SELECT count(*) FROM runs")).To(Equal(want["runs"]), "the runs after the pipe restore")
+	}, 30*time.Minute)
 })
 
 // fireKey is the dedupe source and key of the trigger fire a workflow ID names. "run-now:<org>:<trigger>:<unix>"
