@@ -24,6 +24,7 @@ dependabot[bot]
 
 EOF
 printf 'no-newline-at-end' >"$tmp/vouched-nonl.txt"
+printf 'vouched person\n' >"$tmp/vouched-space.txt"
 
 fails=0
 # expect NAME WANT_EXIT WANT_SUBSTRING [VAR=value...]
@@ -51,6 +52,7 @@ expect "failure explains how to get vouched" 1 "::error::someone has no merged c
 expect "vouch list, other case, comment and spaces" 0 "verdict=pass reason=in the vouch list" GATE_AUTHOR=vouched-person GATE_ASSOCIATION=FIRST_TIME_CONTRIBUTOR
 expect "vouch list holds a bot" 0 "reason=in the vouch list" "GATE_AUTHOR=dependabot[bot]" GATE_ASSOCIATION=NONE
 expect "a comment is not a login" 1 "verdict=fail" "GATE_AUTHOR=a" GATE_ASSOCIATION=NONE
+expect "inner spaces are not dropped" 1 "verdict=fail" GATE_AUTHOR=vouchedperson GATE_ASSOCIATION=NONE GATE_VOUCHED="$tmp/vouched-space.txt"
 expect "a prefix of a vouched login is not vouched" 1 "verdict=fail" GATE_AUTHOR=vouched GATE_ASSOCIATION=NONE
 expect "last line without a newline" 0 "reason=in the vouch list" GATE_VOUCHED="$tmp/vouched-nonl.txt" GATE_AUTHOR=no-newline-at-end GATE_ASSOCIATION=NONE
 expect "vouched label passes" 0 "verdict=pass reason=label vouched" GATE_AUTHOR=someone GATE_ASSOCIATION=FIRST_TIMER 'GATE_LABELS=["area/ci","vouched"]'
@@ -118,7 +120,8 @@ done
 if grep -vE '^[[:space:]]*#' "$workflow" | grep -qE 'pull_request_target|secrets\.|pull_request\.base\.sha'; then echo "FAIL: $workflow uses pull_request_target, a secret or the recorded base.sha"; fails=1; else echo "ok: workflow uses no pull_request_target, no secret and no recorded base.sha"; fi
 
 # The turn-on path of docs/maintainers/contributor-gate.md, proven now: the switch on and the check required (the
-# header line and `external contributor gate` in hack/ci-required.txt); hack/ci-merge-group-test.sh stays green.
+# header line and `external contributor gate` in hack/ci-required.txt); hack/ci-merge-group-test.sh and
+# hack/ci-required-test.sh stay green.
 sim=$tmp/on
 mkdir -p "$sim/hack" "$sim/.github"
 cp -R "$root/.github/workflows" "$sim/.github/workflows"
@@ -127,10 +130,11 @@ sed "s/^    if: false \&\& (/    if: true \&\& (/" "$workflow" >"$sim/.github/wo
 awk '{ print } /^#   claim / { print "#   contributor gate   .github/workflows/contributor-gate.yml" } /^external claim$/ { print "external contributor gate" }' "$root/hack/ci-required.txt" >"$sim/hack/ci-required.txt"
 out=""
 if grep -qxF -- "$on" "$sim/.github/workflows/contributor-gate.yml" && grep -qxF "external contributor gate" "$sim/hack/ci-required.txt" &&
-	out=$("$sim/hack/ci-merge-group-test.sh" 2>&1) && grep -qF "ok: required 'contributor gate' reports on merge_group" <<<"$out"; then
-	echo "ok: switched on and required, hack/ci-merge-group-test.sh passes"
+	out=$("$sim/hack/ci-merge-group-test.sh" 2>&1) && grep -qF "ok: required 'contributor gate' reports on merge_group" <<<"$out" &&
+	out=$(CI_REQUIRED="$sim/hack/ci-required.txt" CI_WORKFLOWS="$sim/.github/workflows" "$root/hack/ci-required-test.sh" 2>&1); then
+	echo "ok: switched on and required, hack/ci-merge-group-test.sh and hack/ci-required-test.sh pass"
 else
-	echo "FAIL: switched on and required, hack/ci-merge-group-test.sh does not pass:"
+	echo "FAIL: switched on and required, hack/ci-merge-group-test.sh or hack/ci-required-test.sh does not pass:"
 	grep -E 'FAIL|contributor' <<<"$out" | sed 's/^/    /' || true
 	fails=1
 fi

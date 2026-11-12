@@ -20,7 +20,9 @@
 # Pull request: the base branch tip (base.ref, not base.sha, which is the base recorded at the last push), so a
 # vouch merged to main counts at the next run. Merge queue: the queue's base, and the queued pull request read
 # from the queue ref, re-judged (labels can change while it waits; a required check that a queue build skips
-# tests nothing, hack/ci-merge-group-test.sh).
+# tests nothing, hack/ci-merge-group-test.sh). It judges the one pull request the queue ref names, which is the
+# whole build at merge queue group size 1 (ADR 0094); raising the group size needs this step to judge every
+# pull request in the group first.
 name: contributor-gate
 
 on:

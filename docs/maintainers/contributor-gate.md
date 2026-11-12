@@ -28,7 +28,9 @@ how a vouch happens.
 The job runs with a read-only token and no secret (no `pull_request_target`, rule W3 of
 `docs/dev/ci-rules.md`). It checks out the base branch, never the pull request's code: on a pull request the
 branch tip (`base.ref`, so a rerun sees a vouch merged since), on a merge queue build the queue's base, where it
-reads the queued pull request's number from the queue ref and judges it again (`check-pr`, as claims.yml does).
+reads the queued pull request's number from the queue ref and judges it again (`check-pr`, as claims.yml does). That
+covers the whole build at the merge queue's group size of 1 (ADR 0094); a larger group needs the step to judge
+every pull request in it first.
 So the script and the vouch list are main's. The workflow file itself is the pull request's own, as on every
 `pull_request` run: a pull request that edits it could turn its own check green. The guard against that is the
 code-owner review of `.github/` (`.github/CODEOWNERS`), the same trade-off as the `claim` check. The gate posts
@@ -63,12 +65,13 @@ Do these in one sitting; each needs a maintainer.
    - add `contributor gate   .github/workflows/contributor-gate.yml` to the header of
      `hack/ci-required.txt` and `external contributor gate` to its list (in the same pull request as
      step 3). `hack/ci-required-test.sh` and `hack/ci-merge-group-test.sh` check the workflow, and
-     `hack/contributor-gate-test.sh` already runs exactly this configuration in a scratch copy. Add
+     `hack/contributor-gate-test.sh` already runs both on exactly this configuration in a scratch copy. Add
      `contributor-gate` to the list of workflows that produce a required context in `docs/dev/ci.md`
      ("Required status checks"). `hack/release-gate.sh` already reads `contributor gate` from the merged
      pull request (it has no push run), so release tags keep working;
    - after it merges, add `contributor gate` to the required status checks of the `main` ruleset and check
-     with `hack/ci-required-test.sh --ruleset`. A ruleset change needs the owner's yes (`docs/dev/ci-rules.md`,
+     with `hack/ci-required-test.sh --ruleset`. Bind it to the GitHub Actions app (rule Q5 of
+     `docs/dev/ci-rules.md`). A ruleset change needs the owner's yes (`docs/dev/ci-rules.md`,
      "Stop and ask").
 5. Add a line to the "Pull requests" section of `CONTRIBUTING.md`: a first pull request needs a maintainer's
    vouch, and how to ask for one.
@@ -84,5 +87,6 @@ not a vouch; the gate then runs and fails until the label or the line is there.
 
 In one pull request: set the switch back to `false`, and remove the two `contributor gate` lines from
 `hack/ci-required.txt` (`hack/ci-merge-group-test.sh` fails on a required job that a queue build skips). Remove
-it from the ruleset's required checks right after that merges. The ruleset counts a skipped check as passing, so
+it from the ruleset's required checks right after that merges; until then `hack/ci-required-test.sh --ruleset`
+reports the extra ruleset context, as expected. The ruleset counts a skipped check as passing, so
 nothing waits in between, but `hack/pr-wait.sh --require "contributor gate"` would report it as skipped.

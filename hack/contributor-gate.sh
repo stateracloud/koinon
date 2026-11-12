@@ -41,7 +41,8 @@ vouched() {
 	local file=$1 login=${2,,} line
 	while IFS= read -r line || [[ -n $line ]]; do
 		line=${line%%#*}
-		line=${line//[[:space:]]/}
+		line=${line#"${line%%[![:space:]]*}"}
+		line=${line%"${line##*[![:space:]]}"}
 		[[ -n $line && ${line,,} == "$login" ]] && return 0
 	done <"$file"
 	return 1
@@ -50,7 +51,7 @@ vouched() {
 verdict() {
 	echo "verdict=$1 reason=$2"
 	if [[ $1 == fail ]]; then
-		echo "::error::$GATE_AUTHOR has no merged contribution here yet, and no maintainer has vouched for them. A maintainer vouches by adding the \`$VOUCH_LABEL\` label to this pull request or the login to .github/vouched.txt (docs/maintainers/contributor-gate.md). Until then, say on the issue this pull request addresses what you plan to change (CONTRIBUTING.md)."
+		echo "::error::$GATE_AUTHOR has no merged contribution here yet, and no maintainer has vouched for them. A maintainer vouches by adding the \`$VOUCH_LABEL\` label to this pull request or the login to .github/vouched.txt (docs/maintainers/contributor-gate.md). Until then, say on the issue this pull request addresses what you plan to change, and ask for a vouch there."
 		exit 1
 	fi
 	exit 0
