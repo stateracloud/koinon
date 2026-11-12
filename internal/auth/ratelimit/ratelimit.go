@@ -14,8 +14,9 @@
 // dropped to make room for a fresh key, so flooding the limiter with fresh keys does not reset a
 // backoff. One group (an IPv4 address, or an IPv6 /48) may hold at most maxBlockedPerAddr blocked
 // keys, so the /64 neighbours of an IPv6 client share that cap: a neighbour can push your failures
-// onto the group. A key that would be the ninth is not tracked; the group's overflow slot is blocked
-// for that key's wait instead, and Blocked returns it for every key of the group, so both entry
+// onto the group. A key that would be the ninth is not tracked; the group's overflow slot counts an
+// overflow instead and blocks the group, for BaseBackoff and then twice as long for each further
+// overflow, up to MaxBackoff, and Blocked returns it for every key of the group, so both entry
 // points refuse the whole group before any lookup or hash, and only that group. When the blocked set
 // is full, the block that ends soonest is dropped to make room, and nobody else is refused. The
 // address is the connection's peer, an IPv6 one masked to its /64; X-Forwarded-For is not trusted.
@@ -86,7 +87,7 @@ type attempts struct {
 	elem    *list.Element // in lru, or nil
 	hidx    int           // index in the blocked heap, or -1
 	group   string        // the address, or an IPv6 address's /48, for the per-address cap
-	exempt  bool          // a group overflow slot: not counted in the cap, dropped when its block ends
+	exempt  bool          // a group overflow slot: not counted in the cap
 }
 
 type blockHeap []*attempts
@@ -129,10 +130,6 @@ func (l *Limiter) Len() int {
 func (l *Limiter) expire(now time.Time) {
 	for len(l.blocked) > 0 && !now.Before(l.blocked[0].blocked) {
 		a := l.dropBlocked(l.blocked[0])
-		if a.exempt {
-			delete(l.keys, a.key)
-			continue
-		}
 		a.elem = l.lru.PushFront(a)
 	}
 	for l.lru.Len() > maxTracked {
@@ -193,18 +190,28 @@ func (l *Limiter) addBlocked(a *attempts) {
 // groupSlot is the key of a group's overflow slot. No Key is ever of this form.
 func groupSlot(group string) string { return "\x00group|" + group }
 
-// blockGroup blocks the whole group until at least until, through its overflow slot, which Blocked
-// checks for every key of the group.
-func (l *Limiter) blockGroup(group string, until, now time.Time) {
+// blockGroup counts one overflow of the group on its overflow slot, which Blocked checks for every key
+// of the group. The slot has its own backoff: the first overflow blocks the group for BaseBackoff, each
+// further one for twice as long, up to MaxBackoff, and a quiet FailWindow after a block starts it
+// afresh. When a block ends the slot stays, in the recency list, with its count.
+func (l *Limiter) blockGroup(group string, now time.Time) {
 	k := groupSlot(group)
 	a := l.keys[k]
 	if a == nil {
+		if l.lru.Len() >= maxTracked {
+			l.forget(l.lru.Back().Value.(*attempts))
+		}
 		a = &attempts{key: k, first: now, group: group, exempt: true, hidx: -1}
+		a.elem = l.lru.PushFront(a)
 		l.keys[k] = a
+	} else if a.elem != nil {
+		l.lru.MoveToFront(a.elem)
 	}
-	if a.blocked.Before(until) {
-		a.blocked = until
+	if now.After(a.blocked) && now.Sub(a.quietSince()) > FailWindow {
+		a.fails, a.first, a.blocked = 0, now, time.Time{}
 	}
+	a.fails++
+	a.blocked = now.Add(min(BaseBackoff<<min(a.fails-1, 20), MaxBackoff))
 	if a.hidx >= 0 {
 		heap.Fix(&l.blocked, a.hidx)
 		return
@@ -301,9 +308,8 @@ func (l *Limiter) FailAfter(key string, freeFails int, now time.Time) {
 		heap.Fix(&l.blocked, a.hidx)
 	case !a.exempt && l.perAddr[a.group] >= maxBlockedPerAddr:
 		// The group holds as many blocked keys as it may: block the group, not this key.
-		until := a.blocked
 		l.forget(a)
-		l.blockGroup(a.group, until, now)
+		l.blockGroup(a.group, now)
 	default:
 		l.addBlocked(a)
 	}

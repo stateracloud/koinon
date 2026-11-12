@@ -193,6 +193,42 @@ var _ = Describe("Limiter", func() {
 		Expect(l.Blocked(ratelimit.Key("2001:db8:8::", "user:new"), t0)).To(BeZero())
 	})
 
+	// overflowRounds is a client that waits out each group block, then blocks nine fresh keys of its
+	// group again; it returns the group's wait after each round.
+	overflowRounds := func(rounds int, at time.Time, k func(round, i int) string) ([]time.Duration, time.Time) {
+		var waits []time.Duration
+		for r := range rounds {
+			for i := range 9 {
+				blockKey(k(r, i), at)
+			}
+			w := l.Blocked(k(r, 0), at)
+			waits = append(waits, w)
+			at = at.Add(w + time.Millisecond)
+		}
+		return waits, at
+	}
+	escalates := func(k func(round, i int) string) {
+		waits, at := overflowRounds(13, t0, k)
+		Expect(waits[0]).To(Equal(ratelimit.BaseBackoff))
+		Expect(waits[1]).To(Equal(2 * ratelimit.BaseBackoff))
+		Expect(waits[len(waits)-1]).To(Equal(ratelimit.MaxBackoff))
+		after, _ := overflowRounds(1, at.Add(ratelimit.FailWindow+time.Second), func(r, i int) string { return k(100+r, i) })
+		Expect(after[0]).To(Equal(ratelimit.BaseBackoff), "a quiet window starts the group afresh")
+	}
+
+	It("escalates the block of an IPv6 /48 that rotates /64s and usernames", func() {
+		escalates(func(r, i int) string {
+			return ratelimit.Key("2001:db8:9:"+strconv.Itoa(r*10+i)+"::", "user:"+strconv.Itoa(r*10+i))
+		})
+	})
+
+	It("escalates the block of an IPv4 address whatever mix of keys overflows it", func() {
+		parts := []string{"", "all-users", "abcdefgh", "user:a", "ijklmnop", "user:b", "qrstuvwx", "user:c", "yzabcdef"}
+		escalates(func(r, i int) string {
+			return ratelimit.Key("203.0.113.5", parts[(i+r)%len(parts)]+strconv.Itoa(r*10+i))
+		})
+	})
+
 	It("limits every key of a family whose parts are not addresses, however many are blocked", func() {
 		for u := range 30 {
 			k := ratelimit.Key("user-"+strconv.Itoa(u), "change-password")
