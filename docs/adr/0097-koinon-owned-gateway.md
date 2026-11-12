@@ -358,7 +358,7 @@ confirms each revision it serves. The kubelet tick, the 90 s key settle and agen
 not apply to Koinon's gateway.
 
 Record (2026-11-12, #279 slice 2; the choices below are decided): the stream is backed by two
-install-wide tables (migration 00081), `gateway_state_revisions` (one revision sequence for the whole
+install-wide tables (migration 00082), `gateway_state_revisions` (one revision sequence for the whole
 State, a full secret-free snapshot per revision with a digest) and `gateway_state_acks` (gateway copy,
 revision, half). The reconciler applies the state, then stores a revision only when the snapshot
 differs from the latest one, so the stored revision records what was applied. Each new revision sends
