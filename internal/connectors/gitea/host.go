@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -80,9 +81,14 @@ func NewConfig(site codehost.Site, read, write []byte, prev *Config, now time.Ti
 
 // Options configure the provider.
 type Options struct {
-	// HTTPClient is the base client for Gitea calls; default a client with a 30 s timeout. A
+	// HTTPClient is the base client for Gitea calls; default a client with a 30 s timeout that
+	// dials through DialContext and returns a 3xx response instead of following it. A
 	// connection's CA bundle derives a client from it.
 	HTTPClient *http.Client
+	// DialContext is the egress policy's dial check (catalog.URLPolicy.DialContext): a
+	// Connection's base URL is admin-supplied. It is unused when HTTPClient is set. Nil dials
+	// unchecked, for tests.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // Host is Gitea as a code-host provider.
@@ -91,7 +97,7 @@ type Host struct{ tr *transports }
 var _ codehost.Provider = (*Host)(nil)
 
 // NewHost returns the Gitea provider.
-func NewHost(o Options) *Host { return &Host{tr: newTransports(o.HTTPClient)} }
+func NewHost(o Options) *Host { return &Host{tr: newTransports(o.HTTPClient, o.DialContext)} }
 
 // ID implements codehost.Provider.
 func (*Host) ID() string { return HostID }

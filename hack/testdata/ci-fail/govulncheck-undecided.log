@@ -1,0 +1,4 @@
+# expect: infra yes
+govulncheck v1.9.0: COULD NOT DECIDE (exit 1): the vulnerability database could not be fetched or read, or the packages did not load.
+##[error]govulncheck: COULD NOT DECIDE
+##[error]Process completed with exit code 2.

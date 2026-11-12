@@ -11,7 +11,9 @@
 infra	yes	^E: Failed to fetch|^Err:[0-9]+ |Temporary failure resolving|Could not resolve host|TLS handshake timeout
 infra	yes	ErrImagePull|ImagePullBackOff|toomanyrequests|pull access denied|failed to pull image
 infra	yes	no space left on device
+infra	yes	govulncheck.*COULD NOT DECIDE|title=govulncheck::COULD NOT DECIDE
 infra	yes	The runner has received a shutdown signal|lost communication with the server
+vuln	no	title=govulncheck::reachable vulnerability|govulncheck.*FAIL, a known vulnerability is reachable
 race	no	WARNING: DATA RACE
 timeout	no	panic: test timed out|exceeded the maximum execution time|timed out waiting for the condition
 lint	no	golangci-lint|shellcheck|tmp-safety|\(typecheck\)|ESLint|eslint|[0-9]+ issues?:

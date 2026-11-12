@@ -1,0 +1,6 @@
+# expect: vuln no
+  #59: internal/adminapi/audit_export.go:103:20: adminapi.exportBody.Read calls bufio.Reader.Read
+Your code is affected by 2 vulnerabilities from 1 module and the Go standard library.
+govulncheck v1.9.0: FAIL, a known vulnerability is reachable from this module (report above)
+##[error]reachable vulnerability: a known vulnerability is reachable from this module
+##[error]Process completed with exit code 1.

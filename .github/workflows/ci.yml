@@ -76,6 +76,7 @@ jobs:
       flavors: ${{ steps.paths.outputs.flavors }}
       opencodeplugin: ${{ steps.paths.outputs.opencodeplugin }}
       tidy: ${{ steps.paths.outputs.tidy }}
+      vuln: ${{ steps.paths.outputs.vuln }}
       shell: ${{ steps.paths.outputs.shell }}
       scripts: ${{ steps.paths.outputs.scripts }}
     steps:
@@ -165,6 +166,27 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+
+  # govulncheck on a pull request that changes go.mod or go.sum (#579 part 2, rule X3 of docs/dev/ci-rules.md;
+  # the `vuln` output). Part of the `go` gate: a reachable known vulnerability fails `go`, and so the merge.
+  # A step of go-tidy would have run on every Go change; this job runs only when the requirements change.
+  # hack/govulncheck.sh installs the version pinned in hack/versions.env and fails, with a message, when the
+  # tool or the vulnerability database (vuln.go.dev) cannot be fetched. No retry (rule T1). The nightly
+  # govulncheck.yml runs the same script and covers a new advisory against an unchanged tree.
+  go-vuln:
+    needs: changes
+    if: needs.changes.outputs.vuln == 'true'
+    name: go-vuln
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: go
+        uses: ./.github/actions/setup-go-cache
+      - name: govulncheck
+        run: hack/govulncheck.sh
 
   go-lint:
     needs: changes
@@ -314,7 +336,7 @@ jobs:
   # failure, so a skipped job cannot pass the gate. hack/ci-go-gate-test.sh keeps this list whole.
   go:
     name: go
-    needs: [changes, go-tidy, go-lint, go-test, go-race-serial, go-race-parallel]
+    needs: [changes, go-tidy, go-vuln, go-lint, go-test, go-race-serial, go-race-parallel]
     # Not on a push to main whose heavy jobs were switched off (old issue 595): the check then reports skipped
     # and hack/release-gate.sh reads the merged pull request's head instead.
     if: ${{ !cancelled() && !(github.event_name == 'push' && needs.changes.outputs.skip == 'true') }}
@@ -326,6 +348,8 @@ jobs:
           GO: ${{ needs.changes.outputs.go }}
           TIDY: ${{ needs.changes.outputs.tidy }}
           TIDY_RESULT: ${{ needs.go-tidy.result }}
+          VULN: ${{ needs.changes.outputs.vuln }}
+          VULN_RESULT: ${{ needs.go-vuln.result }}
           LINT_RESULT: ${{ needs.go-lint.result }}
           SKIP: ${{ needs.changes.outputs.skip }}
           REASON: ${{ needs.changes.outputs.reason }}
@@ -343,10 +367,12 @@ jobs:
             echo "### go: draft: not run" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # go-vuln also runs when only its own inputs changed (hack/govulncheck.sh, versions.env: go=false, vuln=true), so a failure counts before the no-Go exit.
+          [[ $VULN_RESULT == success || $VULN_RESULT == skipped ]] || { echo "::error::go-vuln finished $VULN_RESULT"; exit 1; }
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
           # A skip counts as success only when its reason is known: go-test skipped because an external run proved it
           # (old issue 610), go-tidy or go-lint skipped because no Go file, go.mod, go.sum or lint config changed (#572,
-          # the `tidy` output). Any other skipped part stays a failure, and so does a skip with no such reason.
+          # the `tidy` output), go-vuln skipped because go.mod and go.sum did not change (the `vuln` output). Any other skipped part stays a failure, and so does a skip with no such reason.
           excused=0
           if [[ $GO_TEST == skipped && $LAB == true ]]; then
             echo "go-test passed in an external run: $LAB_REASON"
@@ -355,6 +381,10 @@ jobs:
           if [[ $TIDY != true ]]; then
             [[ $TIDY_RESULT != skipped ]] || excused=$((excused + 1))
             [[ $LINT_RESULT != skipped ]] || excused=$((excused + 1))
+          fi
+          # go-vuln (#579 part 2) runs only when go.mod or go.sum changed (the `vuln` output); skipped for any other reason it is a failure.
+          if [[ $VULN != true ]]; then
+            [[ $VULN_RESULT != skipped ]] || excused=$((excused + 1))
           fi
           skipped=0
           for r in $RESULTS; do
