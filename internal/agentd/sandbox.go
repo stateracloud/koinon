@@ -50,12 +50,23 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 	// The latest row observed, for naming the cause at the cap.
 	var lastReason, lastMessage string
 	observed := false
+	// When this claim first saw each named cause in the row. The failure reports the time to the
+	// cause it names, so the cap (the whole wait) is not mistaken for the time the cause took to show
+	// (issue 573). The time counts from the start of the wait (the first claim); a requeued run
+	// whose cause showed in an earlier claim reports it as first seen in this one, an upper bound.
+	causeSeen := map[execution.SandboxWaitCause]time.Time{}
 	var waitStart time.Time
 	var capd time.Duration
 	for {
 		sb, err := r.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		if err == nil {
 			lastReason, lastMessage, observed = sb.Reason, sb.Message, true
+			if c := execution.ClassifySandboxWait(sb.Reason, sb.Message); c != execution.WaitCauseUnknown {
+				if _, seen := causeSeen[c]; !seen {
+					causeSeen[c] = now()
+					r.log.Info("the sandbox row names a cause for the wait", "cause", string(c), "sinceClaim", now().Sub(started).Round(time.Millisecond))
+				}
+			}
 		}
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -154,10 +165,14 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 					// (ADR 0078), else OpenShell's.
 					detail += ": " + strings.Trim(lastReason+": "+lastMessage, ": ")
 				}
+				su := &sandboxUnavailable{cause: cause, detail: detail, waited: waited, cap: capd}
+				if at, ok := causeSeen[cause]; ok && observed {
+					su.causeSeen, su.causeWasSeen = max(at.Sub(waitStart), 0), true
+				}
 				return store.AgentSandbox{}, &failure{
 					reason:  fmt.Sprintf("the sandbox never became ready in %s: %s (%s)", runreply.Human(capd), cause.Describe(), detail),
 					class:   classSandboxUnavailable,
-					sandbox: &sandboxUnavailable{cause: cause, detail: detail, waited: waited, cap: capd},
+					sandbox: su,
 				}
 			}
 			reason := fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)
