@@ -1437,13 +1437,14 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	Describe("the leader lock (#573)", func() {
+		const leaderKey int64 = 0x6b6f696e6f6e7263
 		// holdLock takes the reconciler's session lock on its own connection, as a running leader
 		// does, and returns the function that releases it.
 		holdLock := func(ctx context.Context) (release func()) {
 			GinkgoHelper()
 			c, err := pool.Acquire(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = c.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(0x6b6f696e6f6e7263))
+			_, err = c.Exec(ctx, "SELECT pg_advisory_lock($1)", leaderKey)
 			Expect(err).NotTo(HaveOccurred())
 			return func() { _ = c.Conn().Close(context.Background()); c.Release() }
 		}
@@ -1467,13 +1468,17 @@ var _ = Describe("Reconciler", func() {
 			return stop
 		}
 		leading := func() int { return strings.Count(logs.String(), "reconciler is leading") }
-		holders := func(ctx context.Context) int {
+		// lockRows counts the advisory lock rows for key in this spec's database: pg_locks covers the
+		// whole server, and suites that share one server use the same key in their own databases.
+		lockRows := func(ctx context.Context, key int64, granted bool) int {
 			GinkgoHelper()
 			var n int
-			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
-				AND ((classid::bigint << 32) | objid::bigint) = $1`, int64(0x6b6f696e6f6e7263)).Scan(&n)).To(Succeed())
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted = $2
+				AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				AND ((classid::bigint << 32) | objid::bigint) = $1`, key, granted).Scan(&n)).To(Succeed())
 			return n
 		}
+		holders := func(ctx context.Context) int { return lockRows(ctx, leaderKey, true) }
 
 		It("takes over within about 2 s of the holder releasing the lock, with a long resync interval", func(ctx SpecContext) {
 			cfg.ResyncInterval = time.Hour
@@ -1514,6 +1519,79 @@ var _ = Describe("Reconciler", func() {
 			stopFirst()
 			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(2))
 			Expect(holders(ctx)).To(Equal(1))
+		})
+
+		It("cancels a blocked lock wait on the server, so no backend takes the lock later", func(ctx SpecContext) {
+			key := leaderKey + seq.Add(1)
+			holder, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = holder.Exec(ctx, "SELECT pg_advisory_lock($1)", key)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = holder.Conn().Close(context.Background()); holder.Release() })
+			waiter, err := pool.Acquire(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = waiter.Conn().Close(context.Background()); waiter.Release() })
+
+			wctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			res := make(chan error, 1)
+			go func() { res <- reconciler.LockBlocking(wctx, waiter.Conn(), key) }()
+			Eventually(func() int { return lockRows(ctx, key, false) }).Should(Equal(1), "the waiter is queued on the server")
+
+			cancel()
+			Eventually(res).WithTimeout(2 * time.Second).Should(Receive(MatchError(context.Canceled)))
+			// The server-side wait is gone: a closed socket alone would leave the backend queued.
+			Eventually(func() int { return lockRows(ctx, key, false) }).Should(BeZero())
+			_, err = holder.Exec(ctx, "SELECT pg_advisory_unlock($1)", key)
+			Expect(err).NotTo(HaveOccurred())
+			Consistently(func() int { return lockRows(ctx, key, true) }, "500ms", "50ms").Should(BeZero())
+		})
+
+		It("cancels a running pass when the leader's connection is lost, before the follower leads", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			mg.mu.Lock()
+			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			entered := mg.entered
+			mg.mu.Unlock()
+			DeferCleanup(func() {
+				mg.mu.Lock()
+				defer mg.mu.Unlock()
+				if mg.hold != nil {
+					close(mg.hold)
+				}
+			})
+			run(newReconciler())
+			Eventually(entered).Should(BeClosed(), "the leader's pass is inside Apply")
+			// Later passes do not wait.
+			mg.mu.Lock()
+			mg.hold, mg.entered = nil, nil
+			mg.mu.Unlock()
+			run(newReconciler())
+			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
+
+			var terminated int
+			Expect(pool.QueryRow(ctx, `SELECT count(pg_terminate_backend(l.pid)) FROM pg_locks l
+				WHERE l.locktype = 'advisory' AND l.granted
+				AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				AND ((l.classid::bigint << 32) | l.objid::bigint) = $1`, leaderKey).Scan(&terminated)).To(Succeed())
+			Expect(terminated).To(Equal(1))
+
+			Eventually(mg.canceledAt).WithTimeout(2 * time.Second).ShouldNot(BeZero())
+			Eventually(leading).WithTimeout(3 * time.Second).Should(Equal(2))
+			Eventually(mg.applyTimes).Should(HaveLen(2))
+			times := mg.applyTimes()
+			Expect(mg.canceledAt()).To(BeTemporally("<=", times[1]), "the old pass ended before the new leader's first write")
+			Expect(mg.appliedCount()).To(Equal(1), "only the new leader's pass finished")
+			Consistently(mg.appliedCount, "500ms", "50ms").Should(Equal(1))
+		})
+
+		It("retries a failed lead after a short backoff with jitter, not after the resync interval", func() {
+			Expect(reconciler.RetryDelay(1, 0)).To(Equal(reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(1, 0.999)).To(BeNumerically("<", 2*reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(2, 0)).To(Equal(2 * reconciler.RetryBase))
+			Expect(reconciler.RetryDelay(50, 0.999)).To(BeNumerically("<", 2*reconciler.RetryCap))
+			Expect(reconciler.RetryDelay(50, 0)).To(Equal(reconciler.RetryCap))
+			Expect(reconciler.RetryCap).To(BeNumerically("<", 30*time.Second))
 		})
 	})
 })

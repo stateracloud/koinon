@@ -59,7 +59,10 @@ The maintained Apache-2.0 alternative, CloudPirates' `postgres` chart (`appVersi
 1. **`postgres.mode` takes three values:**
    - `external`: bring your own Postgres 18 or newer, such as RDS, Aurora PostgreSQL, Cloud SQL,
      Azure Database or any other. As today: one URI per role from a Secret,
-     `sslmode=verify-full` recommended.
+     `sslmode=verify-full` recommended. Every URI must reach Postgres through a **session-mode**
+     connection (direct, or a pooler in session mode): the reconciler's `LISTEN` and its session
+     advisory lock (the leader lock, #573) do not work through a transaction-mode pooler such as
+     PgBouncer's default (amended 2026-11-12).
    - `cnpg`: an **existing** CloudNativePG operator. The chart renders the `Cluster` and never
      installs the operator. As today.
    - `standalone`: Koinon's own single-replica Postgres, for small teams (decisions 3 to 7).
