@@ -20,21 +20,24 @@ import (
 // name. max_concurrent_runs is read in run_claimable at every claim, so a change reaches runs that
 // are already queued, a restored backlog included (issue #462).
 const (
-	MinMaxConcurrentRuns, MaxMaxConcurrentRuns       = 1, 10000
-	MinTriggerConcurrency, MaxTriggerConcurrency     = 1, 1000
-	MinTriggerRatePerMinute, MaxTriggerRatePerMinute = 1, 100000
-	runLimitsSetAction                               = "org.run_limits.set"
+	MinMaxConcurrentRuns, MaxMaxConcurrentRuns                 = 1, 10000
+	MinTriggerConcurrency, MaxTriggerConcurrency               = 1, 1000
+	MinTriggerRatePerMinute, MaxTriggerRatePerMinute           = 1, 100000
+	MinSandboxCreationsPerMinute, MaxSandboxCreationsPerMinute = 1, 10000
+	runLimitsSetAction                                         = "org.run_limits.set"
 )
 
 // RunLimits are the org's effective run limits.
 type RunLimits struct {
 	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute int
+	// SandboxCreationsPerMinute is the most sandbox creations the reconciler makes for the org per minute.
+	SandboxCreationsPerMinute int
 }
 
 // RunLimitsPatch changes some of the org's run limits. A nil field stays as it is; a field that
 // points at 0 returns to the platform default; any other value is the new limit.
 type RunLimitsPatch struct {
-	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute *int
+	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute, SandboxCreationsPerMinute *int
 }
 
 func checkLimit(name string, n *int, lo, hi int) error {
@@ -53,11 +56,13 @@ func (p RunLimitsPatch) Validate() error {
 		checkLimit("max concurrent runs", p.MaxConcurrentRuns, MinMaxConcurrentRuns, MaxMaxConcurrentRuns),
 		checkLimit("trigger concurrency", p.TriggerConcurrency, MinTriggerConcurrency, MaxTriggerConcurrency),
 		checkLimit("trigger rate per minute", p.TriggerRatePerMinute, MinTriggerRatePerMinute, MaxTriggerRatePerMinute),
+		checkLimit("sandbox creations per minute", p.SandboxCreationsPerMinute, MinSandboxCreationsPerMinute, MaxSandboxCreationsPerMinute),
 	)
 }
 
 func runLimitsOf(s Settings) RunLimits {
-	return RunLimits{MaxConcurrentRuns: s.MaxConcurrentRuns, TriggerConcurrency: s.TriggerConcurrency, TriggerRatePerMinute: s.TriggerRatePerMinute}
+	return RunLimits{MaxConcurrentRuns: s.MaxConcurrentRuns, TriggerConcurrency: s.TriggerConcurrency, TriggerRatePerMinute: s.TriggerRatePerMinute,
+		SandboxCreationsPerMinute: s.SandboxCreationsPerMinute}
 }
 
 // RunLimits returns the org's effective run limits.
@@ -114,13 +119,14 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 		// What changed is the stored row, not the effective limits: NULL (the default) to an explicit
 		// value equal to the default is a change, and the audit trail shows it.
 		if row.MaxConcurrentRuns == next.MaxConcurrentRuns && row.TriggerConcurrency == next.TriggerConcurrency &&
-			row.TriggerRatePerMinute == next.TriggerRatePerMinute {
+			row.TriggerRatePerMinute == next.TriggerRatePerMinute &&
+			row.SandboxCreationsPerMinute == next.SandboxCreationsPerMinute {
 			return nil
 		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: runLimitsSetAction, TargetKind: "org", TargetID: org.String(),
-			Before: limitsSummary(row.MaxConcurrentRuns, row.TriggerConcurrency, row.TriggerRatePerMinute),
-			After:  limitsSummary(next.MaxConcurrentRuns, next.TriggerConcurrency, next.TriggerRatePerMinute),
+			Before: limitsSummary(row.MaxConcurrentRuns, row.TriggerConcurrency, row.TriggerRatePerMinute, row.SandboxCreationsPerMinute),
+			After:  limitsSummary(next.MaxConcurrentRuns, next.TriggerConcurrency, next.TriggerRatePerMinute, next.SandboxCreationsPerMinute),
 		})
 		return nil
 	})
@@ -128,7 +134,7 @@ func (s *Service) SetRunLimits(ctx context.Context, org pgtype.UUID, actor audit
 
 // limitsSummary is the audit summary of the stored limits: null is "the default", so NULL to an
 // explicit value equal to the default shows as a change.
-func limitsSummary(maxRuns, triggerConcurrency, ratePerMinute pgtype.Int4) map[string]any {
+func limitsSummary(maxRuns, triggerConcurrency, ratePerMinute, creations pgtype.Int4) map[string]any {
 	stored := func(v pgtype.Int4) any {
 		if !v.Valid {
 			return nil

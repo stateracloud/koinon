@@ -2187,19 +2187,20 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                   pgtype.UUID
-	IdleTimeoutSeconds      pgtype.Int4
-	ParkWarmSeconds         pgtype.Int4
-	QueueWaitSeconds        pgtype.Int4
-	CreatedAt               pgtype.Timestamptz
-	UpdatedAt               pgtype.Timestamptz
-	MaxConcurrentRuns       pgtype.Int4
-	TriggerConcurrency      pgtype.Int4
-	TriggerRatePerMinute    pgtype.Int4
-	SandboxWaitCapSeconds   pgtype.Int4
-	LeakMatchThreshold      pgtype.Int4
-	RunContentRetentionDays pgtype.Int4
-	HomeBackupRetentionDays pgtype.Int4
+	OrgID                     pgtype.UUID
+	IdleTimeoutSeconds        pgtype.Int4
+	ParkWarmSeconds           pgtype.Int4
+	QueueWaitSeconds          pgtype.Int4
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
+	MaxConcurrentRuns         pgtype.Int4
+	TriggerConcurrency        pgtype.Int4
+	TriggerRatePerMinute      pgtype.Int4
+	SandboxWaitCapSeconds     pgtype.Int4
+	LeakMatchThreshold        pgtype.Int4
+	RunContentRetentionDays   pgtype.Int4
+	HomeBackupRetentionDays   pgtype.Int4
+	SandboxCreationsPerMinute pgtype.Int4
 }
 
 type OrgTraceSetting struct {
@@ -2507,6 +2508,14 @@ type RunTurn struct {
 	StartedAt pgtype.Timestamptz
 	EndedAt   pgtype.Timestamptz
 	EndReason pgtype.Text
+}
+
+type SandboxCreation struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	AgentID   pgtype.UUID
+	Kind      string
+	CreatedAt pgtype.Timestamptz
 }
 
 type SandboxIncident struct {

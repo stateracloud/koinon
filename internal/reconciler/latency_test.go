@@ -358,6 +358,38 @@ var _ = Describe("Reconciler latency defaults", func() {
 			Expect(n).To(Equal(1))
 		})
 
+		It("queues a burst of runs behind the org's sandbox creation rate and fails none (issue #27)", func(ctx SpecContext) {
+			rate := 2
+			Expect(orgsettings.Set(ctx, q, org, orgsettings.Override{SandboxCreationsPerMinute: &rate})).To(Succeed())
+			var agents []store.Agent
+			for range 5 {
+				a := onDemand(ctx)
+				queueRun(ctx, org, user, a.ID)
+				agents = append(agents, a)
+			}
+			pass(ctx)
+			pass(ctx)
+			Expect(created()).To(Equal(2), "only the org's rate is created in the minute")
+			held := 0
+			for _, a := range agents {
+				var ph string
+				Expect(pool.QueryRow(ctx, `SELECT phase FROM agent_sandboxes WHERE agent_id = $1`, a.ID).Scan(&ph)).To(Succeed())
+				if ph == "WaitingForCreationRate" {
+					held++
+				}
+			}
+			Expect(held).To(Equal(3), "the rest wait with a reason and their runs stay queued")
+			var failed int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE org_id = $1 AND state = 'failed'`, org).Scan(&failed)).To(Succeed())
+			Expect(failed).To(BeZero())
+
+			By("slots free as the minute passes")
+			_, err := pool.Exec(ctx, `UPDATE sandbox_creations SET created_at = now() - interval '61 seconds' WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			Expect(created()).To(Equal(4))
+		})
+
 		It("creates the sandbox for a pre-wake signal", func(ctx SpecContext) {
 			a := onDemand(ctx)
 			pass(ctx)

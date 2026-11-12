@@ -1310,7 +1310,8 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
-	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
+	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
+		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
 	}
@@ -1345,6 +1346,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			if err := r.deleteGitHub(ctx, ws, names); err != nil {
 				return err
 			}
+		}
+		if held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationCreate, nil, hash); err != nil || held {
+			return err
 		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
@@ -1466,6 +1470,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	case execution.PhaseStopped:
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
+			if held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash); err != nil || held {
+				return err
+			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
@@ -1476,6 +1483,31 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	return r.record(ctx, w, sb, hash, "")
 }
+
+// holdForCreationRate takes one of the org's sandbox creations per minute (issue #27, ADR 0066
+// amendment 2026-11-12). With none free it records why and reports held: the run stays queued or
+// starting, the sandbox is not touched, and the next pass tries again. A burst larger than the rate
+// therefore queues behind it and no run fails for it. sb is the stopped sandbox about to start, or
+// nil when none exists yet.
+func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (held bool, err error) {
+	ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+	if err != nil {
+		return false, fmt.Errorf("reserve a sandbox creation: %w", err)
+	}
+	if ok {
+		return false, nil
+	}
+	r.m.SandboxCreationsHeld.Inc()
+	msg := fmt.Sprintf("waiting for the org's sandbox creation rate (%d per minute); next slot in %s", tune.SandboxCreationsPerMinute, wait.Round(time.Second))
+	r.log.Info("sandbox creation held by the org's rate limit", append(w.logAttrs(), "wait", wait.String())...)
+	if sb != nil {
+		return true, r.record(ctx, w, *sb, hash, msg)
+	}
+	return true, r.recordState(ctx, w, store.SandboxStatePending, creationHeldPhase, msg)
+}
+
+// creationHeldPhase is the phase recorded while a sandbox waits for the org's creation rate.
+const creationHeldPhase = "WaitingForCreationRate"
 
 // deleteSandbox requests the deletion of a sandbox. The OpenShell DeleteSandbox RPC can still block
 // until the pods end; the per-agent queue makes that cost one agent and one worker slot, not the

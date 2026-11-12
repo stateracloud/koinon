@@ -32,7 +32,7 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		got, err := svc.RunLimits(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60, SandboxCreationsPerMinute: 10}))
 
 		// An unrelated override stays when a limit changes.
 		idle := 3 * time.Minute
@@ -41,7 +41,7 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		two, rate := 2, 5
 		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &two, TriggerRatePerMinute: &rate})).To(Succeed())
 		got, _ = svc.RunLimits(ctx, org)
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 2, TriggerConcurrency: 4, TriggerRatePerMinute: 5}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 2, TriggerConcurrency: 4, TriggerRatePerMinute: 5, SandboxCreationsPerMinute: 10}))
 		st, err := orgsettings.Get(ctx, store.New(pool), org, orgsettings.Defaults())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(st.IdleTimeout).To(Equal(idle), "the other overrides stay")
@@ -56,7 +56,7 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		zero := 0
 		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &zero})).To(Succeed())
 		got, _ = svc.RunLimits(ctx, org)
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 5}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 5, SandboxCreationsPerMinute: 10}))
 		Expect(events(ctx, org)).To(Equal(2))
 	})
 

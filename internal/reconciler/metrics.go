@@ -58,7 +58,9 @@ type Metrics struct {
 	UnmarkedWaiting *prometheus.GaugeVec
 	UnmarkedStale   prometheus.Gauge
 	SandboxRepairs  prometheus.Counter
-	AgentsUnhealthy prometheus.Counter
+	// SandboxCreationsHeld counts creations deferred by an org's creation rate (issue #27). No org label (ADR 0023).
+	SandboxCreationsHeld prometheus.Counter
+	AgentsUnhealthy      prometheus.Counter
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
@@ -112,6 +114,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
+		SandboxCreationsHeld: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_sandbox_creations_held_total", Help: "Sandbox creations and starts deferred to a later pass because the org was at its sandbox creations per minute (issue #27, ADR 0066).",
+		}),
 		AgentsUnhealthy: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_agents_marked_unhealthy_total", Help: "Agents marked unhealthy because their sandbox kept failing.",
 		}),
@@ -151,7 +156,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
-			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.GatewayIDMismatch)
+			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.GatewayIDMismatch)
 	}
 	return m
 }
