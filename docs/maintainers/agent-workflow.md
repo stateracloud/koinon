@@ -75,7 +75,7 @@ checkout it is run from, so run it from the lane's worktree.
 
 One human works on the repository today (ADR 0104); these rules hold when a second one joins. The
 rules that hold for every branch (merge `main`, never rebase; dependency bumps; proto; golden files;
-ADR and migration numbers; when to stop and ask) are in
+ADR and migration numbers; conflict classes; when to stop and ask) are in
 [AGENTS.md, Branches and pull requests](../../AGENTS.md#branches-and-pull-requests). Before you
 start, after `take`:
 
@@ -84,14 +84,13 @@ start, after `take`:
   <N>`). If an open PR or another human's claim touches the same files with the same behaviour, run
   `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
   sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
-- **Conflict classes.** Mechanical (generated code, the ADR index, golden files, a migration number):
-  regenerate or renumber. Append-site (both sides add lines to one list): keep both and run the
-  check for that area. Semantic (the same function or behaviour) with the other human's open or
-  last-7-days work: stop, comment on both PRs, ask your human.
+- **Conflict classes** (mechanical, append-site, semantic) are in AGENTS.md. Semantic (the same
+  function or behaviour) with the other human's open or last-7-days work: stop, comment on both PRs,
+  ask your human.
 - **ADR numbers:** reserve first with `hack/claim.sh adr` (prints `NNNN`), then write the file.
 - **Stop and ask your human** when the change touches a sensitive path the other human owns
   (`.github/CODEOWNERS`; either human approves the other's PR there), or you would change a public
-  API or data model another open PR also changes.
+  API or data model another open PR also changes (the latter holds for every branch: AGENTS.md).
 - **Keep branches under a day.** Split the issue and release the rest instead of holding a claim for
   days.
 

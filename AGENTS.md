@@ -42,7 +42,7 @@ of it.
   also the patch-line rule under Conventions, from the `hack/migrate-patch-line` marker);
   after merging main, `hack/migrate-renumber.sh` renumbers your branch's migrations.
 - CI and e2e (details: `docs/dev/ci.md`). A draft PR runs nothing in CI (its `go` and `web` report
-  "draft: not run") and its green is not merge evidence; mark it ready for CI, and get WIP feedback
+  "draft: not run") and its green is not merge evidence; mark it ready (`gh pr ready`) for CI, and get WIP feedback
   from `hack/preflight.sh`.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
@@ -61,16 +61,21 @@ of it.
 
 ## Picking up work
 
+- Work on an issue your human names. Only humans move issues to Ready; issues open to agents carry
+  `agent-ok`.
 - Outside contributors do not claim: say on the issue that you are working on it. Maintainers' agents
   claim first: [claims and lanes](docs/maintainers/agent-workflow.md#picking-up-work).
 - A pull request names the issue it closes with `Closes #N`. New work you discover becomes a new
-  issue; do not start it in the same pull request.
+  issue; do not start it.
 
 ## Branches and pull requests
 
 - **Merge `main`, never rebase** a pushed branch, and merge `origin/main` only when GitHub reports a
   conflict (the merge queue tests the pull request on main's tip). Merging:
   [maintainers](docs/maintainers/agent-workflow.md#merging).
+- **Conflicts.** Mechanical (generated code, the ADR index, golden files, a migration number):
+  regenerate or renumber. Append-site (both sides add lines to one list): keep both and run the
+  check for that area. Semantic (the same function or behaviour): stop and ask your human.
 - **No unrelated dependency bumps** in a feature PR. **Proto:** only add fields, never reuse or
   renumber; `make breaking` must pass. **Golden files:** regenerate, do not hand-edit.
 - **ADR numbers:** run `hack/adr-index.sh`, never edit the index table; renumber yours if
@@ -80,7 +85,8 @@ of it.
   `hack/migrate-lint.sh` complains.
 - **Chart assertions** go in the owning file of `hack/chart-check.d/`; a new feature adds a new file.
 - **Stop and ask your human** when you would need to rebase or force-push, a test only you changed
-  starts failing elsewhere, or the issue turns out bigger than it looked. Overlap with another
+  starts failing elsewhere, you would change a public API or data model another open PR also
+  changes, or the issue turns out bigger than it looked. Overlap with another
   human's work: [working alongside another human](docs/maintainers/agent-workflow.md#working-alongside-another-human).
 
 ## Conventions
