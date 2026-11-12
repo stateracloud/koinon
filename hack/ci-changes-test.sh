@@ -149,7 +149,7 @@ expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml 
 expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
 expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
 expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors" flavors/opencode/Dockerfile
+expect "go flavors opencodeplugin" flavors/opencode/Dockerfile
 expect "go flavors" test/flavors/contract_test.go
 expect "go flavors" hack/flavor-tag.sh
 expect "flavors" hack/probe-tag.sh
@@ -164,7 +164,7 @@ expect "go" test/e2e/run.sh
 expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke escape flavors generate go web"
+all="chart chartsmoke escape flavors generate go opencodeplugin web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum

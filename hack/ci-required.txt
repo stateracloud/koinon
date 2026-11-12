@@ -30,6 +30,7 @@ generated code
 chart
 chart smoke
 escape (admission)
+opencode plugin
 lint-shell
 scripts
 # Runs in the merge queue and on pushes to main only; on a pull request its job-level `if:` skips it, which
@@ -47,6 +48,7 @@ external e2e result
 advisory flavor-publish
 advisory warm-caches
 advisory warm-caches-web
+advisory warm-caches-opencode-plugins
 
 # The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514) is advisory, and is not a pull request or
 # merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
