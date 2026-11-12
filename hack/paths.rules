@@ -178,7 +178,7 @@ lane flavors docker,go test-harnesses
 lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission
 lane tidy - preflight
-lane vuln go preflight
+lane vuln - preflight
 lane shell - preflight
 lane scripts - preflight
 
