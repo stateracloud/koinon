@@ -99,7 +99,7 @@ func (r *runner) turnConfig() turnpolicy.Config {
 
 // harnessRetries reports whether the run's harness is the layer that retries model requests.
 func (r *runner) harnessRetries() bool {
-	return harnessRetries(r.flavor) && !r.p.cfg.ownRetryLayer
+	return harnessRetries(r.harness) && !r.p.cfg.ownRetryLayer
 }
 
 // run returns the policy's outcome, or the error of a write the turns needed.

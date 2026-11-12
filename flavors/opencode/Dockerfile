@@ -151,7 +151,13 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       xz-utils=5.6.1+really5.4.5-1ubuntu0.4 \
       python3=3.12.3-0ubuntu2.1 \
       python-is-python3=3.11.4-1 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+      /var/log/apt/* /var/log/dpkg.log /var/log/alternatives.log \
+      /var/cache/ldconfig/aux-cache /var/cache/debconf/*-old
+# The commit time (#176): useradd writes it into /etc/shadow instead of the current day. It is
+# declared here, after the apt layer: a declared ARG is part of the cache key of every later RUN, so
+# declaring it earlier would make a build with another epoch miss the cached apt install.
+ARG SOURCE_DATE_EPOCH
 # OpenShell runs the sandbox as UID/GID 10001 with the home volume at /sandbox (spike 1, 8).
 RUN groupadd --gid 10001 sandbox \
  && useradd --uid 10001 --gid 10001 --home-dir /sandbox --no-create-home --shell /bin/bash sandbox \
@@ -198,6 +204,10 @@ RUN set -eux; \
 COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
+# koinon.core (ADR 0093), Koinon's one owned OpenCode plugin: only the module, never its tests or
+# dev project (flavors/opencode/plugins/{package.json,pnpm-*,tsconfig*,koinon-core/test/}). Listed
+# first in the config's plugin list (README.md, "koinon.core") so it wins an ID clash.
+COPY --chmod=0644 plugins/koinon-core/index.ts /usr/local/lib/koinon/opencode/plugins/koinon-core/index.ts
 # Koinon's retry policy for OpenCode's model requests, loaded by the config's plugin list
 # (README.md, "Model retries"); outside every config root, so nothing else loads it.
 COPY --chmod=0644 plugins/koinon-retry/index.js /usr/local/lib/koinon/opencode/plugins/koinon-retry/index.js

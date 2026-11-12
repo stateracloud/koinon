@@ -79,7 +79,7 @@ var crossOrgQueries = map[string]string{
 	"audit.sql:ListInstallAnchorHeadsInRange":            "the install export: the org heads each anchor commits to as stream lines; install_audit_anchor_heads.org_id names the anchored org, no org owns the rows",
 	"audit.sql:CheckAnchoredHeads":                       "the audit verifier: compares one anchor's org heads with each org chain (ADR 0100 decision 4.1)",
 	"sandboxes.sql:CountAgentSandboxesByState":           "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
-	"sandboxes.sql:ListAgentsForUnmarked":                "koinon-reconciler unmarked list (operator, read-only): each live org's agents with status and flavor, to give every unmarked OpenShell object of the install a reason",
+	"sandboxes.sql:ListAgentsForUnmarked":                "koinon-reconciler unmarked list (operator, read-only): each live org's agents with status and harness, to give every unmarked OpenShell object of the install a reason",
 	"sandboxes.sql:ListOrgWorkspacesForUnmarked":         "koinon-reconciler unmarked list (operator, read-only): which org of this database owns each OpenShell workspace of the install",
 	"agents.sql:ListActiveAgentVersionsAllOrgs":          "the trigger scheduler: lists the active triggers of every live org's active agents; read-only",
 	"agents.sql:ListAgentActivationsAllOrgs":             "the schedule trigger: when each live org's active agent version was activated; read-only",

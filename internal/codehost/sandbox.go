@@ -8,7 +8,7 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 )
 
-// What a connection's host adds to the git setup of a sandbox (ADR 0062). The flavor images
+// What a connection's host adds to the git setup of a sandbox (ADR 0062). The harness images
 // carry git's configuration for the default host (flavors/common/etc/koinon/git/config) and
 // include SandboxGitConfig, which koinon-agentd writes before every harness start.
 const (
@@ -17,7 +17,7 @@ const (
 	// SandboxGitCA is the CA file git trusts for the connection's host: the sandbox's system
 	// roots plus the connection's CA bundle.
 	SandboxGitCA = "/sandbox/.koinon/git/ca.pem"
-	// CredentialHelper is git's credential helper in the flavor images. It takes --host.
+	// CredentialHelper is git's credential helper in the harness images. It takes --host.
 	//nolint:gosec // a path, not a credential
 	CredentialHelper = "/usr/local/bin/koinon-git-credential"
 )

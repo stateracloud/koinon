@@ -14,6 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -36,7 +37,7 @@ func (b *panicBackend) Upload(ctx context.Context, ws, sb, dest string, tar io.R
 
 var _ = Describe("A panic while driving a run", func() {
 	It("stops the heartbeat, fails the run, and leaves the worker driving the next one", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.backendOverride = &panicBackend{Backend: e.backend}
 		first := e.enqueue(ctx, e.task(ctx, "first"))
 		e.pool("agentd-a")

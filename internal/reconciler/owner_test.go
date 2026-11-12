@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -41,8 +42,8 @@ var _ = Describe("Reconciler install ownership", func() {
 		// retention is the home retention of the reconcilers mk makes.
 		retention reconciler.Retention
 	)
-	flavors := map[store.AgentFlavor]reconciler.Flavor{
-		store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+	harnesses := map[string]reconciler.Harness{
+		harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 	}
 	sandboxOf := func(agent store.Agent) string { return execution.AgentSandboxName(org.Bytes, agent.ID.Bytes) }
 	sandboxProviderName := func(agent store.Agent) string {
@@ -88,7 +89,7 @@ var _ = Describe("Reconciler install ownership", func() {
 				ProviderKeys:        reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
 				ProviderKeyDir:      "/secrets/providers",
 				URLPolicy:           testPolicy,
-				Flavors:             flavors,
+				Harnesses:           harnesses,
 				RuntimeClassName:    "kata",
 				MaxRecreatesPerPass: maxRecreates,
 				HomeRetention:       retention,
@@ -214,7 +215,7 @@ var _ = Describe("Reconciler install ownership", func() {
 		type line struct{ Kind, Name, Reason string }
 		list := func(ctx context.Context) []line {
 			GinkgoHelper()
-			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"), flavors)
+			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"), harnesses)
 			Expect(err).NotTo(HaveOccurred())
 			var out []line
 			for _, o := range objs {
@@ -246,7 +247,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			_, err = bk("").CreateSandbox(ctx, orphanWS, execution.SandboxSpec{Name: "ka-orphan", Image: image})
 			Expect(err).NotTo(HaveOccurred())
 			// Another install's object in this database's workspace.
-			theirs := reconciler.GatewayProfile(store.AgentFlavorOpencode, reconciler.Flavor{Binaries: []string{"/bin/x"}}, reconciler.Endpoint{Host: "h", Port: 1}, false)
+			theirs := reconciler.GatewayProfile(harness.OpenCode, reconciler.Harness{Binaries: []string{"/bin/x"}}, reconciler.Endpoint{Host: "h", Port: 1}, false)
 			theirs.ID = "koinon-theirs"
 			Expect(bk("mark-other").EnsureProvider(ctx, ws, execution.Provider{
 				Name: "kp-theirs", Profile: theirs,
@@ -254,7 +255,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			})).To(Succeed())
 
 			names := func(a store.Agent) execution.AgentNames { return execution.AgentObjectNames(org.Bytes, a.ID.Bytes) }
-			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"), flavors)
+			objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"), harnesses)
 			Expect(err).NotTo(HaveOccurred())
 			got := map[string]string{}
 			for _, o := range objs {
@@ -264,7 +265,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(active).Provider, reconciler.ReasonPendingClaim))
 			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/"+names(draft).Sandbox, reconciler.ReasonWaitsForAgent))
 			Expect(got).To(HaveKeyWithValue(ws+"/provider/"+names(draft).Provider, reconciler.ReasonWaitsForAgent))
-			Expect(got).To(HaveKeyWithValue(ws+"/profile/"+profileID, reconciler.ReasonPendingClaim), "an active agent of the flavor imports it")
+			Expect(got).To(HaveKeyWithValue(ws+"/profile/"+profileID, reconciler.ReasonPendingClaim), "an active agent of the harness imports it")
 			Expect(got).To(HaveKeyWithValue(ws+"/sandbox/ka-handmade", reconciler.ReasonNotReconcilerMade))
 			Expect(got).To(HaveKeyWithValue(orphanWS+"/sandbox/ka-orphan", reconciler.ReasonOrgNotInDB))
 			Expect(got).NotTo(HaveKey(ws + "/provider/kp-theirs"))
@@ -279,7 +280,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			_ = list(ctx)
 			Expect(osg.Calls("CreateProvider") + osg.Calls("CreateSandbox")).To(Equal(creates))
 			Expect(osg.Calls("DeleteProvider") + osg.Calls("DeleteSandbox")).To(Equal(deletes))
-			_, err = reconciler.ListUnmarked(ctx, q, bk(""), flavors)
+			_, err = reconciler.ListUnmarked(ctx, q, bk(""), harnesses)
 			Expect(err).To(HaveOccurred(), "without an install mark nothing is safe to say")
 		})
 
@@ -320,7 +321,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(osg.Provider(ws, names.Provider).GetMetadata().GetId()).To(Equal(id), "a marked provider is not recreated")
 		})
 
-		It("marks the flavor profile of a draft agent whose key Secret was deleted, and leaves its provider", func(ctx SpecContext) {
+		It("marks the harness profile of a draft agent whose key Secret was deleted, and leaves its provider", func(ctx SpecContext) {
 			agent := newOnDemandAgent(ctx, org, user, `{"instructions":"help"}`)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // provider and profile, no sandbox (on demand)
@@ -371,7 +372,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(list(ctx)).To(BeEmpty())
 		})
 
-		It("marks the flavor profile of an archived agent and does not delete it", func(ctx SpecContext) {
+		It("marks the harness profile of an archived agent and does not delete it", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
@@ -382,7 +383,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			live := mk("mark-live", 0)
 			Expect(live.ReconcileAll(ctx)).To(Succeed())
 			Expect(osg.Provider(ws, names.Provider)).To(BeNil(), "the archive deletes the agent's provider")
-			Expect(osg.Profile(ws, profileID)).NotTo(BeNil(), "the shared flavor profile stays")
+			Expect(osg.Profile(ws, profileID)).NotTo(BeNil(), "the shared harness profile stays")
 			Expect(osg.Profile(ws, profileID).GetAnnotations()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
 			Expect(list(ctx)).To(BeEmpty())
 			Expect(live.ReconcileAll(ctx)).To(Succeed())
@@ -391,7 +392,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(gauge("sandbox")).To(BeZero())
 		})
 
-		It("marks the flavor profile of an agent archived and cleaned up before the mark was on", func(ctx SpecContext) {
+		It("marks the harness profile of an agent archived and cleaned up before the mark was on", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed()) // made before the install mark
@@ -415,7 +416,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(testutil.ToFloat64(m.UnmarkedStale)).To(BeZero())
 		})
 
-		It("keeps the flavor profile of an archived agent for an active agent of the same flavor", func(ctx SpecContext) {
+		It("keeps the harness profile of an archived agent for an active agent of the same harness", func(ctx SpecContext) {
 			keep, gone := newAgent(ctx, org, user), newAgent(ctx, org, user)
 			Expect(mk("", 0).ReconcileAll(ctx)).To(Succeed())
 			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: gone.ID})
@@ -443,14 +444,14 @@ var _ = Describe("Reconciler install ownership", func() {
 			Expect(osg.Profile(ws, profileID)).To(BeNil())
 		})
 
-		It("says pending-claim for the profile of a configured flavor no agent of the org has, not-reconciler-made otherwise", func(ctx SpecContext) {
+		It("says pending-claim for the profile of a configured harness no agent of the org has, not-reconciler-made otherwise", func(ctx SpecContext) {
 			_, err := bk("").EnsureWorkspace(ctx, ws, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(bk("").EnsureProvider(ctx, ws, execution.Provider{
-				Name: "kp-handmade", Profile: reconciler.GatewayProfile(store.AgentFlavorOpencode, flavors[store.AgentFlavorOpencode], reconciler.Endpoint{Host: "h", Port: 1}, false),
+				Name: "kp-handmade", Profile: reconciler.GatewayProfile(harness.OpenCode, harnesses[harness.OpenCode], reconciler.Endpoint{Host: "h", Port: 1}, false),
 				Credentials: map[string]string{reconciler.GatewayKeyEnvVar: "koinon_test_not-a-real-token"},
 			})).To(Succeed())
-			reasonOf := func(configured map[store.AgentFlavor]reconciler.Flavor) string {
+			reasonOf := func(configured map[string]reconciler.Harness) string {
 				GinkgoHelper()
 				objs, err := reconciler.ListUnmarked(ctx, q, bk("mark-live"), configured)
 				Expect(err).NotTo(HaveOccurred())
@@ -462,10 +463,10 @@ var _ = Describe("Reconciler install ownership", func() {
 				Fail("the profile is not listed")
 				return ""
 			}
-			Expect(reasonOf(flavors)).To(Equal(reconciler.ReasonPendingClaim), "the org pass marks it")
-			Expect(reasonOf(nil)).To(Equal(reconciler.ReasonNotReconcilerMade), "an unconfigured flavor")
-			Expect(reasonOf(map[store.AgentFlavor]reconciler.Flavor{store.AgentFlavorOpencode: {}})).To(Equal(reconciler.ReasonNotReconcilerMade),
-				"a flavor without an image is not rendered")
+			Expect(reasonOf(harnesses)).To(Equal(reconciler.ReasonPendingClaim), "the org pass marks it")
+			Expect(reasonOf(nil)).To(Equal(reconciler.ReasonNotReconcilerMade), "an unconfigured harness")
+			Expect(reasonOf(map[string]reconciler.Harness{harness.OpenCode: {}})).To(Equal(reconciler.ReasonNotReconcilerMade),
+				"a harness without an image is not rendered")
 		})
 
 		It("lists a draft agent's stopped sandbox and an archived agent's retained sandbox as waits-for-agent, and the rest reaches 0", func(ctx SpecContext) {

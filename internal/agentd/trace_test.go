@@ -34,6 +34,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/tracing/semconv"
@@ -254,7 +255,7 @@ func parkedRun(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.TraceDeci
 // parkedRunWith is parkedRun with between, which runs while the run is parked.
 func parkedRunWith(ctx SpecContext, a *askEnv, rcv *otlpReceiver, d agentd.TraceDecider, between func(), mutate ...func(*agentd.Tracing)) (store.Run, string) {
 	var qid string
-	a.harness.set(func(h *harness) { h.script = traceScript(a, &qid) })
+	a.harness.set(func(h *fakeHarness) { h.script = traceScript(a, &qid) })
 	t := a.task(ctx, markQuestion+": deploy the app")
 	r := a.enqueue(ctx, t)
 	a.pool("agentd-trace", tracingOn(rcv, d, mutate...))
@@ -440,7 +441,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 	})
 
 	It("emits nothing for a run that is not traced", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		t := e.task(ctx, "say hello")
 		r := e.enqueue(ctx, t)
@@ -453,7 +454,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 	})
 
 	It("never delays a run when the receiver does not answer", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		rcv := newReceiver()
 		rcv.block = make(chan struct{})
 		DeferCleanup(func() { close(rcv.block) })
@@ -485,7 +486,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 		DeferCleanup(func() { close(rcv.block) })
 		reg := agentd.NewMetrics(nil)
 		var qid string
-		a.harness.set(func(h *harness) { h.script = traceScript(a, &qid) })
+		a.harness.set(func(h *fakeHarness) { h.script = traceScript(a, &qid) })
 		t := a.task(ctx, markQuestion+": deploy the app")
 		r := a.enqueue(ctx, t)
 		a.pool("agentd-full", tracingOn(rcv, fakeDecider{traced: true, level: "none"}, func(tr *agentd.Tracing) {

@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -264,7 +265,7 @@ var _ = Describe("home checkpoints", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, store.AgentFlavorOpencode)
+		e = newEnv(ctx, harness.OpenCode)
 		// More than the supervisor's 4 MiB exec stdin cap, and incompressible.
 		raw := make([]byte, 5<<20+123)
 		_, _ = rand.Read(raw)

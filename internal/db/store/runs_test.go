@@ -176,7 +176,7 @@ var _ = Describe("runs", func() {
 		It("does not queue a run for an agent that is not active", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			draft, err := q.CreateAgent(ctx, store.CreateAgentParams{
-				OrgID: org, DisplayName: "draft", Flavor: store.AgentFlavorOpencode, CreatedBy: user,
+				OrgID: org, DisplayName: "draft", Harness: "opencode", CreatedBy: user,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			t := newTask(ctx, org, user, draft.ID)

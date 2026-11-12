@@ -9,6 +9,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 func TestClassifyUnmarked(t *testing.T) {
@@ -47,7 +48,7 @@ func TestClassifyUnmarked(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: id(1), Status: tc.agent.status, Flavor: store.AgentFlavorOpencode, SandboxState: tc.agent.sb}
+			a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: id(1), Status: tc.agent.status, Harness: harness.OpenCode, SandboxState: tc.agent.sb}
 			n := execution.AgentObjectNames(org.Bytes, a.ID.Bytes)
 			a.SandboxName, a.ProviderName = rowNames(tc.agent.sb, n.Sandbox, n.Provider)
 			objs := []execution.UnmarkedObject{
@@ -87,7 +88,7 @@ func TestClassifyUnmarkedGitHubProfile(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: pgtype.UUID{Bytes: [16]byte{2, 1}, Valid: true}, Status: tc.status, Flavor: store.AgentFlavorOpencode, SandboxState: tc.sb}
+			a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: pgtype.UUID{Bytes: [16]byte{2, 1}, Valid: true}, Status: tc.status, Harness: harness.OpenCode, SandboxState: tc.sb}
 			n := execution.AgentObjectNames(org.Bytes, a.ID.Bytes)
 			a.SandboxName, a.ProviderName = rowNames(tc.sb, n.Sandbox, n.Provider)
 			objs := []execution.UnmarkedObject{{Workspace: ws, Kind: "profile", Name: n.GitHubProfile}}
@@ -121,7 +122,7 @@ func TestClassifyUnmarkedRowNames(t *testing.T) {
 	n := execution.AgentObjectNames(org.Bytes, agentID.Bytes)
 	task := execution.TaskSandboxName(org.Bytes, agentID.Bytes, [16]byte{3})
 	sb := store.NullSandboxState{SandboxState: store.SandboxStateStopped, Valid: true}
-	a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: agentID, Status: store.AgentStatusDraft, Flavor: store.AgentFlavorOpencode, SandboxState: sb}
+	a := store.ListAgentsForUnmarkedRow{OrgID: org, ID: agentID, Status: store.AgentStatusDraft, Harness: harness.OpenCode, SandboxState: sb}
 	a.SandboxName, a.ProviderName = rowNames(sb, task, n.Provider)
 	objs := []execution.UnmarkedObject{
 		{Workspace: ws, Kind: "sandbox", Name: task, Labels: made},

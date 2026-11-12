@@ -29,7 +29,7 @@ var _ = DescribeTable("ClassifySandboxWait",
 	Entry("captured: no node has the CPU", "Unschedulable",
 		"0/1 nodes are available: 1 Insufficient cpu. preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.",
 		execution.WaitCauseNoNodes),
-	// With a flavor image that cannot be pulled, OpenShell reports no pull error in its conditions: its
+	// With a harness image that cannot be pulled, OpenShell reports no pull error in its conditions: its
 	// ConfigurationReady condition stays False and the pod's ImagePullBackOff shows only in the pod's
 	// container status and events. These two entries pin what the classifier does with OpenShell's
 	// words alone (the sandbox observer, ADR 0078, off or unable to read): unknown. With the observer

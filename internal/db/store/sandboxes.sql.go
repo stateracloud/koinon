@@ -304,7 +304,7 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 }
 
 const listAgentsForUnmarked = `-- name: ListAgentsForUnmarked :many
-SELECT a.org_id, a.id, a.status, a.flavor, s.state AS sandbox_state, s.sandbox_name, s.provider_name
+SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
 FROM agents a
 JOIN orgs o ON o.id = a.org_id
 LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
@@ -316,7 +316,7 @@ type ListAgentsForUnmarkedRow struct {
 	OrgID        pgtype.UUID
 	ID           pgtype.UUID
 	Status       AgentStatus
-	Flavor       AgentFlavor
+	Harness      string
 	SandboxState NullSandboxState
 	SandboxName  pgtype.Text
 	ProviderName pgtype.Text
@@ -339,7 +339,7 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 			&i.OrgID,
 			&i.ID,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.SandboxState,
 			&i.SandboxName,
 			&i.ProviderName,
@@ -355,7 +355,7 @@ func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnm
 }
 
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
-SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit, a.keep_warm_granted FROM agents a
+SELECT a.org_id, a.id, a.display_name, a.status, a.harness, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit, a.keep_warm_granted FROM agents a
 WHERE a.org_id = $1
   AND (a.status <> 'archived' OR EXISTS (
       SELECT 1 FROM agent_sandboxes s
@@ -380,7 +380,7 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.ID,
 			&i.DisplayName,
 			&i.Status,
-			&i.Flavor,
+			&i.Harness,
 			&i.TemplateID,
 			&i.ActiveVersionID,
 			&i.LatestVersion,

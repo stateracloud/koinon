@@ -98,9 +98,9 @@ var _ = Describe("Embedded templates", func() {
 			Expect(ok).To(BeTrue())
 		})
 
-		It("offers OpenCode, the only v0.1 flavor, as default", func() {
-			Expect(t.Spec.Flavors.Allowed).To(ConsistOf(templates.FlavorOpenCode))
-			Expect(t.Spec.Flavors.Default).To(Equal(templates.FlavorOpenCode))
+		It("offers OpenCode, the only v0.1 harness, as default", func() {
+			Expect(t.Spec.Harnesses.Allowed).To(ConsistOf(templates.HarnessOpenCode))
+			Expect(t.Spec.Harnesses.Default).To(Equal(templates.HarnessOpenCode))
 		})
 
 		It("suggests the GitHub v0.1 scopes on the Standard preset for one repository", func() {

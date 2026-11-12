@@ -24,7 +24,9 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Flavor is the harness an agent runs on (ADR 0035).
+// Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since
+// ADR 0112 ("opencode" is the built-in one); the fields of this type are deprecated and kept so
+// the API stays wire- and source-compatible.
 type Flavor int32
 
 const (
@@ -609,11 +611,17 @@ type Template struct {
 	// Hex SHA-256 of the canonical template document.
 	ContentHash string `protobuf:"bytes,3,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
 	// The template's own version label, for example "0.1.0".
-	Version        string   `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
-	DisplayName    string   `protobuf:"bytes,5,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Description    string   `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	Version     string `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	DisplayName string `protobuf:"bytes,5,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description string `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	// Deprecated: use allowed_harnesses. A harness with no Flavor value is left out.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 	AllowedFlavors []Flavor `protobuf:"varint,7,rep,packed,name=allowed_flavors,json=allowedFlavors,proto3,enum=koinon.template.v1alpha1.Flavor" json:"allowed_flavors,omitempty"`
-	DefaultFlavor  Flavor   `protobuf:"varint,8,opt,name=default_flavor,json=defaultFlavor,proto3,enum=koinon.template.v1alpha1.Flavor" json:"default_flavor,omitempty"`
+	// Deprecated: use default_harness. Unspecified when the default harness has no Flavor value.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	DefaultFlavor Flavor `protobuf:"varint,8,opt,name=default_flavor,json=defaultFlavor,proto3,enum=koinon.template.v1alpha1.Flavor" json:"default_flavor,omitempty"`
 	// Logical model name; "default" is the install's default model.
 	Model        string     `protobuf:"bytes,9,opt,name=model,proto3" json:"model,omitempty"`
 	Instructions string     `protobuf:"bytes,10,opt,name=instructions,proto3" json:"instructions,omitempty"`
@@ -627,9 +635,13 @@ type Template struct {
 	Ephemeral bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	// The starting value of the agent's thinking setting, "on" or "off"; empty when the template
 	// names none, which is the default, on (ADR 0069 amendment 2026-10-29).
-	Thinking      string `protobuf:"bytes,16,opt,name=thinking,proto3" json:"thinking,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Thinking string `protobuf:"bytes,16,opt,name=thinking,proto3" json:"thinking,omitempty"`
+	// Names of the harnesses the agent may run on (ADR 0112), for example "opencode".
+	AllowedHarnesses []string `protobuf:"bytes,17,rep,name=allowed_harnesses,json=allowedHarnesses,proto3" json:"allowed_harnesses,omitempty"`
+	// The harness an agent gets when the request names none; one of allowed_harnesses.
+	DefaultHarness string `protobuf:"bytes,18,opt,name=default_harness,json=defaultHarness,proto3" json:"default_harness,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Template) Reset() {
@@ -704,6 +716,7 @@ func (x *Template) GetDescription() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 func (x *Template) GetAllowedFlavors() []Flavor {
 	if x != nil {
 		return x.AllowedFlavors
@@ -711,6 +724,7 @@ func (x *Template) GetAllowedFlavors() []Flavor {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 func (x *Template) GetDefaultFlavor() Flavor {
 	if x != nil {
 		return x.DefaultFlavor
@@ -770,6 +784,20 @@ func (x *Template) GetEphemeral() bool {
 func (x *Template) GetThinking() string {
 	if x != nil {
 		return x.Thinking
+	}
+	return ""
+}
+
+func (x *Template) GetAllowedHarnesses() []string {
+	if x != nil {
+		return x.AllowedHarnesses
+	}
+	return nil
+}
+
+func (x *Template) GetDefaultHarness() string {
+	if x != nil {
+		return x.DefaultHarness
 	}
 	return ""
 }
@@ -890,16 +918,16 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x121\n" +
 	"\x04role\x18\x03 \x01(\x0e2\x1d.koinon.auth.v1alpha1.OrgRoleR\x04role\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x9c\x05\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\"\xfa\x05\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
 	"\fcontent_hash\x18\x03 \x01(\tR\vcontentHash\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12!\n" +
 	"\fdisplay_name\x18\x05 \x01(\tR\vdisplayName\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\x12I\n" +
-	"\x0fallowed_flavors\x18\a \x03(\x0e2 .koinon.template.v1alpha1.FlavorR\x0eallowedFlavors\x12G\n" +
-	"\x0edefault_flavor\x18\b \x01(\x0e2 .koinon.template.v1alpha1.FlavorR\rdefaultFlavor\x12\x14\n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x12M\n" +
+	"\x0fallowed_flavors\x18\a \x03(\x0e2 .koinon.template.v1alpha1.FlavorB\x02\x18\x01R\x0eallowedFlavors\x12K\n" +
+	"\x0edefault_flavor\x18\b \x01(\x0e2 .koinon.template.v1alpha1.FlavorB\x02\x18\x01R\rdefaultFlavor\x12\x14\n" +
 	"\x05model\x18\t \x01(\tR\x05model\x12\"\n" +
 	"\finstructions\x18\n" +
 	" \x01(\tR\finstructions\x127\n" +
@@ -909,7 +937,9 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12=\n" +
 	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\x12\x1c\n" +
 	"\tephemeral\x18\x0f \x01(\bR\tephemeral\x12\x1a\n" +
-	"\bthinking\x18\x10 \x01(\tR\bthinking\"\x16\n" +
+	"\bthinking\x18\x10 \x01(\tR\bthinking\x12+\n" +
+	"\x11allowed_harnesses\x18\x11 \x03(\tR\x10allowedHarnesses\x12'\n" +
+	"\x0fdefault_harness\x18\x12 \x01(\tR\x0edefaultHarness\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +

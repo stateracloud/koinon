@@ -41,7 +41,7 @@ type Config struct {
 type Backend struct {
 	c    openshellv1.OpenShellClient
 	conn *grpc.ClientConn
-	// profileMu serialises ensureProfile: the profile of a flavor is shared by the agents of a
+	// profileMu serialises ensureProfile: the profile of a harness is shared by the agents of a
 	// workspace, which the reconciler converges concurrently (plan item LT1), and a profile
 	// imported twice at once is an AlreadyExists error.
 	profileMu sync.Mutex
