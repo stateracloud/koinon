@@ -131,6 +131,17 @@ The goal of decision 6, replacing agentgateway with another gateway, is met by i
 `ModelGateway`. A separate `MCPGateway` is deferred until a gateway needs to be driven for MCP
 separately from models.
 
+## Amendment (2026-11-12): the fallback is re-checked at each release
+
+The maintainer decided on 2026-10-28 to stay on agentgateway behind `ModelGateway` and to keep Agent
+Router as the documented fallback (see the alternatives table). The table says only that it "remains
+the fallback if agentgateway fails its spike". The spike is done, so the fallback needs its own
+trigger: at each release candidate and final release, check Agent Router's upstream pull request
+#2834 and its release notes against the three gaps in the table (token-window budgets only, quota
+that fails open, Envoy Gateway needed). The steps and the criteria for reconsidering are in
+[docs/dev/releasing.md](../dev/releasing.md#cut-a-release-candidate). A change of gateway still needs
+a new ADR.
+
 ## Links
 
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/upgrade/0-1-0.mdx
