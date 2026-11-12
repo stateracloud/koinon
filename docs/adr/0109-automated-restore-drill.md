@@ -107,10 +107,10 @@ edited.
   run by the `openshell.ai/gateway-id` label.
 - A second OpenShell gateway and an object store run in the kind cluster, which loads a 4 vCPU runner.
   Phase 1 measures it; the answer decides whether the drill needs a larger runner.
-- The guide's blocks name the namespace `koinon` and the release `koinon`. The drill substitutes both
-  in the text it runs. That is an interim measure; its exit is the parameterised restore guide, which
-  makes the blocks take variables. The substitution refuses a block that still has a bare
-  `koinon` after it ran, so a new guide command cannot slip past it.
+- The guide's blocks take the namespace and the release as the variables `NS` and `REL` (default `koinon`,
+  issue #517). The drill sets both to the install under test and runs the blocks as written. It refuses a
+  block that still names the default install literally, so a new guide command cannot slip past it. (The
+  first drill substituted the names in the text it ran; that interim measure is gone.)
 - Phase 2 adds the archived agent and the dead-executor workflow, which need a fake sink with a release
   endpoint and an object store with checkpoints on; phase 3 (the lab profile and `release-gate.sh`)
   follows.

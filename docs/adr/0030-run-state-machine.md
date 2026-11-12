@@ -323,3 +323,29 @@ tool call updates. It has no context-window-error pattern, because the failure c
 `context_overflow`. Its action key is the tool call's kind, title and raw input, and its result key is
 the status, raw output and content, both hashed. And the response to a detection is one nudge then a
 failed run, where OpenHands stops its loop and lets the caller decide.
+
+## Amendment 2026-11-12 (#22): the context guard asks before a request can overflow
+
+Maintainer decision of 2026-11-11, triage of 2026-11-12. This replaces "shrink the largest input
+once, then `ask_user`" in the table above for the input that causes the overflow.
+
+- **The cap.** An input is one message on the task (a webhook body, a chat paste). Before agentd
+  sends the prompt it estimates each input (`internal/contextguard`: UTF-8 bytes divided by 2.3, the
+  ratio of the newest tokenizer, so the guard parks early rather than late). An input over **80% of
+  the model's context window** is not sent. The window is the model's accepted context length in the
+  catalog (`openrouter_limit_values`, ADR 0070); a model the catalog has no window for is assumed to
+  have 200000 tokens, OpenCode's own assumption, so the cap is 160000 tokens.
+- **The artifact.** The whole input is kept as a run artifact (`run_artifacts`, kind `input`; in
+  Postgres until artifacts move to object storage, ADR 0031) and written to
+  `<session directory>/inputs/<artifact id>.txt` in the sandbox, so the agent can read it in parts.
+  Koinon never truncates an input silently.
+- **The ask.** agentd creates an ask_user question addressed like a question the agent would ask
+  (the task's notify target, else the org's admins) and ends the turn without sending the prompt:
+  the run parks with reason `input_required` and the task moves to input-required. The question
+  names the artifact and its file. The safe default if nobody answers is to skip the input. The
+  run does not read the message again when it resumes; the answer is the next prompt.
+- **Not done: summary on failure.** Replacing the largest input with a summary once on a
+  `context_overflow` failure is not part of this guard. A summary needs a model call on an input that
+  does not fit the model, and the maintainer decided on the catalog cap and a human. A
+  `context_overflow` that still happens (an agent whose tool results grow the context) fails the run
+  as before.

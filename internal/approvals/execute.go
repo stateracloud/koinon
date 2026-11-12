@@ -57,7 +57,7 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 	if err != nil {
 		return nil, err
 	}
-	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
+	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions}, s.dial)
 	if err != nil {
 		return nil, err
 	}

@@ -8,42 +8,23 @@ import (
 	"strings"
 )
 
-// The backup and restore guide (test/e2e/commands/backup-restore.e1) writes the namespace `koinon`
-// and the release `koinon`. The drill runs the blocks as written, with those two names replaced, so
-// the guide stays tested. This is an interim measure (ADR 0109, Consequences): its exit is the
-// parameterised restore guide, after which the blocks take variables and Substitute goes away.
-var (
-	nsFlagRE   = regexp.MustCompile(`(^|\s)-n koinon(\s|$)`)
-	objectRE   = regexp.MustCompile(`\b(deploy|deployment|secret)/koinon-`)
-	clusterRE  = regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`)
-	instanceRE = regexp.MustCompile(`(^|[\s,'"])app\.kubernetes\.io/instance=koinon([,'"\s]|$)`)
-)
+// The backup and restore guide (test/e2e/commands/backup-restore.e1) takes the namespace and the release
+// as the variables NS and REL (each block defaults them to koinon). The drill runs the blocks as written,
+// with NS and REL set to the install under test, so the guide stays tested.
 
-// Substitute rewrites one guide block for the install in namespace ns, release release. Release
-// must contain "koinon" (Topology.Validate): the chart then names its objects <release>-api and so on.
-// It fails when a name of the guide's `koinon` install is still in the text afterwards, so a new
-// guide command that Substitute does not know cannot run against the wrong install.
-func Substitute(block, ns, release string) (string, error) {
+// GuideEnv is the environment that points a guide block at the install in ns with the given release.
+// Release must contain "koinon" (Topology.Validate): the chart then names its objects <release>-api and so on.
+func GuideEnv(ns, release string) ([]string, error) {
 	if err := CheckNamespace(ns); err != nil {
-		return "", err
+		return nil, err
 	}
 	if !strings.Contains(release, "koinon") {
-		return "", fmt.Errorf("release %q must contain \"koinon\"", release)
+		return nil, fmt.Errorf("release %q must contain \"koinon\"", release)
 	}
-	out := block
-	for nsFlagRE.MatchString(out) {
-		out = nsFlagRE.ReplaceAllString(out, "${1}-n "+ns+"${2}")
-	}
-	out = objectRE.ReplaceAllString(out, "${1}/"+release+"-")
-	out = clusterRE.ReplaceAllString(out, "${1}cnpg.io/cluster="+release+"-pg")
-	out = instanceRE.ReplaceAllString(out, "${1}app.kubernetes.io/instance="+release+"${2}")
-	if err := Unsubstituted(out); err != nil {
-		return "", err
-	}
-	return out, nil
+	return []string{"NS=" + ns, "REL=" + release}, nil
 }
 
-var leftoverRE = []*regexp.Regexp{
+var hardcodedRE = []*regexp.Regexp{
 	regexp.MustCompile(`(^|\s)-n koinon(\s|$)`),
 	regexp.MustCompile(`\b(deploy|deployment)/koinon-(api|reconciler|agentd|gateway|pg|kek)\b`),
 	regexp.MustCompile(`(^|[\s,'"])cnpg\.io/cluster=koinon-pg\b`),
@@ -52,11 +33,12 @@ var leftoverRE = []*regexp.Regexp{
 	regexp.MustCompile(`\b(svc|service|secret|statefulset|job|pod)/koinon(-(api|reconciler|agentd|gateway|pg|kek)\b|\s|$)`),
 }
 
-// Unsubstituted reports a name of the guide's own install left in text.
-func Unsubstituted(text string) error {
-	for _, re := range leftoverRE {
+// Hardcoded reports a name of the guide's default install written literally in text instead of through
+// $NS and $REL, so a new guide command that ignores the variables cannot run against the wrong install.
+func Hardcoded(text string) error {
+	for _, re := range hardcodedRE {
 		if m := re.FindString(text); m != "" {
-			return fmt.Errorf("the guide block still names the guide's install (%q); teach drill.Substitute this command", strings.TrimSpace(m))
+			return fmt.Errorf("the guide block names the default install literally (%q); use $NS and $REL", strings.TrimSpace(m))
 		}
 	}
 	return nil

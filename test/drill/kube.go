@@ -178,13 +178,16 @@ func (k *Kube) GuideBlock(ctx context.Context, repoRoot, workdir, name, ns, rele
 	if err != nil {
 		return "", err
 	}
-	script, err := Substitute(text, ns, release)
+	if err := Hardcoded(text); err != nil {
+		return "", fmt.Errorf("guide block %s: %w", name, err)
+	}
+	env, err := GuideEnv(ns, release)
 	if err != nil {
 		return "", fmt.Errorf("guide block %s: %w", name, err)
 	}
-	c := exec.CommandContext(ctx, "bash", "-euo", "pipefail", "-c", script) //nolint:gosec // the guide block is the thing under test
+	c := exec.CommandContext(ctx, "bash", "-euo", "pipefail", "-c", text) //nolint:gosec // the guide block is the thing under test
 	c.Dir = workdir
-	c.Env = append(os.Environ(), "KUBECONFIG="+k.Kubeconfig, "PATH="+k.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c.Env = append(append(os.Environ(), env...), "KUBECONFIG="+k.Kubeconfig, "PATH="+k.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var out bytes.Buffer
 	c.Stdout, c.Stderr = &out, &out
 	if err := c.Run(); err != nil {
