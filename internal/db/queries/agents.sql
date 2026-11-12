@@ -116,10 +116,18 @@ RETURNING *;
 -- name: SetAgentKeepWarm :one
 -- Whether an org admin asks for the agent's sandbox to stay up (old issue 315). The operator's per-org cap
 -- decides how many of the requests the reconciler grants. Not a new version.
+-- Clearing the request clears the grant with it; a new request starts not granted until the next pass.
 UPDATE agents
-SET keep_warm = @keep_warm
+SET keep_warm = @keep_warm, keep_warm_granted = keep_warm_granted AND @keep_warm
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: SetAgentsKeepWarmGranted :exec
+-- The reconciler's decision on keep-warm requests (#100): sets keep_warm_granted of the named agents of
+-- one org. Only rows that change are written.
+UPDATE agents
+SET keep_warm_granted = @granted
+WHERE org_id = @org_id AND id = ANY(@ids::uuid[]) AND keep_warm_granted <> @granted;
 
 -- name: SetAgentSandboxResources :one
 -- An agent's sandbox resource override (NULL: follow the version's template values, then the platform
