@@ -299,25 +299,43 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	return out, nil
 }
 
-// ErrIDRetired is what [AddableID] returns for a KEK ID that the install audit chain records as retired.
-var ErrIDRetired = errors.New("KEK ID was retired")
+// ErrIDRetired is what [AddableID] returns for a KEK ID that the install audit chain has ever recorded.
+var ErrIDRetired = errors.New("KEK ID was used before; IDs are never reused: pick a new ID")
 
-// AddableID is the probe for every KEK add path: it reports true when the ID may not be added, either
-// because a stored value carries an envelope under it ([UsedID]) or because keys retire removed it
-// ([RetiredID]; the error is then [ErrIDRetired]). A retired ID has no envelopes, yet re-adding it with
-// new bytes would break "IDs are never reused" and let an old backup's KEK be mistaken for it.
+// AddableID is the probe for every KEK add path (keys add, the key-admin Job's plain add and its
+// recovery): it reports true when the ID may not be added, either because a stored value carries an
+// envelope under it ([UsedID]) or because the install audit chain ever recorded it ([RecordedID]; the
+// error is then [ErrIDRetired]). A retired or forgotten ID has no envelopes, yet old database backups may
+// still seal under it, so new bytes under it would break "IDs are never reused".
 func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	if used, err := UsedID(ctx, pool, id); err != nil || used {
 		return used, err
 	}
-	retired, err := RetiredID(ctx, pool, id)
+	seen, err := RecordedID(ctx, pool, id)
 	if err != nil {
-		return false, fmt.Errorf("check whether KEK %s was retired: %w", id, err)
+		return false, fmt.Errorf("check whether KEK %s was used before: %w", id, err)
 	}
-	if retired {
+	if seen {
 		return true, ErrIDRetired
 	}
 	return false, nil
+}
+
+// RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
+// keys.forget event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
+// after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
+func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
+	var found bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS (
+SELECT 1 FROM install_audit_events
+WHERE (action IN ($1, $2) AND target_kind = 'kek' AND target_id = $3)
+   OR (action LIKE 'keys.%' AND (
+        summary #> '{before,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
+     OR summary #> '{after,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
+     OR summary #> '{before,retired}' @> to_jsonb($3::text)
+     OR summary #> '{after,retired}' @> to_jsonb($3::text))))`,
+		ActionRetire, ForgetAction, id).Scan(&found)
+	return found, err
 }
 
 // UsedID reports whether any stored value carries an envelope under the KEK ID: the usage query
@@ -339,7 +357,7 @@ func RefuseUsedID(ctx context.Context, used func(context.Context, string) (bool,
 	}
 	u, err := used(ctx, id)
 	if errors.Is(err, ErrIDRetired) {
-		return fmt.Errorf("KEK ID %s was retired; IDs are never reused: pick a new ID", id)
+		return fmt.Errorf("KEK ID %s was used before; IDs are never reused: pick a new ID", id)
 	}
 	if err != nil {
 		return fmt.Errorf("check that KEK ID %s is unused: %w", id, err)

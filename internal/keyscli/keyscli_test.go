@@ -94,7 +94,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: ks, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		freeStorage()
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 	})

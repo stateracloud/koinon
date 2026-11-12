@@ -103,6 +103,11 @@ func strs(v any) []string {
 	return out
 }
 
+// envelopeOnly is the probe of the shared specs: the install audit chain is append-only and shared, and
+// they reuse fixed KEK IDs, which the full probe (keyscli.AddableID) would refuse as used before. The
+// specs of the never-reused rule set Tool.UsedID back to nil.
+func envelopeOnly(ctx context.Context, id string) (bool, error) { return keyscli.UsedID(ctx, pool, id) }
+
 // recordLive records the key set load returns as the chain's last state (a start-up observation with
 // no generated Secrets), so the next command or check starts from it.
 func recordLive(ctx context.Context, load keyscli.KeyLoader) {
@@ -244,7 +249,7 @@ var _ = Describe("key events in the install audit chain", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ks = keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: ks, Out: out, Now: func() time.Time { return now }}
+		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: ks, Out: out, Now: func() time.Time { return now }}
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 		// The chain's last state is whatever an earlier spec left: record this Secret as it is, so a
 		// command's "before" is not preceded by a keys.observed that only reflects the leftovers.

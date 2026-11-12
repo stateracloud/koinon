@@ -104,7 +104,7 @@ var _ = Describe("koinon-api keys new-repositories", func() {
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		out = &bytes.Buffer{}
-		tool = &keyscli.Tool{Pool: pool, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
+		tool = &keyscli.Tool{Pool: pool, UsedID: envelopeOnly, Store: keyscli.KubeStore{Client: kube, Namespace: ns, Name: "koinon-kek"}, Out: out, Now: func() time.Time { return now }, ProbeTimeout: 5 * time.Second, ProbePoll: 10 * time.Millisecond}
 		q = store.New(pool)
 		pw = checkpoint.Passwords{Q: q, Keys: ring(ctx), Begin: pool.Begin}
 		freeStorage()

@@ -758,7 +758,10 @@ Maintainer decision (procoduck, 2026-11-11).
   therefore runs in koinon-api: `koinon-api keys import` reads the manifest of `keys export` from
   standard input and merges it into the Secret, as the koinon-api service account, which the
   guard admits (owner decision 2026-11-12): it adds the manifest's KEKs, makes the manifest's active KEK
-  active and never removes a key; only `keys retire` removes one, with its database check. A KEK ID that
+  active and never removes a key; only `keys retire` removes one, with its database check. The add paths (`keys add`,
+  the key-admin Job's plain add and its recovery) refuse any ID the install audit chain ever recorded (a `keys.retire` or
+  `keys.forget` event, or the ID in the KEKs or Retired of a recorded state), besides an ID that stored envelopes carry:
+  IDs are never reused. Import keeps the narrower `keys.retire` rule, because it restores the same bytes. A KEK ID that
   the Secret holds with other key bytes is refused. A KEK ID that the install audit chain records as
   retired (a `keys.retire` event) is refused too, so an old backup cannot bring back a KEK that was
   removed on purpose, for example a compromised one; `--allow-retired` adds it inactive, and a retired

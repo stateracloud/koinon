@@ -152,10 +152,10 @@ func anyEnvelopeYet(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	return found, err
 }
 
-// kekIDUsedYet is keyscli.AddableID (envelopes or a keys.retire event) for every KEK add path (keys add, the Job's plain add and the recovery),
-// which must not guess: treating a missing table as empty (as anyEnvelopeYet does) would say "unused" for
-// an ID that later tables still carry, so the check fails closed instead and the operator reruns the
-// command once the migrations are done.
+// kekIDUsedYet is keyscli.AddableID (envelopes, or an ID the audit chain ever recorded) for every KEK add
+// path (keys add, the Job's plain add and the recovery). It must not guess: treating a missing table as
+// empty (as anyEnvelopeYet does) would say "unused" for an ID that later tables still carry, so the check
+// fails closed instead and the operator reruns the command once the migrations are done.
 func kekIDUsedYet(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	used, err := keyscli.AddableID(ctx, pool, id)
 	var pgErr *pgconn.PgError
