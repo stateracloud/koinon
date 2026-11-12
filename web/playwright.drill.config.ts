@@ -18,7 +18,8 @@ export default defineConfig({
   timeout: 2 * 60_000,
   expect: { timeout: 30_000 },
   forbidOnly: true,
-  reporter: [['list'], ['json', { outputFile: process.env.PLAYWRIGHT_JSON_REPORT ?? 'test-results-drill/report.json' }]],
+  // The list reporter only: a JSON report would carry step titles that include fill() values.
+  reporter: [['list']],
   // No trace and no video: both record fill() text, and the password is typed into this page.
   use: { baseURL: url, trace: 'off', video: 'off', screenshot: 'only-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

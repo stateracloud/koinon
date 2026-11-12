@@ -75,7 +75,7 @@ var _ = BeforeSuite(func() {
 	top, err = drill.LoadTopology(os.Getenv("KOINON_DRILL_TOPOLOGY"), runID)
 	Expect(err).NotTo(HaveOccurred())
 	if top.BrowserSignin {
-		testenv.Require(testenv.Binary("pnpm"))
+		testenv.Require(testenv.BinaryNamed("drill", "pnpm"))
 	}
 	kube, err = drill.NewKube(os.Getenv("KOINON_DRILL_KUBECONFIG"), top.Context, filepath.Join(outDir, "bin"))
 	Expect(err).NotTo(HaveOccurred())

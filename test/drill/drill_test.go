@@ -795,7 +795,10 @@ stringData:
 		if browserProfile() {
 			It("signs in through the browser", Label("browser-signin"), func(ctx SpecContext) {
 				needs("release")
-				openAPI(ctx, &dst) // a fresh port-forward: the browser is the only client of this one
+				// The browser gets its own port-forward: dst.client holds the signed-in session of later specs.
+				addr, stop, err := kube.PortForward(context.WithoutCancel(ctx), dst.in.Namespace, "svc/"+dst.name("api"), 8080)
+				must(err, "port-forward the API of "+dst.in.Release+" for the browser")
+				defer stop()
 				password := os.Getenv("KOINON_DRILL_WEB_PASSWORD")
 				if password == "" {
 					password = drill.SeededPassword
@@ -806,10 +809,9 @@ stringData:
 				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill")
 				// The password goes in the environment of the child only, never on its command line or into a log.
 				cmd.Env = append(os.Environ(),
-					"KOINON_DRILL_WEB_URL="+dst.client.Base,
+					"KOINON_DRILL_WEB_URL=http://"+addr,
 					"KOINON_DRILL_WEB_PASSWORD="+password,
 					"PLAYWRIGHT_OUTPUT_DIR="+filepath.Join(outDir, "browser-signin"),
-					"PLAYWRIGHT_JSON_REPORT="+filepath.Join(outDir, "browser-signin.json"),
 				)
 				cmd.Stdout, cmd.Stderr = logFile, logFile
 				must(cmd.Run(), "the Playwright sign-in spec on the restored copy (see browser-signin.log)")

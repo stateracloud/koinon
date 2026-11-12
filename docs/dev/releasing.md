@@ -87,8 +87,10 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
    It also asks for the restore drill (ADR 0109 decision 2, #518; "rc: kind, final: lab"): an rc tag needs a
    `drill-logs` artifact for the commit whose `drill-result.json` says that commit, profile `kind` and
-   verdict `pass`; the `drill` job of `e2e-kind.yml` makes it on an rc tag push, nightly, or on
-   `gh workflow run e2e-kind.yml -f suite=drill --ref <branch at the commit>`. Artifacts keep 14 days. A
+   verdict `pass`; the `drill` job of `e2e-kind.yml` makes it nightly or on
+   `gh workflow run e2e-kind.yml -f suite=drill --ref <branch at the commit>` (not with `-f commit=`: the gate
+   matches the run's own commit). The drill of an rc tag push takes up to two hours and the release `gate`
+   job does not wait for it: run the drill before you tag, or re-run the gate job once it is green. Artifacts keep 14 days. A
    final tag needs the lab result of the rc it promotes (below). A check that is neither `pass` nor
    `known-gap` makes a result red whatever its `verdict` field says. Known gaps do not block; the gate prints
    them. It fails closed on anything it cannot read.

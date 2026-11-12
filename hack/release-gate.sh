@@ -329,15 +329,17 @@ DRILL_LAB_ASSET=drill-result-lab.json
 # the known gaps (possibly none) and returns 0. A result with no check, or with a check that is neither
 # pass nor known-gap, is never green, whatever its verdict field says.
 drill_verdict() {
-	jq -r --arg c "$2" --arg p "$3" '
-		if type != "object" then "not a drill-result.json object"
+	jq -rs --arg c "$2" --arg p "$3" '
+		def verdict: if type != "object" then "not a drill-result.json object"
 		elif .commit != $c then "it is for commit \(.commit // "none"), not \($c)"
 		elif .topology.profile != $p then "its profile is \(.topology.profile // "none"), not \($p)"
 		elif .verdict != "pass" then "its verdict is \(.verdict // "none")"
 		elif ((.checks // []) | length) == 0 then "it has no check"
 		elif ((.checks // []) | map(select(.verdict != "pass" and .verdict != "known-gap")) | length) > 0 then "a check is neither pass nor known-gap"
-		else "OK known gaps: " + (([.knownGaps[]? | .issue + " " + .name] | join(", ")) | if . == "" then "none" else . end) end' "$1" 2>/dev/null |
-		awk 'BEGIN { rc = 1 } /^OK / { sub(/^OK /, ""); rc = 0 } { print } END { exit rc }'
+		elif $p == "lab" and ((.topology.browserSignin != true) or (((.checks // []) | map(select(.name == "browser-signin" and .verdict == "pass")) | length) != 1)) then "the lab result has no passing browser-signin check"
+		else "OK known gaps: " + (([.knownGaps[]? | (.issue | tostring) + " " + .name] | join(", ")) | if . == "" then "none" else . end) end;
+		if length != 1 then "not exactly one result in the file" else (.[0] | verdict) end' "$1" 2>/dev/null |
+		awk 'BEGIN { rc = 1 } NR == 1 && /^OK / { sub(/^OK /, ""); rc = 0 } { print; n++ } END { if (n == 0) { print "unreadable drill-result.json"; rc = 1 } exit (n == 1 ? rc : 1) }'
 }
 
 # kind_drill: ok when a green kind drill result for SHA is among the drill-logs artifacts.
@@ -345,13 +347,13 @@ kind_drill() {
 	local rows id why='' seen=0 dir
 	dir=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-drill.XXXXXX") || return 2
 	rows=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=drill-logs&per_page=$DRILL_ARTIFACT_LIMIT" \
-		--jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$SHA\") | .id") || { rm -rf "$dir"; return 2; }
+		--jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$SHA\" and .workflow_run.head_repository_id == .workflow_run.repository_id) | .id") || { rm -rf "$dir"; return 2; }
 	for id in $rows; do
 		seen=1
 		gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" >"$dir/a.zip" 2>/dev/null || { why="artifact $id could not be downloaded"; continue; }
 		unzip -p "$dir/a.zip" '*drill-result.json' >"$dir/r.json" 2>/dev/null || { why="artifact $id has no drill-result.json (the suite did not finish)"; continue; }
 		if why=$(drill_verdict "$dir/r.json" "$SHA" kind); then
-			echo "ok: kind restore drill (artifact $id; known gaps: $why)"
+			echo "ok: kind restore drill (artifact $id; $why)"
 			rm -rf "$dir"
 			return 0
 		fi
@@ -359,7 +361,7 @@ kind_drill() {
 	done
 	rm -rf "$dir"
 	if ((seen == 0)); then
-		echo "FAIL: restore drill on kind: no drill-logs artifact for $SHA among the newest $DRILL_ARTIFACT_LIMIT; run the e2e-kind workflow with suite=drill on $SHA (an rc tag push does)" >&2
+		echo "FAIL: restore drill on kind: no drill-logs artifact for $SHA among the newest $DRILL_ARTIFACT_LIMIT; run the e2e-kind workflow with suite=drill on $SHA (the drill of an rc tag push takes up to two hours, so run it before tagging, or re-run the release gate job once it is green; a dispatch with -f commit is not found)" >&2
 	else
 		echo "FAIL: restore drill on kind: no green result for $SHA (last: $why)" >&2
 	fi
@@ -397,7 +399,7 @@ lab_drill() {
 		return 1
 	fi
 	if why=$(drill_verdict "$dir/r.json" "$rc_sha" lab); then
-		echo "ok: lab restore drill ($rc at $rc_sha; known gaps: $why)"
+		echo "ok: lab restore drill ($rc at $rc_sha; $why)"
 		rm -rf "$dir"
 		return 0
 	fi
