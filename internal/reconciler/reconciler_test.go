@@ -1264,7 +1264,7 @@ var _ = Describe("Reconciler", func() {
 		}
 		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
 		Expect(err).NotTo(HaveOccurred())
-		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit nothing wakes the reconciler")
+		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
 
 		By("the request that reaches the limit")
 		start := time.Now()
@@ -1276,6 +1276,9 @@ var _ = Describe("Reconciler", func() {
 
 		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
 		AddReportEntry("budget overshoot window", fmt.Sprintf("ledger transaction %s + NOTIFY and reconcile pass %s = %s from the crossing request to the revoke", ledgerTx, reconcilePass, total))
+		// The measured window ends when the gateway driver receives the zero limit. Then
+		// internal/gateway/kubernetes/render.go drops the key from the ConfigMap (covered by
+		// render_test.go). The ConfigMap write and the agentgateway hot reload add to the real window.
 		// The gateway keeps serving until the revoke, so this window (times the spend rate) is the
 		// overshoot beyond the one in-flight response of ADR 0097. The bound is generous for a loaded
 		// CI host and far below the one-hour resync, which proves the NOTIFY path did the waking.
