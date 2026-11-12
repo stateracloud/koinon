@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
@@ -57,9 +57,9 @@ var _ = Describe("koinon-reconciler unmarked list", func() {
 		Expect(c.openshellAddress).To(Equal("openshell.openshell.svc:8080"))
 		Expect(c.openshellTLSDir).To(Equal("/etc/koinon/openshell-tls"))
 		Expect(c.installMark).To(Equal("koinon_test_not-a-real-mark"))
-		Expect(c.flavors).To(HaveKeyWithValue(store.AgentFlavorOpencode, reconciler.Flavor{
-			Image: "ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
-		}), "the configured flavors, whose profiles the reconciler claims")
+		Expect(c.harnesses).To(HaveKeyWithValue(harness.OpenCode, reconciler.Harness{
+			Image: "ghcr.io/stateracloud/koinon/flavors/opencode:0.1.0", Binaries: reconciler.DefaultBinaries[harness.OpenCode],
+		}), "the configured harnesses, whose profiles the reconciler claims")
 		Expect(strings.Fields(out)).To(Equal([]string{"kw-1", "sandbox", "ka-x", "org-not-in-db"}), "one line: workspace, kind, name, reason")
 	})
 

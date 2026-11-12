@@ -65,7 +65,7 @@ type env struct {
 	agent     store.Agent
 	gw        *fakegateway.Gateway
 	backend   *openshell.Backend
-	harness   *harness
+	harness   *fakeHarness
 	// backendOverride, if set, is the backend the pools use (a wrapper of backend).
 	backendOverride agentd.Backend
 	workspace       string
@@ -74,7 +74,7 @@ type env struct {
 }
 
 // files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
-// instruction file and the flavor's link to it.
+// instruction file and the harness's link to it.
 type files struct {
 	mu     sync.Mutex
 	data   map[string][]byte
@@ -228,13 +228,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	}
 }
 
-func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
-	return newEnvWith(ctx, flavor, nil)
+func newEnv(ctx context.Context, harness string) *env {
+	return newEnvWith(ctx, harness, nil)
 }
 
 // newEnvWith is newEnv with the agent version's config from configFor, which runs once the
 // org and user exist.
-func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*env) string) *env {
+func newEnvWith(ctx context.Context, harness string, configFor func(*env) string) *env {
 	e := &env{}
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
@@ -268,7 +268,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 	})
 
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
-		OrgID: e.org, DisplayName: uniq("agent"), Flavor: flavor, CreatedBy: e.user,
+		OrgID: e.org, DisplayName: uniq("agent"), Harness: harness, CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	config := `{"model":"` + model + `","instructions":"` + instructions + `"}`

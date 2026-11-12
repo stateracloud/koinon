@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/triggers"
@@ -82,7 +83,7 @@ func (r *replica) wokenAt(agent pgtype.UUID) []time.Time {
 func newAgent(ctx context.Context, org pgtype.UUID, trs ...templates.Trigger) store.Agent {
 	GinkgoHelper()
 	q := store.New(pool)
-	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: pgtest.Uniq("sched"), Flavor: store.AgentFlavorOpencode})
+	a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: pgtest.Uniq("sched"), Harness: harness.OpenCode})
 	Expect(err).NotTo(HaveOccurred())
 	return activate(ctx, a, trs...)
 }

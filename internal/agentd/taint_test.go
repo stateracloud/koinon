@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -79,7 +80,7 @@ var _ = Describe("The leak guard's feed (ADR 0091 decision 4)", func() {
 		Expect(texts).To(ConsistOf("a wiki page"))
 	})
 
-	Describe("with the flavor's MCP tool prefix", func() {
+	Describe("with the harness's MCP tool prefix", func() {
 		BeforeEach(func() { finished = agentd.NewTaintCallsFor("koinon_") })
 
 		It("reports nothing for a finished Koinon MCP call: the gateway set its legs", func() {
@@ -260,8 +261,8 @@ func (f *recordingFeed) latest() [2]int64 {
 
 var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2026-11-03)", func() {
 	It("counts each finished tool call when it is read and again once it is reported, under the run's epoch", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				// A shell read of repository text, then a fetch, then a call still running.
@@ -305,8 +306,8 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	})
 
 	It("counts a result read while an earlier report is slow, before that report finishes", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				// Two shell reads finish back to back; the first one's report is slow.
@@ -329,8 +330,8 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	})
 
 	It("feeds a tool that finishes during the end-of-turn summary before it counts it as done", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) {
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) {
 			// The summary prompt blocks permission requests, not tools: a fetch can finish then.
 			h.summaryUpdates = []sdk.SessionUpdate{
 				sdk.StartToolCall("s1", "webfetch", sdk.WithStartKind(sdk.ToolKindFetch)),
@@ -361,9 +362,9 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 		// again as its raw output, the two winnowed to the same fingerprints, the fingerprints'
 		// upsert refused the statement (SQLSTATE 21000), and every worker gave the run up until it
 		// failed.
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		out := "koinon-test private repository file\nwith a second line that the harness reports twice\n"
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
@@ -387,7 +388,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	})
 
 	finishOneTool := func(e *env) {
-		e.harness.set(func(h *harness) {
+		e.harness.set(func(h *fakeHarness) {
 			h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
 				defer GinkgoRecover()
 				Expect(say(sdk.StartToolCall("c1", "bash", sdk.WithStartKind(sdk.ToolKindExecute)))).To(Succeed())
@@ -399,7 +400,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	}
 
 	It("fails the run once, in one epoch, with a named reason when the feed's error is permanent (koinon#123)", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		finishOneTool(e)
 		feed := &errFeed{err: fmt.Errorf("upsert fingerprints: %w", &pgconn.PgError{Code: "21000", Message: "koinon-test cardinality"})}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
@@ -413,7 +414,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	})
 
 	It("retries a transient feed error and carries on", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		finishOneTool(e)
 		feed := &errFeed{err: &pgconn.PgError{Code: "40001", Message: "koinon-test serialization"}, failFirst: 2}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
@@ -424,7 +425,7 @@ var _ = Describe("The leak guard's feed counts (ADR 0091 decision 4, amendment 2
 	})
 
 	It("leaves the run to the newer worker when its feed is already fenced, as a takeover, not an interruption", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		feed := &fencedFeed{}
 		r := e.enqueue(ctx, e.task(ctx, "feed"))
 		e.pool("agentd-feed-fenced", func(c *agentd.Config) { c.Taint = feed })

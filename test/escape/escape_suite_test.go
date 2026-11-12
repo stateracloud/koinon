@@ -16,7 +16,7 @@
 //	KOINON_OPENSHELL_ENDPOINT   gateway host:port, for example a port-forward (required)
 //	KOINON_OPENSHELL_MTLS_DIR   directory with tls.crt, tls.key and ca.crt (required)
 //	KOINON_OPENSHELL_IMAGE      sandbox image with sh, git, curl and python3 at /usr/bin
-//	                            (required; the spike probe image qualifies, the flavor images
+//	                            (required; the spike probe image qualifies, the harness images
 //	                            do not)
 //	KOINON_OPENSHELL_WORKSPACE  workspace to use (default koinon-escape)
 //	KOINON_ESCAPE_REPO          the repository the grant is bound to (default

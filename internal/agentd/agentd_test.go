@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -74,7 +75,7 @@ func eventOf(evs []store.RunEvent, kind string) []store.RunEvent {
 
 var _ = Describe("Pool", func() {
 	It("drives a task's first run: new session, prompt, updates, permissions, end_turn", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markPermit+" please")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -84,7 +85,7 @@ var _ = Describe("Pool", func() {
 		// The launch command and its endpoints, run in the session directory.
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(Equal([][]string{{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--compaction-tokens", "170000", "--no-web-tools",
 		}}))
 		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
 		// file's removal (no custom host), the harness, the instruction file's check
@@ -150,7 +151,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("sends a trigger's instruction, a system message carrying its source, as the first prompt", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t, err := q.CreateTask(ctx, store.CreateTaskParams{
 			OrgID: e.org, Title: uniq("Scheduled"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
 			CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
@@ -169,7 +170,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -199,7 +200,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("starts a new session when the sandbox home was replaced since the session was stored", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
@@ -251,7 +252,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("starts a new session for a session stored without a home generation", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
@@ -274,7 +275,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("asks the reconciler to start a stopped sandbox and waits for it before it execs", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -311,7 +312,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("keeps a run in the queue, past the 5 minute wait, when the reconciler does not make its sandbox ready", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		clock := &fakeClock{t: time.Now()}
@@ -334,7 +335,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("waits as long as the org's queue wait says", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		wait := 20 * time.Minute
 		Expect(orgsettings.Set(ctx, q, e.org, orgsettings.Override{QueueWait: &wait})).To(Succeed())
@@ -350,7 +351,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("honours a cancel with session/cancel and records only the cut-off message after it", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-a")
 		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
@@ -371,7 +372,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("cancels the run at the wall-clock cap", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markWait)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
 			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2,
@@ -388,7 +389,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("resumes with session/load under a new epoch when the exec stream drops", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markCrash)
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -415,7 +416,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails a run whose harness writes a line over 10 MiB, without a resume", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markLongLine))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(30 * time.Second)).Should(Equal(store.RunStateFailed))
@@ -428,7 +429,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("lets another replica take over a killed worker's run, without duplicate events", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markHang)
 		r := e.enqueue(ctx, t)
 		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
@@ -469,7 +470,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run with a reason when the session cannot be loaded", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "hello")
 		// Stored in the current home, so agentd loads it, but the harness does not know it.
 		_, err := db.Exec(ctx, `UPDATE tasks SET harness_session_id = 'ses_gone', harness_session_cwd = '/sandbox/work',
@@ -487,9 +488,9 @@ var _ = Describe("Pool", func() {
 		Expect(tevs[len(tevs)-1].Kind).To(Equal("status.changed"), "a fatal run fails its task (old issue 324)")
 	})
 
-	DescribeTable("runs each flavor's entry script with the agent's endpoints",
-		func(ctx SpecContext, flavor store.AgentFlavor, script string) {
-			e := newEnv(ctx, flavor)
+	DescribeTable("runs each harness's entry script with the agent's endpoints",
+		func(ctx SpecContext, harness string, script string) {
+			e := newEnv(ctx, harness)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -499,15 +500,15 @@ var _ = Describe("Pool", func() {
 			Eventually(e.gw.Execs).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(9))
 			execs := e.gw.Execs()
 			Expect(execs[6].GetCommand()).To(Equal([]string{
-				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--no-web-tools",
+				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-tries", "3", "--model-retry-backoff-ms", "1000", "--model-max-retry-after-ms", "60000", "--model-format", "openai", "--thinking", "none", "--compaction-tokens", "170000", "--no-web-tools",
 			}))
 			Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
 		},
-		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode"),
+		Entry("opencode", harness.OpenCode, "/usr/local/bin/koinon-opencode"),
 	)
 
 	It("writes the run's instructions before the harness starts and records their hash", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
@@ -543,7 +544,7 @@ var _ = Describe("Pool", func() {
 
 	It("renders the git configuration of the connection's host into the sandbox before the harness starts", func(ctx SpecContext) {
 		const ca = "-----BEGIN CERTIFICATE-----\nMIIBkoinon-test-not-a-real-certificate\n-----END CERTIFICATE-----\n"
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+		e := newEnvWith(ctx, harness.OpenCode, func(e *env) string {
 			connID := uuid.New()
 			cfg, err := json.Marshal(connections.GitHubConfig{
 				AppID: 1, InstallationID: 2, Site: codehost.Site{BaseURL: "https://ghes.example.test", CABundle: ca},
@@ -573,7 +574,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("ends what an earlier run left running before the harness starts, and records it", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.files.sweep = func() (string, int) { return "ended: 41 57\n", 0 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -586,10 +587,10 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("sweeps after a run it finished even when its harness outlives the run's end", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		// The harness ignores end-of-file: closing it takes two seconds, long enough for a
 		// heartbeat to find the run finished.
-		e.harness.set(func(h *harness) { h.lingers = true })
+		e.harness.set(func(h *fakeHarness) { h.lingers = true })
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -597,10 +598,10 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("sweeps after a run before the agent's next run starts its harness", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		// Closing each harness takes two seconds: long enough for the next run to start its
 		// own if the run gave up the agent's slot before its sweep.
-		e.harness.set(func(h *harness) { h.lingers = true })
+		e.harness.set(func(h *fakeHarness) { h.lingers = true })
 		a := e.enqueue(ctx, e.task(ctx, "first"))
 		b := e.enqueue(ctx, e.task(ctx, "second"))
 		e.pool("agentd-a")
@@ -622,7 +623,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -634,7 +635,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run, without starting the harness, when the sweep cannot tell the sandbox's main process", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.files.sweep = func() (string, int) { return "sweep: unknown PID 1 (tini)\n", 2 }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -645,7 +646,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run when the instructions cannot be written", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.files.failWrite = true
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
@@ -656,7 +657,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run before the harness starts when the version's config is unreadable", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		// Valid JSON, but not a config agentd can read: the instructions are no string.
 		_, err := db.Exec(ctx, `UPDATE agent_versions SET config = '{"instructions": ["not", "a", "string"]}'
 			WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
@@ -669,7 +670,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails the run when the written instruction file does not read back", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		// The agent's directory at the path took the file: the read finds no regular file.
 		e.files.onRead = func(data map[string][]byte) { delete(data, instructionsFile) }
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -682,7 +683,7 @@ var _ = Describe("Pool", func() {
 
 	DescribeTable("restores the instruction file before the prompt",
 		func(ctx SpecContext, tamper func(map[string][]byte), reason string) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e := newEnv(ctx, harness.OpenCode)
 			// The first read checks the file agentd wrote; the agent changes it before the
 			// second, the check before the prompt.
 			reads := 0
@@ -708,8 +709,8 @@ var _ = Describe("Pool", func() {
 	)
 
 	It("fails the run when the harness never announces Koinon's MCP tools", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.harness.set(func(h *harness) { h.silent = true })
+		e := newEnv(ctx, harness.OpenCode)
+		e.harness.set(func(h *fakeHarness) { h.silent = true })
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
@@ -721,13 +722,13 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("selects the agent's model after session/load too, and fails when the harness keeps its own", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 
-		e.harness.set(func(h *harness) { h.stubborn = true })
+		e.harness.set(func(h *fakeHarness) { h.stubborn = true })
 		e.message(ctx, t, "again")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
@@ -739,7 +740,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("rejects permission requests for paths outside the session directory, whatever their kind", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markOutside))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
@@ -753,7 +754,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("waits while the reconciler recreates a failed sandbox, and runs in the new one", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error: main process exited)")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
@@ -766,7 +767,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("runs an ephemeral agent's task only in the task's own sandbox", func(ctx SpecContext) {
-		e := newEnvWith(ctx, store.AgentFlavorOpencode, func(*env) string {
+		e := newEnvWith(ctx, harness.OpenCode, func(*env) string {
 			return `{"model":"` + model + `","instructions":"` + instructions + `","ephemeral":true}`
 		})
 		task := e.task(ctx, "hello")
@@ -793,7 +794,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("requeues a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
@@ -802,7 +803,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails a run taken over while running whose sandbox stays unready, instead of requeueing it", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStarting, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "dead-owner", LeaseSeconds: 60})
@@ -820,7 +821,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("waits for a sandbox in error to be repaired", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
@@ -833,7 +834,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("requeues a run whose sandbox stays in error past SandboxTimeout", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
@@ -842,7 +843,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("fails a run at once when its sandbox is in error and the agent is unhealthy", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
@@ -858,7 +859,7 @@ var _ = Describe("Pool", func() {
 	})
 
 	It("records a retried event once", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "test", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())

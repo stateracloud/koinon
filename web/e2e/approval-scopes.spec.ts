@@ -76,7 +76,7 @@ test('approve a pull request for this agent until a date, see it on the agent pa
       },
       'koinon.connection.v1alpha1.ConnectionService/ListConnections': () => ({ connections: [] }),
       'koinon.agent.v1alpha1.AgentService/GetAgent': () => ({
-        agent: { id: 'a-1', orgId: org, displayName: 'LCM agent', status: 'AGENT_STATUS_ACTIVE', flavor: 'FLAVOR_OPENCODE', latestVersion: 1, activeVersion: 1 },
+        agent: { id: 'a-1', orgId: org, displayName: 'LCM agent', status: 'AGENT_STATUS_ACTIVE', harness: 'opencode', latestVersion: 1, activeVersion: 1 },
       }),
     },
     stream: {},

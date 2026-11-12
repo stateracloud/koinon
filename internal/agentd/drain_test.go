@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
@@ -30,7 +31,7 @@ var _ = Describe("Draining on stop", func() {
 	}
 
 	It("finishes the turn in progress and claims nothing more", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		var (
 			started = make(chan struct{})
 			release = make(chan struct{})
@@ -68,7 +69,7 @@ var _ = Describe("Draining on stop", func() {
 	})
 
 	It("hands the run off at the drain deadline, and another replica takes it over", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markHang))
 		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Second })
 		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
@@ -87,7 +88,7 @@ var _ = Describe("Draining on stop", func() {
 	})
 
 	It("hands a run off at once when it has not begun its turn", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "") // the run waits for its sandbox
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		stop := e.pool("agentd-a", func(c *agentd.Config) { c.DrainDeadline = time.Minute })
@@ -101,7 +102,7 @@ var _ = Describe("Draining on stop", func() {
 	})
 
 	It("stops a retry back-off at once when the run is cancelled during the drain", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e := newEnv(ctx, harness.OpenCode)
 		srv, err := fakemodel.New(fakemodel.Script{
 			Model: "faulty", Faults: fakemodel.Faults{RateLimit: 5, RetryAfter: 30},
 			Turns: []fakemodel.Turn{{Text: "one two three four"}},
@@ -112,7 +113,7 @@ var _ = Describe("Draining on stop", func() {
 		e.harness.modelFault = modelCaller(ts.URL)
 
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		// agentd's own retry layer, the one for a flavor whose harness does not retry.
+		// agentd's own retry layer, the one for a harness whose harness does not retry.
 		stop := e.pool("agentd-a", agentd.OwnRetryLayer, func(c *agentd.Config) { c.DrainDeadline = time.Minute })
 		Eventually(func() int { return len(srv.Requests()) }).WithTimeout(racescale.D(15 * time.Second)).Should(BeNumerically(">=", 1))
 		Eventually(func() bool {

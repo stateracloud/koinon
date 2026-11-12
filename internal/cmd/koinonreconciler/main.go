@@ -227,7 +227,7 @@ func serve(ctx context.Context, cfg config) error {
 			ProviderKeyDir:      cfg.providerKeysDir,
 			URLPolicy:           catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
 			ProviderKeySettle:   cfg.keySettle,
-			Flavors:             cfg.flavors(),
+			Harnesses:           cfg.harnesses(),
 			RuntimeClassName:    cfg.runtimeClass,
 			SandboxResources:    &cfg.sandboxResources,
 			IdleTimeout:         cfg.idleTimeout,

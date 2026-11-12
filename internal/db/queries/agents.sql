@@ -5,8 +5,8 @@
 
 -- name: CreateAgent :one
 -- New agents are drafts (ADR 0020).
-INSERT INTO agents (org_id, display_name, flavor, template_id, created_by)
-VALUES (@org_id, @display_name, @flavor, sqlc.narg(template_id), sqlc.narg(created_by))
+INSERT INTO agents (org_id, display_name, harness, template_id, created_by)
+VALUES (@org_id, @display_name, @harness, sqlc.narg(template_id), sqlc.narg(created_by))
 RETURNING *;
 
 -- name: GetAgent :one
