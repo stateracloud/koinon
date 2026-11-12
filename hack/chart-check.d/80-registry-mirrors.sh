@@ -18,7 +18,7 @@ want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.7 ghcr
 	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 | sort -u)
 [[ $(image_refs) == "$want" ]] || fail "default image references changed: $(image_refs | tr '\n' ' ')"
 # The public repository's packages (#167): none of the old private-repository names may come back.
-image_refs | grep -Eq -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
+image_refs | hit -E -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
 # (b) imageRegistry replaces every host and keeps path, tag and digest.
 want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.7 \
 	art.example.com/proxy/stateracloud/koinon/flavors/opencode:0.0.0 art.example.com/proxy/stateracloud/koinon/agentd:0.0.0 \

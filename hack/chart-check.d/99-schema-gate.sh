@@ -14,4 +14,4 @@ for c in api agentd reconciler; do
 	[[ $(probe_path "$c" readinessProbe) == /readyz ]] || fail "$c readinessProbe is /readyz (schema gate), got '$(probe_path "$c" readinessProbe)'"
 	[[ $(probe_path "$c" livenessProbe) == /healthz ]] || fail "$c livenessProbe stays /healthz, got '$(probe_path "$c" livenessProbe)'"
 done
-awk 'BEGIN{RS="\n---\n"} index($0, "component: agentd\n")' <<<"$deployments" | grep -Fq -- "- name: health" || fail "agentd exposes its health port"
+awk 'BEGIN{RS="\n---\n"} index($0, "component: agentd\n")' <<<"$deployments" | hit -F -- "- name: health" || fail "agentd exposes its health port"

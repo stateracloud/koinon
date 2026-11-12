@@ -36,10 +36,10 @@ if grep -q 'KOINON_OPENBAO_' <<<"$awskms_all"; then fail "no OpenBao settings wi
 # IRSA: each identity's ServiceAccount carries its own role, decrypt-only for the services.
 awskms_sa=$(render --show-only templates/serviceaccounts.yaml "${awskms[@]}" "${awskms_irsa[@]}")
 for c in api reconciler; do
-	grep -A12 "name: koinon-$c\$" <<<"$awskms_sa" | grep -Fq "eks.amazonaws.com/role-arn: \"arn:aws:iam::111122223333:role/koinon-$c-decrypt\"" ||
+	grep -A12 "name: koinon-$c\$" <<<"$awskms_sa" | hit -F "eks.amazonaws.com/role-arn: \"arn:aws:iam::111122223333:role/koinon-$c-decrypt\"" ||
 		fail "the koinon-$c ServiceAccount carries its IRSA role"
 done
-if grep -A12 'name: koinon-agentd$' <<<"$awskms_sa" | grep -q 'eks.amazonaws.com'; then fail "agentd gets no IAM role (it holds no keyring)"; fi
+if grep -A12 'name: koinon-agentd$' <<<"$awskms_sa" | hit 'eks.amazonaws.com'; then fail "agentd gets no IAM role (it holds no keyring)"; fi
 has "the key-admin ServiceAccount carries the encrypt role" \
 	'eks.amazonaws.com/role-arn: "arn:aws:iam::111122223333:role/koinon-key-admin-encrypt"' \
 	--show-only templates/key-admin.yaml "${awskms[@]}" "${awskms_irsa[@]}"

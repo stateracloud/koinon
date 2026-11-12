@@ -30,9 +30,10 @@ n=$(render --show-only templates/deployments.yaml | grep -c 'checksum/config:' |
 # The API reads only sandboxResources: its checksum ignores a reconciler-only value, follows a sandbox
 # resources value, and the reconciler's checksum follows both.
 sum_of() { # <component> [helm args]: the checksum/config annotation of one component
-	local c=$1
+	local c=$1 r
 	shift
-	render "$@" --show-only templates/deployments.yaml | awk -v c="koinon-$c" '$0 ~ "name: .*" c "$" {f=1} f && /checksum\/config:/ {print $2; exit}'
+	r=$(render "$@" --show-only templates/deployments.yaml)
+	awk -v c="koinon-$c" '$0 ~ "name: .*" c "$" {f=1} f && /checksum\/config:/ {print $2; exit}' <<<"$r"
 }
 api0=$(sum_of api)
 rec0=$(sum_of reconciler)
