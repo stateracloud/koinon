@@ -399,22 +399,14 @@ jobs:
       - name: proto (buf breaking)
         if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
         env:
-          # merge_group: the base tip this entry lands on (ADR 0094 decision 4). pull_request: the
-          # merge base of the head and origin/<base> (#542), so a PR behind a proto change on main
-          # is not told it "deleted" fields it never had.
+          # The main this entry lands on (ADR 0094 decision 4), not the one the PR head was checked against.
           BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ $EVENT_NAME == merge_group ]]; then
-            against=$(hack/buf-breaking-against.sh "$BASE" --merge-group)
+          base="$BASE"
+          if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
+            buf breaking --against ".git#ref=$base"
           else
-            against=$(hack/buf-breaking-against.sh "$BASE")
-          fi
-          echo "buf breaking against $against"
-          if git cat-file -e "$against:buf.yaml" 2>/dev/null; then
-            buf breaking --against ".git#ref=$against"
-          else
-            echo "no buf.yaml on $against yet; nothing to compare"
+            echo "no buf.yaml on $base yet; nothing to compare"
           fi
       - name: migrations (tests)
         if: ${{ !cancelled() }}
@@ -856,7 +848,6 @@ jobs:
       - run: hack/release-gate-test.sh
       - run: hack/route-guard-test.sh
       - run: hack/dep-age-check-test.sh
-      - run: hack/buf-breaking-against-test.sh
       - run: hack/ci-changes-test.sh
       - run: hack/paths-test.sh
       - run: hack/lane-gates-test.sh
