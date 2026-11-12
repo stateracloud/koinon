@@ -4,54 +4,96 @@
 # One block per '# e1=<name>' line; the lines up to the next marker are the block's commands.
 # Limits (hack/docs-e1.sh header): empty lines are dropped, so keep heredoc bodies free of them; a line that
 # is exactly a marker starts a block also inside a heredoc body, so never write one there.
+# Variables (each block sets its own, so a block runs alone): NS is the namespace and REL the Helm release of the
+# install the block acts on (default koinon, koinon). A restore into a fresh namespace sets both to the target's.
+# The chart names its objects <release>-api, <release>-pg, <release>-kek and so on when the release name contains
+# "koinon" and there is no fullnameOverride and no secrets.kek.existingSecret (helm install prints the real names).
+# Not here and not checked by any test: restoring with pg_dump piped into pg_restore, keys export piped into keys import,
+# and a CloudNativePG backup restore. They need a live source and a target at once, which backup-restore.sh cannot
+# provide. Tracked in https://github.com/stateracloud/koinon/issues/910.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/backup-restore.e1
 # e1=backup-keys
-kubectl -n koinon exec deploy/koinon-api -- koinon-api keys export > koinon-kek-backup.yaml
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys export > koinon-kek-backup.yaml
+# e1=note-keys
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+# Only IDs and fingerprints: no key material. Keep the file with the backup; compare-keys reads it after the restore.
+kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys status > koinon-keys-status.txt
 # e1=check-keys
-fp=$(kubectl -n koinon exec deploy/koinon-api -- koinon-api keys status | awk '$2 == "active" { print $NF }')
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+fp=$(kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys status | awk '$2 == "active" { print $NF }')
 test -n "$fp"
 grep -q "fingerprint $fp" koinon-kek-backup.yaml || { echo "the backup does not hold the active key $fp" >&2; false; }
 # e1=backup-db
-PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name)
-kubectl -n koinon exec "$PRIMARY" -c postgres -- pg_dump --format=custom --dbname=koinon > koinon.dump
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
+kubectl -n "$NS" exec "$PRIMARY" -c postgres -- pg_dump --format=custom --dbname=koinon > koinon.dump
 # e1=verify-dump
-PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name)
-kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --list < koinon.dump > /dev/null
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
+kubectl -n "$NS" exec -i "$PRIMARY" -c postgres -- pg_restore --list < koinon.dump > /dev/null
 # e1=stop
-kubectl -n koinon scale deployment/koinon-agentd --replicas=0
-kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=koinon,app.kubernetes.io/component=agentd --timeout=10m
-kubectl -n koinon scale deployment/koinon-reconciler deployment/koinon-api --replicas=0
-kubectl -n koinon wait --for=delete pod -l 'app.kubernetes.io/instance=koinon,app.kubernetes.io/component in (api,reconciler)' --timeout=5m
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=0
+kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=agentd --timeout=10m
+kubectl -n "$NS" scale deployment/"$REL"-reconciler deployment/"$REL"-api --replicas=0
+kubectl -n "$NS" wait --for=delete pod -l "app.kubernetes.io/instance=$REL,app.kubernetes.io/component in (api,reconciler)" --timeout=5m
 # e1=hold
-kubectl -n koinon set env deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd KOINON_RESTORE_HOLD=true
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" set env deployment/"$REL"-api deployment/"$REL"-reconciler deployment/"$REL"-agentd KOINON_RESTORE_HOLD=true
 # e1=restore-db
-PRIMARY=$(kubectl -n koinon get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name)
-kubectl -n koinon exec "$PRIMARY" -c postgres -- psql --dbname=koinon -v ON_ERROR_STOP=1 \
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
+kubectl -n "$NS" exec "$PRIMARY" -c postgres -- psql --dbname=koinon -v ON_ERROR_STOP=1 \
   -c 'DROP SCHEMA IF EXISTS dbos CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public AUTHORIZATION pg_database_owner' -c 'GRANT USAGE ON SCHEMA public TO PUBLIC'
-kubectl -n koinon exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon.dump
+kubectl -n "$NS" exec -i "$PRIMARY" -c postgres -- pg_restore --dbname=koinon --exit-on-error < koinon.dump
 # e1=restore-keys
+NS=${NS:-koinon}
+REL=${REL:-koinon}
 # The KEK Secret is guarded: kubectl cannot replace one that exists (admission refuses it), so a Secret that
 # is there (the usual case: a new install made its own first KEK) is merged with the backup by koinon-api itself,
 # which needs one pod: keys import adds the backup's KEKs, makes its active KEK active and removes none. It
 # refuses a KEK that keys retire removed (--allow-retired overrides, inactive). A Secret that is gone is created with apply.
-if kubectl -n koinon get secret/koinon-kek > /dev/null 2>&1; then
-  kubectl -n koinon scale deployment/koinon-api --replicas=1
-  kubectl -n koinon rollout status deployment/koinon-api --timeout=5m
-  kubectl -n koinon exec -i deploy/koinon-api -- koinon-api keys import --yes < koinon-kek-backup.yaml
-  kubectl -n koinon scale deployment/koinon-api --replicas=0
-  kubectl -n koinon wait --for=delete pod -l app.kubernetes.io/instance=koinon,app.kubernetes.io/component=api --timeout=5m
+if kubectl -n "$NS" get secret/"$REL"-kek > /dev/null 2>&1; then
+  kubectl -n "$NS" scale deployment/"$REL"-api --replicas=1
+  kubectl -n "$NS" rollout status deployment/"$REL"-api --timeout=5m
+  kubectl -n "$NS" exec -i deploy/"$REL"-api -- koinon-api keys import --yes < koinon-kek-backup.yaml
+  kubectl -n "$NS" scale deployment/"$REL"-api --replicas=0
+  kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=api --timeout=5m
 else
-  kubectl -n koinon apply -f koinon-kek-backup.yaml
+  kubectl -n "$NS" apply -f koinon-kek-backup.yaml
 fi
 # e1=start
-kubectl -n koinon scale deployment/koinon-api deployment/koinon-reconciler --replicas=1
-kubectl -n koinon rollout status deployment/koinon-api deployment/koinon-reconciler --timeout=5m
-kubectl -n koinon scale deployment/koinon-agentd --replicas=1
-kubectl -n koinon rollout status deployment/koinon-agentd --timeout=5m
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" scale deployment/"$REL"-api deployment/"$REL"-reconciler --replicas=1
+kubectl -n "$NS" rollout status deployment/"$REL"-api deployment/"$REL"-reconciler --timeout=5m
+kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=1
+kubectl -n "$NS" rollout status deployment/"$REL"-agentd --timeout=5m
 # e1=resync
-kubectl -n koinon exec deploy/koinon-api -- koinon-api checkpoints resync --all
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api checkpoints resync --all
+# e1=compare-keys
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+# Every KEK the source listed is here with the same fingerprint, and the active KEK is the same (exits 1 otherwise).
+# It needs one koinon-api pod, so run it while the install is up, or after restore-keys scales it for keys import.
+kubectl -n "$NS" exec -i deploy/"$REL"-api -- koinon-api keys compare < koinon-keys-status.txt
 # e1=verify-keys
-kubectl -n koinon exec deploy/koinon-api -- koinon-api keys verify
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys verify
 # e1=release
-kubectl -n koinon set env deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd KOINON_RESTORE_HOLD-
-kubectl -n koinon rollout status deployment/koinon-api deployment/koinon-reconciler deployment/koinon-agentd --timeout=5m
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+kubectl -n "$NS" set env deployment/"$REL"-api deployment/"$REL"-reconciler deployment/"$REL"-agentd KOINON_RESTORE_HOLD-
+kubectl -n "$NS" rollout status deployment/"$REL"-api deployment/"$REL"-reconciler deployment/"$REL"-agentd --timeout=5m

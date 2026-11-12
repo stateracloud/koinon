@@ -1,0 +1,8 @@
+{"schema_version":"1.7.0","id":"USN-9001-1","summary":"ca-certificates update","published":"2026-11-05T14:46:13Z",
+ "affected":[
+  {"package":{"ecosystem":"Ubuntu:22.04:LTS","name":"ca-certificates"},
+   "ecosystem_specific":{"binaries":[{"binary_name":"ca-certificates","binary_version":"20260816ubuntu0.22.04.2"}]},
+   "database_specific":{"cves_map":{"ecosystem":"Ubuntu:22.04:LTS","cves":[]}}},
+  {"package":{"ecosystem":"Ubuntu:24.04:LTS","name":"ca-certificates"},
+   "ecosystem_specific":{"binaries":[{"binary_name":"ca-certificates","binary_version":"20260816ubuntu0.24.04.2"}]},
+   "database_specific":{"cves_map":{"ecosystem":"Ubuntu:24.04:LTS","cves":[]}}}]}

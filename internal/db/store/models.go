@@ -2485,6 +2485,21 @@ type Run struct {
 	ContentPurgedAt      pgtype.Timestamptz
 }
 
+type RunArtifact struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	RunID      pgtype.UUID
+	TaskID     pgtype.UUID
+	Kind       string
+	MessageSeq int64
+	Name       string
+	MediaType  string
+	SizeBytes  int64
+	Sha256     string
+	Body       []byte
+	CreatedAt  pgtype.Timestamptz
+}
+
 type RunEvent struct {
 	OrgID           pgtype.UUID
 	ID              pgtype.UUID

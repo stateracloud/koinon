@@ -3,6 +3,7 @@
 package approvals_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -379,6 +380,39 @@ var _ = Describe("Service", func() {
 		req2 := f2.call(ctx, githubtools.ToolCreatePullRequest, args)
 		Eventually(func() store.ApprovalStatus { return f2.get(ctx, req2.ID).Status }).
 			WithTimeout(10 * time.Second).Should(Equal(store.ApprovalStatusExecuted))
+	})
+
+	It("sends a call the Trusted preset allows to a person when the leak check flags it, and runs it once approved", func(ctx SpecContext) {
+		f := newFixture(ctx, "trusted")
+		checked := make(chan githubtools.LeakCall, 4)
+		f.useLeakCheck(func(_ context.Context, call githubtools.LeakCall) (map[string]any, error) {
+			checked <- call
+			return map[string]any{"leak": map[string]any{"reasons": []string{"taint"}}}, nil
+		})
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		Expect(req.Status).To(Equal("pending"))
+		Expect(checked).To(HaveLen(1), "one check")
+		Expect((<-checked).Tool).To(Equal(githubtools.ToolCreatePullRequest))
+
+		row := f.get(ctx, req.ID)
+		Expect(row.Status).To(Equal(store.ApprovalStatusPending))
+		Expect(row.Decision).To(Equal(store.ApprovalDecisionAsk))
+		var risk map[string]any
+		Expect(json.Unmarshal(row.Risk, &risk)).To(Succeed())
+		Expect(risk).To(HaveKeyWithValue("leak", HaveKeyWithValue("reasons", ConsistOf("taint"))))
+		pending, err := q.ListPendingApprovalRequests(ctx, f.org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pending).To(HaveLen(1), "a card for a person")
+		Consistently(func() store.ApprovalStatus { return f.get(ctx, req.ID).Status }).
+			WithTimeout(time.Second).Should(Equal(store.ApprovalStatusPending), "nothing runs it unattended")
+		Expect(f.gh.Snapshot("widgets").Pulls).To(BeEmpty())
+
+		By("a person approves the exact call")
+		done, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(done.Status).To(Equal(store.ApprovalStatusExecuted), done.Error.String)
+		Expect(done.DecidedBy).To(Equal(f.admin))
+		Expect(f.gh.Snapshot("widgets").Pulls).To(HaveLen(1))
 	})
 
 	It("posts an approved comment once, with the request as idempotency key", func(ctx SpecContext) {

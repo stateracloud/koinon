@@ -27,7 +27,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providertype"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
@@ -132,6 +134,10 @@ type runner struct {
 	// res is how the turns ended, when execute got as far as the turn and the policy ended it with
 	// anything but end_turn. The run's ending is then res, not an error.
 	res *turnResult
+	// window is the model's context window from the catalog (0 unknown), and overflow the inputs of
+	// the prompt over the cap (overflow.go).
+	window   int64
+	overflow *inputOverflow
 	// turnState is the run's phase for a draining pool (turnSetup, turnRunning, turnHandedOff).
 	turnState atomic.Int32
 
@@ -482,6 +488,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	r.log.Info("the run's model", "model", model, "source", string(source), "format", string(facts.Format))
 	ptype, format := facts.ProviderType, facts.Format
+	r.window = facts.ContextWindow
 	marker, unknown := cacheMarker(facts.Cache)
 	if unknown {
 		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
@@ -728,6 +735,17 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "build the prompt", err)
 	}
+	if r.overflow != nil {
+		// An input is over the cap: keep it, ask a person and park; the prompt is not sent.
+		if err := r.parkOnOverflow(fctx, task, vc, closeHarness, sweepOnce); err != nil {
+			var f *failure
+			if errors.As(err, &f) {
+				return err
+			}
+			return r.dbErr(ctx, "park the run on an input over the context cap", err)
+		}
+		return nil
+	}
 	if _, err := r.q.SetRunPromptThrough(fctx, store.SetRunPromptThroughParams{
 		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, PromptThroughSeq: through,
 	}); err != nil {
@@ -973,16 +991,31 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if restart {
 		return r.handoffPrompt(ctx, task, outcomes, notice)
 	}
+	handled, err := r.q.ListTaskInputArtifacts(ctx, store.ListTaskInputArtifactsParams{OrgID: r.run.OrgID, TaskID: task.ID})
+	if err != nil {
+		return "", 0, err
+	}
+	kept := make(map[int64]bool, len(handled))
+	ownKept := false
+	for _, a := range handled {
+		kept[a.MessageSeq] = true
+		ownKept = ownKept || a.RunID == r.run.ID
+	}
 	var texts []string
+	var seqs []int64
 	through := after
 	for _, m := range msgs {
+		through = m.Seq
+		if kept[m.Seq] {
+			continue // the context guard kept this one whole and asked; it is not sent
+		}
 		var body struct {
 			Text string `json:"text"`
 		}
 		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
 			texts = append(texts, body.Text)
+			seqs = append(seqs, m.Seq)
 		}
-		through = m.Seq
 	}
 	mode := promptNew
 	switch {
@@ -992,13 +1025,22 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	// its approvals were decided. A takeover keeps the state it had.
 	case resumed && r.run.State == store.RunStateStarting:
 		mode = promptParkResume
+		if ownKept {
+			// This run parked on an input over the cap before anything was sent: the agent has not
+			// seen the task yet.
+			mode = promptParkResumeFresh
+		}
 	case resumed:
 		mode = promptTakeover
 	case loaded:
 		mode = promptContinue
 	}
+	if len(handled) > 0 && (reset || mode == promptParkResume || mode == promptParkResumeFresh) {
+		r.rehydrate(ctx, handled)
+	}
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
+	r.guardInputs(texts, seqs, max(after, r.run.PromptThroughSeq.Int64))
 	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
 }
 
@@ -1066,6 +1108,9 @@ const (
 	promptTakeover
 	// promptParkResume resumes a parked run after its approvals and questions were decided.
 	promptParkResume
+	// promptParkResumeFresh resumes a run that parked on an input over the context cap before it sent
+	// any prompt: the task's title comes first.
+	promptParkResumeFresh
 	// promptReset is a new session that replaces one the sandbox home lost.
 	promptReset
 )
@@ -1085,6 +1130,9 @@ func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcom
 	case promptReset, promptNew:
 		header()
 	case promptParkResume:
+		parts = append(parts, parkResumeNote+outcomes)
+	case promptParkResumeFresh:
+		header()
 		parts = append(parts, parkResumeNote+outcomes)
 	case promptTakeover:
 		parts = append(parts, resumeNote+outcomes)
@@ -1343,12 +1391,40 @@ type modelFacts struct {
 	Cache prices.CacheMode
 	// CompactionTokens is where the harness compacts the conversation (compactionTokens).
 	CompactionTokens int
+	// ContextWindow is the model's context window in tokens from the catalog, or 0 when the catalog
+	// has none (contextguard then assumes its default).
+	ContextWindow int64
 }
 
 // modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
 // as before, with chat completions and no cache: the gateway refuses it anyway. Only a database
 // error is returned.
 func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error) {
+	f, err := r.priceFacts(ctx, name)
+	if err != nil {
+		return modelFacts{}, err
+	}
+	f.ContextWindow, err = r.contextWindow(ctx, f.ProviderType, name)
+	return f, err
+}
+
+// contextWindow is the model's accepted context length in the catalog (ADR 0070): today only the
+// accepted OpenRouter limits (internal/orcatalog) are stored; any other model has none, and 0 is
+// returned. Only a database error is returned.
+func (r *runner) contextWindow(ctx context.Context, providerType, name string) (int64, error) {
+	if providerType != providertype.OpenRouter {
+		return 0, nil
+	}
+	v, err := r.q.GetOpenRouterLimitValue(ctx, store.GetOpenRouterLimitValueParams{Model: name, Field: orcatalog.FieldContextLength})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	return int64(v.Value), nil
+}
+
+func (r *runner) priceFacts(ctx context.Context, name string) (modelFacts, error) {
 	qt, err := r.p.cfg.Prices.Find(ctx, r.q, r.run.OrgID, name, time.Now())
 	m := qt.Model
 	if _, ok := prices.Unpriceable(err); ok {

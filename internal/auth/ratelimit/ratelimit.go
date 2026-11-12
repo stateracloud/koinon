@@ -13,7 +13,7 @@
 // waits out each block keeps doubling it. Blocked(key) is the longest wait over the three levels, so a
 // client that spreads its failures over many credentials, or many /64s of one /48, is refused once it
 // passes the address or group budget. The /64 neighbours of an IPv6 client share the group budget. A
-// success resets the key only. X-Forwarded-For is not trusted.
+// success resets the key only. X-Forwarded-For is not trusted unless proxies are listed (proxy.go).
 // The password login adds an account level over all addresses, which a device cookie set by an earlier
 // successful login exempts (internal/auth/devicecookie.go).
 //
@@ -186,11 +186,15 @@ func Key(addr, part string) string {
 // ClientAddr is the request's peer address without the port. An IPv6 address is masked to its /64,
 // the smallest block a client commonly holds, so rotating the host part does not escape a key; an
 // IPv4 address stays whole. The /64 mask also groups in-cluster IPv6 clients (dual-stack pods on one
-// node often share a /64) into one address for the admin API. X-Forwarded-For is not read.
+// node often share a /64) into one address for the admin API. X-Forwarded-For is read only through
+// TrustedProxies.Middleware, which an operator turns on by listing proxy CIDRs; otherwise the peer is used.
 func ClientAddr(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
+	host, ok := r.Context().Value(resolvedKey{}).(string)
+	if !ok {
+		var err error
+		if host, _, err = net.SplitHostPort(r.RemoteAddr); err != nil {
+			host = r.RemoteAddr
+		}
 	}
 	if ip, perr := netip.ParseAddr(host); perr == nil {
 		ip = ip.Unmap()

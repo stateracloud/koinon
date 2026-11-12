@@ -1,0 +1,5 @@
+{"id":"USN-9003-1","published":"2026-10-01T10:00:00Z",
+ "affected":[
+  {"package":{"ecosystem":"Ubuntu:24.04:LTS","name":"git"},
+   "ecosystem_specific":{"binaries":[{"binary_name":"git","binary_version":"1:2.43.0-1ubuntu7.3"}]},
+   "database_specific":{"cves_map":{"cves":[{"id":"CVE-2099-0002","severity":[{"type":"Ubuntu","score":"low"}]}]}}}]}

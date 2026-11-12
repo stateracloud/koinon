@@ -73,7 +73,11 @@ type fixture struct {
 	svc   *approvals.Service
 	tools *httptest.Server
 	logs  *lockedBuffer
+	// leak is the tool server's leak check (#687): every call is clean unless a spec sets it.
+	leak atomic.Pointer[leakCheck]
 }
+
+type leakCheck = func(context.Context, githubtools.LeakCall) (map[string]any, error)
 
 type lockedBuffer struct {
 	mu sync.Mutex
@@ -187,6 +191,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 		Execute: func(ctx context.Context, org, id pgtype.UUID) {
 			_, _ = f.svc.Execute(ctx, org, id)
 		},
+		LeakCheck: f.leakCheck,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.tools = httptest.NewServer(tools.Handler())
@@ -321,3 +326,18 @@ func kinds(evs []store.TaskEvent) []string {
 	}
 	return out
 }
+
+// useLeakCheck makes the fixture's tool server ask check about every call no person decides.
+func (f *fixture) useLeakCheck(check leakCheck) { f.leak.Store(&check) }
+
+// leakCheck is the tool server's hook: the check a spec set, or cleanLeakCheck.
+func (f *fixture) leakCheck(ctx context.Context, call githubtools.LeakCall) (map[string]any, error) {
+	if c := f.leak.Load(); c != nil {
+		return (*c)(ctx, call)
+	}
+	return cleanLeakCheck(ctx, call)
+}
+
+// cleanLeakCheck stands in for the leak guard (#687): these specs cover how an unattended call
+// runs, so every call is clean. The guard's own verdicts are specified in internal/mcpguard.
+func cleanLeakCheck(context.Context, githubtools.LeakCall) (map[string]any, error) { return nil, nil }
