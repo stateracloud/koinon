@@ -240,8 +240,8 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   (a branch that changes the probe before main has published it) builds the image, with apt, on the same pinned `ARG BASE=` that the tag hashes (kind.sh ignores `KOINON_PROBE_BASE` when
   `PROBE_PULL_REPO` is set), so a tag always names one image. The e2e therefore tests the probe on the pinned base, not on the
   flavor image the run built.
-  The Gitea read grant cases (label `gitea`) are not in it: they re-point the gateway at a supervisor
-  image with a throwaway CA, which the chart's pinned-image rule refuses (that interim goes away with #80).
+  The Gitea read grant cases (label `gitea`) are not in it: they point the OpenShell gateway at a throwaway-CA ConfigMap
+  (`supervisor.network.additionalCaConfigMapName`) by a helm upgrade, which the chart install does not take.
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
   Koinon policy: the quicker loop when you change `test/escape` or the sandbox profile (no Koinon
   images or install), and the only place the Gitea cases run.
@@ -439,7 +439,7 @@ that file and nowhere else.
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
   (Markdown, `docs/`, `web/`, `.github/`, top-level `hack/*.sh`, `hack/hooks/`,
   `hack/chart-check.d/`), and `keep go` brings back the scripts the Go jobs run (`go-test.sh`,
-  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `flavor-tag.sh`) and every
+  `golangci-lint.sh`, `agentgateway-pin.sh`, `record-compat-fixtures.sh`, `harness-tag.sh`) and every
   `.go` file. A path no rule mentions runs the Go jobs. The script tests (`hack/*-test.sh`) run in
   the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
   own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
@@ -543,7 +543,7 @@ work that fills it, then saves:
 | Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
-| pnpm store (`flavors/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
+| pnpm store (`harnesses/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
 | golangci-lint cache | the action's | a lint run on a go-ci miss only: the action's key has the same 7-day interval as the go-ci key, so the first push of a week misses both (`go-lint` has `skip-save-cache`) |
 
 Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
@@ -558,7 +558,7 @@ reports on pushes only. A new key goes into the warm job and the restoring jobs 
 
 Anonymous GitHub release downloads from shared runner IPs sometimes return a fixed error body,
 which fails a pinned checksum. Every Dockerfile download of a release asset goes through
-`flavors/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
+`harnesses/common/koinon-fetch` (or the same logic in `hack/e2e-toolchain/Dockerfile`): the job passes
 `GITHUB_TOKEN` as the BuildKit secret `github_token`. The github.com web download URL ignores a
 token, so the script resolves the asset id from the release (`api.github.com/.../releases/tags/<tag>`)
 and downloads `.../releases/assets/<id>` with `Accept: application/octet-stream`; the build log
@@ -601,7 +601,7 @@ no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks sou
 module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
 `go mod download` also checks against sum.golang.org (unless GOSUMDB is off; the pin holds either way); `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
-The flavor layer cache (`flavors-<hash of flavors/**>`, prefix `flavors-`) is restored by `flavors`,
+The flavor layer cache (`flavors-<hash of harnesses/**>`, prefix `flavors-`) is restored by `flavors`,
 `quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
 `flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
 skipped by #595 still writes the entry). A pull request never writes it.

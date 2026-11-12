@@ -24,14 +24,13 @@ import (
 // outside the binding, whatever the server would say.
 //
 // Every request below is refused by OpenShell's L7 policy in the sandbox's proxy, so the suite needs
-// no Gitea, only something to dial: OpenShell 0.1.5 admits the connect to an allowed host at L4 and
+// no Gitea, only something to dial: OpenShell admits the connect to an allowed host at L4 and
 // dials (and TLS-handshakes) it before its L7 relay judges the request. KOINON_ESCAPE_GITEA_URL
 // names the base URL the grant is rendered for; test/escape/kind.sh sets it to the in-cluster TLS
 // stand-in (escape-gitea-standin, koinon-fakemodel -standin over TLS, with a sub-path, which
-// exercises the prefix), with a throwaway CA that it appends to the trust bundle of a supervisor
-// image the gateway is re-pointed at (OpenShell 0.1.5's supervisor verifies upstream TLS against
-// the bundle in its own image, not the sandbox's; interim until #80), so nothing leaves the
-// cluster (old issue 371). A request that reached the stand-in would get its 418, not the proxy's 403. The
+// exercises the prefix), with a throwaway CA that it puts in a ConfigMap the OpenShell gateway
+// names in supervisor.network.additionalCaConfigMapName; the stock supervisor image trusts that CA
+// for upstream TLS, so nothing leaves the cluster (old issue 371). A request that reached the stand-in would get its 418, not the proxy's 403. The
 // default, https://example.com/gitea, is for a cluster that can reach example.com:443 (IANA's
 // reserved example domain, which resolves inside the sandbox: a name that fails DNS, such as one
 // under .invalid, never reaches the proxy and the specs would see curl code 000, old issue 244).

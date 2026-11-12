@@ -37,7 +37,7 @@ ENV GOTOOLCHAIN=local
 # The apt packages are not version-pinned (hadolint DL3008) on purpose: this is a local dev and lab
 # toolchain, not a shipped image, and the base is pinned by digest. Debian bookworm's archive drops
 # superseded versions, so an exact pin would break the build as soon as a security update lands,
-# while the flavor images pin against an Ubuntu snapshot (flavors/opencode/Dockerfile) because they
+# while the harness images pin against an Ubuntu snapshot (harnesses/opencode/Dockerfile) because they
 # ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
 # above by version and sha256.
 # hadolint ignore=DL3008
@@ -51,7 +51,7 @@ COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 # The optional BuildKit secret github_token (--secret id=github_token,env=GITHUB_TOKEN) authenticates
 # the github.com release downloads (#145); without it they are anonymous. The github.com web URL
 # ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
-# id, Accept: application/octet-stream), as in flavors/common/koinon-fetch (this build context cannot
+# id, Accept: application/octet-stream), as in harnesses/common/koinon-fetch (this build context cannot
 # copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
 RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \

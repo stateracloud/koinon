@@ -9,7 +9,7 @@ import (
 )
 
 // What a connection's host adds to the git setup of a sandbox (ADR 0062). The harness images
-// carry git's configuration for the default host (flavors/common/etc/koinon/git/config) and
+// carry git's configuration for the default host (harnesses/common/etc/koinon/git/config) and
 // include SandboxGitConfig, which koinon-agentd writes before every harness start.
 const (
 	// SandboxGitConfig is the git configuration rendered from the connection's host.

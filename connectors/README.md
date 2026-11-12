@@ -61,7 +61,7 @@ bound to repositories:
   OpenShell sends a static credential only to its profile's endpoints, so the profile cannot be
   shared between agents bound to different repositories;
 - the same endpoints as the sandbox policy entry `github_read`, `protocol: rest`,
-  `enforcement: enforce`, for `/usr/bin/git` and the flavor's binaries.
+  `enforcement: enforce`, for `/usr/bin/git` and the harness's binaries.
 
 Allowed: `GET /{owner}/{repo}[.git]/info/refs?service=git-upload-pack` and
 `POST /{owner}/{repo}[.git]/git-upload-pack` on `github.com` (clone and fetch over smart HTTP),
@@ -95,8 +95,8 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
   keeps a `GET` under `/repos/{owner}/{repo}/**` to data the token may read.
 - **Credential placement.** OpenShell 0.1.7 injects static credentials only by rewriting the
   placeholder where the client puts it (headers, including Basic and Bearer, and URL path and
-  query values; `crates/openshell-core/src/secrets.rs`, unchanged since 0.1.5). Every flavor image
-  therefore ships `koinon-git-credential` (`flavors/common`), configured for
+  query values; `crates/openshell-core/src/secrets.rs`, unchanged since 0.1.5). Every harness image
+  therefore ships `koinon-git-credential` (`harnesses/common`), configured for
   `https://github.com` in the read-only `/etc/koinon/git/config` (included from
   `/etc/gitconfig`): it answers `x-access-token` and the placeholder from `$GITHUB_TOKEN`, git
   sends it as Basic auth and OpenShell substitutes the token on the wire. It stores nothing.

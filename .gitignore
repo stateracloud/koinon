@@ -7,7 +7,7 @@ coverage.out
 
 web/node_modules/
 web/dist/
-flavors/opencode/plugins/node_modules/
+harnesses/opencode/plugins/node_modules/
 
 # Tilt
 tilt_modules/

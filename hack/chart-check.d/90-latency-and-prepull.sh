@@ -21,8 +21,8 @@ prepull=(--set harnessPrepull.enabled=true --set-string 'harnessPrepull.nodeSele
 lacks "no harness pre-pull by default" 'kind: DaemonSet'
 has "harness pre-pull renders a DaemonSet" '^kind: DaemonSet$' "${prepull[@]}" --show-only templates/harness-prepull.yaml
 has "harness pre-pull selects the Kata nodes" 'katacontainers.io/kata-runtime: "true"' "${prepull[@]}" --show-only templates/harness-prepull.yaml
-has "harness pre-pull pulls the harness image" 'image: "ghcr.io/stateracloud/koinon/flavors/opencode:' "${prepull[@]}" --show-only templates/harness-prepull.yaml
-has "harness pre-pull image follows the registry mirror" 'image: "mirror.example.com/stateracloud/koinon/flavors/opencode:' "${prepull[@]}" \
+has "harness pre-pull pulls the harness image" 'image: "ghcr.io/stateracloud/koinon/sandbox:' "${prepull[@]}" --show-only templates/harness-prepull.yaml
+has "harness pre-pull image follows the registry mirror" 'image: "mirror.example.com/stateracloud/koinon/sandbox:' "${prepull[@]}" \
 	--set global.imageRegistry=mirror.example.com --show-only templates/harness-prepull.yaml
 has "harness pre-pull pause image follows the registry mirror" 'image: "mirror.example.com/pause:3.10"' "${prepull[@]}" \
 	--set global.imageRegistry=mirror.example.com --show-only templates/harness-prepull.yaml

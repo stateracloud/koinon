@@ -50,7 +50,7 @@ check "warm-caches-opencode-plugins is advisory" grep -qx "advisory warm-caches-
 # setup-node keys its pnpm cache on the hash of every cache-dependency-path entry, so each lockfile
 # list a consumer uses must be warmed by one job with exactly that list (a single path per warm job).
 check "warm-caches-web warms web/pnpm-lock.yaml alone" has "$warmweb" '^          cache-dependency-path: web/pnpm-lock.yaml$'
-check "warm-caches-opencode-plugins warms flavors/opencode/plugins/pnpm-lock.yaml alone" test "$(grep -Ec '^          cache-dependency-path: ' <<<"$warmplug")" = 1
+check "warm-caches-opencode-plugins warms harnesses/opencode/plugins/pnpm-lock.yaml alone" test "$(grep -Ec '^          cache-dependency-path: ' <<<"$warmplug")" = 1
 warmpaths=$(printf '%s\n%s\n' "$warmweb" "$warmplug" | grep -E '^          cache-dependency-path: ' | sort -u)
 while read -r job path; do
   case $job in warm-caches-web* | warm-caches-opencode-plugins*) continue ;; esac
