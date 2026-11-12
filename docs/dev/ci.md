@@ -320,6 +320,14 @@ SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (
 source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
 waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
 
+Phase 3 (#518) is the lab profile and the release gate. A topology file has a `profile` (`kind` or `lab`), and
+`drill-result.json` carries it. The lab profile (`test/drill/topology/lab.example.yaml` is a made-up example; the real
+file stays outside git) adds the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
+that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
+environment of that process). The spec exists only when the topology says `browserSignin: true`, because a drill spec never
+skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
+rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
+
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
 `hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.

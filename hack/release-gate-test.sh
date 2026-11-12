@@ -24,6 +24,8 @@ cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 [[ $1 == merge-base && -n ${GIT_NOT_ANCESTOR:-} ]] && exit 1
 [[ $1 == diff ]] && { printf '%s\n' "${GIT_DIFF:-}"; exit 0; }
+[[ $1 == tag ]] && { printf '%s\n' ${GIT_TAGS:-}; exit 0; }
+[[ $1 == rev-list ]] && { cat "$FX/tag-${3}" 2>/dev/null || exit 1; exit 0; }
 exit 0
 EOF
 
@@ -52,6 +54,10 @@ repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
 repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
 repos/o/r/actions/workflows/ci.yml/runs) f=ci-runs.json ;;
 repos/o/r/actions/runs) f=qruns.json ;;
+repos/o/r/actions/artifacts) f=drill-artifacts.json ;;
+repos/o/r/actions/artifacts/*/zip) c=${path#repos/o/r/actions/artifacts/}; cat "$FX/artifact-${c%%/*}.zip" 2>/dev/null || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }; exit ;;
+repos/o/r/releases/tags/*) f=release-${path##*/}.json ;;
+repos/o/r/releases/assets/*) cat "$FX/asset-${path##*/}.json" 2>/dev/null || { echo "gh stub: HTTP 404 $path" >&2; exit 1; }; exit ;;
 repos/o/r/actions/runs/*/jobs) c=${path#repos/o/r/actions/runs/}; f=jobs-${c%%/*}.json ;;
 repos/o/r/commits/*/statuses) c=${path#repos/o/r/commits/}; f=statuses-${c%%/*}.json ;;
 *) echo "gh stub: unexpected $path" >&2; exit 1 ;;
@@ -68,6 +74,12 @@ fi
 # the merge_group ci runs: none unless a case adds some
 if [[ $f == ci-runs.json ]]; then
 	[[ -f $FX/$f ]] || echo '{"workflow_runs":[]}' >"$FX/$f"
+	jq -r "$expr" "$FX/$f"
+	exit
+fi
+# the drill-logs artifacts: none unless a case adds some
+if [[ $f == drill-artifacts.json ]]; then
+	[[ -f $FX/$f ]] || echo '{"artifacts":[]}' >"$FX/$f"
 	jq -r "$expr" "$FX/$f"
 	exit
 fi
@@ -123,6 +135,7 @@ new_case() {
 	run_on "$sha" quickstart success
 	run_on "$pr_head" dco success
 	run_on "$pr_head" "e2e result" success
+	kind_artifact 501 "$sha" "$sha" kind pass
 }
 set_ruleset() { # <context>...: the rules/branches answer
 	local ctx
@@ -154,10 +167,27 @@ ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merg
 	local i
 	for i in 900 910 920 930; do queue_wf_run "$i" "$1"; done
 }
+# The restore drill (#518). drill_result <file> <commit> <profile> <verdict> [check verdict]: a drill-result.json.
+drill_result() {
+	jq -n --arg c "$2" --arg p "$3" --arg v "$4" --arg cv "${5:-pass}" \
+		'{runId: "abc123", commit: $c, topology: {name: "t", profile: $p}, checks: [{name: "signin", verdict: "pass"}, {name: "hold", verdict: $cv}],
+		  knownGaps: (if $cv == "known-gap" then [{name: "hold", issue: "#516", verdict: "known-gap"}] else [] end), verdict: $v}' >"$1"
+}
+kind_artifact() { # <artifact id> <head sha> <result commit> <profile> <verdict> [check verdict] [expired]: a drill-logs artifact
+	local d=$FX/art.$1
+	mkdir -p "$d/drill"
+	drill_result "$d/drill/drill-result.json" "$3" "$4" "$5" "${6:-pass}"
+	echo log >"$d/drill.log"
+	(cd "$d" && zip -qr "$FX/artifact-$1.zip" drill.log drill)
+	local f=$FX/drill-artifacts.json
+	[[ -f $f ]] || echo '{"artifacts":[]}' >"$f"
+	jq --argjson i "$1" --arg h "$2" --argjson e "${7:-false}" '.artifacts += [{id: $i, name: "drill-logs", expired: $e, workflow_run: {head_sha: $h}}]' "$f" >"$f.new"
+	mv "$f.new" "$f"
+}
 n=0
 gate_rc() { # TAG env as given: exit code; stderr to $tmp/err, stdout to $tmp/out
 	local rc=0
-	PATH=$tmp/bin:$PATH TAG=${TAG:-v1.2.3} SHA=$sha GITHUB_REPOSITORY=o/r GH_TOKEN=koinon_test_not-a-real-token \
+	PATH=$tmp/bin:$PATH TAG=${TAG:-v1.2.3-rc.1} SHA=$sha GITHUB_REPOSITORY=o/r GH_TOKEN=koinon_test_not-a-real-token \
 		bash "$gate" >"$tmp/out" 2>"$tmp/err" || rc=$?
 	echo "$rc"
 }
@@ -591,6 +621,132 @@ check "an unreadable default branch fails closed" "$(gate_rc)" 1
 new_case
 check "a commit off main fails" "$(GIT_NOT_ANCESTOR=1 gate_rc)" 1
 check "a bad tag fails" "$(TAG=1.2.3 gate_rc)" 1
+
+# --- the restore drill (#518): rc needs a green kind drill, a final tag a green lab drill for its rc ---
+new_case
+check "an rc with a green kind drill passes" "$(gate_rc)" 0
+check "...and says so" "$(grep -c '^ok: kind restore drill (artifact 501; known gaps: none)' "$tmp/out")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+check "an rc with no drill artifact fails" "$(gate_rc)" 1
+check "...and says to run the drill" "$(grep -c 'no drill-logs artifact for aaaa111' "$tmp/err")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 502 other999 other999 kind pass
+check "a drill artifact for another commit does not count" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 503 "$sha" "$sha" kind fail
+check "a red kind drill fails" "$(gate_rc)" 1
+check "...with its verdict" "$(grep -c 'its verdict is fail' "$tmp/err")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 504 "$sha" other999 kind pass
+check "a result for another commit inside an artifact of this one fails" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 505 "$sha" "$sha" lab pass
+check "a lab result does not stand in for the kind drill" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 506 "$sha" "$sha" kind pass pass true
+check "an expired artifact does not count" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 507 "$sha" "$sha" kind pass notrun
+check "a notrun check makes the verdict untrustworthy even when the file says pass" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 508 "$sha" "$sha" kind pass known-gap
+check "a kind drill that failed only on a known gap passes" "$(gate_rc)" 0
+check "...and prints the gap" "$(grep -c 'known gaps: #516 hold' "$tmp/out")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 509 "$sha" "$sha" kind fail
+kind_artifact 510 "$sha" "$sha" kind pass
+check "a later green artifact for the commit is enough after a red one" "$(gate_rc)" 0
+
+new_case
+rm "$FX/artifact-501.zip"
+check "an artifact that cannot be downloaded fails closed" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+mkdir -p "$FX/empty" && echo log >"$FX/empty/drill.log" && (cd "$FX/empty" && zip -q "$FX/artifact-511.zip" drill.log)
+echo '{"artifacts":[{"id":511,"name":"drill-logs","expired":false,"workflow_run":{"head_sha":"'$sha'"}}]}' >"$FX/drill-artifacts.json"
+check "an artifact with no drill-result.json fails (the suite did not finish)" "$(gate_rc)" 1
+check "...and says so" "$(grep -c 'has no drill-result.json' "$tmp/err")" 1
+
+# final tag: the lab drill for the rc it promotes
+rc_sha=rrrr444
+final_case() { # a final tag at $sha; rc.2 is on the same tree (commit rrrr444), rc.1 on another
+	new_case
+	rm "$FX/drill-artifacts.json"
+	export GIT_TAGS="v1.2.3-rc.1 v1.2.3-rc.2 v1.2.3-rc.10"
+	echo "$rc_sha" >"$FX/tag-v1.2.3-rc.2"
+	echo "$rc_sha" >"$FX/tag-v1.2.3-rc.10"
+	echo oldold5 >"$FX/tag-v1.2.3-rc.1"
+	echo "{\"sha\":\"$rc_sha\",\"tree\":{\"sha\":\"treeS\"}}" >"$FX/commit-$rc_sha.json"
+	echo '{"sha":"oldold5","tree":{"sha":"treeOLD"}}' >"$FX/commit-oldold5.json"
+}
+lab_asset() { # <rc tag> <asset id> <result commit> <profile> <verdict>
+	echo "{\"assets\":[{\"id\":$2,\"name\":\"drill-result-lab.json\"}]}" >"$FX/release-$1.json"
+	drill_result "$FX/asset-$2.json" "$3" "$4" "$5"
+}
+final_rc() { TAG=v1.2.3 GIT_TAGS="${GIT_TAGS:-}" gate_rc; }
+
+final_case
+lab_asset v1.2.3-rc.10 601 "$rc_sha" lab pass
+check "a final tag with a green lab drill of its rc passes" "$(final_rc)" 0
+check "...naming the rc (the highest N on the tree, rc.10 over rc.2)" "$(grep -c '^ok: lab restore drill (v1.2.3-rc.10 at rrrr444' "$tmp/out")" 1
+check "...and it asks for no kind drill" "$(grep -c 'kind restore drill' "$tmp/out")" 0
+
+final_case
+check "a final tag whose rc release has no lab result fails" "$(final_rc)" 1
+check "...naming the asset" "$(grep -c 'has no drill-result-lab.json' "$tmp/err")" 1
+
+final_case
+echo '{"assets":[{"id":1,"name":"drill-result.json"}]}' >"$FX/release-v1.2.3-rc.10.json"
+check "the kind result on the rc release is not a lab result" "$(final_rc)" 1
+
+final_case
+lab_asset v1.2.3-rc.10 602 "$rc_sha" kind pass
+check "a kind result under the lab name fails" "$(final_rc)" 1
+check "...with the profile" "$(grep -c 'its profile is kind, not lab' "$tmp/err")" 1
+
+final_case
+lab_asset v1.2.3-rc.10 603 oldold5 lab pass
+check "a lab result for another commit than the rc fails" "$(final_rc)" 1
+
+final_case
+lab_asset v1.2.3-rc.10 604 "$rc_sha" lab fail
+check "a red lab drill fails" "$(final_rc)" 1
+
+final_case
+echo '{"sha":"'$sha'","tree":{"sha":"treeS"}}' >"$FX/commit-$sha.json"
+echo "{\"sha\":\"$rc_sha\",\"tree\":{\"sha\":\"treeOTHER\"}}" >"$FX/commit-$rc_sha.json"
+lab_asset v1.2.3-rc.10 605 "$rc_sha" lab pass
+check "a final tag on a tree no rc has fails" "$(final_rc)" 1
+check "...saying a final tag promotes an rc" "$(grep -c 'a final tag promotes an rc' "$tmp/err")" 1
+
+final_case
+export GIT_TAGS=
+check "a final tag with no rc tag at all fails" "$(final_rc)" 1
+
+final_case
+lab_asset v1.2.3-rc.10 606 "$rc_sha" lab pass
+rm "$FX/asset-606.json"
+check "a lab result that cannot be downloaded fails closed" "$(final_rc)" 1
+unset GIT_TAGS
 
 echo "release-gate-test: $pass passed, $failed failed"
 ((failed == 0))

@@ -85,6 +85,13 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    the gate fails closed.
    The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
+   It also asks for the restore drill (ADR 0109 decision 2, #518; "rc: kind, final: lab"): an rc tag needs a
+   `drill-logs` artifact for the commit whose `drill-result.json` says that commit, profile `kind` and
+   verdict `pass`; the `drill` job of `e2e-kind.yml` makes it on an rc tag push, nightly, or on
+   `gh workflow run e2e-kind.yml -f suite=drill --ref <branch at the commit>`. Artifacts keep 14 days. A
+   final tag needs the lab result of the rc it promotes (below). A check that is neither `pass` nor
+   `known-gap` makes a result red whatever its `verdict` field says. Known gaps do not block; the gate prints
+   them. It fails closed on anything it cannot read.
    No checkout in the workflow keeps git credentials (`persist-credentials: false`), and no job
    restores an Actions cache (#579). The gate's `git fetch origin main` is anonymous, so it relies on
    the repository being public. If the repository becomes private, the fetch fails and the gate
@@ -113,12 +120,28 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
+The final tag must be on the tree of an rc (`vX.Y.Z-rc.N`; the gate takes the highest N on that tree), and
+that rc's GitHub release must carry the asset `drill-result-lab.json`, a drill result of the **lab** profile
+for the rc's commit. Make it before the final tag:
+
+1. Write your lab topology file outside the repository. Start from `test/drill/topology/lab.example.yaml`
+   (every value in it is made up; the real hosts, contexts, registries and storage classes stay out of git).
+2. On a machine that reaches the lab cluster, with pnpm and `pnpm --dir web exec playwright install chromium`
+   done, check out the rc commit and run
+   `KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your file> test/drill/run.sh`. It makes no cluster and loads
+   no images. The check `browser-signin` signs in through the web UI on the restored copy; it uses the
+   seeded fake password. If you want it to use another (for example one made by a break-glass password
+   reset, #512), set `KOINON_DRILL_WEB_PASSWORD`.
+3. When the verdict is `pass`, upload the result under the gate's name:
+   `cp $OUT/drill-result.json /tmp/drill-result-lab.json && gh release upload vX.Y.Z-rc.N /tmp/drill-result-lab.json`.
+   The run fails (exit 1) when a check fails that is not a known gap; do not upload a red result.
+
 Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). It is
 tracked in #313 ("release: v0.1.0 tag-time gate checklist"), separate from the docs change that
 added it. Tick it on the tag commit, not before:
 
-- [ ] The restore drill passed on a real cluster (ADR 0085 decision 15), with RTO and RPO recorded
-      (#275).
+- [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded
+      (#275); `drill-result-lab.json` is on the rc release (`hack/release-gate.sh` checks it).
 - [ ] The ADR 0085 implementation issues still in the v0.1.0 gate (decisions 2-4 and 13-16, ADR 0099
       decision 2) are closed.
 - [ ] `hack/release-gate.sh` is green for the commit.
