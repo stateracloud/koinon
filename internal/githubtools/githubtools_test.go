@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -454,14 +456,164 @@ var _ = Describe("Server", func() {
 		Expect(text).To(ContainSubstring("no repository"))
 	})
 
-	It("marks calls the Trusted preset allows as approved", func(ctx SpecContext) {
-		f := newFixture(ctx, strings.Replace(standardGrant, `"standard"`, `"trusted"`, 1))
+	It("parks a call the Trusted preset allows for a person when no leak check is configured", func(ctx SpecContext) {
+		f := newFixture(ctx, trustedGrant)
 		res, text := call(ctx, session(ctx, f.agentID), "create_pull_request", validPRMap())
 		Expect(res.IsError).To(BeFalse(), text)
-		Expect(text).To(HavePrefix("accepted: id="))
-		Expect(result(res).Status).To(Equal("approved"))
+		Expect(result(res).Status).To(Equal("pending"))
+		Expect(decisionOf(ctx, result(res).ID)).To(Equal(store.ApprovalDecisionAsk))
+	})
+
+	// The guard lets the agent's calls to these tools through (mcpguard.Options.OwnTargets) because a
+	// person approves the exact call. A call the Trusted preset allows or an approval scope covers
+	// has no such person, so it runs only once the leak check finds it clean (#687).
+	Describe("the leak check of a call no person decides", func() {
+		var (
+			checked []githubtools.LeakCall
+			answer  map[string]any
+			failure error
+		)
+
+		BeforeEach(func() {
+			checked, answer, failure = nil, nil, nil
+			s, err := githubtools.New(pool, githubtools.Options{
+				Logger: slog.New(slog.NewJSONHandler(logs, nil)),
+				LeakCheck: func(_ context.Context, c githubtools.LeakCall) (map[string]any, error) {
+					checked = append(checked, c)
+					return answer, failure
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			srv = httptest.NewServer(s.Handler())
+			DeferCleanup(srv.Close)
+		})
+
+		leakOf := func(ctx context.Context, id string) map[string]any {
+			GinkgoHelper()
+			var raw []byte
+			Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE id = $1`, id).Scan(&raw)).To(Succeed())
+			var risk map[string]any
+			Expect(json.Unmarshal(raw, &risk)).To(Succeed())
+			leak, _ := risk["leak"].(map[string]any)
+			return leak
+		}
+
+		It("runs a Trusted call the check finds clean, and hands the check the call", func(ctx SpecContext) {
+			f := newFixture(ctx, trustedGrant)
+			res, text := call(ctx, session(ctx, f.agentID), "create_pull_request", validPRMap())
+			Expect(res.IsError).To(BeFalse(), text)
+			Expect(text).To(HavePrefix("accepted: id="))
+			Expect(result(res).Status).To(Equal("approved"))
+			Expect(checked).To(HaveLen(1))
+			c := checked[0]
+			Expect(c.Org.ID).To(Equal(f.org.ID))
+			Expect(c.Agent.ID).To(Equal(f.agent.ID))
+			Expect(c.Tool).To(Equal(githubtools.ToolCreatePullRequest))
+			Expect(c.Repo).To(Equal("acme/widgets"))
+			Expect(c.Connection.Valid).To(BeTrue())
+			Expect(c.Connection.String()).To(Equal("00000000-0000-0000-0000-000000000000"))
+			var args map[string]any
+			Expect(json.Unmarshal(c.Arguments, &args)).To(Succeed())
+			Expect(args).To(HaveKeyWithValue("title", "Fix a typo"))
+		})
+
+		It("parks a Trusted call the check holds for a person, with the check's risk on the card", func(ctx SpecContext) {
+			answer = map[string]any{"leak": map[string]any{"reasons": []string{"taint"}}}
+			f := newFixture(ctx, trustedGrant)
+			res, text := call(ctx, session(ctx, f.agentID), "create_pull_request", validPRMap())
+			Expect(res.IsError).To(BeFalse(), text)
+			Expect(result(res).Status).To(Equal("pending"))
+			Expect(decisionOf(ctx, result(res).ID)).To(Equal(store.ApprovalDecisionAsk))
+			Expect(leakOf(ctx, result(res).ID)).To(HaveKeyWithValue("reasons", ConsistOf("taint")))
+		})
+
+		It("parks a Trusted call for a person when the check fails", func(ctx SpecContext) {
+			failure = errors.New("koinon-test: the guard is down")
+			f := newFixture(ctx, trustedGrant)
+			res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+			Expect(res.IsError).To(BeFalse(), text)
+			Expect(result(res).Status).To(Equal("pending"))
+			Expect(leakOf(ctx, result(res).ID)).To(HaveKeyWithValue("reasons", ConsistOf("error")))
+		})
+
+		It("does not check a call a person decides", func(ctx SpecContext) {
+			f := newFixture(ctx, standardGrant)
+			res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+			Expect(res.IsError).To(BeFalse(), text)
+			Expect(result(res).Status).To(Equal("pending"))
+			Expect(checked).To(BeEmpty())
+		})
+
+		It("answers a call already recorded with its stored decision, without a new check", func(ctx SpecContext) {
+			f := newFixture(ctx, trustedGrant)
+			s := session(ctx, f.agentID)
+			first, _ := call(ctx, s, "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+			Expect(checked).To(HaveLen(1))
+			answer = map[string]any{"leak": map[string]any{"reasons": []string{"taint"}}}
+			again, text := call(ctx, s, "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+			Expect(again.IsError).To(BeFalse(), text)
+			Expect(result(again).ID).To(Equal(result(first).ID))
+			Expect(result(again).Status).To(Equal(result(first).Status))
+			Expect(checked).To(HaveLen(1))
+		})
+
+		Describe("a call an approval scope covers", func() {
+			scope := func(ctx context.Context, f fixture) {
+				GinkgoHelper()
+				// The scope's source is a call a person decides (the Standard preset).
+				res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 1, "body": "First."})
+				Expect(res.IsError).To(BeFalse(), text)
+				var source pgtype.UUID
+				Expect(source.Scan(result(res).ID)).To(Succeed())
+				_, err := q.CreateApprovalScope(ctx, store.CreateApprovalScopeParams{
+					OrgID: f.org.ID, AgentID: f.agent.ID, Connector: "github", Tool: githubtools.ToolCommentOnIssue,
+					Target: "github:acme/widgets", Kind: store.ApprovalScopeKindAgent,
+					ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+					CreatedBy: f.agent.CreatedBy, SourceApprovalID: source,
+					CallBinding: []byte(`{"connectionId":"00000000-0000-0000-0000-000000000000"}`),
+				})
+				Expect(err).NotTo(HaveOccurred())
+				checked = nil
+			}
+
+			It("runs it when the check finds it clean", func(ctx SpecContext) {
+				f := newFixture(ctx, standardGrant)
+				scope(ctx, f)
+				res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+				Expect(res.IsError).To(BeFalse(), text)
+				Expect(result(res).Status).To(Equal("approved"))
+				Expect(checked).To(HaveLen(1))
+				Expect(checked[0].Tool).To(Equal(githubtools.ToolCommentOnIssue))
+			})
+
+			It("parks it for a person when the check holds it, and the scope does not cover it", func(ctx SpecContext) {
+				answer = map[string]any{"leak": map[string]any{"reasons": []string{"both_legs"}}}
+				f := newFixture(ctx, standardGrant)
+				scope(ctx, f)
+				res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+				Expect(res.IsError).To(BeFalse(), text)
+				Expect(result(res).Status).To(Equal("pending"))
+				Expect(decisionOf(ctx, result(res).ID)).To(Equal(store.ApprovalDecisionAsk))
+				var scoped pgtype.UUID
+				Expect(pool.QueryRow(ctx, `SELECT scope_id FROM approval_requests WHERE id = $1`, result(res).ID).Scan(&scoped)).To(Succeed())
+				Expect(scoped.Valid).To(BeFalse())
+				Expect(leakOf(ctx, result(res).ID)).To(HaveKeyWithValue("reasons", ConsistOf("both_legs")))
+			})
+		})
 	})
 })
+
+const trustedGrant = `{"instructions":"help",` +
+	`"grants":[{"connector":"github","scopes":["repo.read","pull_request.create","issue.comment"],"preset":"trusted"}],` +
+	`"bindings":[{"connector":"github","connectionId":"00000000-0000-0000-0000-000000000000","targets":["acme/widgets"]}]}`
+
+// decisionOf is the stored decision of an approval request.
+func decisionOf(ctx context.Context, id string) store.ApprovalDecision {
+	GinkgoHelper()
+	var d store.ApprovalDecision
+	Expect(pool.QueryRow(ctx, `SELECT decision FROM approval_requests WHERE id = $1`, id).Scan(&d)).To(Succeed())
+	return d
+}
 
 func validPRMap() map[string]any {
 	return map[string]any{

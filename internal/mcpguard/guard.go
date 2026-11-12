@@ -3,6 +3,7 @@
 package mcpguard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/sinkclass"
@@ -69,9 +71,13 @@ type Options struct {
 	// FeedWait bounds the wait for agentd's feed (DefaultFeedWait when <= 0).
 	FeedWait time.Duration
 	// OwnTargets are the gateway targets of Koinon's own tool servers (the code-host tools and
-	// gateway.KoinonTarget). Every write they offer is already an ADR 0042 approval of the exact
-	// call and their results carry no org data, so the guard lets them through. Any other target
-	// that is not an org's server is refused.
+	// gateway.KoinonTarget). The guard lets the agent's calls to them through: their results carry
+	// no org data, and a call to one only records the write, which runs when its stored decision
+	// is a person's ADR 0042 approval of the exact call. A code-host write that no person decides
+	// (the Trusted preset allows it, an approval scope covers it) is not exempt: githubtools runs
+	// it only when CheckCodeHost finds it clean (githubtools.Options.LeakCheck), and records it
+	// for a person's approval otherwise (#687). Any other target that is not an org's server is
+	// refused.
 	OwnTargets []string
 	// UnseenAfter is how long a passed call may wait for its guarded result before both legs are
 	// recorded on its session (DefaultUnseenAfter when <= 0; #254).
@@ -125,6 +131,77 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, person: PersonDecider{Approve: o.Approve}, own: slices.Clone(o.OwnTargets),
 		url: leakguard.DefaultURLPolicy(), feedWait: o.FeedWait, unseenAfter: o.UnseenAfter,
 	}
+}
+
+// codeHostWrite is the declaration of a write of Koinon's own code-host tools: its class follows
+// from the repository (ADR 0091 decision 3), every argument of the call is payload.
+var codeHostWrite = sinkclass.Declaration{Class: sinkclass.ExternalHigh, Derivation: sinkclass.CodeHost, AddressArgs: []string{"owner", "repo"}}
+
+// CheckCodeHost is the leak check of a call to Koinon's own code-host tools that no person decides
+// (githubtools.Options.LeakCheck): the Trusted preset allows it, or an approval scope covers it. The
+// call is checked as a code-host write of an org's MCP server: the repository is its address,
+// looked up in the list of the connection the grant is bound to, and the arguments are its payload.
+// It writes nothing. A nil risk is a clean call. Otherwise the risk is for the card of a person's
+// approval of the exact call: a call the rules hold (it needs a decision or would be refused) and
+// a call whose facts the guard cannot gather both go to a person, as the same call does under a
+// preset a person decides. An error is a call the guard could not check at all.
+func (g *Guard) CheckCodeHost(ctx context.Context, call githubtools.LeakCall) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(ctx, Deadline)
+	defer cancel()
+	raw, err := codeHostArgs(call)
+	if err != nil {
+		return nil, err
+	}
+	c := caller{org: call.Org, agent: call.Agent, server: store.McpServer{OrgID: call.Org.ID, CodeHostConnectionID: call.Connection}}
+	a, err := g.assess(ctx, c, codeHostWrite, raw, false)
+	if err != nil {
+		return nil, err
+	}
+	if a.refused != nil {
+		a.verdict = a.refused.Verdict
+	}
+	v := a.verdict
+	if v.Action == Pass {
+		return nil, nil
+	}
+	if len(v.Reasons) == 0 {
+		a.verdict.Reasons = []string{v.Reason}
+	}
+	g.log.Info("mcp guard: an own code-host call goes to a person", "org", call.Org.Slug, "agent", call.Agent.ID.String(),
+		"tool", call.Tool, "action", string(v.Action), "reason", v.Reason, "reasons", a.verdict.Reasons, "class", string(a.class),
+		"feed_stalled", a.feedStalled, "reply_unseen", a.replyUnseen)
+	return a.risk(), nil
+}
+
+// codeHostArgs are a code-host call's arguments with its repository as the owner and repo address
+// arguments of codeHostWrite. Arguments that already name either are not read: the address would
+// be ambiguous.
+func codeHostArgs(call githubtools.LeakCall) (json.RawMessage, error) {
+	owner, repo, ok := strings.Cut(call.Repo, "/")
+	if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return nil, fmt.Errorf("mcpguard: the repository %q is not owner/name", call.Repo)
+	}
+	args := map[string]json.RawMessage{}
+	if len(bytes.TrimSpace(call.Arguments)) > 0 {
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("mcpguard: the arguments of %s: %w", call.Tool, err)
+		}
+	}
+	for k := range args {
+		for _, a := range codeHostWrite.AddressArgs {
+			if strings.EqualFold(k, a) {
+				return nil, fmt.Errorf("mcpguard: the arguments of %s name %q, the repository's address argument", call.Tool, k)
+			}
+		}
+	}
+	var err error
+	if args["owner"], err = json.Marshal(owner); err != nil {
+		return nil, err
+	}
+	if args["repo"], err = json.Marshal(repo); err != nil {
+		return nil, err
+	}
+	return json.Marshal(args)
 }
 
 // State is the guard's Postgres state, for the taint feed.
