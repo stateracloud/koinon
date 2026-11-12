@@ -1,6 +1,6 @@
 # 0040. agentgateway as the model gateway and MCP gateway
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below)
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 and 2026-11-12 (below)
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
 - Verification: Pending: agentgateway spike (deployment mode, ExtMCP routing) and OpenShell spike (old issue 3)
@@ -129,6 +129,14 @@ Decision 6 and the follow-up promise a `ModelGateway` and an `MCPGateway` interf
 The goal of decision 6, replacing agentgateway with another gateway, is met by implementing
 `ModelGateway`. A separate `MCPGateway` is deferred until a gateway needs to be driven for MCP
 separately from models.
+
+## Amendment (2026-11-12): MCPGateway arrives in ADR 0097 step 2
+
+[0097](0097-koinon-owned-gateway.md) decision 2.1 introduces the `MCPGateway` interface in step 2, the point the
+2026-10-26 amendment waited for: Koinon's own gateway serves the MCP path apart from models.
+`ApplyMCP(ctx, MCPConfig)` is its own method, not a second `Apply`, so a driver that serves both
+paths can be applied and acknowledged for each path apart. The agentgateway drivers keep
+`ModelGateway.Apply` for both halves. The text above stays as written.
 
 ## Links
 

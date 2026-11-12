@@ -44,7 +44,11 @@ type ModelGateway interface {
 	// or with an error when the gateway rejected it or ctx expired. Apply is
 	// idempotent; revoking a key or changing a limit is an Apply of a State
 	// without that key or with the new limit (see State.RevokeKey and
-	// State.SetLimit).
+	// ModelState.SetLimit).
+	//
+	// Apply converges both halves of s (the model path and the MCP path), as the agentgateway
+	// drivers serve both from one config. A per-half model call, next to [MCPGateway.ApplyMCP],
+	// comes with the stream client slice of ADR 0097 step 2.
 	//
 	// A driver whose gateway judges objects one by one (Kubernetes mode) may return the
 	// revision together with a *RejectedError: everything but the named objects is live.
@@ -55,17 +59,17 @@ type ModelGateway interface {
 }
 
 // MCPGateway is implemented by a driver that serves the MCP path (ADR 0097 decision 2.1). It is the
-// MCP counterpart of [ModelGateway], so the two paths are built and tested apart and a driver may
-// serve one of them only. The standalone and Kubernetes drivers serve both paths from one config
-// and implement neither interface separately yet; Koinon's own gateway (ADR 0097 step 2) is the
-// first driver of this one.
+// MCP counterpart of [ModelGateway], so the two paths are built, applied and acknowledged apart and
+// a driver may serve one of them only. The standalone and Kubernetes drivers serve both paths from
+// one config and implement neither half separately yet; Koinon's own gateway (ADR 0097 step 2) is
+// the first driver of this interface.
 type MCPGateway interface {
-	// Apply converges the gateway's MCP path to the MCP half of s and returns once the gateway
-	// serves it, or with an error when the gateway rejected it or ctx expired. Apply is idempotent.
-	// It takes the whole State, not an MCPState, because the MCP half reads s.Keys to know which
-	// agent a key belongs to (see State.Keys). It returns the same [Revision] type as
-	// [ModelGateway.Apply]: one revision covers both halves.
-	Apply(ctx context.Context, s State) (Revision, error)
+	// ApplyMCP converges the gateway's MCP path to c and returns once the gateway serves it, or
+	// with an error when the gateway rejected it or ctx expired. ApplyMCP is idempotent. It takes
+	// an [MCPConfig], not an MCPState, because the MCP half reads the keys to know which agent a
+	// key belongs to. It returns the same [Revision] type as [ModelGateway.Apply]; the revision
+	// covers the MCP path only.
+	ApplyMCP(ctx context.Context, c MCPConfig) (Revision, error)
 }
 
 // Rejection is one object the gateway refused, with the org it belongs to ("" for a platform
@@ -494,7 +498,8 @@ type ToolGrant struct {
 // State is everything a gateway serves. The zero value serves nothing. It is the model half and
 // the MCP half side by side (ADR 0097 decision 2.1), with the one thing both need, the keys.
 // Fields of the halves are promoted, so s.Providers and s.MCP read as before; a composite literal
-// names the half: State{ModelState: ModelState{...}}.
+// may name the half (State{ModelState: ModelState{...}}) or set the promoted fields flat. ModelConfig
+// and MCPConfig give each path its view.
 type State struct {
 	// Keys are shared by the halves: a key is how a caller of either path is authenticated, and
 	// its agent is what the model half limits and the MCP half grants tools to. Keeping them on
@@ -503,6 +508,26 @@ type State struct {
 	ModelState
 	MCPState
 }
+
+// ModelConfig is what the model path is handed: the keys and the model half of a State. A driver
+// that serves only the model path takes this and ignores the MCP half.
+type ModelConfig struct {
+	Keys []Key
+	ModelState
+}
+
+// MCPConfig is what the MCP path is handed: the keys and the MCP half of a State. A driver that
+// serves only the MCP path takes this and ignores the model half.
+type MCPConfig struct {
+	Keys []Key
+	MCPState
+}
+
+// ModelConfig returns the model view of s: its keys and its model half.
+func (s State) ModelConfig() ModelConfig { return ModelConfig{Keys: s.Keys, ModelState: s.ModelState} }
+
+// MCPConfig returns the MCP view of s: its keys and its MCP half.
+func (s State) MCPConfig() MCPConfig { return MCPConfig{Keys: s.Keys, MCPState: s.MCPState} }
 
 // ModelState is the half of a State the model path serves (ADR 0097 decision 2.1): spend limits,
 // providers with their models, and each agent's model allowlist. A driver that serves only the
@@ -710,10 +735,35 @@ func ToolRules(tools map[AgentRef][]ToolGrant) []string {
 // Validate checks s for values that would be unsafe or ambiguous in gateway
 // config. Drivers call it before rendering.
 func (s State) Validate() error {
+	errs := validateKeys(s.Keys)
+	errs = append(errs, s.ModelState.validate()...)
+	errs = append(errs, s.MCPState.validate()...)
+	return invalidState(errs)
+}
+
+// Validate checks the keys and the model half, with the same errors State.Validate reports for them.
+func (c ModelConfig) Validate() error {
+	return invalidState(append(validateKeys(c.Keys), c.validate()...))
+}
+
+// Validate checks the keys and the MCP half, with the same errors State.Validate reports for them.
+func (c MCPConfig) Validate() error {
+	return invalidState(append(validateKeys(c.Keys), c.validate()...))
+}
+
+func invalidState(errs []error) error {
+	if len(errs) > 0 {
+		return fmt.Errorf("gateway: invalid state: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+// validateKeys checks the keys both halves share.
+func validateKeys(keys []Key) []error {
 	var errs []error
 	seenID := map[string]bool{}
 	seenHash := map[string]bool{}
-	for _, k := range s.Keys {
+	for _, k := range keys {
 		if !keyID.MatchString(k.ID) {
 			errs = append(errs, fmt.Errorf("key %q: invalid id", k.ID))
 		} else if k.ID == ReloadProbeKeyName {
@@ -730,12 +780,7 @@ func (s State) Validate() error {
 		}
 		seenID[k.ID], seenHash[k.Hash] = true, true
 	}
-	errs = append(errs, s.ModelState.validate()...)
-	errs = append(errs, s.MCPState.validate()...)
-	if len(errs) > 0 {
-		return fmt.Errorf("gateway: invalid state: %w", errors.Join(errs...))
-	}
-	return nil
+	return errs
 }
 
 // validate checks the model half; State.Validate runs it after the keys.
