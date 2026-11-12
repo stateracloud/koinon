@@ -38,6 +38,7 @@ if [[ -s $tmp/rc && $(<"$tmp/rc") =~ ^[0-9]+$ ]]; then ok "hack/go-test.sh write
 
 # (#846) The maintainer scripts are labelled and name no org: hack/README.md lists them, each carries the
 # label in its header, and the repository and board come from hack/repo-lib.sh alone.
+# shellcheck disable=SC2016 # backticks are Markdown, not a command
 listed=$(sed -n 's/^| `\([^`]*\.sh\)` |.*/\1/p' hack/README.md | sort)
 labelled=$(cd hack && grep -rl --include='*.sh' -m1 '^# Maintainer script (hack/README.md): ' . | sed 's|^\./||' | sort)
 [[ -n $listed ]] || bad "hack/README.md lists no maintainer scripts"
@@ -51,7 +52,7 @@ for s in $listed; do
 done
 ok "maintainer scripts name no org outside comments"
 
-# shellcheck source=repo-lib.sh
+# shellcheck source=hack/repo-lib.sh
 (
 	source hack/repo-lib.sh
 	unset KOINON_REPO GH_REPO KOINON_UPSTREAM KOINON_BOARD KOINON_BOARD_OWNER
