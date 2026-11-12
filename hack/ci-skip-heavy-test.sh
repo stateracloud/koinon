@@ -241,9 +241,9 @@ expect_lab "lab: an API error means go-test runs" false EVENT_NAME=pull_request 
 
 # --- apply -----------------------------------------------------------------------------------------
 cd "$tmp"
-input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nshell=true\nscripts=true'
-want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nflavors=false\ntidy=false\nshell=false\nscripts=false\nflavors_publish=true'
-want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nshell=true\nscripts=true\nflavors_publish=true'
+input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nshell=true\nscripts=true'
+want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nflavors=false\ntidy=false\nvuln=false\nshell=false\nscripts=false\nflavors_publish=true'
+want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nshell=true\nscripts=true\nflavors_publish=true'
 check_apply() { # check_apply NAME WANT SKIP INPUT
 	local got
 	got=$(SKIP=$3 "$script" apply <<<"$4")

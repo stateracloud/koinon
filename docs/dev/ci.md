@@ -415,10 +415,10 @@ Binaries that tests build themselves (the chart smoke images) do not get the tag
 
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
-`go` (go-tidy, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
+`go` (go-tidy, go-vuln, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
 `generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
-`go.mod`, `go.sum`, the lint config). `changes` and
+`go.mod`, `go.sum`, the lint config) and `go-vuln` (path rule `vuln`: `go.mod`, `go.sum`; see below). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
 old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run when the path rules say a change can affect them, and
@@ -444,6 +444,25 @@ that file and nowhere else.
   the `scripts` job, so a shell-only change runs them and not go-test. go-tidy and go-lint have their
   own rule (`job tidy`: `.go` files, `go.mod`, `go.sum`, the lint config), and `lint-shell` has `job shell`
   (`.sh` files, `.github/`, the tool pins); a docs-only or web-only pull request runs neither (#572).
+- **govulncheck (`go-vuln`, #579 part 2).** A pull request that changes `go.mod` or `go.sum` (rule `job vuln`),
+  the check itself (`hack/govulncheck.sh`, `govulncheck.yml`, `hack/versions.env`) or an `everything` path
+  (`ci.yml`, the Makefile, the setup-go-cache action, `hack/paths.rules`, `hack/paths-lib.sh`) runs
+  `hack/govulncheck.sh`, and so does a push to main, except one whose heavy jobs are switched off because a queue run already tested the same tree (`hack/ci-skip-heavy.sh`; then `go-vuln` is skipped with the rest); any other pull request skips the job. The nested modules
+  under `hack/spike/` are not scanned. The rule does not see new reachability from a code change (a `.go` change
+  that starts to call a vulnerable symbol of a module already required, or of the standard library) nor a new advisory:
+  the nightly run catches those, up to one day later. It is a part of the
+  required `go` check: the `go` gate accepts the skip only when the `vuln` output is false, and fails on a
+  finding. The script installs the version pinned in `hack/versions.env` (`GOVULNCHECK_VERSION`) with `go install`
+  and runs `govulncheck ./...`: exit 0 is a pass, a reachable known vulnerability fails the job (exit 1), and
+  a tool or database (`vuln.go.dev`) that cannot be fetched fails it too (exit 2, "COULD NOT DECIDE"), never
+  a silent pass. There is no automatic retry (T1): re-run the job by hand. On Actions the cause is an
+  `::error title=govulncheck::` annotation, and `hack/ci-fail.sh` sorts "COULD NOT DECIDE" as `infra` (re-run is
+  fair) and a finding as `vuln` (read it). The script scans with the Go toolchain of the `go` line of `go.mod`,
+  and says so when that toolchain is not available (a local run keeps the default one). The nightly `govulncheck.yml` runs
+  the same script on `main`, because a new advisory needs no code change. The preflight gate `vuln` runs it
+  locally and needs the network; the Go standard library counts, so a finding in `net/http` is fixed by raising
+  the `go` line of `go.mod`. Test: `hack/govulncheck-test.sh` (exit codes, pin, no retry), `hack/ci-go-gate-test.sh`
+  (the gate), `hack/ci-changes-test.sh` and `hack/paths-test.sh` (the path rule).
 - **Everything.** `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, the rules and their reader, the
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
@@ -451,7 +470,7 @@ that file and nowhere else.
   like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
   `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
-- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy` and `scripts` use the CI job's rule. The
+- **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy`, `vuln` and `scripts` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
   checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
