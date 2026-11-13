@@ -298,6 +298,13 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+Guide examples that need no cluster live in `test/docs-examples/*.e1`. `hack/docs-examples.sh` (CI job
+`docs examples`, advisory until it has run stable, ci-rules S3) builds `koinon-api` from the checkout and runs every
+block of every file with `docs-e1.sh run`, in an empty directory, with `KUBECONFIG=/dev/null`; a failing block or
+an empty directory fails the run. `hack/e2e-commands-check.sh` checks the files parse and runs
+`hack/docs-examples-test.sh`. Run it locally with `hack/docs-examples.sh` (`--list` to see the blocks). The page that
+shows a guide's blocks is in `koinon-docs`; its CI compares the page with the file as for the quickstart.
+
 **The restore drill** (ADR 0109, #514; `test/drill`) is the evidence for ADR 0085 decision 15: a Ginkgo suite
 seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
