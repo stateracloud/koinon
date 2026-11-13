@@ -234,7 +234,8 @@ Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again w
 
 The workflow's `test-images` job publishes the images that the lab drills need, built at the tagged
 commit, under the release images' repository path: `ghcr.io/<owner>/<repo>/koinon-fakemodel` (the fake model
-server of `test/drill`, `cmd/koinon-fakemodel`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
+server of `test/drill`, `cmd/koinon-fakemodel`), `ghcr.io/<owner>/<repo>/koinon-fakemcp` (the fake MCP server,
+`cmd/koinon-fakemcp`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
 images of `hack/rt1-fixtures-build.sh`; `rt1-prometheus`, `rt1-searxng` and `rt1-searxng-mcp` are copies of
 pinned upstream images, unmodified). Tags are the release version without the `v` (the upstream copies also
 keep their upstream tag). The lab cannot build images, so it mirrors them by digest; the job's artifact
