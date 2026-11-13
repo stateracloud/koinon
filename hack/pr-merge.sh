@@ -59,6 +59,8 @@
 
 set -euo pipefail
 # KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# Directive kept as source=/dev/null until #968 is fixed (the preflight shell gate runs shellcheck without -x, so
+# the old `source-path=SCRIPTDIR source=repo-lib.sh` fires SC1091); then go back to the old directive.
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo

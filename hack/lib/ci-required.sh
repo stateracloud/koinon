@@ -16,6 +16,13 @@ cir_parse() {
     awk 'NF && $1 != "advisory" { sub(/^(aggregator|external) /, ""); print }'
 }
 
+# cir_names: ci-required.txt on stdin -> every name it lists, required and advisory, one per line (same
+# normalisation as cir_parse; the `advisory`, `aggregator` and `external` prefixes dropped).
+cir_names() {
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+    awk 'NF { if ($1 == "advisory") sub(/^advisory[[:space:]]+/, ""); else sub(/^(aggregator|external)[[:space:]]+/, ""); print }'
+}
+
 # cir_fetch <ref>: the raw hack/ci-required.txt at a commit or branch of the repository, from the API (the
 # remote's state: a stale local checkout is never read). Fails when it cannot be read.
 cir_fetch() {

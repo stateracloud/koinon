@@ -67,6 +67,8 @@
 
 set -euo pipefail
 # KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
+# Directive kept as source=/dev/null until #968 is fixed (the preflight shell gate runs shellcheck without -x, so
+# the old `source-path=SCRIPTDIR source=repo-lib.sh` fires SC1091); then go back to the old directive.
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo
@@ -359,12 +361,14 @@ while :; do
     fi
     # A ruleset context the head's own workflows do not define can never report on this head (a check renamed
     # or added by the ruleset ahead of the PR, #971): report it instead of waiting for it. "Defined" is the
-    # head's hack/ci-required.txt (required or advisory); when that cannot be read nothing is reported.
+    # hack/ci-required.txt (required or advisory) of the PR's merge ref, because pull_request workflows run from the
+    # merge commit (base + head), so a PR behind main still gets a job that main added; the head's list only when the
+    # merge ref cannot be read. When neither can be read nothing is reported.
     if [ -n "$missing_ctx" ] && [ -n "$head" ]; then
       if [ "$defined_for" != "$head" ]; then
         defined_for=$head defined=""
-        if dtxt=$(cir_fetch "$head" 2>/dev/null); then
-          defined=$(printf '%s\n' "$dtxt" | sed -e 's/#.*//' | awk 'NF { if ($1 == "advisory") sub(/^advisory /, ""); else sub(/^(aggregator|external) /, ""); sub(/[[:space:]]+$/, ""); print }')
+        if dtxt=$(cir_fetch "refs/pull/$pr/merge" 2>/dev/null) || dtxt=$(cir_fetch "$head" 2>/dev/null); then
+          defined=$(printf '%s\n' "$dtxt" | cir_names)
         fi
       fi
       if [ -n "$defined" ]; then

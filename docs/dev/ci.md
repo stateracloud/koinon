@@ -773,7 +773,7 @@ create runs in an approval-required state (other types, such as `labeled`, `edit
 `ready_for_review`, create none). The required workflows listen as follows: `ci.yml`
 (opened, synchronize, reopened, ready_for_review), `dco.yml` (default types), `claims.yml` (opened,
 reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchronize, reopened;
-`e2e-kind.yml` also ready_for_review). So the route is:
+`e2e-kind.yml` also ready_for_review and `labeled`, which acts only for the `e2e` label). So the route is:
 
 1. A maintainer reviews the table and clicks **Approve workflows to run** on the pull request. That
    starts all of the above for the current head. This is the human review step of ADR 0079.
@@ -861,7 +861,7 @@ today's ruleset (#971):
 | Script | Reads the required list from |
 |---|---|
 | `hack/pr-merge.sh` | `hack/ci-required.txt` on the base branch on the remote; on the PR head when the PR changes that file |
-| `hack/pr-wait.sh --checks` | the ruleset's contexts, but a context missing on the head that the head's `hack/ci-required.txt` does not list exits 1 with `UNDEFINED <name>` at once instead of waiting |
+| `hack/pr-wait.sh --checks` | the ruleset's contexts, but a context missing on the head that `hack/ci-required.txt` of the PR's merge ref (`refs/pull/N/merge`, the commit its workflows run from; the head's own list when the merge ref cannot be read) does not list exits 1 with `UNDEFINED <name>` at once instead of waiting |
 | `hack/release-gate.sh` | `hack/ci-required.txt` of the tagged commit (the ruleset only when that tree has none), so an earlier rc is still judged by the checks its own tree had |
 
 The procedure, in this order (the ruleset is changed by the maintainer, `docs/maintainers/agent-workflow.md`):
@@ -876,7 +876,7 @@ The procedure, in this order (the ruleset is changed by the maintainer, `docs/ma
 4. Tags cut before the rename stay releasable: `release-gate.sh` judges each by the list in its own tree.
 
 A one-PR rename (change the job name, the list line and the ruleset together) is possible but costs more: every
-other open PR is blocked from the moment the ruleset changes until it merges main (`UNDEFINED`), and the rename PR
+other open PR waits for the new check from the moment the ruleset changes until its next run (its workflows run from the merge with main, so they have the new job; only a PR whose merge ref lacks it reports `UNDEFINED`), and the rename PR
 itself cannot enter the queue before the ruleset names the new check. Use it only when no other PR is open. A
 `.github/` PR that is merged with `pr-merge.sh --admin` needs a green `quickstart` on its head when it is
 e2e-relevant: add the `e2e` label (`hack/ship.sh --e2e`); the label starts the run itself (`e2e-kind.yml` runs on

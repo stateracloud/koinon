@@ -35,8 +35,10 @@ if [ "$1 $2" = "run list" ]; then
   exit 0
 fi
 if [ "$1" = api ] && [[ $* == *contents/hack/ci-required.txt* ]]; then # the head's hack/ci-required.txt: $FAKE_DIR/ci-required.txt, else unreadable
-  [ -f "$FAKE_DIR/ci-required.txt" ] || exit 9
-  cat "$FAKE_DIR/ci-required.txt"
+  f="$FAKE_DIR/ci-required.txt"
+  [[ $* == *ref=refs/pull/*/merge* ]] && f="$FAKE_DIR/ci-required.merge.txt" # the merge ref's list, else unreadable
+  [ -f "$f" ] || exit 9
+  cat "$f"
   exit 0
 fi
 if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
@@ -263,6 +265,20 @@ printf 'advisory flavors\n' >"$FAKE_DIR/ci-required.txt"
 run 7 --checks --interval 0 --timeout 0
 expect "an advisory name counts as defined" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
 TIMEOUT"
+printf '  advisory flavors\n' >"$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "an indented advisory row counts as defined" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+# The merge ref's list decides: main added flavors, the PR head (behind main) does not list it yet.
+printf 'aggregator go\nlint\n' >"$FAKE_DIR/ci-required.txt"
+printf 'aggregator go\nlint\nflavors\n' >"$FAKE_DIR/ci-required.merge.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "a context only the merge ref lists is waited for, not UNDEFINED" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+printf 'aggregator go\nlint\n' >"$FAKE_DIR/ci-required.merge.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "a context the merge ref does not list is UNDEFINED" 1 "UNDEFINED flavors: required by the ruleset, but hack/ci-required.txt on the head abc1234 does not list it, so no run of this head will report it. A renamed or new required check needs the ruleset and the PR changed in the right order (docs/dev/ci.md \"Renaming a required check\")"
+rm "$FAKE_DIR/ci-required.merge.txt"
 rm "$FAKE_DIR/ci-required.txt"
 run 7 --checks --interval 0 --timeout 0
 expect "an unreadable head list changes nothing" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
