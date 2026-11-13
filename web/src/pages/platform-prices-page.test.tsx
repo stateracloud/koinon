@@ -52,17 +52,17 @@ function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof pr
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => create(WhoAmIResponseSchema, { ...whoAmI(), platformAdmin: opts.platformAdmin ?? true }) })
     service(PriceService, {
-      listPriceProposals: (req) => ({ proposals: proposals.filter((p) => !req.class || p.class === req.class) }),
+      listPriceProposals: (req) => ({ proposals: proposals.filter((candidate) => !req.class || candidate.class === req.class) }),
       acceptPriceProposal: (req) => {
         calls.accepts.push(req)
-        const p = proposals.find((proposal) => proposal.id === req.id)
-        if (p?.class === 'confirm' && req.confirm !== p.model) throw reasoned('type the model id', Code.InvalidArgument, 'CONFIRM_MISMATCH')
-        proposals = proposals.filter((x) => x.id !== req.id)
+        const target = proposals.find((proposal) => proposal.id === req.id)
+        if (target?.class === 'confirm' && req.confirm !== target.model) throw reasoned('type the model id', Code.InvalidArgument, 'CONFIRM_MISMATCH')
+        proposals = proposals.filter((remaining) => remaining.id !== req.id)
         return { version: 3n, warnings: [] }
       },
       dismissPriceProposal: (req) => {
         calls.dismisses.push(req.id)
-        proposals = proposals.filter((x) => x.id !== req.id)
+        proposals = proposals.filter((remaining) => remaining.id !== req.id)
         return {}
       },
       listPlatformPriceVersions: () => ({ versions }),
