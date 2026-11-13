@@ -67,7 +67,7 @@
 
 set -euo pipefail
 # KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
-# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+# shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo
 export GH_PAGER=cat PAGER=cat

@@ -6,6 +6,9 @@
 # a required check"). A script that judges a commit reads the list of THAT commit, never the checkout it runs in
 # and never today's ruleset. Source this file, do not run it.
 
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
 # cir_parse: ci-required.txt on stdin -> the required contexts, one per line (comments, `advisory` rows and the
 # `aggregator`/`external` prefixes dropped).
 cir_parse() {

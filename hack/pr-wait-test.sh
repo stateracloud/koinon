@@ -361,6 +361,15 @@ ciruns "61:ci (draft)" "62:ci"
 run 7 --interval 0
 expect "#231: without --checks the draft run is not reported FAILED" 0 "checks 2/2 green
 MERGED abcdef0"
+# (#971) a label other than `e2e` starts an e2e-kind run titled `e2e-kind (label ignored)` whose quickstart is skipped; it is
+# newer than the real run but never counts.
+e_ok=$(cr_at quickstart SUCCESS 70 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+e_skip=$(cr_at quickstart SKIPPED 71 2026-11-01T10:05:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+seq_set "$(rdh "$e_ok,$e_skip")"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 70 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 71 e2e-kind.yml 'e2e-kind (label ignored)' 2026-11-01T10:05:00Z)"
+run 7 --checks --interval 0
+expect "#971: a newer ignored-label e2e-kind run does not hide the green quickstart" 0 "checks 1/1 green"
 # the ready run is not there yet: wait, never pass
 seq_set "$(rdh "$d_go")" "$(rdh "$d_go")" "$(rdh "$d_go,$r_go")"
 printf 'go\n' >"$FAKE_DIR/rules"

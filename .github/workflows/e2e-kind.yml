@@ -29,7 +29,7 @@
 # failed or was cancelled. Trust limit: `result` runs from this very file, so a PR can edit it to drop the
 # check; the guard is the ruleset's required review on `.github/**` (ADR 0105).
 name: e2e-kind
-run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || '' }}
+run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit, inputs.bisect_id) || (github.event.action == 'labeled' && github.event.label.name != 'e2e' && ' (label ignored)') || '' }}
 
 on:
   pull_request:
@@ -38,6 +38,8 @@ on:
     # `labeled` is for the `e2e` label only (#971): `pr-merge --admin` and ship.sh --e2e add it to a PR that is
     # already open, and without this trigger the label started nothing until a push or a rerun. Any other label
     # skips `decide` (see its `if:`) and does not share the PR's concurrency group (a label must never cancel a run).
+    # Its run is titled `e2e-kind (label ignored)` and hack/lib/pr-verdict.sh drops it (like `ci (draft)`), so it never hides
+    # the newest real run's `quickstart`.
   # The merge queue (#225, #444, ADR 0102, ADR 0105): `e2e result` is required, so it reports on the queue's commit.
   # When the entry's own diff (against merge_group.base_sha) is e2e-relevant, or the pull request has the `e2e`
   # label, decide starts the quickstart on the queue commit (main plus the pull request): that run is the one
