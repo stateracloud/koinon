@@ -6,6 +6,11 @@
 # not run here); no lab and no external-run status.
 #
 #   hack/lane-gates.sh [<base>]     base defaults to origin/main
+#   hack/lane-gates.sh --start [<base>]
+#                                   detach the same run, print the verdict file path and return at once
+#   hack/lane-gates.sh --wait <file> [--max N]
+#                                   print the verdict file's gate lines and exit with the run's code;
+#                                   75 when the run is still going after N seconds (default 600, 0 = look once)
 #
 # Which gates: the lint, test and consistency gates of hack/preflight.sh (`--list` picks them from
 # the diff) plus the heavy CI jobs hack/ci-changes.sh turns on: chartsmoke (make test-chart-smoke),
@@ -23,6 +28,12 @@
 # preflight --list or ci-changes.sh, an empty gate list (gitleaks is always selected) and a CI job
 # with no local gate are never "ok": the first two exit 1, the last is notrun (exit 3).
 #
+# --start / --wait (#654): a lane agent that must hand back cannot block on the run, and a background
+# task dies with its turn. --start runs `lane-gates.sh <base>` in its own session (setsid), with its
+# output in <dir>/verdict, its pid in <dir>/pid and, when it ends, its exit code in <dir>/rc. --wait
+# polls that rc file, so it can be called again after 75. A run whose process vanished without an rc
+# (killed, host restart) is exit 1 with that said, never "still running" forever.
+#
 # Test hooks (hack/lane-gates-test.sh): LANE_GATES_PREFLIGHT, LANE_GATES_CHANGES, LANE_GATES_MAKE
 # replace hack/preflight.sh, hack/ci-changes.sh and make; LANE_GATES_MISSING_TOOLS="helm go" hides tools.
 # Setting any of them prints a warning on stderr.
@@ -32,8 +43,77 @@
 
 set -uo pipefail
 
+self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0") # before any cd: --start re-runs this file
+
 case ${1:-} in
--h | --help) sed -n 4,27p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+-h | --help) sed -n 4,35p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+--wait)
+	shift
+	wfile="" wmax=600
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		--max) [[ ${2:-} =~ ^[0-9]+$ ]] || { echo "lane-gates: --max needs a number of seconds" >&2; exit 2; }
+			wmax=$2; shift 2 ;;
+		-*) echo "lane-gates: unknown argument $1 (see --help)" >&2; exit 2 ;;
+		*) [[ -z $wfile ]] || { echo "lane-gates: --wait takes one verdict file" >&2; exit 2; }
+			wfile=$1; shift ;;
+		esac
+	done
+	[[ -n $wfile ]] || { echo "lane-gates: --wait needs the verdict file that --start printed" >&2; exit 2; }
+	[[ -f $wfile ]] || { echo "lane-gates: no verdict file $wfile" >&2; exit 2; }
+	wdir=$(dirname "$wfile")
+	waited=0
+	while [[ ! -f $wdir/rc ]]; do
+		wpid=$(cat "$wdir/pid" 2>/dev/null)
+		if [[ -z $wpid ]] || ! kill -0 "$wpid" 2>/dev/null; then
+			[[ -f $wdir/rc ]] && break # finished between the two checks
+			echo "lane-gates FAIL: the run (pid ${wpid:-unknown}) is gone and left no exit code; nothing was verified (log $wfile)" >&2
+			exit 1
+		fi
+		if [[ $waited -ge $wmax ]]; then
+			echo "lane-gates: still running after ${wmax}s (pid $wpid); call --wait $wfile again" >&2
+			exit 75
+		fi
+		sleep 2
+		waited=$((waited + 2))
+	done
+	wrc=$(cat "$wdir/rc")
+	if [[ $wrc == 0 || $wrc == 1 || $wrc == 3 ]]; then
+		grep -E '^(gate=|lane-gates )' "$wfile"
+		exit "$wrc"
+	fi
+	# 2, 126, 127...: the run itself broke (usage error, missing file); never pass that code on as a verdict.
+	echo "lane-gates FAIL: the run exited $wrc before it had a verdict; nothing was verified"
+	tail -n 5 "$wfile" | sed 's/^/  | /'
+	exit 1
+	;;
+--start)
+	shift
+	[[ $# -le 1 ]] || { echo "lane-gates: --start takes at most the base ref" >&2; exit 2; }
+	sbase=${1:-origin/main}
+	cd "$(git rev-parse --show-toplevel)" || exit 2
+	git rev-parse --verify --quiet "$sbase^{commit}" >/dev/null || { echo "lane-gates: unknown base $sbase (git fetch origin?)" >&2; exit 2; }
+	sdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates-run.XXXXXX") || exit 2
+	[[ -f $self ]] || { echo "lane-gates: cannot find $self" >&2; exit 2; }
+	: >"$sdir/verdict"
+	# shellcheck disable=SC2016 # the script is for the child shell: its $1..$3 must not expand here
+	# The detached shell writes rc last and atomically, so --wait never reads a half-written code.
+	run='echo $$ >"$3/pid"; bash "$1" "$2" >"$3/verdict" 2>&1; echo $? >"$3/rc.tmp"; mv "$3/rc.tmp" "$3/rc"'
+	# A new session, so ending the caller's process group does not end the run (macOS has no setsid).
+	if command -v setsid >/dev/null 2>&1; then
+		setsid bash -c "$run" _ "$self" "$sbase" "$sdir" </dev/null >/dev/null 2>&1 &
+	elif command -v perl >/dev/null 2>&1; then
+		perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash -c "$run" _ "$self" "$sbase" "$sdir" </dev/null >/dev/null 2>&1 &
+	else
+		echo "lane-gates: --start needs setsid (util-linux) or perl to detach the run" >&2; exit 2
+	fi
+	disown 2>/dev/null
+	# The pid is the detached shell's own ($$ above; setsid may fork). Wait for it so --wait never races it.
+	for _ in $(seq 1 50); do [[ -s $sdir/pid ]] && break; sleep 0.1; done
+	[[ -s $sdir/pid ]] || { echo "lane-gates: the detached run did not start" >&2; exit 2; }
+	echo "$sdir/verdict"
+	exit 0
+	;;
 -*) echo "lane-gates: unknown argument $1 (see --help)" >&2; exit 2 ;;
 esac
 [[ $# -le 1 ]] || { echo "lane-gates: at most one argument, the base ref" >&2; exit 2; }
