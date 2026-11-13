@@ -52,6 +52,18 @@ const (
 	// BudgetServiceSetAgentRunLimitsProcedure is the procedure name of the BudgetService's
 	// SetAgentRunLimits RPC.
 	BudgetServiceSetAgentRunLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/SetAgentRunLimits"
+	// BudgetServiceGetOrgContinuationLimitsProcedure is the procedure name of the BudgetService's
+	// GetOrgContinuationLimits RPC.
+	BudgetServiceGetOrgContinuationLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/GetOrgContinuationLimits"
+	// BudgetServiceSetOrgContinuationTaskSpendProcedure is the procedure name of the BudgetService's
+	// SetOrgContinuationTaskSpend RPC.
+	BudgetServiceSetOrgContinuationTaskSpendProcedure = "/koinon.budget.v1alpha1.BudgetService/SetOrgContinuationTaskSpend"
+	// BudgetServiceGetAgentContinuationLimitsProcedure is the procedure name of the BudgetService's
+	// GetAgentContinuationLimits RPC.
+	BudgetServiceGetAgentContinuationLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/GetAgentContinuationLimits"
+	// BudgetServiceSetAgentContinuationLimitsProcedure is the procedure name of the BudgetService's
+	// SetAgentContinuationLimits RPC.
+	BudgetServiceSetAgentContinuationLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/SetAgentContinuationLimits"
 	// BudgetServiceListNotificationsProcedure is the procedure name of the BudgetService's
 	// ListNotifications RPC.
 	BudgetServiceListNotificationsProcedure = "/koinon.budget.v1alpha1.BudgetService/ListNotifications"
@@ -129,6 +141,36 @@ var (
 			Procedure:  BudgetServiceSetAgentRunLimitsProcedure,
 		}
 	})
+	budgetServiceGetOrgContinuationLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("GetOrgContinuationLimits"),
+			Procedure:        BudgetServiceGetOrgContinuationLimitsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	budgetServiceSetOrgContinuationTaskSpendSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("SetOrgContinuationTaskSpend"),
+			Procedure:  BudgetServiceSetOrgContinuationTaskSpendProcedure,
+		}
+	})
+	budgetServiceGetAgentContinuationLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("GetAgentContinuationLimits"),
+			Procedure:        BudgetServiceGetAgentContinuationLimitsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	budgetServiceSetAgentContinuationLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("SetAgentContinuationLimits"),
+			Procedure:  BudgetServiceSetAgentContinuationLimitsProcedure,
+		}
+	})
 	budgetServiceListNotificationsSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -172,6 +214,20 @@ type BudgetServiceClient interface {
 	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
 	// override; all zero clears them all. It applies to runs queued afterwards.
 	SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error)
+	// GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs
+	// (issue #99): the effective value and the platform default. Admins and owners.
+	GetOrgContinuationLimits(context.Context, *v1alpha1.GetOrgContinuationLimitsRequest) (*v1alpha1.GetOrgContinuationLimitsResponse, error)
+	// SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An
+	// empty amount clears it, so the platform default applies. It applies from the next time a run
+	// hits its time limit.
+	SetOrgContinuationTaskSpend(context.Context, *v1alpha1.SetOrgContinuationTaskSpendRequest) (*v1alpha1.SetOrgContinuationTaskSpendResponse, error)
+	// GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the
+	// effective values, the template's and org's defaults and the admin's overrides.
+	GetAgentContinuationLimits(context.Context, *v1alpha1.GetAgentContinuationLimitsRequest) (*v1alpha1.GetAgentContinuationLimitsResponse, error)
+	// SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset
+	// fields follow the template (the count) or the org's default (the cap); a count of 0 switches
+	// continuation off for the agent.
+	SetAgentContinuationLimits(context.Context, *v1alpha1.SetAgentContinuationLimitsRequest) (*v1alpha1.SetAgentContinuationLimitsResponse, error)
 	// ListNotifications returns the caller's notifications in this org, newest first: budget
 	// warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
 	// those about the platform ceiling.
@@ -212,6 +268,20 @@ type BudgetServiceHandler interface {
 	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
 	// override; all zero clears them all. It applies to runs queued afterwards.
 	SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error)
+	// GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs
+	// (issue #99): the effective value and the platform default. Admins and owners.
+	GetOrgContinuationLimits(context.Context, *v1alpha1.GetOrgContinuationLimitsRequest) (*v1alpha1.GetOrgContinuationLimitsResponse, error)
+	// SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An
+	// empty amount clears it, so the platform default applies. It applies from the next time a run
+	// hits its time limit.
+	SetOrgContinuationTaskSpend(context.Context, *v1alpha1.SetOrgContinuationTaskSpendRequest) (*v1alpha1.SetOrgContinuationTaskSpendResponse, error)
+	// GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the
+	// effective values, the template's and org's defaults and the admin's overrides.
+	GetAgentContinuationLimits(context.Context, *v1alpha1.GetAgentContinuationLimitsRequest) (*v1alpha1.GetAgentContinuationLimitsResponse, error)
+	// SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset
+	// fields follow the template (the count) or the org's default (the cap); a count of 0 switches
+	// continuation off for the agent.
+	SetAgentContinuationLimits(context.Context, *v1alpha1.SetAgentContinuationLimitsRequest) (*v1alpha1.SetAgentContinuationLimitsResponse, error)
 	// ListNotifications returns the caller's notifications in this org, newest first: budget
 	// warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
 	// those about the platform ceiling.
@@ -234,6 +304,10 @@ func RegisterBudgetServiceHandler(server *connect.Server, svc BudgetServiceHandl
 		connect.Method{Spec: budgetServiceSetAgentBudgetSpec(), Handler: adapter.setAgentBudget},
 		connect.Method{Spec: budgetServiceGetAgentRunLimitsSpec(), Handler: adapter.getAgentRunLimits},
 		connect.Method{Spec: budgetServiceSetAgentRunLimitsSpec(), Handler: adapter.setAgentRunLimits},
+		connect.Method{Spec: budgetServiceGetOrgContinuationLimitsSpec(), Handler: adapter.getOrgContinuationLimits},
+		connect.Method{Spec: budgetServiceSetOrgContinuationTaskSpendSpec(), Handler: adapter.setOrgContinuationTaskSpend},
+		connect.Method{Spec: budgetServiceGetAgentContinuationLimitsSpec(), Handler: adapter.getAgentContinuationLimits},
+		connect.Method{Spec: budgetServiceSetAgentContinuationLimitsSpec(), Handler: adapter.setAgentContinuationLimits},
 		connect.Method{Spec: budgetServiceListNotificationsSpec(), Handler: adapter.listNotifications},
 		connect.Method{Spec: budgetServiceMarkNotificationReadSpec(), Handler: adapter.markNotificationRead},
 	)
@@ -276,6 +350,22 @@ func (UnimplementedBudgetServiceHandler) GetAgentRunLimits(context.Context, *v1a
 
 func (UnimplementedBudgetServiceHandler) SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.SetAgentRunLimits is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) GetOrgContinuationLimits(context.Context, *v1alpha1.GetOrgContinuationLimitsRequest) (*v1alpha1.GetOrgContinuationLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.GetOrgContinuationLimits is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) SetOrgContinuationTaskSpend(context.Context, *v1alpha1.SetOrgContinuationTaskSpendRequest) (*v1alpha1.SetOrgContinuationTaskSpendResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.SetOrgContinuationTaskSpend is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) GetAgentContinuationLimits(context.Context, *v1alpha1.GetAgentContinuationLimitsRequest) (*v1alpha1.GetAgentContinuationLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.GetAgentContinuationLimits is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) SetAgentContinuationLimits(context.Context, *v1alpha1.SetAgentContinuationLimitsRequest) (*v1alpha1.SetAgentContinuationLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.SetAgentContinuationLimits is not implemented")
 }
 
 func (UnimplementedBudgetServiceHandler) ListNotifications(context.Context, *v1alpha1.ListNotificationsRequest) (*v1alpha1.ListNotificationsResponse, error) {
@@ -357,6 +447,38 @@ func (c *budgetServiceClient) GetAgentRunLimits(ctx context.Context, req *v1alph
 func (c *budgetServiceClient) SetAgentRunLimits(ctx context.Context, req *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error) {
 	var res v1alpha1.SetAgentRunLimitsResponse
 	if err := c.client.CallUnary(ctx, budgetServiceSetAgentRunLimitsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) GetOrgContinuationLimits(ctx context.Context, req *v1alpha1.GetOrgContinuationLimitsRequest) (*v1alpha1.GetOrgContinuationLimitsResponse, error) {
+	var res v1alpha1.GetOrgContinuationLimitsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceGetOrgContinuationLimitsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) SetOrgContinuationTaskSpend(ctx context.Context, req *v1alpha1.SetOrgContinuationTaskSpendRequest) (*v1alpha1.SetOrgContinuationTaskSpendResponse, error) {
+	var res v1alpha1.SetOrgContinuationTaskSpendResponse
+	if err := c.client.CallUnary(ctx, budgetServiceSetOrgContinuationTaskSpendSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) GetAgentContinuationLimits(ctx context.Context, req *v1alpha1.GetAgentContinuationLimitsRequest) (*v1alpha1.GetAgentContinuationLimitsResponse, error) {
+	var res v1alpha1.GetAgentContinuationLimitsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceGetAgentContinuationLimitsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) SetAgentContinuationLimits(ctx context.Context, req *v1alpha1.SetAgentContinuationLimitsRequest) (*v1alpha1.SetAgentContinuationLimitsResponse, error) {
+	var res v1alpha1.SetAgentContinuationLimitsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceSetAgentContinuationLimitsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -482,6 +604,54 @@ func (h budgetServiceHandler) setAgentRunLimits(ctx context.Context, _ connect.S
 		return err
 	}
 	res, err := h.svc.SetAgentRunLimits(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) getOrgContinuationLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetOrgContinuationLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetOrgContinuationLimits(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) setOrgContinuationTaskSpend(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetOrgContinuationTaskSpendRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetOrgContinuationTaskSpend(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) getAgentContinuationLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetAgentContinuationLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetAgentContinuationLimits(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) setAgentContinuationLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentContinuationLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentContinuationLimits(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -968,15 +968,19 @@ the platform ceiling is for platform admins. Every change is audited.
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
 | GetAgentBudget | `koinon.budget.v1alpha1.GetAgentBudgetRequest` | `koinon.budget.v1alpha1.GetAgentBudgetResponse` | - | GetAgentBudget returns an agent's effective daily limit and today's spend. |
+| GetAgentContinuationLimits | `koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest` | `koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse` | - | GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the effective values, the template's and org's defaults and the admin's overrides. |
 | GetAgentRunLimits | `koinon.budget.v1alpha1.GetAgentRunLimitsRequest` | `koinon.budget.v1alpha1.GetAgentRunLimitsResponse` | - | GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the template's defaults and the admin's overrides (ADR 0081). |
 | GetOrgBudget | `koinon.budget.v1alpha1.GetOrgBudgetRequest` | `koinon.budget.v1alpha1.GetOrgBudgetResponse` | - | GetOrgBudget returns the cap, the platform ceiling and this month's spend. |
+| GetOrgContinuationLimits | `koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest` | `koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse` | - | GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs (issue #99): the effective value and the platform default. Admins and owners. |
 | ListAgentBudgets | `koinon.budget.v1alpha1.ListAgentBudgetsRequest` | `koinon.budget.v1alpha1.ListAgentBudgetsResponse` | - | ListAgentBudgets returns every agent's effective daily limit, template default and today's spend. |
 | ListNotifications | `koinon.budget.v1alpha1.ListNotificationsRequest` | `koinon.budget.v1alpha1.ListNotificationsResponse` | - | ListNotifications returns the caller's notifications in this org, newest first: budget warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also those about the platform ceiling. |
 | ListOrgBudgets | `koinon.budget.v1alpha1.ListOrgBudgetsRequest` | `koinon.budget.v1alpha1.ListOrgBudgetsResponse` | - | ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform admins only. |
 | MarkNotificationRead | `koinon.budget.v1alpha1.MarkNotificationReadRequest` | `koinon.budget.v1alpha1.MarkNotificationReadResponse` | - | MarkNotificationRead marks one of the caller's notifications read. |
 | SetAgentBudget | `koinon.budget.v1alpha1.SetAgentBudgetRequest` | `koinon.budget.v1alpha1.SetAgentBudgetResponse` | - | SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for a new agent. |
+| SetAgentContinuationLimits | `koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest` | `koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse` | - | SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset fields follow the template (the count) or the org's default (the cap); a count of 0 switches continuation off for the agent. |
 | SetAgentRunLimits | `koinon.budget.v1alpha1.SetAgentRunLimitsRequest` | `koinon.budget.v1alpha1.SetAgentRunLimitsResponse` | - | SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that override; all zero clears them all. It applies to runs queued afterwards. |
 | SetMonthlyCap | `koinon.budget.v1alpha1.SetMonthlyCapRequest` | `koinon.budget.v1alpha1.SetMonthlyCapResponse` | - | SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling. |
+| SetOrgContinuationTaskSpend | `koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest` | `koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse` | - | SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An empty amount clears it, so the platform default applies. It applies from the next time a run hits its time limit. |
 | SetPlatformCeiling | `koinon.budget.v1alpha1.SetPlatformCeilingRequest` | `koinon.budget.v1alpha1.SetPlatformCeilingResponse` | - | SetPlatformCeiling sets the org's ceiling, or clears it with an empty amount. Platform admins only. The org's cap must already fit under it. |
 
 ### Service PriceService
@@ -1005,6 +1009,16 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | agent_name | 5 | `string` | singular |  | agent_name and template_default_usd are set by ListAgentBudgets. The default is the spendUSD of the agent's active version. |
 | template_default_usd | 6 | `string` | singular |  |  |
 
+### Message AgentContinuationLimits
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent_id | 1 | `string` | singular |  |  |
+| agent_name | 2 | `string` | singular |  |  |
+| effective | 3 | `koinon.budget.v1alpha1.ContinuationValues` | singular |  | effective is what a task gets now: the override, else the template's count and the org's cap. |
+| template_default | 4 | `koinon.budget.v1alpha1.ContinuationValues` | singular |  | template_default is the agent's active version's count and the org's cap. |
+| override | 5 | `koinon.budget.v1alpha1.ContinuationOverride` | singular |  |  |
+
 ### Message AgentRunLimits
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1014,6 +1028,24 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | effective | 3 | `koinon.budget.v1alpha1.RunLimitValues` | singular |  | effective is what a run queued now gets: the override, else the template's value. |
 | template_default | 4 | `koinon.budget.v1alpha1.RunLimitValues` | singular |  | template_default is the agent's active version (the template's values). |
 | override | 5 | `koinon.budget.v1alpha1.RunLimitValues` | singular |  | override is what an admin set; unset fields follow the template. |
+
+### Message ContinuationOverride
+
+ContinuationOverride is what an admin set on one agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_continuations | 1 | `int32` | optional |  | max_continuations is unset when the agent follows the template; 0 switches continuation off. |
+| task_spend_usd | 2 | `string` | singular |  | task_spend_usd is empty when the agent follows the org's default. |
+
+### Message ContinuationValues
+
+ContinuationValues are the continuation limits of one task of an agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_continuations | 1 | `int32` | singular |  | max_continuations is the continuation runs a task gets; 0 means continuation is off. |
+| task_spend_usd | 2 | `string` | singular |  | task_spend_usd is the task's spend (all its runs) at which no further continuation starts. |
 
 ### Message FlaggedPrice
 
@@ -1042,6 +1074,19 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | budget | 1 | `koinon.budget.v1alpha1.AgentBudget` | singular |  |  |
+
+### Message GetAgentContinuationLimitsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+
+### Message GetAgentContinuationLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.budget.v1alpha1.AgentContinuationLimits` | singular |  |  |
 
 ### Message GetAgentRunLimitsRequest
 
@@ -1097,6 +1142,18 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | budget | 1 | `koinon.budget.v1alpha1.OrgBudget` | singular |  |  |
+
+### Message GetOrgContinuationLimitsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message GetOrgContinuationLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.budget.v1alpha1.OrgContinuationLimits` | singular |  |  |
 
 ### Message ListAgentBudgetsRequest
 
@@ -1207,6 +1264,14 @@ No fields.
 | monthly_cap_usd | 4 | `string` | singular |  | monthly_cap_usd and platform_ceiling_usd are empty when unset. |
 | platform_ceiling_usd | 5 | `string` | singular |  |  |
 | spent_this_month_usd | 6 | `string` | singular |  |  |
+
+### Message OrgContinuationLimits
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| task_spend_usd | 1 | `string` | singular |  | task_spend_usd is the effective per-task cap: the org's value, else the platform default. |
+| platform_default_task_spend_usd | 2 | `string` | singular |  | platform_default_task_spend_usd is what an org that sets none gets. |
+| overridden | 3 | `bool` | singular |  | overridden is true when the org set its own value. |
 
 ### Message PriceChange
 
@@ -1327,6 +1392,20 @@ RunLimitValues are the limits of one run. Zero (or empty) means unset.
 | --- | --- | --- | --- | --- | --- |
 | budget | 1 | `koinon.budget.v1alpha1.AgentBudget` | singular |  |  |
 
+### Message SetAgentContinuationLimitsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| override | 3 | `koinon.budget.v1alpha1.ContinuationOverride` | singular |  |  |
+
+### Message SetAgentContinuationLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.budget.v1alpha1.AgentContinuationLimits` | singular |  |  |
+
 ### Message SetAgentRunLimitsRequest
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1353,6 +1432,19 @@ RunLimitValues are the limits of one run. Zero (or empty) means unset.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | budget | 1 | `koinon.budget.v1alpha1.OrgBudget` | singular |  |  |
+
+### Message SetOrgContinuationTaskSpendRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| task_spend_usd | 2 | `string` | singular |  | task_spend_usd is a USD decimal string; empty clears the org's value. |
+
+### Message SetOrgContinuationTaskSpendResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.budget.v1alpha1.OrgContinuationLimits` | singular |  |  |
 
 ### Message SetPlatformCeilingRequest
 

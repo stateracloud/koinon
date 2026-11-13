@@ -249,7 +249,9 @@ wrap-up note of [0066](0066-triggers-and-scheduling.md) asked for.
    `agent_run_limits.max_continuations` and `task_spend_usd`. The per-agent override rows are written by
    `budget.Service.SetAgentContinuationLimits`, the org default by
    `budget.Service.SetOrgContinuationTaskSpend`; neither touches the other overrides of its row. They
-   have no API method yet (a proto change, tracked in issue 923).
+   are exposed as `BudgetService.GetOrgContinuationLimits` and `SetOrgContinuationTaskSpend` and
+   `BudgetService.{Get,Set}AgentContinuationLimits` (admins and owners, audited as
+   `budget.org_continuation_task_spend.set` and `budget.agent_continuation_limits.set`; issue 923).
 
 What a cheaper option would cost later: counting continuations on the run (a chain through
 `continued_from`) would have needed a recursive read at every cap, and a cap checked only per run

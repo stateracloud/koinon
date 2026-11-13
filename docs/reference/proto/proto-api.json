@@ -3824,6 +3824,15 @@
               "deprecated": false
             },
             {
+              "name": "GetAgentContinuationLimits",
+              "description": "GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the\neffective values, the template's and org's defaults and the admin's overrides.",
+              "requestType": "koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "GetAgentRunLimits",
               "description": "GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the\ntemplate's defaults and the admin's overrides (ADR 0081).",
               "requestType": "koinon.budget.v1alpha1.GetAgentRunLimitsRequest",
@@ -3837,6 +3846,15 @@
               "description": "GetOrgBudget returns the cap, the platform ceiling and this month's spend.",
               "requestType": "koinon.budget.v1alpha1.GetOrgBudgetRequest",
               "responseType": "koinon.budget.v1alpha1.GetOrgBudgetResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetOrgContinuationLimits",
+              "description": "GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs\n(issue #99): the effective value and the platform default. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -3887,6 +3905,15 @@
               "deprecated": false
             },
             {
+              "name": "SetAgentContinuationLimits",
+              "description": "SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset\nfields follow the template (the count) or the org's default (the cap); a count of 0 switches\ncontinuation off for the agent.",
+              "requestType": "koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentRunLimits",
               "description": "SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that\noverride; all zero clears them all. It applies to runs queued afterwards.",
               "requestType": "koinon.budget.v1alpha1.SetAgentRunLimitsRequest",
@@ -3900,6 +3927,15 @@
               "description": "SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.",
               "requestType": "koinon.budget.v1alpha1.SetMonthlyCapRequest",
               "responseType": "koinon.budget.v1alpha1.SetMonthlyCapResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetOrgContinuationTaskSpend",
+              "description": "SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An\nempty amount clears it, so the platform default applies. It applies from the next time a run\nhits its time limit.",
+              "requestType": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest",
+              "responseType": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -4044,6 +4080,60 @@
           ]
         },
         {
+          "name": "AgentContinuationLimits",
+          "fullName": "koinon.budget.v1alpha1.AgentContinuationLimits",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "effective",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.ContinuationValues",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "effective is what a task gets now: the override, else the template's count and the org's cap."
+            },
+            {
+              "name": "template_default",
+              "number": 4,
+              "type": "koinon.budget.v1alpha1.ContinuationValues",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "template_default is the agent's active version's count and the org's cap."
+            },
+            {
+              "name": "override",
+              "number": 5,
+              "type": "koinon.budget.v1alpha1.ContinuationOverride",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "AgentRunLimits",
           "fullName": "koinon.budget.v1alpha1.AgentRunLimits",
           "file": "koinon/budget/v1alpha1/budget.proto",
@@ -4094,6 +4184,60 @@
               "oneof": "",
               "deprecated": false,
               "description": "override is what an admin set; unset fields follow the template."
+            }
+          ]
+        },
+        {
+          "name": "ContinuationOverride",
+          "fullName": "koinon.budget.v1alpha1.ContinuationOverride",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "ContinuationOverride is what an admin set on one agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_continuations",
+              "number": 1,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_continuations is unset when the agent follows the template; 0 switches continuation off."
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is empty when the agent follows the org's default."
+            }
+          ]
+        },
+        {
+          "name": "ContinuationValues",
+          "fullName": "koinon.budget.v1alpha1.ContinuationValues",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "ContinuationValues are the continuation limits of one task of an agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_continuations",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_continuations is the continuation runs a task gets; 0 means continuation is off."
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is the task's spend (all its runs) at which no further continuation starts."
             }
           ]
         },
@@ -4234,6 +4378,51 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.AgentBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.AgentContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -4441,6 +4630,42 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.OrgBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.OrgContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -4911,6 +5136,42 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgContinuationLimits",
+          "fullName": "koinon.budget.v1alpha1.OrgContinuationLimits",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "task_spend_usd",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is the effective per-task cap: the org's value, else the platform default."
+            },
+            {
+              "name": "platform_default_task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_default_task_spend_usd is what an org that sets none gets."
+            },
+            {
+              "name": "overridden",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "overridden is true when the org set its own value."
             }
           ]
         },
@@ -5508,6 +5769,60 @@
           ]
         },
         {
+          "name": "SetAgentContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "override",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.ContinuationOverride",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.AgentContinuationLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "SetAgentRunLimitsRequest",
           "fullName": "koinon.budget.v1alpha1.SetAgentRunLimitsRequest",
           "file": "koinon/budget/v1alpha1/budget.proto",
@@ -5599,6 +5914,51 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.OrgBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetOrgContinuationTaskSpendRequest",
+          "fullName": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is a USD decimal string; empty clears the org's value."
+            }
+          ]
+        },
+        {
+          "name": "SetOrgContinuationTaskSpendResponse",
+          "fullName": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.OrgContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
