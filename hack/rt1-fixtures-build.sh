@@ -33,9 +33,13 @@ searxng_mcp_tag=2.9.0
 root="$(cd "$(dirname "$0")/.." && pwd)"
 repo="${RT1_REPO:-${registry%/}/koinon}" # RT1_REPO: the full repository path, when it is not <REGISTRY>/koinon (the release workflow, #928)
 
+# shellcheck source=hack/push-retry-lib.sh
+. "$root/hack/push-retry-lib.sh"
+
+# Every command run here is a registry push; a first push to a new GHCR package is retried on DENIED only (#950).
 run() {
   echo "+ $*" >&2
-  if [ "${DRY_RUN:-}" != 1 ]; then "$@"; fi
+  if [ "${DRY_RUN:-}" != 1 ]; then push_retry "$@"; fi
 }
 
 for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen fakemodel:koinon-fakemodel; do

@@ -20,6 +20,12 @@ mkdir -p "$tmp/bin"
 cat >"$tmp/bin/ko" <<'STUB'
 #!/usr/bin/env bash
 echo "ko KO_DOCKER_REPO=$KO_DOCKER_REPO $*" >>"$TMP/calls"
+# KO_FAIL_N: the first N ko calls fail with KO_FAIL_MSG on stderr (the first push to a new GHCR package, #950)
+if [[ -n ${KO_FAIL_N:-} ]]; then
+	n=$(($(cat "$TMP/ko-n" 2>/dev/null || echo 0) + 1))
+	echo "$n" >"$TMP/ko-n"
+	if ((n <= KO_FAIL_N)); then echo "$KO_FAIL_MSG" >&2; exit 1; fi
+fi
 STUB
 cat >"$tmp/bin/docker" <<'STUB'
 #!/usr/bin/env bash
@@ -42,7 +48,8 @@ check() { # name got want
 run() { # args: exit code; stderr in $tmp/err
 	local rc=0
 	: >"$tmp/calls"
-	TMP=$tmp PATH=$tmp/bin:$PATH bash "$script" "$@" >"$tmp/stdout" 2>"$tmp/err" || rc=$?
+	rm -f "$tmp/ko-n"
+	PUSH_RETRY_DELAY=0 TMP=$tmp PATH=$tmp/bin:$PATH bash "$script" "$@" >"$tmp/stdout" 2>"$tmp/err" || rc=$?
 	echo "$rc"
 }
 
@@ -60,6 +67,20 @@ check "a tag that is not a release tag fails" "$(run ghcr.io/o/r main "$tmp/refs
 check "...and writes nothing" "$([[ -e $tmp/refs3 ]] && echo yes || echo no)" no
 check "a short fixtures output fails" "$(CRANE_SHORT=1 run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs4")" 1
 check "...and writes nothing" "$([[ -e $tmp/refs4 ]] && echo yes || echo no)" no
+
+# A DENIED manifest PUT on a new package is retried (#950); any other error fails at once; DENIED for good fails
+# once the attempts are spent.
+denied='PUT https://ghcr.io/v2/o/r/rt1-x/manifests/1: DENIED: requested access to the resource is denied'
+check "DENIED twice, then success, publishes" "$(KO_FAIL_N=2 KO_FAIL_MSG=$denied run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs5")" 0
+check "...two failed attempts plus the four ko builds" "$(cat "$tmp/ko-n")" 6
+check "...and said why it retried" "$(grep -c 'push retry: DENIED' "$tmp/err")" 2
+check "DENIED on every attempt fails" "$(KO_FAIL_N=99 KO_FAIL_MSG=$denied run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs6")" 1
+check "...after exactly five attempts" "$(cat "$tmp/ko-n")" 5
+check "...and says so" "$(grep -c 'still DENIED after 5 attempts' "$tmp/err")" 1
+check "...and writes nothing" "$([[ -e $tmp/refs6 ]] && echo yes || echo no)" no
+check "another error fails at once" "$(KO_FAIL_N=99 KO_FAIL_MSG='PUT: UNAUTHORIZED: authentication required' run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs7")" 1
+check "...with no retry" "$(cat "$tmp/ko-n")" 1
+check "...and no retry message" "$(grep -c 'push retry' "$tmp/err")" 0
 
 ((fails == 0)) || { echo "$fails failed" >&2; exit 1; }
 echo "all passed"
