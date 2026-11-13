@@ -45,14 +45,15 @@ host_iso_epoch() {
 	date -d "$t" +%s 2>/dev/null || date -j -f '%Y-%m-%dT%H:%M:%S%z' "$t" +%s 2>/dev/null || true
 }
 
-# Ask Docker for its clock under a deadline of $1 seconds (default 5). Prints the daemon's
-# SystemTime; returns 0 answered, 1 no daemon (answered with an error: the suites skip as before),
-# 2 no answer within the deadline.
-host_docker_time() {
-	local limit=${1:-5} docker=${KOINON_DOCKER:-docker} out pid i
+# Run `docker <args>` under a deadline of $1 seconds. Prints its stdout; returns 0 answered, 1 no
+# docker CLI or it answered with an error (no daemon: the suites skip as before), 2 no answer within
+# the deadline.
+host_docker_run() {
+	local limit=$1 docker=${KOINON_DOCKER:-docker} out pid i
+	shift
 	command -v "$docker" >/dev/null 2>&1 || return 1
 	out=$(mktemp "${TMPDIR:-/tmp}/go-test-docker.XXXXXX") || return 1
-	"$docker" info --format '{{.SystemTime}}' >"$out" 2>/dev/null &
+	"$docker" "$@" >"$out" 2>/dev/null &
 	pid=$!
 	for ((i = 0; i < limit * 10; i++)); do
 		kill -0 "$pid" 2>/dev/null || break
@@ -73,24 +74,59 @@ host_docker_time() {
 	return 1
 }
 
+# Does the daemon answer within $1 seconds? `docker version` asks the daemon's /version and nothing
+# else; `docker info` also gathers plugin, storage and container data and can take seconds on a cold
+# runner (issue 945). Same returns as host_docker_run.
+host_docker_ping() {
+	host_docker_run "${1:-30}" version --format '{{.Server.Version}}' >/dev/null
+}
+
+# The daemon's SystemTime under a deadline of $1 seconds (default 10), same returns as host_docker_run.
+host_docker_time() {
+	host_docker_run "${1:-10}" info --format '{{.SystemTime}}'
+}
+
 # Before the tests: Docker answers, and its clock (the daemon's VM, which every container shares)
 # is within KOINON_CLOCK_SKEW seconds (default 2) of the host's. Returns 3 with a message when not.
 # No Docker CLI or a daemon that answers with an error is not a problem here: testenv skips.
+# Two steps with a deadline each (issue 945): the daemon must answer a ping within
+# KOINON_DOCKER_PING_SECONDS (default 30: a cold CI daemon is slow, a dead one that hangs is not
+# waited for longer); then the clock is read within KOINON_DOCKER_CLOCK_SECONDS (default 10). A
+# daemon that answered the ping but not the clock read is slow, not dead: on a Mac that is the
+# stalled VM this check is for (3); elsewhere the clock check is skipped with a note.
 host_docker_preflight() {
-	local ts rc=0 dock now skew max=${KOINON_CLOCK_SKEW:-2}
-	ts=$(host_docker_time "${KOINON_DOCKER_PING_SECONDS:-5}") || rc=$?
+	local ts rc=0 dock before now skew max=${KOINON_CLOCK_SKEW:-2}
+	local ping=${KOINON_DOCKER_PING_SECONDS:-30} clock=${KOINON_DOCKER_CLOCK_SECONDS:-10}
+	host_docker_ping "$ping" || rc=$?
 	case $rc in
 	0) ;;
 	2)
-		echo "go-test.sh: Docker did not answer within ${KOINON_DOCKER_PING_SECONDS:-5} s; restart it (OrbStack: orb restart) and run again" >&2
+		echo "go-test.sh: Docker did not answer within ${ping} s; restart it (OrbStack: orb restart) and run again" >&2
 		return 3
+		;;
+	*) return 0 ;;
+	esac
+	rc=0
+	before=$(date +%s)
+	ts=$(host_docker_time "$clock") || rc=$?
+	now=$(date +%s)
+	case $rc in
+	0) ;;
+	2)
+		if host_is_mac; then
+			echo "go-test.sh: Docker answers but gave no clock within ${clock} s; restart it (OrbStack: orb restart) and run again" >&2
+			return 3
+		fi
+		echo "go-test.sh: Docker gave no clock within ${clock} s; skipping the clock check (it is for a Mac VM)" >&2
+		return 0
 		;;
 	*) return 0 ;;
 	esac
 	dock=$(host_iso_epoch "$ts")
 	[[ -n $dock ]] || { echo "go-test.sh: cannot read the Docker clock ($ts); skipping the clock check" >&2; return 0; }
-	now=$(date +%s)
-	skew=$((dock > now ? dock - now : now - dock))
+	# The daemon stamps its time somewhere inside the call, so a slow `info` is not drift: the skew is
+	# the distance from the stamp to the window [before, now] of the call (0 inside it).
+	if ((dock < before)); then skew=$((before - dock)); elif ((dock > now)); then skew=$((dock - now)); else skew=0; fi
 	if ((skew > max)); then
 		echo "go-test.sh: the Docker clock differs from this host by ${skew} s (limit ${max} s); time-based specs would fail. Restart Docker (OrbStack: orb restart) and run again" >&2
 		return 3

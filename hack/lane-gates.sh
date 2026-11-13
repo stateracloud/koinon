@@ -153,7 +153,7 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 	fi
 	if grep -qF 'reason="host slept"' "$log"; then
 		echo "host slept"
-	elif grep -qE 'Docker did not answer within|the Docker clock differs from this host' "$log"; then
+	elif grep -qE 'Docker did not answer within|Docker answers but gave no clock|the Docker clock differs from this host' "$log"; then
 		echo "docker unhealthy"
 	elif grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"

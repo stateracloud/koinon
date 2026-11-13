@@ -89,9 +89,11 @@ with stubs for `uname`, `pmset`, `docker` and `caffeinate`.
 
 - **Keep awake.** On macOS the run holds `caffeinate -i -s -w $$`: it ends with the run, with no timer to
   run out. `-s` works on AC power only; on battery the script warns. Other systems: nothing happens.
-- **Docker and clock.** Before the tests, `docker info` must answer within `KOINON_DOCKER_PING_SECONDS`
-  (default 5) and the daemon's `SystemTime` (the VM clock, shared by every container) must be within
-  `KOINON_CLOCK_SKEW` seconds (default 2) of the host. If not, the run stops with exit 3 and says
+- **Docker and clock.** Before the tests, the daemon must answer `docker version` within
+  `KOINON_DOCKER_PING_SECONDS` (default 30, a cold CI daemon is slow). The clock is then read with `docker info`
+  within `KOINON_DOCKER_CLOCK_SECONDS` (default 10); on no answer the clock check is skipped off a Mac and stops
+  the run on one. The daemon's `SystemTime` (the VM clock, shared by every container) must be within
+  `KOINON_CLOCK_SKEW` seconds (default 2) of the host (measured against the window of the call, so a slow `info` is not drift). If not, the run stops with exit 3 and says
   `orb restart` for OrbStack. No Docker CLI or a daemon that answers with an error is not a stop: the
   suites skip as before.
 - **Host slept.** After the run, a `Sleep` event in `pmset -g log` between the start and end turns the
