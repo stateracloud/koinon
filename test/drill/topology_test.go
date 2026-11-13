@@ -5,6 +5,8 @@ package drill_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -196,5 +198,99 @@ func TestTheFakeMCPServerIsAnInputAndItsHostIsAllowed(t *testing.T) {
 	}
 	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
 		t.Error("the fake MCP URL names the Service in the fakes namespace")
+	}
+}
+
+// publishedFakes maps each Topology image field the release publishes to the image name that
+// hack/release-test-images.sh pushes for it.
+var publishedFakes = map[string]string{
+	"FakeModelImage": "koinon-fakemodel",
+	"FakeMCPImage":   "koinon-fakemcp",
+}
+
+// unpublishedImages are image fields Validate() requires that the release deliberately does not publish.
+var unpublishedImages = map[string]string{
+	// The S3 server for home checkpoints is an upstream image (SeaweedFS), pinned by digest in the topology.
+	"ObjectStoreImage": "upstream image, pinned by digest; not built by this repository",
+}
+
+// releaseFakes reads the fakes=(...) array of hack/release-test-images.sh, on one line or several.
+func releaseFakes(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile("../../hack/release-test-images.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^fakes=\(([^)]*)\)`).FindStringSubmatch(string(b))
+	if m == nil {
+		t.Fatal("hack/release-test-images.sh: no fakes=(...) array found")
+	}
+	var out []string
+	for _, line := range strings.Split(m[1], "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		out = append(out, strings.Fields(line)...)
+	}
+	return out
+}
+
+// imageFields returns pointers to every string field named *Image, at any depth, keyed by field name.
+func imageFields(v reflect.Value, into map[string]*string) {
+	for i := 0; i < v.NumField(); i++ {
+		f, sf := v.Field(i), v.Type().Field(i)
+		switch {
+		case f.Kind() == reflect.Struct:
+			imageFields(f, into)
+		case f.Kind() == reflect.String && strings.HasSuffix(sf.Name, "Image"):
+			into[sf.Name] = f.Addr().Interface().(*string)
+		}
+	}
+}
+
+// The drill topology must not require an image the release does not publish (#952). Validate() is the
+// single source of truth: blank each image field in turn and see which ones it rejects.
+func TestEveryImageTheDrillRequiresIsPublishedOrAllowlisted(t *testing.T) {
+	top, err := drill.LoadTopology("topology/kind.yaml", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]*string{}
+	imageFields(reflect.ValueOf(top).Elem(), fields)
+	if len(fields) == 0 {
+		t.Fatal("no *Image fields found in Topology")
+	}
+
+	published := map[string]bool{}
+	for _, f := range releaseFakes(t) {
+		published[f] = true
+	}
+	for field, img := range publishedFakes {
+		if !published[img] {
+			t.Errorf("%s maps to %s, which hack/release-test-images.sh does not publish", field, img)
+		}
+		if _, ok := fields[field]; !ok {
+			t.Errorf("publishedFakes names %s, which is not a Topology image field", field)
+		}
+	}
+
+	for name, p := range fields {
+		saved := *p
+		*p = ""
+		verr := top.Validate()
+		*p = saved
+		if verr == nil {
+			continue // optional field
+		}
+		_, isPub := publishedFakes[name]
+		_, isAllowed := unpublishedImages[name]
+		if !isPub && !isAllowed {
+			t.Errorf("Validate() requires %s, but no published image maps to it and it is not allowlisted: publish it in hack/release-test-images.sh or allowlist it with a reason", name)
+		}
+	}
+	for name := range unpublishedImages {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("allowlist names %s, which is not a Topology image field", name)
+		}
 	}
 }

@@ -63,13 +63,7 @@ check "...the five ko builds use the tag without the v" "$(grep -c -- '--tags 0.
 check "...every image also gets the release version" "$(grep -c '^crane tag .* 0.1.0-rc.2$' "$tmp/calls")" 8
 check "...no v tag is pushed" "$(grep -c 'v0.1.0' "$tmp/calls")" 0
 
-# The drill topology must not require an image the release does not publish (#952): every image field that
-# Validate() rejects as empty (test/drill/topology.go) and that is a koinon-fake* server must be in the list.
-required=$(grep -oE '"(fake[A-Za-z]*Image|fakeMcpImage)": t\.' "$here/../test/drill/topology.go" | grep -oE 'fake[A-Za-z]+' | sort -u | tr '\n' ' ')
-check "the drill requires the fake model and MCP images (the grep still finds them)" "$required" "fakeMcpImage fakeModelImage "
-for f in koinon-fakemodel koinon-fakemcp; do
-	check "...$f is published" "$(grep -c "^fakes=(.*\b$f\b" "$script")" 1
-done
+# The drill topology's image requirements are checked against fakes=(...) in test/drill/topology_test.go (#952).
 
 check "a final tag publishes too" "$(run ghcr.io/o/r v0.1.0 "$tmp/refs2")" 0
 check "a tag that is not a release tag fails" "$(run ghcr.io/o/r main "$tmp/refs3")" 1
