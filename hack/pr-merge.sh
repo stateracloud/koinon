@@ -88,7 +88,7 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --lane)
-    echo "pr-merge: --lane is gone (ADR 0104): the merge releases the claim, pr-merge.sh no longer calls claim.sh" >&2
+    echo "pr-merge: --lane is gone (ADR 0104): the merge releases the claim; pr-merge.sh takes and releases no claim (it only reads one to warn)" >&2
     exit 64
     ;;
   --approved-at)
@@ -131,7 +131,10 @@ claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
 me_lane=${KOINON_LANE:-main}
 me_login=""
 for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$json"); do
-  shown=$("$claim_sh" show "$n" 2>/dev/null) || continue
+  if ! shown=$("$claim_sh" show "$n" 2>/dev/null); then
+    echo "pr-merge: note: cannot read the claim on #$n; check it with claim.sh show $n" >&2
+    continue
+  fi
   [[ $shown == *": held"* ]] || continue
   holder=$(sed -n 's/^ *holder: //p' <<<"$shown" | head -n1)
   [ -n "$holder" ] || continue

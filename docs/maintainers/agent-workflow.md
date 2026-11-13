@@ -102,8 +102,8 @@ start, after `take`:
 
 The only merge method is a merge commit through the merge queue, and `hack/pr-merge.sh <PR>` does
 it: it refuses a draft, runs `hack/pr-wait.sh --checks`, reads every required context on the head,
-then enqueues and comments on the PR. It does not call `claim.sh`: the push to main releases the
-claim (`claims.yml`, `release-merged`). Do not hand-write the wait or the merge. `--jump` enqueues at
+then enqueues and comments on the PR. It takes and releases no claim (the push to main releases it: `claims.yml`,
+`release-merged`); it warns when an issue the PR closes is claimed by another lane or login (#961). Do not hand-write the wait or the merge. `--jump` enqueues at
 the front. `--admin` is for a PR that changes at least one `.github/**` path (owner decision, ADR
 0105); an e2e-relevant one also needs a green `quickstart` on its head. `--break-glass "<reason>"
 --approved-at <time>` is for an emergency the owner approved; it opens a `break-glass` issue.

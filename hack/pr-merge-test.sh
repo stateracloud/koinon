@@ -79,6 +79,7 @@ cat >"$tmp/bin/claimshow" <<'SH'
 #!/usr/bin/env bash
 # claim.sh show <N> stand-in: CLAIM_HOLDER unset prints "no claim"; else a held claim in claim.sh's format.
 echo "showclaim $*" >>"$FAKE_DIR/calls"
+if [ -n "${CLAIM_FAIL:-}" ]; then exit 1; fi
 if [ -z "${CLAIM_HOLDER:-}" ]; then echo "#$2: no claim"; exit 0; fi
 printf '#%s: held\n  holder: %s\n  lane:   x\n' "$2" "$CLAIM_HOLDER"
 SH
@@ -635,6 +636,10 @@ for c in "other lane|me#lane2|1" "other login|you#main|1" "other login, old hold
   [ "$got" = "$want" ] || { echo "FAIL: claim warning ($name): want $want, got $got: $out" >&2; fail=1; }
   [ "$want" = 0 ] || grep -q "claimed by $holder, .*ask the holder or your human" <<<"$out" || { echo "FAIL: warning names the holder ($name)" >&2; fail=1; }
 done
+setup false "$green"
+CLAIM_FAIL=1 run 7
+check "claim show fails: still merges" 0 merge
+grep -q 'pr-merge: note: cannot read the claim on #647; check it with claim.sh show 647' <<<"$out" || { echo "FAIL: unreadable claim prints a note: $out" >&2; fail=1; }
 KOINON_LANE=lane2 CLAIM_HOLDER="me#lane2" run 7
 grep -q 'WARNING' <<<"$out" && { echo "FAIL: KOINON_LANE=lane2 is the own lane" >&2; fail=1; }
 
