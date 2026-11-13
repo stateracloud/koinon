@@ -44,6 +44,11 @@ run)
 start)
   echo running >"$STATE/s-${*: -1}" ;;
 network)
+  # inspect <net>: the network exists once create made it; create <net>: record it.
+  case "$2" in
+  inspect) [[ -e $STATE/net-${*: -1} ]] || exit 1; exit 0 ;;
+  create) touch "$STATE/net-${*: -1}"; exit 0 ;;
+  esac
   name=${*: -1}
   echo '{"bridge":{},"kind":{}}' >"$STATE/c-$name"
   if [[ -e $STATE/netrace-$name ]]; then
@@ -88,7 +93,13 @@ check "caches publish no port" bash -c "! grep '^docker run .*kind-proxy-' '$STA
 check "the cache for ghcr.io has the upstream and ttl 0" grep -q 'kind-proxy-ghcr-io.*REGISTRY_PROXY_REMOTEURL=https://ghcr.io.*REGISTRY_PROXY_TTL=0' "$STATE/calls.log"
 check "the registry image is pinned by digest" grep -q 'registry:3@sha256:[0-9a-f]\{64\}' "$STATE/calls.log"
 
+# #956: the containers join the kind network at start, before any push; attach has nothing to connect, because
+# a `docker network connect` in the middle of a push makes the published port refuse it.
+check "start creates the kind network" grep -q '^docker network create .* kind$' "$STATE/calls.log"
+check "start connects the registry and the caches to the kind network" bash -c "test \$(grep -c '^docker network connect' '$STATE/calls.log') = 3"
+connects=$(grep -c '^docker network connect' "$STATE/calls.log")
 "$reg" attach koinon-test >/dev/null
+check "attach connects no network after start" test "$(grep -c '^docker network connect' "$STATE/calls.log")" = "$connects"
 node=$STATE/node/etc/containerd/certs.d
 check "node trusts the push registry" grep -q 'host."http://kind-registry:5000"' "$node/localhost:5001/hosts.toml"
 check "push registry may be pushed to" grep -q '"push"' "$node/localhost:5001/hosts.toml"
