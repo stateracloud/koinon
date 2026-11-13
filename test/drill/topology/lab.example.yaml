@@ -10,10 +10,11 @@
 #   test/drill/run.sh
 # (optional: KOINON_DRILL_WEB_PASSWORD=<admin password of the restored copy>; the default is the seeded fake one.)
 # The oidc-signin check reads the two personas' passkeys from the environment, never from a file: for each of
-# ADMIN and MEMBER, KOINON_DRILL_OIDC_<PERSONA>_<FIELD> with FIELD one of USERNAME, CREDENTIAL_ID (base64url),
+# ADMIN and MEMBER, KOINON_DRILL_OIDC_<PERSONA>_<FIELD> with FIELD one of USERNAME, CREDENTIAL_ID (standard base64),
 # RP_ID, ORIGIN (the issuer's origin), PRIVATE_KEY (PKCS#8, base64), USER_HANDLE (base64), SIGN_COUNT.
-# After the check, oidc-signcounts.json in the result directory holds each persona's username and new signCount
-# (no key material); write it back to the lab's store before the next run.
+# After each sign-in run (source, then the restored copy, which overwrites it), oidc-signcounts.json in the result
+# directory holds each persona's username and latest signCount (no key material), even when the drill fails later;
+# write it back to the lab's store before the next run, whatever the verdict.
 # Then upload the result to the rc release the final tag promotes, as drill-result-lab.json (docs/dev/releasing.md).
 #
 # {run} is the run ID. Namespaces must start with koinon-drill-; gateway IDs with drill-.

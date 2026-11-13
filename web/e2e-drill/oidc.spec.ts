@@ -48,7 +48,7 @@ async function authenticator(page: Page, persona: Persona | null): Promise<Authe
     await cdp.send('WebAuthn.addCredential', {
       authenticatorId,
       credential: {
-        credentialId: env(persona, 'CREDENTIAL_ID'), // base64url
+        credentialId: env(persona, 'CREDENTIAL_ID'), // standard base64 (CDP binary), as getCredentials returns it
         isResidentCredential: true,
         rpId: env(persona, 'RP_ID'),
         privateKey: env(persona, 'PRIVATE_KEY'), // PKCS#8, base64
@@ -65,7 +65,7 @@ async function startSSO(page: Page, persona: Persona) {
   await page.goto('/')
   await page.getByRole('link', { name: 'Sign in with SSO' }).click()
   // Koinon sent the browser to the issuer (the persona's ORIGIN), not anywhere else.
-  await page.waitForURL((u) => u.origin === env(persona, 'ORIGIN'), { timeout: 30_000 })
+  await page.waitForURL((u) => u.origin === new URL(env(persona, 'ORIGIN')).origin, { timeout: 30_000 })
   const name = page.locator('input[name="username"], input#username').first()
   if (await name.isVisible({ timeout: 15_000 }).catch(() => false)) {
     await name.fill(username)
@@ -109,9 +109,10 @@ for (const persona of personas) {
 
     // The authenticator counted the sign-in. The lab writes the new count back, so the next run does not replay.
     const { credentials } = await auth.cdp.send('WebAuthn.getCredentials', { authenticatorId: auth.authenticatorId })
-    const mine = credentials.find((c) => c.credentialId === env(persona, 'CREDENTIAL_ID'))
-    expect(mine, 'the persona credential is on the authenticator').toBeTruthy()
-    merge(need('KOINON_DRILL_OIDC_SIGNCOUNT_OUT'), persona, { username, signCount: mine?.signCount })
+    // The authenticator was created for this persona alone, so it holds exactly its one credential; no encoding compare.
+    expect(credentials, 'the authenticator holds the persona credential').toHaveLength(1)
+    const mine = credentials[0]
+    merge(need('KOINON_DRILL_OIDC_SIGNCOUNT_OUT'), persona, { username, signCount: mine.signCount })
   })
 }
 

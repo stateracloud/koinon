@@ -630,13 +630,17 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 		Expect(accepted).To(BeNumerically(">=", 1), "no Run now call was accepted: %v", replies)
 		AddReportEntry("run-now replies", fmt.Sprintf("%v", replies))
-
-		// The OIDC personas sign in once on the source (topology oidc, #927), so their users exist before the backup
-		// and the restored copy has to keep them: the role each holds is recorded here and compared after the release.
-		if oidcProfile() {
-			oidcSignIn(ctx, &src, "source", false)
-		}
 	}, seedTimeout)
+
+	// The OIDC personas sign in once on the source (topology oidc, #927), so their users exist before the backup
+	// and the restored copy has to keep them: the role each holds is recorded here and compared after the release.
+	// Its own step, so a broken issuer fails oidc-source and oidc-signin, not the seed and everything behind it.
+	if oidcProfile() {
+		step("oidc-source: the OIDC personas sign in on the source", func(ctx SpecContext) {
+			needs("seed")
+			oidcSignIn(ctx, &src, "source", false)
+		}, 20*time.Minute)
+	}
 
 	step("backup: the guide's backup blocks, then the source is lost", func(ctx SpecContext) {
 		needs("seed")
@@ -1087,7 +1091,7 @@ spec:
 		// their credentials come from the environment, never from the repository.
 		if oidcProfile() {
 			It("signs in through the OIDC issuer, and each user keeps the role", Label("oidc-signin"), func(ctx SpecContext) {
-				needs("release", "seed")
+				needs("release", "seed", "oidc-source")
 				oidcSignIn(ctx, &dst, "target", true)
 				var before, after map[string]oidcRoles
 				readJSON(oidcFile("roles-source"), &before)
@@ -1100,8 +1104,6 @@ spec:
 				}
 				// And the two personas differ: the admin group maps to admin, the member group to member.
 				Expect(after[drill.PersonaAdmin].Roles).NotTo(Equal(after[drill.PersonaMember].Roles))
-				// The lab writes the new signCount of each passkey back after the run: username and signCount only.
-				Expect(os.Rename(oidcFile("signcount-target"), filepath.Join(outDir, "oidc-signcounts.json"))).To(Succeed())
 			}, NodeTimeout(20*time.Minute))
 		}
 
@@ -1424,5 +1426,33 @@ func oidcSignIn(ctx context.Context, s *side, tag string, negative bool) {
 		cmd.Env = append(cmd.Env, "KOINON_DRILL_OIDC_NEGATIVE=1")
 	}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
-	must(cmd.Run(), "the Playwright OIDC spec on the "+tag+" (see oidc-signin-"+tag+".log): each persona signs in with the passkey, and an authenticator without it does not")
+	runErr := cmd.Run()
+	publishSignCounts(tag) // the issuer's counters moved with each sign-in, pass or fail
+	must(runErr, "the Playwright OIDC spec on the "+tag+" (see oidc-signin-"+tag+".log): each persona signs in with the passkey, and an authenticator without it does not")
+}
+
+// publishSignCounts writes oidc-signcounts.json to the result directory: the source's counts, overlaid by the
+// target's once that has run. The issuer's counter moves with every sign-in, so the file is written whether or not
+// the run passed; the lab writes it back to its store. Username and signCount only, no key material.
+func publishSignCounts(tag string) {
+	GinkgoHelper()
+	merged := map[string]json.RawMessage{}
+	for _, t := range []string{"source", "target"} {
+		if t == "target" && tag != "target" {
+			break
+		}
+		b, err := os.ReadFile(oidcFile("signcount-" + t))
+		if err != nil {
+			continue
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(b, &m) == nil {
+			for k, v := range m {
+				merged[k] = v
+			}
+		}
+	}
+	b, err := json.MarshalIndent(merged, "", "  ")
+	must(err, "encode the signCounts")
+	must(os.WriteFile(filepath.Join(outDir, "oidc-signcounts.json"), append(b, '\n'), 0o600), "write oidc-signcounts.json")
 }

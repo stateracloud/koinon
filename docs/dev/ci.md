@@ -341,8 +341,8 @@ authenticators, first on the source in the seed step and then on the restored co
 role, and an authenticator without the credential does not sign in). The OIDC client is public (PKCE, no secret); the
 browser reaches the source on `127.0.0.1:18181` and the target on `127.0.0.1:18182` (fixed ports, the redirect URLs the
 lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<FIELD>` (fields in
-`test/drill/topology/lab.example.yaml`), and the check leaves `oidc-signcounts.json` (username and signCount per
-persona, no key material) in the result directory for the lab to write back. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+`test/drill/topology/lab.example.yaml`), and the sign-in runs leave `oidc-signcounts.json` (username and latest signCount per
+persona, no key material) in the result directory for the lab to write back, whatever the verdict. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
 scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
 
