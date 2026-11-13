@@ -72,7 +72,7 @@ type OIDC struct {
 // provider); the values live in the operator's environment and never in a file of the repository.
 const (
 	EnvOIDCUser          = "KOINON_DRILL_OIDC_USER"
-	EnvOIDCCredentialID  = "KOINON_DRILL_OIDC_CREDENTIAL_ID"
+	EnvOIDCCredentialID  = "KOINON_DRILL_OIDC_CREDENTIAL_ID" //nolint:gosec // the name of a variable, not a credential
 	EnvOIDCPrivateKey    = "KOINON_DRILL_OIDC_PRIVATE_KEY"
 	EnvOIDCUserHandle    = "KOINON_DRILL_OIDC_USER_HANDLE"
 	EnvOIDCRPID          = "KOINON_DRILL_OIDC_RP_ID"

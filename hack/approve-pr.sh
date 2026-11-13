@@ -45,7 +45,7 @@ cookie_header() {
 # header is the CSRF guard of cookie sessions (ADR 0022). A non-200 answer prints the body and fails.
 rpc() {
   local out status
-  out=$(mktemp)
+  out=$(mktemp "${TMPDIR:-/tmp}/approve-pr.XXXXXX")
   status=$(curl -sS -o "$out" -w '%{http_code}' -X POST "$svc/$1" \
     -H 'Content-Type: application/json' -H 'Connect-Protocol-Version: 1' -H "Cookie: $(cookie_header)" -d "$2")
   if [[ $status != 200 ]]; then
