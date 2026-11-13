@@ -21,6 +21,8 @@ RUN python -m venv /opt/venv \
 # The 16-way concurrency guard for init_sql.py runs on every image build, against the locked duckdb
 # (the Go suite only runs it where duckdb is installed).
 COPY init_sql.py test_init_sql.py /tmp/t/
+# test fixture image, never shipped: the cd runs the unittest next to the copied files
+# hadolint ignore=DL3003
 RUN cd /tmp/t && /opt/venv/bin/python -B -m unittest test_init_sql
 COPY build_base.py /tmp/build_base.py
 RUN mkdir -p /opt/focus \

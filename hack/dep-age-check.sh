@@ -484,6 +484,7 @@ tool_repo() {
 	SHELLCHECK) echo "koalaman/shellcheck" ;;
 	ACTIONLINT) echo "rhysd/actionlint" ;;
 	ZIZMOR) echo "zizmorcore/zizmor" ;;
+	HADOLINT) echo "hadolint/hadolint" ;;
 	GORELEASER) echo "goreleaser/goreleaser" ;;
 	COSIGN) echo "sigstore/cosign" ;;
 	KUBECONFORM) echo "yannh/kubeconform" ;;

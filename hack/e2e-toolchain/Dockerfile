@@ -40,7 +40,6 @@ ENV GOTOOLCHAIN=local
 # while the harness images pin against an Ubuntu snapshot (harnesses/opencode/Dockerfile) because they
 # ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
 # above by version and sha256.
-# hadolint ignore=DL3008
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
  && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl git jq make netcat-openbsd openssl procps unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -53,6 +52,8 @@ COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 # ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
 # id, Accept: application/octet-stream), as in harnesses/common/koinon-fetch (this build context cannot
 # copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
+# each pipe ends in the command that decides (curl -K - reads the header from stdin; jq -er fails on empty input; sha256sum -c), and the grep|sed is advisory with || true
+# hadolint ignore=DL4006
 RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sha() { eval "echo \$$1_$arch"; }; \

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Config of hack/dockerfile-lint.sh (hadolint, pinned in hack/versions.env). Findings of warning
+# level and above fail; style and info findings (DL3059 consecutive RUNs and the like) do not,
+# because rewriting Dockerfiles for style is out of scope (#175). A rule is switched off for one
+# instruction with `# hadolint ignore=DLxxxx` and a comment saying why, never here for the whole tree,
+# unless the reason below applies to every Dockerfile.
+#
+# What hadolint cannot say is checked by hack/dockerfile-lint.sh itself: base images pinned by
+# digest and no secret-named ENV/ARG. Apt retries are hack/apt-retries-test.sh (#149).
+failure-threshold: warning
+no-color: true
+# Why hadolint and not `docker buildx build --check` (#175): hadolint is one static binary, pinned by
+# version and sha256 (hack/versions.env), and needs neither a BuildKit daemon nor network; `--check`
+# needs both and reports only the build-time checks.
+#
+# Switched off for every Dockerfile, for a reason that holds tree-wide:
+#  - DL3008 (pin apt package versions): reproducibility comes from one dated Ubuntu snapshot
+#    (snapshot.ubuntu.com, UBUNTU_SNAPSHOT in harnesses/opencode/Dockerfile) in the shipped image on a
+#    digest-pinned base, and hack/apt-retries-test.sh checks the apt steps; per-package pins would
+#    break on every snapshot bump. The throwaway and tooling stages and images (the CA and download
+#    stages, the e2e toolchain, the spikes) install from the live archive and ship nothing to users.
+ignored:
+  - DL3008
