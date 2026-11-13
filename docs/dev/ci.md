@@ -663,7 +663,18 @@ settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call w
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
-Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, gitleaks, kind, ko, the
+Every Dockerfile in the tree (`hack/testdata/` fixtures excepted) is linted by `hack/dockerfile-lint.sh`
+(#175; preflight gate `dockerfile`, the `dockerfile lint` CI job). It runs hadolint, pinned in
+`hack/versions.env` and configured by `.hadolint.yaml` (warning and above fail), and an awk pass for the two
+rules hadolint has no rule for: a base image is pinned by `@sha256:` digest (also through an ARG default;
+an ARG without a default is the caller's), and no ENV or ARG is named like a secret (TOKEN, SECRET,
+PASSWORD, API_KEY, ...; a `_FILE` or `_PATH` name is fine; values are gitleaks' job). An exception is
+`# dockerfile-lint: allow=digest <reason>` (or `allow=secret`) on the line above the instruction; for a
+hadolint rule, `# hadolint ignore=DLxxxx` with a reason. Without hadolint the script exits 3
+(INCOMPLETE) after the awk pass; CI sets `KOINON_REQUIRE=hadolint`, which makes that a failure.
+Apt retries stay in `hack/apt-retries-test.sh`. `hack/dockerfile-lint-test.sh` tests the rules offline.
+
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, hadolint, gitleaks, kind, ko, the
 gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
 `hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
 the sha256 check, and a file already there with the right sha256 is not fetched again (#431;

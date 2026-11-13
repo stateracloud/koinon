@@ -15,7 +15,7 @@
 #   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
 #                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
 #
-# Gates: go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks.
+# Gates: go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint dockerfile mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
 # seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
@@ -35,7 +35,7 @@ set -uo pipefail
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
-ALL="go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint mktemp pinned bash5 audit versions scripts e2e gitleaks"
+ALL="go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint dockerfile mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
 base=origin/main only="" list=0 verbose=0 stop=0
@@ -139,6 +139,7 @@ reason() {
 	actionlint) echo "workflows or the actionlint config changed" ;;
 	zizmor) echo "workflows, composite actions or the zizmor config changed" ;;
 	runnerlint) echo "workflows, the actionlint config or the runner lint changed" ;;
+	dockerfile) echo "a Dockerfile or the Dockerfile lint changed" ;;
 	pinned) echo "shell scripts, workflows or composite actions changed" ;;
 	mktemp) echo "shell scripts, the Makefile, workflows or Go files under internal/ changed" ;;
 	audit) echo "Go code, sqlc queries or the audit batch lint changed" ;;
@@ -301,6 +302,10 @@ g_zizmor() { # workflow security lint, offline and default persona as in CI (.gi
 g_runnerlint() { # GitHub-hosted runners only (#58); needs no actionlint, so it runs where that is missing
 	hack/runner-lint-test.sh
 	hack/runner-lint.sh
+}
+g_dockerfile() { # hadolint (pinned in hack/versions.env) and the digest and secret rules; exit 3 when hadolint is missing (#175)
+	hack/dockerfile-lint-test.sh
+	hack/dockerfile-lint.sh
 }
 g_mktemp() { # independent of shellcheck, so it runs where shellcheck is missing (old issue 535)
 	hack/mktemp-lint-test.sh

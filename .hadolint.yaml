@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Config of hack/dockerfile-lint.sh (hadolint, pinned in hack/versions.env). Findings of warning
+# level and above fail; style and info findings (DL3059 consecutive RUNs and the like) do not,
+# because rewriting Dockerfiles for style is out of scope (#175). A rule is switched off for one
+# instruction with `# hadolint ignore=DLxxxx` and a comment saying why, never here for the whole tree,
+# unless the reason below applies to every Dockerfile.
+#
+# What hadolint cannot say is checked by hack/dockerfile-lint.sh itself: base images pinned by
+# digest and no secret-named ENV/ARG. Apt retries are hack/apt-retries-test.sh (#149).
+failure-threshold: warning
+no-color: true
+ignored: []
