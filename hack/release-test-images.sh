@@ -30,6 +30,8 @@ tag=${git_tag#v}
 root=$(cd "$(dirname "$0")/.." && pwd)
 refs=$(mktemp "${TMPDIR:-/tmp}/release-test-images.XXXXXX") || exit 1
 trap 'rm -f "$refs"' EXIT
+# shellcheck source=hack/push-retry-lib.sh
+. "$root/hack/push-retry-lib.sh"
 
 # The fake servers the drills need, one ko image each (cmd/<name>). test/drill's Validate() requires an image
 # for each of them; hack/release-test-images-test.sh checks that every image the topology requires is here.
@@ -37,7 +39,7 @@ fakes=(koinon-fakemodel koinon-fakemcp)
 
 # Multi-arch ko images (the kind drill runs on either architecture).
 for f in "${fakes[@]}"; do
-	(cd "$root" && KO_DOCKER_REPO="$registry/$f" ko build --bare --platform linux/amd64,linux/arm64 --tags "$tag" "./cmd/$f") >&2
+	(cd "$root" && KO_DOCKER_REPO="$registry/$f" push_retry ko build --bare --platform linux/amd64,linux/arm64 --tags "$tag" "./cmd/$f") >&2
 	digest=$(crane digest "$registry/$f:$tag")
 	[[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "release test images: no digest for $f:$tag" >&2; exit 1; }
 	echo "$f $registry/$f@$digest" >>"$refs"
@@ -55,7 +57,7 @@ while read -r key value; do
 		[[ -n $name && $value =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "release test images: unreadable fixtures output near '$name $value'" >&2; exit 1; }
 		echo "${name##*/} $name@$value" >>"$refs"
 		# The copies of upstream images keep their upstream tag; every image also gets the release version.
-		crane tag "$name@$value" "$tag" >&2
+		push_retry crane tag "$name@$value" "$tag" >&2
 		n=$((n + 1))
 		name=
 		;;

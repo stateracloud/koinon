@@ -30,6 +30,7 @@ names what needs the upstream project's rights and what still works from a fork.
 | `drill-issue.sh` | the upstream CI's token |
 | `release-gate.sh` | nothing: it only reads (the release workflow runs it) |
 | `release-drill-wait.sh` | nothing: it only reads (the release workflow runs it) |
+| `push-retry-lib.sh` | sourced by the two test-image scripts: retries a registry push on GHCR's DENIED only (#950) |
 | `release-test-images.sh` | the release registry (the release workflow runs it; `rt1-fixtures-build.sh` does the fixtures) |
 | `release-harness.sh` | the release registry (`release-flavor.sh` is a link to it) |
 | `spike/teardown.sh` | the maintainers' spike infrastructure |
