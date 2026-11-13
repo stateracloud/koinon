@@ -114,6 +114,7 @@ var recordedSettings = []platformSetting{
 	{Flag: "otlp-traces-token-dir", Key: "otlp-traces-auth-dir", Kind: kindRef},
 	setting("durable", kindValue),
 	setting("restore-hold", kindValue),
+	setting("restore-accept-importer-deletions", kindValue),
 	setting("run-cap-sweep-interval", kindValue),
 	setting("audit-anchor-interval", kindValue),
 

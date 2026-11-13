@@ -83,6 +83,7 @@ data:
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
       checkpoints: {{ .Values.checkpoints.enabled }}
+      checkpointsReadOnly: {{ .Values.checkpoints.readOnly }}
     # Sandbox sizing (ADR 0083): the default, the bounds and the Kata memory rule.
     sandboxResources:
       default:

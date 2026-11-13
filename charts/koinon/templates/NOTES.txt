@@ -45,6 +45,29 @@ The rewrite starts from image.registry, so Koinon's images may not end up where 
 already under the mirror is left alone). Leave image.registry at its default when you use a global mirror.
 {{- end }}
 
+{{- if (.Values.restore).acceptImporterDeletions }}
+
+WARNING: restore.acceptImporterDeletions is set: every waiting removal of a restore (a provider, MCP server or
+connection that a deleted Secret declared) is accepted at the next koinon-api start. Remove it after the release.
+{{- end }}
+
+{{- if .Values.restoreHold }}
+
+WARNING: restoreHold is on. If this install is a restored copy of another one, it must not act with the
+source's outward settings once you release the hold (ADR 0110):
+{{- if and .Values.checkpoints.enabled (not .Values.checkpoints.readOnly) }}
+  - checkpoints.enabled is true and checkpoints.readOnly is false: after the release koinon-agentd writes
+    snapshots into bucket {{ .Values.checkpoints.s3.bucket | quote }} and applies retention to them. If that bucket is the source's,
+    set checkpoints.s3 to a bucket of your own or set checkpoints.readOnly=true.
+{{- end }}
+{{- if .Values.oidc.enabled }}
+  - oidc.enabled is true: publicUrl ({{ include "koinon.publicUrl" . | quote }}) and oidc.redirectUrl ({{ .Values.oidc.redirectUrl | default "the default under publicUrl" | quote }}) must be this
+    copy's own URLs, not the source's, or the identity provider sends this copy's logins to the source.
+{{- end }}
+  - a Secret that declares a model provider, MCP server or connection stays declared: disable the ones the
+    copy must not call (the outward switch) before the release. `koinon-api restore status` lists them.
+{{- end }}
+
 {{- $pricesMode := include "koinon.pricesRefreshMode" . }}
 
 {{- if eq $pricesMode "off" }}

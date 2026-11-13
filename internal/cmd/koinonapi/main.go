@@ -101,6 +101,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -134,6 +135,9 @@ type config struct {
 	// restoreHold starts the process without the DBOS runtime, the sweepers, the price refresh and the
 	// code-host scope refresh (issue #462).
 	restoreHold bool
+	// restoreAcceptImporterDeletions accepts the declarative removals a restore brought in (ADR 0110
+	// decision 1): the restore's release step records them as accepted instead of waiting.
+	restoreAcceptImporterDeletions bool
 
 	// sandboxResources is the platform's sandbox sizing policy, from the config file's sandboxResources
 	// (ADR 0083); a per-agent override must stay inside its bounds.
@@ -230,6 +234,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 			"Empty is DBOS's default, \"local\", which is right for one process only")
 	c.waitFlag(fs)
 	c.restoreHoldFlag(fs)
+	fs.BoolVar(&c.restoreAcceptImporterDeletions, "restore-accept-importer-deletions", false,
+		"accept the declarative removals a restore brought in (providers, MCP servers and connections whose Secret is missing); without it the importer keeps them until you accept (ADR 0110 decision 1)")
 	fs.StringVar(&c.installMark, "install-mark", "",
 		"this install's random mark (the chart's koinon-install-mark Secret). The database records its hash, and API tokens and sessions that another install issued are refused (a restored copy, ADR 0110); empty turns that off")
 	fs.StringVar(&c.pricesRefresh, "prices-refresh", string(prices.RefreshAuto),
@@ -807,6 +813,14 @@ func serve(ctx context.Context, cfg config) error {
 		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
 		slog.Info("schedule triggers started")
 	}
+	if !cfg.restoreHold {
+		// The release step (revoke every session, record restore.release) runs here, before the
+		// listeners start, and is retried until it succeeds; it does not wait for an importer pass.
+		rel := newReleaseAtStart(binding, pool, kube, cfg.secretsNamespace, cfg.restoreAcceptImporterDeletions)
+		if !rel.Try(ctx, 15*time.Second) {
+			safego.GoOrStop(bgCtx, slog.Default(), "restore-release", stop, func(ctx context.Context) { rel.Retry(ctx) })
+		}
+	}
 	if pollers != nil {
 		pollers.Bind(poll.ConnectionOpener{Hosts: hosts, Keys: opener}, poll.LogDeliverer{Logger: slog.Default()})
 		safego.GoOrStop(bgCtx, slog.Default(), "code-host-pollers", stop, func(ctx context.Context) { pollers.Run(ctx) })
@@ -816,12 +830,23 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), Held: hold, Release: binding, AcceptRemovals: cfg.restoreAcceptImporterDeletions, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo).
+		WithRestoreStatus(func(ctx context.Context) (any, error) {
+			opt := restorestatus.Options{AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions, Configured: restorestatus.ConfiguredTargets{
+				PublicURL: installbinding.Origin(cfg.publicURL), OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: installbinding.Origin(cfg.oidcRedirectURL),
+			}}
+			if kube != nil {
+				opt.PlanRemovals = func(ctx context.Context) ([]installbinding.Removal, error) {
+					return declarative.PlanRemovals(ctx, pool, kube, cfg.secretsNamespace)
+				}
+			}
+			return restorestatus.Build(ctx, pool, bindingOwner, opt)
+		})
 
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
@@ -848,6 +873,8 @@ func serve(ctx context.Context, cfg config) error {
 	reg.MustRegister(guardMetrics.Collectors()...)
 	restorehold.Metric(reg, cfg.restoreHold)
 	binding.Metrics(reg)
+	binding.ReleasePendingMetric(reg)
+	declarative.RegisterMetrics(reg)
 	if durableRT != nil {
 		// Every replica reports the same database-derived counts; alerts aggregate with max (ADR 0085).
 		reg.MustRegister(durableRT.Collector())

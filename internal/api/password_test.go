@@ -122,6 +122,36 @@ var _ = Describe("bootstrap password login", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	// ADR 0110 decision 1: until the release step has run, an unheld koinon-api serves no session of the
+	// dump, also on an in-place restore where the marks are the same, and no sign-in makes a new one.
+	It("refuses every session and sign-in while the release step has not run (the gate fails closed)", func(ctx SpecContext) {
+		var live *installbinding.Binding
+		e := newEnv(ctx, envOptions{binding: func(p *pgxpool.Pool) *installbinding.Binding {
+			live = installbinding.New(p, "hash-live", false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			_, err := live.Claim(ctx, installbinding.Targets{})
+			Expect(err).NotTo(HaveOccurred())
+			return live
+		}})
+		b := e.browser()
+		Expect(b.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+		_, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred(), "a session of this install, same mark")
+
+		By("the release step could not run (its Kubernetes List failed)")
+		live.HoldSessions(true)
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated), "a session with this install's mark is refused too")
+		Expect(e.browser().login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusServiceUnavailable))
+		var n int
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM sessions`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "the refused sign-in made no session")
+
+		By("the release step ran")
+		live.HoldSessions(false)
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("drops Secure and the __Host- prefix when the public URL is plain http", func(ctx SpecContext) {
 		e := newEnv(ctx, envOptions{plainHTTP: true})
 		Expect(e.srv.URL).To(HavePrefix("http://"))

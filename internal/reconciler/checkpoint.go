@@ -26,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 )
@@ -108,6 +109,9 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 		// Nothing wrote the home: no new backup is needed, whatever the phase.
 		return true, "", r.restoreUntouched(ctx, w)
 	}
+	if r.cfg.CheckpointsReadOnly {
+		return r.unreadableGate(ctx, w, sb, since)
+	}
 	if sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted {
 		return r.unreadableGate(ctx, w, sb, since)
 	}
@@ -158,6 +162,9 @@ func (r *Reconciler) unreadableGate(ctx context.Context, w *work, sb execution.S
 		return true, "", nil
 	}
 	reason := fmt.Sprintf("the sandbox is in phase %s, so its home cannot be read and has no backup since the home was last written; it is not recreated and its home is kept", sb.Phase)
+	if r.cfg.CheckpointsReadOnly {
+		reason = checkpoint.ReadOnlyError + ", and the home has no backup since it was last written; the sandbox is not recreated and its home is kept"
+	}
 	if hasCP {
 		reason += fmt.Sprintf(" (the last backup is from %s)", cp.FinishedAt.Time.UTC().Format(time.RFC3339))
 	}
@@ -210,7 +217,8 @@ func (r *Reconciler) stopGate(ctx context.Context, w *work, sb execution.Sandbox
 		return true, nil
 	}
 	since := homeDirtiedSince(w.sb)
-	if since.IsZero() {
+	if since.IsZero() || r.cfg.CheckpointsReadOnly {
+		// Restore-only: no backup will come, and a stop keeps the volume.
 		return true, nil
 	}
 	cp, err := r.q.LatestHomeCheckpointOfSandbox(ctx, store.LatestHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})

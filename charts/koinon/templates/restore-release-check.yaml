@@ -1,0 +1,138 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The restore release check (ADR 0110 decision 1, issue 516): "koinon-api restore release-check" as a
+pre-upgrade hook, rendered whenever restoreHold is false. It prints `restore status` and fails when a
+release is pending (the hold left held_since set, or this is a copy that has not run its release step)
+and the importer plan holds a removal of a declared provider, MCP server or connection while
+restore.acceptImporterDeletions is not true, so `helm upgrade` stops before any Deployment changes and the
+install stays held. It exits 0 when the schema does not exist yet (a first install; Argo CD runs hooks then
+too) and when nothing blocks. It refuses nothing else: it never blocks an upgrade because of the binding
+state.
+
+It is a preview and an early stop, not the gate. With --no-hooks or a plain `kubectl apply` it does not run,
+and under Argo CD the Deployments (wave 0) are applied before wave 2, so there it only previews. The gate is the importer
+(the release step in koinon-api): it removes only what the restore's accepted list allows.
+
+Weights: after the migrate Job (hook-weight "0", Argo wave "1") so the tables exist; the ServiceAccount, Role
+and RoleBinding are hooks of weight "-5" because the Job reads the labelled Secrets of this namespace (the same
+read the importer has) and needs the Kubernetes API.
+*/ -}}
+{{- if not .Values.restoreHold }}
+{{- $name := include "koinon.componentName" (list . "restore-release-check") }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "restore-release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "restore-release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "restore-release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "restore-release-check") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "restore-release-check") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: release-check
+          image: {{ include "koinon.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["restore", "release-check"]
+          env:
+            {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- /* optional: under Argo CD the Job can run before the ensure-secrets hook made the mark. */}}
+            - name: KOINON_INSTALL_MARK
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "koinon.installMarkName" . }}
+                  key: token
+                  optional: true
+            {{- if (.Values.restore).acceptImporterDeletions }}
+            - name: KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS
+              value: "true"
+            {{- end }}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "koinon.dbVolumeMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "koinon.dbVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+{{- end }}

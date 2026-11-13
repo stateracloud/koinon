@@ -34,6 +34,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/restorehold"
@@ -228,6 +229,98 @@ var _ = Describe("Importer", func() {
 		By("a second pass over the same Secret changes and audits nothing")
 		Expect(imp.Sync(ctx)).To(Succeed())
 		Expect(auditOf(ctx, "provider.declare")).To(HaveLen(1))
+	})
+
+	It("only plans while the install is held: no write, a HeldNotApplied Event, and the removals wait for the release (ADR 0110)", func(ctx SpecContext) {
+		put(ctx, "kept", declarative.TypeModelProvider, slug, provider("kept"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "kept", metav1.DeleteOptions{})).To(Succeed())
+		fresh := provider("fresh")
+		fresh["models"] = "- name: other/model\n"
+		put(ctx, "fresh", declarative.TypeModelProvider, slug, fresh)
+		put(ctx, "bad", declarative.TypeMCPServer, slug, map[string]string{"name": "bad"})
+		auditBefore := len(auditOf(ctx, "provider.undeclare")) + len(auditOf(ctx, "provider.declare"))
+
+		imp.Held = restorehold.NewGuard(true)
+		Expect(imp.Sync(ctx)).To(Succeed())
+
+		list, _ := svc.ListProviders(ctx, org)
+		Expect(list).To(HaveLen(1), "the held pass created no provider")
+		Expect(list[0].Name).To(Equal("kept"))
+		Expect(list[0].Removed).To(BeFalse(), "the held pass removed nothing")
+		Expect(len(auditOf(ctx, "provider.undeclare")) + len(auditOf(ctx, "provider.declare"))).To(Equal(auditBefore))
+		Expect(imp.HeldPlan(declarative.TypeModelProvider, declarative.ActionApply)).To(Equal(1))
+		Expect(imp.HeldPlan(declarative.TypeModelProvider, declarative.ActionRemove)).To(Equal(1))
+		Expect(logs.String()).To(ContainSubstring("held: would apply model-provider fresh"))
+		Expect(logs.String()).To(ContainSubstring("held: would remove model-provider kept"))
+		var held, invalid int
+		for _, e := range events(ctx) {
+			switch e.Reason {
+			case declarative.ReasonHeldNotApplied:
+				held++
+			case declarative.ReasonInvalid:
+				if e.InvolvedObject.Name == "bad" {
+					invalid++
+				}
+			}
+		}
+		Expect(held).To(Equal(1))
+		Expect(invalid).To(Equal(1), "an invalid Secret is still reported")
+
+		By("a second held pass writes the Event and the log line once")
+		Expect(imp.Sync(ctx)).To(Succeed())
+		held = 0
+		for _, e := range events(ctx) {
+			if e.Reason == declarative.ReasonHeldNotApplied {
+				held++
+			}
+		}
+		Expect(held).To(Equal(1))
+
+		By("after the release the same pass applies and removes")
+		imp.Held = nil
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list).To(HaveLen(2))
+		for _, p := range list {
+			Expect(p.Removed).To(Equal(p.Name == "kept"))
+		}
+	})
+
+	It("keeps what the restore brought in until the removals are accepted, and revokes the sessions once (ADR 0110 decision 1)", func(ctx SpecContext) {
+		put(ctx, "kept", declarative.TypeModelProvider, slug, provider("kept"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "kept", metav1.DeleteOptions{})).To(Succeed())
+
+		By("the copy was held: its row is unbound and held_since is set")
+		_, err := pool.Exec(ctx, `DELETE FROM install_binding`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO install_binding (mark, held_since) VALUES (NULL, now())`)
+		Expect(err).NotTo(HaveOccurred())
+		imp.Release = installbinding.New(pool, "hash-copy", false, nil)
+
+		By("the first unheld pass does not remove the provider whose Secret the copy never had")
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ := svc.ListProviders(ctx, org)
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeFalse())
+		Expect(logs.String()).To(ContainSubstring("removal of model-provider kept waits for restore.acceptImporterDeletions"))
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+
+		By("a later pass keeps waiting and does not release again")
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list[0].Removed).To(BeFalse())
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+
+		By("the accept removes it")
+		imp.AcceptRemovals = true
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list[0].Removed).To(BeTrue())
 	})
 
 	It("disables the entries when the Secret is deleted, audited as the Secret, and restores them with it", func(ctx SpecContext) {

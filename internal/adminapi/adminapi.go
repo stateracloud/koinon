@@ -79,8 +79,10 @@ type Server struct {
 	modelCheck *modelcheck.Service
 	// outward is the one switch for outward targets (ADR 0110 decision 5).
 	outward *outward.Service
-	log     *slog.Logger
-	limiter *limiter
+	// restoreStatus builds the report of GET /restore/status; nil answers 501.
+	restoreStatus func(ctx context.Context) (any, error)
+	log           *slog.Logger
+	limiter       *limiter
 	// exportAudit writes an audit export (audit.Export when nil) and exportDone, when set, runs as
 	// the export goroutine ends; tests set both through export_test.go.
 	exportAudit func(ctx context.Context, w io.Writer, sc audit.ExportScope, fromSeq int64) error
