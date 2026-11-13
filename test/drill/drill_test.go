@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/approvals"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
@@ -141,6 +142,13 @@ const stepTimeout = 20 * time.Minute
 // seedTimeout covers the seed step's waits with margin: the scheduled run and the marker run (each
 // up to releasedWait, 8m in topology/kind.yaml) and 20m for archived_at, about 36m, plus the fake MCP server's health (up to 8m) and the approval run (up to 8m), plus the API calls.
 const seedTimeout = 60 * time.Minute
+
+// releasedKeySettle is koinon-reconciler's --provider-key-settle default and approvalSweep koinon-api's
+// --run-cap-sweep-interval default (the approval sweeper's interval); the chart sets neither.
+const (
+	releasedKeySettle = 90 * time.Second
+	approvalSweep     = 30 * time.Second
+)
 
 // step names a step of the drill in the report; check names come from the label. A step whose
 // waits add up to more than stepTimeout passes its own budget.
@@ -347,6 +355,20 @@ func admin(ctx context.Context, s *side, method, path string, body ...string) (i
 	code, b, err := s.client.Admin(ctx, s.token, method, path, body...)
 	must(err, method+" "+path)
 	return code, b
+}
+
+// adminError decodes the admin API's error body ({"error":{"code","message"}}). Compare the decoded
+// message, not the raw body: JSON escapes characters such as the quotes in restorehold.ErrHeld.
+func adminError(body []byte) (code, message string) {
+	GinkgoHelper()
+	var e struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	must(json.Unmarshal(body, &e), "decode the admin API error: "+string(body))
+	return e.Error.Code, e.Error.Message
 }
 
 func sql(ctx context.Context, s *side, q string) string {
@@ -880,7 +902,9 @@ stringData:
 			Expect(string(body)).To(ContainSubstring(`"adminDisabled"`), "the MCP server does not show as admin-disabled")
 			code, body = admin(ctx, &dst, http.MethodPut, path, `{"disabled":false}`)
 			Expect(code).To(Equal(http.StatusConflict), "enable while held must be refused: "+string(body))
-			Expect(string(body)).To(ContainSubstring(restorehold.ErrHeld.Error()))
+			errCode, errMsg := adminError(body)
+			Expect(errCode).To(Equal("conflict"), string(body))
+			Expect(errMsg).To(Equal(restorehold.ErrHeld.Error()), string(body))
 		}, NodeTimeout(5*time.Minute))
 
 		It("shows in restore status what the release will do", Label("hold", "restore-status"), func(ctx SpecContext) {
@@ -1004,12 +1028,23 @@ stringData:
 			By("the org admin approves it on the restored copy, and the parked call runs exactly once")
 			_, err = ad.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: dst.org, ApprovalId: pending.approval, ArgsSha256: pending.argsSHA256})
 			must(err, "the org admin approves on the restored copy")
+			// The approval comes right after the release, as an operator's would. The copy's executor
+			// key and MCP credentials did not exist while it was held (the held reconciler converges
+			// nothing, ADR 0107), so the released reconciler writes them first and serves the server
+			// once its credential has settled (--provider-key-settle, 90 s by default). An attempt in
+			// that window fails before the call leaves Koinon, and the approval sweeper retries it
+			// once the execution lease has passed. Wait for the settle, the lease and two sweeps.
+			executedWait := releasedKeySettle + approvals.DefaultExecutionLease + 2*approvalSweep + time.Minute
 			Eventually(func(g Gomega) {
 				a := read(ad)
 				g.Expect(a.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), a.GetError())
-				g.Expect(a.GetExecutions()).To(BeEquivalentTo(1))
-			}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
-		})
+				g.Expect(a.GetExecutions()).To(BeNumerically("<=", approvals.DefaultMaxExecutions), "executions counts attempts")
+			}).WithContext(ctx).WithTimeout(executedWait).WithPolling(2 * time.Second).Should(Succeed())
+			// Exactly once: one completed execution, whatever the attempts before it (the executor
+			// completes a request fenced on its attempt, so only one attempt can record a result).
+			Expect(sqlInt(ctx, &dst, fmt.Sprintf("SELECT count(*) FROM task_events WHERE kind = '%s' AND payload->>'approval_id' = '%s'",
+				approvals.KindExecuted, pending.approval))).To(Equal(1), "the parked call must run exactly once")
+		}, NodeTimeout(10*time.Minute))
 
 		// The break-glass request (#512) on the restore target, with an age key made when the suite started
 		// (#927): the operator regains a local user's login (the check resets drill-breakglass, which nothing else uses) without kubectl exec.
