@@ -353,7 +353,8 @@ lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<
 `test/drill/topology/lab.example.yaml`), and the sign-in runs leave `oidc-signcounts.json` (username and latest signCount per
 persona, no key material) in the result directory for the lab to write back, whatever the verdict. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
-scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
+scripted approver for any install, GitHub and Gitea targets (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`);
+`hack/answer-question.sh` answers one pending `ask_user` question by run and question ID.
 
 The check `enforcement` (#955) runs `koinon-api run-evidence export` (#926) in the target's api pod for every run of the restored
 copy and reads the sandbox enforcement mode it prints. It passes only with at least one run and `enforce` on every run; `unknown`, `audit`,
