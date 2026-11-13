@@ -16,9 +16,10 @@ any more, so step 7 is now a retirement list.
   Progress, Done. Migrate: rename **Todo to Backlog** (existing items keep their value), then add
   **Ready** and **In Review**. Only humans move items to Ready.
 - New single-select field **Priority** with options **P0, P1, P2, P3**.
-- **Retire the Phase field** (delete it, or hide it from the views): milestones are the release gate
-  and `claim.sh next` reads the milestone only.
-- Keep the **Component** field; it is shown in `next` but is not a lock.
+- The **Stage** field (was Phase) orders the work; milestones are the release gate and `claim.sh next`
+  reads the milestone only.
+- The **Lane** field (was Component) is shown in `next` but is not a lock. See
+  [triage labels](../agents/triage-labels.md).
 - Built-in workflows: item closed -> Done; pull request merged -> Done; pull request linked to issue
   -> In Progress. Nothing sets In Review (no built-in trigger; ADR 0104 "Board Status").
 - `claim.sh next` reads the project: `gh auth refresh -s project` once (read access is enough).

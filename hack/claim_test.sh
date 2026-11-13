@@ -99,7 +99,7 @@ eq "assignees: none" "$(other_assignees '{}' alice)" ""
 # with nothing holding the issue count as Ready.
 item() { # N STATUS ASSIGNEES_JSON [LABELS_JSON] [PRIORITY]
   jq -nc --argjson n "$1" --arg s "$2" --argjson a "$3" --argjson l "${4:-[\"agent-ok\"]}" --arg p "${5-P1}" \
-    '{status:{name:$s},priority:{name:$p},component:null,content:{number:$n,title:"t\($n)",state:"OPEN",createdAt:"2026-01-0\($n % 9 + 1)T00:00:00Z",repository:{nameWithOwner:"acme/koinon"},milestone:{title:"m1"},labels:{nodes:($l|map({name:.}))},assignees:{nodes:($a|map({login:.}))}}}'
+    '{status:{name:$s},priority:{name:$p},lane:null,content:{number:$n,title:"t\($n)",state:"OPEN",createdAt:"2026-01-0\($n % 9 + 1)T00:00:00Z",repository:{nameWithOwner:"acme/koinon"},milestone:{title:"m1"},labels:{nodes:($l|map({name:.}))},assignees:{nodes:($a|map({login:.}))}}}'
 }
 board=$(jq -sc '[{data:{organization:{projectV2:{items:{nodes:.}}}}}]' < <(
   item 1 Ready '[]'; item 2 Ready '[]'; item 3 Ready '[]'; item 4 Ready '["bob"]'; item 5 Ready '["Alice"]'
