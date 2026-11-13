@@ -109,11 +109,11 @@ g checkout -q main; echo d >"$repo/d"; g add d; g commit -qm "main moved"
 g merge -q --no-ff feat2 -m "Merge feat2" # main moved after feat2 branched: tree differs from the head
 merge_diff=$(g rev-parse HEAD)
 plain=$(g rev-parse HEAD~1) # a one-parent commit
-# a merge that brings a file the flavors suite builds from
+# a merge that brings a file the harnesses suite builds from
 g checkout -qb feat3; mkdir -p "$repo/harnesses"; echo f >"$repo/harnesses/x"; g add harnesses; g commit -qm feat3
 g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
-export CI_CHANGES_FLAVORS_DIRS=test/harnesses # the directories the flavors suite builds (no go list in the scratch repo)
+export CI_CHANGES_HARNESSES_DIRS=test/harnesses # the directories the harnesses suite builds (no go list in the scratch repo)
 
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }
@@ -148,7 +148,7 @@ qh_same=1111111111111111111111111111111111111111 # a queue commit with merge_sam
 qh_other=2222222222222222222222222222222222222222 # a queue commit with another tree
 commit_json "$qh_same" "$(tree_of "$merge_same")"
 commit_json "$qh_other" "$(tree_of "$merge_diff")"
-checks flavors:success
+checks harnesses:success
 
 mq_runs "$qh_same"
 # shellcheck disable=SC2046 # push prints separate KEY=VALUE words
@@ -162,7 +162,7 @@ mq_runs
 # shellcheck disable=SC2046
 expect "no queue run (an admin merge) runs everything" false "no successful merge_group" $(push "$merge_same")
 # A draft-era or ready pull request head that is green never skips a push: its check runs are not read.
-checks go:success "quick checks:success" "generated code:success" flavors:success
+checks go:success "quick checks:success" "generated code:success" harnesses:success
 # shellcheck disable=SC2046
 expect "a green pull request head without a queue run runs everything" false "no successful merge_group" $(push "$merge_same")
 # A queue run that carries no tree for its head commit matches nothing.
@@ -176,24 +176,24 @@ expect "an API error on the runs list runs everything" false "cannot list" $(pus
 expect "an unknown commit runs everything" false "cannot read" $(push 0000000000000000000000000000000000000000)
 expect "a tag push runs everything" false "not a push to main" EVENT_NAME=push REF=refs/tags/v1 SHA="$merge_same"
 expect "no repo runs everything" false "not a push to main" EVENT_NAME=push REF=refs/heads/main SHA="$merge_same" REPO=
-# flavors is required (a queue check, #572) and flavor-publish ships what it tested: judged on the queue head.
-checks flavors:failure
+# harnesses is required (a queue check, #572) and harness-publish ships what it tested: judged on the queue head.
+checks harnesses:failure
 # shellcheck disable=SC2046
-expect "flavors red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")
+expect "harnesses red on the queue head, nothing it builds from changed: skip" true "merge_group" $(push "$merge_same")
 commit_json "$qh_same" "$(tree_of "$merge_flav")"
 mq_runs "$qh_same"
 # shellcheck disable=SC2046
-expect "flavors red and its files changed runs everything" false "flavors did not pass" $(push "$merge_flav")
-checks flavors:success
+expect "harnesses red and its files changed runs everything" false "harnesses did not pass" $(push "$merge_flav")
+checks harnesses:success
 # shellcheck disable=SC2046
-expect "flavors green and its files changed: skip" true "merge_group" $(push "$merge_flav")
+expect "harnesses green and its files changed: skip" true "merge_group" $(push "$merge_flav")
 checks
 # shellcheck disable=SC2046
-expect "flavors never ran and its files changed runs everything" false "no completed run" $(push "$merge_flav")
+expect "harnesses never ran and its files changed runs everything" false "no completed run" $(push "$merge_flav")
 # A one-parent commit (squash or rebase landing) is judged the same way, by tree.
 commit_json "$qh_same" "$(tree_of "$plain")"
 mq_runs "$qh_same"
-checks flavors:success
+checks harnesses:success
 # shellcheck disable=SC2046
 expect "a one-parent commit with a queue run on its tree: skip" true "merge_group" $(push "$plain")
 : "$feat_head"
@@ -241,9 +241,9 @@ expect_lab "lab: an API error means go-test runs" false EVENT_NAME=pull_request 
 
 # --- apply -----------------------------------------------------------------------------------------
 cd "$tmp"
-input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true'
-want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nflavors=false\ntidy=false\nvuln=false\nfuzz=false\nshell=false\nscripts=false\nflavors_publish=true'
-want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nflavors=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true\nflavors_publish=true'
+input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nharnesses=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true'
+want_skip=$'go=false\nweb=false\ngenerate=false\nchart=false\nchartsmoke=false\nescape=false\nharnesses=false\ntidy=false\nvuln=false\nfuzz=false\nshell=false\nscripts=false\nharnesses_publish=true'
+want_keep=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nharnesses=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true\nharnesses_publish=true'
 check_apply() { # check_apply NAME WANT SKIP INPUT
 	local got
 	got=$(SKIP=$3 "$script" apply <<<"$4")
@@ -252,9 +252,9 @@ check_apply() { # check_apply NAME WANT SKIP INPUT
 check_apply "apply with skip=true switches every heavy output off" "$want_skip" true "$input"
 check_apply "apply with skip=false changes nothing" "$want_keep" false "$input"
 check_apply "apply with skip unset changes nothing" "$want_keep" "" "$input"
-check_apply "flavors_publish keeps a false flavors" $'go=false\nflavors=false\nflavors_publish=false' true $'go=true\nflavors=false'
+check_apply "harnesses_publish keeps a false harnesses" $'go=false\nharnesses=false\nharnesses_publish=false' true $'go=true\nharnesses=false'
 # an unknown name passes through untouched
-check_apply "unknown outputs pass through" $'extra=true\nflavors_publish=true' true $'extra=true'
+check_apply "unknown outputs pass through" $'extra=true\nharnesses_publish=true' true $'extra=true'
 
 # --- ci.yml wiring (old issue 594, #572) --------------------------------------------------------------------
 # `scripts` and `lint-shell` are gated by the path rules and the draft/queue-tested skip, both through the

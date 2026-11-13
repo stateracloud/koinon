@@ -363,7 +363,7 @@ docker buildx create --name dryrun --driver docker-container --driver-opt networ
 BUILDX_BUILDER=dryrun hack/release-harness.sh 0.0.0-rc.0 localhost:5000 "$(git rev-parse HEAD)"
 ```
 
-It prints the pushed index's digest reference. The release itself does not run this form: the `flavor-build` matrix builds each platform natively (`hack/release-harness.sh --platform linux/amd64|linux/arm64 ...`, `ubuntu-24.04` and `ubuntu-24.04-arm`, pushed by digest, with a registry build cache `sandbox:buildcache-<arch>` that is never a release artifact and can be deleted at any time), and the `flavor` job joins the digests with `hack/release-harness.sh --merge ...` (`docker buildx imagetools create`) into the tagged manifest list. The gate does not check the harness contract suite
+It prints the pushed index's digest reference. The release itself does not run this form: the `harness-build` matrix builds each platform natively (`hack/release-harness.sh --platform linux/amd64|linux/arm64 ...`, `ubuntu-24.04` and `ubuntu-24.04-arm`, pushed by digest, with a registry build cache `sandbox:buildcache-<arch>` that is never a release artifact and can be deleted at any time), and the `harness` job joins the digests with `hack/release-harness.sh --merge ...` (`docker buildx imagetools create`) into the tagged manifest list. The gate does not check the harness contract suite
 (`harnesses` in `ci.yml` is required but runs only in the merge queue and on main, and only when harness files change; see `hack/ci-required.txt`), and CI
 builds only the runner's own platform, so the release's native build of the other platform is the
 first one: dry-run the `--platform` and `--merge` forms (or the one-call form on an x86 host, where arm64 is emulated) before an rc that

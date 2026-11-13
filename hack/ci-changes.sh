@@ -3,10 +3,10 @@
 #
 # Prints name=true|false lines (for $GITHUB_OUTPUT) saying which CI jobs a change can affect.
 # The path rules are in hack/paths.rules (read through hack/paths-lib.sh); this script adds the
-# flavors and chartsmoke suites' `go list` build graphs.
+# harnesses and chartsmoke suites' `go list` build graphs.
 # With no base ref (a push to main) every job runs. Usage: hack/ci-changes.sh [base-ref]
 # `--stdin` in place of the base ref reads the changed paths from stdin (hack/ci-changes-test.sh);
-# `--flavors-dirs` / `--chartsmoke-dirs` print the directories each suite builds from.
+# `--harnesses-dirs` / `--chartsmoke-dirs` print the directories each suite builds from.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -24,13 +24,13 @@ strip_mod_dirs() {
 	awk -v r="$root/" -v l="$PWD/" 'index($0, r) == 1 { print substr($0, length(r) + 1) } index($0, l) == 1 { print substr($0, length(l) + 1) }' | sort -u
 }
 
-# flavors_dirs: the repository-relative directory of every package of this module that the flavors
-# suite builds, tests included (`go list -deps -test`, as the flavors job runs it on linux).
-# CI_CHANGES_FLAVORS_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
-flavors_dirs() {
+# harnesses_dirs: the repository-relative directory of every package of this module that the harnesses
+# suite builds, tests included (`go list -deps -test`, as the harnesses job runs it on linux).
+# CI_CHANGES_HARNESSES_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
+harnesses_dirs() {
 	local out dirs
-	if [[ -v CI_CHANGES_FLAVORS_DIRS ]]; then
-		dirs=$CI_CHANGES_FLAVORS_DIRS
+	if [[ -v CI_CHANGES_HARNESSES_DIRS ]]; then
+		dirs=$CI_CHANGES_HARNESSES_DIRS
 	else
 		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/harnesses/...) || return 1
 		dirs=$(strip_mod_dirs <<<"$out")
@@ -60,8 +60,8 @@ chartsmoke_dirs() {
 }
 
 case ${1:-} in
---flavors-dirs)
-	flavors_dirs
+--harnesses-dirs)
+	harnesses_dirs
 	exit
 	;;
 --chartsmoke-dirs)
@@ -88,7 +88,7 @@ fi
 
 # A change to CI itself, the Makefile, the Go module or the rules runs everything. With
 # CI_CHANGES_IGNORE_PLUMBING=1 the CI-plumbing rule (`everything ci`) is dropped and only the build
-# inputs (`everything -`) count: hack/pr-merge.sh --admin asks "is a real flavors run owed", and a
+# inputs (`everything -`) count: hack/pr-merge.sh --admin asks "is a real harnesses run owed", and a
 # change of ci.yml alone cannot get one. An empty list still runs everything.
 everything=false
 # An empty change list is not "nothing changed": a diff that failed or an empty file list runs
@@ -121,7 +121,7 @@ suite_graph() {
 for j in "${jobs[@]}"; do
 	if [[ $everything == true ]] || paths_job_any "$j" <<<"$files"; then
 		echo "$j=true"
-	elif [[ $j == flavors ]] && suite_graph flavors_dirs flavors; then
+	elif [[ $j == harnesses ]] && suite_graph harnesses_dirs harnesses; then
 		echo "$j=true"
 	elif [[ $j == chartsmoke ]] && suite_graph chartsmoke_dirs chartsmoke; then
 		echo "$j=true"

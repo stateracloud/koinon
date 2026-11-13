@@ -19,7 +19,7 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 (docker, git, helm) was missing. A plain `func TestX` that passes in a Ginkgo package counts as a run
 test, so the suite reads "partly run" when only that test ran. A plain test that calls `testenv.RequireT`
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
-`go tool ginkgo -p ./internal/x`. `test/flavors` needs the flavor images: `make test-flavors`.
+`go tool ginkgo -p ./internal/x`. `test/harnesses` needs the harness images: `make test-harnesses`.
 
 ### Test result reuse (#43)
 
@@ -237,12 +237,12 @@ escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./
   missing-audience or a long-lived token, a token mounted by default, a foreign supervisor image). It adds about 4 to 8 minutes to the e2e (probe image pull, or its build on a miss, one ko stand-in
   image, a dozen sandboxes); the step's `Escape suite (OpenShell cases)` row in the run's table is the
   real number. A skip of a case it needs is a failure (`KOINON_REQUIRE=openshell,cluster,escape-gateway`).
-  The probe image has no apt step in the run (#482): `flavor-publish` pushes it to
+  The probe image has no apt step in the run (#482): `harness-publish` pushes it to
   `ghcr.io/<repo>/spike-probe:<tag>` on main (the tag is `hack/probe-tag.sh`, a hash of `hack/spike/probe` and the
-  flavor's `ARG BASE=`), and the e2e sets `PROBE_PULL_REPO` so `test/escape/kind.sh` pulls that tag. Only a miss
+  harness's `ARG BASE=`), and the e2e sets `PROBE_PULL_REPO` so `test/escape/kind.sh` pulls that tag. Only a miss
   (a branch that changes the probe before main has published it) builds the image, with apt, on the same pinned `ARG BASE=` that the tag hashes (kind.sh ignores `KOINON_PROBE_BASE` when
   `PROBE_PULL_REPO` is set), so a tag always names one image. The e2e therefore tests the probe on the pinned base, not on the
-  flavor image the run built.
+  harness image the run built.
   The Gitea read grant cases (label `gitea`) are not in it: they point the OpenShell gateway at a throwaway-CA ConfigMap
   (`supervisor.network.additionalCaConfigMapName`) by a helm upgrade, which the chart install does not take.
 - **Alone**: `make dev-kind-up`, then `make test-escape-kind`. A bare OpenShell without the chart, so no
@@ -391,7 +391,7 @@ migrate Job lacked) passed every package test and failed only in a full install.
 
 `hack/lane-gates.sh [<base>]` (base defaults to `origin/main`) runs the gates your change touches and
 blocks until it has a verdict: the gates of `hack/preflight.sh` that the diff selects, plus the heavy
-CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `flavors`, `escape`, each from its
+CI jobs `hack/ci-changes.sh` turns on for it (`chartsmoke`, `harnesses`, `escape`, each from its
 `lane` line in `hack/paths.rules`; the e2e is not part of it, see [testing layers](#testing-layers)). It needs Docker for the container gates and nothing
 else: no lab, no external-run status. It prints one line per gate,
 
@@ -481,7 +481,7 @@ Binaries that tests build themselves (the chart smoke images) do not get the tag
 Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides, its header and
 `hack/ci-skip-heavy-test.sh` are the rule. The heavy jobs are the ones the `changes` job gates:
 `go` (go-tidy, go-vuln, go-lint, go-test, go-race-serial, go-race-parallel; `go vet` is part of golangci-lint's `standard` set), `web` (web-lint, web-test, web-e2e),
-`generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `flavors` (not on a pull request, #572), plus
+`generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `harnesses` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
 `go.mod`, `go.sum`, the lint config) and `go-vuln` (path rule `vuln`: `go.mod`, `go.sum`; see below). `changes` and
 `quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
@@ -498,7 +498,7 @@ One source, `hack/paths.rules`. Which paths turn on which job or gate is data, i
 e2e), `hack/preflight.sh` (which gates run, and the `scripts` gate) and `hack/lane-gates.sh` (the
 `lane` lines: which local gate stands for a CI job). The file's header defines the kinds of line;
 the comment above each rule says why it exists. `hack/ci-changes.sh` adds the `go list` build
-graphs of the flavors and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
+graphs of the harnesses and chartsmoke suites; `hack/needs-e2e.sh` adds the binaries' build graph. Change a rule in
 that file and nowhere else.
 
 - **Fail closed.** `job go .` matches every path; `except go` names what cannot affect the Go jobs
@@ -538,7 +538,7 @@ that file and nowhere else.
   Makefile, `go.mod` and `go.sum` turn every job on.
 - **Chart smoke.** The suite renders the chart and builds each `cmd/koinon-*` with `go build` and no
   tags. `hack/ci-changes.sh` derives the Go packages those commands and the suite import (`go list`,
-  like flavors). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
+  like harnesses). The seed in `hack/paths.rules` covers what the graph cannot name: `charts/`,
   `hack/versions.env`, `test/chartsmoke/` and `go.mod`/`go.sum`. `web/` without Go files and
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy`, `vuln` and `scripts` use the CI job's rule. The
@@ -609,11 +609,11 @@ Tests: `hack/ci-concurrency-test.sh`, `hack/ci-supersede-test.sh`, `hack/ship-te
 
 Everything runs, except when a successful `merge_group` `ci` run (the merge queue's build) tested a commit with
 the pushed commit's tree (`hack/ci-skip-heavy.sh decide_push` lists the last 30 queue runs and compares trees).
-Then the heavy jobs are skipped: the queue already ran the whole suite on exactly these files. `flavors`
-(required, and `flavor-publish` ships what it tested) must also have passed on that queue commit unless nothing
+Then the heavy jobs are skipped: the queue already ran the whole suite on exactly these files. `harnesses`
+(required, and `harness-publish` ships what it tested) must also have passed on that queue commit unless nothing
 it builds from changed. On such a push `go`, `web`, `scripts` and `lint-shell` report skipped (old issue 594, #572).
 A pull request head's green never counts (a draft run is green by skipping). Any doubt (an admin or direct push,
-which has no queue run; an API error; no matching run) runs everything. `flavor-publish` and the kind e2e
+which has no queue run; an API error; no matching run) runs everything. `harness-publish` and the kind e2e
 (batched on main, nightly) are unaffected. So what no single commit explains is caught by the nightly and
 batched e2e, not by `ci` on main. `hack/release-gate.sh` reads a check that main skipped from that same queue
 build (the `merge_group` `ci` run on the tagged commit's tree), never from the PR head.
@@ -639,8 +639,8 @@ work that fills it, then saves:
 Every other job restores and never saves: one Go cache scheme (`go-ci`, the local action
 `setup-go-cache`: `setup-go` with `cache: false` plus the `actions/cache/restore` with the weekly key; a
 week without a go.sum change still gets a fresh build cache, and a pull request falls back to the previous week's entry until main has saved the new one), and `e2e-go` is one entry per `go.sum`
-(no run id; saved by main only when the exact key was missing). The flavor layer cache stays with
-`flavors` and `flavor-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
+(no run id; saved by main only when the exact key was missing). The harness layer cache stays with
+`harnesses` and `harness-publish` (see below). The `warm-caches*` jobs are advisory in `hack/ci-required.txt`: it
 reports on pushes only. A new key goes into the warm job and the restoring jobs together;
 `hack/ci-cache-test.sh` checks the rule.
 
@@ -660,7 +660,7 @@ this; a new `ADD` of a release asset fails it, also with the URL on a continuati
 Every Dockerfile `apt-get update` and `apt-get install` carries `-o Acquire::Retries=5 -o
 Acquire::http::Timeout=30`, because snapshot.ubuntu.com answers 5xx now and then (#149), and every
 `apt-get update` adds `-o APT::Update::Error-Mode=any`, so an outage fails at the update step and not
-later as "Unable to locate package" (#141). The flavor's snapshot step prints one line naming
+later as "Unable to locate package" (#141). The harness's snapshot step prints one line naming
 snapshot.ubuntu.com and the snapshot date when its update fails. A step that runs apt through
 another tool (for example `playwright install --with-deps` in `hack/e2e-toolchain/web.Dockerfile`) writes an `apt.conf.d` snippet with all three
 settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call without them. The
@@ -702,9 +702,9 @@ no change on our side; `hack/gitleaks-rules.sh` therefore takes the gitleaks sou
 module proxy and pins the module's `h1:` content hash (`GITLEAKS_MODULE_SUM`), which
 `go mod download` also checks against sum.golang.org (unless GOSUMDB is off; the pin holds either way); `hack/fetch-pinned-test.sh` tests the helper, including a retry on 504.
 
-The flavor layer cache (`flavors-<hash of harnesses/**>`, prefix `flavors-`) is restored by `flavors`,
-`quickstart` (e2e-kind) and `flavor-publish`. Only pushes to main save it: `flavors` and
-`flavor-publish` (which exports with `--cache-to` and saves, so a main push where `flavors` was
+The harness layer cache (`harnesses-<hash of harnesses/**>`, prefix `harnesses-`) is restored by `harnesses`,
+`quickstart` (e2e-kind) and `harness-publish`. Only pushes to main save it: `harnesses` and
+`harness-publish` (which exports with `--cache-to` and saves, so a main push where `harnesses` was
 skipped by #595 still writes the entry). A pull request never writes it.
 
 ## Main's e2e regressions and release tags
@@ -776,7 +776,7 @@ reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchr
    type of every required workflow and runs them normally.
 3. Mark it ready for review: `ready_for_review` re-runs `ci` in full (a draft reports a vacuous
    green, above). On a pull request `e2e-kind` runs only with the `e2e` label and is advisory (#572). `dco` and `claim` do not listen to it; they keep the result of step 1 or 2.
-4. The change touches `harnesses/`. The proof is the required merge-queue jobs: `flavors`
+4. The change touches `harnesses/`. The proof is the required merge-queue jobs: `harnesses`
    (`hack/paths.rules` matches `harnesses/`) and `quickstart` (ADR 0105). A dispatched `e2e-kind.yml`
    run is not merge evidence.
 
@@ -804,7 +804,7 @@ reports on every pull request, push and merge group build); it also runs in `hac
 
 | Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
 |---|---|---|---|
-| `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`flavor-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
+| `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`harness-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
 | `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `contributor-gate.yml` | `pull_request`, `merge_group` (the `contributor gate` job, off by default, #848) | `GITHUB_TOKEN` only; `contents: read` at top level, the job adds `pull-requests: read` (the queued pull request, `check-pr`); no secret, no Environment | ok: checks out the base branch's tip (`pull_request.base.ref`) or `merge_group.base_sha` and runs the base's `hack/contributor-gate.sh`; the PR's code never runs. The workflow file is the PR head's, so the guard is the code-owner review of `.github/`, as for `claims.yml` |
@@ -831,9 +831,9 @@ pull request workflows is a setting, not a file; it is tracked as
 
 ## Required status checks
 
-`hack/ci-required.txt` is the list the `main` ruleset mirrors. `flavors` is required but runs only in the merge
+`hack/ci-required.txt` is the list the `main` ruleset mirrors. `harnesses` is required but runs only in the merge
 queue and on pushes to main (#572, #128): on a pull request its job-level `if:` skips it, which reports success,
-so the name exists on every build. `flavor-publish` is advisory and push-only. `flavor-repro` (`flavor-repro.yml`, #176) is advisory too: it runs on
+so the name exists on every build. `harness-publish` is advisory and push-only. `harness-repro` (`harness-repro.yml`, #176) is advisory too: it runs on
 a push to main, nightly and on dispatch, so it is not a `ci.yml` job and has no line in the list. `hack/ci-required-test.sh` (CI job
 `scripts`) fails when a `ci.yml` job is neither required nor advisory;
 `hack/ci-required-test.sh --ruleset` diffs the list with the live ruleset. A new job goes into the
@@ -924,7 +924,7 @@ The only merge method is a merge commit, and the merge queue is the single route
 is the only e2e proof. `--jump` enqueues at the front (GraphQL `enqueuePullRequest`, pinned to the
 head oid). `--break-glass "<reason>" --approved-at <time>` is for an emergency the owner approved: it
 merges with `--admin`, and opens a `break-glass` issue with the reason.
-`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10; a pull request runs the quickstart only with the `e2e` label, so add it with `hack/ship.sh --e2e` or `gh pr edit --add-label e2e`, or use the queue) and for `flavors` (the base's `hack/ci-changes.sh` runs with `CI_CHANGES_IGNORE_PLUMBING=1`, which ignores the CI-plumbing files `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, `paths.rules` and `paths-lib.sh` and decides on the real flavor inputs only; a plumbing-only change is not held, and the push run on main runs `flavors` after the merge, a break is fixed forward. When real flavor inputs changed, the head needs a real, not skipped, `flavors` success, else exit 10: `ci.yml` has no trigger that runs `flavors` for a branch, so split the pull request, the flavor change through the merge queue; see the ADR 0105 amendment of #572) Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`; the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.. Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
+`--admin` alone is for a PR that changes at least one `.github/` path (exit 9 otherwise) and stays fail-closed for the e2e (an e2e-relevant PR needs a green `quickstart` on its head, exit 10; a pull request runs the quickstart only with the `e2e` label, so add it with `hack/ship.sh --e2e` or `gh pr edit --add-label e2e`, or use the queue) and for `harnesses` (the base's `hack/ci-changes.sh` runs with `CI_CHANGES_IGNORE_PLUMBING=1`, which ignores the CI-plumbing files `ci.yml`, `ci-changes.sh`, `ci-skip-heavy.sh`, `paths.rules` and `paths-lib.sh` and decides on the real harness inputs only; a plumbing-only change is not held, and the push run on main runs `harnesses` after the merge, a break is fixed forward. When real harness inputs changed, the head needs a real, not skipped, `harnesses` success, else exit 10: `ci.yml` has no trigger that runs `harnesses` for a branch, so split the pull request, the harness change through the merge queue; see the ADR 0105 amendment of #572) Until this change is on main, the base copy does not know the flag, so the guard of this branch refuses each pull request that changes `ci.yml`; the pull request that lands this change is merged with `hack/pr-merge.sh` from a main checkout.. Break glass turns a failed `pr-wait --checks` into a warning recorded in the issue. `hack/ship.sh
 --auto-merge` no longer refuses an e2e-relevant change: the queue runs the e2e. There is no claim step:
 the push to main releases the claim (`claims.yml` runs `release-merged`, ADR 0104). The route guard
 (`.github/workflows/route-guard.yml`) opens an issue for a main commit with no queue build
@@ -1014,7 +1014,7 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   `needed=true` and the `quickstart` job runs on the queue commit, which is main plus the pull request. That
   run is the only merge evidence: `e2e result` is green when it passes, and a red one drops the entry from the
   queue. Not relevant: the job is skipped and `e2e result` is green. The queue's `quickstart` builds the
-  flavor image itself when GHCR has none for the tree. The push to main after the queue merge does not run the
+  harness image itself when GHCR has none for the tree. The push to main after the queue merge does not run the
   quickstart again: `decide` (push) accepts a green `merge_group` quickstart job whose head commit has the
   pushed commit's tree (`PUSH_SHA`). The PR-head lookup shim and `e2e-lab` gate are gone (#452).
 - Owner step: the ruleset change in ADR 0105 (code-owner review for `.github/**` only; required checks on `merge_group`). PR B merges only with or after it.

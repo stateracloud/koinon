@@ -36,8 +36,8 @@
 #                  CODEOWNERS approval, which one human cannot give (ADR 0105). Any other pull request is
 #                  refused with exit 9 and told to use the queue or --break-glass. It skips the queue and so the queue
 #                  e2e, so it is fail-closed for it: when the base's needs-e2e.sh says the change needs the e2e (or cannot
-#                  say), the head needs a green `quickstart` of its own, else exit 10. Likewise for `flavors` (exit 10): when the base's hack/ci-changes.sh (ignoring the CI-plumbing
-#                  files, CI_CHANGES_IGNORE_PLUMBING=1) says real flavor inputs changed, the head needs a real, not skipped, flavors success; split such a pull request. Exit 2 when the file list
+#                  say), the head needs a green `quickstart` of its own, else exit 10. Likewise for `harnesses` (exit 10): when the base's hack/ci-changes.sh (ignoring the CI-plumbing
+#                  files, CI_CHANGES_IGNORE_PLUMBING=1) says real harness inputs changed, the head needs a real, not skipped, harnesses success; split such a pull request. Exit 2 when the file list
 #                  cannot be read.
 #   Unresolved review threads (#187): pr-wait.sh --checks exits 7 when every check is green but the PR is
 #   BLOCKED by them (it lists them, path:line and author), and this script passes the 7 through; it also
@@ -268,13 +268,13 @@ if [ $((admin + glass)) != 0 ]; then
         exit 10
       fi
     fi
-    # The same for `flavors`, with one difference: it is required, but a pull request head only has its green skip
+    # The same for `harnesses`, with one difference: it is required, but a pull request head only has its green skip
     # (the job runs on the queue commit and on pushes to main, and ci.yml has no workflow_dispatch trigger to run it
     # for a branch). A `.github/**` pull request cannot use the queue (code-owner approval, ADR 0105 decision 6), so
     # the guard must not hold a change of the CI plumbing itself (ci.yml and the scripts that decide what it runs):
     # that would deadlock every ci.yml change. It asks the BASE's hack/ci-changes.sh with
-    # CI_CHANGES_IGNORE_PLUMBING=1, which drops the `everything ci` rule and decides on the real flavor inputs only
-    # (the `job flavors` rule, the suite's build graph, Makefile, go.mod, go.sum). When those changed, the head needs a
+    # CI_CHANGES_IGNORE_PLUMBING=1, which drops the `everything ci` rule and decides on the real harness inputs only
+    # (the `job harnesses` rule, the suite's build graph, Makefile, go.mod, go.sum). When those changed, the head needs a
     # real (not skipped) success, and there is none to get: the change must be split (exit 10).
     # The build graph (`go list`) comes from the local checkout, not from the base or the head: run this script from a
     # checkout that is in sync with the pull request head. A variable exported in the caller's shell must not change
@@ -288,18 +288,18 @@ if [ $((admin + glass)) != 0 ]; then
       trap 'rm -rf "${ne_dir:-}" "$ci_dir"' EXIT
       mkdir -p "$ci_dir/hack"
       for f in hack/ci-changes.sh hack/paths-lib.sh hack/paths.rules; do
-        git show "refs/remotes/origin/$base:$f" >"$ci_dir/$f" 2>/dev/null || { echo "pr-merge: cannot read $f from origin/$base to decide the flavors; not merging" >&2; exit 2; }
+        git show "refs/remotes/origin/$base:$f" >"$ci_dir/$f" 2>/dev/null || { echo "pr-merge: cannot read $f from origin/$base to decide the harnesses; not merging" >&2; exit 2; }
       done
       chmod +x "$ci_dir/hack/ci-changes.sh"
       ci_sh=$ci_dir/hack/ci-changes.sh
       ci_root=$(cd "$here/.." && pwd)
     fi
-    fl=$(env -u HACK_PATHS_RULES -u CI_CHANGES_FLAVORS_DIRS CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^flavors=//p') || fl=""
+    fl=$(env -u HACK_PATHS_RULES -u CI_CHANGES_HARNESSES_DIRS CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^harnesses=//p') || fl=""
     if [ "$fl" != false ]; then
       # true, or the rule could not be applied: needed.
-      fv=$(prv_judge "$rows" "$wfruns" false flavors | awk -F'\t' 'NR == 1 { print $2 }')
+      fv=$(prv_judge "$rows" "$wfruns" false harnesses | awk -F'\t' 'NR == 1 { print $2 }')
       if [ "$fv" != success ]; then
-        echo "pr-merge: --admin: this pull request changes flavor inputs and .github paths together (hack/ci-changes.sh on origin/$base says flavors=${fl:-unknown}) and the head ${sha:0:7} has no successful flavors run (${fv:-missing}); flavors runs only on the queue commit and on main, so split it: the flavor change goes through the merge queue, the .github change through --admin; not merging" >&2
+        echo "pr-merge: --admin: this pull request changes harness inputs and .github paths together (hack/ci-changes.sh on origin/$base says harnesses=${fl:-unknown}) and the head ${sha:0:7} has no successful harnesses run (${fv:-missing}); harnesses runs only on the queue commit and on main, so split it: the harness change goes through the merge queue, the .github change through --admin; not merging" >&2
         exit 10
       fi
     fi

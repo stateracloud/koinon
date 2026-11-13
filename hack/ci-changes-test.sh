@@ -23,16 +23,16 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0 total=0
 script=hack/ci-changes.sh
 
-# The flavors and chartsmoke suite package directories, computed once (the script's own `go list`);
+# The harnesses and chartsmoke suite package directories, computed once (the script's own `go list`);
 # the table rows reuse them; rows at the end run the real `go list` path.
-flavors_dirs=$(bash $script --flavors-dirs)
-[[ -n $flavors_dirs ]] || { echo "FAIL: $script --flavors-dirs printed nothing"; exit 1; }
+harnesses_dirs=$(bash $script --harnesses-dirs)
+[[ -n $harnesses_dirs ]] || { echo "FAIL: $script --harnesses-dirs printed nothing"; exit 1; }
 chartsmoke_dirs=$(bash $script --chartsmoke-dirs)
 [[ -n $chartsmoke_dirs ]] || { echo "FAIL: $script --chartsmoke-dirs printed nothing"; exit 1; }
 
 # jobs_for <paths...>: the sorted jobs that turn on, space separated.
 jobs_for() {
-	printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
+	printf '%s\n' "$@" | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
 }
 
 # The path-gate jobs of #572 (tidy: go-tidy and go-lint, shell: lint-shell, scripts) and #579 (vuln: go-vuln) and #684 (fuzz) have their own table in
@@ -106,7 +106,7 @@ expect "web" web/e2e-real/login.spec.ts
 # The protos: generate and web (the generated client). The chart smoke ignores them: the generated
 # Go code is committed under internal/gen, where a change matches.
 expect "go web generate" api/proto/koinon/agent/v1/agent.proto
-expect "go" internal/zzz-new/x.go # not in the chartsmoke or flavors build graph
+expect "go" internal/zzz-new/x.go # not in the chartsmoke or harnesses build graph
 expect "go" internal/zzz-new/x_test.go # tests of other packages are not in a binary or the suite's imports
 
 # F3, generate: the Makefile's `generate` recipe reads each of these.
@@ -117,7 +117,7 @@ expect "go generate" third_party/openshell/proto/openshell.proto # buf.gen.opens
 expect "go generate" buf.gen.openshell.yaml                      # buf generate --template
 expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agentgateway.yaml input
 expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
-expect "go generate chartsmoke flavors" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)
+expect "go generate chartsmoke harnesses" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)
 expect "go generate" sqlc.yaml
 expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
@@ -137,24 +137,24 @@ expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart chartsmoke escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
-expect "go chartsmoke escape flavors" internal/testing/testenv/testenv.go # the admission specs import it
+expect "go chartsmoke escape harnesses" internal/testing/testenv/testenv.go # the admission specs import it
 
-# F5, flavors: test/harnesses imports these (go list -deps -test ./test/harnesses/...).
-expect "go chartsmoke flavors" internal/execution/run.go
-expect "go chartsmoke flavors" internal/modelformat/format.go
-expect "go chartsmoke flavors" internal/prices/prices.go
-expect "go flavors" internal/testing/fakemodel/server.go # flavors only; not in the chartsmoke graph
-expect "go chartsmoke flavors" internal/thinking/thinking.go
-expect "go chartsmoke flavors generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
-expect "go chartsmoke flavors" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
-expect "go chartsmoke flavors" internal/agentd/agentd.go # the original filter
-expect "go chartsmoke flavors" templates/agent.yaml
-expect "go flavors opencodeplugin" harnesses/opencode/Dockerfile
-expect "go flavors" test/harnesses/contract_test.go
-expect "go flavors" hack/harness-tag.sh
-expect "flavors" hack/probe-tag.sh
-expect "" hack/harness-repro-check.sh # its own advisory workflow (flavor-repro.yml), not a ci.yml job
-expect "go flavors" hack/spike/probe/Dockerfile
+# F5, harnesses: test/harnesses imports these (go list -deps -test ./test/harnesses/...).
+expect "go chartsmoke harnesses" internal/execution/run.go
+expect "go chartsmoke harnesses" internal/modelformat/format.go
+expect "go chartsmoke harnesses" internal/prices/prices.go
+expect "go harnesses" internal/testing/fakemodel/server.go # harnesses only; not in the chartsmoke graph
+expect "go chartsmoke harnesses" internal/thinking/thinking.go
+expect "go chartsmoke harnesses generate" internal/db/store/models.go # sqlc.yaml out: a hand edit of generated code must run the check
+expect "go chartsmoke harnesses" pricing/prices.json # pricing/ is embedded by internal/prices; its own package dir
+expect "go chartsmoke harnesses" internal/agentd/agentd.go # the original filter
+expect "go chartsmoke harnesses" templates/agent.yaml
+expect "go harnesses opencodeplugin" harnesses/opencode/Dockerfile
+expect "go harnesses" test/harnesses/contract_test.go
+expect "go harnesses" hack/harness-tag.sh
+expect "harnesses" hack/probe-tag.sh
+expect "" hack/harness-repro-check.sh # its own advisory workflow (harness-repro.yml), not a ci.yml job
+expect "go harnesses" hack/spike/probe/Dockerfile
 # Negative: a package neither suite imports.
 expect "go" internal/zzz-not-imported/x.go
 
@@ -165,7 +165,7 @@ expect "go" test/e2e/run.sh
 expect "go" test/e2e/commands/quickstart.e1
 
 # CI itself, the Makefile and the Go module run everything.
-all="chart chartsmoke escape flavors generate go opencodeplugin web"
+all="chart chartsmoke escape harnesses generate go opencodeplugin web"
 expect "$all" Makefile
 expect "$all" go.mod
 expect "$all" go.sum
@@ -175,13 +175,13 @@ expect "$all" hack/ci-skip-heavy.sh
 expect "$all" hack/paths.rules
 expect "$all" hack/paths-lib.sh
 # CI_CHANGES_IGNORE_PLUMBING=1 (hack/pr-merge.sh --admin) drops the CI-plumbing rule but keeps the build inputs.
-expect_ignoring() { # <want flavors value> <paths...>
+expect_ignoring() { # <want harnesses value> <paths...>
 	local want=$1 got
 	shift
-	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^flavors=//p')
+	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^harnesses=//p')
 	total=$((total + 1))
 	if [[ $got != "$want" ]]; then
-		echo "FAIL: ignoring plumbing, flavors for [$*]: want $want, got $got"
+		echo "FAIL: ignoring plumbing, harnesses for [$*]: want $want, got $got"
 		fails=$((fails + 1))
 	fi
 }
@@ -247,17 +247,17 @@ expect_gates "tidy fuzz scripts" internal/leakguard/zzz_test.go
 expect_gates "fuzz shell scripts" hack/go-fuzz.sh
 
 # The real `go list` path (no CI_CHANGES_*_DIRS): a dependency of each suite, and one neither has.
-# Read the script's output fully before grepping: flavors and chartsmoke are not the last jobs, so `grep -q` in
+# Read the script's output fully before grepping: harnesses and chartsmoke are not the last jobs, so `grep -q` in
 # a pipefail pipeline would SIGPIPE the script mid-write and look like a miss.
 total=$((total + 4))
 out=$(printf 'internal/execution/run.go\n' | bash $script --stdin) || true
-if ! grep -qx 'flavors=true' <<<"$out"; then
-	echo "FAIL: go list path: internal/execution/run.go does not turn on flavors"
+if ! grep -qx 'harnesses=true' <<<"$out"; then
+	echo "FAIL: go list path: internal/execution/run.go does not turn on harnesses"
 	fails=$((fails + 1))
 fi
 out=$(printf 'internal/zzz-not-imported/x.go\n' | bash $script --stdin) || true
-if grep -qx 'flavors=true' <<<"$out"; then
-	echo "FAIL: go list path: an unrelated package turns on flavors"
+if grep -qx 'harnesses=true' <<<"$out"; then
+	echo "FAIL: go list path: an unrelated package turns on harnesses"
 	fails=$((fails + 1))
 fi
 out=$(printf 'internal/preflight/preflight.go\n' | bash $script --stdin) || true
@@ -370,11 +370,11 @@ for p in "${chart_inputs[@]}"; do
 	turns_on chart "$(probe "$p")"
 done
 
-# flavors, independent of the script: a real `go list` of the suite (import paths, not .Dir, so
+# harnesses, independent of the script: a real `go list` of the suite (import paths, not .Dir, so
 # no path stripping is shared with ci-changes.sh). The packages the audit named, and the suite
-# itself, must be in it; then each package directory (and a file below it) must turn flavors on.
+# itself, must be in it; then each package directory (and a file below it) must turn harnesses on.
 mod=$(go list -m)
-real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/harnesses/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/flavors_test is the external test package of test/flavors
+real_dirs=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/harnesses/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u) # test/harnesses_test is the external test package of test/harnesses
 for pkg in test/harnesses internal/execution internal/modelformat internal/prices internal/testing/fakemodel internal/thinking pricing internal/db/store; do
 	total=$((total + 1))
 	if ! grep -qxF "$pkg" <<<"$real_dirs"; then
@@ -382,16 +382,16 @@ for pkg in test/harnesses internal/execution internal/modelformat internal/price
 		fails=$((fails + 1))
 	fi
 done
-need_min "packages in the flavors build graph" 30 "$(grep -c . <<<"$real_dirs" || true)"
+need_min "packages in the harnesses build graph" 30 "$(grep -c . <<<"$real_dirs" || true)"
 while IFS= read -r d; do
 	[[ -n $d ]] || continue
-	turns_on flavors "$d/zzz-probe.file"
+	turns_on harnesses "$d/zzz-probe.file"
 done <<<"$real_dirs"
-# Fail closed: a dirs list without test/flavors (a path strip that found nothing) turns flavors on.
+# Fail closed: a dirs list without test/harnesses (a path strip that found nothing) turns harnesses on.
 total=$((total + 1))
-out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
-if ! grep -qx 'flavors=true' <<<"$out"; then
-	echo "FAIL: a dirs list without test/flavors must fail closed (flavors=true)"
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSES_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
+if ! grep -qx 'harnesses=true' <<<"$out"; then
+	echo "FAIL: a dirs list without test/harnesses must fail closed (harnesses=true)"
 	fails=$((fails + 1))
 fi
 
@@ -419,7 +419,7 @@ for p in charts/koinon/values.yaml hack/versions.env test/chartsmoke/smoke_test.
 done
 # Fail closed: a dirs list without test/chartsmoke turns chartsmoke on.
 total=$((total + 1))
-out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$'cmd/koinon-api\ninternal/preflight' bash $script --stdin) || true
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$'cmd/koinon-api\ninternal/preflight' bash $script --stdin) || true
 if ! grep -qx 'chartsmoke=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/chartsmoke must fail closed (chartsmoke=true)"
 	fails=$((fails + 1))
@@ -429,7 +429,7 @@ fi
 total=$((total + 1))
 all=$(bash $script | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ')
 [[ -n $all ]] || { echo "FAIL: no-argument run printed no jobs"; exit 1; }
-if [[ $(printf '' | CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
+if [[ $(printf '' | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
 	echo "FAIL: an empty change list must turn every job on"
 	fails=$((fails + 1))
 fi
@@ -445,7 +445,7 @@ total=$((total + 1))
 	echo a >charts/a.yaml && echo b >docs/b.md
 	git add -A && git commit -q -m base
 	git mv charts/a.yaml docs/a.yaml && git commit -q -m rename
-	CI_CHANGES_FLAVORS_DIRS=$flavors_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash hack/ci-changes.sh HEAD~1
+	CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash hack/ci-changes.sh HEAD~1
 ) >"$tmp/rename.out" 2>&1 || true
 if ! grep -qx 'chart=true' "$tmp/rename.out"; then
 	echo "FAIL: renaming charts/a.yaml to docs/ must turn chart on: $(tr '\n' ' ' <"$tmp/rename.out")"

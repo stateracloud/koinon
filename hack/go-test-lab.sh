@@ -44,8 +44,8 @@ touches-go)
 	base=${2:?usage: hack/go-test-lab.sh touches-go <base> <head>} head=${3:?usage: hack/go-test-lab.sh touches-go <base> <head>}
 	changed=$(git diff --name-only --no-renames "$base" "$head" 2>/dev/null) || exit 2
 	[[ -n $changed ]] || exit 2
-	# Only go= is read: the directories of the flavors suite (a `go list`) are not needed.
-	line=$(CI_CHANGES_FLAVORS_DIRS=${CI_CHANGES_FLAVORS_DIRS:-none} "$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || exit 2
+	# Only go= is read: the directories of the harnesses suite (a `go list`) are not needed.
+	line=$(CI_CHANGES_HARNESSES_DIRS=${CI_CHANGES_HARNESSES_DIRS:-none} "$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || exit 2
 	case $line in
 	go=true) exit 0 ;;
 	go=false) exit 1 ;;

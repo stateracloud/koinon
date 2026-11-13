@@ -20,7 +20,7 @@ export PR_MERGE_WAIT="$tmp/bin/wait"
 export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 GH_REPO=o/r
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
-printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
+printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory harnesses\n' >"$PR_MERGE_REQUIRED"
 
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -95,7 +95,7 @@ cat >"$tmp/bin/cich" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null
 # Without the plumbing flag the real script answers true for a ci.yml change (the `everything` rule).
-if [ "${CI_CHANGES_IGNORE_PLUMBING:-}" = 1 ]; then echo "flavors=${FLAVORS:-false}"; else echo "flavors=${FLAVORS_ALL:-true}"; fi
+if [ "${CI_CHANGES_IGNORE_PLUMBING:-}" = 1 ]; then echo "harnesses=${HARNESSES:-false}"; else echo "harnesses=${HARNESSES_ALL:-true}"; fi
 SH
 chmod +x "$tmp/bin"/*
 export PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CI_CHANGES="$tmp/bin/cich"
@@ -214,30 +214,30 @@ check "--admin, needs-e2e cannot say (2): treated as needed, refused (10)" 10 no
 setup false "$green"
 NEEDS_RC=1 run 7 --admin
 check "--admin, .github only, e2e not needed: merges without a quickstart" 0 merge
-# --admin and flavors: the head only has the green skip, so a change that affects the flavors suite is refused
+# --admin and harnesses: the head only has the green skip, so a change that affects the harnesses suite is refused
 setup false "$green
-$(r flavors 2026-11-01T10:00:00Z skipped)"
-NEEDS_RC=1 FLAVORS=true run 7 --admin
-check "--admin, flavors affected, skipped flavors: refused (10)" 10 nomerge
-{ grep -q 'changes flavor inputs and .github paths together' <<<"$out" && grep -q 'split it' <<<"$out"; } || { echo "FAIL: flavors refusal says to split the pull request: $out" >&2; fail=1; }
+$(r harnesses 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 HARNESSES=true run 7 --admin
+check "--admin, harnesses affected, skipped harnesses: refused (10)" 10 nomerge
+{ grep -q 'changes harness inputs and .github paths together' <<<"$out" && grep -q 'split it' <<<"$out"; } || { echo "FAIL: harnesses refusal says to split the pull request: $out" >&2; fail=1; }
 setup false "$green
-$(r flavors 2026-11-01T10:00:00Z success)"
-NEEDS_RC=1 FLAVORS=true run 7 --admin
-check "--admin, flavors affected, real flavors success: merges" 0 merge
-# A ci.yml-only change (flavors=true only through the plumbing rule) is not held for flavors.
+$(r harnesses 2026-11-01T10:00:00Z success)"
+NEEDS_RC=1 HARNESSES=true run 7 --admin
+check "--admin, harnesses affected, real harnesses success: merges" 0 merge
+# A ci.yml-only change (harnesses=true only through the plumbing rule) is not held for harnesses.
 setup false "$green
-$(r flavors 2026-11-01T10:00:00Z skipped)"
-NEEDS_RC=1 FLAVORS=false FLAVORS_ALL=true run 7 --admin
-check "--admin, ci.yml-only change, skipped flavors: merges" 0 merge
-# Real flavor inputs together with a .github path: refused unless a real flavors success exists.
+$(r harnesses 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 HARNESSES=false HARNESSES_ALL=true run 7 --admin
+check "--admin, ci.yml-only change, skipped harnesses: merges" 0 merge
+# Real harness inputs together with a .github path: refused unless a real harnesses success exists.
 setup false "$green
-$(r flavors 2026-11-01T10:00:00Z skipped)"
-NEEDS_RC=1 FLAVORS=true FLAVORS_ALL=true run 7 --admin
-check "--admin, flavor input plus .github path, skipped flavors: refused (10)" 10 nomerge
+$(r harnesses 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 HARNESSES=true HARNESSES_ALL=true run 7 --admin
+check "--admin, harness input plus .github path, skipped harnesses: refused (10)" 10 nomerge
 setup false "$green
-$(r flavors 2026-11-01T10:00:00Z skipped)"
-NEEDS_RC=1 FLAVORS=false run 7 --admin
-check "--admin, flavors not affected: merges" 0 merge
+$(r harnesses 2026-11-01T10:00:00Z skipped)"
+NEEDS_RC=1 HARNESSES=false run 7 --admin
+check "--admin, harnesses not affected: merges" 0 merge
 setup false "$green"
 NEEDS_RC=0 run 7 --break-glass "queue down" --approved-at 2026-11-10T09:00:00Z
 check "--break-glass does not need the quickstart" 0 merge
@@ -593,26 +593,26 @@ check "the base rule path: fetch ok, rule read from the base, e2e not needed: me
 grep -q '^git fetch .*origin main' "$FAKE_DIR/calls" || { echo "FAIL: the base was not fetched" >&2; fail=1; }
 grep -q '^git show refs/remotes/origin/main:hack/needs-e2e.sh' "$FAKE_DIR/calls" || { echo "FAIL: needs-e2e.sh not shown from the base" >&2; fail=1; }
 
-# The flavors guard reads ci-changes.sh from the base too (PR_MERGE_CI_CHANGES="" selects the real copy path).
+# The harnesses guard reads ci-changes.sh from the base too (PR_MERGE_CI_CHANGES="" selects the real copy path).
 setup false "$green"
 PR_MERGE_CI_CHANGES="" SHOW_FAIL=hack/ci-changes.sh PR_MERGE_NEEDS_E2E="" run 7 --admin
 check "a base ci-changes.sh git show cannot read is a tool failure" 2 nomerge
 # A base copy that echoes its environment: the plumbing flag and the root reach it, caller overrides do not.
 # shellcheck disable=SC2016 # the $FAKE_DIR must expand in the fake script, not here
-printf '#!/usr/bin/env bash\ncat >/dev/null\nenv >"$FAKE_DIR/cich-env"\necho flavors=false\n' >"$tmp/cich-env.sh"
+printf '#!/usr/bin/env bash\ncat >/dev/null\nenv >"$FAKE_DIR/cich-env"\necho harnesses=false\n' >"$tmp/cich-env.sh"
 setup false "$green"
-HACK_PATHS_RULES=/nonexistent CI_CHANGES_FLAVORS_DIRS=nonexistent CICH_BODY="$tmp/cich-env.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
-check "the base copy of ci-changes.sh answers flavors=false: merges" 0 merge
+HACK_PATHS_RULES=/nonexistent CI_CHANGES_HARNESSES_DIRS=nonexistent CICH_BODY="$tmp/cich-env.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
+check "the base copy of ci-changes.sh answers harnesses=false: merges" 0 merge
 grep -qx 'CI_CHANGES_IGNORE_PLUMBING=1' "$FAKE_DIR/cich-env" || { echo "FAIL: the base copy did not get CI_CHANGES_IGNORE_PLUMBING=1" >&2; fail=1; }
 grep -qx "CI_CHANGES_ROOT=$repo" "$FAKE_DIR/cich-env" || { echo "FAIL: the base copy did not get CI_CHANGES_ROOT=$repo" >&2; fail=1; }
-grep -q '^HACK_PATHS_RULES=\|^CI_CHANGES_FLAVORS_DIRS=' "$FAKE_DIR/cich-env" && { echo "FAIL: a caller override reached the base copy" >&2; fail=1; }
-# A base copy that errors or prints nothing means "flavors needed": the head has no flavors success, so refuse.
+grep -q '^HACK_PATHS_RULES=\|^CI_CHANGES_HARNESSES_DIRS=' "$FAKE_DIR/cich-env" && { echo "FAIL: a caller override reached the base copy" >&2; fail=1; }
+# A base copy that errors or prints nothing means "harnesses needed": the head has no harnesses success, so refuse.
 printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 3\n' >"$tmp/cich-err.sh"
 printf '#!/usr/bin/env bash\ncat >/dev/null\n' >"$tmp/cich-empty.sh"
 for b in err empty; do
   setup false "$green"
   CICH_BODY="$tmp/cich-$b.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
-  check "a base copy that gives no answer ($b) is treated as flavors needed" 10 nomerge
+  check "a base copy that gives no answer ($b) is treated as harnesses needed" 10 nomerge
 done
 
 exit "$fail"

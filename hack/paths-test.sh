@@ -46,7 +46,7 @@ if (HACK_PATHS_RULES=$tmp/missing.rules paths_load) 2>/dev/null; then bad "a mis
 
 # --- 2. The rules and ci.yml name the same jobs. -------------------------------------------------------
 want=$(paths_jobs | sort | tr '\n' ' ')
-have=$(sed -n '/^  changes:/,/^    steps:/p' .github/workflows/ci.yml | sed -n 's/^      \([a-z]*\): \${{ steps.paths.outputs.\1 }}$/\1/p' | grep -vx flavors_publish | sort | tr '\n' ' ')
+have=$(sed -n '/^  changes:/,/^    steps:/p' .github/workflows/ci.yml | sed -n 's/^      \([a-z]*\): \${{ steps.paths.outputs.\1 }}$/\1/p' | grep -vx harnesses_publish | sort | tr '\n' ' ')
 if [[ $want == "$have" ]]; then ok; else bad "jobs in hack/paths.rules [${want% }] differ from the paths outputs of ci.yml [${have% }]"; fi
 for j in $(paths_jobs); do
 	if [[ -n $(paths_raw lane "$j") ]]; then ok; else bad "job $j has no lane line (lane-gates would report it as not run)"; fi
@@ -72,8 +72,8 @@ done)
 if [[ -z $dups ]]; then ok; else bad "in both script-check and script-skip: $dups"; fi
 
 # --- 4. Example change sets through the consumers. ---------------------------------------------------------
-dirs=$(bash hack/ci-changes.sh --flavors-dirs)
-jobs_for() { printf '%s\n' "$@" | CI_CHANGES_FLAVORS_DIRS=$dirs bash hack/ci-changes.sh --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '; }
+dirs=$(bash hack/ci-changes.sh --harnesses-dirs)
+jobs_for() { printf '%s\n' "$@" | CI_CHANGES_HARNESSES_DIRS=$dirs bash hack/ci-changes.sh --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '; }
 e2e_for() { local rc=0; printf '%s\n' "$@" | bash hack/needs-e2e.sh --stdin >/dev/null || rc=$?; echo "$rc"; }
 example() { # <name> <want jobs> <want e2e exit> <paths...>
 	local name=$1 wj got ge
@@ -91,8 +91,8 @@ example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
 example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
 example "a web source file" "web" 1 web/src/app.ts
 example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
-example "the rules themselves" "chart chartsmoke escape flavors fuzz generate go opencodeplugin scripts shell tidy vuln web" 1 hack/paths.rules
-example "go.mod runs govulncheck" "chart chartsmoke escape flavors fuzz generate go opencodeplugin scripts shell tidy vuln web" 0 go.mod
+example "the rules themselves" "chart chartsmoke escape harnesses fuzz generate go opencodeplugin scripts shell tidy vuln web" 1 hack/paths.rules
+example "go.mod runs govulncheck" "chart chartsmoke escape harnesses fuzz generate go opencodeplugin scripts shell tidy vuln web" 0 go.mod
 example "a Go file alone does not run govulncheck" "chartsmoke go scripts tidy" 0 internal/reconciler/reconcile.go
 example "documentation" "" 1 docs/design.md
 

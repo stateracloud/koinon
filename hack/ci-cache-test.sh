@@ -58,17 +58,17 @@ while read -r job path; do
   check "consumer $job cache-dependency-path '$path' is warmed" has "$warmpaths" "cache-dependency-path: ${path}\$"
 done < <(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /cache-dependency-path:/ { sub(/.*cache-dependency-path: */, ""); print job, $0 }' "$wf")
 
-# No job but warm-caches and flavor-publish/flavors (their own layer cache) may use the saving form.
+# No job but warm-caches and harness-publish/harnesses (their own layer cache) may use the saving form.
 saving=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache@/ { print job }' "$wf")
 check "no ci.yml job restores-and-saves with actions/cache@" test -z "$saving"
 saves=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1 } /uses: actions\/cache\/save@/ { print job }' "$wf" | sort -u | tr '\n' ' ')
-check "only the warm-caches jobs and the flavor jobs save a cache (got: $saves)" test "$saves" = "flavor-publish: flavors: warm-caches: "
+check "only the warm-caches jobs and the harness jobs save a cache (got: $saves)" test "$saves" = "harness-publish: harnesses: warm-caches: "
 
 # One Go cache scheme: every setup-go in ci.yml has cache: false (the go-ci restore is explicit).
 total=$(grep -c 'uses: actions/setup-go@' "$wf")
 off=$(awk '/uses: actions\/setup-go@/ { f = 1; next } f && /cache: false/ { n++; f = 0 } f && /^      - / { f = 0 } END { print n + 0 }' "$wf")
 check "every setup-go in ci.yml has cache: false ($off of $total)" test "$total" = "$off"
-for j in generate chart chart-smoke escape-admission scripts flavors; do
+for j in generate chart chart-smoke escape-admission scripts harnesses; do
   check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'uses: \./\.github/actions/setup-go-cache'
 done
 for j in go-tidy go-lint go-test go-race-serial go-race-parallel; do

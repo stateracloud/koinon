@@ -36,8 +36,8 @@
 # --- Changes that run everything: CI itself, the Makefile, the Go module, and these rules ---------
 # `everything ci` is CI plumbing: the workflow and the scripts that decide what it runs. `everything -` is the
 # build inputs. Both turn everything on; hack/pr-merge.sh --admin asks hack/ci-changes.sh to ignore the plumbing
-# rule (CI_CHANGES_IGNORE_PLUMBING=1) when it decides whether `flavors` is owed, because a plumbing change by itself
-# cannot get a branch `flavors` run and `--admin` is the only route of a `.github/**` pull request.
+# rule (CI_CHANGES_IGNORE_PLUMBING=1) when it decides whether `harnesses` is owed, because a plumbing change by itself
+# cannot get a branch `harnesses` run and `--admin` is the only route of a `.github/**` pull request.
 everything ci ^(\.github/workflows/ci\.yml|\.github/actions/setup-go-cache/action\.yml|hack/ci-changes\.sh|hack/ci-skip-heavy\.sh|hack/paths\.rules|hack/paths-lib\.sh)$
 everything - ^(Makefile|go\.mod|go\.sum)$
 
@@ -115,7 +115,7 @@ job shell ^hack/versions(-env\.sh|\.env)$
 # --- scripts: the `scripts` CI job and the preflight gate of that name (#572) -------------------------
 # The job runs about 65 script tests and static checks. They read the tracked shell scripts,
 # workflows, Dockerfiles, Go sources (mktemp, audit and bash5 lints, the `go list` graphs of
-# needs-e2e), web/package.json and the lockfile (e2e-remote-test), the flavors, test/e2e and
+# needs-e2e), web/package.json and the lockfile (e2e-remote-test), the harnesses, test/e2e and
 # CONTRIBUTING.md (versions-check), docs/dev/ci.md (ci-cache-test) and docs/adr (adr-lint tests), measured
 # 2026-11-11 by deleting each directory and running the job's steps. So the job fails closed like
 # `job go`: it runs for every path except the ones below. The one check that reads every file of the
@@ -147,7 +147,7 @@ job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|ha
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
 # no build tags (test/chartsmoke/images_test.go). Go packages those commands and the suite import
-# (and files they embed) are derived by hack/ci-changes.sh (`go list`, like flavors). This seed
+# (and files they embed) are derived by hack/ci-changes.sh (`go list`, like harnesses). This seed
 # covers what the graph cannot name: the chart itself, hack/versions.env (tool pins the job and
 # the suite's helpers read), the suite's own tree, and go.mod/go.sum.
 job chartsmoke ^(charts/|test/chartsmoke/|hack/versions\.env$|go\.(mod|sum))
@@ -164,11 +164,11 @@ except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 # The reconciler-side cases need kind or the lab (#66), so their packages are not triggers.
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
 
-# --- flavors: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
-job flavors ^(harnesses/|internal/(agentd|harness|acp)/|test/harnesses/|hack/harness-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
+# --- harnesses: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
+job harnesses ^(harnesses/|internal/(agentd|harness|acp)/|test/harnesses/|hack/harness-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
 # --- opencodeplugin: tsc and node --test of Koinon's OpenCode plugins' CI-only dev project ----------
-# (ADR 0093 decision 4). A change under harnesses/opencode/plugins/ also matches `job flavors` above
+# (ADR 0093 decision 4). A change under harnesses/opencode/plugins/ also matches `job harnesses` above
 # (the Dockerfile COPYs the plugin module, and test/harnesses proves it loads), so both jobs run; this
 # one is the fast, Docker-free type-check and unit-test pass. The Dockerfile is a trigger too: the job
 # checks that the types pin equals the image's OpenCode pin, so a re-pin type-checks against new types.
@@ -181,8 +181,8 @@ lane web - preflight
 lane generate - preflight
 lane chart - preflight
 lane chartsmoke docker,helm,go test-chart-smoke
-# hack/harness-repro-check.sh (two uncached builds, one digest) is the advisory workflow flavor-repro.yml, not a ci.yml job; it has no lane.
-lane flavors docker,go test-harnesses
+# hack/harness-repro-check.sh (two uncached builds, one digest) is the advisory workflow harness-repro.yml, not a ci.yml job; it has no lane.
+lane harnesses docker,go test-harnesses
 lane opencodeplugin pnpm test-opencode-plugin
 lane escape helm,go test-admission
 lane tidy - preflight
@@ -299,7 +299,7 @@ script-skip - hack/claim_test.sh
 script-skip - hack/migrate-lint.sh
 # Needs a UTF-8 locale with its own collation: CI generates en_US.UTF-8 in a separate step first.
 script-skip - hack/harness-tag-test.sh
-script-skip - hack/flavor-tag-test.sh # the earlier name, an alias link ci.yml still calls (#610)
+script-skip - hack/flavor-tag-test.sh # the earlier name, an alias link, kept until #610 step 4
 # Fail on a Mac with the sandbox's /private/tmp paths or its git setup; they run on Linux in CI.
 script-skip - hack/wt-test.sh
 script-skip - hack/wt-install-test.sh
@@ -364,7 +364,7 @@ e2e-forced - ^hack/(spike/probe/|probe-tag\.sh$)
 e2e-forced - ^\.github/workflows/e2e-kind\.yml$
 # Agent prompts and instructions may be Markdown.
 e2e-forced - ^harnesses/.*\.md$
-# run.sh runs the quickstart blocks (test/e2e/commands/*.e1) through docs-e1.sh, names the flavor image with harness-tag.sh
+# run.sh runs the quickstart blocks (test/e2e/commands/*.e1) through docs-e1.sh, names the harness image with harness-tag.sh
 # and sets its base image with harness-base.sh (HARNESS_BASE, #200).
 e2e-forced - ^hack/docs-e1\.sh$
 e2e-forced - ^hack/harness-tag\.sh$
