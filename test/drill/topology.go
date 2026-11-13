@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +48,56 @@ type Install struct {
 	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
+// OIDC is the external identity provider the source and the restored copy must both accept (`oidc-signin`). The
+// client is a standing PUBLIC client (PKCE only, no client secret: the chart's clientSecret stays empty), so the
+// topology names only the issuer, the client ID and the two personas. The chart's oidc values are set from them on
+// both installs, with a redirect URL on the fixed local port of that side (OIDCSourcePort, OIDCTargetPort): the
+// lab's client allows exactly those two callbacks.
+type OIDC struct {
+	// IssuerURL is the provider's issuer (https). ClientID is the standing client the drill uses.
+	IssuerURL string `yaml:"issuerUrl" json:"issuerUrl"`
+	ClientID  string `yaml:"clientId" json:"clientId"`
+	// Admin and Member are the two personas: an org admin and an org member. The IdP group of each is mapped to
+	// the role in the default org (groupMappings), so the same user holds the same role on both sides.
+	Admin  Persona `yaml:"admin" json:"admin"`
+	Member Persona `yaml:"member" json:"member"`
+}
+
+// Persona is one OIDC test user. Its passkey (a CDP WebAuthn credential) comes from the environment, see Env.
+type Persona struct {
+	// Group is the IdP group the user belongs to (the lab uses koinon-admins and koinon-users).
+	Group string `yaml:"group" json:"group"`
+}
+
+// The fixed local ports of the OIDC browser forwards. The redirect URL of each install is
+// http://127.0.0.1:<port>/auth/oidc/callback, and the lab's client allows those two URLs.
+const (
+	OIDCSourcePort = 18181
+	OIDCTargetPort = 18182
+)
+
+// OIDCRedirect is the callback URL of an install whose API the browser reaches on 127.0.0.1:port.
+func OIDCRedirect(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/auth/oidc/callback", port)
+}
+
+// The personas, in the order the check runs them.
+const (
+	PersonaAdmin  = "admin"
+	PersonaMember = "member"
+)
+
+// OIDCEnvFields are the fields of a persona's environment, each KOINON_DRILL_OIDC_<PERSONA>_<FIELD> (for example
+// KOINON_DRILL_OIDC_ADMIN_PRIVATE_KEY). They are the fields of a CDP WebAuthn.addCredential call plus the login
+// name and the origin of the issuer's relying party. The values live in the operator's environment and never in
+// a file of the repository; nothing logs them.
+var OIDCEnvFields = []string{"USERNAME", "CREDENTIAL_ID", "RP_ID", "ORIGIN", "PRIVATE_KEY", "USER_HANDLE", "SIGN_COUNT"}
+
+// OIDCEnv is the name of one persona environment variable.
+func OIDCEnv(persona, field string) string {
+	return "KOINON_DRILL_OIDC_" + strings.ToUpper(persona) + "_" + field
+}
+
 // Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
 // outside the repository, only this schema is in it).
 type Topology struct {
@@ -64,6 +115,20 @@ type Topology struct {
 	Context string  `yaml:"context" json:"context"`
 	Source  Install `yaml:"source" json:"source"`
 	Target  Install `yaml:"target" json:"target"`
+	// NamespaceHook is a manifest file the operator supplies (a path relative to the repository root, or
+	// absolute; a lab keeps it outside the repository). After the drill creates each of its namespaces it
+	// applies the file there with `kubectl apply -n <namespace>`, so the operator can add the access objects the
+	// topology needs (for example ExternalSecrets that bring a credential in). The repository carries the
+	// mechanism only: no lab endpoint or store is named in it. Objects in the file must not name a namespace
+	// of their own (kubectl refuses a mismatch). The namespace goes away with the objects at the end of the run.
+	NamespaceHook string `yaml:"namespaceHook,omitempty" json:"namespaceHook,omitempty"`
+	// NamespaceLabels are added to every namespace the drill creates, before the hook is applied (a lab
+	// selects namespaces by them, for example to let a secret store serve them).
+	NamespaceLabels map[string]string `yaml:"namespaceLabels,omitempty" json:"namespaceLabels,omitempty"`
+	// OIDC describes the external identity provider of the `oidc-signin` check. The check exists only when it
+	// is set. The issuer and the client are inputs of the topology; the user's credentials are never in the
+	// file (OIDCEnv names the environment variables they come from).
+	OIDC *OIDC `yaml:"oidc,omitempty" json:"oidc,omitempty"`
 	// FakesNamespace holds the drill's fake model server and its object store.
 	FakesNamespace string `yaml:"fakesNamespace" json:"fakesNamespace"`
 	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root, or absolute).
@@ -75,6 +140,9 @@ type Topology struct {
 	GatewayValues  string `yaml:"gatewayValues" json:"gatewayValues"`
 	// FakeModelImage is the fake model server's image on this cluster.
 	FakeModelImage string `yaml:"fakeModelImage" json:"fakeModelImage"`
+	// FakeMCPImage is the fake MCP server's image on this cluster: the seed's pending approval is an
+	// agent's call to its ask-tier write tool.
+	FakeMCPImage string `yaml:"fakeMcpImage" json:"fakeMcpImage"`
 	// ObjectStoreImage is the S3 server for home checkpoints (phase 2), pinned by digest: SeaweedFS, Apache-2.0.
 	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
 	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
@@ -152,6 +220,27 @@ func (t *Topology) Validate() error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
+	if t.FakeMCPImage == "" {
+		return fmt.Errorf("fakeMcpImage is empty: the seed's pending approval needs the fake MCP server's image")
+	}
+	for k := range t.NamespaceLabels {
+		if k == RunLabel {
+			return fmt.Errorf("namespaceLabels %q is the drill's own run label", k)
+		}
+		if !labelKeyRE.MatchString(k) {
+			return fmt.Errorf("namespaceLabels key %q is not a valid label key", k)
+		}
+	}
+	for k, v := range t.NamespaceLabels {
+		if !labelValueRE.MatchString(v) {
+			return fmt.Errorf("namespaceLabels %q: value %q is not a valid label value", k, v)
+		}
+	}
+	if t.OIDC != nil {
+		if err := t.OIDC.validate(); err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+	}
 	if t.Source.Namespace == t.Target.Namespace {
 		return fmt.Errorf("source and target use the same namespace %q: the target is a fresh one", t.Source.Namespace)
 	}
@@ -181,7 +270,7 @@ func (t *Topology) Validate() error {
 	}
 	for name, v := range map[string]string{
 		"chartPath": t.ChartPath, "valuesFile": t.ValuesFile, "gatewayChart": t.GatewayChart,
-		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage,
+		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage, "fakeMcpImage": t.FakeMCPImage,
 		"objectStoreImage": t.ObjectStoreImage,
 	} {
 		if v == "" {
@@ -198,6 +287,42 @@ func (t *Topology) Validate() error {
 		return fmt.Errorf("releasedWait is empty")
 	}
 	return nil
+}
+
+var (
+	labelKeyRE   = regexp.MustCompile(`^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?$`)
+	labelValueRE = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?)?$`)
+)
+
+func (o *OIDC) validate() error {
+	if !strings.HasPrefix(o.IssuerURL, "https://") {
+		return fmt.Errorf("issuerUrl %q must be an https URL", o.IssuerURL)
+	}
+	if o.ClientID == "" {
+		return fmt.Errorf("clientId is empty")
+	}
+	if o.Admin.Group == "" || o.Member.Group == "" {
+		return fmt.Errorf("admin.group and member.group are required")
+	}
+	if o.Admin.Group == o.Member.Group {
+		return fmt.Errorf("admin and member are in the same group %q: the check compares two roles", o.Admin.Group)
+	}
+	return nil
+}
+
+// NamespaceManifest is the Namespace object the drill creates: the run label, then the operator's labels.
+func NamespaceManifest(ns, runID string, labels map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: %q\n", ns, RunLabel, runID)
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "    %s: %q\n", k, labels[k])
+	}
+	return b.String()
 }
 
 // GatewayIDPrefix starts every gateway ID the drill uses; the sweep refuses any other.
