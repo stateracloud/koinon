@@ -70,6 +70,19 @@ func intentsSince(ctx context.Context, mark int64) []string {
 	return out
 }
 
+// saveProbe runs before on every Save, and saves only when it returns nil.
+type saveProbe struct {
+	keyscli.Store
+	before func(ctx context.Context) error
+}
+
+func (p saveProbe) Save(ctx context.Context, ks keyscli.KeySet) error {
+	if err := p.before(ctx); err != nil {
+		return err
+	}
+	return p.Store.Save(ctx, ks)
+}
+
 func keyEventsSince(ctx context.Context, mark int64) []keyEvent {
 	GinkgoHelper()
 	rows, err := pool.Query(ctx, `SELECT actor_kind, actor_id, action, target_kind, target_id, summary
@@ -406,7 +419,7 @@ var _ = Describe("key events in the install audit chain", func() {
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }}
 			tool.AuditOptional = true
 			err := tool.Add(ctx, kekB)
-			Expect(err).To(MatchError(ContainSubstring("nothing was changed")))
+			Expect(err).To(MatchError(ContainSubstring("the KEK was not added")))
 			Expect(errors.Is(err, keyscli.ErrNotAudited)).To(BeFalse())
 			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(kekB), "no Secret was saved")
 			seen, err := keyscli.RecordedID(ctx, pool, kekB)
@@ -414,14 +427,20 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(seen).To(BeFalse())
 		})
 
-		It("records the new ID before the Secret is saved, so a removed key's ID is not drawn again", func(ctx SpecContext) {
+		It("records the new ID before the Secret is saved, so a failed save still leaves the ID spent", func(ctx SpecContext) {
 			mark := auditMark(ctx)
-			Expect(tool.Add(ctx, kekB)).To(Succeed())
-			seen, err := keyscli.RecordedID(ctx, pool, kekB)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(seen).To(BeTrue())
-			// The intent names the ID on its own, whatever happens to the key-set states.
+			var recordedAtSave bool
+			tool.Store = saveProbe{Store: tool.Store, before: func(ctx context.Context) error {
+				var err error
+				recordedAtSave, err = keyscli.RecordedID(ctx, pool, kekB)
+				Expect(err).NotTo(HaveOccurred())
+				return errors.New("koinon_test save refused")
+			}}
+			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("save refused")))
+			Expect(recordedAtSave).To(BeTrue(), "the ID is in the chain when the Save starts")
 			Expect(intentsSince(ctx, mark)).To(Equal([]string{kekB}))
+			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(kekB))
+			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("IDs are never reused")))
 		})
 
 		It("keeps the change and says so when only the add event cannot be written", func(ctx SpecContext) {
@@ -1071,7 +1090,8 @@ var _ = Describe("key-admin Job events", func() {
 
 		start := time.Now()
 		// The Secret is created with a warning; the KEK add fails closed, because its ID cannot be recorded.
-		Expect(a.Run(ctx)).To(MatchError(ContainSubstring("nothing was changed")))
+		Expect(a.Run(ctx)).To(MatchError(ContainSubstring("the KEK was not added")))
+		Expect(out.String()).To(And(ContainSubstring("WARNING"), ContainSubstring("could not be read")))
 		// One retry pause is 2s; a budget per call would pay it for the Secret and again for the added KEK.
 		Expect(time.Since(start)).To(BeNumerically("<", 3500*time.Millisecond))
 		ks, err := jobStore().Load(ctx)

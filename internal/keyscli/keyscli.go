@@ -210,8 +210,9 @@ func (t *Tool) beginWith(ctx context.Context, command string, load KeyLoader) (c
 	if !t.AuditOptional {
 		return nil, KeySet{}, nil, err
 	}
-	// The key-admin Job: a chain it cannot read is a warning, not a failure. The Secret changes without an
-	// event and the next koinon-api start records the key set as keys.observed.
+	// The key-admin Job: a chain it cannot read is a warning, not a failure, for every command but add
+	// (Add records the new ID first and fails closed). The Secret changes without an event and the next
+	// koinon-api start records the key set as keys.observed.
 	notAudited = fmt.Errorf("%w: %w", ErrNotAudited, err)
 	ks, err = load(ctx)
 	return nil, ks, notAudited, err
@@ -940,11 +941,12 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 		return err
 	}
 	// Record the ID durably before any key under it exists, in its own transaction (the Change's
-	// is still open until the add event). A failed write fails closed, with AuditOptional too: no
-	// Secret is saved, so no ID goes unrecorded. Same shape as the .started event of rewrap.
+	// is still open until the add event, so it cannot carry the intent: it commits only after the
+	// Save). A failed write fails closed, with AuditOptional too: no Secret is saved, so no ID goes
+	// unrecorded. Once written, the ID is spent even if the Save then fails: a retry needs a new ID.
 	if a := t.auditor(); a != nil {
 		if err := a.Record(ctx, Event{Command: "add", Action: ActionAddIntent, TargetKind: "kek", TargetID: id}); err != nil {
-			return fmt.Errorf("nothing was changed: %w", err)
+			return fmt.Errorf("the KEK was not added; its ID could not be recorded in the install audit chain: %w", err)
 		}
 	}
 	ks.Keys[id] = key
