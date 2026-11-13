@@ -128,7 +128,7 @@ function blockedReason(reason: string | undefined): string | undefined {
     case 'task_spend_cap':
       return "the task reached its spend cap, so it was not continued"
     case 'continuation_agent_unavailable':
-      return "the agent could not continue the task (it is archived or its configuration no longer loads)"
+      return "the agent cannot take runs (it is not active or is marked unhealthy)"
     default:
       return undefined
   }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -660,10 +661,16 @@ func (s *Server) orgContinuationView(ctx context.Context, org pgtype.UUID) (*bud
 	if err != nil {
 		return nil, s.dbError(err, "org settings")
 	}
+	// Overridden reads the stored column, not the value, so an org that set the platform default's
+	// amount still reads as having its own value.
+	row, err := s.q.GetOrgSettings(ctx, org)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, s.dbError(err, "org settings")
+	}
 	return &budgetv1alpha1.OrgContinuationLimits{
 		TaskSpendUsd:                set.ContinuationTaskSpend.String(),
 		PlatformDefaultTaskSpendUsd: orgsettings.DefaultContinuationTaskSpend.String(),
-		Overridden:                  set.ContinuationTaskSpend != orgsettings.DefaultContinuationTaskSpend,
+		Overridden:                  err == nil && row.ContinuationTaskSpendUsd.Valid,
 	}, nil
 }
 
@@ -690,6 +697,9 @@ func (s *Server) SetOrgContinuationTaskSpend(ctx context.Context, req *budgetv1a
 	if req.GetTaskSpendUsd() != "" {
 		if v, err = money.Parse(req.GetTaskSpendUsd()); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+		if v == 0 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "the task spend cap must be more than 0; leave it empty to follow the default")
 		}
 	}
 	if err := s.budgets.SetOrgContinuationTaskSpend(requestCtx(ctx), c.org, c.auditActor(), v); err != nil {
@@ -781,6 +791,9 @@ func (s *Server) SetAgentContinuationLimits(ctx context.Context, req *budgetv1al
 	if in.GetTaskSpendUsd() != "" {
 		if o.TaskSpend, err = money.Parse(in.GetTaskSpendUsd()); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+		if o.TaskSpend == 0 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "the task spend cap must be more than 0; leave it empty to follow the default")
 		}
 	}
 	if err := s.budgets.SetAgentContinuationLimits(requestCtx(ctx), c.org, id, c.auditActor(), o); err != nil {

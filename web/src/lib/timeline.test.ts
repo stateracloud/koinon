@@ -112,7 +112,7 @@ describe('buildTimeline', () => {
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
       'Moved from Working to Input required: the task used all its continuation runs',
       'Moved from Working to Input required: the task reached its spend cap, so it was not continued',
-      'Moved from Working to Input required: the agent could not continue the task (it is archived or its configuration no longer loads)',
+      'Moved from Working to Input required: the agent cannot take runs (it is not active or is marked unhealthy)',
       'Moved from Working to Input required',
     ])
   })

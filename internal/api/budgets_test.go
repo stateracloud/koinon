@@ -123,7 +123,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 
 		_, err = budgets(member).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: "7"})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
-		for _, bad := range []string{"abc", "-1"} {
+		for _, bad := range []string{"abc", "-1", "0"} {
 			_, err = budgets(admin).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: bad})
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad)
 		}
@@ -143,7 +143,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 		_, err = budgets(member).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.ContinuationOverride{TaskSpendUsd: "3"}})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 		eleven, zero := int32(11), int32(0)
-		for _, bad := range []*budgetv1alpha1.ContinuationOverride{{MaxContinuations: &eleven}, {TaskSpendUsd: "abc"}, {TaskSpendUsd: "-1"}} {
+		for _, bad := range []*budgetv1alpha1.ContinuationOverride{{MaxContinuations: &eleven}, {TaskSpendUsd: "abc"}, {TaskSpendUsd: "-1"}, {TaskSpendUsd: "0"}} {
 			_, err = budgets(admin).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: bad})
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad.String())
 		}
