@@ -56,6 +56,28 @@ service BudgetService {
   // override; all zero clears them all. It applies to runs queued afterwards.
   rpc SetAgentRunLimits(SetAgentRunLimitsRequest) returns (SetAgentRunLimitsResponse);
 
+  // GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs
+  // (issue #99): the effective value and the platform default. Admins and owners.
+  rpc GetOrgContinuationLimits(GetOrgContinuationLimitsRequest) returns (GetOrgContinuationLimitsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An
+  // empty amount clears it, so the platform default applies. It applies from the next time a run
+  // hits its time limit.
+  rpc SetOrgContinuationTaskSpend(SetOrgContinuationTaskSpendRequest) returns (SetOrgContinuationTaskSpendResponse);
+
+  // GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the
+  // effective values, the template's and org's defaults and the admin's overrides.
+  rpc GetAgentContinuationLimits(GetAgentContinuationLimitsRequest) returns (GetAgentContinuationLimitsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset
+  // fields follow the template (the count) or the org's default (the cap); a count of 0 switches
+  // continuation off for the agent.
+  rpc SetAgentContinuationLimits(SetAgentContinuationLimitsRequest) returns (SetAgentContinuationLimitsResponse);
+
   // ListNotifications returns the caller's notifications in this org, newest first: budget
   // warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
   // those about the platform ceiling.
@@ -200,6 +222,78 @@ message SetAgentRunLimitsRequest {
 
 message SetAgentRunLimitsResponse {
   AgentRunLimits limits = 1;
+}
+
+message OrgContinuationLimits {
+  // task_spend_usd is the effective per-task cap: the org's value, else the platform default.
+  string task_spend_usd = 1;
+  // platform_default_task_spend_usd is what an org that sets none gets.
+  string platform_default_task_spend_usd = 2;
+  // overridden is true when the org set its own value.
+  bool overridden = 3;
+}
+
+message GetOrgContinuationLimitsRequest {
+  string org_id = 1;
+}
+
+message GetOrgContinuationLimitsResponse {
+  OrgContinuationLimits limits = 1;
+}
+
+message SetOrgContinuationTaskSpendRequest {
+  string org_id = 1;
+  // task_spend_usd is a USD decimal string; empty clears the org's value.
+  string task_spend_usd = 2;
+}
+
+message SetOrgContinuationTaskSpendResponse {
+  OrgContinuationLimits limits = 1;
+}
+
+// ContinuationValues are the continuation limits of one task of an agent.
+message ContinuationValues {
+  // max_continuations is the continuation runs a task gets; 0 means continuation is off.
+  int32 max_continuations = 1;
+  // task_spend_usd is the task's spend (all its runs) at which no further continuation starts.
+  string task_spend_usd = 2;
+}
+
+// ContinuationOverride is what an admin set on one agent.
+message ContinuationOverride {
+  // max_continuations is unset when the agent follows the template; 0 switches continuation off.
+  optional int32 max_continuations = 1;
+  // task_spend_usd is empty when the agent follows the org's default.
+  string task_spend_usd = 2;
+}
+
+message AgentContinuationLimits {
+  string agent_id = 1;
+  string agent_name = 2;
+  // effective is what a task gets now: the override, else the template's count and the org's cap.
+  ContinuationValues effective = 3;
+  // template_default is the agent's active version's count and the org's cap.
+  ContinuationValues template_default = 4;
+  ContinuationOverride override = 5;
+}
+
+message GetAgentContinuationLimitsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentContinuationLimitsResponse {
+  AgentContinuationLimits limits = 1;
+}
+
+message SetAgentContinuationLimitsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  ContinuationOverride override = 3;
+}
+
+message SetAgentContinuationLimitsResponse {
+  AgentContinuationLimits limits = 1;
 }
 
 message Notification {

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/budget/v1alpha1/budget.proto.
  */
 export const file_koinon_budget_v1alpha1_budget: GenFile = /*@__PURE__*/
-  fileDesc("CiNrb2lub24vYnVkZ2V0L3YxYWxwaGExL2J1ZGdldC5wcm90bxIWa29pbm9uLmJ1ZGdldC52MWFscGhhMSLZAQoJT3JnQnVkZ2V0EhcKD21vbnRobHlfY2FwX3VzZBgBIAEoCRIcChRwbGF0Zm9ybV9jZWlsaW5nX3VzZBgCIAEoCRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgDIAEoCRIvCgttb250aF9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoYZXN0aW1hdGVkX3RoaXNfbW9udGhfdXNkGAUgASgJEiQKHHN5c3RlbV9jaGVja3NfdGhpc19tb250aF91c2QYBiABKAkiFwoVTGlzdE9yZ0J1ZGdldHNSZXF1ZXN0IpsBChBPcmdCdWRnZXRTdW1tYXJ5Eg4KBm9yZ19pZBgBIAEoCRIQCghvcmdfc2x1ZxgCIAEoCRIQCghvcmdfbmFtZRgDIAEoCRIXCg9tb250aGx5X2NhcF91c2QYBCABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYBSABKAkSHAoUc3BlbnRfdGhpc19tb250aF91c2QYBiABKAkigQEKFkxpc3RPcmdCdWRnZXRzUmVzcG9uc2USNgoEb3JncxgBIAMoCzIoLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0U3VtbWFyeRIvCgttb250aF9zdGFydBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiJQoTR2V0T3JnQnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkiSQoUR2V0T3JnQnVkZ2V0UmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQiPwoUU2V0TW9udGhseUNhcFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhcKD21vbnRobHlfY2FwX3VzZBgCIAEoCSJKChVTZXRNb250aGx5Q2FwUmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQiSQoZU2V0UGxhdGZvcm1DZWlsaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYAiABKAkiTwoaU2V0UGxhdGZvcm1DZWlsaW5nUmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQisgEKC0FnZW50QnVkZ2V0EhAKCGFnZW50X2lkGAEgASgJEhcKD2RhaWx5X2xpbWl0X3VzZBgCIAEoCRIXCg9zcGVudF90b2RheV91c2QYAyABKAkSLQoJZGF5X3N0YXJ0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgphZ2VudF9uYW1lGAUgASgJEhwKFHRlbXBsYXRlX2RlZmF1bHRfdXNkGAYgASgJIjkKFUdldEFnZW50QnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiTQoWR2V0QWdlbnRCdWRnZXRSZXNwb25zZRIzCgZidWRnZXQYASABKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0IikKF0xpc3RBZ2VudEJ1ZGdldHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJQChhMaXN0QWdlbnRCdWRnZXRzUmVzcG9uc2USNAoHYnVkZ2V0cxgBIAMoCzIjLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuQWdlbnRCdWRnZXQiUgoVU2V0QWdlbnRCdWRnZXRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIXCg9kYWlseV9saW1pdF91c2QYAyABKAkiTQoWU2V0QWdlbnRCdWRnZXRSZXNwb25zZRIzCgZidWRnZXQYASABKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0ImEKDlJ1bkxpbWl0VmFsdWVzEhoKEm1heF9tb2RlbF9yZXF1ZXN0cxgBIAEoAxIVCg1tYXhfc3BlbmRfdXNkGAIgASgJEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAMgASgDIu0BCg5BZ2VudFJ1bkxpbWl0cxIQCghhZ2VudF9pZBgBIAEoCRISCgphZ2VudF9uYW1lGAIgASgJEjkKCWVmZmVjdGl2ZRgDIAEoCzImLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUnVuTGltaXRWYWx1ZXMSQAoQdGVtcGxhdGVfZGVmYXVsdBgEIAEoCzImLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUnVuTGltaXRWYWx1ZXMSOAoIb3ZlcnJpZGUYBSABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJ1bkxpbWl0VmFsdWVzIjwKGEdldEFnZW50UnVuTGltaXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiUwoZR2V0QWdlbnRSdW5MaW1pdHNSZXNwb25zZRI2CgZsaW1pdHMYASABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50UnVuTGltaXRzInYKGFNldEFnZW50UnVuTGltaXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSOAoIb3ZlcnJpZGUYAyABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJ1bkxpbWl0VmFsdWVzIlMKGVNldEFnZW50UnVuTGltaXRzUmVzcG9uc2USNgoGbGltaXRzGAEgASgLMiYua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudFJ1bkxpbWl0cyKiAgoMTm90aWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGV2ZWwYAyABKAkSEQoJdGhyZXNob2xkGAQgASgFEhEKCWxpbWl0X3VzZBgFIAEoCRIRCglzcGVudF91c2QYBiABKAkSEAoIYWdlbnRfaWQYByABKAkSMAoMd2luZG93X3N0YXJ0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgdyZWFkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIPCgdtZXNzYWdlGAsgASgJIj8KGExpc3ROb3RpZmljYXRpb25zUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLbWF4X3Jlc3VsdHMYAiABKAUiWAoZTGlzdE5vdGlmaWNhdGlvbnNSZXNwb25zZRI7Cg1ub3RpZmljYXRpb25zGAEgAygLMiQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5Ob3RpZmljYXRpb24iRgobTWFya05vdGlmaWNhdGlvblJlYWRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIXCg9ub3RpZmljYXRpb25faWQYAiABKAkiHgocTWFya05vdGlmaWNhdGlvblJlYWRSZXNwb25zZTK/CgoNQnVkZ2V0U2VydmljZRJuCgxHZXRPcmdCdWRnZXQSKy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldE9yZ0J1ZGdldFJlcXVlc3QaLC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldE9yZ0J1ZGdldFJlc3BvbnNlIgOQAgESdAoOTGlzdE9yZ0J1ZGdldHMSLS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RPcmdCdWRnZXRzUmVxdWVzdBouLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdE9yZ0J1ZGdldHNSZXNwb25zZSIDkAIBEmwKDVNldE1vbnRobHlDYXASLC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldE1vbnRobHlDYXBSZXF1ZXN0Gi0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRNb250aGx5Q2FwUmVzcG9uc2USewoSU2V0UGxhdGZvcm1DZWlsaW5nEjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRQbGF0Zm9ybUNlaWxpbmdSZXF1ZXN0GjIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRQbGF0Zm9ybUNlaWxpbmdSZXNwb25zZRJ0Cg5HZXRBZ2VudEJ1ZGdldBItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0QWdlbnRCdWRnZXRSZXF1ZXN0Gi4ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRBZ2VudEJ1ZGdldFJlc3BvbnNlIgOQAgESegoQTGlzdEFnZW50QnVkZ2V0cxIvLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdEFnZW50QnVkZ2V0c1JlcXVlc3QaMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RBZ2VudEJ1ZGdldHNSZXNwb25zZSIDkAIBEm8KDlNldEFnZW50QnVkZ2V0Ei0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudEJ1ZGdldFJlcXVlc3QaLi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldEFnZW50QnVkZ2V0UmVzcG9uc2USfQoRR2V0QWdlbnRSdW5MaW1pdHMSMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldEFnZW50UnVuTGltaXRzUmVxdWVzdBoxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0QWdlbnRSdW5MaW1pdHNSZXNwb25zZSIDkAIBEngKEVNldEFnZW50UnVuTGltaXRzEjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudFJ1bkxpbWl0c1JlcXVlc3QaMS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldEFnZW50UnVuTGltaXRzUmVzcG9uc2USfQoRTGlzdE5vdGlmaWNhdGlvbnMSMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3ROb3RpZmljYXRpb25zUmVxdWVzdBoxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdE5vdGlmaWNhdGlvbnNSZXNwb25zZSIDkAIBEoEBChRNYXJrTm90aWZpY2F0aW9uUmVhZBIzLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTWFya05vdGlmaWNhdGlvblJlYWRSZXF1ZXN0GjQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5NYXJrTm90aWZpY2F0aW9uUmVhZFJlc3BvbnNlQlNaUWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2J1ZGdldC92MWFscGhhMTtidWRnZXR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("CiNrb2lub24vYnVkZ2V0L3YxYWxwaGExL2J1ZGdldC5wcm90bxIWa29pbm9uLmJ1ZGdldC52MWFscGhhMSLZAQoJT3JnQnVkZ2V0EhcKD21vbnRobHlfY2FwX3VzZBgBIAEoCRIcChRwbGF0Zm9ybV9jZWlsaW5nX3VzZBgCIAEoCRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgDIAEoCRIvCgttb250aF9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoYZXN0aW1hdGVkX3RoaXNfbW9udGhfdXNkGAUgASgJEiQKHHN5c3RlbV9jaGVja3NfdGhpc19tb250aF91c2QYBiABKAkiFwoVTGlzdE9yZ0J1ZGdldHNSZXF1ZXN0IpsBChBPcmdCdWRnZXRTdW1tYXJ5Eg4KBm9yZ19pZBgBIAEoCRIQCghvcmdfc2x1ZxgCIAEoCRIQCghvcmdfbmFtZRgDIAEoCRIXCg9tb250aGx5X2NhcF91c2QYBCABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYBSABKAkSHAoUc3BlbnRfdGhpc19tb250aF91c2QYBiABKAkigQEKFkxpc3RPcmdCdWRnZXRzUmVzcG9uc2USNgoEb3JncxgBIAMoCzIoLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0U3VtbWFyeRIvCgttb250aF9zdGFydBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiJQoTR2V0T3JnQnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkiSQoUR2V0T3JnQnVkZ2V0UmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQiPwoUU2V0TW9udGhseUNhcFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhcKD21vbnRobHlfY2FwX3VzZBgCIAEoCSJKChVTZXRNb250aGx5Q2FwUmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQiSQoZU2V0UGxhdGZvcm1DZWlsaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYAiABKAkiTwoaU2V0UGxhdGZvcm1DZWlsaW5nUmVzcG9uc2USMQoGYnVkZ2V0GAEgASgLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5PcmdCdWRnZXQisgEKC0FnZW50QnVkZ2V0EhAKCGFnZW50X2lkGAEgASgJEhcKD2RhaWx5X2xpbWl0X3VzZBgCIAEoCRIXCg9zcGVudF90b2RheV91c2QYAyABKAkSLQoJZGF5X3N0YXJ0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgphZ2VudF9uYW1lGAUgASgJEhwKFHRlbXBsYXRlX2RlZmF1bHRfdXNkGAYgASgJIjkKFUdldEFnZW50QnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiTQoWR2V0QWdlbnRCdWRnZXRSZXNwb25zZRIzCgZidWRnZXQYASABKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0IikKF0xpc3RBZ2VudEJ1ZGdldHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJQChhMaXN0QWdlbnRCdWRnZXRzUmVzcG9uc2USNAoHYnVkZ2V0cxgBIAMoCzIjLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuQWdlbnRCdWRnZXQiUgoVU2V0QWdlbnRCdWRnZXRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIXCg9kYWlseV9saW1pdF91c2QYAyABKAkiTQoWU2V0QWdlbnRCdWRnZXRSZXNwb25zZRIzCgZidWRnZXQYASABKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0ImEKDlJ1bkxpbWl0VmFsdWVzEhoKEm1heF9tb2RlbF9yZXF1ZXN0cxgBIAEoAxIVCg1tYXhfc3BlbmRfdXNkGAIgASgJEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAMgASgDIu0BCg5BZ2VudFJ1bkxpbWl0cxIQCghhZ2VudF9pZBgBIAEoCRISCgphZ2VudF9uYW1lGAIgASgJEjkKCWVmZmVjdGl2ZRgDIAEoCzImLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUnVuTGltaXRWYWx1ZXMSQAoQdGVtcGxhdGVfZGVmYXVsdBgEIAEoCzImLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUnVuTGltaXRWYWx1ZXMSOAoIb3ZlcnJpZGUYBSABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJ1bkxpbWl0VmFsdWVzIjwKGEdldEFnZW50UnVuTGltaXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiUwoZR2V0QWdlbnRSdW5MaW1pdHNSZXNwb25zZRI2CgZsaW1pdHMYASABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50UnVuTGltaXRzInYKGFNldEFnZW50UnVuTGltaXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSOAoIb3ZlcnJpZGUYAyABKAsyJi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJ1bkxpbWl0VmFsdWVzIlMKGVNldEFnZW50UnVuTGltaXRzUmVzcG9uc2USNgoGbGltaXRzGAEgASgLMiYua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudFJ1bkxpbWl0cyJsChVPcmdDb250aW51YXRpb25MaW1pdHMSFgoOdGFza19zcGVuZF91c2QYASABKAkSJwofcGxhdGZvcm1fZGVmYXVsdF90YXNrX3NwZW5kX3VzZBgCIAEoCRISCgpvdmVycmlkZGVuGAMgASgIIjEKH0dldE9yZ0NvbnRpbnVhdGlvbkxpbWl0c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJImEKIEdldE9yZ0NvbnRpbnVhdGlvbkxpbWl0c1Jlc3BvbnNlEj0KBmxpbWl0cxgBIAEoCzItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQ29udGludWF0aW9uTGltaXRzIkwKIlNldE9yZ0NvbnRpbnVhdGlvblRhc2tTcGVuZFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhYKDnRhc2tfc3BlbmRfdXNkGAIgASgJImQKI1NldE9yZ0NvbnRpbnVhdGlvblRhc2tTcGVuZFJlc3BvbnNlEj0KBmxpbWl0cxgBIAEoCzItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQ29udGludWF0aW9uTGltaXRzIkcKEkNvbnRpbnVhdGlvblZhbHVlcxIZChFtYXhfY29udGludWF0aW9ucxgBIAEoBRIWCg50YXNrX3NwZW5kX3VzZBgCIAEoCSJkChRDb250aW51YXRpb25PdmVycmlkZRIeChFtYXhfY29udGludWF0aW9ucxgBIAEoBUgAiAEBEhYKDnRhc2tfc3BlbmRfdXNkGAIgASgJQhQKEl9tYXhfY29udGludWF0aW9ucyKEAgoXQWdlbnRDb250aW51YXRpb25MaW1pdHMSEAoIYWdlbnRfaWQYASABKAkSEgoKYWdlbnRfbmFtZRgCIAEoCRI9CgllZmZlY3RpdmUYAyABKAsyKi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkNvbnRpbnVhdGlvblZhbHVlcxJEChB0ZW1wbGF0ZV9kZWZhdWx0GAQgASgLMioua29pbm9uLmJ1ZGdldC52MWFscGhhMS5Db250aW51YXRpb25WYWx1ZXMSPgoIb3ZlcnJpZGUYBSABKAsyLC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkNvbnRpbnVhdGlvbk92ZXJyaWRlIkUKIUdldEFnZW50Q29udGludWF0aW9uTGltaXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiZQoiR2V0QWdlbnRDb250aW51YXRpb25MaW1pdHNSZXNwb25zZRI/CgZsaW1pdHMYASABKAsyLy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50Q29udGludWF0aW9uTGltaXRzIoUBCiFTZXRBZ2VudENvbnRpbnVhdGlvbkxpbWl0c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEj4KCG92ZXJyaWRlGAMgASgLMiwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5Db250aW51YXRpb25PdmVycmlkZSJlCiJTZXRBZ2VudENvbnRpbnVhdGlvbkxpbWl0c1Jlc3BvbnNlEj8KBmxpbWl0cxgBIAEoCzIvLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuQWdlbnRDb250aW51YXRpb25MaW1pdHMiogIKDE5vdGlmaWNhdGlvbhIKCgJpZBgBIAEoCRIMCgRraW5kGAIgASgJEg0KBWxldmVsGAMgASgJEhEKCXRocmVzaG9sZBgEIAEoBRIRCglsaW1pdF91c2QYBSABKAkSEQoJc3BlbnRfdXNkGAYgASgJEhAKCGFnZW50X2lkGAcgASgJEjAKDHdpbmRvd19zdGFydBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoHcmVhZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHbWVzc2FnZRgLIAEoCSI/ChhMaXN0Tm90aWZpY2F0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC21heF9yZXN1bHRzGAIgASgFIlgKGUxpc3ROb3RpZmljYXRpb25zUmVzcG9uc2USOwoNbm90aWZpY2F0aW9ucxgBIAMoCzIkLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTm90aWZpY2F0aW9uIkYKG01hcmtOb3RpZmljYXRpb25SZWFkUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFwoPbm90aWZpY2F0aW9uX2lkGAIgASgJIh4KHE1hcmtOb3RpZmljYXRpb25SZWFkUmVzcG9uc2Uyng8KDUJ1ZGdldFNlcnZpY2USbgoMR2V0T3JnQnVkZ2V0Eisua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXF1ZXN0Giwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXNwb25zZSIDkAIBEnQKDkxpc3RPcmdCdWRnZXRzEi0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0T3JnQnVkZ2V0c1JlcXVlc3QaLi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RPcmdCdWRnZXRzUmVzcG9uc2UiA5ACARJsCg1TZXRNb250aGx5Q2FwEiwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRNb250aGx5Q2FwUmVxdWVzdBotLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0TW9udGhseUNhcFJlc3BvbnNlEnsKElNldFBsYXRmb3JtQ2VpbGluZxIxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UGxhdGZvcm1DZWlsaW5nUmVxdWVzdBoyLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UGxhdGZvcm1DZWlsaW5nUmVzcG9uc2USdAoOR2V0QWdlbnRCdWRnZXQSLS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldEFnZW50QnVkZ2V0UmVxdWVzdBouLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0QWdlbnRCdWRnZXRSZXNwb25zZSIDkAIBEnoKEExpc3RBZ2VudEJ1ZGdldHMSLy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RBZ2VudEJ1ZGdldHNSZXF1ZXN0GjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0QWdlbnRCdWRnZXRzUmVzcG9uc2UiA5ACARJvCg5TZXRBZ2VudEJ1ZGdldBItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0QWdlbnRCdWRnZXRSZXF1ZXN0Gi4ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudEJ1ZGdldFJlc3BvbnNlEn0KEUdldEFnZW50UnVuTGltaXRzEjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRBZ2VudFJ1bkxpbWl0c1JlcXVlc3QaMS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldEFnZW50UnVuTGltaXRzUmVzcG9uc2UiA5ACARJ4ChFTZXRBZ2VudFJ1bkxpbWl0cxIwLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0QWdlbnRSdW5MaW1pdHNSZXF1ZXN0GjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudFJ1bkxpbWl0c1Jlc3BvbnNlEpIBChhHZXRPcmdDb250aW51YXRpb25MaW1pdHMSNy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldE9yZ0NvbnRpbnVhdGlvbkxpbWl0c1JlcXVlc3QaOC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldE9yZ0NvbnRpbnVhdGlvbkxpbWl0c1Jlc3BvbnNlIgOQAgESlgEKG1NldE9yZ0NvbnRpbnVhdGlvblRhc2tTcGVuZBI6LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0T3JnQ29udGludWF0aW9uVGFza1NwZW5kUmVxdWVzdBo7LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0T3JnQ29udGludWF0aW9uVGFza1NwZW5kUmVzcG9uc2USmAEKGkdldEFnZW50Q29udGludWF0aW9uTGltaXRzEjkua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRBZ2VudENvbnRpbnVhdGlvbkxpbWl0c1JlcXVlc3QaOi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldEFnZW50Q29udGludWF0aW9uTGltaXRzUmVzcG9uc2UiA5ACARKTAQoaU2V0QWdlbnRDb250aW51YXRpb25MaW1pdHMSOS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldEFnZW50Q29udGludWF0aW9uTGltaXRzUmVxdWVzdBo6LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0QWdlbnRDb250aW51YXRpb25MaW1pdHNSZXNwb25zZRJ9ChFMaXN0Tm90aWZpY2F0aW9ucxIwLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdE5vdGlmaWNhdGlvbnNSZXF1ZXN0GjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0Tm90aWZpY2F0aW9uc1Jlc3BvbnNlIgOQAgESgQEKFE1hcmtOb3RpZmljYXRpb25SZWFkEjMua29pbm9uLmJ1ZGdldC52MWFscGhhMS5NYXJrTm90aWZpY2F0aW9uUmVhZFJlcXVlc3QaNC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLk1hcmtOb3RpZmljYXRpb25SZWFkUmVzcG9uc2VCU1pRZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYnVkZ2V0L3YxYWxwaGExO2J1ZGdldHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message koinon.budget.v1alpha1.OrgBudget
@@ -583,6 +583,294 @@ export const SetAgentRunLimitsResponseSchema: GenMessage<SetAgentRunLimitsRespon
   messageDesc(file_koinon_budget_v1alpha1_budget, 22);
 
 /**
+ * @generated from message koinon.budget.v1alpha1.OrgContinuationLimits
+ */
+export type OrgContinuationLimits = Message<"koinon.budget.v1alpha1.OrgContinuationLimits"> & {
+  /**
+   * task_spend_usd is the effective per-task cap: the org's value, else the platform default.
+   *
+   * @generated from field: string task_spend_usd = 1;
+   */
+  taskSpendUsd: string;
+
+  /**
+   * platform_default_task_spend_usd is what an org that sets none gets.
+   *
+   * @generated from field: string platform_default_task_spend_usd = 2;
+   */
+  platformDefaultTaskSpendUsd: string;
+
+  /**
+   * overridden is true when the org set its own value.
+   *
+   * @generated from field: bool overridden = 3;
+   */
+  overridden: boolean;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.OrgContinuationLimits.
+ * Use `create(OrgContinuationLimitsSchema)` to create a new message.
+ */
+export const OrgContinuationLimitsSchema: GenMessage<OrgContinuationLimits> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 23);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest
+ */
+export type GetOrgContinuationLimitsRequest = Message<"koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest.
+ * Use `create(GetOrgContinuationLimitsRequestSchema)` to create a new message.
+ */
+export const GetOrgContinuationLimitsRequestSchema: GenMessage<GetOrgContinuationLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 24);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse
+ */
+export type GetOrgContinuationLimitsResponse = Message<"koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.OrgContinuationLimits limits = 1;
+   */
+  limits?: OrgContinuationLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse.
+ * Use `create(GetOrgContinuationLimitsResponseSchema)` to create a new message.
+ */
+export const GetOrgContinuationLimitsResponseSchema: GenMessage<GetOrgContinuationLimitsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 25);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest
+ */
+export type SetOrgContinuationTaskSpendRequest = Message<"koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * task_spend_usd is a USD decimal string; empty clears the org's value.
+   *
+   * @generated from field: string task_spend_usd = 2;
+   */
+  taskSpendUsd: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest.
+ * Use `create(SetOrgContinuationTaskSpendRequestSchema)` to create a new message.
+ */
+export const SetOrgContinuationTaskSpendRequestSchema: GenMessage<SetOrgContinuationTaskSpendRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 26);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse
+ */
+export type SetOrgContinuationTaskSpendResponse = Message<"koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.OrgContinuationLimits limits = 1;
+   */
+  limits?: OrgContinuationLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse.
+ * Use `create(SetOrgContinuationTaskSpendResponseSchema)` to create a new message.
+ */
+export const SetOrgContinuationTaskSpendResponseSchema: GenMessage<SetOrgContinuationTaskSpendResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 27);
+
+/**
+ * ContinuationValues are the continuation limits of one task of an agent.
+ *
+ * @generated from message koinon.budget.v1alpha1.ContinuationValues
+ */
+export type ContinuationValues = Message<"koinon.budget.v1alpha1.ContinuationValues"> & {
+  /**
+   * max_continuations is the continuation runs a task gets; 0 means continuation is off.
+   *
+   * @generated from field: int32 max_continuations = 1;
+   */
+  maxContinuations: number;
+
+  /**
+   * task_spend_usd is the task's spend (all its runs) at which no further continuation starts.
+   *
+   * @generated from field: string task_spend_usd = 2;
+   */
+  taskSpendUsd: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ContinuationValues.
+ * Use `create(ContinuationValuesSchema)` to create a new message.
+ */
+export const ContinuationValuesSchema: GenMessage<ContinuationValues> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 28);
+
+/**
+ * ContinuationOverride is what an admin set on one agent.
+ *
+ * @generated from message koinon.budget.v1alpha1.ContinuationOverride
+ */
+export type ContinuationOverride = Message<"koinon.budget.v1alpha1.ContinuationOverride"> & {
+  /**
+   * max_continuations is unset when the agent follows the template; 0 switches continuation off.
+   *
+   * @generated from field: optional int32 max_continuations = 1;
+   */
+  maxContinuations?: number | undefined;
+
+  /**
+   * task_spend_usd is empty when the agent follows the org's default.
+   *
+   * @generated from field: string task_spend_usd = 2;
+   */
+  taskSpendUsd: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ContinuationOverride.
+ * Use `create(ContinuationOverrideSchema)` to create a new message.
+ */
+export const ContinuationOverrideSchema: GenMessage<ContinuationOverride> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 29);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.AgentContinuationLimits
+ */
+export type AgentContinuationLimits = Message<"koinon.budget.v1alpha1.AgentContinuationLimits"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: string agent_name = 2;
+   */
+  agentName: string;
+
+  /**
+   * effective is what a task gets now: the override, else the template's count and the org's cap.
+   *
+   * @generated from field: koinon.budget.v1alpha1.ContinuationValues effective = 3;
+   */
+  effective?: ContinuationValues | undefined;
+
+  /**
+   * template_default is the agent's active version's count and the org's cap.
+   *
+   * @generated from field: koinon.budget.v1alpha1.ContinuationValues template_default = 4;
+   */
+  templateDefault?: ContinuationValues | undefined;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.ContinuationOverride override = 5;
+   */
+  override?: ContinuationOverride | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.AgentContinuationLimits.
+ * Use `create(AgentContinuationLimitsSchema)` to create a new message.
+ */
+export const AgentContinuationLimitsSchema: GenMessage<AgentContinuationLimits> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 30);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest
+ */
+export type GetAgentContinuationLimitsRequest = Message<"koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest.
+ * Use `create(GetAgentContinuationLimitsRequestSchema)` to create a new message.
+ */
+export const GetAgentContinuationLimitsRequestSchema: GenMessage<GetAgentContinuationLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 31);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse
+ */
+export type GetAgentContinuationLimitsResponse = Message<"koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.AgentContinuationLimits limits = 1;
+   */
+  limits?: AgentContinuationLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse.
+ * Use `create(GetAgentContinuationLimitsResponseSchema)` to create a new message.
+ */
+export const GetAgentContinuationLimitsResponseSchema: GenMessage<GetAgentContinuationLimitsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 32);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest
+ */
+export type SetAgentContinuationLimitsRequest = Message<"koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.ContinuationOverride override = 3;
+   */
+  override?: ContinuationOverride | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest.
+ * Use `create(SetAgentContinuationLimitsRequestSchema)` to create a new message.
+ */
+export const SetAgentContinuationLimitsRequestSchema: GenMessage<SetAgentContinuationLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 33);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse
+ */
+export type SetAgentContinuationLimitsResponse = Message<"koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.AgentContinuationLimits limits = 1;
+   */
+  limits?: AgentContinuationLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse.
+ * Use `create(SetAgentContinuationLimitsResponseSchema)` to create a new message.
+ */
+export const SetAgentContinuationLimitsResponseSchema: GenMessage<SetAgentContinuationLimitsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 34);
+
+/**
  * @generated from message koinon.budget.v1alpha1.Notification
  */
 export type Notification = Message<"koinon.budget.v1alpha1.Notification"> & {
@@ -660,7 +948,7 @@ export type Notification = Message<"koinon.budget.v1alpha1.Notification"> & {
  * Use `create(NotificationSchema)` to create a new message.
  */
 export const NotificationSchema: GenMessage<Notification> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 23);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 35);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListNotificationsRequest
@@ -684,7 +972,7 @@ export type ListNotificationsRequest = Message<"koinon.budget.v1alpha1.ListNotif
  * Use `create(ListNotificationsRequestSchema)` to create a new message.
  */
 export const ListNotificationsRequestSchema: GenMessage<ListNotificationsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 24);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 36);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListNotificationsResponse
@@ -701,7 +989,7 @@ export type ListNotificationsResponse = Message<"koinon.budget.v1alpha1.ListNoti
  * Use `create(ListNotificationsResponseSchema)` to create a new message.
  */
 export const ListNotificationsResponseSchema: GenMessage<ListNotificationsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 25);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 37);
 
 /**
  * @generated from message koinon.budget.v1alpha1.MarkNotificationReadRequest
@@ -723,7 +1011,7 @@ export type MarkNotificationReadRequest = Message<"koinon.budget.v1alpha1.MarkNo
  * Use `create(MarkNotificationReadRequestSchema)` to create a new message.
  */
 export const MarkNotificationReadRequestSchema: GenMessage<MarkNotificationReadRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 26);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 38);
 
 /**
  * @generated from message koinon.budget.v1alpha1.MarkNotificationReadResponse
@@ -736,7 +1024,7 @@ export type MarkNotificationReadResponse = Message<"koinon.budget.v1alpha1.MarkN
  * Use `create(MarkNotificationReadResponseSchema)` to create a new message.
  */
 export const MarkNotificationReadResponseSchema: GenMessage<MarkNotificationReadResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 27);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 39);
 
 /**
  * BudgetService sets an org's monthly cap and its agents' daily limits and lists the in-app
@@ -842,6 +1130,52 @@ export const BudgetService: GenService<{
     methodKind: "unary";
     input: typeof SetAgentRunLimitsRequestSchema;
     output: typeof SetAgentRunLimitsResponseSchema;
+  },
+  /**
+   * GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs
+   * (issue #99): the effective value and the platform default. Admins and owners.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.BudgetService.GetOrgContinuationLimits
+   */
+  getOrgContinuationLimits: {
+    methodKind: "unary";
+    input: typeof GetOrgContinuationLimitsRequestSchema;
+    output: typeof GetOrgContinuationLimitsResponseSchema;
+  },
+  /**
+   * SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An
+   * empty amount clears it, so the platform default applies. It applies from the next time a run
+   * hits its time limit.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.BudgetService.SetOrgContinuationTaskSpend
+   */
+  setOrgContinuationTaskSpend: {
+    methodKind: "unary";
+    input: typeof SetOrgContinuationTaskSpendRequestSchema;
+    output: typeof SetOrgContinuationTaskSpendResponseSchema;
+  },
+  /**
+   * GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the
+   * effective values, the template's and org's defaults and the admin's overrides.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.BudgetService.GetAgentContinuationLimits
+   */
+  getAgentContinuationLimits: {
+    methodKind: "unary";
+    input: typeof GetAgentContinuationLimitsRequestSchema;
+    output: typeof GetAgentContinuationLimitsResponseSchema;
+  },
+  /**
+   * SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset
+   * fields follow the template (the count) or the org's default (the cap); a count of 0 switches
+   * continuation off for the agent.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.BudgetService.SetAgentContinuationLimits
+   */
+  setAgentContinuationLimits: {
+    methodKind: "unary";
+    input: typeof SetAgentContinuationLimitsRequestSchema;
+    output: typeof SetAgentContinuationLimitsResponseSchema;
   },
   /**
    * ListNotifications returns the caller's notifications in this org, newest first: budget
