@@ -25,7 +25,8 @@
 # `registry.mirrors` patch, which turns that default off. The ConfigMap
 # kube-public/local-registry-hosting (KEP-1755) tells tools such as Tilt where to push.
 #
-#   registry.sh start            create or start the registry and the caches (idempotent; no cluster needed)
+#   registry.sh start            create or start the registry and the caches and join them to the kind network, creating
+#                                it as kind would when missing (idempotent; no cluster needed; #956)
 #   registry.sh attach <cluster> join the cluster's kind network, write the nodes' hosts.toml files and the
 #                                ConfigMap (idempotent); the kube context is kind-<cluster>
 #   registry.sh stop [--force]   remove the containers; the cached blobs stay (KIND_PROXY_PURGE=1 also removes the volumes).
@@ -103,8 +104,31 @@ storage_for() {
   fi
 }
 
+# on_kind_net <container>: the container is on the kind network.
+on_kind_net() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$1" 2>/dev/null | grep -q "\"$KIND_NET\""; }
+
+# ensure_kind_net: the kind network exists. kind reuses a network of this name and creates it only when it is
+# missing (providers/docker/network.go, ensureNetwork), with the same bridge and masquerade options and the
+# default bridge's MTU. The cluster here is IPv4 only (kind-config.yaml), so no IPv6 subnet is needed.
+ensure_kind_net() {
+  docker network inspect "$KIND_NET" >/dev/null 2>&1 && return 0
+  local mtu args=(-d=bridge -o com.docker.network.bridge.enable_ip_masquerade=true)
+  mtu=$(docker network inspect bridge -f '{{index .Options "com.docker.network.driver.mtu"}}' 2>/dev/null || true)
+  [[ -z $mtu || $mtu == 0 ]] || args+=(-o "com.docker.network.driver.mtu=$mtu")
+  # Another lane or kind itself may create it between the check and the create.
+  docker network create "${args[@]}" "$KIND_NET" >/dev/null 2>&1 || docker network inspect "$KIND_NET" >/dev/null
+}
+
+# join_kind_net <container>: the container is on the kind network.
+join_kind_net() {
+  on_kind_net "$1" && return 0
+  # Another lane's attach may connect it between the check and the connect: "already exists" is success.
+  docker network connect "$KIND_NET" "$1" 2>/dev/null || on_kind_net "$1" ||
+    { echo "cannot connect $1 to the $KIND_NET network" >&2; return 1; }
+}
+
 cmd_start() {
-  local t0 h
+  local t0 h c
   t0=$(date +%s)
   [[ -z $PROXY_CACHE ]] || PROXY_CACHE=$(mkdir -p "$PROXY_CACHE" && cd "$PROXY_CACHE" && pwd)
   ensure "$REG_NAME" "127.0.0.1:${REG_PORT}:5000" "$REG_NAME"
@@ -112,6 +136,13 @@ cmd_start() {
     ensure "$(proxy_name "$h")" "" "$(storage_for "$h")" \
       "REGISTRY_PROXY_REMOTEURL=$(proxy_remote "$h")" REGISTRY_PROXY_TTL=0
   done
+  # Join the kind network now, not in attach (#956). test/e2e/run.sh pushes images while kind creates the
+  # cluster, and attach ran `docker network connect` in the middle of those pushes: on a Linux Docker host that
+  # re-programs the container's published port, and a push in that moment gets "connection refused" (CI run
+  # 43420655094: attach began at 11:55:48.29, the PATCH of koinon-fakegithub failed at 11:55:48). A registry that
+  # is on the network before the first push is not touched again; attach then finds it connected.
+  ensure_kind_net
+  for c in $(all_names); do join_kind_net "$c"; done
   for _ in $(seq 60); do
     if curl -fsS --max-time 2 "http://127.0.0.1:${REG_PORT}/v2/" >/dev/null 2>&1; then
       echo "-- registry: localhost:${REG_PORT} up, caches: ${PROXY_HOSTS:-none}: $(( $(date +%s) - t0 ))s"
@@ -134,19 +165,12 @@ write_hosts() {
     docker exec -i "$node" sh -c "cat > '$dir/hosts.toml'"
 }
 
-# on_kind_net <container>: the container is on the kind network.
-on_kind_net() { docker inspect -f '{{json .NetworkSettings.Networks}}' "$1" 2>/dev/null | grep -q "\"$KIND_NET\""; }
-
 cmd_attach() {
   local cluster=${1:?usage: registry.sh attach <cluster>}
   local ctx="kind-$cluster" t0 c h node nodes
   t0=$(date +%s)
-  for c in $(all_names); do
-    on_kind_net "$c" && continue
-    # Another lane's attach may connect it between the check and the connect: "already exists" is success.
-    docker network connect "$KIND_NET" "$c" 2>/dev/null || on_kind_net "$c" ||
-      { echo "cannot connect $c to the $KIND_NET network" >&2; return 1; }
-  done
+  # Normally a no-op: start joined them. It stays for a registry started by an older script.
+  for c in $(all_names); do join_kind_net "$c"; done
   mapfile -t nodes < <(kind get nodes --name "$cluster")
   [[ ${#nodes[@]} -gt 0 ]] || { echo "kind cluster $cluster has no nodes" >&2; return 1; }
   for node in "${nodes[@]}"; do
