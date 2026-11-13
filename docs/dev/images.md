@@ -10,7 +10,7 @@ Koinon builds its Go images with `ko`. Every other image (a harness image, a too
 Dockerfile, and [`harnesses/opencode/Dockerfile`](../../harnesses/opencode/Dockerfile) is the one to
 copy (`flavors/` is a symlink to `harnesses/`, #610). This page lists the five rules that Dockerfile
 follows, why each exists and the lines that carry it, so that you can write a new image without
-reading the whole file. Railpack was considered and rejected; Dockerfiles stay.
+reading the whole file. Railpack was considered and rejected (#174); Dockerfiles stay.
 
 ## Use this page when
 
@@ -27,8 +27,8 @@ Versions, digests and the `...` gaps are the only things that change between ima
 | Rule | Why | Where in the Dockerfile |
 | --- | --- | --- |
 | Download per architecture, check a sha256 | Same bytes on `amd64` and `arm64`, on every build | `fetch-amd64`, `fetch-arm64`, `fetch-tools-*` stages |
-| One download step, secret mounted there only | A token must not reach a layer, a log or the environment | `RUN --mount=type=secret,...` and `koinon-fetch` |
-| apt from `snapshot.ubuntu.com`, with retries | Same packages on any day; an outage must not fail a build silently | `UBUNTU_SNAPSHOT`, `Acquire::Retries=5` |
+| Each download is one step, secret mounted there only | A token must not reach a layer, a log or the environment | `RUN --mount=type=secret,...` and `koinon-fetch` |
+| apt from `snapshot.ubuntu.com`, with retries | Same packages on any day; a 5xx is retried, and a real outage fails at `update`, not later at install | `UBUNTU_SNAPSHOT`, `Acquire::Retries=5` |
 | A licences stage | Redistributed binaries ship their licence texts | `FROM scratch AS licenses` |
 | A non-root user | OpenShell runs the sandbox as UID/GID 10001 | `groupadd` / `useradd`, `USER 10001:10001` |
 
@@ -46,7 +46,7 @@ never changes without a change to the Dockerfile.
 
 ## 1. Per-architecture downloads, each checked against a checksum
 
-**Why.** The image is built for `linux/amd64` and `linux/arm64` (`make harness-opencode`). A
+**Why.** CI builds the image for `linux/amd64` and `linux/arm64` (`HARNESS_PLATFORMS=linux/amd64,linux/arm64 make harness-opencode`; by default the target builds the host's platform). A
 download whose bytes are not pinned changes under you without a diff, and a "latest" URL makes
 two builds of one commit differ. Dependencies also pass the three-day cooldown of
 [ADR 0079](../adr/0079-dependency-cooldown.md), which only works when the version is pinned in the
@@ -87,7 +87,7 @@ RUN set -eux; \
     /out/libexec/duckdb -c 'SELECT version()' | grep -q 'v2\.0\.0'
 ```
 
-## 2. One download step, with the BuildKit secret mounted (never an env var)
+## 2. Each download is one step, with the BuildKit secret mounted there only (never an env var)
 
 **Why.** Anonymous GitHub release downloads are rate limited per runner IP and sometimes return a
 fixed error body, which fails a pinned checksum (#145). An authenticated request has its own
@@ -131,9 +131,12 @@ token_file=${KOINON_FETCH_TOKEN_FILE:-/run/secrets/github_token}
 echo "$sha  $dest" | sha256sum -c -
 ```
 
-Use `koinon-fetch` for every GitHub release asset instead of a bare `curl` or an `ADD` of a release
-URL: `hack/koinon-fetch-test.sh` fails a new `ADD` of a release asset, and `hack/pinned-download-lint.sh`
-fails a bare `curl` or `wget` in scripts. Details: [docs/dev/ci.md](ci.md#image-builds-authenticated-downloads-and-layer-cache-145).
+Use `koinon-fetch` for every GitHub release asset instead of an `ADD` of a release URL. GitHub
+honours a token for release assets only on its REST API, so an `ADD` of the github.com URL cannot
+authenticate, and `koinon-fetch` resolves the asset through `api.github.com`. `hack/koinon-fetch-test.sh`
+fails a new `ADD` of a release asset, or a token in an `ARG` or `ENV`, in `harnesses/*/Dockerfile` and
+`hack/e2e-toolchain/*Dockerfile`. A bare `curl` in a Dockerfile is not checked by any script, so review
+catches it; an image outside those paths is not covered by that test at all. Details: [docs/dev/ci.md](ci.md#image-builds-authenticated-downloads-and-layer-cache-145).
 
 ## 3. apt from snapshot.ubuntu.com, with retries
 
@@ -180,7 +183,7 @@ COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-ce
 ```
 
 Stages that never reach the final image (`dl`, `ca-bootstrap`) still carry the retry options
-(lines 49 to 51), because the checker applies to every apt call. A step that runs apt through another
+(the `dl` and `ca-bootstrap` stages above), because the checker applies to every apt call. A step that runs apt through another
 tool writes an `apt.conf.d` snippet with the same settings instead (see `hack/e2e-toolchain/web.Dockerfile`).
 
 ## 4. A licences stage
@@ -220,9 +223,10 @@ table) and note any GPL package that ships unmodified from Ubuntu.
 ## 5. A non-root user
 
 **Why.** OpenShell runs the sandbox as UID/GID 10001 with the home volume at `/sandbox` (spike 1, 8;
-[ADR 0048](../adr/0048-openshell-spike-results.md)), and the hardening defaults of
-[ADR 0045](../adr/0045-openshell-hardening-defaults.md) must not be weakened. So the image runs
-as that user, the files are root-owned and not writable by it, and only `/sandbox` belongs to the user.
+[ADR 0048](../adr/0048-openshell-spike-results.md); UID/GID 10001 is also recorded in
+[docs/spikes/kind.md](../spikes/kind.md) and [ADR 0052](../adr/0052-opencode-v2-flavor.md)), and the
+hardening defaults of [ADR 0045](../adr/0045-openshell-hardening-defaults.md) must not be weakened.
+So the image runs as that user, the files are root-owned and not writable by it, and only `/sandbox` belongs to the user.
 
 **The lines.** The user and its home, created with fixed IDs:
 
@@ -257,7 +261,9 @@ WORKDIR /sandbox
 5. A `licenses` stage and the files copied under `/usr/share/doc/`.
 6. UID/GID 10001, root-owned read-only files, `USER 10001:10001`, no Koinon binary in the image
    ([ADR 0049](../adr/0049-v01-scope-decisions.md)).
-7. A Makefile target like `harness-opencode`, an entry in `HARNESSES` in the Makefile and the harness seam described in
+7. A Makefile target like `harness-opencode` that passes `--build-context common=harnesses/common`
+   (a toolchain image built from another context inlines the downloader, as
+   `hack/e2e-toolchain/Dockerfile` does), an entry in `HARNESSES` in the Makefile and the harness seam described in
    [harnesses/README.md](../../harnesses/README.md), and a run of `make test-harnesses` (Docker).
 8. Tell the chart: a sandbox image reference goes through the registry rewrite of
    [ADR 0061](../adr/0061-image-pull-secrets-and-registry-mirrors.md) (`koinon.imageRef`), so do not
