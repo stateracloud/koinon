@@ -85,9 +85,9 @@ Already repaired or not a contradiction on this tree:
   (commits `4edea9286`, `6ec112458`, `e98781670`); it now prints `verdict=notrun` with the reason
   `sandbox denial`.
 - The brief against `sleep-chain.sh`. The brief (`docs/agents/subagent-brief.md`, "Work in your
-  worktree", the "No standalone `sleep`" bullet) forbids a foreground sleep loop and sends waits to
-  `hack/pr-wait.sh`, `run_in_background` or a Monitor call. `sleep-chain-check.sh` is a PreToolUse hook on
-  the Bash tool only, so it never sees a Monitor call. The two do not conflict.
+  worktree", the wait bullet) routes waits only to `hack/pr-wait.sh` or `run_in_background`, and names
+  `hack/hooks/sleep-chain-check.sh` as the enforcer: a PreToolUse hook that refuses a foreground sleep
+  in any spelling. The two do not conflict.
 
 Not checked against the live system: the hook refusal count (about 375 on 2026-11-08) and the
 classifier record. They are from the audit.
@@ -108,7 +108,7 @@ Checked against https://code.claude.com/docs/en/hooks on 2026-11-09:
 
 So the proposal is: the spawn hook denies only for a missing `model`, and a SubagentStart hook
 injects the digest. That hook cannot see the prompt, so it injects the digest into every subagent.
-This costs about the digest's size per spawn: `subagent-brief-digest.txt` is 1658 bytes, 255 words.
+This costs about the digest's size per spawn: `subagent-brief-digest.txt` is 1843 bytes, 289 words.
 
 The proposal adds `subagent-brief-digest.txt` to `hack/hooks/` (today it exists only in
 `~/.config/koinon/hooks/`), adds `hack/hooks/subagent-brief-inject.sh`, and registers a

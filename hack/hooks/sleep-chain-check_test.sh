@@ -119,7 +119,7 @@ case_ deny 'python3 -c "import time; time.sleep(30)"'
 case_ deny $'python3 - <<\'PY\'\nimport time\ntime.sleep(30)\nPY'
 case_ deny $'mkfifo /tmp/f\ncat /tmp/f'
 case_ deny 'mkfifo "$TMPDIR/ff"; read x < "$TMPDIR/ff"'
-case_ deny 'f=$(mktemp -u); mkfifo $f && head -n1 $f'
+case_ deny 'f=/tmp/ff; mkfifo $f && head -n1 $f'
 # ... in the foreground only.
 case_ allow '/bin/sleep 10' true
 case_ allow 'perl -e '"'"'select(undef,undef,undef,12)'"'"'' true
@@ -128,12 +128,19 @@ case_ allow $'mkfifo /tmp/f\ncat /tmp/f' true
 case_ allow '/bin/sleep 2'
 case_ allow 'perl -e '"'"'select(undef,undef,undef,0.2)'"'"
 case_ allow 'mkfifo /tmp/f'
+case_ allow 'mkfifo /tmp/f; cat notes.txt'
+case_ allow $'mkfifo /tmp/f\ngrep x notes.txt'
 case_ allow 'ls -l /tmp/f'
 # ... and the word as data is not a wait (heredoc body, quoted text written to a file).
 case_ allow $'python3 - <<\'PY\' > /dev/null\nopen("/tmp/x.yaml","w").write("run: sleep 5\\n")\nPY'
 case_ allow $'cat > payload.yaml <<\'EOF\'\nsteps:\n  - run: sleep 5\n  - run: /bin/sleep 30\n  - run: read -t 20 x\nEOF'
 case_ allow $'cat > p.py <<\'EOF\'\nimport time\ntime.sleep(30)\nEOF'
 case_ allow $'cat > p.pl <<\'EOF\'\nselect(undef,undef,undef,30);\nEOF'
+case_ allow 'git commit -m "fix: drop time.sleep(30) from the test"'
+case_ allow 'git commit -m "drop time.sleep(30)"'
+case_ allow 'grep -rn "time.sleep(10)" .'
+case_ allow 'grep -n "time.sleep(10)" f.py'
+case_ allow "echo 'select(undef,undef,undef,30)'"
 case_ allow 'echo "run: sleep 5" > payload.yaml'
 case_ allow "printf '%s\\n' '  - run: /bin/sleep 30' >> payload.yaml"
 case_ allow 'echo "read -t 30 x" >> notes.txt'
