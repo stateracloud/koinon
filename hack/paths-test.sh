@@ -73,7 +73,7 @@ if [[ -z $dups ]]; then ok; else bad "in both script-check and script-skip: $dup
 
 # --- 4. Example change sets through the consumers. ---------------------------------------------------------
 dirs=$(bash hack/ci-changes.sh --harnesses-dirs)
-jobs_for() { printf '%s\n' "$@" | CI_CHANGES_HARNESSS_DIRS=$dirs bash hack/ci-changes.sh --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '; }
+jobs_for() { printf '%s\n' "$@" | CI_CHANGES_HARNESSES_DIRS=$dirs bash hack/ci-changes.sh --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '; }
 e2e_for() { local rc=0; printf '%s\n' "$@" | bash hack/needs-e2e.sh --stdin >/dev/null || rc=$?; echo "$rc"; }
 example() { # <name> <want jobs> <want e2e exit> <paths...>
 	local name=$1 wj got ge

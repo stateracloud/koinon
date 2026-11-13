@@ -32,7 +32,7 @@ chartsmoke_dirs=$(bash $script --chartsmoke-dirs)
 
 # jobs_for <paths...>: the sorted jobs that turn on, space separated.
 jobs_for() {
-	printf '%s\n' "$@" | CI_CHANGES_HARNESSS_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
+	printf '%s\n' "$@" | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' '
 }
 
 # The path-gate jobs of #572 (tidy: go-tidy and go-lint, shell: lint-shell, scripts) and #579 (vuln: go-vuln) and #684 (fuzz) have their own table in
@@ -178,7 +178,7 @@ expect "$all" hack/paths-lib.sh
 expect_ignoring() { # <want harnesses value> <paths...>
 	local want=$1 got
 	shift
-	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_HARNESSS_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^harnesses=//p')
+	got=$(printf '%s\n' "$@" | CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^harnesses=//p')
 	total=$((total + 1))
 	if [[ $got != "$want" ]]; then
 		echo "FAIL: ignoring plumbing, harnesses for [$*]: want $want, got $got"
@@ -389,7 +389,7 @@ while IFS= read -r d; do
 done <<<"$real_dirs"
 # Fail closed: a dirs list without test/harnesses (a path strip that found nothing) turns harnesses on.
 total=$((total + 1))
-out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSS_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSES_DIRS=$'internal/execution\ninternal/prices' CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin) || true
 if ! grep -qx 'harnesses=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/harnesses must fail closed (harnesses=true)"
 	fails=$((fails + 1))
@@ -419,7 +419,7 @@ for p in charts/koinon/values.yaml hack/versions.env test/chartsmoke/smoke_test.
 done
 # Fail closed: a dirs list without test/chartsmoke turns chartsmoke on.
 total=$((total + 1))
-out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSS_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$'cmd/koinon-api\ninternal/preflight' bash $script --stdin) || true
+out=$(printf 'internal/zzz-not-imported/x.go\n' | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$'cmd/koinon-api\ninternal/preflight' bash $script --stdin) || true
 if ! grep -qx 'chartsmoke=true' <<<"$out"; then
 	echo "FAIL: a dirs list without test/chartsmoke must fail closed (chartsmoke=true)"
 	fails=$((fails + 1))
@@ -429,7 +429,7 @@ fi
 total=$((total + 1))
 all=$(bash $script | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ')
 [[ -n $all ]] || { echo "FAIL: no-argument run printed no jobs"; exit 1; }
-if [[ $(printf '' | CI_CHANGES_HARNESSS_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
+if [[ $(printf '' | CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash $script --stdin | sed -n 's/^\(.*\)=true$/\1/p' | sort | tr '\n' ' ') != "$all" ]]; then
 	echo "FAIL: an empty change list must turn every job on"
 	fails=$((fails + 1))
 fi
@@ -445,7 +445,7 @@ total=$((total + 1))
 	echo a >charts/a.yaml && echo b >docs/b.md
 	git add -A && git commit -q -m base
 	git mv charts/a.yaml docs/a.yaml && git commit -q -m rename
-	CI_CHANGES_HARNESSS_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash hack/ci-changes.sh HEAD~1
+	CI_CHANGES_HARNESSES_DIRS=$harnesses_dirs CI_CHANGES_CHARTSMOKE_DIRS=$chartsmoke_dirs bash hack/ci-changes.sh HEAD~1
 ) >"$tmp/rename.out" 2>&1 || true
 if ! grep -qx 'chart=true' "$tmp/rename.out"; then
 	echo "FAIL: renaming charts/a.yaml to docs/ must turn chart on: $(tr '\n' ' ' <"$tmp/rename.out")"

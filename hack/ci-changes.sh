@@ -26,11 +26,11 @@ strip_mod_dirs() {
 
 # harnesses_dirs: the repository-relative directory of every package of this module that the harnesses
 # suite builds, tests included (`go list -deps -test`, as the harnesses job runs it on linux).
-# CI_CHANGES_HARNESSS_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
+# CI_CHANGES_HARNESSES_DIRS (a list of directories) replaces the `go list` call; the test sets it once.
 harnesses_dirs() {
 	local out dirs
-	if [[ -v CI_CHANGES_HARNESSS_DIRS ]]; then
-		dirs=$CI_CHANGES_HARNESSS_DIRS
+	if [[ -v CI_CHANGES_HARNESSES_DIRS ]]; then
+		dirs=$CI_CHANGES_HARNESSES_DIRS
 	else
 		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/harnesses/...) || return 1
 		dirs=$(strip_mod_dirs <<<"$out")

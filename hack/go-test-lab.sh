@@ -45,7 +45,7 @@ touches-go)
 	changed=$(git diff --name-only --no-renames "$base" "$head" 2>/dev/null) || exit 2
 	[[ -n $changed ]] || exit 2
 	# Only go= is read: the directories of the harnesses suite (a `go list`) are not needed.
-	line=$(CI_CHANGES_HARNESSS_DIRS=${CI_CHANGES_HARNESSS_DIRS:-none} "$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || exit 2
+	line=$(CI_CHANGES_HARNESSES_DIRS=${CI_CHANGES_HARNESSES_DIRS:-none} "$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || exit 2
 	case $line in
 	go=true) exit 0 ;;
 	go=false) exit 1 ;;

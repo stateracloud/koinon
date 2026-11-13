@@ -113,7 +113,7 @@ plain=$(g rev-parse HEAD~1) # a one-parent commit
 g checkout -qb feat3; mkdir -p "$repo/harnesses"; echo f >"$repo/harnesses/x"; g add harnesses; g commit -qm feat3
 g checkout -q main; g merge -q --no-ff feat3 -m "Merge feat3"
 merge_flav=$(g rev-parse HEAD)
-export CI_CHANGES_HARNESSS_DIRS=test/harnesses # the directories the harnesses suite builds (no go list in the scratch repo)
+export CI_CHANGES_HARNESSES_DIRS=test/harnesses # the directories the harnesses suite builds (no go list in the scratch repo)
 
 cd "$repo"
 push() { echo "EVENT_NAME=push REF=refs/heads/main SHA=$1"; }

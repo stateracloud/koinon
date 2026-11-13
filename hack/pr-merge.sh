@@ -294,7 +294,7 @@ if [ $((admin + glass)) != 0 ]; then
       ci_sh=$ci_dir/hack/ci-changes.sh
       ci_root=$(cd "$here/.." && pwd)
     fi
-    fl=$(env -u HACK_PATHS_RULES -u CI_CHANGES_HARNESSS_DIRS CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^harnesses=//p') || fl=""
+    fl=$(env -u HACK_PATHS_RULES -u CI_CHANGES_HARNESSES_DIRS CI_CHANGES_IGNORE_PLUMBING=1 CI_CHANGES_ROOT="$ci_root" "$ci_sh" --stdin <<<"$files" 2>/dev/null | sed -n 's/^harnesses=//p') || fl=""
     if [ "$fl" != false ]; then
       # true, or the rule could not be applied: needed.
       fv=$(prv_judge "$rows" "$wfruns" false harnesses | awk -F'\t' 'NR == 1 { print $2 }')
