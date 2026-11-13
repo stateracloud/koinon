@@ -38,7 +38,9 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.reply(401, {"error": "bad login"})
             return self.reply(200, {"passwordChangeRequired": False},
                               [("Set-Cookie", "__Host-koinon_session=fake-session-token; Path=/; Secure; HttpOnly")])
-        if "fake-session-token" not in self.headers.get("Cookie", ""):
+        # As strict as the server's http.ParseCookie: "a=b; c=d" only, no empty item (the jar has blank lines).
+        items = self.headers.get("Cookie", "").split("; ")
+        if "__Host-koinon_session=fake-session-token" not in items or "" in items:
             return self.reply(401, {"code": "unauthenticated"})
         if self.headers.get("Connect-Protocol-Version") != "1":
             return self.reply(403, {"code": "csrf"})
@@ -89,7 +91,7 @@ check "$out" "approved a-want" "the pending approval of the named repository is 
 check "$(cat "$tmp/calls")" '"argsSha256": "sha-want"' "Approve carries the hash GetApproval showed"
 nocheck "$(cat "$tmp/calls")" 'a-other' "another repository's approval is not touched"
 nocheck "$(cat "$tmp/calls")" 'a-done' "a decided approval is not touched"
-check "$(stat -c %a "$tmp/jar")" "^600$" "the cookie jar is private (0600)"
+check "$(stat -c %a "$tmp/jar" 2>/dev/null || stat -f %Lp "$tmp/jar")" "^600$" "the cookie jar is private (0600)"
 stop
 
 start '[{"id":"a-other","target":"github:acme/other","status":"STATUS_PENDING","argsSha256":"x"}]'
@@ -101,6 +103,32 @@ start "$two"
 KOINON_APPROVER_PASSWORD=koinon_test_wrong approver 1 acme/widgets
 check "$out" "login as drill-admin: HTTP 401" "a refused login is exit 1"
 stop
+
+# Gitea targets (#967): same checks, and a github approval of the same name is never taken for it.
+both='[{"id":"a-gh","target":"github:acme/widgets","status":"STATUS_PENDING","argsSha256":"sha-gh"},
+       {"id":"a-gt","target":"gitea:acme/widgets","status":"STATUS_PENDING","argsSha256":"sha-gt"}]'
+start "$both"
+approver 0 gitea:acme/widgets
+check "$out" "approved a-gt (gitea:acme/widgets)" "a gitea target approves the gitea approval"
+check "$(cat "$tmp/calls")" '"argsSha256": "sha-gt"' "Approve carries the gitea approval's hash"
+nocheck "$(cat "$tmp/calls")" 'a-gh' "the github approval of the same name is not touched"
+stop
+
+start "$both"
+approver 0 acme/widgets
+check "$out" "approved a-gh (github:acme/widgets)" "a bare owner/name still means github"
+nocheck "$(cat "$tmp/calls")" 'a-gt' "a bare owner/name does not touch the gitea approval"
+stop
+
+start '[{"id":"a-gh","target":"github:acme/widgets","status":"STATUS_PENDING","argsSha256":"x"}]'
+approver 3 gitea:acme/widgets
+check "$out" "no pending approval for gitea:acme/widgets" "a gitea target without a gitea approval is exit 3"
+stop
+
+approver 2 gitlab:acme/widgets
+check "$out" "must be github or gitea" "another connector is a usage error"
+approver 2 gitea:widgets
+check "$out" "repo must be owner/name" "a gitea target without an owner is a usage error"
 
 rc=0
 usage=$("$repo/hack/approve-pr.sh" only-one-arg 2>&1) || rc=$?
