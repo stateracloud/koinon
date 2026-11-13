@@ -59,7 +59,7 @@ check "e2e-kind.yml: the quickstart job is not limited to pull requests and push
 	! awk "/^  quickstart:/ { j = 1 } /^  result:/ { j = 0 } j && /^    if:.*event_name/ { bad = 1 } END { exit !bad }" "$1"' _ "$wfdir/e2e-kind.yml"
 # shellcheck disable=SC2016
 check "e2e-kind.yml: a queue build is never cancelled" bash -c '
-	grep -q "cancel-in-progress: \${{ github.event_name == .pull_request. }}" "$1"' _ "$wfdir/e2e-kind.yml"
+	grep -q "cancel-in-progress: \${{ github.event_name == .pull_request. && (github.event.action != .labeled. || github.event.label.name == .e2e.) }}" "$1"' _ "$wfdir/e2e-kind.yml"
 
 # Every required name reports on a queue build. Only a workflow without a `merge_group` trigger makes the entry wait
 # for the 60-minute timeout; a job skipped by its `if:` reports a skipped (green) check that tests nothing, which is
@@ -245,7 +245,7 @@ check "ci.yml: harnesses is skipped on pull_request and gated on its path output
 check "hack/ci-required.txt: harnesses is required, not advisory" bash -c 'grep -qx "harnesses" "$1" && ! grep -q "^advisory harnesses" "$1"' _ "$repo/hack/ci-required.txt"
 # `e2e result` reads `decide`; a skipped decide on a queue build would hand the gate an empty output.
 decide_if=$(awk '/^  decide:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/e2e-kind.yml")
-check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || !github.event.pull_request.draft) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'"
+check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'labeled' || github.event.label.name == 'e2e'))) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'"
 check "e2e-kind.yml: the advisory drill job is continue-on-error and runs only on schedule, rc tags and a drill dispatch" bash -c '
 	awk "/^  drill:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    continue-on-error: true/ { c = 1 } j && /event_name == .schedule./ { s = 1 } j && /refs\/tags\// { t = 1 } j && /inputs.suite == .drill./ { d = 1 } END { exit !(c && s && t && d) }" "$1"' _ "$wfdir/e2e-kind.yml"
 check "e2e-kind.yml: result is skipped on an rc tag push and a drill dispatch" bash -c '

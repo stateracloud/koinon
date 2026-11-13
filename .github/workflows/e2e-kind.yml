@@ -34,7 +34,10 @@ run-name: e2e-kind${{ inputs.commit && format(' ({0}) bisect {1}', inputs.commit
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # `labeled` is for the `e2e` label only (#971): `pr-merge --admin` and ship.sh --e2e add it to a PR that is
+    # already open, and without this trigger the label started nothing until a push or a rerun. Any other label
+    # skips `decide` (see its `if:`) and does not share the PR's concurrency group (a label must never cancel a run).
   # The merge queue (#225, #444, ADR 0102, ADR 0105): `e2e result` is required, so it reports on the queue's commit.
   # When the entry's own diff (against merge_group.base_sha) is e2e-relevant, or the pull request has the `e2e`
   # label, decide starts the quickstart on the queue commit (main plus the pull request): that run is the one
@@ -73,14 +76,14 @@ permissions:
 # replaces the older (batching). Everything else (dispatch, nightly, a merge queue build) runs alone:
 # a queue build is never cancelled (its group is its run id, cancel-in-progress is off for it).
 concurrency:
-  group: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && format('e2e-kind-tag-{0}', github.ref) || github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && format('e2e-kind-tag-{0}', github.ref) || github.event_name == 'push' && 'e2e-main' || github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'e2e') && format('e2e-kind-pr-{0}', github.ref) || format('e2e-kind-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'e2e') }}
 
 jobs:
   # Cheap: a checkout, a git diff, one `go list`.
   decide:
     # Not for drafts, not for an rc tag push or a drill dispatch (those run only the `drill` job).
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'labeled' || github.event.label.name == 'e2e'))) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

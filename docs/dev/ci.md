@@ -850,6 +850,38 @@ workflows that produce a required context listen to it (`ci`, `dco`, `secrets`, 
 `e2e-kind`), `hack/ci-merge-group-test.sh` keeps them subscribed, and a new required workflow
 subscribes in the same PR.
 
+### Renaming a required check
+
+Prior art: GitHub matches a required check by its name only, and a required check that no run reports stays
+pending and blocks the merge ([about protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging)).
+So a rename needs a transition in which both names report, then the old one is dropped; Koinon does that.
+Each script reads the required list from the commit it judges, never from the checkout it runs in and never from
+today's ruleset (#971):
+
+| Script | Reads the required list from |
+|---|---|
+| `hack/pr-merge.sh` | `hack/ci-required.txt` on the base branch on the remote; on the PR head when the PR changes that file |
+| `hack/pr-wait.sh --checks` | the ruleset's contexts, but a context missing on the head that the head's `hack/ci-required.txt` does not list exits 1 with `UNDEFINED <name>` at once instead of waiting |
+| `hack/release-gate.sh` | `hack/ci-required.txt` of the tagged commit (the ruleset only when that tree has none), so an earlier rc is still judged by the checks its own tree had |
+
+The procedure, in this order (the ruleset is changed by the maintainer, `docs/maintainers/agent-workflow.md`):
+
+1. **Add the new name next to the old one.** One PR gives the job both names (a second job, or a matrix entry)
+   and lists the new name in `hack/ci-required.txt` as `advisory <new>`. Merge it through the queue.
+2. **Ruleset: add the new context** (keep the old one). Change the list: `advisory <new>` becomes required.
+   `hack/ci-required-test.sh --ruleset` shows no difference.
+3. **Ruleset: remove the old context**, then merge the PR that drops the old job and the old line. Remove the
+   old context first: the queue commit of that PR has no run of the old name, so a ruleset that still requires it
+   blocks the entry. Until the PR merges, `main` is guarded by the new name.
+4. Tags cut before the rename stay releasable: `release-gate.sh` judges each by the list in its own tree.
+
+A one-PR rename (change the job name, the list line and the ruleset together) is possible but costs more: every
+other open PR is blocked from the moment the ruleset changes until it merges main (`UNDEFINED`), and the rename PR
+itself cannot enter the queue before the ruleset names the new check. Use it only when no other PR is open. A
+`.github/` PR that is merged with `pr-merge.sh --admin` needs a green `quickstart` on its head when it is
+e2e-relevant: add the `e2e` label (`hack/ship.sh --e2e`); the label starts the run itself (`e2e-kind.yml` runs on
+`labeled`, for that label only), so no push or rerun is needed.
+
 Third-party analysers are advisory: their checks never enter the list or the ruleset, and
 `hack/pr-wait.sh` (so `hack/pr-merge.sh`) judges only the base branch's required contexts, the
 `--require` names: any other check that is red or pending is printed as

@@ -24,6 +24,7 @@ cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 [[ $1 == merge-base && -n ${GIT_NOT_ANCESTOR:-} ]] && exit 1
 [[ $1 == diff ]] && { printf '%s\n' "${GIT_DIFF:-}"; exit 0; }
+[[ $1 == show && $2 == *:hack/ci-required.txt ]] && { cat "$FX/ci-required-${2%%:*}.txt" 2>/dev/null || cat "$FX/ci-required.txt" 2>/dev/null || exit 128; exit 0; }
 [[ $1 == tag ]] && { printf '%s\n' ${GIT_TAGS:-}; exit 0; }
 [[ $1 == rev-list ]] && { cat "$FX/tag-${3}" 2>/dev/null || exit 1; exit 0; }
 exit 0
@@ -142,6 +143,8 @@ set_ruleset() { # <context>...: the rules/branches answer
 	ctx=$(printf '%s\n' "$@" | jq -R '{context: .}' | jq -s .)
 	jq -n --argjson ctx "$ctx" \
 		'[{type: "deletion"}, {type: "required_status_checks", ruleset_id: 7, parameters: {required_status_checks: $ctx}}]' >"$FX/rules.json"
+	# the tagged commit's own hack/ci-required.txt lists the same checks (#971: it, not the ruleset, is the list)
+	printf '# comment\n%s\n' "$(printf 'external %s\n' "$@")" >"$FX/ci-required.txt"
 }
 default_run() { # <sha> <name>: ci is run 900; dco, claim and e2e result are their own workflows' runs
 	[[ $1 == "$qh" ]] || { echo 1; return; }
@@ -606,18 +609,35 @@ check "quickstart: a duplicate across pages does not count as a run read" "$(gat
 check "...with the unread message" "$(grep -c 'read 100 of 102 e2e-kind runs' "$tmp/err")" 1
 
 new_case
-rm "$FX/rules.json"
+rm "$FX/rules.json" "$FX/ci-required.txt"
 check "unreadable rules fail closed" "$(gate_rc)" 1
-check "...with a clear message" "$(grep -c 'cannot read the rules that apply' "$tmp/err")" 1
+check "...with a clear message" "$(grep -c 'nor the rules that apply' "$tmp/err")" 1
 
 new_case
+rm "$FX/ci-required.txt"
 echo '[{"type":"deletion"}]' >"$FX/rules.json"
 check "no required status checks fails closed" "$(gate_rc)" 1
 check "...with a clear message (none)" "$(grep -c 'no required status checks apply' "$tmp/err")" 1
 
 new_case
+rm "$FX/ci-required.txt"
 rm "$FX/repo.json"
-check "an unreadable default branch fails closed" "$(gate_rc)" 1
+check "an unreadable default branch fails closed (no ci-required.txt in the tree)" "$(gate_rc)" 1
+
+# #971: the list is the tagged commit's own hack/ci-required.txt, not today's ruleset.
+new_case
+set_ruleset go dco "e2e result" renamed # the ruleset already names a check this tree never had
+printf 'aggregator go\nexternal dco\nexternal e2e result\n' >"$FX/ci-required.txt"
+check "a check the ruleset added later does not fail an older tree" "$(gate_rc)" 0
+check "...and the list's source is named" "$(grep -c 'required checks: hack/ci-required.txt of' "$tmp/out")" 1
+new_case
+printf 'aggregator go\nexternal dco\nexternal e2e result\nharnesses\n' >"$FX/ci-required.txt"
+check "a check the tree lists but never reported fails" "$(gate_rc)" 1
+check "...naming it" "$(grep -c 'FAIL: harnesses: no check run found' "$tmp/err")" 1
+new_case
+printf '# only comments\nadvisory fuzz\n' >"$FX/ci-required.txt"
+check "a ci-required.txt with no required row falls back to the ruleset" "$(gate_rc)" 0
+check "...and says so" "$(grep -c 'required checks: the ruleset' "$tmp/out")" 1
 
 new_case
 check "a commit off main fails" "$(GIT_NOT_ANCESTOR=1 gate_rc)" 1

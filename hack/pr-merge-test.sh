@@ -45,6 +45,11 @@ case "$1 $2" in
   cat "$FAKE_DIR/files" ;;
 "api repos/{owner}/{repo}/rules/branches/"*)
   if [ -f "$FAKE_DIR/rules" ]; then cat "$FAKE_DIR/rules"; else exit 1; fi ;;
+"api -H")
+  ref=${!#}
+  ref=${ref##*ref=}
+  [ -f "$FAKE_DIR/req-$ref" ] || exit 1
+  cat "$FAKE_DIR/req-$ref" ;;
 "api repos/{owner}/{repo}/commits/"*"/status") apijq "$FAKE_DIR/statuses" "$@" ;;
 "api repos/{owner}/{repo}/commits/"*"/check-runs"*) apijq "$FAKE_DIR/runs" "$@" ;;
 "api repos/{owner}/{repo}/actions/runs"*) [ -f "$FAKE_DIR/wfruns" ] || exit 9; apijq "$FAKE_DIR/wfruns" "$@" ;;
@@ -624,6 +629,36 @@ for b in err empty; do
   CICH_BODY="$tmp/cich-$b.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
   check "a base copy that gives no answer ($b) is treated as harnesses needed" 10 nomerge
 done
+
+# #971: the required list is the base branch's on the remote, or the PR head's when the PR changes
+# hack/ci-required.txt; never the local checkout. PR_MERGE_REQUIRED (the override every test above uses) is unset.
+req_run() { # <files of the PR, \n separated>
+  setup false "$green"
+  printf '%b' "$1" >"$FAKE_DIR/files"
+  printf 'aggregator go\nquick checks\nexternal dco\nharnesses\n' >"$FAKE_DIR/req-main"
+  printf 'aggregator go\nquick checks\nexternal dco\nharnesses-new\n' >"$FAKE_DIR/req-abc1234def"
+  rc=0
+  out=$(env -u PR_MERGE_REQUIRED "$repo/hack/pr-merge.sh" 7 2>&1) || rc=$?
+}
+req_run 'hack/x.sh\n'
+check "the base's list is read from the remote: a context the head lacks is refused" 1 nomerge
+grep -q 'NOT GREEN harnesses (missing)' <<<"$out" || { echo "FAIL: the base's harnesses is judged: $out" >&2; fail=1; }
+grep -q 'ref=main' "$FAKE_DIR/calls" || { echo "FAIL: reads the list at the base branch" >&2; fail=1; }
+req_run 'hack/x.sh\nhack/ci-required.txt\n'
+check "a PR that changes hack/ci-required.txt is judged by its own list (a rename)" 1 nomerge
+{ grep -q 'NOT GREEN harnesses-new (missing)' <<<"$out" && ! grep -q 'NOT GREEN harnesses (' <<<"$out"; } || { echo "FAIL: the head's list decides: $out" >&2; fail=1; }
+grep -q 'ref=abc1234def' "$FAKE_DIR/calls" || { echo "FAIL: reads the list at the head" >&2; fail=1; }
+setup false "$green
+$(r harnesses-new 2026-11-01T10:00:00Z skipped)"
+printf 'hack/ci-required.txt\n' >"$FAKE_DIR/files"
+printf 'aggregator go\nquick checks\nexternal dco\nharnesses-new\n' >"$FAKE_DIR/req-abc1234def"
+rc=0
+out=$(env -u PR_MERGE_REQUIRED "$repo/hack/pr-merge.sh" 7 2>&1) || rc=$?
+check "the renaming PR merges once the new name is green" 0 merge
+setup false "$green"
+rc=0
+out=$(env -u PR_MERGE_REQUIRED "$repo/hack/pr-merge.sh" 7 2>&1) || rc=$?
+check "an unreadable list refuses (fail closed)" 2 nomerge
 
 # Claim warning (#961): warn only, never refuse; silent for no claim or the caller's own lane.
 for c in "other lane|me#lane2|1" "other login|you#main|1" "other login, old holder|you/host/s1#main|1" "own lane|me#main|0" "own lane, no lane suffix|me|0" "no claim||0"; do

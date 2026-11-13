@@ -54,6 +54,8 @@
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
 #       8 the PR was in the merge queue and left it without merging (DEQUEUED).
+#       A required context of the ruleset that is missing on the head and that the head's hack/ci-required.txt does not
+#       list prints `UNDEFINED <names>: ...` and exits 1 at once (#971, a renamed check): it would never report.
 #       Merge queue (#225): a queued PR is OPEN until the queue build merges it; the wait prints
 #       `in the merge queue (<position> <state>)` and continues to `MERGED` (exit 0). With --checks the head's
 #       checks are judged as before: they gate entry to the queue; the queue build's own checks are on the
@@ -123,6 +125,8 @@ case $pr in '' | *[!0-9]*) usage ;; esac
 # hack/pr-merge.sh. A name is judged on its newest row of the workflow run that counts; see that file's header.
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "$0")" && pwd)/lib/pr-verdict.sh"
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "$0")" && pwd)/lib/ci-required.sh"
 # shellcheck disable=SC2016 # $req is a jq variable, bound by jqn
 norm="$PRV_JQ"'[(.statusCheckRollup // [])[] | prv_row] | prv_collapse'
 
@@ -168,6 +172,7 @@ emit() { # print only when the line differs from the previous one
 
 threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
+defined_for="" defined=""
 start=$SECONDS
 while :; do
   if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository 2>/dev/null) && [ -n "$json" ]; then
@@ -351,6 +356,28 @@ while :; do
         jq -e --arg c "$c" 'any((.statusCheckRollup // [])[]; (.name // .context // "") == $c)' <<<"$json" >/dev/null ||
           missing_ctx+="${missing_ctx:+,}$c"
       done <<<"$ctxs"
+    fi
+    # A ruleset context the head's own workflows do not define can never report on this head (a check renamed
+    # or added by the ruleset ahead of the PR, #971): report it instead of waiting for it. "Defined" is the
+    # head's hack/ci-required.txt (required or advisory); when that cannot be read nothing is reported.
+    if [ -n "$missing_ctx" ] && [ -n "$head" ]; then
+      if [ "$defined_for" != "$head" ]; then
+        defined_for=$head defined=""
+        if dtxt=$(cir_fetch "$head" 2>/dev/null); then
+          defined=$(printf '%s\n' "$dtxt" | sed -e 's/#.*//' | awk 'NF { if ($1 == "advisory") sub(/^advisory /, ""); else sub(/^(aggregator|external) /, ""); sub(/[[:space:]]+$/, ""); print }')
+        fi
+      fi
+      if [ -n "$defined" ]; then
+        undefined=""
+        IFS=, read -r -a mc <<<"$missing_ctx"
+        for c in "${mc[@]}"; do
+          grep -qxF -- "$c" <<<"$defined" || undefined+="${undefined:+,}$c"
+        done
+        if [ -n "$undefined" ]; then
+          echo "UNDEFINED $undefined: required by the ruleset, but hack/ci-required.txt on the head ${head:0:7} does not list it, so no run of this head will report it. A renamed or new required check needs the ruleset and the PR changed in the right order (docs/dev/ci.md \"Renaming a required check\")"
+          exit 1
+        fi
+      fi
     fi
     total=$(jqn "$norm | length" <<<"$json")
     pending=$(jqn -r "$norm | [.[] | select(.done | not) | .name] | sort | join(\",\")" <<<"$json")
