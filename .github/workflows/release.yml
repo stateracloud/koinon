@@ -4,7 +4,12 @@
 # publishes the three Go images, the OpenCode flavor image (ADR 0059) and the OCI Helm chart to
 # ghcr.io/<owner>/<repo> (ghcr.io/stateracloud/koinon) and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
 # retested for the gate: it only checks that the tagged commit is on main and that the required CI
-# checks succeeded on it.
+# checks succeeded on it. For an rc tag that includes the restore drill (ADR 0109, #518): the push of the tag
+# starts the drill (e2e-kind.yml, up to two hours), the gate first waits for that run to finish
+# (hack/release-drill-wait.sh, which only waits and never judges) and then judges the drill-result.json it left;
+# the gate stays the one judge and fails closed. The result it judged is attached to the draft release as
+# drill-result.json (#928). The `test-images` job also publishes the fake model server and the RT1 fixture
+# images at the tagged commit; they are test images for the lab drills, not product images.
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
@@ -34,7 +39,9 @@ jobs:
   gate:
     name: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The wait for the tag-push drill (up to 150 minutes, hack/release-drill-wait.sh) plus the checks. A wait that
+    # runs out ends in the gate's own failure ("no green result"), never in a release.
+    timeout-minutes: 170
     permissions:
       contents: read
       checks: read
@@ -45,12 +52,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false # hack/release-gate.sh fetches main anonymously (public repository)
+      # An rc tag push starts the drill in e2e-kind.yml at the same moment as this job. Wait for it; a final tag
+      # (whose evidence is the lab result on the rc release) does not wait.
+      - name: wait for the restore drill of this tag push (rc only)
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: hack/release-drill-wait.sh
       - name: tagged commit is on main and its required checks succeeded
         env:
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
-        run: hack/release-gate.sh
+          DRILL_RESULT_OUT: ${{ runner.temp }}/drill-result/drill-result.json # an rc: the green kind result the gate judged
+        run: |
+          mkdir -p "$RUNNER_TEMP/drill-result"
+          hack/release-gate.sh
+      # The gate passed, so for an rc this file exists and is green; the release job attaches it to the release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: contains(github.ref_name, '-rc.')
+        with:
+          name: drill-result
+          path: ${{ runner.temp }}/drill-result/drill-result.json
+          if-no-files-found: error
+          retention-days: 14
 
   release:
     name: release
@@ -82,7 +108,7 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false # no cache, as with setup-go above; turns automatic caching off explicitly
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: ${{ env.HELM_VERSION }}
       - name: log in to ghcr.io
@@ -100,6 +126,29 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      # An rc release carries the drill result the gate judged (#928). The release is a draft, which the
+      # tags endpoint does not return, so it is found by its tag in the list of releases. A missing artifact
+      # or release fails the job (the gate job uploads the artifact for every rc).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: contains(github.ref_name, '-rc.')
+        with:
+          name: drill-result
+          path: drill-result
+      - name: attach drill-result.json to the draft release (rc only)
+        if: contains(github.ref_name, '-rc.')
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)] | first | .id // empty")
+          [[ -n $id ]] || { echo "no draft release for $TAG" >&2; exit 1; }
+          jq -e '.commit and .verdict == "pass"' drill-result/drill-result.json >/dev/null
+          gh api --method POST "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=drill-result.json" \
+            -H 'Content-Type: application/json' --input drill-result/drill-result.json >/dev/null
+          echo "attached drill-result.json to the draft release of $TAG"
 
       # The chart takes its version and appVersion from the tag; nothing is committed for it.
       - name: package and push the chart
@@ -224,6 +273,96 @@ jobs:
           [[ -s flavor-digests/amd64 && -s flavor-digests/arm64 ]] || { echo "want a digest for amd64 and arm64" >&2; exit 1; }
           hack/release-flavor.sh --merge "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" \
             "$(<flavor-digests/amd64)" "$(<flavor-digests/arm64)" >>"$GITHUB_OUTPUT"
+
+  # The test images the lab drills need (#928): the fake model server and the RT1 fixture images, built at the
+  # tagged commit and pushed under the same repository path as the release images (koinon-fakemodel, rt1-*; tags
+  # without the "v"). TEST images, not product images: the chart never references them and nothing installs them
+  # in production. The lab mirrors them by digest because it cannot build images. Signed by `sign-test-images`.
+  test-images:
+    name: test-images
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write # pushes the images
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # a release never restores a cache that a pull request or branch build could have written
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          cache-binary: false # a release job publishes artifacts: nothing to restore (zizmor cache-poisoning)
+      - name: install ko and crane
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          hack/fetch-pinned.sh "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz" "$KO_SHA256_AMD64" "$RUNNER_TEMP/ko.tgz"
+          tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}"
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+      - name: log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          crane auth login ghcr.io -u "$ACTOR" --password-stdin <<<"$TOKEN"
+      - name: build and push the test images
+        env:
+          TAG: ${{ github.ref_name }}
+        run: hack/release-test-images.sh "$KOINON_IMAGE_REGISTRY" "$TAG" "$RUNNER_TEMP/test-image-refs.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-image-refs
+          path: ${{ runner.temp }}/test-image-refs.txt
+          if-no-files-found: error
+
+  # Keyless cosign signatures for the test images, like `sign` (ADR 0049: off unless RELEASE_SIGNING is 'true').
+  # Its own job, so that a failed test image never blocks the signing of the release images.
+  sign-test-images:
+    name: sign-test-images
+    needs: test-images
+    if: vars.RELEASE_SIGNING == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # cosign pushes signatures next to the images
+      id-token: write # keyless signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-image-refs
+          path: test-images
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+      - name: log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: sign
+        run: |
+          set -euo pipefail
+          [[ -s test-images/test-image-refs.txt ]] || { echo "no test image refs" >&2; exit 1; }
+          while read -r _ ref; do
+            cosign sign --yes "$ref"
+          done <test-images/test-image-refs.txt
 
   # Keyless cosign signing and SBOM attestations. Off unless RELEASE_SIGNING is 'true'.
   sign:

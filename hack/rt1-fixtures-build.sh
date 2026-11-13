@@ -31,7 +31,7 @@ searxng_tag=2026.10.27
 searxng_mcp=isokoliuk/mcp-searxng@sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60
 searxng_mcp_tag=2.9.0
 root="$(cd "$(dirname "$0")/.." && pwd)"
-repo="${registry%/}/koinon"
+repo="${RT1_REPO:-${registry%/}/koinon}" # RT1_REPO: the full repository path, when it is not <REGISTRY>/koinon (the release workflow, #928)
 
 run() {
   echo "+ $*" >&2

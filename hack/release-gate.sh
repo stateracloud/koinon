@@ -9,6 +9,7 @@
 # swapped for a "local checks recorded" gate without touching the release job.
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
+# (and, optional, DRILL_RESULT_OUT: a path where an rc tag's green kind drill-result.json is copied to)
 # (needs checks:read, contents:read, actions:read and pull-requests:read; the ruleset is read with the implicit
 # metadata permission). The required checks are read from
 # the `main` ruleset, in this order (ADR 0104-era route, docs/dev/releasing.md): the tagged commit itself;
@@ -354,6 +355,8 @@ kind_drill() {
 		unzip -p "$dir/a.zip" '*drill-result.json' >"$dir/r.json" 2>/dev/null || { why="artifact $id has no drill-result.json (the suite did not finish)"; continue; }
 		if why=$(drill_verdict "$dir/r.json" "$SHA" kind); then
 			echo "ok: kind restore drill (artifact $id; $why)"
+			# The release workflow attaches the evidence it just judged to the release (#928).
+			if [[ -n ${DRILL_RESULT_OUT:-} ]]; then cp "$dir/r.json" "$DRILL_RESULT_OUT" || return 2; fi
 			rm -rf "$dir"
 			return 0
 		fi

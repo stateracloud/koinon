@@ -89,8 +89,15 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    `drill-logs` artifact for the commit whose `drill-result.json` says that commit, profile `kind` and
    verdict `pass`; the `drill` job of `e2e-kind.yml` makes it nightly or on
    `gh workflow run e2e-kind.yml -f suite=drill --ref <branch at the commit>` (not with `-f commit=`: the gate
-   matches the run's own commit). The drill of an rc tag push takes up to two hours and the release `gate`
-   job does not wait for it: run the drill before you tag, or re-run the gate job once it is green. Artifacts keep 14 days. A
+   matches the run's own commit). The push of an rc tag starts that drill itself and it takes up to two hours, so the
+   release `gate` job first runs `hack/release-drill-wait.sh`: it waits (150 minutes at most) for the tag push's
+   `e2e-kind` run to finish, and only waits. It never reads a result and cannot make anything pass; the gate
+   then judges the `drill-logs` artifact as above. A run that never appears, a wait that runs out or an API
+   error end in the gate's own failure ("no green result"), which fails closed; no person has to re-run
+   anything while the drill is running. After a red or missing drill, fix it and re-run the `gate` job (or the
+   workflow) once a green drill artifact for the commit exists. The gate copies the green result it judged
+   (`DRILL_RESULT_OUT`), and the `release` job attaches it to the draft release as `drill-result.json` (the
+   kind result; the lab result of a final tag is the separate `drill-result-lab.json` below). Artifacts keep 14 days. A
    final tag needs the lab result of the rc it promotes (below). A check that is neither `pass` nor
    `known-gap` makes a result red whatever its `verdict` field says. Known gaps do not block; the gate prints
    them. It fails closed on anything it cannot read.
@@ -222,6 +229,21 @@ pushed with the image. Verify as shown under [Verify with no login](#verify-with
 
 Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again with
 `gh variable delete RELEASE_SIGNING`.
+
+## Test images
+
+The workflow's `test-images` job publishes the images that the lab drills need, built at the tagged
+commit, under the release images' repository path: `ghcr.io/<owner>/<repo>/koinon-fakemodel` (the fake model
+server of `test/drill`, `cmd/koinon-fakemodel`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
+images of `hack/rt1-fixtures-build.sh`; `rt1-prometheus`, `rt1-searxng` and `rt1-searxng-mcp` are copies of
+pinned upstream images, unmodified). Tags are the release version without the `v` (the upstream copies also
+keep their upstream tag). The lab cannot build images, so it mirrors them by digest; the job's artifact
+`test-image-refs` lists each image as a digest reference. When `RELEASE_SIGNING` is `true`, the
+`sign-test-images` job signs each one keyless, like the release images (a failed test image never blocks the
+signing of the release images). These are **test images, not product images**: the chart does not reference
+them, nothing installs them in production, and they carry no support promise. A signature says only that this
+workflow pushed the digest at that commit. A new GHCR package starts private: after the first rc, make each
+public in its package settings if the lab pulls anonymously (as under [Make the packages public](#make-the-packages-public)).
 
 ## Make the packages public
 

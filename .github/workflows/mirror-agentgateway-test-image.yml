@@ -9,9 +9,9 @@
 # copy has that digest. It runs on any ref, so a pull request that moves the pin can fill the mirror
 # before its own go-test pulls it: the pin is read from the ref it runs on, and by-digest content
 # cannot be wrong. Only main moves the pin's tag (v1.7.0); another ref tags the copy by its digest
-# (pin-<hex>; not sha256-<hex>, the OCI referrers tag schema), so a branch never changes what a version tag names. The GHCR package stays private until v0.3:
-# the go-test job pulls it with its own GITHUB_TOKEN (packages: read), which works only while the
-# package's "Manage Actions access" lists this repository with read. The image's source label names
+# (pin-<hex>; not sha256-<hex>, the OCI referrers tag schema), so a branch never changes what a version tag names. Koinon's released packages are public (ADR 0027),
+# but this one is a CI test image and stays private: the go-test job pulls it with its own
+# GITHUB_TOKEN (packages: read), which works only while the package's "Manage Actions access" lists this repository with read. The image's source label names
 # the upstream repository, so GHCR does not link the package here by itself: after the first run,
 # check that setting and add the repository if it is missing.
 name: mirror agentgateway test image

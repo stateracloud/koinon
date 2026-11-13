@@ -629,6 +629,15 @@ check "an rc with a green kind drill passes" "$(gate_rc)" 0
 check "...and says so" "$(grep -c '^ok: kind restore drill (artifact 501; known gaps: none)' "$tmp/out")" 1
 
 new_case
+rm -f "$tmp/drill-out.json"
+check "an rc with a green kind drill passes (result copy asked for)" "$(DRILL_RESULT_OUT=$tmp/drill-out.json gate_rc)" 0
+check "...and DRILL_RESULT_OUT holds the result that was judged" "$(jq -r '.commit + " " + .topology.profile + " " + .verdict' "$tmp/drill-out.json")" "$sha kind pass"
+new_case
+rm -f "$tmp/drill-out.json" "$FX/drill-artifacts.json"
+check "an rc with no drill fails (result copy asked for)" "$(DRILL_RESULT_OUT=$tmp/drill-out.json gate_rc)" 1
+check "...and writes no copy" "$([[ -e $tmp/drill-out.json ]] && echo yes || echo no)" no
+
+new_case
 rm "$FX/drill-artifacts.json"
 check "an rc with no drill artifact fails" "$(gate_rc)" 1
 check "...and says to run the drill" "$(grep -c 'no drill-logs artifact for aaaa111' "$tmp/err")" 1
