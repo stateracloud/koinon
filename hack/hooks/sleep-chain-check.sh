@@ -3,8 +3,8 @@
 #
 # Claude Code PreToolUse hook on the Bash tool (issue 843; docs/agents/guards.md, "No sleep of 5 s or
 # more"). It replaces the maintainers' earlier local copy. A foreground `sleep`
-# blocks the session and burns the turn while it waits; waits belong in `hack/pr-wait.sh`,
-# `run_in_background` or a Monitor call (docs/agents/subagent-brief.md, "No standalone sleep").
+# blocks the session and burns the turn while it waits; waits belong in hack/pr-wait.sh or a
+# run_in_background command (docs/agents/subagent-brief.md, the wait bullet).
 # It refuses a foreground Bash command whose literal `sleep` durations add up to 5 seconds or more
 # (`sleep 5`, `sleep 1m`, `sleep 2; sleep 3`, `sleep 1 2 2`, `FOO=1 sleep 9`, `timeout 20 sleep 9`,
 # `sleep infinity`). A background call (`run_in_background: true`) is allowed, and so is a `sleep`
@@ -13,7 +13,8 @@
 # foreground call is refused too: a later `wait`, or the shell, can still hold the call. Not seen:
 # a sleep inside `bash -c "..."` or `eval`. The same wait in other spellings is refused as well (a
 # perl `select` with undef handles, `tail -f /dev/null`, `timeout N tail -f`, `read -t N`, python
-# `time.sleep`); those are matched on the raw command, so quoted text can trip them.
+# `time.sleep`, `/bin/sleep`, a FIFO made with mkfifo and then read); the word in quoted text or in a
+# data heredoc is not a wait.
 # On a violation it prints a PreToolUse "deny" decision with a one-line reason; otherwise nothing.
 # Needs only bash, awk and jq.
 
@@ -42,17 +43,22 @@ max_seconds=5
 #   3. add up the literal arguments of every `sleep` that starts a simple command. Before it may come
 #      do/then/else/!/time, NAME=value words, command, env, exec, nohup, and `timeout DURATION`.
 #      GNU sleep sums its arguments.
-total=$(printf '%s\n' "$cmd" | LC_ALL=C awk -v sq="'" '
+# `mode` picks the output: total (the seconds), shell (the command with quoted text and every heredoc
+# body removed) or code (the interpreter code only: the bodies of heredocs fed to python, perl, ruby or
+# node, and the quoted argument of an interpreter call with -c or -e).
+scan() {
+printf '%s\n' "${2-$cmd}" | LC_ALL=C awk -v mode="$1" -v sq="'" '
 BEGIN { RS = "\001" }
 function sep() { out = out " ; " }
 {
   # 1. heredoc bodies, line by line, with a rough quote state per line.
-  nl = split($0, L, "\n"); text = ""; tag = ""
+  nl = split($0, L, "\n"); text = ""; cbody = ""; qcode = ""; cap = 0; tag = ""
   for (k = 1; k <= nl; k++) {
     line = L[k]
     if (tag != "") {
       t = line; if (strip) sub(/^\t+/, "", t)
       if (t == tag) tag = ""
+      else if (code) cbody = cbody line "\n"
       text = text "\n"
       continue
     }
@@ -69,6 +75,7 @@ function sep() { out = out " ; " }
         h = substr(line, hs, hl)
         strip = (h ~ /^<<-/)
         sub(/^<<-?[ \t]*/, "", h); gsub(/["\047]/, "", h); tag = h
+        code = (pre ~ /(^|[^A-Za-z0-9_])(python[0-9.]*|perl|ruby|node)[ \t]/)
       }
     }
   }
@@ -76,15 +83,18 @@ function sep() { out = out " ; " }
   out = ""; st = 0; n = length(text)
   for (k = 1; k <= n; k++) {
     c = substr(text, k, 1)
-    if (st == 1) { if (c == sq) st = 0; continue }
+    if (st == 1) { if (c == sq) { st = 0; if (cap) qcode = qcode "\n"; cap = 0 } else if (cap) qcode = qcode c; continue }
     if (st == 2) {
-      if (c == "\\") { k++; continue }
-      if (c == "\"") st = 0
+      if (c == "\\") { if (cap) qcode = qcode substr(text, k + 1, 1); k++; continue }
+      if (c == "\"") { st = 0; if (cap) qcode = qcode "\n"; cap = 0 }
+      else if (cap) qcode = qcode c
       continue
     }
     if (c == "\\") { k++; out = out "x"; continue }
-    if (c == sq) { st = 1; out = out "Q"; continue }
-    if (c == "\"") { st = 2; out = out "Q"; continue }
+    if (c == sq || c == "\"") {
+      cap = (out ~ /(^|[^A-Za-z0-9_])(python[0-9.]*|perl|ruby|node|bash|sh|zsh)[ \t]+(-[^ \t]+([ \t]+[^- \t][^ \t]*)?[ \t]+)*-[A-Za-z]*[ceE][ \t]*$/)
+      st = (c == sq) ? 1 : 2; out = out "Q"; continue
+    }
     if (c == "#" && (out == "" || substr(out, length(out)) ~ /[ \t]/)) {
       while (k < n && substr(text, k + 1, 1) != "\n") k++
       continue
@@ -92,6 +102,8 @@ function sep() { out = out " ; " }
     if (c == "\n" || c == "`" || c ~ /[;&|(){}]/) { sep(); continue }
     out = out c
   }
+  if (mode == "code") { printf "%s", cbody qcode; exit }
+  if (mode == "shell") { printf "%s", out; exit }
   # 3. the sleeps.
   n = split(out, w, /[ \t]+/); start = 1
   for (i = 1; i <= n; i++) {
@@ -99,7 +111,7 @@ function sep() { out = out " ; " }
     if (w[i] == ";") { start = 1; continue }
     if (start && (w[i] ~ /^(do|then|else|!|time|command|env|exec|nohup)$/ || w[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) continue
     if (start && w[i] == "timeout") { i++; continue }
-    if (start && w[i] == "sleep") {
+    if (start && w[i] ~ /^(\/[^ ]*\/)?sleep$/) {
       for (j = i + 1; j <= n && w[j] != ";"; j++) {
         if (w[j] == "infinity") sum += 86400
         else if (w[j] ~ /^[0-9]+(\.[0-9]+)?[smhd]?$/) {
@@ -114,29 +126,64 @@ function sep() { out = out " ; " }
     start = 0
   }
 }
-END { printf "%d\n", sum }')
+END { if (mode == "total") printf "%d\n", sum }'
+}
+total=$(scan total)
+shell_text=$(scan shell)
+code_text=$(scan code)
+# The quoted argument of bash|sh|zsh -c is code too, and may call an interpreter itself: scan each
+# layer again, a bounded number of times.
+layer=$code_text
+for _ in 1 2 3; do
+  [ -n "$layer" ] || break
+  layer=$(scan code "$layer")
+  code_text+=$'\n'$layer
+done
 
-# Other spellings of a wait of 5 s or more, matched line by line on the raw command.
+# Other spellings of a wait of 5 s or more. Shell-level ones are matched on the shell text (quoted text
+# and heredoc bodies removed, so the word in a commit message or a payload file is data); the
+# interpreter ones (perl select, python time.sleep) on the code text only: a heredoc fed to an
+# interpreter and the quoted argument of `python -c`, `perl -e` and the like. The same words in a
+# commit message, an echo or a grep pattern are data.
 n='([5-9]|[1-9][0-9]+)'
 start='(^|[;&|(]|do|then)[[:space:]]*'
-other_pats=(
-  "select\\([[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*$n"
+shell_pats=(
   "${start}tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow[^[:space:]]*)[[:space:]]+([^|;&]*[[:space:]])?/dev/null"
   "${start}timeout[[:space:]]+(-[^[:space:]]+[[:space:]]+)*${n}[smhd]?[[:space:]]+tail[[:space:]]+([^|;&]*[[:space:]])?(-[a-zA-Z]*[fF][a-zA-Z0-9]*|--follow)"
   "${start}read[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*t[[:space:]]*$n"
-  "python[0-9.]*[[:space:]].*time\\.sleep\\([[:space:]]*($n(\\.[0-9]*)?([^0-9.eE-]|[eE]\\+?[0-9])|[1-4](\\.[0-9]*)?[eE]\\+?0*[1-9])"
+)
+code_pats=(
+  "select\\([[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*undef[[:space:]]*,[[:space:]]*$n"
+  "time\\.sleep\\([[:space:]]*($n(\\.[0-9]*)?([^0-9.eE-]|[eE]\\+?[0-9])|[1-4](\\.[0-9]*)?[eE]\\+?0*[1-9])"
 )
 other=0
-for p in "${other_pats[@]}"; do
-  if grep -Eq -- "$p" <<<"$cmd"; then other=1; break; fi
+for p in "${shell_pats[@]}"; do
+  if grep -Eq -- "$p" <<<"$shell_text"; then other=1; break; fi
 done
+for p in "${code_pats[@]}"; do
+  [ "$other" = 1 ] && break
+  if grep -Eq -- "$p" <<<"$code_text"; then other=1; fi
+done
+# A FIFO made with mkfifo and then read in the foreground blocks until a writer comes. Only a read of
+# the FIFO's own path (literal or the same variable) counts; other reads in the call are fine.
+if [ "$other" = 0 ] && grep -Eq -- "${start}mkfifo[[:space:]]" <<<"$shell_text"; then
+  fifo=$(grep -oE 'mkfifo[[:space:]]+(-[a-zA-Z]+[[:space:]]+([0-7]+[[:space:]]+)?)*[^[:space:];&|]+' <<<"$cmd" | head -n1 | awk '{print $NF}' | tr -d "\"'")
+  if [ -n "$fifo" ]; then
+    fre=$(printf '%s' "$fifo" | sed 's/[][\.*^$+?(){}|/]/\\&/g')
+    end='([^A-Za-z0-9_.]|$)'
+    if grep -Eq -- "${start}(read|cat|head|tail|wc|grep)[[:space:]][^;&|]*${fre}${end}|<[[:space:]]*[\"']?${fre}${end}" <<<"$cmd"; then
+      other=1
+    fi
+  fi
+fi
 
+msg="Foreground wait blocked: a pause under another name is a sleep. Use hack/pr-wait.sh, or run the command with run_in_background and end the turn; the task notifies you."
 if [ "${total:-0}" -lt "$max_seconds" ]; then
   [ "$other" = 1 ] || exit 0
-  reason="Sleep chain blocked: a foreground wait of ${max_seconds}s or more (perl select, tail -f /dev/null, read -t, python time.sleep). Wait with hack/pr-wait.sh <PR> --checks, run_in_background, or a Monitor call (docs/agents/subagent-brief.md)."
+  reason="$msg"
   jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 fi
 
-reason="Sleep chain blocked: ${total}s of foreground sleep. Wait with hack/pr-wait.sh <PR> --checks, run_in_background, or a Monitor call (docs/agents/subagent-brief.md)."
+reason="$msg"
 jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'

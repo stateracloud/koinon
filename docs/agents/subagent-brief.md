@@ -43,10 +43,10 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
 - Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
 - Call hack scripts by absolute path (`<worktree>/hack/x.sh`), never `cd X && hack/x.sh`.
-- No standalone `sleep`, and no `until … sleep` loop in the foreground. To wait on a pull request use
-  `hack/pr-wait.sh`. For anything else: `run_in_background`, then keep working or end the turn; wait
-  on a condition with Monitor and an until-loop that tests it (the Monitor tool needs a
-  `description`). Never sleep-then-read, never Monitor a bare sleep, and never `pgrep`/`pkill`
+- Wait with `hack/pr-wait.sh` (for a pull request) or with a command that you start with
+  `run_in_background`; end the turn and the task notifies you. A pause under another name is a sleep
+  (`/bin/sleep`, `read -t`, perl `select`, python `time.sleep`, a read from a FIFO): never run one in
+  the foreground. The hook `hack/hooks/sleep-chain-check.sh` enforces this. Never `pgrep`/`pkill`
   another lane's processes. Never `pkill`/`pgrep` by script name (`pkill -f hack/preflight.sh` kills
   every lane's run): stop your own preflight with `hack/preflight.sh --stop`, which uses the pid file
   of your worktree's log directory.

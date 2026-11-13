@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Offline tests of hack/hooks/sleep-chain-check.sh (issue 843). Needs only bash, sed, awk and jq.
+# Offline tests of hack/hooks/sleep-chain-check.sh (issue 843; retro 2026-11-13 additions at the end).
+# HOOK=<path> tests another copy of the hook. Needs only bash, sed, awk and jq.
 # shellcheck disable=SC2016 # the commands under test are literal strings; nothing should expand
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -10,7 +11,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-hook=$here/sleep-chain-check.sh
+hook=${HOOK:-$here/sleep-chain-check.sh}
 fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
@@ -76,7 +77,7 @@ case_ allow 'echo a#b; sleep 1'
 out=$("$hook" <<<'{"tool_input":{"command":"sleep 10"}}')
 reason=$(jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$out")
 if [ "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$out")" = PreToolUse ] && [ "$(printf '%s\n' "$reason" | wc -l)" -eq 1 ] \
-  && grep -q 'Sleep chain blocked' <<<"$reason" && grep -q run_in_background <<<"$reason"; then
+  && grep -q 'Foreground wait blocked: a pause under another name is a sleep' <<<"$reason" && grep -q run_in_background <<<"$reason" && grep -q hack/pr-wait.sh <<<"$reason"; then
   ok "the deny names PreToolUse and the routes in one line"
 else
   bad "the deny output: $out"
@@ -106,6 +107,50 @@ case_ allow 'python3 -c "import time; time.sleep(4.9)"'
 case_ allow 'python3 -c "import time; time.sleep(0.5)"'
 case_ allow 'tail -f /var/log/x' true
 case_ allow 'tail -n 20 /var/log/x'
+
+# Retro 2026-11-13: the same wait under other names is refused ...
+case_ deny '/bin/sleep 10'
+case_ deny '/usr/bin/sleep 30 && echo done'
+case_ deny 'perl -e '"'"'select(undef,undef,undef,12)'"'"
+case_ deny 'perl -e '"'"'select(undef, undef, undef, 5.5)'"'"
+case_ deny 'read -t 15 line'
+case_ deny 'while true; do read -t 6 -r x; done'
+case_ deny 'python3 -c "import time; time.sleep(30)"'
+case_ deny $'python3 - <<\'PY\'\nimport time\ntime.sleep(30)\nPY'
+case_ deny $'mkfifo /tmp/f\ncat /tmp/f'
+case_ deny 'mkfifo "$TMPDIR/ff"; read x < "$TMPDIR/ff"'
+case_ deny 'f=/tmp/ff; mkfifo $f && head -n1 $f'
+# ... in the foreground only.
+case_ allow '/bin/sleep 10' true
+case_ allow 'perl -e '"'"'select(undef,undef,undef,12)'"'"'' true
+case_ allow $'mkfifo /tmp/f\ncat /tmp/f' true
+# Interpreter calls nested in a shell -c, perl -E, python options before -c.
+case_ deny "bash -c 'python3 -c \"import time; time.sleep(30)\"'"
+case_ deny "sh -c \"perl -e 'select(undef,undef,undef,10)'\""
+case_ deny "perl -E 'select(undef,undef,undef,10)'"
+case_ deny "python3 -X dev -c 'import time; time.sleep(30)'"
+# Short waits and unrelated commands stay allowed.
+case_ allow '/bin/sleep 2'
+case_ allow 'perl -e '"'"'select(undef,undef,undef,0.2)'"'"
+case_ allow 'mkfifo /tmp/f'
+case_ allow 'mkfifo /tmp/f; cat notes.txt'
+case_ allow $'mkfifo /tmp/f\ngrep x notes.txt'
+case_ allow 'ls -l /tmp/f'
+# ... and the word as data is not a wait (heredoc body, quoted text written to a file).
+case_ allow $'python3 - <<\'PY\' > /dev/null\nopen("/tmp/x.yaml","w").write("run: sleep 5\\n")\nPY'
+case_ allow $'cat > payload.yaml <<\'EOF\'\nsteps:\n  - run: sleep 5\n  - run: /bin/sleep 30\n  - run: read -t 20 x\nEOF'
+case_ allow $'cat > p.py <<\'EOF\'\nimport time\ntime.sleep(30)\nEOF'
+case_ allow $'cat > p.pl <<\'EOF\'\nselect(undef,undef,undef,30);\nEOF'
+case_ allow 'git commit -m "fix: drop time.sleep(30) from the test"'
+case_ allow 'git commit -m "drop time.sleep(30)"'
+case_ allow 'grep -rn "time.sleep(10)" .'
+case_ allow 'grep -n "time.sleep(10)" f.py'
+case_ allow "echo 'select(undef,undef,undef,30)'"
+case_ allow 'echo "run: sleep 5" > payload.yaml'
+case_ allow "printf '%s\\n' '  - run: /bin/sleep 30' >> payload.yaml"
+case_ allow 'echo "read -t 30 x" >> notes.txt'
+case_ allow $'python3 -I patch.py <<\'EOF\'\nsleep 5\nEOF'
+case_ allow $'git commit -m "docs: say read -t 30 and /bin/sleep 9 are sleeps"'
 
 # Off unless KOINON_MAINTAINER_HOOKS=1: no output and exit 0 for a command it would refuse, also under
 # a POSIX sh (the opt-in line comes before any bash 4+ syntax).
