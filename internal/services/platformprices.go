@@ -276,6 +276,12 @@ func (s *Server) CheckPriceSources(ctx context.Context, _ *budgetv1alpha1.CheckP
 	if err != nil {
 		return nil, err
 	}
+	// ADR 0098: "off" makes no request to any source, so an air-gapped install stays quiet.
+	if st, err := s.prices.Settings(ctx); err != nil {
+		return nil, s.budgetError(err)
+	} else if st.Mode == prices.RefreshOff {
+		return nil, withReason(connect.NewError(connect.CodeFailedPrecondition, "price refresh is off on this install; set it to auto or on to check the sources"), "PRICE_REFRESH_OFF")
+	}
 	run, err := r.Run(ctx, prices.TriggerCLI, false)
 	// A source that failed is part of the answer (the CLI prints it too) and sits in the fetch log;
 	// any other error is the server's.
@@ -305,7 +311,9 @@ func (s *Server) ExplainPlatformPrice(ctx context.Context, req *budgetv1alpha1.E
 		Layer: res.Source, PriceRef: res.Ref, Entry: entryProto(res.Entry), PlatformVersion: res.PlatformVersion, ListVersion: res.ListVersion,
 	}
 	if res.Source == prices.SourcePlatform {
-		if v, err := s.prices.PlatformVersion(ctx, res.PlatformVersion); err == nil {
+		if v, err := s.prices.PlatformVersion(ctx, res.PlatformVersion); err != nil {
+			return nil, s.budgetError(err)
+		} else {
 			for _, e := range v.Entries {
 				if e.Entry.ID == res.Entry.ID {
 					out.Provenance = provenanceProto(e.Provenance)

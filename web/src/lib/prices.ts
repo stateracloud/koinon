@@ -243,7 +243,7 @@ export function formatWhen(ts: { seconds: bigint; nanos: number } | undefined): 
 
 /** rateChangeLine says one rate of a proposal in words: "input $3 → $4", "tier over 200000: output added at $9". */
 export function rateChangeLine(c: { bucket: string; contextOver: bigint; from: string; to: string }): string {
-  const bucket = c.bucket.replace('_', ' ')
+  const bucket = c.bucket.replaceAll('_', ' ')
   const where = c.contextOver > 0n ? ` (over ${c.contextOver} tokens)` : ''
   if (!c.from) return `${bucket}${where} added at $${c.to}`
   if (!c.to) return `${bucket}${where} removed (was $${c.from})`

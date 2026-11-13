@@ -68,7 +68,7 @@ function PlatformPrices() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">Platform prices</h1>
-        <Button size="sm" className="ml-auto" onClick={check} disabled={checking}>
+        <Button size="sm" className="ml-auto" onClick={check} disabled={checking || s?.mode === 'off'} title={s?.mode === 'off' ? 'Price refresh is off on this install' : undefined}>
           Check sources
         </Button>
       </div>
@@ -77,7 +77,7 @@ function PlatformPrices() {
         Every version is kept; a rollback writes a new version.
       </p>
       {s && (
-        <p className="text-muted-foreground text-sm" aria-label="Refresh setting">
+        <p className="text-muted-foreground text-sm" role="group" aria-label="Refresh setting">
           Scheduled refresh: {s.mode}
           {s.mode !== 'off' && `, every ${s.interval}`}; auto-apply up to {s.maxChangePercent}% and {s.maxAutoPerDay} a day. Set by the install’s Helm values.
           {!s.recorded && ' (Defaults: koinon-api has not recorded a setting yet.)'}
@@ -435,7 +435,7 @@ function Explain() {
       {ask && res.isPending && <p role="status">Loading…</p>}
       {ask && res.error && <p role="alert">{ConnectError.from(res.error).rawMessage}</p>}
       {ask && res.data && (
-        <div aria-label="Price in use" className="grid gap-1 text-sm">
+        <div role="group" aria-label="Price in use" className="grid gap-1 text-sm">
           <p>
             <Badge variant="secondary">{layerLabel(res.data.layer)}</Badge> <span className="font-mono text-xs">{res.data.priceRef}</span>
           </p>

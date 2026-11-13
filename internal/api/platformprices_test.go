@@ -151,6 +151,12 @@ var _ = Describe("the platform price RPCs of PriceService", func() {
 		chk, err := p.CheckPriceSources(ctx, &budgetv1alpha1.CheckPriceSourcesRequest{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chk.GetFailed()).To(HaveKey(pricefetch.SourceOpenRouter))
+
+		By("with the refresh set off, Check sources makes no request")
+		Expect(r.SyncSettings(ctx, prices.RefreshOff, 24*time.Hour)).To(Succeed())
+		_, err = p.CheckPriceSources(ctx, &budgetv1alpha1.CheckPriceSourcesRequest{})
+		Expect(connect.CodeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+
 		fetches, err := p.ListPriceSourceFetches(ctx, &budgetv1alpha1.ListPriceSourceFetchesRequest{Limit: 5})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fetches.GetFetches()).NotTo(BeEmpty())

@@ -818,13 +818,13 @@ var isolationCases = map[string]isolationCase{
 	},
 }
 
-// isolationExempt lists RPCs that take no org-owned input, with the reason.
 // platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
 // takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
 // platformprices_test.go).
 const platformPricesReason = "platform price list (ADR 0098): install-wide data, platform admins only; refused to " +
 	"everyone else in platformprices_test.go"
 
+// isolationExempt lists RPCs that take no org-owned input, with the reason.
 var isolationExempt = map[string]string{
 	budgetv1alpha1connect.PriceServiceListPriceProposalsProcedure:        platformPricesReason,
 	budgetv1alpha1connect.PriceServiceGetPriceProposalProcedure:          platformPricesReason,
