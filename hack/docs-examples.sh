@@ -6,7 +6,7 @@
 # The docs site is stateracloud/koinon-docs. Its guide pages show shell blocks whose info string is
 # `sh e1=<name>`; this repository owns the commands, in command files (hack/docs-e1.sh). The quickstart
 # and the backup guide need a cluster and run in test/e2e. A guide whose examples need nothing but the
-# Koinon binaries puts its file under test/e2e/commands/guides/, and this script runs every block of
+# Koinon binaries puts its file under test/docs-examples/, and this script runs every block of
 # every such file, so a command that stops working on a pull request fails the pull request.
 #
 #   hack/docs-examples.sh               build the binaries, run every block of every guide file
@@ -19,7 +19,7 @@
 # must not pass). Exit 2 on a usage or build error.
 #
 # Environment:
-#   DOCS_EXAMPLES_DIR   directory of guide command files (default test/e2e/commands/guides)
+#   DOCS_EXAMPLES_DIR   directory of guide command files (default test/docs-examples)
 #   KOINON_BIN_DIR      where the binaries are built, or are found with --no-build (default: a temp dir)
 #   DOCS_EXAMPLES_TIMEOUT  seconds one block may run (default 120)
 #
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-dir=${DOCS_EXAMPLES_DIR:-$root/test/e2e/commands/guides}
+dir=${DOCS_EXAMPLES_DIR:-$root/test/docs-examples}
 timeout_s=${DOCS_EXAMPLES_TIMEOUT:-120}
 # The binaries a guide example may call, built from cmd/<name>.
 BINARIES=(koinon-api)
@@ -53,26 +53,32 @@ files=("$dir"/*.e1)
 
 if [[ $list -eq 1 ]]; then
   for f in "${files[@]}"; do
-    for n in $(E1_FILE=$f "$root/hack/docs-e1.sh" names); do echo "${f##*/} $n"; done
+    names=$(E1_FILE=$f "$root/hack/docs-e1.sh" names) || { echo "docs-examples: reading the e1 blocks of $f failed" >&2; exit 1; }
+    for n in $names; do echo "${f##*/} $n"; done
   done
   exit 0
 fi
 
+command -v timeout >/dev/null || { echo "docs-examples: needs timeout (GNU coreutils; on macOS: brew install coreutils)" >&2; exit 2; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/docs-examples.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 bin=${KOINON_BIN_DIR:-$tmp/bin}
 if [[ $build -eq 1 ]]; then
   command -v go >/dev/null || { echo "docs-examples: go is not on PATH (use --no-build with KOINON_BIN_DIR)" >&2; exit 2; }
   mkdir -p "$bin"
+  bin=$(cd "$bin" && pwd)
   for b in "${BINARIES[@]}"; do
     echo "docs-examples: building $b"
     (cd "$root" && go build -o "$bin/$b" "./cmd/$b") || { echo "docs-examples: building $b failed" >&2; exit 2; }
   done
 fi
+bin=$(cd "$bin" 2>/dev/null && pwd) || { echo "docs-examples: KOINON_BIN_DIR does not exist" >&2; exit 2; }
 for b in "${BINARIES[@]}"; do
   [[ -x $bin/$b ]] || { echo "docs-examples: $bin/$b is not an executable (build it, or drop --no-build)" >&2; exit 2; }
 done
 
+scrub=()
+while IFS= read -r v; do scrub+=(-u "$v"); done < <(compgen -e | grep '^KOINON_' || true)
 pass=0
 failed=()
 for f in "${files[@]}"; do
@@ -80,7 +86,9 @@ for f in "${files[@]}"; do
   for n in $names; do
     w=$(mktemp -d "$tmp/work.XXXXXX")
     label="${f##*/} $n"
-    if env "PATH=$bin:$PATH" KUBECONFIG=/dev/null E1_FILE="$f" E1_WORKDIR="$w" \
+    # KOINON_* is scrubbed: every koinon-api flag is also read from KOINON_<FLAG>, which would let an example
+    # pass here and fail for a reader.
+    if env "${scrub[@]}" "PATH=$bin:$PATH" HOME="$w" KUBECONFIG=/dev/null E1_FILE="$f" E1_WORKDIR="$w" \
       timeout "$timeout_s" "$root/hack/docs-e1.sh" run "$n" >"$tmp/out" 2>&1; then
       echo "ok: $label"
       pass=$((pass + 1))

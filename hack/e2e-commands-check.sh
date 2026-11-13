@@ -10,7 +10,7 @@
 #   2. test/e2e/run.sh runs every block of quickstart.e1, and only blocks that exist.
 #   3. test/e2e/backup-restore.sh runs only blocks of backup-restore.e1, and every block it does not run
 #      (the pipe blocks: they need a source and a target install) is run by test/drill/drill_test.go.
-#   4. The guide files (test/e2e/commands/guides/*.e1, run by hack/docs-examples.sh against a build) parse,
+#   4. The guide files (test/docs-examples/*.e1, run by hack/docs-examples.sh against a build) parse,
 #      and the offline tests of hack/docs-examples.sh pass. Running the guides is the `docs examples` job.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -81,8 +81,8 @@ done
 [[ $failures -eq 0 ]] && ok "every e1 block of the backup file is run by test/e2e/backup-restore.sh or the drill: $(tr '\n' ' ' <<<"$gused")"
 
 # 4. The guide files parse; the runner's own tests pass.
-for g in "$cmds"/guides/*.e1; do
-  [[ -e $g ]] || { fail "$cmds/guides has no .e1 file"; break; }
+for g in test/docs-examples/*.e1; do
+  [[ -e $g ]] || { fail "test/docs-examples has no .e1 file"; break; }
   [[ -n $(E1_FILE="$g" hack/docs-e1.sh names) ]] || fail "$g has no e1 blocks"
   parses "$g"
 done

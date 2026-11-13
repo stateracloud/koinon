@@ -8,4 +8,4 @@
 # e1=cli-version
 koinon-api --version
 # e1=cli-keys-help
-koinon-api keys --help | grep export
+koinon-api keys --help | grep -E '^  export '
