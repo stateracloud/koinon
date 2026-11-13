@@ -333,7 +333,13 @@ Phase 3 (#518) is the lab profile and the release gate. A topology file has a `p
 `drill-result.json` carries it. The lab profile (`test/drill/topology/lab.example.yaml` is a made-up example; the real
 file stays outside git) adds the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
 that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
-environment of that process). The spec exists only when the topology says `browserSignin: true`, because a drill spec never
+environment of that process). Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
+(or `no_proxy`) for the drill: `web/playwright.drill.config.ts` maps them to Playwright's `use.proxy` (Playwright
+ignores them itself). The server goes in without credentials; a user name and password in the URL are split out and
+URL-decoded. The bypass list is the `NO_PROXY` entries plus `127.0.0.1` and `localhost`, which the port-forward needs.
+Without them nothing changes. The drill keeps trace, video and JSON report off and uses the list reporter, so the
+credentials reach no artifact; a malformed value fails without printing it
+(`web/src/lib/playwright-proxy.ts`). The spec exists only when the topology says `browserSignin: true`, because a drill spec never
 skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
 rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
 
