@@ -92,7 +92,7 @@ func newWorld(t *testing.T) *world {
 				return
 			}
 			w.sawSecureCookie = true
-			fmt.Fprint(rw, `{"user":{"id":"u-1"},"memberships":[{"orgSlug":"default","role":"ORG_ROLE_ADMIN"},{"orgSlug":"personal","role":"ORG_ROLE_OWNER"}]}`)
+			_, _ = fmt.Fprint(rw, `{"user":{"id":"u-1"},"memberships":[{"orgSlug":"default","role":"ORG_ROLE_ADMIN"},{"orgSlug":"personal","role":"ORG_ROLE_OWNER"}]}`)
 		default:
 			http.NotFound(rw, r)
 		}
@@ -111,12 +111,12 @@ func newWorld(t *testing.T) *world {
 			if page == "" {
 				page = "login.html"
 			}
-			fmt.Fprint(rw, fixtureNoT(page))
+			_, _ = fmt.Fprint(rw, fixtureNoT(page))
 		case r.URL.Path == "/dex/auth/local/login" && r.Method == http.MethodPost:
 			_ = r.ParseForm()
 			if r.PostForm.Get("login") != "drill-admin" || r.PostForm.Get("password") != drill.FakeIdPPassword {
 				rw.WriteHeader(http.StatusUnauthorized) // as Dex does
-				fmt.Fprint(rw, fixtureNoT("wrong-password.html"))
+				_, _ = fmt.Fprint(rw, fixtureNoT("wrong-password.html"))
 				return
 			}
 			q := url.Values{"code": {"c1"}, "state": {"s1"}}

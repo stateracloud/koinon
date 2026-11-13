@@ -38,14 +38,15 @@ func oidcLogin(ctx context.Context, s *side) (login drill.OIDCLogin, stop func()
 		stopAPI()
 	}
 	must(err, "port-forward the OIDC provider")
-	return drill.OIDCLogin{
-			Base:        "http://127.0.0.1:" + strconv.Itoa(s.oidcPort),
-			IdPHostPort: fmt.Sprintf("%s:%d", drill.FakeIdPHost(top.FakesNamespace), drill.FakeIdPPort),
-			IdPAddr:     "127.0.0.1:" + strconv.Itoa(drill.FakeIdPForwardPort),
-		}, func() {
-			stopIdP()
-			stopAPI()
-		}
+	login = drill.OIDCLogin{
+		Base:        "http://127.0.0.1:" + strconv.Itoa(s.oidcPort),
+		IdPHostPort: fmt.Sprintf("%s:%d", drill.FakeIdPHost(top.FakesNamespace), drill.FakeIdPPort),
+		IdPAddr:     "127.0.0.1:" + strconv.Itoa(drill.FakeIdPForwardPort),
+	}
+	return login, func() {
+		stopIdP()
+		stopAPI()
+	}
 }
 
 // oidcSignIn runs the flow for one user. A failure of the flow itself is retried a few times: the install's first
