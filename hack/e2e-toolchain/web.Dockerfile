@@ -22,6 +22,8 @@ ARG PLAYWRIGHT_VERSION=1.65.0
 # Browsers in a fixed place the run finds through the environment, not in a user's cache.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# the pipe is `echo | sha256sum -c -`: sha256sum is the last command and its status is the step's
+# hadolint ignore=DL4006
 RUN set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     node_arch=x64; [ "$arch" = arm64 ] && node_arch=arm64; \

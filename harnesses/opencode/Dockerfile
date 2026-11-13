@@ -27,6 +27,8 @@ ADD --checksum=sha256:22352e200630ec61a48a65b9f5c2b627328ae5002658d81c067f67c5fb
     https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.2.6.tgz /tmp/opencode.tgz
 
 FROM fetch-${TARGETARCH} AS fetch
+# a failing /opencode prints nothing, so the grep on its output fails and so does the step
+# hadolint ignore=DL4006
 RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
  && install -m 0755 /tmp/package/bin/opencode /opencode \
  && /opencode --version | grep -qx 'opencode v2.2.6'
@@ -49,6 +51,8 @@ FROM ${BASE} AS dl
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
+# "common" is a named build context (--build-context common=harnesses/common), not a stage
+# hadolint ignore=DL3022
 COPY --from=common --chmod=0755 koinon-fetch /usr/local/bin/koinon-fetch
 
 FROM dl AS fetch-tools-amd64
@@ -93,6 +97,8 @@ ADD --checksum=sha256:81471889c77b2161a3e4dcdb1b2e6ca382e485766132d92d5fe1d7497e
 ADD --checksum=sha256:075c33400ffcb0c586dd106a029d3e733e9da3693f8fcb9cebfc651c8a2f14e3 https://raw.githubusercontent.com/duckdb/duckdb/v2.0.0/LICENSE /duckdb
 
 FROM fetch-tools-${TARGETARCH} AS tools
+# every pipe ends in the command whose status decides: head/grep read the version a failing tool never printed, so a missing tool still fails the step
+# hadolint ignore=DL4006
 RUN set -eux; \
     mkdir -p /x/rg /x/fd /x/yq /x/duckdb /out/bin /out/libexec /out/doc/fd /out/doc/rg; \
     tar -xzf /tmp/rg.tgz -C /x/rg --strip-components=1; \
@@ -183,6 +189,8 @@ COPY --from=licenses /duckdb /usr/share/doc/koinon-tools/duckdb/LICENSE
 # incomplete, if pip came in with a dependency, or if a tool or the DuckDB defaults do not work.
 # RUN uses dash, which has no pipefail: `tool | head -1` would pass with the tool missing (head
 # exits 0), so unzip and xz run in a command substitution, where `set -e` sees their status (#190).
+# the RUN avoids pipes on purpose (see above): a failing left side of a pipe runs inside a command substitution under set -e, or is the last word of the check
+# hadolint ignore=DL4006
 RUN set -eux; \
     python3 -I -c 'import json, csv, sqlite3, gzip, zipfile, statistics, decimal, datetime, re, subprocess, shutil, tarfile'; \
     ! command -v pip || exit 1; ! command -v pip3 || exit 1; ! command -v ensurepip || exit 1; \
@@ -201,6 +209,8 @@ RUN set -eux; \
     duckdb -c "COPY (SELECT 1 AS a) TO '/tmp/koinon-check.parquet' (FORMAT parquet); SELECT * FROM '/tmp/koinon-check.parquet'; SELECT '{\"a\":1}'::JSON;"; \
     rm -rf /tmp/koinon-check.parquet /tmp/duckdb
 # The entry scripts' shared helpers (harnesses/common, build context "common").
+# "common" is a named build context (--build-context common=harnesses/common), not a stage
+# hadolint ignore=DL3022
 COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
@@ -213,7 +223,11 @@ COPY --chmod=0644 plugins/koinon-core/index.ts /usr/local/lib/koinon/opencode/pl
 COPY --chmod=0644 plugins/koinon-retry/index.js /usr/local/lib/koinon/opencode/plugins/koinon-retry/index.js
 # git's GitHub credential helper, shared by every harness (harnesses/common, build context
 # "common"): it prints the OpenShell placeholder and stores nothing.
+# "common" is a named build context (--build-context common=harnesses/common), not a stage
+# hadolint ignore=DL3022
 COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
+# "common" is a named build context (--build-context common=harnesses/common), not a stage
+# hadolint ignore=DL3022
 COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
 RUN printf '[include]\n\tpath = /etc/koinon/git/config\n\tpath = /sandbox/.koinon/git/config\n' >> /etc/gitconfig
 # Koinon's instructions are per run: koinon-agentd writes /sandbox/.koinon/AGENTS.md and the

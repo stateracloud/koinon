@@ -7,6 +7,8 @@
 # this file only on a miss, on that same pinned base; the harness's USER and ENTRYPOINT are reset below.
 ARG BASE
 FROM ${BASE}
+# spike probe image: the escape checks install tools and run as root; the harness USER is reset on purpose (see above)
+# hadolint ignore=DL3002
 USER root
 ENTRYPOINT []
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \

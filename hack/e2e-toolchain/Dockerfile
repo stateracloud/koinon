@@ -53,6 +53,8 @@ COPY --from=buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 # ignores a token, so an authenticated download goes through the REST API (release by tag, asset by
 # id, Accept: application/octet-stream), as in harnesses/common/koinon-fetch (this build context cannot
 # copy that script). curl reads the header from stdin, so the token is in no argv, env var, log or layer.
+# each pipe ends in the command that decides (curl -K - reads the header from stdin; jq -er fails on empty input; sha256sum -c), and the grep|sed is advisory with || true
+# hadolint ignore=DL4006
 RUN --mount=type=secret,id=github_token,required=false set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sha() { eval "echo \$$1_$arch"; }; \
