@@ -58,7 +58,9 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
-# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+# Directive kept as source=/dev/null until #968 is fixed (the preflight shell gate runs shellcheck without -x, so
+# the old `source-path=SCRIPTDIR source=repo-lib.sh` fires SC1091); then go back to the old directive.
+# shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 
 DEFAULT_LANE=main
@@ -168,7 +170,7 @@ JQ_NEXT='def rank: ({"P0":0,"P1":1,"P2":2,"P3":3}[.] // 9);
   | select($label == "" or ([.content.labels.nodes[].name] | index($label)))
   | select(.content.number as $n | ($held | index($n) | not) and ($prs | index($n) | not))
   | select([(.content.assignees.nodes // [])[].login | ascii_downcase] | all(. == ($human | ascii_downcase)))
-  | {n: .content.number, p: (.priority.name // ""), c: (.component.name // ""), t: .content.title, at: .content.createdAt}]
+  | {n: .content.number, p: (.priority.name // ""), c: (.lane.name // ""), t: .content.title, at: .content.createdAt}]
   | sort_by([(.p | rank), .at])'
 
 # held_of CLAIMS_JSON LOGIN [LANE] [EXCEPT_JSON] -> "#N" for each held claim of LOGIN (in LANE when
@@ -365,7 +367,7 @@ cmd_next() {
       items(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{
         status:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){... on ProjectV2ItemFieldSingleSelectValue{name}}
-        component:fieldValueByName(name:"Component"){... on ProjectV2ItemFieldSingleSelectValue{name}}
+        lane:fieldValueByName(name:"Lane"){... on ProjectV2ItemFieldSingleSelectValue{name}}
         content{... on Issue{number title state createdAt repository{nameWithOwner} milestone{title}
           labels(first:50){nodes{name}} assignees(first:10){nodes{login}}}}}}}}}' |
     jq -s --arg repo "$REPO" --arg ms "$ms" --arg label "$label" --argjson held "$held" --argjson prs "$prs" \

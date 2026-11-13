@@ -21,6 +21,7 @@ assigns your human; the assignee is only a mirror of the claim ref.
   Without sub-issues, put `Part of #<parent>` at the top of the child body.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+- **Type and board fields**: the `type:` labels are the only issue type (the built-in Type is not used); the board fields are Stage and Lane (`docs/agents/triage-labels.md`).
 - **Close**: `gh issue close <number> --comment "..."`. Usually a PR with `Closes #<number>` closes it.
 
 ## Pull requests as a triage surface
