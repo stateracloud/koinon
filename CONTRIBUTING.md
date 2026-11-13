@@ -97,6 +97,10 @@ The local development loop is kind: `make dev-kind-up`, then `make dev` (Tilt), 
 `make test-e2e-kind` for the quickstart end to end. [docs/dev/loop.md](docs/dev/loop.md) covers it,
 including how to point Tilt at a remote cluster of your own.
 
+A new non-Go image (a harness or toolchain image) is a Dockerfile that follows
+[docs/dev/images.md](docs/dev/images.md): checksummed per-architecture downloads, the build secret,
+snapshot apt with retries, a licences stage and a non-root user.
+
 ## Pull requests
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages and PR titles.
