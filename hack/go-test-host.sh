@@ -95,7 +95,7 @@ host_docker_time() {
 # daemon that answered the ping but not the clock read is slow, not dead: on a Mac that is the
 # stalled VM this check is for (3); elsewhere the clock check is skipped with a note.
 host_docker_preflight() {
-	local ts rc=0 dock now skew max=${KOINON_CLOCK_SKEW:-2}
+	local ts rc=0 dock before now skew max=${KOINON_CLOCK_SKEW:-2}
 	local ping=${KOINON_DOCKER_PING_SECONDS:-30} clock=${KOINON_DOCKER_CLOCK_SECONDS:-10}
 	host_docker_ping "$ping" || rc=$?
 	case $rc in
@@ -107,7 +107,9 @@ host_docker_preflight() {
 	*) return 0 ;;
 	esac
 	rc=0
+	before=$(date +%s)
 	ts=$(host_docker_time "$clock") || rc=$?
+	now=$(date +%s)
 	case $rc in
 	0) ;;
 	2)
@@ -122,8 +124,9 @@ host_docker_preflight() {
 	esac
 	dock=$(host_iso_epoch "$ts")
 	[[ -n $dock ]] || { echo "go-test.sh: cannot read the Docker clock ($ts); skipping the clock check" >&2; return 0; }
-	now=$(date +%s)
-	skew=$((dock > now ? dock - now : now - dock))
+	# The daemon stamps its time somewhere inside the call, so a slow `info` is not drift: the skew is
+	# the distance from the stamp to the window [before, now] of the call (0 inside it).
+	if ((dock < before)); then skew=$((before - dock)); elif ((dock > now)); then skew=$((dock - now)); else skew=0; fi
 	if ((skew > max)); then
 		echo "go-test.sh: the Docker clock differs from this host by ${skew} s (limit ${max} s); time-based specs would fail. Restart Docker (OrbStack: orb restart) and run again" >&2
 		return 3

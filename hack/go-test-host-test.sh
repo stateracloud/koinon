@@ -72,6 +72,13 @@ grep -q 'skipping the clock check' <<<"$out" || fail "no skip note for slow info
 rc=0
 out=$(KOINON_UNAME=$bin/uname-mac KOINON_DOCKER_CLOCK_SECONDS=1 KOINON_DOCKER=$bin/docker-slow-info host_docker_preflight 2>&1) || rc=$?
 { [[ $rc == 3 ]] && grep -q 'no clock' <<<"$out"; } || fail "slow info on a Mac: rc=$rc out=$out"
+# A slow info that stamps its time at the start (4 s before it returns) is no drift, on Linux or a Mac.
+stub docker-slow-stamp 'case $1 in version) ;; info) t=$(date -u +%Y-%m-%dT%H:%M:%S.123456789Z); sleep 3; echo "$t";; esac'
+KOINON_UNAME=$bin/uname-linux KOINON_DOCKER=$bin/docker-slow-stamp host_docker_preflight || fail "slow info is not drift (Linux)"
+KOINON_UNAME=$bin/uname-mac KOINON_DOCKER=$bin/docker-slow-stamp host_docker_preflight || fail "slow info is not drift (Mac)"
+# lane-gates classifies both Docker messages.
+grep -q "Docker answers but gave no clock" hack/lane-gates.sh || fail "lane-gates must classify the no-clock message"
+grep -q "Docker did not answer within" hack/lane-gates.sh || fail "lane-gates must classify the no-ping message"
 rc=0
 out=$(KOINON_UNAME=$bin/uname-mac KOINON_DOCKER=$bin/docker-skew-split host_docker_preflight 2>&1) || rc=$?
 { [[ $rc == 3 ]] && grep -q 'orb restart' <<<"$out"; } || fail "Mac drift: rc=$rc out=$out"
