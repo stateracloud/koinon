@@ -819,9 +819,27 @@ var isolationCases = map[string]isolationCase{
 }
 
 // isolationExempt lists RPCs that take no org-owned input, with the reason.
+// platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
+// takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
+// platformprices_test.go).
+const platformPricesReason = "platform price list (ADR 0098): install-wide data, platform admins only; refused to " +
+	"everyone else in platformprices_test.go"
+
 var isolationExempt = map[string]string{
-	authv1alpha1connect.AuthServiceWhoAmIProcedure:         "describes the caller's own session; takes no IDs",
-	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
+	budgetv1alpha1connect.PriceServiceListPriceProposalsProcedure:        platformPricesReason,
+	budgetv1alpha1connect.PriceServiceGetPriceProposalProcedure:          platformPricesReason,
+	budgetv1alpha1connect.PriceServiceAcceptPriceProposalProcedure:       platformPricesReason,
+	budgetv1alpha1connect.PriceServiceDismissPriceProposalProcedure:      platformPricesReason,
+	budgetv1alpha1connect.PriceServiceListPriceSourceFetchesProcedure:    platformPricesReason,
+	budgetv1alpha1connect.PriceServiceListPlatformPriceVersionsProcedure: platformPricesReason,
+	budgetv1alpha1connect.PriceServiceGetPlatformPriceVersionProcedure:   platformPricesReason,
+	budgetv1alpha1connect.PriceServiceDiffPlatformPriceVersionsProcedure: platformPricesReason,
+	budgetv1alpha1connect.PriceServiceRollbackPlatformPricesProcedure:    platformPricesReason,
+	budgetv1alpha1connect.PriceServiceGetPriceRefreshSettingsProcedure:   platformPricesReason,
+	budgetv1alpha1connect.PriceServiceCheckPriceSourcesProcedure:         platformPricesReason,
+	budgetv1alpha1connect.PriceServiceExplainPlatformPriceProcedure:      platformPricesReason,
+	authv1alpha1connect.AuthServiceWhoAmIProcedure:                       "describes the caller's own session; takes no IDs",
+	authv1alpha1connect.AuthServiceChangePasswordProcedure:               "changes the caller's own password; takes no IDs",
 	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
 		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
