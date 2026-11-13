@@ -74,6 +74,7 @@ lock() {
 	fi
 	mkdir -p "$state_dir"
 	local token="$$-$RANDOM$RANDOM-$SECONDS" t=${KOINON_STATE_LOCK_TIMEOUT:-60} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
+	[[ $t =~ ^[1-9][0-9]*$ ]] || die "KOINON_STATE_LOCK_TIMEOUT must be a whole number of seconds, 1 or more (got '$t')"
 	if [[ -z $locker ]]; then if command -v flock >/dev/null 2>&1; then locker=flock; else locker=perl; fi; fi
 	case $locker in
 	flock) flock -w "$t" -E 75 "$lf" env "KOINON_STATE_LOCKED=$token" "$BASH" "$0" --locked-token "$token" "${orig_args[@]}" || rc=$? ;;
