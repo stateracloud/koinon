@@ -350,14 +350,20 @@ ask-tier write tool and an agent whose task makes the fake model call it. The ch
 `local-users` (both sign in on the restored copy with their roles; a wrong password is refused), `pending-approval`
 (still pending with the same `args_sha256`; the member cannot approve it), `recovery-signin` (a `PlatformAdminRecovery`
 reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
-in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin`
-(`web/e2e-drill/oidc.spec.ts`: an admin and a member persona sign in through the issuer with virtual WebAuthn
-authenticators, first on the source in the seed step and then on the restored copy; the same user must hold the same
-role, and an authenticator without the credential does not sign in). The OIDC client is public (PKCE, no secret); the
-browser reaches the source on `127.0.0.1:18181` and the target on `127.0.0.1:18182` (fixed ports, the redirect URLs the
-lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<FIELD>` (fields in
-`test/drill/topology/lab.example.yaml`), and the sign-in runs leave `oidc-signcounts.json` (username and latest signCount per
-persona, no key material) in the result directory for the lab to write back, whatever the verdict. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+in; the same nonce again is refused) and `oidc-signin`
+(ADR 0109, amendment 2026-11-13, #983). The drill runs its own OIDC provider, Dex, in the fakes namespace (topology
+`fakeIdpImage`, the upstream image pinned by digest; kind pulls it from ghcr.io, a lab mirrors that digest; the release
+builds nothing for it). It has three static users, `drill-admin`, `drill-member` and `drill-disabled`, with a fake
+password whose bcrypt hash is made at run time. The step `oidc-source` signs the three in on the source with a Go HTTP
+flow through Koinon's real `/auth/oidc/start` and `/auth/oidc/callback` (kind and lab alike), records user IDs and roles,
+and disables `drill-disabled` in Koinon before the backup. The check `oidc-signin` first reads the restored rows (same
+user IDs, same roles, same disabled state) before any sign-in on the copy, then runs the flow again: admin and member keep
+ID and roles and no user is made, and the disabled user gets 403 at the callback. The lab profile adds one Playwright
+sign-in of the admin through the Dex login form (`web/e2e-drill/oidc.spec.ts`), which waits for the first of "back at
+Koinon" or a known Dex page and fails with a named error, never with a 60 s heading wait. The drill host reaches Dex
+through a port-forward (fixed local port 18556); the browser maps its cluster name with `--host-resolver-rules` and
+bypasses the proxy for it. The install's API is on `127.0.0.1:18181` (source) and `127.0.0.1:18182` (target), the two
+redirect URLs of Dex's one client. No secret, no external provider and no state across runs are involved. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
 scripted approver for any install, GitHub and Gitea targets (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`);
 `hack/answer-question.sh` answers one pending `ask_user` question by run and question ID.

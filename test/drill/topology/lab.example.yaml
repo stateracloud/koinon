@@ -9,18 +9,13 @@
 #   KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your lab file> \
 #   test/drill/run.sh
 # (optional: KOINON_DRILL_WEB_PASSWORD=<admin password of the restored copy>; the default is the seeded fake one.)
-# The oidc-signin check reads the two personas' passkeys from the environment, never from a file: for each of
-# ADMIN and MEMBER, KOINON_DRILL_OIDC_<PERSONA>_<FIELD> with FIELD one of USERNAME, CREDENTIAL_ID (standard base64),
-# RP_ID, ORIGIN (the issuer's origin), PRIVATE_KEY (PKCS#8, base64), USER_HANDLE (base64), SIGN_COUNT.
-# After each sign-in run (source, then the restored copy, which overwrites it), oidc-signcounts.json in the result
-# directory holds each persona's username and latest signCount (no key material), even when the drill fails later;
-# write it back to the lab's store before the next run, whatever the verdict.
 # Then upload the result to the rc release the final tag promotes, as drill-result-lab.json (docs/dev/releasing.md).
 #
 # {run} is the run ID. Namespaces must start with koinon-drill-; gateway IDs with drill-.
 name: lab-example
 profile: lab
-# The lab gate includes the browser sign-in (web/e2e-drill). The machine that runs the drill needs pnpm
+# The lab gate includes the browser sign-in (web/e2e-drill): a password sign-in, and the OIDC sign-in through the
+# drill's own Dex login form. The machine that runs the drill needs pnpm
 # and a Chromium for Playwright (`pnpm --dir web exec playwright install chromium`).
 browserSignin: true
 context: example-lab-context
@@ -40,23 +35,10 @@ fakesNamespace: koinon-drill-fakes-{run}
 # The per-namespace hook (#927): after the drill creates each of its namespaces it adds these labels and applies
 # this manifest there (`kubectl apply -n <namespace> -f`). The file is the operator's, kept outside the repository
 # next to this one: it holds the access objects the lab needs in a fresh namespace (for example ExternalSecrets that
-# bring the OIDC client secret or a registry pull secret in). Objects in it must not name a namespace.
+# bring a registry pull secret in). Objects in it must not name a namespace.
 namespaceHook: /etc/example/koinon-drill/namespace-hook.yaml
 namespaceLabels:
   example.invalid/secret-store: "true"
-# The `oidc-signin` check (#927): the two personas sign in through an external identity provider, on the source
-# before it is lost and on the restored copy, and each keeps its role. The issuer and the standing client are
-# topology inputs. The client is PUBLIC (PKCE only; the chart's clientSecret stays empty). The drill gives the
-# source the redirect URL http://127.0.0.1:18181/auth/oidc/callback and the target
-# http://127.0.0.1:18182/auth/oidc/callback (fixed ports): the client must allow both. Each persona's group is
-# mapped to a role in the default org (admin, member).
-oidc:
-  issuerUrl: https://idp.example.invalid/realms/drill
-  clientId: koinon-drill
-  admin:
-    group: koinon-admins
-  member:
-    group: koinon-users
 chartPath: charts/koinon
 # Base values for the chart on your cluster (relative to the repository root, or an absolute path). The
 # kind values (test/e2e/kind/koinon-values.yaml) are a starting point; set your storage class and image
@@ -69,6 +51,9 @@ gatewayValues: test/e2e/kind/openshell-values.yaml
 fakeModelImage: registry.example.invalid/koinon/koinon-fakemodel:e2e
 fakeMcpImage: registry.example.invalid/koinon/koinon-fakemcp:e2e
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
+# Dex, the drill's own OIDC provider (the `oidc-signin` check needs no external identity provider and no secret).
+# Mirror the upstream image by THIS digest (the tag is only a label; keep it equal to kind.yaml's).
+fakeIdpImage: registry.example.invalid/dexidp/dex:v2.46.1@sha256:65b72ca0f4b0bf6d4ada84ec21da8851782563404ac7b8f926923d27ceced9ab
 registry: registry.example.invalid
 imageRegistry: registry.example.invalid/koinon
 storageClass: example-storage-class

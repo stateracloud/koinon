@@ -14,6 +14,14 @@ if (!url) throw new Error('KOINON_DRILL_WEB_URL is not set; the drill suite sets
 // them itself. The credentials stay in use.proxy; they are not logged (list reporter, no trace).
 const proxy = proxyFromEnv(process.env)
 
+// The OIDC spec signs in through the drill's own Dex, which has a cluster name only (KOINON_DRILL_IDP_HOST,
+// dex.<ns>.svc.cluster.local:5556). The drill host reaches it through a port-forward (KOINON_DRILL_IDP_ADDR,
+// 127.0.0.1:<port>), so Chromium maps the name to it. The rule names the host, the replacement carries the port. The
+// proxy bypasses the name too (bypassFromEnv).
+const idpHost = process.env.KOINON_DRILL_IDP_HOST?.replace(/:\d+$/, '')
+const idpAddr = process.env.KOINON_DRILL_IDP_ADDR
+const args = idpHost && idpAddr ? [`--host-resolver-rules=MAP ${idpHost} ${idpAddr}`] : []
+
 export default defineConfig({
   testDir: './e2e-drill',
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results-drill',
@@ -26,6 +34,13 @@ export default defineConfig({
   // The list reporter only: a JSON report would carry step titles that include fill() values.
   reporter: [['list']],
   // No trace and no video: both record fill() text, and the password is typed into this page.
-  use: { baseURL: url, trace: 'off', video: 'off', screenshot: 'only-on-failure', ...(proxy ? { proxy } : {}) },
+  use: {
+    baseURL: url,
+    trace: 'off',
+    video: 'off',
+    screenshot: 'only-on-failure',
+    ...(proxy ? { proxy } : {}),
+    ...(args.length ? { launchOptions: { args } } : {}),
+  },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 })

@@ -39,6 +39,12 @@ describe('playwright proxy from env', () => {
     )
   })
 
+  it("bypasses the drill's own OIDC provider by name, without its port", () => {
+    expect(bypassFromEnv({ KOINON_DRILL_IDP_HOST: 'dex.fakes.svc.cluster.local:5556' })).toBe(
+      '127.0.0.1,localhost,dex.fakes.svc.cluster.local',
+    )
+  })
+
   it('never echoes the value in an error', () => {
     expect(() => proxyFromEnv({ HTTPS_PROXY: 'http://koinon_test:not-a-real-token@[bad' })).toThrow(
       /not a valid URL/,

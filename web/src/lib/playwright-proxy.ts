@@ -32,12 +32,15 @@ export function proxyFromEnv(env: Env): PlaywrightProxy | undefined {
   return proxy
 }
 
-// NO_PROXY entries first, then the loopback names the drill's port-forward needs.
+// NO_PROXY entries first, then the loopback names the drill's port-forward needs, then the host name of the drill's
+// own OIDC provider (KOINON_DRILL_IDP_HOST, host:port): Chromium maps it to a loopback forward, but picks the proxy
+// by the name, so the name must be bypassed too.
 export function bypassFromEnv(env: Env): string {
   const entries = pick(env, 'NO_PROXY', 'no_proxy')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  for (const h of ['127.0.0.1', 'localhost']) if (!entries.includes(h)) entries.push(h)
+  const idp = (env.KOINON_DRILL_IDP_HOST ?? '').trim().replace(/:\d+$/, '')
+  for (const h of ['127.0.0.1', 'localhost', idp]) if (h && !entries.includes(h)) entries.push(h)
   return entries.join(',')
 }

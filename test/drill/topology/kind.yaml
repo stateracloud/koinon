@@ -34,6 +34,9 @@ fakeModelImage: localhost:5001/koinon-fakemodel:e2e
 fakeMcpImage: localhost:5001/koinon-fakemcp:e2e
 # SeaweedFS 4.50, Apache-2.0: the S3 server of the checkpoint writer's own test (internal/checkpoint/s3_test.go).
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
+# Dex v2.46.1, Apache-2.0, the drill's OIDC provider (ADR 0109, amendment 2026-11-13): the upstream image by its index
+# digest (multi-arch), pulled by the kind nodes from ghcr.io. The release builds nothing for it; a lab mirrors this digest.
+fakeIdpImage: ghcr.io/dexidp/dex:v2.46.1@sha256:65b72ca0f4b0bf6d4ada84ec21da8851782563404ac7b8f926923d27ceced9ab
 runNowCalls: 3
 heldObserve: 100s
 releasedWait: 8m
