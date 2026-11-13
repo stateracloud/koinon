@@ -72,7 +72,10 @@ def prv_stamp($runs):
 # Only events that the PR rollup carries count: a workflow_dispatch (or schedule) run of the same workflow on the head
 # has no rows in the rollup and must never supersede the pull_request / merge_group run (PR #521, run 42963683121).
 def prv_pr_event: ((.event // "") | IN("", "pull_request", "pull_request_target", "merge_group", "push"));
-def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select($draft or (.display_title != "ci (draft)"))];
+# A run titled `e2e-kind (label ignored)` (any label but `e2e` on a PR, #971) ran nothing and never counts, ready or draft:
+# it would otherwise be the newest e2e-kind run and hide the real run's quickstart.
+def prv_ignored: (.display_title // "") == "e2e-kind (label ignored)";
+def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select(prv_ignored | not) | select($draft or (.display_title != "ci (draft)"))];
 def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring);
 # $req: names the caller asked for explicitly (pr-wait --require). Such a name is judged on its newest run of any event
 # (created_at, then run_attempt, per workflow path), so a failed workflow_dispatch run of it (hack/e2e-remote.sh) is read,
@@ -82,7 +85,7 @@ def prv_drop($runs; $draft; $req):
     ($runs | map(.id | tostring)) as $known
     | prv_live($runs; $draft) as $live
     | prv_cur($live) as $cur
-    | ([$runs[] | select($draft or (.display_title != "ci (draft)"))]) as $any
+    | ([$runs[] | select(prv_ignored | not) | select($draft or (.display_title != "ci (draft)"))]) as $any
     | . as $rows
     | ([$rows[] | select(prv_is_status | not) | select((prv_name as $n | $req | index($n)) != null)
           | {n: prv_name, id: prv_rid} | select(.id != null)] | unique) as $asked

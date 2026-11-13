@@ -34,6 +34,13 @@ if [ "$1 $2" = "run list" ]; then
   sed -n "${m}p" "$FAKE_DIR/runs" | grep . || tail -n 1 "$FAKE_DIR/runs"
   exit 0
 fi
+if [ "$1" = api ] && [[ $* == *contents/hack/ci-required.txt* ]]; then # the head's hack/ci-required.txt: $FAKE_DIR/ci-required.txt, else unreadable
+  f="$FAKE_DIR/ci-required.txt"
+  [[ $* == *ref=refs/pull/*/merge* ]] && f="$FAKE_DIR/ci-required.merge.txt" # the merge ref's list, else unreadable
+  [ -f "$f" ] || exit 9
+  cat "$f"
+  exit 0
+fi
 if [ "$1" = api ] && [[ $2 == */rules/branches/* ]]; then # the ruleset's required contexts, one per line
   [ ! -f "$FAKE_DIR/rules-fail" ] || exit 9
   # No $FAKE_DIR/rules: every check of the current PR json is required (most tests judge all of them).
@@ -243,6 +250,39 @@ seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok,$web_ok")"
 printf 'lint\ngo\nweb\n' >"$FAKE_DIR/rules"
 run 7 --checks --interval 0
 expect "--checks green when every required context exists" 0 "checks 3/3 green"
+# #971: a ruleset context the head's own list does not define never reports: say so at once, do not wait.
+pr_h() { printf '{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"headRefOid":"abc1234def","statusCheckRollup":[%s]}' "$1"; }
+seq_set "$(pr_h "$lint_ok,$go_ok")"
+printf 'lint\ngo\nflavors\n' >"$FAKE_DIR/rules"
+printf 'aggregator go\nquick lint\nharnesses\nadvisory fuzz\n' >"$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "--checks reports a required context the head does not define" 1 "UNDEFINED flavors: required by the ruleset, but hack/ci-required.txt on the head abc1234 does not list it, so no run of this head will report it. A renamed or new required check needs the ruleset and the PR changed in the right order (docs/dev/ci.md \"Renaming a required check\")"
+printf 'aggregator go\nlint\nflavors\n' >"$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "--checks still waits for a context the head defines" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+printf 'advisory flavors\n' >"$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "an advisory name counts as defined" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+printf '  advisory flavors\n' >"$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "an indented advisory row counts as defined" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+# The merge ref's list decides: main added flavors, the PR head (behind main) does not list it yet.
+printf 'aggregator go\nlint\n' >"$FAKE_DIR/ci-required.txt"
+printf 'aggregator go\nlint\nflavors\n' >"$FAKE_DIR/ci-required.merge.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "a context only the merge ref lists is waited for, not UNDEFINED" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
+printf 'aggregator go\nlint\n' >"$FAKE_DIR/ci-required.merge.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "a context the merge ref does not list is UNDEFINED" 1 "UNDEFINED flavors: required by the ruleset, but hack/ci-required.txt on the head abc1234 does not list it, so no run of this head will report it. A renamed or new required check needs the ruleset and the PR changed in the right order (docs/dev/ci.md \"Renaming a required check\")"
+rm "$FAKE_DIR/ci-required.merge.txt"
+rm "$FAKE_DIR/ci-required.txt"
+run 7 --checks --interval 0 --timeout 0
+expect "an unreadable head list changes nothing" 2 "checks 2/2 done; waiting for required checks not on the head yet: flavors
+TIMEOUT"
 seq_set "$(pr OPEN CLEAN "" "$lint_ok,$go_ok")"
 run 7 --interval 0 --timeout 0
 expect "without --checks a required context absent from the head does not wait" 2 "checks 2/2 green
@@ -337,6 +377,15 @@ ciruns "61:ci (draft)" "62:ci"
 run 7 --interval 0
 expect "#231: without --checks the draft run is not reported FAILED" 0 "checks 2/2 green
 MERGED abcdef0"
+# (#971) a label other than `e2e` starts an e2e-kind run titled `e2e-kind (label ignored)` whose quickstart is skipped; it is
+# newer than the real run but never counts.
+e_ok=$(cr_at quickstart SUCCESS 70 2026-11-01T10:00:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+e_skip=$(cr_at quickstart SKIPPED 71 2026-11-01T10:05:00Z | sed 's/^{/{"workflowName":"e2e-kind",/')
+seq_set "$(rdh "$e_ok,$e_skip")"
+printf 'quickstart\n' >"$FAKE_DIR/rules"
+wfruns "$(wfrun 70 e2e-kind.yml e2e-kind 2026-11-01T10:00:00Z)" "$(wfrun 71 e2e-kind.yml 'e2e-kind (label ignored)' 2026-11-01T10:05:00Z)"
+run 7 --checks --interval 0
+expect "#971: a newer ignored-label e2e-kind run does not hide the green quickstart" 0 "checks 1/1 green"
 # the ready run is not there yet: wait, never pass
 seq_set "$(rdh "$d_go")" "$(rdh "$d_go")" "$(rdh "$d_go,$r_go")"
 printf 'go\n' >"$FAKE_DIR/rules"

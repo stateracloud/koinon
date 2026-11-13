@@ -11,7 +11,8 @@
 #                      rule (needs-e2e.sh) and is the only e2e proof. The labels are the
 #                      event's plus the PR's current ones: `gh pr create --label` opens the PR and
 #                      then labels it (two events, old issue 468), and the run of `opened` should already see
-#                      the label. Label events do not start the workflow.
+#                      the label. The workflow also runs on the `labeled` event of the `e2e` label (#971), so a label added to an
+#                      open PR starts the run; other labels skip `decide`.
 #   merge_group        (the merge queue, #225, #444, ADR 0102, ADR 0105) needed when the pull request named by
 #                      the queue ref (QUEUE_REF, gh-readonly-queue/main/pr-<N>-<sha>) carries the `e2e` label,
 #                      or the entry's own diff against MG_BASE (merge_group.base_sha) matches the full rule or

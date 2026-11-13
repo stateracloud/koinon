@@ -59,7 +59,9 @@
 
 set -euo pipefail
 # KOINON_REPO picks the repository for every gh call below (hack/repo-lib.sh).
-# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
+# Directive kept as source=/dev/null until #968 is fixed (the preflight shell gate runs shellcheck without -x, so
+# the old `source-path=SCRIPTDIR source=repo-lib.sh` fires SC1091); then go back to the old directive.
+# shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo
 export GH_PAGER=cat PAGER=cat
@@ -67,9 +69,12 @@ export GH_PAGER=cat PAGER=cat
 here=$(cd "$(dirname "$0")" && pwd)
 wait_sh=${PR_MERGE_WAIT:-$here/pr-wait.sh}
 threads_sh=${PR_MERGE_THREADS:-$here/pr-threads.sh}
-required_txt=${PR_MERGE_REQUIRED:-$here/ci-required.txt}
+# Test hook (and an explicit override): PR_MERGE_REQUIRED names a file in place of the list read below.
+required_txt=${PR_MERGE_REQUIRED:-}
 # shellcheck source=/dev/null
 . "$here/lib/pr-verdict.sh"
+# shellcheck source=/dev/null
+. "$here/lib/ci-required.sh"
 
 usage() {
   echo "usage: hack/pr-merge.sh <PR> [--jump | --break-glass \"<reason>\" | --admin] [--e2e] [--approved-at <time>]" >&2
@@ -175,9 +180,21 @@ fi
 
 # Every required context of hack/ci-required.txt, read on the head SHA and judged by hack/lib/pr-verdict.sh, the
 # same function hack/pr-wait.sh uses (#133): per workflow run, the newest counting run of each workflow decides.
-contexts=$(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$required_txt" |
-  awk 'NF && $1 != "advisory" { sub(/^(aggregator|external) /, ""); print }')
-[ -n "$contexts" ] || { echo "pr-merge: no required contexts in $required_txt" >&2; exit 2; }
+# The list is the PR head's own when the PR changes hack/ci-required.txt (a rename: the old name never reports on
+# that head), else the base branch's on the remote, never the local checkout (#971: a checkout behind a merged
+# rename judged "flavors (missing)").
+if [ -n "$required_txt" ]; then
+  required_src=$required_txt
+  contexts=$(cir_parse <"$required_txt")
+else
+  rfiles=$(gh api "repos/{owner}/{repo}/pulls/$pr/files" --paginate --jq '.[].filename' 2>/dev/null) || rfiles=""
+  [ -n "$rfiles" ] || { echo "pr-merge: cannot read the file list of PR $pr to pick the required list; not merging" >&2; exit 2; }
+  if grep -qx 'hack/ci-required.txt' <<<"$rfiles"; then rref=$sha; else rref=$base; fi
+  required_src="hack/ci-required.txt at ${rref:0:12}"
+  rtxt=$(cir_fetch "$rref") || { echo "pr-merge: cannot read $required_src; not merging" >&2; exit 2; }
+  contexts=$(cir_parse <<<"$rtxt")
+fi
+[ -n "$contexts" ] || { echo "pr-merge: no required contexts in $required_src" >&2; exit 2; }
 runs=$(prv_check_rows "$sha") || { echo "pr-merge: cannot read the check runs of $sha" >&2; exit 2; }
 stats=$(prv_status_rows "$sha") || { echo "pr-merge: cannot read the commit statuses of $sha" >&2; exit 2; }
 wfruns=$(prv_runs "$sha") # empty when unreadable: nothing is dropped, so the verdict only gets stricter
@@ -287,7 +304,7 @@ if [ $((admin + glass)) != 0 ]; then
       # 0 = needed; anything else = the rule could not be applied: needed.
       qv=$(prv_judge "$rows" "$wfruns" false quickstart | awk -F'\t' 'NR == 1 { print $2 }')
       if [ "$qv" != success ]; then
-        echo "pr-merge: --admin: this change needs the kind e2e (hack/needs-e2e.sh on origin/$base, exit $nrc) and the head ${sha:0:7} has no green quickstart (${qv:-missing}); add the e2e label (hack/ship.sh --e2e or gh pr edit $pr --add-label e2e) to get a quickstart on the head, or use the queue; not merging" >&2
+        echo "pr-merge: --admin: this change needs the kind e2e (hack/needs-e2e.sh on origin/$base, exit $nrc) and the head ${sha:0:7} has no green quickstart (${qv:-missing}); add the e2e label (hack/ship.sh --e2e or gh pr edit $pr --add-label e2e; the label starts the run itself, e2e-kind.yml runs on the labeled event) to get a quickstart on the head, wait for it, or use the queue; not merging" >&2
         exit 10
       fi
     fi

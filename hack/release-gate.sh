@@ -11,8 +11,8 @@
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
 # (and, optional, DRILL_RESULT_OUT: a path where an rc tag's green kind drill-result.json is copied to)
 # (needs checks:read, contents:read, actions:read and pull-requests:read; the ruleset is read with the implicit
-# metadata permission). The required checks are read from
-# the `main` ruleset, in this order (ADR 0104-era route, docs/dev/releasing.md): the tagged commit itself;
+# metadata permission). The required checks are those of hack/ci-required.txt in the tagged commit (#971; the
+# `main` ruleset only when that tree has none). They are judged in this order (ADR 0104-era route, docs/dev/releasing.md): the tagged commit itself;
 # where it reports `skipped` (the push skipped its heavy jobs because the merge queue had tested the
 # tree) or, for the pull-request-only contexts (pr_only below), the successful merge_group `ci` run on a
 # commit with the same tree (the queue build); and only when there is no queue run (an admin merge) the
@@ -30,8 +30,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
 
-# The required status checks come from GitHub at run time (required_contexts below), so a check
-# added to or dropped from the ruleset needs no edit here.
+# The required status checks come from the tagged commit's own hack/ci-required.txt (below), so a check
+# added, renamed or dropped needs no edit here.
 #
 # Required contexts that are not reported by a push to main, read instead from the queue build (the
 # merge_group run on the same tree), else from the head commit of the pull request that merged the
@@ -99,10 +99,23 @@ required_contexts() {
 		sort -u
 }
 
-contexts=$(required_contexts) ||
-	fail "cannot read the rules that apply to the default branch (gh api repos/$GITHUB_REPOSITORY/rules/branches/<default> failed); refusing to release without the required list"
-[[ -n $contexts ]] ||
-	fail "no required status checks apply to the default branch; refusing to release without the required list"
+# The required list of a release is the list of the tagged commit itself (#971): its own hack/ci-required.txt,
+# read from the clone. Today's ruleset says nothing about an older tree: after a check is renamed (the ruleset
+# names the new one) every earlier rc would fail "no check run found" for a check its tree never had. The ruleset
+# is the fallback for a tree with no ci-required.txt, and fails closed.
+# shellcheck source-path=SCRIPTDIR source=lib/ci-required.sh
+. "$here/lib/ci-required.sh"
+required_src="hack/ci-required.txt of $SHA"
+if txt=$(git show "$SHA:hack/ci-required.txt" 2>/dev/null) && contexts=$(cir_parse <<<"$txt") && [[ -n $contexts ]]; then
+	contexts=$(sort -u <<<"$contexts")
+else
+	required_src="the ruleset (no usable hack/ci-required.txt in $SHA)"
+	contexts=$(required_contexts) ||
+		fail "cannot read hack/ci-required.txt of $SHA nor the rules that apply to the default branch (gh api repos/$GITHUB_REPOSITORY/rules/branches/<default> failed); refusing to release without the required list"
+	[[ -n $contexts ]] ||
+		fail "no required status checks apply to the default branch; refusing to release without the required list"
+fi
+echo "required checks: $required_src"
 mapfile -t required <<<"$contexts"
 
 is_both() { local p; for p in "${both[@]}"; do [[ $p == "$1" ]] && return 0; done; return 1; }
