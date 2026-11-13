@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -53,6 +54,11 @@ type runner struct {
 	started       []testcontainers.Container
 	dockerVolumes []string
 }
+
+// containerSeq numbers the containers of one run. A clock reading would not do: the platform clock has
+// microsecond resolution, so the reading modulo a millisecond has 1000 values and two containers of one
+// spec group (they live until it ends) collide by chance.
+var containerSeq atomic.Int64
 
 // workload is a started container.
 type workload struct {
@@ -103,7 +109,7 @@ func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c c
 	opts := []testcontainers.ContainerCustomizer{
 		testcontainers.WithEnv(envList),
 		testcontainers.WithCmd(args...),
-		testcontainers.WithName(fmt.Sprintf("chartsmoke-%s-%s-%d", owner, c.Name, time.Now().UnixNano()%1_000_000)),
+		testcontainers.WithName(fmt.Sprintf("chartsmoke-%s-%s-%d", owner, c.Name, containerSeq.Add(1))),
 		testcontainers.WithConfigModifier(func(cfg *container.Config) {
 			if user != "" {
 				cfg.User = user
