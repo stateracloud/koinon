@@ -100,16 +100,37 @@ timeout=${SWEEP_TIMEOUT:-300}
 poll=${SWEEP_POLL:-5}
 [[ $timeout =~ ^[0-9]+$ && $poll =~ ^[0-9]+$ ]] || { echo "SWEEP_TIMEOUT and SWEEP_POLL are whole seconds" >&2; exit 2; }
 deadline=$((SECONDS + timeout))
-while :; do
-  left=$(ns_phases "$label")
+left=""
+poll_err=""
+# One poll of the label selector and of both OpenShell workspace selectors. A failed kubectl call (an
+# API blip) counts as "not gone yet": its stderr is kept for the timeout report and the wait goes on.
+# Returns 1 when any call failed (left then holds what the calls that worked saw, plus a marker).
+poll_left() {
+  local out err_file failed=0 side
+  err_file=$(mktemp "${TMPDIR:-/tmp}/sweep-poll.XXXXXX")
+  left=""
+  poll_err=""
+  if out=$(ns_phases "$label" 2>"$err_file"); then left=$out; else failed=1; poll_err+=$(<"$err_file"); fi
   for side in src dst; do
-    left+=$'\n'$(ns_phases "openshell.ai/gateway-id=drill-$side-$run" | grep -E "^openshell-drill-$side-$run-" || true)
+    if out=$(ns_phases "openshell.ai/gateway-id=drill-$side-$run" 2>"$err_file"); then
+      left+=$'\n'$(grep -E "^openshell-drill-$side-$run-" <<<"$out" || true)
+    else
+      failed=1; poll_err+=$(<"$err_file")
+    fi
   done
+  rm -f "$err_file"
   left=$(sed '/^$/d' <<<"$left")
-  [[ -z $left ]] && break
+  return "$failed"
+}
+while :; do
+  poll_ok=1
+  poll_left || poll_ok=0
+  # Only a clean poll that finds nothing ends the wait.
+  [[ $poll_ok == 1 && -z $left ]] && break
   if (( SECONDS >= deadline )); then
     echo "sweep $run: namespace(s) still present after ${timeout}s:" >&2
-    printf '  %s\n' "${left//$'\n'/$'\n  '}" >&2
+    if [[ -n $left ]]; then printf '  %s\n' "${left//$'\n'/$'\n  '}" >&2; else echo "  (none seen; the last poll failed)" >&2; fi
+    [[ -z $poll_err ]] || printf 'last poll error: %s\n' "$poll_err" >&2
     exit 1
   fi
   sleep "$poll"
