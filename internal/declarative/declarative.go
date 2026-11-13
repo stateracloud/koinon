@@ -708,27 +708,40 @@ func (i *Importer) listAbsent(ctx context.Context, q *store.Queries, seen map[pr
 		if err != nil {
 			return nil, err
 		}
+		// Several active connections can share one managed_by_secret; the release records one removal per
+		// Secret (UNIQUE (org_id, kind, secret_name)), like the providers and MCP servers above.
+		byName := map[string][]store.Connection{}
+		names = nil
 		for _, c := range conns {
 			if c.Source != store.ConfigSourceSecret || c.RemovedAt.Valid || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
 				continue
 			}
-			out = append(out, absentItem{installbinding.Removal{Kind: TypeConnection, Org: slug, Secret: c.ManagedBySecret.String}, func(ctx context.Context) error {
+			if _, ok := byName[c.ManagedBySecret.String]; !ok {
+				names = append(names, c.ManagedBySecret.String)
+			}
+			byName[c.ManagedBySecret.String] = append(byName[c.ManagedBySecret.String], c)
+		}
+		for _, name := range names {
+			group := byName[name]
+			out = append(out, absentItem{installbinding.Removal{Kind: TypeConnection, Org: slug, Secret: name}, func(ctx context.Context) error {
 				// Marked removed, not deleted: agents are bound to it and the audit log names it.
 				_, err := audit.InTx(ctx, i.Pool, func(tq *store.Queries, b audit.Batch) error {
-					if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
-						return err
+					for _, c := range group {
+						if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
+							return err
+						}
+						b.Org(audit.Event{
+							Org: id, Actor: audit.Secret(name), Action: "connection.undeclare", TargetKind: "connection",
+							TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
+							After: map[string]any{"removed": true},
+						})
 					}
-					b.Org(audit.Event{
-						Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
-						TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
-						After: map[string]any{"removed": true},
-					})
 					return nil
 				})
 				if err != nil {
 					return err
 				}
-				i.log().Warn("marked the connection of a deleted Secret removed; agents bound to it report why, and restoring the Secret restores it", "secret", c.ManagedBySecret.String, "org", slug)
+				i.log().Warn("marked the connections of a deleted Secret removed; agents bound to them report why, and restoring the Secret restores them", "secret", name, "org", slug)
 				return nil
 			}})
 		}

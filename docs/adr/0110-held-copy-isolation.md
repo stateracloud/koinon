@@ -457,15 +457,15 @@ picture).
   gap.
 - Negative: koinon-api gets a new startup input (the mark), so a lost mark Secret now also refuses tokens and
   sessions on the live install until `adopt-restore`. The mark backup (ADR 0106) becomes more important.
-- Negative: **a live install that lost its mark Secret turns the guards on against itself.** Its new mark differs
-  from the bound one, so the state is `copy`: its own targets equal the recorded ones, so checkpoints go
-  restore-only (no new snapshots) and OIDC login is off, until a platform admin runs `adopt-restore` or applies the
-  mark backup. The alerts `KoinonRestoreIsolationConflict` (decision 4) and the `koinon_install_binding{state="copy"}`
-  gauge make this visible within minutes; it also runs the release step once (decision 1), which signs everyone
+- Negative: **a live install that lost its mark Secret is treated as a copy.** Its new mark differs from the bound
+  one, so the state is `copy` (the amendment of 2026-11-13 below: the runtime guards of decision 4 are not built, so
+  checkpoints and OIDC are unaffected). The `koinon_install_binding{state="copy"}` gauge makes this visible within
+  minutes, until a platform admin runs `adopt-restore` or applies the mark backup; it also runs the release step once (decision 1), which signs everyone
   out. It stays upgradable throughout. The backup and restore guide gets a "lost mark Secret" section, which also
   says: because the install is pending once, its importer queues the declarative removals of that pass as
-  `waiting`, and the `restore-release-check` Job then fails each later `helm upgrade` whose plan holds one of them,
-  until `restore.acceptImporterDeletions` is set (or the Secret is restored).
+  `waiting`; they stay plan-only until `restore.acceptImporterDeletions` is set (or the Secret is restored), and
+  `koinon_restore_release_pending` and its alert say so. The Job does not fail later upgrades because of them
+  (amendment of 2026-11-13).
 - Negative: every release signs everyone out, also a release with no data loss (a hold kept only for a check).
 - Negative: an operator on a copy cannot use a source API token; automation against a copy needs a new token.
 - **CRD.** The chart ships its first CustomResourceDefinition (`PlatformAdminRecovery`), in `crds/`. A CRD is
@@ -545,6 +545,30 @@ Each part is one pull request. The drill specs of its decisions move from known 
 - **(e) `restore status`** (decision 7). The status function, `GET /admin/v1/restore/status`, the full report in the
   release-check Job's log (added to (c)'s Job), the tokens-at-dump list, the `waiting` removals. Depends on (a), (b1), (b2) and (c) for its sections; it can land
   first with those sections empty and fill them as they merge.
+
+## Amendment (2026-11-13, #940)
+
+Review of the first implementation (#939) found three gaps between this ADR and the code. Decisions:
+
+- **Decision 1, the Job and rows that wait.** The `restore-release-check` Job fails only while a release is
+  pending (the sentence above: "it refuses nothing else"). Removals that wait after the release are printed and
+  counted, but they no longer fail `helm upgrade`: the importer gate already keeps them plan-only in every case,
+  and `koinon_restore_release_pending` with its alert is the signal. This replaces the earlier reading that the
+  Job also failed on waiting rows.
+- **Decision 4, the runtime guard is not built; the chart switch is the guard.** In state `copy` nothing compares the
+  targets, agentd does not enter restore-only mode by itself, `/auth/oidc/*` does not answer 409, and neither
+  `koinon_restore_isolation_conflict` nor the alert `KoinonRestoreIsolationConflict` exists. What decision 4 ships is
+  the chart value `checkpoints.readOnly` (restore-only mode, which now also opens the kopia repository read-only,
+  so a restore, verify or listing puts no blob in the source's bucket) and the NOTES.txt warning when `restoreHold`
+  is true with checkpoints on and `readOnly` false. The case the runtime guard would catch is a copy whose operator
+  left the checkpoint bucket and the public or OIDC redirect URL at the source's values with `readOnly` false. It
+  is left to the operator and to `restore status`, which prints the recorded targets and marks those equal to the
+  configured ones. Reason: the guard needs the recorded targets in the hot paths of three binaries and a second OIDC
+  failure mode, and the drill and the NOTES warning already cover the supported flows. The guard can be built later
+  without a schema change (the targets are in `install_binding`); until then the sentence "Held or released, the
+  guard holds" of decision 4 and the alert of Consequences do not apply.
+- **Decision 7, removed targets.** The outward-target list of `restore status` skips providers, MCP servers and
+  connections whose `removed_at` is set: a removed target is not in use.
 
 ## Open questions
 

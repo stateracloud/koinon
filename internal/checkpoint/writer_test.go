@@ -80,6 +80,43 @@ var _ = Describe("Writer", func() {
 		Expect(w.Verify(ctx, prefix, "koinon_test_not-a-real-token", r2.SnapshotID)).To(Succeed())
 	})
 
+	It("writes nothing to the bucket in restore-only mode (#940)", func() {
+		bucket := GinkgoT().TempDir()
+		src := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir()}
+		pw := "koinon_test_not-a-real-token"
+		r, err := src.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+
+		state := func() map[string]string {
+			out := map[string]string{}
+			Expect(filepath.WalkDir(bucket, func(p string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return err
+				}
+				fi, err := d.Info()
+				Expect(err).NotTo(HaveOccurred())
+				out[p] = fmt.Sprintf("%d@%d", fi.Size(), fi.ModTime().UnixNano())
+				return nil
+			})).To(Succeed())
+			return out
+		}
+		before := state()
+
+		ro := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir(), ReadOnly: true}
+		var out bytes.Buffer
+		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, &out)).To(Succeed())
+		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
+		Expect(ro.Verify(ctx, prefix, pw, r.SnapshotID)).To(Succeed())
+		snaps, err := ro.Snapshots(ctx, prefix, pw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(HaveLen(1))
+		Expect(state()).To(Equal(before), "no blob was put, rewritten or deleted")
+
+		_, err = ro.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c2"})
+		Expect(err).To(MatchError(ContainSubstring(checkpoint.ReadOnlyError)))
+		Expect(state()).To(Equal(before))
+	})
+
 	It("does not open a repository with another password", func() {
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).NotTo(HaveOccurred())
