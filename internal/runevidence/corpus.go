@@ -9,6 +9,9 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 // The converter from an export to the leak guard's replay corpus (#51, #352). The corpus format is
@@ -47,6 +50,9 @@ type CorpusReport struct {
 	// UnpairedCalls are tool calls of an MCP tool with no decision record (or the other way round):
 	// they are left out, because a call without its server and generation cannot be replayed.
 	UnpairedCalls, UnpairedDecisions int
+	// OwnCalls are MCP-prefixed calls no decision names (Koinon's own tools): written as feeds that set
+	// both legs, as the guard held them.
+	OwnCalls int
 }
 
 type eventLine struct {
@@ -93,7 +99,12 @@ type toolCall struct {
 	done             bool
 }
 
-type queueKey struct{ run, name string }
+type queueKey struct{ run, server, tool string }
+
+// nameKey is a harness tool name's candidates: "<server>_<tool>" and, for an ask-tier call,
+// "<server>-ask_<tool>". A name with underscores can be split in more than one way, so the key keeps
+// every candidate and the first with a decision left wins.
+type nameKey struct{ run, name string }
 
 // Corpus reads an export's run_events and decisions and writes corpus lines to w.
 func Corpus(events, decisions io.Reader, w io.Writer, o CorpusOptions) (CorpusReport, error) {
@@ -109,8 +120,14 @@ func Corpus(events, decisions io.Reader, w io.Writer, o CorpusOptions) (CorpusRe
 
 	// Decisions per run, per server/tool, in order.
 	queues := map[queueKey][]decisionLine{}
+	names := map[nameKey][]queueKey{}
 	for _, d := range decs {
-		k := queueKey{d.RunID, d.Server + "_" + d.Tool}
+		k := queueKey{d.RunID, d.Server, d.Tool}
+		if _, seen := queues[k]; !seen {
+			for _, n := range []string{d.Server + "_" + d.Tool, d.Server + mcpservers.AskSuffix + "_" + d.Tool} {
+				names[nameKey{d.RunID, n}] = append(names[nameKey{d.RunID, n}], k)
+			}
+		}
 		queues[k] = append(queues[k], d)
 	}
 
@@ -168,11 +185,42 @@ func Corpus(events, decisions io.Reader, w io.Writer, o CorpusOptions) (CorpusRe
 	var body []map[string]any
 	for _, c := range order {
 		name, mcp := strings.CutPrefix(c.title, o.MCPToolPrefix)
-		if mcp && o.MCPToolPrefix != "" || (o.MCPToolPrefix == "" && queueHas(queues, c.run, name)) {
-			k := queueKey{c.run, name}
+		cands := names[nameKey{c.run, name}]
+		if mcp && o.MCPToolPrefix != "" || (o.MCPToolPrefix == "" && len(cands) > 0) {
+			var k queueKey
+			for _, cand := range cands {
+				if len(queues[cand]) > 0 {
+					k = cand
+					break
+				}
+			}
 			q := queues[k]
 			if len(q) == 0 {
-				rep.UnpairedCalls++
+				if len(cands) > 0 {
+					rep.UnpairedCalls++
+					continue
+				}
+				// No decision names this tool in the run: one of Koinon's own tools (no record), or a
+				// call the guard refused before it knew the org. Either way its result set both legs in
+				// the real run (OwnResultLegs: a tool nobody declared sets both), so the replay gets a feed
+				// that does the same, and a replayed call is not passed for lack of legs.
+				if !c.done {
+					rep.UnpairedCalls++
+					continue
+				}
+				{
+					legs := mcpguard.OwnResultLegs(name)
+					line := map[string]any{
+						"type": "feed", "run": c.run, "seq": c.seq, "tool": name,
+						"legs":       map[string]bool{"untrusted_input": legs.UntrustedInput, "private_data": legs.PrivateData},
+						"generation": generationOf(decs, c.run),
+					}
+					if len(c.texts) > 0 {
+						line["texts"] = c.texts
+					}
+					body = append(body, line)
+					rep.OwnCalls++
+				}
 				continue
 			}
 			d := q[0]
@@ -231,10 +279,6 @@ func Corpus(events, decisions io.Reader, w io.Writer, o CorpusOptions) (CorpusRe
 		}
 	}
 	return rep, nil
-}
-
-func queueHas(queues map[queueKey][]decisionLine, run, name string) bool {
-	return len(queues[queueKey{run, name}]) > 0
 }
 
 func generationOf(decs []decisionLine, run string) string {

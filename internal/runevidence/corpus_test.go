@@ -78,4 +78,31 @@ var _ = Describe("Corpus", func() {
 		Expect(rep.UndeclaredServers).To(BeEmpty())
 		Expect(parse(out.Bytes())[0]).To(HaveKeyWithValue("kind", "send"))
 	})
+
+	It("pairs an ask-tier call on its -ask name and splits a tool name with underscores", func() {
+		ev := jl(
+			`{"type":"run_event","run_id":"r1","seq":1,"kind":"acp.tool_call","payload":{"sessionUpdate":"tool_call","toolCallId":"t1","kind":"other","title":"koinon_gh-ask_issue_create","rawInput":{"title":"x"}}}`,
+			`{"type":"run_event","run_id":"r1","seq":2,"kind":"acp.tool_call_update","payload":{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}}`,
+		)
+		dec := jl(`{"type":"decision","run_id":"r1","generation":"g1","server":"gh","tool":"issue_create","sink_class":"external-high"}`)
+		var out bytes.Buffer
+		rep, err := runevidence.Corpus(ev, dec, &out, runevidence.CorpusOptions{MCPToolPrefix: "koinon_"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rep.Calls).To(Equal(1))
+		Expect(rep.UnpairedCalls).To(BeZero())
+		Expect(rep.UnpairedDecisions).To(BeZero())
+	})
+
+	It("writes a finished call of an own tool as a feed that sets both legs", func() {
+		ev := jl(
+			`{"type":"run_event","run_id":"r1","seq":1,"kind":"acp.tool_call","payload":{"sessionUpdate":"tool_call","toolCallId":"t1","kind":"other","title":"koinon_ticket_get"}}`,
+			`{"type":"run_event","run_id":"r1","seq":2,"kind":"acp.tool_call_update","payload":{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed"}}`,
+		)
+		var out bytes.Buffer
+		rep, err := runevidence.Corpus(ev, jl(), &out, runevidence.CorpusOptions{MCPToolPrefix: "koinon_"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rep.OwnCalls).To(Equal(1))
+		Expect(rep.UnpairedCalls).To(BeZero())
+		Expect(parse(out.Bytes())[0]["legs"]).To(Equal(map[string]any{"untrusted_input": true, "private_data": true}))
+	})
 })

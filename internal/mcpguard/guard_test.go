@@ -371,6 +371,46 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(got).NotTo(HaveKey("gen-a/wiki"))
 		})
 
+		It("counts a parked or ask-tier call only once a person approved it and it ran", func(ctx SpecContext) {
+			add := func(action, reason string, n int32) {
+				GinkgoHelper()
+				Expect(q.InsertLeakGuardDecision(ctx, store.InsertLeakGuardDecisionParams{
+					OrgID: org, AgentID: agent.ID, Generation: "gen-p", Server: "chat", Tool: "post", SinkClass: "external-high", Action: action,
+					Reason: reason, Reasons: []string{reason}, PayloadBytes: n,
+				})).To(Succeed())
+			}
+			sum := func() int64 {
+				GinkgoHelper()
+				rows, err := q.SumRunEvidenceOutbound(ctx, store.SumRunEvidenceOutboundParams{OrgID: org, RunID: runID(ctx)})
+				Expect(err).NotTo(HaveOccurred())
+				var n int64
+				for _, r := range rows {
+					if r.Generation == "gen-p" {
+						n += r.PayloadBytes
+					}
+				}
+				return n
+			}
+			approved := func() {
+				GinkgoHelper()
+				Expect(q.InsertApprovedExecutionDecision(ctx, store.InsertApprovedExecutionDecisionParams{
+					OrgID: org, AgentID: agent.ID, RunID: runID(ctx), Server: "chat", Tool: "post",
+				})).To(Succeed())
+			}
+			// Parked for a person (approve) and the ask-tier pass that mcpask parks: nothing left yet. Denied: still nothing.
+			add("approve", "both_legs", 40)
+			add("pass", "ask_target", 60)
+			Expect(sum()).To(BeZero())
+			// The executor ran the latest parked call: its bytes are counted, once.
+			approved()
+			Expect(sum()).To(BeEquivalentTo(60))
+			// No parked decision for a tool: nothing is invented.
+			Expect(q.InsertApprovedExecutionDecision(ctx, store.InsertApprovedExecutionDecisionParams{
+				OrgID: org, AgentID: agent.ID, RunID: runID(ctx), Server: "chat", Tool: "other",
+			})).To(Succeed())
+			Expect(sum()).To(BeEquivalentTo(60))
+		})
+
 		It("exports the run as JSON Lines with no secret, no argument host and the enforcement mode", func(ctx SpecContext) {
 			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
 			Expect(q.SetAgentSandboxEnforcement(ctx, store.SetAgentSandboxEnforcementParams{OrgID: org, AgentID: agent.ID, Enforcement: "enforce"})).To(Succeed())
@@ -382,7 +422,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			dir := GinkgoT().TempDir()
 			hosts, err := runevidence.NewHostMasker()
 			Expect(err).NotTo(HaveOccurred())
-			e := runevidence.Exporter{Q: q, Scrubber: scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("koinon_test_not-a-real-token")}), Hosts: hosts}
+			e := runevidence.Exporter{Q: q, Scrubber: runevidence.NewScrubber(scrub.NewSecrets("koinon_test_not-a-real-token")), Hosts: hosts}
 			sum, err := e.Export(ctx, org, rid, runevidence.DirSink(dir))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sum.Enforcement).To(Equal("enforce"))

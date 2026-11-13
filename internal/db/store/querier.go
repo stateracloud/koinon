@@ -660,6 +660,11 @@ type Querier interface {
 	// Gives a new agent its template's limit as its own editable limit.
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
+	// A call a person approved has run through the gateway (internal/approvals). The guard's own record
+	// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
+	// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
+	// are counted once, when they left. Nothing is inserted when no parked decision is found.
+	InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
@@ -1594,8 +1599,10 @@ type Querier interface {
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// The bytes that left the org for each external sink: the payload of every external call the guard
-	// passed, per run, per home generation and per MCP server. A call refused, or
-	// parked for a person's approval (action 'approve'), sent nothing at that moment.
+	// passed, per run, per home generation and per MCP server. A call refused, or parked for a person
+	// (action 'approve', or the pass with reason 'ask_target' that mcpask parks), sent nothing at that
+	// moment; the approval executor records the call as a pass with reason 'approved' once it has run
+	// (InsertApprovedExecutionDecision), and that row is counted.
 	SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)

@@ -94,6 +94,13 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	})
 	switch {
 	case err == nil:
+		// The call left the org: count its bytes (lab run evidence, #926). Evidence, not a control: a
+		// failed write is logged and the result is returned.
+		if err := s.q.InsertApprovedExecutionDecision(ctx, store.InsertApprovedExecutionDecisionParams{
+			OrgID: row.OrgID, AgentID: row.AgentID, RunID: row.RunID, Server: name, Tool: row.Tool,
+		}); err != nil {
+			s.log.Error("approvals: could not record the approved call's bytes", append(attrs(row), "err", err)...)
+		}
 		if s.onMCP != nil {
 			raw, err := json.Marshal(res)
 			if err == nil {

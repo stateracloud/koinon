@@ -36,4 +36,13 @@ var _ = Describe("HostMasker", func() {
 		in := "edit main.go and values.yaml, call fmt.Println"
 		Expect(m.Mask(in)).To(Equal(in))
 	})
+
+	It("masks names under other public suffixes and IPv6 addresses outside a URL", func() {
+		in := "db.prod.gov x.edu svc.acme.me box.tv fd00:1234:5678::1 2001:db8:0:0:0:0:0:1"
+		out := m.Mask(in)
+		for _, s := range []string{"prod.gov", "x.edu", "acme.me", "box.tv", "fd00:", "2001:db8"} {
+			Expect(out).NotTo(ContainSubstring(s))
+		}
+		Expect(m.Mask("run.sh and main.go and 12:34:56")).To(Equal("run.sh and main.go and 12:34:56"))
+	})
 })

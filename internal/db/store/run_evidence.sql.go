@@ -111,6 +111,42 @@ func (q *Queries) GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceS
 	return i, err
 }
 
+const insertApprovedExecutionDecision = `-- name: InsertApprovedExecutionDecision :exec
+INSERT INTO leak_guard_decisions (
+    org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
+       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data
+FROM leak_guard_decisions d
+WHERE d.org_id = $1 AND d.agent_id = $2 AND d.run_id IS NOT DISTINCT FROM $3
+  AND d.server = $4 AND d.tool = $5 AND (d.action = 'approve' OR d.reason = 'ask_target')
+ORDER BY d.created_at DESC, d.id DESC
+LIMIT 1
+`
+
+type InsertApprovedExecutionDecisionParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	RunID   pgtype.UUID
+	Server  string
+	Tool    string
+}
+
+// A call a person approved has run through the gateway (internal/approvals). The guard's own record
+// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
+// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
+// are counted once, when they left. Nothing is inserted when no parked decision is found.
+func (q *Queries) InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error {
+	_, err := q.db.Exec(ctx, insertApprovedExecutionDecision,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RunID,
+		arg.Server,
+		arg.Tool,
+	)
+	return err
+}
+
 const insertLeakGuardDecision = `-- name: InsertLeakGuardDecision :exec
 
 INSERT INTO leak_guard_decisions (
@@ -330,7 +366,7 @@ const sumGenerationEvidenceOutbound = `-- name: SumGenerationEvidenceOutbound :m
 SELECT server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
-  AND action = 'pass' AND sink_class IN ('external-low', 'external-high')
+  AND action = 'pass' AND reason <> 'ask_target' AND sink_class IN ('external-low', 'external-high')
 GROUP BY server, sink_class
 ORDER BY server, sink_class
 `
@@ -377,7 +413,7 @@ func (q *Queries) SumGenerationEvidenceOutbound(ctx context.Context, arg SumGene
 const sumRunEvidenceOutbound = `-- name: SumRunEvidenceOutbound :many
 SELECT generation, server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
-WHERE org_id = $1 AND run_id = $2 AND action = 'pass'
+WHERE org_id = $1 AND run_id = $2 AND action = 'pass' AND reason <> 'ask_target'
   AND sink_class IN ('external-low', 'external-high')
 GROUP BY generation, server, sink_class
 ORDER BY generation, server, sink_class
@@ -397,8 +433,10 @@ type SumRunEvidenceOutboundRow struct {
 }
 
 // The bytes that left the org for each external sink: the payload of every external call the guard
-// passed, per run, per home generation and per MCP server. A call refused, or
-// parked for a person's approval (action 'approve'), sent nothing at that moment.
+// passed, per run, per home generation and per MCP server. A call refused, or parked for a person
+// (action 'approve', or the pass with reason 'ask_target' that mcpask parks), sent nothing at that
+// moment; the approval executor records the call as a pass with reason 'approved' once it has run
+// (InsertApprovedExecutionDecision), and that row is counted.
 func (q *Queries) SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error) {
 	rows, err := q.db.Query(ctx, sumRunEvidenceOutbound, arg.OrgID, arg.RunID)
 	if err != nil {

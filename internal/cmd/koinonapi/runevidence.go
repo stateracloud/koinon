@@ -4,9 +4,11 @@ package koinonapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +22,11 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/runevidence"
+	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
+	"github.com/stateracloud/koinon/internal/tracing/router"
 	"github.com/stateracloud/koinon/internal/tracing/scrub"
 )
 
@@ -36,6 +42,9 @@ func newRunEvidenceCommand() *cobra.Command {
 
 	var dbURL, org, run, out string
 	var s3 checkpoint.S3
+	var kekDir string
+	var wrapCfg wrapping.Config
+	var noOrgSecrets bool
 	export := &cobra.Command{
 		Use:   "export",
 		Short: "Write a run's evidence to a directory or an s3://bucket/prefix",
@@ -65,9 +74,11 @@ func newRunEvidenceCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			e := runevidence.Exporter{
-				Q: store.New(pool), Scrubber: scrub.New(scrub.Config{Level: scrub.LevelRedacted}), Hosts: hosts,
+			secrets, err := exportSecrets(cmd.Context(), pool, orgID, kekDir, wrapCfg, noOrgSecrets)
+			if err != nil {
+				return err
 			}
+			e := runevidence.Exporter{Q: store.New(pool), Scrubber: runevidence.NewScrubber(secrets), Hosts: hosts}
 			sum, err := e.Export(cmd.Context(), orgID, runID, sink)
 			if err != nil {
 				return err
@@ -84,6 +95,9 @@ func newRunEvidenceCommand() *cobra.Command {
 	export.Flags().StringVar(&s3.Region, "s3-region", "", "S3 region")
 	export.Flags().StringVar(&s3.AccessKeyID, "s3-access-key-id", "", "S3 access key ID")
 	export.Flags().StringVar(&s3.SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key (use the environment, not the command line)")
+	export.Flags().StringVar(&kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret, as koinon-api reads it; the export scrubs the org's stored credentials")
+	export.Flags().BoolVar(&noOrgSecrets, "no-org-secrets", false, "export without the org's stored credentials in the scrubber (only for an org that stores none)")
+	wrapCfg.Flags(export.Flags())
 	cli.EnvAlias(export, "database-url", "DATABASE_URL")
 	cli.EnvAlias(export, "s3-access-key-id", "AWS_ACCESS_KEY_ID")
 	cli.EnvAlias(export, "s3-secret-access-key", "AWS_SECRET_ACCESS_KEY")
@@ -180,4 +194,28 @@ func parseUUID(flag, v string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, fmt.Errorf("%s: %w", flag, err)
 	}
 	return pgtype.UUID{Bytes: u, Valid: true}, nil
+}
+
+// exportSecrets is the org's secret set for the export's scrubber, built as the trace router builds
+// it (router.PGSecrets: the org's secret store and provider records, opened with the KEKs). It fails
+// when a stored envelope cannot be opened: the set would miss a value, and an export that cannot
+// remove a credential it cannot read must not be written. Without --kek-dir the export refuses
+// unless --no-org-secrets says the org stores none.
+func exportSecrets(ctx context.Context, pool *pgxpool.Pool, org pgtype.UUID, kekDir string, wc wrapping.Config, none bool) (*scrub.Secrets, error) {
+	if kekDir == "" {
+		if !none {
+			return nil, errors.New("--kek-dir is required, so the export can scrub the org's stored credentials (or --no-org-secrets for an org that stores none)")
+		}
+		return scrub.NewSecrets(), nil
+	}
+	wrappers, err := wrapping.New(ctx, wc, wrapping.Service, installid.BoundOnlySource(pool))
+	if err != nil {
+		return nil, err
+	}
+	wrappers = wrappers.WithInstallID(installid.Source(pool))
+	keyring, err := secretstore.LoadDir(ctx, kekDir, wrappers)
+	if err != nil {
+		return nil, fmt.Errorf("load the key-encryption keys: %w", err)
+	}
+	return router.NewPGSecrets(pool, keyring, slog.Default()).Secrets(ctx, org)
 }

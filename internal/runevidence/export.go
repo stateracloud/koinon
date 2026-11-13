@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -152,8 +154,8 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 		generations[d.Generation] = true
 		l := map[string]any{
 			"type": "decision", "run_id": uuidString(run.ID), "n": i + 1, "at": ts(d.CreatedAt), "generation": d.Generation,
-			"server": d.Server, "tool": d.Tool, "sink_class": d.SinkClass, "action": d.Action, "reason": d.Reason,
-			"reasons": d.Reasons, "match_count": d.MatchCount, "match_length": d.MatchLength, "match_encoding": d.MatchEncoding,
+			"server": e.Hosts.Mask(d.Server), "tool": e.Hosts.Mask(d.Tool), "sink_class": d.SinkClass, "action": d.Action,
+			"reason": e.Hosts.Mask(d.Reason), "reasons": e.maskAll(d.Reasons), "match_count": d.MatchCount, "match_length": d.MatchLength, "match_encoding": d.MatchEncoding,
 			"payload_bytes": d.PayloadBytes,
 		}
 		if d.UntrustedInput.Valid {
@@ -173,14 +175,15 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 	}
 	for _, o := range out {
 		if err := line(bufs[FileOutbound], map[string]any{
-			"type": "outbound", "scope": "run", "run_id": uuidString(run.ID), "generation": o.Generation, "server": o.Server,
+			"type": "outbound", "scope": "run", "run_id": uuidString(run.ID), "generation": o.Generation, "server": e.Hosts.Mask(o.Server),
 			"sink_class": o.SinkClass, "calls": o.Calls, "payload_bytes": o.PayloadBytes,
 		}); err != nil {
 			return sum, err
 		}
 		sum.Outbound++
 	}
-	for gen := range generations {
+	// In a fixed order, so two exports of one run are the same bytes.
+	for _, gen := range slices.Sorted(maps.Keys(generations)) {
 		if gen == "" {
 			continue
 		}
@@ -190,7 +193,7 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 		}
 		for _, o := range rows {
 			if err := line(bufs[FileOutbound], map[string]any{
-				"type": "outbound", "scope": "generation", "agent_id": uuidString(run.AgentID), "generation": gen, "server": o.Server,
+				"type": "outbound", "scope": "generation", "agent_id": uuidString(run.AgentID), "generation": gen, "server": e.Hosts.Mask(o.Server),
 				"sink_class": o.SinkClass, "calls": o.Calls, "payload_bytes": o.PayloadBytes,
 			}); err != nil {
 				return sum, err
@@ -209,6 +212,21 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 }
 
 // text scrubs a free-text field.
+// NewScrubber is the scrubber an export uses: the trace router's redaction level with the org's
+// known secrets, which the entropy and pattern rules alone would not catch (a password, a short key).
+// The command and its specs build it here, so what a spec proves is what the command runs.
+func NewScrubber(secrets *scrub.Secrets) *scrub.Scrubber {
+	return scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: secrets})
+}
+
+func (e *Exporter) maskAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = e.Hosts.Mask(v)
+	}
+	return out
+}
+
 func (e *Exporter) text(s string) string { return e.Hosts.Mask(e.Scrubber.Text(s)) }
 
 // json scrubs a JSON payload. A payload that is not one JSON value is exported as a scrubbed string.
