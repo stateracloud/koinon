@@ -56,10 +56,11 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 
 4. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
    `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required status
-   check that applies to `main` has not concluded `success`. The gate reads that list at run time from
-   `rules/branches/<default>` (every active repository and organization rule for the branch, branch
-   patterns resolved by GitHub), so adding or removing a required check needs no edit to
-   `hack/release-gate.sh`; if it cannot read the rules, or finds no required checks, it fails closed.
+   check that applies to `main` has not concluded `success`. The gate reads the required checks from `hack/ci-required.txt` of the tagged commit (#971), so an
+   earlier rc is judged by its own tree, whatever the ruleset names today. It reads the `main` ruleset
+   (`rules/branches/<default>`, every active repository and organization rule for the branch) only
+   when that tree has no usable list, and it fails closed when it can read neither. See
+   [Renaming a required check](ci.md#renaming-a-required-check).
    Each context is read in this order: the tagged commit itself; where it reports `skipped` (the push to
    main skips its heavy jobs when the merge queue already tested the tree, `hack/ci-skip-heavy.sh`), the
    successful `merge_group` `ci` run on a commit with the same tree (the queue build, found through the
