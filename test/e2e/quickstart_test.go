@@ -982,8 +982,6 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. Gateway header allowlist and key-in-header/URL refusal")
 	})
 
-	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
-	// the run (the cluster is deleted afterwards).
 	// AG1 (issue 9): the pod that owns a run is killed mid-turn, and another replica takes the run over
 	// under a new ownership epoch (ADR 0030). It sits before the image_pull spec, which breaks the
 	// harness image for every later run. Run alone with SUITE_LABEL='smoke || failover'.
@@ -999,9 +997,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 
 		By("two agentd replicas, so a second one can take the run over")
+		// The spec's own context is canceled when the spec ends, so the cleanup runs kubectl with its own.
 		DeferCleanup(func(ctx context.Context) {
-			kc("-n", "koinon", "scale", "deploy/koinon-agentd", "--replicas=1")
-			kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
+			for _, args := range [][]string{
+				{"-n", "koinon", "scale", "deploy/koinon-agentd", "--replicas=1"},
+				{"-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m"},
+			} {
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			}
 		})
 		kc("-n", "koinon", "scale", "deploy/koinon-agentd", "--replicas=2")
 		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
@@ -1044,18 +1048,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(fakeModelRequests(ctx, g, fakeModel, "claude-failover")).NotTo(BeEmpty(), "the harness asked the model")
 		}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
 		Expect(before.Takeovers).To(BeZero())
-		By(fmt.Sprintf("deleting the owner, pod %s (epoch %d), with no grace period: no drain, no hand-over", before.Owner, before.Epoch))
-		kc("-n", "koinon", "delete", "pod", before.Owner, "--grace-period=0", "--force", "--wait=false")
+		// owner_id is "<pod>/<worker index>" (internal/agentd/agentd.go).
+		podOf := func(owner string) string { return strings.SplitN(owner, "/", 2)[0] }
+		ownerPod := podOf(before.Owner)
+		By(fmt.Sprintf("deleting the owner, pod %s (epoch %d), with no grace period: no drain, no hand-over", ownerPod, before.Epoch))
+		kc("-n", "koinon", "delete", "pod", ownerPod, "--grace-period=0", "--force", "--wait=false")
 
 		By("the lease runs out and the other replica takes the run over under a higher epoch")
 		var after runOwner
 		Eventually(func(g Gomega) {
 			after = readRunOwner(ctx, g, kubectl, runID)
 			g.Expect(after.Takeovers).To(BeNumerically(">=", 1))
-			g.Expect(after.Owner).NotTo(Equal(before.Owner))
+			g.Expect(podOf(after.Owner)).NotTo(Equal(ownerPod))
 			g.Expect(after.Epoch).To(BeNumerically(">", before.Epoch))
 		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
-		Expect(after.Owner).To(HavePrefix("koinon-agentd-"), "the new owner is a koinon-agentd pod")
+		Expect(podOf(after.Owner)).To(HavePrefix("koinon-agentd-"), "the new owner is a koinon-agentd pod")
 
 		By("the run completes")
 		var done *runv1alpha1.Run
@@ -1088,6 +1095,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. agentd pod killed mid-run: takeover under a new epoch, no duplicate events")
 	})
 
+	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
+	// the run (the cluster is deleted afterwards).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
