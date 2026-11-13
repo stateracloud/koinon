@@ -922,6 +922,8 @@ jobs:
       - run: hack/hooks/question-checklist-check_test.sh
       - run: hack/agent-state-test.sh
       - run: hack/release-gate-test.sh
+      - run: hack/release-drill-wait-test.sh
+      - run: hack/release-test-images-test.sh
       - run: hack/release-harness-test.sh
       - run: hack/route-guard-test.sh
       - run: hack/contributor-gate-test.sh
