@@ -66,3 +66,23 @@ export function usePlatformActions() {
     }
   }, [transport, queryClient])
 }
+
+/** usePlatformPriceActions returns the write calls of the platform price list (platform admins); each refreshes the price queries. */
+export function usePlatformPriceActions() {
+  const transport = useTransport()
+  const queryClient = useQueryClient()
+  return useMemo(() => {
+    const client = createClient(PriceService, transport)
+    const done = async <T>(p: Promise<T>) => {
+      const res = await p
+      await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: PriceService, cardinality: undefined }) })
+      return res
+    }
+    return {
+      accept: (id: string, confirm: string, maxOutput: number) => done(client.acceptPriceProposal({ id, confirm, maxOutput })),
+      dismiss: (id: string) => done(client.dismissPriceProposal({ id })),
+      rollback: (version: bigint) => done(client.rollbackPlatformPrices({ version })),
+      checkSources: () => done(client.checkPriceSources({})),
+    }
+  }, [transport, queryClient])
+}

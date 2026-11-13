@@ -141,6 +141,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <Link to="/platform/budgets" className={navLink} activeProps={active}>
               Budget ceilings
             </Link>
+            <Link to="/platform/prices" className={navLink} activeProps={active}>
+              Platform prices
+            </Link>
             <Link to="/platform/observability" className={navLink} activeProps={active}>
               Observability
             </Link>
