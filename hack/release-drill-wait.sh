@@ -42,7 +42,7 @@ run_of_tag() {
 start=$SECONDS
 seen=
 while :; do
-	row=$(run_of_tag 2>/dev/null) || row=
+	row=$(run_of_tag) || { [[ -n ${warned:-} ]] || echo "release drill wait: the API call failed (will keep trying until the limits)" >&2; warned=1; row=; }
 	if [[ -n $row ]]; then
 		[[ -n $seen ]] || { echo "release drill wait: the drill run of $TAG is ${row% *}; waiting for it to finish"; seen=1; }
 		if [[ ${row#* } == completed ]]; then
@@ -51,6 +51,12 @@ while :; do
 		fi
 		if ((SECONDS - start >= max)); then
 			echo "release drill wait: run ${row% *} is still going after $max s; the gate decides on what exists" >&2
+			exit 0
+		fi
+	elif [[ -n $seen ]]; then
+		# the run was seen and one look failed: keep waiting, up to the same limit
+		if ((SECONDS - start >= max)); then
+			echo "release drill wait: no answer from the API after $max s; the gate decides on what exists" >&2
 			exit 0
 		fi
 	elif ((SECONDS - start >= appear)); then

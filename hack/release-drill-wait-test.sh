@@ -89,6 +89,13 @@ echo '{}' >"$tmp/runs.json"
 check "an API error is waited out, not fatal (the gate decides)" "$(DRILL_WAIT_APPEAR=2 wait_rc)" 0
 
 reset
+run_json in_progress >"$tmp/runs.json"
+echo '{"workflow_runs":[]}' >"$tmp/runs-after-2.json"
+run_json completed >"$tmp/runs-after-5.json"
+check "a run seen once, then missing from a look, is still waited for (appear < max)" "$(DRILL_WAIT_APPEAR=1 DRILL_WAIT_MAX=60 wait_rc)" 0
+check "...until it finished" "$(cat "$tmp/calls")" 5
+
+reset
 check "a final tag waits for nothing" "$(TAG=v1.2.3 wait_rc)" 0
 check "...and makes no API call" "$(cat "$tmp/calls" 2>/dev/null || echo 0)" 0
 
