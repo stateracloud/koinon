@@ -1,0 +1,5 @@
+{"data":{"organization":{"projectV2":{"items":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+{"status":{"name":"Ready"},"content":{"number":12,"state":"OPEN","repository":{"nameWithOwner":"stateracloud/koinon"}}},
+{"status":{"name":"Done"},"content":{"number":10,"state":"OPEN","repository":{"nameWithOwner":"stateracloud/koinon-docs"}}},
+{"status":null,"content":{"number":12,"state":"OPEN","repository":{"nameWithOwner":"stateracloud/koinon-docs"}}},
+{"status":{"name":"Done"},"content":{"number":13,"state":"CLOSED","repository":{"nameWithOwner":"stateracloud/koinon"}}}]}}}}}

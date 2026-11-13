@@ -328,6 +328,24 @@ environment of that process). The spec exists only when the topology says `brows
 skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
 rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
 
+Phase 4 (#927) seeds users and an approval and checks the sign-ins on the restored copy. The seed adds an org admin
+(`drill-admin`) and a member (`drill-member`) with `koinon-api users create` (the supported path for a second local
+user; the password goes in on stdin), and one pending approval: a fake MCP server (topology `fakeMcpImage`) with an
+ask-tier write tool and an agent whose task makes the fake model call it. The checks, each with one negative case:
+`local-users` (both sign in on the restored copy with their roles; a wrong password is refused), `pending-approval`
+(still pending with the same `args_sha256`; the member cannot approve it), `recovery-signin` (a `PlatformAdminRecovery`
+reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
+in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin`
+(`web/e2e-drill/oidc.spec.ts`: an admin and a member persona sign in through the issuer with virtual WebAuthn
+authenticators, first on the source in the seed step and then on the restored copy; the same user must hold the same
+role, and an authenticator without the credential does not sign in). The OIDC client is public (PKCE, no secret); the
+browser reaches the source on `127.0.0.1:18181` and the target on `127.0.0.1:18182` (fixed ports, the redirect URLs the
+lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<FIELD>` (fields in
+`test/drill/topology/lab.example.yaml`), and the sign-in runs leave `oidc-signcounts.json` (username and latest signCount per
+persona, no key material) in the result directory for the lab to write back, whatever the verdict. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
+scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
+
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
 `hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.
@@ -382,6 +400,26 @@ test failure next to such a line stays `fail`. The `generate` and `web` gates ne
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
+
+**Getting the verdict without blocking (#654).** A lane that must hand back cannot wait on a run, and a
+background task dies with its turn. `hack/lane-gates.sh --start [<base>]` runs the same command in its own
+session and prints a verdict file path at once (next to it: `pid`, and `rc` when the run ends).
+`hack/lane-gates.sh --wait <file> [--max N]` prints the `gate=…` lines and the closing `lane-gates …` line
+and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
+looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
+
+**Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
+to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs
+`gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .` (a new branch scans what the
+remote does not have), skips deletes, refuses the push on a leak, and warns when gitleaks is not
+installed. `KOINON_SKIP_GITLEAKS=1` skips it for one push; CI still scans every commit.
+
+**The board snapshot (#654).** `hack/board.sh snapshot|backlog|ready|issue N` reads the org board with
+one paginated GraphQL query (no 1000-item cap), joins it with the REST list of open issues (an issue
+missing from the board has status `none` and shows in `backlog`), and caches the result in
+`$KOINON_STATE_DIR/board.json` for 10 minutes (`--refresh` to fetch again). Use it instead of
+`gh project item-list` in triage loops. `hack/board-test.sh` is its offline test (fake gh, fixtures in
+`hack/testdata/board`).
 
 ## The race detector
 
