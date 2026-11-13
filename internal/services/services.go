@@ -182,6 +182,8 @@ type Server struct {
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
+	// refresher runs the platform price RPCs' writes and fetches (BindPriceRefresher).
+	refresher *prices.Refresher
 	hosts     *codehost.Registry
 	approvals *approvals.Service
 	catalog   *catalog.Service

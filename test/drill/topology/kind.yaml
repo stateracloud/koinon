@@ -10,6 +10,7 @@
 # DRILL_TOPOLOGY file (the lab) sets imageRegistry only to override the chart's image.registry; `registry` is
 # descriptive and changes nothing.
 name: kind
+profile: kind
 context: kind-koinon-e1
 source:
   namespace: koinon-drill-src-{run}
@@ -30,6 +31,7 @@ gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart
 gatewayVersion: 0.1.7
 gatewayValues: test/e2e/kind/openshell-values.yaml
 fakeModelImage: localhost:5001/koinon-fakemodel:e2e
+fakeMcpImage: localhost:5001/koinon-fakemcp:e2e
 # SeaweedFS 4.50, Apache-2.0: the S3 server of the checkpoint writer's own test (internal/checkpoint/s3_test.go).
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
 runNowCalls: 3

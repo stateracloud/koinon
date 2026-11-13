@@ -36,6 +36,9 @@ const (
 	// for trigger, webhook and task-creation work (DB2, ADR 0066).
 	DefaultTriggerConcurrency   = 4
 	DefaultTriggerRatePerMinute = 60
+	// DefaultSandboxCreationsPerMinute is the most sandbox creations (new or started) the reconciler
+	// makes for one org per minute (issue #27, ADR 0066): a burst queues behind it.
+	DefaultSandboxCreationsPerMinute = 10
 )
 
 // DefaultContinuationTaskSpend is the per-task USD cap for continuation runs of an org that sets
@@ -58,6 +61,9 @@ type Settings struct {
 	// TriggerConcurrency is how many trigger, webhook and task-creation items of the org run at
 	// once; TriggerRatePerMinute is how many may start per minute (internal/durable).
 	TriggerConcurrency, TriggerRatePerMinute int
+	// SandboxCreationsPerMinute caps the sandboxes the reconciler creates or starts for the org in a
+	// sliding minute (sandboxrate.go).
+	SandboxCreationsPerMinute int
 	// RunContentRetention is how long a finished run's stored content is kept (retention.go).
 	RunContentRetention time.Duration
 	// HomeBackupRetention is how long an old home backup repository is kept after a key change
@@ -74,8 +80,8 @@ func Defaults() Settings {
 		IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait,
 		SandboxWaitCap: DefaultSandboxWaitCap, RunContentRetention: DefaultRunContentRetention,
 		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
-		TriggerRatePerMinute: DefaultTriggerRatePerMinute, HomeBackupRetention: DefaultHomeBackupRetention,
-		ContinuationTaskSpend: DefaultContinuationTaskSpend,
+		TriggerRatePerMinute: DefaultTriggerRatePerMinute, SandboxCreationsPerMinute: DefaultSandboxCreationsPerMinute,
+		HomeBackupRetention: DefaultHomeBackupRetention, ContinuationTaskSpend: DefaultContinuationTaskSpend,
 	}
 }
 
@@ -113,6 +119,9 @@ func apply(def Settings, row store.OrgSetting) Settings {
 	if row.TriggerRatePerMinute.Valid {
 		def.TriggerRatePerMinute = int(row.TriggerRatePerMinute.Int32)
 	}
+	if row.SandboxCreationsPerMinute.Valid {
+		def.SandboxCreationsPerMinute = int(row.SandboxCreationsPerMinute.Int32)
+	}
 	if row.RunContentRetentionDays.Valid {
 		def.RunContentRetention = time.Duration(row.RunContentRetentionDays.Int32) * 24 * time.Hour
 	}
@@ -146,6 +155,8 @@ type Override struct {
 	SandboxWaitCap *time.Duration
 	// MaxConcurrentRuns, TriggerConcurrency and TriggerRatePerMinute are the DB2 limits.
 	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute *int
+	// SandboxCreationsPerMinute is the sandbox creation rate (1 to 10000).
+	SandboxCreationsPerMinute *int
 }
 
 // Set replaces the org's overrides. The database bounds each value (see migrations 00022 and 00023).
@@ -160,6 +171,8 @@ func Set(ctx context.Context, q *store.Queries, org pgtype.UUID, o Override) err
 		MaxConcurrentRuns:    count(o.MaxConcurrentRuns),
 		TriggerConcurrency:   count(o.TriggerConcurrency),
 		TriggerRatePerMinute: count(o.TriggerRatePerMinute),
+
+		SandboxCreationsPerMinute: count(o.SandboxCreationsPerMinute),
 	})
 	return err
 }

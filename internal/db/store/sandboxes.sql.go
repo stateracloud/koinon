@@ -15,7 +15,7 @@ const clearAgentSandboxKey = `-- name: ClearAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = $1 AND agent_id = $2
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type ClearAgentSandboxKeyParams struct {
@@ -55,6 +55,7 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -93,7 +94,7 @@ func (q *Queries) CountAgentSandboxesByState(ctx context.Context) ([]CountAgentS
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type CreateAgentSandboxParams struct {
@@ -144,6 +145,7 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -199,7 +201,7 @@ func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivi
 }
 
 const getAgentSandbox = `-- name: GetAgentSandbox :one
-SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at FROM agent_sandboxes
+SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement FROM agent_sandboxes
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -240,6 +242,7 @@ func (q *Queries) GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -524,7 +527,7 @@ const markSandboxArchived = `-- name: MarkSandboxArchived :one
 UPDATE agent_sandboxes
 SET archived_at = now()
 WHERE org_id = $1 AND agent_id = $2
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type MarkSandboxArchivedParams struct {
@@ -566,6 +569,7 @@ func (q *Queries) MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchiv
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -623,7 +627,7 @@ SET state = $1::sandbox_state,
                        THEN NULL ELSE archived_at END,
     observed_at = now()
 WHERE org_id = $7 AND agent_id = $8
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type RecordAgentSandboxParams struct {
@@ -681,6 +685,7 @@ func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandbox
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -689,7 +694,7 @@ const setAgentSandboxKey = `-- name: SetAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = $1, gateway_key_hash = $2
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type SetAgentSandboxKeyParams struct {
@@ -737,6 +742,7 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -745,7 +751,7 @@ const setAgentSandboxMessage = `-- name: SetAgentSandboxMessage :one
 UPDATE agent_sandboxes
 SET message = $1
 WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type SetAgentSandboxMessageParams struct {
@@ -789,6 +795,7 @@ func (q *Queries) SetAgentSandboxMessage(ctx context.Context, arg SetAgentSandbo
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -811,7 +818,7 @@ SET sandbox_name = $1,
     home_generation = NULL,
     home_dirtied_at = NULL
 WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type SetAgentSandboxNameParams struct {
@@ -856,6 +863,7 @@ func (q *Queries) SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNa
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }

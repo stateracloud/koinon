@@ -172,6 +172,8 @@ var _ = Describe("Reconciler", func() {
 
 			row := sandboxRow(ctx, agent.ID)
 			Expect(row.State).To(Equal(store.SandboxStateReady))
+			// The enforcement mode of the sandbox's policy is recorded on the row (ADR 0045, #926).
+			Expect(row.Enforcement).To(Equal("enforce"))
 			profile := osg.Profile(row.Workspace, "koinon-agentgateway-"+harness)
 			Expect(profile).NotTo(BeNil())
 			var paths []string

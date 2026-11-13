@@ -28,7 +28,8 @@ const notice = (id: string, threshold: number, level = 'org_monthly', read = fal
   })
 
 function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string; path?: string; notices?: ReturnType<typeof notice>[] } = {}) {
-  const calls = { caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0, gate: undefined as Promise<void> | undefined }
+  const calls = { contSets: [] as { taskSpendUsd: string }[], caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0, gate: undefined as Promise<void> | undefined }
+  let contSpend = ''
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => create(WhoAmIResponseSchema, { ...whoAmI({ role: opts.role }), platformAdmin: !!opts.platformAdmin }) })
     service(BudgetService, {
@@ -46,6 +47,12 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
           create(AgentBudgetSchema, { agentId: 'a-2', agentName: 'Docs bot', dailyLimitUsd: '10.00', templateDefaultUsd: '10.00', spentTodayUsd: '0.00' }),
         ],
         }
+      },
+      getOrgContinuationLimits: () => ({ limits: { taskSpendUsd: contSpend || '20.00', platformDefaultTaskSpendUsd: '20.00', overridden: contSpend !== '' } }),
+      setOrgContinuationTaskSpend: (req) => {
+        calls.contSets.push(req)
+        contSpend = req.taskSpendUsd
+        return { limits: { taskSpendUsd: contSpend || '20.00', platformDefaultTaskSpendUsd: '20.00', overridden: contSpend !== '' } }
       },
       listNotifications: () => {
         calls.noticeCalls++
@@ -107,6 +114,27 @@ describe('Budgets page', () => {
     await userEvent.type(input, '250')
     await userEvent.click(within(cap).getByRole('button', { name: 'Save cap' }))
     await waitFor(() => expect(calls.caps).toEqual([expect.objectContaining({ orgId: 'org-1', monthlyCapUsd: '250' })]))
+  })
+
+  it('sets and clears the org default task spend cap for continuations', async () => {
+    const calls = setup()
+    const cap = await screen.findByRole('region', { name: 'Task spend cap for continuations' })
+    expect(await within(cap).findByText(/This is the platform default/)).toBeInTheDocument()
+    await userEvent.click(within(cap).getByRole('button', { name: 'Change task spend cap' }))
+    const input = within(cap).getByLabelText('Task spend cap in US dollars')
+    await userEvent.type(input, 'lots')
+    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
+    expect(await within(cap).findByText(/must be a dollar amount/)).toBeInTheDocument()
+    expect(calls.contSets).toHaveLength(0)
+    await userEvent.clear(input)
+    await userEvent.type(input, '35')
+    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
+    await waitFor(() => expect(calls.contSets).toEqual([expect.objectContaining({ orgId: 'org-1', taskSpendUsd: '35' })]))
+    expect(await within(cap).findByText(/The platform default is/)).toBeInTheDocument()
+    await userEvent.click(within(cap).getByRole('button', { name: 'Change task spend cap' }))
+    await userEvent.clear(within(cap).getByLabelText('Task spend cap in US dollars'))
+    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
+    await waitFor(() => expect(calls.contSets.at(-1)).toEqual(expect.objectContaining({ taskSpendUsd: '' })))
   })
 
   it('lists the agents with their template default and spend, and changes one limit', async () => {

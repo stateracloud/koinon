@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Guide examples that need nothing but the Koinon binaries (no cluster, no database, no network).
+# hack/docs-examples.sh runs every block against a build of the checkout, in CI (job `docs examples`) and locally.
+# The page that shows them is in stateracloud/koinon-docs (issue 6 there); its CI compares the page with this file
+# at the release it names, as for quickstart.e1. Rules of the format: hack/docs-e1.sh header.
+# Add a file here per guide; a block that needs a cluster belongs to test/e2e/commands/ instead.
+# e1=cli-version
+koinon-api --version
+# e1=cli-keys-help
+koinon-api keys --help | grep -E '^  export '

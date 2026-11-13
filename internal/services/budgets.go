@@ -9,6 +9,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -19,6 +20,7 @@ import (
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/pricing"
@@ -328,6 +330,24 @@ func runLimitValuesProto(wall time.Duration, requests int64, spend money.USD) *b
 	return out
 }
 
+// agentTemplateConfig is the config of the agent's active version (a draft has none yet, so its
+// latest version's).
+func (s *Server) agentTemplateConfig(ctx context.Context, a store.Agent) (agentconfig.Config, error) {
+	var cfg agentconfig.Config
+	versions, err := s.q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: a.OrgID, AgentID: a.ID})
+	if err != nil {
+		return cfg, s.dbError(err, "agent versions")
+	}
+	for _, v := range versions {
+		if v.ID == a.ActiveVersionID || (!a.ActiveVersionID.Valid && v.Version == a.LatestVersion) {
+			if cfg, err = agentconfig.Parse(v.Config); err != nil {
+				return cfg, s.dbError(err, "agent version")
+			}
+		}
+	}
+	return cfg, nil
+}
+
 // agentRunLimitsView is what a run of the agent gets now: the active version's values (the
 // template's defaults), the admin's override and the two merged.
 func (s *Server) agentRunLimitsView(ctx context.Context, org, agent pgtype.UUID) (*budgetv1alpha1.AgentRunLimits, error) {
@@ -335,18 +355,9 @@ func (s *Server) agentRunLimitsView(ctx context.Context, org, agent pgtype.UUID)
 	if err != nil {
 		return nil, s.dbError(err, "agent")
 	}
-	// The active version's values; a draft has none yet, so its latest version's.
-	var cfg agentconfig.Config
-	versions, err := s.q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: org, AgentID: agent})
+	cfg, err := s.agentTemplateConfig(ctx, a)
 	if err != nil {
-		return nil, s.dbError(err, "agent versions")
-	}
-	for _, v := range versions {
-		if v.ID == a.ActiveVersionID || (!a.ActiveVersionID.Valid && v.Version == a.LatestVersion) {
-			if cfg, err = agentconfig.Parse(v.Config); err != nil {
-				return nil, s.dbError(err, "agent version")
-			}
-		}
+		return nil, err
 	}
 	base := cfg.RunLimits()
 	o, err := runlimits.GetOverride(ctx, s.q, org, agent)
@@ -499,9 +510,9 @@ func entryProto(e pricing.Entry) *budgetv1alpha1.PriceEntry {
 	return &budgetv1alpha1.PriceEntry{
 		Id: e.ID, Provider: e.Provider, Match: &budgetv1alpha1.PriceMatch{Glob: e.Match.Glob, Regex: e.Match.Regex}, ValidFrom: e.ValidFrom,
 		Rates: ratesProto(e.Prices), Tiers: tiersProto(e.Tiers), Tokenizer: e.Tokenizer, Ratio: e.Ratio,
-		ToolOverheadTokens: int32(e.ToolOverheadTokens), //nolint:gosec // validated to at most 100000
-		HiddenThinking:     e.HiddenThinking,
-		SourceUrl:          e.Source.URL, SourceAccessed: e.Source.Accessed, Note: e.Note,
+		ToolOverheadTokens: int32(e.ToolOverheadTokens),                     //nolint:gosec // validated to at most 100000
+		HiddenThinking:     e.HiddenThinking, MaxOutput: int32(e.MaxOutput), //nolint:gosec // validated to at most 10M
+		SourceUrl: e.Source.URL, SourceAccessed: e.Source.Accessed, Note: e.Note,
 	}
 }
 
@@ -642,4 +653,155 @@ func (s *Server) ListFlaggedPrices(ctx context.Context, req *budgetv1alpha1.List
 		})
 	}
 	return res, nil
+}
+
+// orgContinuationView is the org's default per-task cap for continuation runs.
+func (s *Server) orgContinuationView(ctx context.Context, org pgtype.UUID) (*budgetv1alpha1.OrgContinuationLimits, error) {
+	set, err := orgsettings.Get(ctx, s.q, org, orgsettings.Defaults())
+	if err != nil {
+		return nil, s.dbError(err, "org settings")
+	}
+	// Overridden reads the stored column, not the value, so an org that set the platform default's
+	// amount still reads as having its own value.
+	row, err := s.q.GetOrgSettings(ctx, org)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, s.dbError(err, "org settings")
+	}
+	return &budgetv1alpha1.OrgContinuationLimits{
+		TaskSpendUsd:                set.ContinuationTaskSpend.String(),
+		PlatformDefaultTaskSpendUsd: orgsettings.DefaultContinuationTaskSpend.String(),
+		Overridden:                  err == nil && row.ContinuationTaskSpendUsd.Valid,
+	}, nil
+}
+
+// GetOrgContinuationLimits implements BudgetService. Admins and owners.
+func (s *Server) GetOrgContinuationLimits(ctx context.Context, req *budgetv1alpha1.GetOrgContinuationLimitsRequest) (*budgetv1alpha1.GetOrgContinuationLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.orgContinuationView(ctx, c.org)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.GetOrgContinuationLimitsResponse{Limits: l}, nil
+}
+
+// SetOrgContinuationTaskSpend implements BudgetService. Admins and owners.
+func (s *Server) SetOrgContinuationTaskSpend(ctx context.Context, req *budgetv1alpha1.SetOrgContinuationTaskSpendRequest) (*budgetv1alpha1.SetOrgContinuationTaskSpendResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	var v money.USD
+	if req.GetTaskSpendUsd() != "" {
+		if v, err = money.Parse(req.GetTaskSpendUsd()); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+		if v == 0 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "the task spend cap must be more than 0; leave it empty to follow the default")
+		}
+	}
+	if err := s.budgets.SetOrgContinuationTaskSpend(requestCtx(ctx), c.org, c.auditActor(), v); err != nil {
+		return nil, s.budgetError(err)
+	}
+	l, err := s.orgContinuationView(ctx, c.org)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.SetOrgContinuationTaskSpendResponse{Limits: l}, nil
+}
+
+func continuationValuesProto(c runlimits.Continuation) *budgetv1alpha1.ContinuationValues {
+	return &budgetv1alpha1.ContinuationValues{MaxContinuations: int32(c.Max), TaskSpendUsd: c.TaskSpend.String()} //nolint:gosec // bounded by MaxContinuationsLimit
+}
+
+// agentContinuationView is what a task of the agent gets: the template's count and the org's cap,
+// the admin's override and the two merged.
+func (s *Server) agentContinuationView(ctx context.Context, org, agent pgtype.UUID) (*budgetv1alpha1.AgentContinuationLimits, error) {
+	a, err := s.q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	cfg, err := s.agentTemplateConfig(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	set, err := orgsettings.Get(ctx, s.q, org, orgsettings.Defaults())
+	if err != nil {
+		return nil, s.dbError(err, "org settings")
+	}
+	o, err := runlimits.GetContinuationOverride(ctx, s.q, org, agent)
+	if err != nil {
+		return nil, s.dbError(err, "continuation limits")
+	}
+	eff, err := runlimits.ContinuationFor(ctx, s.q, org, agent, cfg)
+	if err != nil {
+		return nil, s.dbError(err, "continuation limits")
+	}
+	ov := &budgetv1alpha1.ContinuationOverride{}
+	if o.MaxContinuations != nil {
+		n := int32(*o.MaxContinuations) //nolint:gosec // bounded by MaxContinuationsLimit
+		ov.MaxContinuations = &n
+	}
+	if o.TaskSpend > 0 {
+		ov.TaskSpendUsd = o.TaskSpend.String()
+	}
+	return &budgetv1alpha1.AgentContinuationLimits{
+		AgentId: a.ID.String(), AgentName: a.DisplayName,
+		Effective:       continuationValuesProto(eff),
+		TemplateDefault: continuationValuesProto(runlimits.Continuation{Max: cfg.MaxContinuations(), TaskSpend: set.ContinuationTaskSpend}),
+		Override:        ov,
+	}, nil
+}
+
+// GetAgentContinuationLimits implements BudgetService. Admins and owners.
+func (s *Server) GetAgentContinuationLimits(ctx context.Context, req *budgetv1alpha1.GetAgentContinuationLimitsRequest) (*budgetv1alpha1.GetAgentContinuationLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.agentContinuationView(ctx, c.org, id)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.GetAgentContinuationLimitsResponse{Limits: l}, nil
+}
+
+// SetAgentContinuationLimits implements BudgetService. Admins and owners.
+func (s *Server) SetAgentContinuationLimits(ctx context.Context, req *budgetv1alpha1.SetAgentContinuationLimitsRequest) (*budgetv1alpha1.SetAgentContinuationLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	in := req.GetOverride()
+	var o runlimits.ContinuationOverride
+	if in != nil && in.MaxContinuations != nil {
+		n := int(*in.MaxContinuations)
+		o.MaxContinuations = &n
+	}
+	if in.GetTaskSpendUsd() != "" {
+		if o.TaskSpend, err = money.Parse(in.GetTaskSpendUsd()); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+		if o.TaskSpend == 0 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "the task spend cap must be more than 0; leave it empty to follow the default")
+		}
+	}
+	if err := s.budgets.SetAgentContinuationLimits(requestCtx(ctx), c.org, id, c.auditActor(), o); err != nil {
+		return nil, s.budgetError(err)
+	}
+	l, err := s.agentContinuationView(ctx, c.org, id)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.SetAgentContinuationLimitsResponse{Limits: l}, nil
 }

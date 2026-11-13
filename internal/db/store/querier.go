@@ -198,6 +198,8 @@ type Querier interface {
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
+	// Creations of the org in the last minute.
+	CountOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) (int32, error)
 	CountPriceProposalsByClassState(ctx context.Context) ([]CountPriceProposalsByClassStateRow, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
@@ -598,6 +600,8 @@ type Querier interface {
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	GetRunEvidenceRun(ctx context.Context, arg GetRunEvidenceRunParams) (Run, error)
+	GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceSandboxParams) (AgentSandbox, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
 	GetRunTraced(ctx context.Context, arg GetRunTracedParams) (pgtype.Bool, error)
@@ -656,11 +660,23 @@ type Querier interface {
 	// Gives a new agent its template's limit as its own editable limit.
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
+	// A call a person approved has run through the gateway (internal/approvals). The guard's own record
+	// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
+	// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
+	// are counted once, when they left. Nothing is inserted when no parked decision is found.
+	InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Lab run evidence (issue #926): the leak guard's decision records and what an export reads. Every
+	// query takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	// One decision of the MCP leak guard. The agent's running run is read in the same statement, so a
+	// decision costs one round trip. No argument, payload or matched text is stored.
+	InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGuardDecisionParams) error
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -1065,6 +1081,10 @@ type Querier interface {
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	ListRunEvidenceDecisions(ctx context.Context, arg ListRunEvidenceDecisionsParams) ([]LeakGuardDecision, error)
+	// Pages of the run's events in write order.
+	ListRunEvidenceEvents(ctx context.Context, arg ListRunEvidenceEventsParams) ([]RunEvent, error)
+	ListRunEvidenceTurns(ctx context.Context, arg ListRunEvidenceTurnsParams) ([]RunTurn, error)
 	// The model calls of a run in a turn's window, for the trace router's model-call spans (ADR 0074,
 	// decision 3): the ledger's rows with the provider type and ID of the model the agent asked for. The
 	// model name is the one the agent used, with or without the org slug the gateway prefixes. A row at or
@@ -1157,6 +1177,8 @@ type Querier interface {
 	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
 	// cannot be added to two connections at once. Held until the transaction ends.
 	LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error
+	// Serializes the reconciler workers that reserve a creation for one org, for the transaction.
+	LockOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1270,6 +1292,7 @@ type Querier interface {
 	// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
 	// Their acks go with them.
 	PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error)
+	PruneOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error
 	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
 	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
@@ -1309,6 +1332,7 @@ type Querier interface {
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
+	RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error)
 	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
 	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
 	// The router's health: a batch was accepted.
@@ -1330,6 +1354,9 @@ type Querier interface {
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
 	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
+	// Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+	// the org's healthy ones.
+	ReleaseSandboxCreation(ctx context.Context, arg ReleaseSandboxCreationParams) error
 	ReleaseSandboxRestore(ctx context.Context, arg ReleaseSandboxRestoreParams) error
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
@@ -1398,6 +1425,8 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	// Ends every live session of the user (the operator's password reset).
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Seconds until the oldest creation still inside the minute leaves it, so a slot frees.
+	SandboxCreationSlotFreesIn(ctx context.Context, orgID pgtype.UUID) (float64, error)
 	// Stores one poll's outcome.
 	SaveCodeHostPoll(ctx context.Context, arg SaveCodeHostPollParams) error
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
@@ -1412,6 +1441,9 @@ type Querier interface {
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
+	// The network enforcement mode observed in the sandbox's policy (ADR 0045): enforce, audit, none or
+	// unknown. Kept apart from RecordAgentSandbox, which many paths call without an observed sandbox.
+	SetAgentSandboxEnforcement(ctx context.Context, arg SetAgentSandboxEnforcementParams) error
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Stores an operator message and nothing else. A note written from outside the agent's work item
@@ -1497,8 +1529,8 @@ type Querier interface {
 	// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
 	// It touches only this column, so the latency and limit overrides stay.
 	SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error
-	// The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
-	// platform default. It touches only these three columns, so the latency overrides and the other
+	// The org's run concurrency, trigger queue and sandbox creation limits (DB2, ADR 0066, issues #462
+	// and #27); NULL is the platform default. It touches only these four columns, so the latency overrides and the other
 	// settings stay.
 	SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams) error
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
@@ -1562,8 +1594,16 @@ type Querier interface {
 	StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) (int64, error)
 	// The questions became visible: their recipients start waiting now.
 	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
+	// The same sums for one home generation of an agent, over every run that was in it.
+	SumGenerationEvidenceOutbound(ctx context.Context, arg SumGenerationEvidenceOutboundParams) ([]SumGenerationEvidenceOutboundRow, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
+	// The bytes that left the org for each external sink: the payload of every external call the guard
+	// passed, per run, per home generation and per MCP server. A call refused, or parked for a person
+	// (action 'approve', or the pass with reason 'ask_target' that mcpask parks), sent nothing at that
+	// moment; the approval executor records the call as a pass with reason 'approved' once it has run
+	// (InsertApprovedExecutionDecision), and that row is counted.
+	SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)
 	// A fetch that returned other values for a model, or the same as the effective price, replaces the

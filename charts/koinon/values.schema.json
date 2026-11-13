@@ -506,6 +506,7 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
+        "readOnly": {"type": "boolean"},
         "s3": {
           "type": "object",
           "additionalProperties": false,
@@ -621,6 +622,11 @@
           }
         }
       }
+    },
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"acceptImporterDeletions": {"type": "boolean"}}
     },
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "installMark": {

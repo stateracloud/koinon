@@ -227,7 +227,7 @@ UPDATE agent_sandboxes
 SET restore_claimed_at = now()
 WHERE org_id = $1 AND agent_id = $2 AND restore_checkpoint_id IS NOT NULL
   AND (restore_claimed_at IS NULL OR restore_claimed_at < now() - make_interval(secs => $3::int))
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type ClaimSandboxRestoreParams struct {
@@ -270,6 +270,7 @@ func (q *Queries) ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxResto
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }
@@ -2407,7 +2408,7 @@ const setSandboxRestore = `-- name: SetSandboxRestore :one
 UPDATE agent_sandboxes
 SET restore_checkpoint_id = $1, restore_claimed_at = NULL
 WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
 `
 
 type SetSandboxRestoreParams struct {
@@ -2450,6 +2451,7 @@ func (q *Queries) SetSandboxRestore(ctx context.Context, arg SetSandboxRestorePa
 		&i.ArchivedAt,
 		&i.Reason,
 		&i.HomeDirtiedAt,
+		&i.Enforcement,
 	)
 	return i, err
 }

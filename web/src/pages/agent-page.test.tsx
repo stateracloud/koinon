@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus, type ActivateAgentRequest, type ResumeAgentRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalScopeSchema, ApprovalService, ScopeKind, type RevokeApprovalScopeRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { BudgetService, type SetAgentRunLimitsRequest } from '@/gen/koinon/budget/v1alpha1/budget_pb'
+import { BudgetService, type SetAgentContinuationLimitsRequest, type SetAgentRunLimitsRequest } from '@/gen/koinon/budget/v1alpha1/budget_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
@@ -32,6 +32,8 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
     : []
   const activates: ActivateAgentRequest[] = []
   const runLimitSets: SetAgentRunLimitsRequest[] = []
+  const contSets: SetAgentContinuationLimitsRequest[] = []
+  let contOverride: { maxContinuations?: number; taskSpendUsd: string } = { taskSpendUsd: '' }
   let runOverride = { maxModelRequests: 0n, maxSpendUsd: '', maxDurationSeconds: 0n }
   const template = { maxModelRequests: 300n, maxSpendUsd: '5.00', maxDurationSeconds: 1800n }
   let unhealthyAt = opts.unhealthy ? timestampFromMs(Date.now() - 60_000) : undefined
@@ -58,10 +60,22 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
       maxDurationSeconds: runOverride.maxDurationSeconds || template.maxDurationSeconds,
     },
   })
+  const contView = () => ({
+    agentId: 'a-1',
+    templateDefault: { maxContinuations: 3, taskSpendUsd: '20.00' },
+    override: contOverride,
+    effective: { maxContinuations: contOverride.maxContinuations ?? 3, taskSpendUsd: contOverride.taskSpendUsd || '20.00' },
+  })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
     service(BudgetService, {
+      getAgentContinuationLimits: () => ({ limits: contView() }),
+      setAgentContinuationLimits: (req) => {
+        contSets.push(req)
+        contOverride = { maxContinuations: req.override?.maxContinuations, taskSpendUsd: req.override?.taskSpendUsd ?? '' }
+        return { limits: contView() }
+      },
       getAgentRunLimits: () => ({ limits: runLimitsView() }),
       setAgentRunLimits: (req) => {
         runLimitSets.push(req)
@@ -94,7 +108,7 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
     })
   })
   renderApp(transport, '/agents/a-1')
-  return { resumes, activates, revokes, runLimitSets }
+  return { resumes, activates, revokes, runLimitSets, contSets }
 }
 
 describe('AgentPage unhealthy', () => {
@@ -234,5 +248,30 @@ describe('AgentPage run limits (ADR 0081)', () => {
     setup({ role: OrgRole.MEMBER })
     await screen.findByRole('heading', { name: 'Repo helper' })
     expect(screen.queryByRole('region', { name: 'Run limits' })).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentPage continuation limits', () => {
+  it('lets an admin override the count and the cap, and switch continuation off', async () => {
+    const { contSets } = setup({ role: OrgRole.ADMIN })
+    const region = await screen.findByRole('region', { name: 'Continuation limits' })
+    expect(await within(region).findByText(/Up to 3 continuation runs/)).toBeInTheDocument()
+    await userEvent.click(within(region).getByRole('button', { name: 'Change continuation limits' }))
+    await userEvent.type(within(region).getByLabelText('Continuation runs'), '11')
+    await userEvent.click(within(region).getByRole('button', { name: 'Save continuation limits' }))
+    expect(await within(region).findByText(/from 0 to 10/)).toBeInTheDocument()
+    expect(contSets).toHaveLength(0)
+    await userEvent.clear(within(region).getByLabelText('Continuation runs'))
+    await userEvent.type(within(region).getByLabelText('Continuation runs'), '0')
+    await userEvent.type(within(region).getByLabelText('Task spend cap (USD)'), '5')
+    await userEvent.click(within(region).getByRole('button', { name: 'Save continuation limits' }))
+    await waitFor(() => expect(contSets).toEqual([expect.objectContaining({ orgId, agentId: 'a-1', override: expect.objectContaining({ maxContinuations: 0, taskSpendUsd: '5' }) })]))
+    expect(await within(region).findByText(/No continuation, \$5\.00 per task/)).toBeInTheDocument()
+  })
+
+  it('is not offered to a member', async () => {
+    setup({ role: OrgRole.MEMBER })
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.queryByRole('region', { name: 'Continuation limits' })).not.toBeInTheDocument()
   })
 })

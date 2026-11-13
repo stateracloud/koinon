@@ -72,4 +72,16 @@ spec:
               trace destination test, approving a request, Run now). Check the keys and the
               run limits, then release the hold by upgrading with restoreHold=false (see the "Back up and
               restore" guide).
+        - alert: KoinonRestoreReleasePending
+          expr: max(koinon_restore_release_pending) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: A restore release has not finished, so sign-ins are refused or removals wait
+            description: >-
+              koinon-api is unheld, but the release step of a restore has not run (it refuses every session
+              and sign-in until it has run; read the koinon-api log for "restore release failed"), or the
+              importer removals the restore brought in wait for restore.acceptImporterDeletions. Run
+              "koinon-api restore status" and see ADR 0110 decision 1.
 {{- end }}

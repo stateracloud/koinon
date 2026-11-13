@@ -89,9 +89,11 @@ with stubs for `uname`, `pmset`, `docker` and `caffeinate`.
 
 - **Keep awake.** On macOS the run holds `caffeinate -i -s -w $$`: it ends with the run, with no timer to
   run out. `-s` works on AC power only; on battery the script warns. Other systems: nothing happens.
-- **Docker and clock.** Before the tests, `docker info` must answer within `KOINON_DOCKER_PING_SECONDS`
-  (default 5) and the daemon's `SystemTime` (the VM clock, shared by every container) must be within
-  `KOINON_CLOCK_SKEW` seconds (default 2) of the host. If not, the run stops with exit 3 and says
+- **Docker and clock.** Before the tests, the daemon must answer `docker version` within
+  `KOINON_DOCKER_PING_SECONDS` (default 30, a cold CI daemon is slow). The clock is then read with `docker info`
+  within `KOINON_DOCKER_CLOCK_SECONDS` (default 10); on no answer the clock check is skipped off a Mac and stops
+  the run on one. The daemon's `SystemTime` (the VM clock, shared by every container) must be within
+  `KOINON_CLOCK_SKEW` seconds (default 2) of the host (measured against the window of the call, so a slow `info` is not drift). If not, the run stops with exit 3 and says
   `orb restart` for OrbStack. No Docker CLI or a daemon that answers with an error is not a stop: the
   suites skip as before.
 - **Host slept.** After the run, a `Sleep` event in `pmset -g log` between the start and end turns the
@@ -298,6 +300,13 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+Guide examples that need no cluster live in `test/docs-examples/*.e1`. `hack/docs-examples.sh` (CI job
+`docs examples`, advisory until it has run stable, ci-rules S3) builds `koinon-api` from the checkout and runs every
+block of every file with `docs-e1.sh run`, in an empty directory, with `KUBECONFIG=/dev/null`; a failing block or
+an empty directory fails the run. `hack/e2e-commands-check.sh` checks the files parse and runs
+`hack/docs-examples-test.sh`. Run it locally with `hack/docs-examples.sh` (`--list` to see the blocks). The page that
+shows a guide's blocks is in `koinon-docs`; its CI compares the page with the file as for the quickstart.
+
 **The restore drill** (ADR 0109, #514; `test/drill`) is the evidence for ADR 0085 decision 15: a Ginkgo suite
 seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
@@ -319,6 +328,32 @@ Phase 2 (#515) adds two checks: `archive` (an archived agent's home and session 
 SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (a workflow PENDING under the
 source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
 waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
+
+Phase 3 (#518) is the lab profile and the release gate. A topology file has a `profile` (`kind` or `lab`), and
+`drill-result.json` carries it. The lab profile (`test/drill/topology/lab.example.yaml` is a made-up example; the real
+file stays outside git) adds the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
+that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
+environment of that process). The spec exists only when the topology says `browserSignin: true`, because a drill spec never
+skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
+rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
+
+Phase 4 (#927) seeds users and an approval and checks the sign-ins on the restored copy. The seed adds an org admin
+(`drill-admin`) and a member (`drill-member`) with `koinon-api users create` (the supported path for a second local
+user; the password goes in on stdin), and one pending approval: a fake MCP server (topology `fakeMcpImage`) with an
+ask-tier write tool and an agent whose task makes the fake model call it. The checks, each with one negative case:
+`local-users` (both sign in on the restored copy with their roles; a wrong password is refused), `pending-approval`
+(still pending with the same `args_sha256`; the member cannot approve it), `recovery-signin` (a `PlatformAdminRecovery`
+reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
+in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin`
+(`web/e2e-drill/oidc.spec.ts`: an admin and a member persona sign in through the issuer with virtual WebAuthn
+authenticators, first on the source in the seed step and then on the restored copy; the same user must hold the same
+role, and an authenticator without the credential does not sign in). The OIDC client is public (PKCE, no secret); the
+browser reaches the source on `127.0.0.1:18181` and the target on `127.0.0.1:18182` (fixed ports, the redirect URLs the
+lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<FIELD>` (fields in
+`test/drill/topology/lab.example.yaml`), and the sign-in runs leave `oidc-signcounts.json` (username and latest signCount per
+persona, no key material) in the result directory for the lab to write back, whatever the verdict. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
+scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
 
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
@@ -374,6 +409,26 @@ test failure next to such a line stays `fail`. The `generate` and `web` gates ne
 crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, and a CI job with no
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
+
+**Getting the verdict without blocking (#654).** A lane that must hand back cannot wait on a run, and a
+background task dies with its turn. `hack/lane-gates.sh --start [<base>]` runs the same command in its own
+session and prints a verdict file path at once (next to it: `pid`, and `rc` when the run ends).
+`hack/lane-gates.sh --wait <file> [--max N]` prints the `gate=…` lines and the closing `lane-gates …` line
+and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
+looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
+
+**Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
+to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs
+`gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .` (a new branch scans what the
+remote does not have), skips deletes, refuses the push on a leak, and warns when gitleaks is not
+installed. `KOINON_SKIP_GITLEAKS=1` skips it for one push; CI still scans every commit.
+
+**The board snapshot (#654).** `hack/board.sh snapshot|backlog|ready|issue N` reads the org board with
+one paginated GraphQL query (no 1000-item cap), joins it with the REST list of open issues (an issue
+missing from the board has status `none` and shows in `backlog`), and caches the result in
+`$KOINON_STATE_DIR/board.json` for 10 minutes (`--refresh` to fetch again). Use it instead of
+`gh project item-list` in triage loops. `hack/board-test.sh` is its offline test (fake gh, fixtures in
+`hack/testdata/board`).
 
 ## The race detector
 

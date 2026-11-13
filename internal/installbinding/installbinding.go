@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -147,6 +148,9 @@ type Binding struct {
 	followUp bool
 
 	quarantined *prometheus.CounterVec
+
+	// sessionsHeld is the session gate of [Binding.HoldSessions].
+	sessionsHeld atomic.Bool
 }
 
 // New returns a Binding for a process whose mark hashes to ownerID (execution.OwnerID of the install

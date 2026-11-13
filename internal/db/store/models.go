@@ -1582,6 +1582,7 @@ type AgentSandbox struct {
 	ArchivedAt          pgtype.Timestamptz
 	Reason              string
 	HomeDirtiedAt       pgtype.Timestamptz
+	Enforcement         string
 }
 
 type AgentVersion struct {
@@ -1926,6 +1927,27 @@ type KekFingerprint struct {
 	ActivatedAt pgtype.Timestamptz
 }
 
+type LeakGuardDecision struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	AgentID        pgtype.UUID
+	Generation     string
+	RunID          pgtype.UUID
+	Server         string
+	Tool           string
+	SinkClass      string
+	Action         string
+	Reason         string
+	Reasons        []string
+	MatchCount     int32
+	MatchLength    int32
+	MatchEncoding  string
+	PayloadBytes   int32
+	UntrustedInput pgtype.Bool
+	PrivateData    pgtype.Bool
+	CreatedAt      pgtype.Timestamptz
+}
+
 type LeakGuardFingerprint struct {
 	OrgID      pgtype.UUID
 	AgentID    pgtype.UUID
@@ -2189,20 +2211,21 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                    pgtype.UUID
-	IdleTimeoutSeconds       pgtype.Int4
-	ParkWarmSeconds          pgtype.Int4
-	QueueWaitSeconds         pgtype.Int4
-	CreatedAt                pgtype.Timestamptz
-	UpdatedAt                pgtype.Timestamptz
-	MaxConcurrentRuns        pgtype.Int4
-	TriggerConcurrency       pgtype.Int4
-	TriggerRatePerMinute     pgtype.Int4
-	SandboxWaitCapSeconds    pgtype.Int4
-	LeakMatchThreshold       pgtype.Int4
-	RunContentRetentionDays  pgtype.Int4
-	HomeBackupRetentionDays  pgtype.Int4
-	ContinuationTaskSpendUsd pgtype.Numeric
+	OrgID                     pgtype.UUID
+	IdleTimeoutSeconds        pgtype.Int4
+	ParkWarmSeconds           pgtype.Int4
+	QueueWaitSeconds          pgtype.Int4
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
+	MaxConcurrentRuns         pgtype.Int4
+	TriggerConcurrency        pgtype.Int4
+	TriggerRatePerMinute      pgtype.Int4
+	SandboxWaitCapSeconds     pgtype.Int4
+	LeakMatchThreshold        pgtype.Int4
+	RunContentRetentionDays   pgtype.Int4
+	HomeBackupRetentionDays   pgtype.Int4
+	ContinuationTaskSpendUsd  pgtype.Numeric
+	SandboxCreationsPerMinute pgtype.Int4
 }
 
 type OrgTraceSetting struct {
@@ -2457,6 +2480,16 @@ type RecoveryRequest struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type RestoreAcceptedRemoval struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	Kind       string
+	SecretName string
+	ReleaseID  pgtype.UUID
+	State      string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Run struct {
 	OrgID                pgtype.UUID
 	ID                   pgtype.UUID
@@ -2534,6 +2567,14 @@ type RunTurn struct {
 	StartedAt pgtype.Timestamptz
 	EndedAt   pgtype.Timestamptz
 	EndReason pgtype.Text
+}
+
+type SandboxCreation struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	AgentID   pgtype.UUID
+	Kind      string
+	CreatedAt pgtype.Timestamptz
 }
 
 type SandboxIncident struct {

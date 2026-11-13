@@ -84,6 +84,7 @@ type Gateway struct {
 	providers            map[key]*datamodelv1.Provider
 	sandboxes            map[key]*openshellv1.Sandbox
 	policies             map[key][]*sandboxv1.SandboxPolicy
+	drafts               map[key][]*openshellv1.PolicyChunk
 	commands             map[string]Command
 	execs                []*openshellv1.ExecSandboxRequest
 	calls                map[string]int
@@ -104,6 +105,7 @@ func New() *Gateway {
 		providers:  map[key]*datamodelv1.Provider{},
 		sandboxes:  map[key]*openshellv1.Sandbox{},
 		policies:   map[key][]*sandboxv1.SandboxPolicy{},
+		drafts:     map[key][]*openshellv1.PolicyChunk{},
 		commands:   map[string]Command{},
 		calls:      map[string]int{},
 		faults:     map[string][]error{},
@@ -869,6 +871,7 @@ func (g *Gateway) DeleteSandbox(ctx context.Context, req *openshellv1.DeleteSand
 	}
 	delete(g.sandboxes, k)
 	delete(g.policies, k)
+	delete(g.drafts, k)
 	return &openshellv1.DeleteSandboxResponse{
 		Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED, SandboxId: sb.GetMetadata().GetId(),
 	}, nil
@@ -1050,4 +1053,58 @@ func eventWriter(send func(*openshellv1.ExecSandboxEvent) error, wrap func([]byt
 		}
 		return n, nil
 	})
+}
+
+// SeedDraftChunk adds a draft policy chunk with the given status ("pending", "approved",
+// "rejected") to a sandbox, as the sandbox's denial aggregator would submit one.
+func (g *Gateway) SeedDraftChunk(workspace, sandbox, id, status string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	k := key{workspace, sandbox}
+	g.drafts[k] = append(g.drafts[k], &openshellv1.PolicyChunk{Id: id, Status: status})
+}
+
+// GetDraftPolicy implements openshellv1.OpenShellServer. Like OpenShell, it finds the sandbox by
+// name: a deleted sandbox is NotFound, whatever chunks it left.
+func (g *Gateway) GetDraftPolicy(_ context.Context, req *openshellv1.GetDraftPolicyRequest) (*openshellv1.GetDraftPolicyResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("GetDraftPolicy"); err != nil {
+		return nil, err
+	}
+	_, k, err := g.sandbox(req.GetWorkspaceScope(), req.GetSandbox())
+	if err != nil {
+		return nil, err
+	}
+	resp := &openshellv1.GetDraftPolicyResponse{}
+	for _, c := range g.drafts[k] {
+		if req.GetStatusFilter() == "" || req.GetStatusFilter() == c.GetStatus() {
+			resp.Chunks = append(resp.Chunks, clone(c))
+		}
+	}
+	return resp, nil
+}
+
+// ClearDraftChunks implements openshellv1.OpenShellServer. It clears only pending chunks.
+func (g *Gateway) ClearDraftChunks(_ context.Context, req *openshellv1.ClearDraftChunksRequest) (*openshellv1.ClearDraftChunksResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("ClearDraftChunks"); err != nil {
+		return nil, err
+	}
+	_, k, err := g.sandbox(req.GetWorkspaceScope(), req.GetSandbox())
+	if err != nil {
+		return nil, err
+	}
+	var kept []*openshellv1.PolicyChunk
+	var cleared uint32
+	for _, c := range g.drafts[k] {
+		if c.GetStatus() == "pending" {
+			cleared++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	g.drafts[k] = kept
+	return &openshellv1.ClearDraftChunksResponse{ChunksCleared: cleared}, nil
 }

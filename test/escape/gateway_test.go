@@ -5,6 +5,7 @@ package escape_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,15 +98,76 @@ func (g *gateway) sandbox(ctx context.Context, spec execution.SandboxSpec) {
 	}
 	_, err := g.b.CreateSandbox(ctx, g.workspace, spec)
 	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func(ctx context.Context) error {
-		_, err := g.b.DeleteSandbox(ctx, g.workspace, spec.Name)
-		return err
-	})
+	DeferCleanup(func(ctx context.Context) error { return g.remove(ctx, spec.Name) })
 	Eventually(func(gm Gomega) {
 		sb, err := g.b.GetSandbox(ctx, g.workspace, spec.Name)
 		gm.Expect(err).NotTo(HaveOccurred())
 		gm.Expect(sb.Phase).To(Equal(execution.PhaseReady))
 	}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+}
+
+// remove deletes a sandbox so that it leaves no draft policy chunk behind (old issue 640). The
+// gateway refuses to delete a workspace that holds a draft chunk. A running sandbox submits
+// chunks, and a submit that races the delete leaves an orphan chunk that no call can reach, so:
+// stop it and wait for Stopped (its supervisor is gone, nothing submits any more; this is what
+// prevents the orphan), then clear the pending chunks and wait until none is pending (extra
+// safety: the gateway deletes all chunks of a sandbox when it deletes the sandbox).
+//
+// Stop, wait and clear are best effort: a sandbox stuck in Provisioning cannot be stopped, and
+// that must not keep it from being deleted. DeleteSandbox is always called, with plain polling
+// that returns errors (no Gomega assertion, which would panic out of the cleanup), and every
+// error is reported.
+func (g *gateway) remove(ctx context.Context, name string) error {
+	var stopErr, clearErr error
+	if _, stopErr = g.b.StopSandbox(ctx, g.workspace, name); stopErr == nil {
+		stopErr = pollUntil(ctx, 2*time.Minute, func() error {
+			sb, err := g.b.GetSandbox(ctx, g.workspace, name)
+			if err != nil {
+				return err
+			}
+			if sb.Phase != execution.PhaseStopped {
+				return fmt.Errorf("sandbox %s is %s, not Stopped", name, sb.Phase)
+			}
+			return nil
+		})
+	}
+	clearErr = pollUntil(ctx, time.Minute, func() error {
+		if _, err := g.b.ClearDraftChunks(ctx, g.workspace, name); err != nil {
+			return err
+		}
+		n, err := g.b.PendingDraftChunks(ctx, g.workspace, name)
+		if err != nil {
+			return err
+		}
+		if n != 0 {
+			return fmt.Errorf("%d pending draft policy chunks of sandbox %s", n, name)
+		}
+		return nil
+	})
+	_, deleteErr := g.b.DeleteSandbox(ctx, g.workspace, name)
+	return errors.Join(stopErr, clearErr, deleteErr)
+}
+
+// pollUntil calls check every two seconds until it returns nil, the timeout passes or ctx ends,
+// and returns the last error of check. It never panics.
+func pollUntil(ctx context.Context, timeout time.Duration, check func() error) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		err := check()
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-deadline.C:
+			return err
+		case <-tick.C:
+		}
+	}
 }
 
 // exec runs command in the sandbox with stdin as its standard input and returns stdout,
@@ -177,6 +239,10 @@ const headerMark = "--koinon-headers--"
 // KOINON_ESCAPE_DELETE_WORKSPACE=1 (the kind e2e, test/e2e/escape-openshell.sh): deleting only the
 // namespace leaves the record, and a rerun then finds a workspace without a namespace. Run it after
 // the last spec, which needs the namespace.
+//
+// The gateway refuses to delete a workspace that still holds a draft policy chunk (old issue 640);
+// gateway.remove clears them per sandbox while it still exists. Here wait until the workspace lists
+// no sandbox (deletion is asynchronous), then delete it.
 func deleteWorkspace(ctx context.Context) {
 	GinkgoHelper()
 	if os.Getenv("KOINON_ESCAPE_DELETE_WORKSPACE") != "1" || os.Getenv("KOINON_OPENSHELL_ENDPOINT") == "" {
@@ -191,5 +257,11 @@ func deleteWorkspace(ctx context.Context) {
 	})
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = b.Close() }()
-	Expect(b.DeleteWorkspace(ctx, envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape"))).To(Succeed())
+	workspace := envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape")
+	Eventually(func(g Gomega) {
+		names, err := b.ListSandboxNames(ctx, workspace)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(names).To(BeEmpty(), "sandboxes still in the workspace")
+	}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+	Expect(b.DeleteWorkspace(ctx, workspace)).To(Succeed())
 }

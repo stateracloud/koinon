@@ -41,6 +41,42 @@ const (
 	// PriceServiceListFlaggedPricesProcedure is the procedure name of the PriceService's
 	// ListFlaggedPrices RPC.
 	PriceServiceListFlaggedPricesProcedure = "/koinon.budget.v1alpha1.PriceService/ListFlaggedPrices"
+	// PriceServiceListPriceProposalsProcedure is the procedure name of the PriceService's
+	// ListPriceProposals RPC.
+	PriceServiceListPriceProposalsProcedure = "/koinon.budget.v1alpha1.PriceService/ListPriceProposals"
+	// PriceServiceGetPriceProposalProcedure is the procedure name of the PriceService's
+	// GetPriceProposal RPC.
+	PriceServiceGetPriceProposalProcedure = "/koinon.budget.v1alpha1.PriceService/GetPriceProposal"
+	// PriceServiceAcceptPriceProposalProcedure is the procedure name of the PriceService's
+	// AcceptPriceProposal RPC.
+	PriceServiceAcceptPriceProposalProcedure = "/koinon.budget.v1alpha1.PriceService/AcceptPriceProposal"
+	// PriceServiceDismissPriceProposalProcedure is the procedure name of the PriceService's
+	// DismissPriceProposal RPC.
+	PriceServiceDismissPriceProposalProcedure = "/koinon.budget.v1alpha1.PriceService/DismissPriceProposal"
+	// PriceServiceListPriceSourceFetchesProcedure is the procedure name of the PriceService's
+	// ListPriceSourceFetches RPC.
+	PriceServiceListPriceSourceFetchesProcedure = "/koinon.budget.v1alpha1.PriceService/ListPriceSourceFetches"
+	// PriceServiceListPlatformPriceVersionsProcedure is the procedure name of the PriceService's
+	// ListPlatformPriceVersions RPC.
+	PriceServiceListPlatformPriceVersionsProcedure = "/koinon.budget.v1alpha1.PriceService/ListPlatformPriceVersions"
+	// PriceServiceGetPlatformPriceVersionProcedure is the procedure name of the PriceService's
+	// GetPlatformPriceVersion RPC.
+	PriceServiceGetPlatformPriceVersionProcedure = "/koinon.budget.v1alpha1.PriceService/GetPlatformPriceVersion"
+	// PriceServiceDiffPlatformPriceVersionsProcedure is the procedure name of the PriceService's
+	// DiffPlatformPriceVersions RPC.
+	PriceServiceDiffPlatformPriceVersionsProcedure = "/koinon.budget.v1alpha1.PriceService/DiffPlatformPriceVersions"
+	// PriceServiceRollbackPlatformPricesProcedure is the procedure name of the PriceService's
+	// RollbackPlatformPrices RPC.
+	PriceServiceRollbackPlatformPricesProcedure = "/koinon.budget.v1alpha1.PriceService/RollbackPlatformPrices"
+	// PriceServiceGetPriceRefreshSettingsProcedure is the procedure name of the PriceService's
+	// GetPriceRefreshSettings RPC.
+	PriceServiceGetPriceRefreshSettingsProcedure = "/koinon.budget.v1alpha1.PriceService/GetPriceRefreshSettings"
+	// PriceServiceCheckPriceSourcesProcedure is the procedure name of the PriceService's
+	// CheckPriceSources RPC.
+	PriceServiceCheckPriceSourcesProcedure = "/koinon.budget.v1alpha1.PriceService/CheckPriceSources"
+	// PriceServiceExplainPlatformPriceProcedure is the procedure name of the PriceService's
+	// ExplainPlatformPrice RPC.
+	PriceServiceExplainPlatformPriceProcedure = "/koinon.budget.v1alpha1.PriceService/ExplainPlatformPrice"
 )
 
 var (
@@ -90,6 +126,98 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	priceServiceListPriceProposalsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("ListPriceProposals"),
+			Procedure:        PriceServiceListPriceProposalsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceGetPriceProposalSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("GetPriceProposal"),
+			Procedure:        PriceServiceGetPriceProposalProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceAcceptPriceProposalSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("AcceptPriceProposal"),
+			Procedure:  PriceServiceAcceptPriceProposalProcedure,
+		}
+	})
+	priceServiceDismissPriceProposalSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("DismissPriceProposal"),
+			Procedure:  PriceServiceDismissPriceProposalProcedure,
+		}
+	})
+	priceServiceListPriceSourceFetchesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("ListPriceSourceFetches"),
+			Procedure:        PriceServiceListPriceSourceFetchesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceListPlatformPriceVersionsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("ListPlatformPriceVersions"),
+			Procedure:        PriceServiceListPlatformPriceVersionsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceGetPlatformPriceVersionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("GetPlatformPriceVersion"),
+			Procedure:        PriceServiceGetPlatformPriceVersionProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceDiffPlatformPriceVersionsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("DiffPlatformPriceVersions"),
+			Procedure:        PriceServiceDiffPlatformPriceVersionsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceRollbackPlatformPricesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("RollbackPlatformPrices"),
+			Procedure:  PriceServiceRollbackPlatformPricesProcedure,
+		}
+	})
+	priceServiceGetPriceRefreshSettingsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("GetPriceRefreshSettings"),
+			Procedure:        PriceServiceGetPriceRefreshSettingsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	priceServiceCheckPriceSourcesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("CheckPriceSources"),
+			Procedure:  PriceServiceCheckPriceSourcesProcedure,
+		}
+	})
+	priceServiceExplainPlatformPriceSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("ExplainPlatformPrice"),
+			Procedure:        PriceServiceExplainPlatformPriceProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 )
 
 // PriceServiceClient is a client for the koinon.budget.v1alpha1.PriceService service.
@@ -109,6 +237,35 @@ type PriceServiceClient interface {
 	// ListFlaggedPrices returns price entries whose recomputed cost differs from the gateway's
 	// by more than 1%.
 	ListFlaggedPrices(context.Context, *v1alpha1.ListFlaggedPricesRequest) (*v1alpha1.ListFlaggedPricesResponse, error)
+	// ListPriceProposals lists proposals, newest first. Empty state or class mean all.
+	ListPriceProposals(context.Context, *v1alpha1.ListPriceProposalsRequest) (*v1alpha1.ListPriceProposalsResponse, error)
+	// GetPriceProposal returns one proposal.
+	GetPriceProposal(context.Context, *v1alpha1.GetPriceProposalRequest) (*v1alpha1.GetPriceProposalResponse, error)
+	// AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of
+	// class confirm needs the model id typed out; a new model without an output limit needs max_output.
+	AcceptPriceProposal(context.Context, *v1alpha1.AcceptPriceProposalRequest) (*v1alpha1.AcceptPriceProposalResponse, error)
+	// DismissPriceProposal closes a proposal; the same values from the same source do not come back.
+	DismissPriceProposal(context.Context, *v1alpha1.DismissPriceProposalRequest) (*v1alpha1.DismissPriceProposalResponse, error)
+	// ListPriceSourceFetches returns the fetch log, newest first.
+	ListPriceSourceFetches(context.Context, *v1alpha1.ListPriceSourceFetchesRequest) (*v1alpha1.ListPriceSourceFetchesResponse, error)
+	// ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries.
+	ListPlatformPriceVersions(context.Context, *v1alpha1.ListPlatformPriceVersionsRequest) (*v1alpha1.ListPlatformPriceVersionsResponse, error)
+	// GetPlatformPriceVersion returns one version with its entries and their provenance.
+	GetPlatformPriceVersion(context.Context, *v1alpha1.GetPlatformPriceVersionRequest) (*v1alpha1.GetPlatformPriceVersionResponse, error)
+	// DiffPlatformPriceVersions returns what changed between two versions of the platform list.
+	DiffPlatformPriceVersions(context.Context, *v1alpha1.DiffPlatformPriceVersionsRequest) (*v1alpha1.DiffPlatformPriceVersionsResponse, error)
+	// RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are
+	// never edited or deleted.
+	RollbackPlatformPrices(context.Context, *v1alpha1.RollbackPlatformPricesRequest) (*v1alpha1.RollbackPlatformPricesResponse, error)
+	// GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting
+	// is Helm-owned: there is no write.
+	GetPriceRefreshSettings(context.Context, *v1alpha1.GetPriceRefreshSettingsRequest) (*v1alpha1.GetPriceRefreshSettingsResponse, error)
+	// CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It
+	// makes proposals and applies nothing.
+	CheckPriceSources(context.Context, *v1alpha1.CheckPriceSourcesRequest) (*v1alpha1.CheckPriceSourcesResponse, error)
+	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
+	// price_ref.
+	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
 }
 
 // NewPriceServiceClient constructs a client for the koinon.budget.v1alpha1.PriceService service.
@@ -134,6 +291,35 @@ type PriceServiceHandler interface {
 	// ListFlaggedPrices returns price entries whose recomputed cost differs from the gateway's
 	// by more than 1%.
 	ListFlaggedPrices(context.Context, *v1alpha1.ListFlaggedPricesRequest) (*v1alpha1.ListFlaggedPricesResponse, error)
+	// ListPriceProposals lists proposals, newest first. Empty state or class mean all.
+	ListPriceProposals(context.Context, *v1alpha1.ListPriceProposalsRequest) (*v1alpha1.ListPriceProposalsResponse, error)
+	// GetPriceProposal returns one proposal.
+	GetPriceProposal(context.Context, *v1alpha1.GetPriceProposalRequest) (*v1alpha1.GetPriceProposalResponse, error)
+	// AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of
+	// class confirm needs the model id typed out; a new model without an output limit needs max_output.
+	AcceptPriceProposal(context.Context, *v1alpha1.AcceptPriceProposalRequest) (*v1alpha1.AcceptPriceProposalResponse, error)
+	// DismissPriceProposal closes a proposal; the same values from the same source do not come back.
+	DismissPriceProposal(context.Context, *v1alpha1.DismissPriceProposalRequest) (*v1alpha1.DismissPriceProposalResponse, error)
+	// ListPriceSourceFetches returns the fetch log, newest first.
+	ListPriceSourceFetches(context.Context, *v1alpha1.ListPriceSourceFetchesRequest) (*v1alpha1.ListPriceSourceFetchesResponse, error)
+	// ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries.
+	ListPlatformPriceVersions(context.Context, *v1alpha1.ListPlatformPriceVersionsRequest) (*v1alpha1.ListPlatformPriceVersionsResponse, error)
+	// GetPlatformPriceVersion returns one version with its entries and their provenance.
+	GetPlatformPriceVersion(context.Context, *v1alpha1.GetPlatformPriceVersionRequest) (*v1alpha1.GetPlatformPriceVersionResponse, error)
+	// DiffPlatformPriceVersions returns what changed between two versions of the platform list.
+	DiffPlatformPriceVersions(context.Context, *v1alpha1.DiffPlatformPriceVersionsRequest) (*v1alpha1.DiffPlatformPriceVersionsResponse, error)
+	// RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are
+	// never edited or deleted.
+	RollbackPlatformPrices(context.Context, *v1alpha1.RollbackPlatformPricesRequest) (*v1alpha1.RollbackPlatformPricesResponse, error)
+	// GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting
+	// is Helm-owned: there is no write.
+	GetPriceRefreshSettings(context.Context, *v1alpha1.GetPriceRefreshSettingsRequest) (*v1alpha1.GetPriceRefreshSettingsResponse, error)
+	// CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It
+	// makes proposals and applies nothing.
+	CheckPriceSources(context.Context, *v1alpha1.CheckPriceSourcesRequest) (*v1alpha1.CheckPriceSourcesResponse, error)
+	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
+	// price_ref.
+	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
 }
 
 // RegisterPriceServiceHandler registers svc as the koinon.budget.v1alpha1.PriceService
@@ -147,6 +333,18 @@ func RegisterPriceServiceHandler(server *connect.Server, svc PriceServiceHandler
 		connect.Method{Spec: priceServiceGetDefaultPricesSpec(), Handler: adapter.getDefaultPrices},
 		connect.Method{Spec: priceServiceGetDefaultPriceChangesSpec(), Handler: adapter.getDefaultPriceChanges},
 		connect.Method{Spec: priceServiceListFlaggedPricesSpec(), Handler: adapter.listFlaggedPrices},
+		connect.Method{Spec: priceServiceListPriceProposalsSpec(), Handler: adapter.listPriceProposals},
+		connect.Method{Spec: priceServiceGetPriceProposalSpec(), Handler: adapter.getPriceProposal},
+		connect.Method{Spec: priceServiceAcceptPriceProposalSpec(), Handler: adapter.acceptPriceProposal},
+		connect.Method{Spec: priceServiceDismissPriceProposalSpec(), Handler: adapter.dismissPriceProposal},
+		connect.Method{Spec: priceServiceListPriceSourceFetchesSpec(), Handler: adapter.listPriceSourceFetches},
+		connect.Method{Spec: priceServiceListPlatformPriceVersionsSpec(), Handler: adapter.listPlatformPriceVersions},
+		connect.Method{Spec: priceServiceGetPlatformPriceVersionSpec(), Handler: adapter.getPlatformPriceVersion},
+		connect.Method{Spec: priceServiceDiffPlatformPriceVersionsSpec(), Handler: adapter.diffPlatformPriceVersions},
+		connect.Method{Spec: priceServiceRollbackPlatformPricesSpec(), Handler: adapter.rollbackPlatformPrices},
+		connect.Method{Spec: priceServiceGetPriceRefreshSettingsSpec(), Handler: adapter.getPriceRefreshSettings},
+		connect.Method{Spec: priceServiceCheckPriceSourcesSpec(), Handler: adapter.checkPriceSources},
+		connect.Method{Spec: priceServiceExplainPlatformPriceSpec(), Handler: adapter.explainPlatformPrice},
 	)
 }
 
@@ -175,6 +373,54 @@ func (UnimplementedPriceServiceHandler) GetDefaultPriceChanges(context.Context, 
 
 func (UnimplementedPriceServiceHandler) ListFlaggedPrices(context.Context, *v1alpha1.ListFlaggedPricesRequest) (*v1alpha1.ListFlaggedPricesResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ListFlaggedPrices is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) ListPriceProposals(context.Context, *v1alpha1.ListPriceProposalsRequest) (*v1alpha1.ListPriceProposalsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ListPriceProposals is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) GetPriceProposal(context.Context, *v1alpha1.GetPriceProposalRequest) (*v1alpha1.GetPriceProposalResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.GetPriceProposal is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) AcceptPriceProposal(context.Context, *v1alpha1.AcceptPriceProposalRequest) (*v1alpha1.AcceptPriceProposalResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.AcceptPriceProposal is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) DismissPriceProposal(context.Context, *v1alpha1.DismissPriceProposalRequest) (*v1alpha1.DismissPriceProposalResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.DismissPriceProposal is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) ListPriceSourceFetches(context.Context, *v1alpha1.ListPriceSourceFetchesRequest) (*v1alpha1.ListPriceSourceFetchesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) ListPlatformPriceVersions(context.Context, *v1alpha1.ListPlatformPriceVersionsRequest) (*v1alpha1.ListPlatformPriceVersionsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) GetPlatformPriceVersion(context.Context, *v1alpha1.GetPlatformPriceVersionRequest) (*v1alpha1.GetPlatformPriceVersionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) DiffPlatformPriceVersions(context.Context, *v1alpha1.DiffPlatformPriceVersionsRequest) (*v1alpha1.DiffPlatformPriceVersionsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) RollbackPlatformPrices(context.Context, *v1alpha1.RollbackPlatformPricesRequest) (*v1alpha1.RollbackPlatformPricesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) GetPriceRefreshSettings(context.Context, *v1alpha1.GetPriceRefreshSettingsRequest) (*v1alpha1.GetPriceRefreshSettingsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) CheckPriceSources(context.Context, *v1alpha1.CheckPriceSourcesRequest) (*v1alpha1.CheckPriceSourcesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.CheckPriceSources is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice is not implemented")
 }
 
 type priceServiceClient struct {
@@ -224,6 +470,102 @@ func (c *priceServiceClient) GetDefaultPriceChanges(ctx context.Context, req *v1
 func (c *priceServiceClient) ListFlaggedPrices(ctx context.Context, req *v1alpha1.ListFlaggedPricesRequest) (*v1alpha1.ListFlaggedPricesResponse, error) {
 	var res v1alpha1.ListFlaggedPricesResponse
 	if err := c.client.CallUnary(ctx, priceServiceListFlaggedPricesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) ListPriceProposals(ctx context.Context, req *v1alpha1.ListPriceProposalsRequest) (*v1alpha1.ListPriceProposalsResponse, error) {
+	var res v1alpha1.ListPriceProposalsResponse
+	if err := c.client.CallUnary(ctx, priceServiceListPriceProposalsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) GetPriceProposal(ctx context.Context, req *v1alpha1.GetPriceProposalRequest) (*v1alpha1.GetPriceProposalResponse, error) {
+	var res v1alpha1.GetPriceProposalResponse
+	if err := c.client.CallUnary(ctx, priceServiceGetPriceProposalSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) AcceptPriceProposal(ctx context.Context, req *v1alpha1.AcceptPriceProposalRequest) (*v1alpha1.AcceptPriceProposalResponse, error) {
+	var res v1alpha1.AcceptPriceProposalResponse
+	if err := c.client.CallUnary(ctx, priceServiceAcceptPriceProposalSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) DismissPriceProposal(ctx context.Context, req *v1alpha1.DismissPriceProposalRequest) (*v1alpha1.DismissPriceProposalResponse, error) {
+	var res v1alpha1.DismissPriceProposalResponse
+	if err := c.client.CallUnary(ctx, priceServiceDismissPriceProposalSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) ListPriceSourceFetches(ctx context.Context, req *v1alpha1.ListPriceSourceFetchesRequest) (*v1alpha1.ListPriceSourceFetchesResponse, error) {
+	var res v1alpha1.ListPriceSourceFetchesResponse
+	if err := c.client.CallUnary(ctx, priceServiceListPriceSourceFetchesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) ListPlatformPriceVersions(ctx context.Context, req *v1alpha1.ListPlatformPriceVersionsRequest) (*v1alpha1.ListPlatformPriceVersionsResponse, error) {
+	var res v1alpha1.ListPlatformPriceVersionsResponse
+	if err := c.client.CallUnary(ctx, priceServiceListPlatformPriceVersionsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) GetPlatformPriceVersion(ctx context.Context, req *v1alpha1.GetPlatformPriceVersionRequest) (*v1alpha1.GetPlatformPriceVersionResponse, error) {
+	var res v1alpha1.GetPlatformPriceVersionResponse
+	if err := c.client.CallUnary(ctx, priceServiceGetPlatformPriceVersionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) DiffPlatformPriceVersions(ctx context.Context, req *v1alpha1.DiffPlatformPriceVersionsRequest) (*v1alpha1.DiffPlatformPriceVersionsResponse, error) {
+	var res v1alpha1.DiffPlatformPriceVersionsResponse
+	if err := c.client.CallUnary(ctx, priceServiceDiffPlatformPriceVersionsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) RollbackPlatformPrices(ctx context.Context, req *v1alpha1.RollbackPlatformPricesRequest) (*v1alpha1.RollbackPlatformPricesResponse, error) {
+	var res v1alpha1.RollbackPlatformPricesResponse
+	if err := c.client.CallUnary(ctx, priceServiceRollbackPlatformPricesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) GetPriceRefreshSettings(ctx context.Context, req *v1alpha1.GetPriceRefreshSettingsRequest) (*v1alpha1.GetPriceRefreshSettingsResponse, error) {
+	var res v1alpha1.GetPriceRefreshSettingsResponse
+	if err := c.client.CallUnary(ctx, priceServiceGetPriceRefreshSettingsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) CheckPriceSources(ctx context.Context, req *v1alpha1.CheckPriceSourcesRequest) (*v1alpha1.CheckPriceSourcesResponse, error) {
+	var res v1alpha1.CheckPriceSourcesResponse
+	if err := c.client.CallUnary(ctx, priceServiceCheckPriceSourcesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) ExplainPlatformPrice(ctx context.Context, req *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error) {
+	var res v1alpha1.ExplainPlatformPriceResponse
+	if err := c.client.CallUnary(ctx, priceServiceExplainPlatformPriceSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -297,6 +639,150 @@ func (h priceServiceHandler) listFlaggedPrices(ctx context.Context, _ connect.Sp
 		return err
 	}
 	res, err := h.svc.ListFlaggedPrices(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) listPriceProposals(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListPriceProposalsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListPriceProposals(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) getPriceProposal(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetPriceProposalRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetPriceProposal(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) acceptPriceProposal(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.AcceptPriceProposalRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.AcceptPriceProposal(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) dismissPriceProposal(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.DismissPriceProposalRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DismissPriceProposal(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) listPriceSourceFetches(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListPriceSourceFetchesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListPriceSourceFetches(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) listPlatformPriceVersions(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListPlatformPriceVersionsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListPlatformPriceVersions(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) getPlatformPriceVersion(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetPlatformPriceVersionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetPlatformPriceVersion(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) diffPlatformPriceVersions(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.DiffPlatformPriceVersionsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DiffPlatformPriceVersions(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) rollbackPlatformPrices(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.RollbackPlatformPricesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RollbackPlatformPrices(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) getPriceRefreshSettings(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetPriceRefreshSettingsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetPriceRefreshSettings(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) checkPriceSources(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.CheckPriceSourcesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CheckPriceSources(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) explainPlatformPrice(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ExplainPlatformPriceRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ExplainPlatformPrice(ctx, &req)
 	if err != nil {
 		return err
 	}

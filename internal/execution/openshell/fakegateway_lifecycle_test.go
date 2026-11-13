@@ -108,3 +108,49 @@ var _ = Describe("fakegateway stop and start", func() {
 		Entry("a suspending sandbox", openshellv1.SandboxPhase_SANDBOX_PHASE_SUSPENDING),
 	)
 })
+
+// The gateway finds a sandbox's draft chunks by its name and clears only pending ones; after the
+// sandbox is deleted both calls are NotFound (OpenShell 5d25211b2), which the backend reads as
+// "none", so chunks must be cleared before the delete (old issue 640).
+var _ = Describe("backend draft policy chunks", func() {
+	var (
+		gw *fakegateway.Gateway
+		b  *openshell.Backend
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		gw = fakegateway.New()
+		conn, err := gw.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(gw.Stop)
+		DeferCleanup(conn.Close)
+		b = openshell.New(conn)
+		_, err = b.EnsureWorkspace(ctx, ws, nil)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = b.CreateSandbox(ctx, ws, execution.SandboxSpec{
+			Name: "sb", Image: "img", Command: []string{"sleep", "infinity"}, Policy: harnessPolicy(),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		gw.SeedDraftChunk(ws, "sb", "c1", "pending")
+		gw.SeedDraftChunk(ws, "sb", "c2", "pending")
+		gw.SeedDraftChunk(ws, "sb", "c3", "approved")
+	})
+
+	It("counts and clears the pending chunks only", func(ctx SpecContext) {
+		Expect(b.PendingDraftChunks(ctx, ws, "sb")).To(Equal(2))
+		Expect(b.ClearDraftChunks(ctx, ws, "sb")).To(BeEquivalentTo(2))
+		Expect(b.PendingDraftChunks(ctx, ws, "sb")).To(BeZero())
+		Expect(b.ClearDraftChunks(ctx, ws, "sb")).To(BeZero())
+	})
+
+	It("reads a deleted sandbox as having none", func(ctx SpecContext) {
+		_, err := b.DeleteSandbox(ctx, ws, "sb")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(b.PendingDraftChunks(ctx, ws, "sb")).To(BeZero())
+		Expect(b.ClearDraftChunks(ctx, ws, "sb")).To(BeZero())
+	})
+
+	It("lists the sandbox names of a workspace", func(ctx SpecContext) {
+		Expect(b.ListSandboxNames(ctx, ws)).To(ConsistOf("sb"))
+	})
+})

@@ -5,6 +5,7 @@ package checkpoint
 import (
 	"context"
 
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -24,4 +25,9 @@ func (w *Writer) BlobIDs(ctx context.Context, prefix string) ([]blob.ID, error) 
 		return nil
 	})
 	return ids, err
+}
+
+// OpenForTest opens the repository at prefix as the writer does and closes the storage with it.
+func (w *Writer) OpenForTest(ctx context.Context, work, prefix, password string) (repo.Repository, error) {
+	return w.open(ctx, work, prefix, password, false)
 }

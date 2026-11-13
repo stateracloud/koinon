@@ -79,6 +79,7 @@ type config struct {
 	resyncInterval                        time.Duration
 	homeRetention                         string
 	checkpoints                           bool
+	checkpointsReadOnly                   bool
 	// restoreHold starts the process without converging anything (issue #462).
 	restoreHold bool
 	// recoveryPolicy and recoveryBinding name this release's ValidatingAdmissionPolicy and binding for

@@ -44,6 +44,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -161,6 +163,11 @@ type Config struct {
 	// archived only after its home was backed up, and a recreated sandbox keeps its home
 	// generation and gets the home restored. koinon-agentd writes the checkpoints.
 	Checkpoints bool
+	// CheckpointsReadOnly is the restore-only mode (checkpoints.readOnly, ADR 0110 decision 4):
+	// koinon-agentd writes no backup, so nothing waits for one. A recreation uses the newest complete
+	// snapshot when it was taken since the home was last written, and otherwise is blocked with the
+	// reason at once; an idle stop does not wait (it keeps the volume).
+	CheckpointsReadOnly bool
 	// CheckpointStopWait is how long an idle stop waits for its checkpoint. Default
 	// DefaultCheckpointStopWait.
 	CheckpointStopWait time.Duration
@@ -1310,7 +1317,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
-	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
+	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{
+		IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
+		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute,
+	})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
 	}
@@ -1346,9 +1356,16 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 		}
+		release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationCreate, nil, hash)
+		if err != nil || held {
+			return err
+		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
+			if definiteFailure(err) {
+				release()
+			}
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
@@ -1466,7 +1483,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	case execution.PhaseStopped:
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
+			release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash)
+			if err != nil || held {
+				return err
+			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
+				if definiteFailure(err) {
+					release()
+				}
 				return err
 			}
 			r.log.Info("started sandbox for a run", w.logAttrs()...)
@@ -1476,6 +1500,53 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 	return r.record(ctx, w, sb, hash, "")
 }
+
+// holdForCreationRate takes one of the org's sandbox creations per minute (issue #27, ADR 0066
+// amendment 2026-11-12). With none free it records why and reports held: the run stays queued or
+// starting, the sandbox is not touched, and the next pass tries again. A burst larger than the rate
+// therefore queues behind it and no run fails for it. sb is the stopped sandbox about to start, or
+// nil when none exists yet.
+//
+// release gives the slot back; call it when the backend call that followed failed.
+func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (release func(), held bool, err error) {
+	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+	if err != nil {
+		return nil, false, fmt.Errorf("reserve a sandbox creation: %w", err)
+	}
+	if ok {
+		return func() {
+			if err := res.Release(context.WithoutCancel(ctx), r.pool); err != nil {
+				r.log.Warn("release a sandbox creation slot", append(w.logAttrs(), "error", err)...)
+			}
+		}, false, nil
+	}
+	r.m.SandboxCreationsHeld.Inc()
+	// The message is stable between passes (the wait is only in the log), so a held agent's message
+	// does not churn.
+	msg := fmt.Sprintf("waiting for the org's sandbox creation rate (%d per minute)", tune.SandboxCreationsPerMinute)
+	r.log.Info("sandbox creation held by the org's rate limit", append(w.logAttrs(), "wait", wait.String())...)
+	if sb != nil {
+		return nil, true, r.record(ctx, w, *sb, hash, msg)
+	}
+	return nil, true, r.recordState(ctx, w, store.SandboxStatePending, creationHeldPhase, msg)
+}
+
+// definiteFailure reports whether a backend call certainly did not make the sandbox, so its slot in
+// the org's creation rate can be refunded. A timeout, a cancellation or an unavailable or unknown
+// outcome may have created it; the slot stays spent then, which errs toward fewer creations.
+func definiteFailure(err error) bool {
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled, codes.Unknown, codes.Aborted, codes.Internal, codes.DataLoss:
+		return false
+	}
+	return true
+}
+
+// creationHeldPhase is the phase recorded while a sandbox waits for the org's creation rate.
+const creationHeldPhase = "WaitingForCreationRate"
 
 // deleteSandbox requests the deletion of a sandbox. The OpenShell DeleteSandbox RPC can still block
 // until the pods end; the per-agent queue makes that cost one agent and one worker slot, not the
@@ -1859,7 +1930,23 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID)
+	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID); err != nil {
+		return err
+	}
+	return r.recordEnforcement(ctx, w, sb.Enforcement)
+}
+
+// recordEnforcement stores the enforcement mode the observed sandbox reports (ADR 0045), the
+// field a run's evidence shows. A backend that reports none leaves the recorded value.
+func (r *Reconciler) recordEnforcement(ctx context.Context, w *work, mode string) error {
+	if mode == "" || w.sb.Enforcement == mode {
+		return nil
+	}
+	if err := r.q.SetAgentSandboxEnforcement(ctx, store.SetAgentSandboxEnforcementParams{OrgID: w.org.ID, AgentID: w.agent.ID, Enforcement: mode}); err != nil {
+		return fmt.Errorf("record sandbox enforcement: %w", err)
+	}
+	w.sb.Enforcement = mode
+	return nil
 }
 
 // recordState stores a state without an observed sandbox; the recorded home generation is kept.

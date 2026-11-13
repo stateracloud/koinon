@@ -316,6 +316,16 @@ var _ = Describe("home checkpoints", func() {
 		Expect(n).To(Equal(1))
 	})
 
+	It("writes no snapshot in restore-only mode, though a checkpoint is requested (ADR 0110 decision 4)", func(ctx SpecContext) {
+		e.pool("agentd-ro", cps(ctx, func(c *agentd.Checkpoints) { c.Interval = time.Second; c.ReadOnly = true }))
+		cp := request(ctx, store.CheckpointReasonStop)
+		Eventually(status(checkpointOf(ctx, cp)), racescale.D(10*time.Second), 100*time.Millisecond).Should(Equal(store.CheckpointStatusFailed))
+		Expect(checkpointOf(ctx, cp)().Error.String).To(Equal(checkpoint.ReadOnlyError), "failed at once with the reason, not after SandboxWait")
+		var n int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM home_checkpoints WHERE org_id = $1 AND status = 'complete'`, e.org).Scan(&n)).To(Succeed())
+		Expect(n).To(BeZero())
+	})
+
 	It("resumes the session with session/load in a sandbox recreated from a checkpoint", func(ctx SpecContext) {
 		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)

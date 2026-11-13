@@ -3824,6 +3824,15 @@
               "deprecated": false
             },
             {
+              "name": "GetAgentContinuationLimits",
+              "description": "GetAgentContinuationLimits returns the continuation limits a task of the agent gets: the\neffective values, the template's and org's defaults and the admin's overrides.",
+              "requestType": "koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "GetAgentRunLimits",
               "description": "GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the\ntemplate's defaults and the admin's overrides (ADR 0081).",
               "requestType": "koinon.budget.v1alpha1.GetAgentRunLimitsRequest",
@@ -3837,6 +3846,15 @@
               "description": "GetOrgBudget returns the cap, the platform ceiling and this month's spend.",
               "requestType": "koinon.budget.v1alpha1.GetOrgBudgetRequest",
               "responseType": "koinon.budget.v1alpha1.GetOrgBudgetResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetOrgContinuationLimits",
+              "description": "GetOrgContinuationLimits returns the org's default per-task USD cap for continuation runs\n(issue #99): the effective value and the platform default. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -3887,6 +3905,15 @@
               "deprecated": false
             },
             {
+              "name": "SetAgentContinuationLimits",
+              "description": "SetAgentContinuationLimits replaces the agent's overrides of its continuation limits. Unset\nfields follow the template (the count) or the org's default (the cap); a count of 0 switches\ncontinuation off for the agent.",
+              "requestType": "koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest",
+              "responseType": "koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentRunLimits",
               "description": "SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that\noverride; all zero clears them all. It applies to runs queued afterwards.",
               "requestType": "koinon.budget.v1alpha1.SetAgentRunLimitsRequest",
@@ -3900,6 +3927,15 @@
               "description": "SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.",
               "requestType": "koinon.budget.v1alpha1.SetMonthlyCapRequest",
               "responseType": "koinon.budget.v1alpha1.SetMonthlyCapResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetOrgContinuationTaskSpend",
+              "description": "SetOrgContinuationTaskSpend sets the org's default per-task USD cap for continuation runs. An\nempty amount clears it, so the platform default applies. It applies from the next time a run\nhits its time limit.",
+              "requestType": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest",
+              "responseType": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -3923,6 +3959,51 @@
           "deprecated": false,
           "methods": [
             {
+              "name": "AcceptPriceProposal",
+              "description": "AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of\nclass confirm needs the model id typed out; a new model without an output limit needs max_output.",
+              "requestType": "koinon.budget.v1alpha1.AcceptPriceProposalRequest",
+              "responseType": "koinon.budget.v1alpha1.AcceptPriceProposalResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "CheckPriceSources",
+              "description": "CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It\nmakes proposals and applies nothing.",
+              "requestType": "koinon.budget.v1alpha1.CheckPriceSourcesRequest",
+              "responseType": "koinon.budget.v1alpha1.CheckPriceSourcesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "DiffPlatformPriceVersions",
+              "description": "DiffPlatformPriceVersions returns what changed between two versions of the platform list.",
+              "requestType": "koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest",
+              "responseType": "koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "DismissPriceProposal",
+              "description": "DismissPriceProposal closes a proposal; the same values from the same source do not come back.",
+              "requestType": "koinon.budget.v1alpha1.DismissPriceProposalRequest",
+              "responseType": "koinon.budget.v1alpha1.DismissPriceProposalResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ExplainPlatformPrice",
+              "description": "ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its\nprice_ref.",
+              "requestType": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
+              "responseType": "koinon.budget.v1alpha1.ExplainPlatformPriceResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "GetDefaultPriceChanges",
               "description": "GetDefaultPriceChanges returns what changed between two versions of the default list. An\nempty from_version means the version before to_version; an empty to_version the current one.",
               "requestType": "koinon.budget.v1alpha1.GetDefaultPriceChangesRequest",
@@ -3941,10 +4022,64 @@
               "deprecated": false
             },
             {
+              "name": "GetPlatformPriceVersion",
+              "description": "GetPlatformPriceVersion returns one version with its entries and their provenance.",
+              "requestType": "koinon.budget.v1alpha1.GetPlatformPriceVersionRequest",
+              "responseType": "koinon.budget.v1alpha1.GetPlatformPriceVersionResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetPriceProposal",
+              "description": "GetPriceProposal returns one proposal.",
+              "requestType": "koinon.budget.v1alpha1.GetPriceProposalRequest",
+              "responseType": "koinon.budget.v1alpha1.GetPriceProposalResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetPriceRefreshSettings",
+              "description": "GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting\nis Helm-owned: there is no write.",
+              "requestType": "koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest",
+              "responseType": "koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListFlaggedPrices",
               "description": "ListFlaggedPrices returns price entries whose recomputed cost differs from the gateway's\nby more than 1%.",
               "requestType": "koinon.budget.v1alpha1.ListFlaggedPricesRequest",
               "responseType": "koinon.budget.v1alpha1.ListFlaggedPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListPlatformPriceVersions",
+              "description": "ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries.",
+              "requestType": "koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest",
+              "responseType": "koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListPriceProposals",
+              "description": "ListPriceProposals lists proposals, newest first. Empty state or class mean all.",
+              "requestType": "koinon.budget.v1alpha1.ListPriceProposalsRequest",
+              "responseType": "koinon.budget.v1alpha1.ListPriceProposalsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListPriceSourceFetches",
+              "description": "ListPriceSourceFetches returns the fetch log, newest first.",
+              "requestType": "koinon.budget.v1alpha1.ListPriceSourceFetchesRequest",
+              "responseType": "koinon.budget.v1alpha1.ListPriceSourceFetchesResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -3968,6 +4103,15 @@
               "deprecated": false
             },
             {
+              "name": "RollbackPlatformPrices",
+              "description": "RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are\nnever edited or deleted.",
+              "requestType": "koinon.budget.v1alpha1.RollbackPlatformPricesRequest",
+              "responseType": "koinon.budget.v1alpha1.RollbackPlatformPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetPrice",
               "description": "SetPrice adds a version of a named price. Earlier versions never change, and requests\nbefore valid_from keep the price they were charged at.",
               "requestType": "koinon.budget.v1alpha1.SetPriceRequest",
@@ -3980,6 +4124,69 @@
         }
       ],
       "messages": [
+        {
+          "name": "AcceptPriceProposalRequest",
+          "fullName": "koinon.budget.v1alpha1.AcceptPriceProposalRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "confirm",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "confirm is the model id typed out, for a proposal of class confirm."
+            },
+            {
+              "name": "max_output",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_output is the entry's output limit in tokens; required when the source reports none."
+            }
+          ]
+        },
+        {
+          "name": "AcceptPriceProposalResponse",
+          "fullName": "koinon.budget.v1alpha1.AcceptPriceProposalResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "warnings",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "AgentBudget",
           "fullName": "koinon.budget.v1alpha1.AgentBudget",
@@ -4044,6 +4251,60 @@
           ]
         },
         {
+          "name": "AgentContinuationLimits",
+          "fullName": "koinon.budget.v1alpha1.AgentContinuationLimits",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "effective",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.ContinuationValues",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "effective is what a task gets now: the override, else the template's count and the org's cap."
+            },
+            {
+              "name": "template_default",
+              "number": 4,
+              "type": "koinon.budget.v1alpha1.ContinuationValues",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "template_default is the agent's active version's count and the org's cap."
+            },
+            {
+              "name": "override",
+              "number": 5,
+              "type": "koinon.budget.v1alpha1.ContinuationOverride",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "AgentRunLimits",
           "fullName": "koinon.budget.v1alpha1.AgentRunLimits",
           "file": "koinon/budget/v1alpha1/budget.proto",
@@ -4094,6 +4355,283 @@
               "oneof": "",
               "deprecated": false,
               "description": "override is what an admin set; unset fields follow the template."
+            }
+          ]
+        },
+        {
+          "name": "CheckPriceSourcesRequest",
+          "fullName": "koinon.budget.v1alpha1.CheckPriceSourcesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "CheckPriceSourcesResponse",
+          "fullName": "koinon.budget.v1alpha1.CheckPriceSourcesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "fetched",
+              "number": 1,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "failed",
+              "number": 2,
+              "type": "map<string, string>",
+              "label": "map",
+              "oneof": "",
+              "deprecated": false,
+              "description": "failed maps a source id to why it failed."
+            },
+            {
+              "name": "proposals",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ContinuationOverride",
+          "fullName": "koinon.budget.v1alpha1.ContinuationOverride",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "ContinuationOverride is what an admin set on one agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_continuations",
+              "number": 1,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_continuations is unset when the agent follows the template; 0 switches continuation off."
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is empty when the agent follows the org's default."
+            }
+          ]
+        },
+        {
+          "name": "ContinuationValues",
+          "fullName": "koinon.budget.v1alpha1.ContinuationValues",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "ContinuationValues are the continuation limits of one task of an agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_continuations",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_continuations is the continuation runs a task gets; 0 means continuation is off."
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is the task's spend (all its runs) at which no further continuation starts."
+            }
+          ]
+        },
+        {
+          "name": "DiffPlatformPriceVersionsRequest",
+          "fullName": "koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from_version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "from_version 0 means the version before to_version; to_version 0 the newest."
+            },
+            {
+              "name": "to_version",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DiffPlatformPriceVersionsResponse",
+          "fullName": "koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from_version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to_version",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "changes",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceChange",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DismissPriceProposalRequest",
+          "fullName": "koinon.budget.v1alpha1.DismissPriceProposalRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DismissPriceProposalResponse",
+          "fullName": "koinon.budget.v1alpha1.DismissPriceProposalResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "ExplainPlatformPriceRequest",
+          "fullName": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "provider_type",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExplainPlatformPriceResponse",
+          "fullName": "koinon.budget.v1alpha1.ExplainPlatformPriceResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "layer",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "layer is platform or default."
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_version is set for layer platform."
+            },
+            {
+              "name": "list_version",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "list_version is set for layer default."
+            },
+            {
+              "name": "provenance",
+              "number": 6,
+              "type": "koinon.budget.v1alpha1.PriceProvenance",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "provenance is set for layer platform."
             }
           ]
         },
@@ -4234,6 +4772,51 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.AgentBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.GetAgentContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.GetAgentContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.AgentContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -4449,6 +5032,185 @@
           ]
         },
         {
+          "name": "GetOrgContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.GetOrgContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.GetOrgContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.OrgContinuationLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformPriceVersionRequest",
+          "fullName": "koinon.budget.v1alpha1.GetPlatformPriceVersionRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformPriceVersionResponse",
+          "fullName": "koinon.budget.v1alpha1.GetPlatformPriceVersionResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PlatformPriceVersion",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPriceProposalRequest",
+          "fullName": "koinon.budget.v1alpha1.GetPriceProposalRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPriceProposalResponse",
+          "fullName": "koinon.budget.v1alpha1.GetPriceProposalResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "proposal",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PriceProposal",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPriceRefreshSettingsRequest",
+          "fullName": "koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "GetPriceRefreshSettingsResponse",
+          "fullName": "koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "mode",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "mode is auto, off or on."
+            },
+            {
+              "name": "interval",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "interval is a Go duration such as \"6h0m0s\"."
+            },
+            {
+              "name": "max_change_percent",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_auto_per_day",
+              "number": 4,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "recorded",
+              "number": 5,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "recorded is false before koinon-api ever recorded a setting; the values are then the defaults."
+            },
+            {
+              "name": "updated_at",
+              "number": 6,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "ListAgentBudgetsRequest",
           "fullName": "koinon.budget.v1alpha1.ListAgentBudgetsRequest",
           "file": "koinon/budget/v1alpha1/budget.proto",
@@ -4603,6 +5365,132 @@
               "number": 2,
               "type": "google.protobuf.Timestamp",
               "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListPlatformPriceVersionsRequest",
+          "fullName": "koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limit",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "limit defaults to 100, at most 500."
+            }
+          ]
+        },
+        {
+          "name": "ListPlatformPriceVersionsResponse",
+          "fullName": "koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "versions",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PlatformPriceVersion",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListPriceProposalsRequest",
+          "fullName": "koinon.budget.v1alpha1.ListPriceProposalsRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "state",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "class",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "limit",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "limit defaults to 100, at most 1000."
+            }
+          ]
+        },
+        {
+          "name": "ListPriceProposalsResponse",
+          "fullName": "koinon.budget.v1alpha1.ListPriceProposalsResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "proposals",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PriceProposal",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListPriceSourceFetchesRequest",
+          "fullName": "koinon.budget.v1alpha1.ListPriceSourceFetchesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limit",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "limit defaults to 100, at most 1000."
+            }
+          ]
+        },
+        {
+          "name": "ListPriceSourceFetchesResponse",
+          "fullName": "koinon.budget.v1alpha1.ListPriceSourceFetchesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "fetches",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PriceSourceFetch",
+              "label": "repeated",
               "oneof": "",
               "deprecated": false,
               "description": ""
@@ -4915,6 +5803,177 @@
           ]
         },
         {
+          "name": "OrgContinuationLimits",
+          "fullName": "koinon.budget.v1alpha1.OrgContinuationLimits",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "task_spend_usd",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is the effective per-task cap: the org's value, else the platform default."
+            },
+            {
+              "name": "platform_default_task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_default_task_spend_usd is what an org that sets none gets."
+            },
+            {
+              "name": "overridden",
+              "number": 3,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "overridden is true when the org set its own value."
+            }
+          ]
+        },
+        {
+          "name": "PlatformPriceEntry",
+          "fullName": "koinon.budget.v1alpha1.PlatformPriceEntry",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "PlatformPriceEntry is one entry of a platform version with its provenance.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "entry",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "price_ref is the ref a ledger entry cites for it: platform@<version>#<id>."
+            },
+            {
+              "name": "provenance",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceProvenance",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PlatformPriceVersion",
+          "fullName": "koinon.budget.v1alpha1.PlatformPriceVersion",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "created_at",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "valid_from",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "actor",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "actor is who wrote it: \"user <id>\", \"cli <command>\" or \"system koinon-api:price-refresh\"."
+            },
+            {
+              "name": "reason",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "rule_set_version",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "proposal_ids",
+              "number": 7,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "restored_from",
+              "number": 8,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "restored_from is the version a rollback copied, 0 otherwise."
+            },
+            {
+              "name": "entries",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.PlatformPriceEntry",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "entries is empty in a list."
+            },
+            {
+              "name": "bad_entries",
+              "number": 10,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "PriceChange",
           "fullName": "koinon.budget.v1alpha1.PriceChange",
           "file": "koinon/budget/v1alpha1/price.proto",
@@ -5136,6 +6195,465 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PriceProposal",
+          "fullName": "koinon.budget.v1alpha1.PriceProposal",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "origin",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "origin is how the proposal arrived (a fetch trigger or \"import\")."
+            },
+            {
+              "name": "provider_type",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "current_ref",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "current_ref is the price_ref in use for the model, empty for a new model."
+            },
+            {
+              "name": "current",
+              "number": 7,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "proposed",
+              "number": 8,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "changes",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.PriceRateChange",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provenance",
+              "number": 10,
+              "type": "koinon.budget.v1alpha1.PriceProvenance",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agreeing_sources",
+              "number": 11,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "class",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "class is auto, needs_review, confirm or refused."
+            },
+            {
+              "name": "failed_rules",
+              "number": 13,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "state",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "state is open, accepted, dismissed or superseded."
+            },
+            {
+              "name": "created_at",
+              "number": 15,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "decided_at",
+              "number": 16,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "decided_by",
+              "number": 17,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "applied_version",
+              "number": 18,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "applied_version is the platform version an accepted proposal wrote."
+            }
+          ]
+        },
+        {
+          "name": "PriceProvenance",
+          "fullName": "koinon.budget.v1alpha1.PriceProvenance",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "PriceProvenance is where a platform price came from (ADR 0098 decision 4).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "source",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "source is the source id (\"openrouter\") or \"manual\"."
+            },
+            {
+              "name": "url",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "fetched_at",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "sha256",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "commit_sha",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "committed_at",
+              "number": 6,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "etag",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "licence",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agreeing_sources",
+              "number": 9,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "proposal_id",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "approver",
+              "number": 11,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "approver is who accepted it: \"user <id>\", \"cli <command>\" or \"system koinon-api:price-refresh\"."
+            },
+            {
+              "name": "rule_set_version",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "approved_at",
+              "number": 13,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "vouched_by",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PriceRateChange",
+          "fullName": "koinon.budget.v1alpha1.PriceRateChange",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "PriceRateChange is one rate that differs between the price in use and the proposed one.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "bucket",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "context_over",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "context_over is the tier the rate belongs to; 0 is the base rate."
+            },
+            {
+              "name": "from",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "from is empty when the bucket is added, to when it is removed."
+            },
+            {
+              "name": "to",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PriceSourceFetch",
+          "fullName": "koinon.budget.v1alpha1.PriceSourceFetch",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "fetched_at",
+              "number": 4,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "result",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "result is ok, failed or refused."
+            },
+            {
+              "name": "error",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "sha256",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "etag",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "commit_sha",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model_count",
+              "number": 10,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "trigger",
+              "number": 11,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "trigger is schedule, cli or import."
             }
           ]
         },
@@ -5418,6 +6936,42 @@
           "fields": []
         },
         {
+          "name": "RollbackPlatformPricesRequest",
+          "fullName": "koinon.budget.v1alpha1.RollbackPlatformPricesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RollbackPlatformPricesResponse",
+          "fullName": "koinon.budget.v1alpha1.RollbackPlatformPricesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "version",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "version is the new version, equal to the one rolled back to."
+            }
+          ]
+        },
+        {
           "name": "RunLimitValues",
           "fullName": "koinon.budget.v1alpha1.RunLimitValues",
           "file": "koinon/budget/v1alpha1/budget.proto",
@@ -5500,6 +7054,60 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.AgentBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentContinuationLimitsRequest",
+          "fullName": "koinon.budget.v1alpha1.SetAgentContinuationLimitsRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "override",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.ContinuationOverride",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentContinuationLimitsResponse",
+          "fullName": "koinon.budget.v1alpha1.SetAgentContinuationLimitsResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.AgentContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -5599,6 +7207,51 @@
               "name": "budget",
               "number": 1,
               "type": "koinon.budget.v1alpha1.OrgBudget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetOrgContinuationTaskSpendRequest",
+          "fullName": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendRequest",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spend_usd",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "task_spend_usd is a USD decimal string; empty clears the org's value."
+            }
+          ]
+        },
+        {
+          "name": "SetOrgContinuationTaskSpendResponse",
+          "fullName": "koinon.budget.v1alpha1.SetOrgContinuationTaskSpendResponse",
+          "file": "koinon/budget/v1alpha1/budget.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.OrgContinuationLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,

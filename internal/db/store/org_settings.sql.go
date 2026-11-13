@@ -31,6 +31,19 @@ func (q *Queries) AddOrgFetchTrustedHost(ctx context.Context, arg AddOrgFetchTru
 	return result.RowsAffected(), nil
 }
 
+const countOrgSandboxCreations = `-- name: CountOrgSandboxCreations :one
+SELECT count(*)::int FROM sandbox_creations
+WHERE org_id = $1 AND created_at > clock_timestamp() - interval '1 minute'
+`
+
+// Creations of the org in the last minute.
+func (q *Queries) CountOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countOrgSandboxCreations, orgID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteOrgFetchTrustedHost = `-- name: DeleteOrgFetchTrustedHost :execrows
 DELETE FROM org_fetch_trusted_hosts
 WHERE org_id = $1 AND host = $2
@@ -61,7 +74,7 @@ func (q *Queries) EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) erro
 
 const getOrgSettings = `-- name: GetOrgSettings :one
 
-SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd FROM org_settings
+SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute FROM org_settings
 WHERE org_id = $1
 `
 
@@ -86,6 +99,7 @@ func (q *Queries) GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSet
 		&i.RunContentRetentionDays,
 		&i.HomeBackupRetentionDays,
 		&i.ContinuationTaskSpendUsd,
+		&i.SandboxCreationsPerMinute,
 	)
 	return i, err
 }
@@ -122,6 +136,16 @@ func (q *Queries) ListOrgFetchTrustedHosts(ctx context.Context, orgID pgtype.UUI
 	return items, nil
 }
 
+const lockOrgSandboxCreations = `-- name: LockOrgSandboxCreations :exec
+SELECT pg_advisory_xact_lock(hashtextextended('sandbox_creations:' || ($1::uuid)::text, 0))
+`
+
+// Serializes the reconciler workers that reserve a creation for one org, for the transaction.
+func (q *Queries) LockOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockOrgSandboxCreations, orgID)
+	return err
+}
+
 const lockOrgSettings = `-- name: LockOrgSettings :one
 SELECT org_id FROM org_settings WHERE org_id = $1 FOR UPDATE
 `
@@ -132,6 +156,62 @@ func (q *Queries) LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtyp
 	var org_id pgtype.UUID
 	err := row.Scan(&org_id)
 	return org_id, err
+}
+
+const pruneOrgSandboxCreations = `-- name: PruneOrgSandboxCreations :exec
+DELETE FROM sandbox_creations WHERE org_id = $1 AND created_at < now() - interval '1 hour'
+`
+
+func (q *Queries) PruneOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, pruneOrgSandboxCreations, orgID)
+	return err
+}
+
+const recordSandboxCreation = `-- name: RecordSandboxCreation :one
+INSERT INTO sandbox_creations (org_id, agent_id, kind) VALUES ($1, $2, $3)
+RETURNING id
+`
+
+type RecordSandboxCreationParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	Kind    string
+}
+
+func (q *Queries) RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, recordSandboxCreation, arg.OrgID, arg.AgentID, arg.Kind)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const releaseSandboxCreation = `-- name: ReleaseSandboxCreation :exec
+DELETE FROM sandbox_creations WHERE org_id = $1 AND id = $2
+`
+
+type ReleaseSandboxCreationParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+// the org's healthy ones.
+func (q *Queries) ReleaseSandboxCreation(ctx context.Context, arg ReleaseSandboxCreationParams) error {
+	_, err := q.db.Exec(ctx, releaseSandboxCreation, arg.OrgID, arg.ID)
+	return err
+}
+
+const sandboxCreationSlotFreesIn = `-- name: SandboxCreationSlotFreesIn :one
+SELECT coalesce(extract(epoch FROM min(created_at) + interval '1 minute' - clock_timestamp()), 0)::float8 FROM sandbox_creations
+WHERE org_id = $1 AND created_at > clock_timestamp() - interval '1 minute'
+`
+
+// Seconds until the oldest creation still inside the minute leaves it, so a slot frees.
+func (q *Queries) SandboxCreationSlotFreesIn(ctx context.Context, orgID pgtype.UUID) (float64, error) {
+	row := q.db.QueryRow(ctx, sandboxCreationSlotFreesIn, orgID)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const setOrgContinuationTaskSpend = `-- name: SetOrgContinuationTaskSpend :exec
@@ -207,23 +287,27 @@ func (q *Queries) SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunCo
 }
 
 const setOrgRunLimits = `-- name: SetOrgRunLimits :exec
-INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute)
-VALUES ($1, $2, $3, $4)
+INSERT INTO org_settings (org_id, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,
+                          sandbox_creations_per_minute)
+VALUES ($1, $2, $3, $4,
+        $5)
 ON CONFLICT (org_id) DO UPDATE
 SET max_concurrent_runs = EXCLUDED.max_concurrent_runs,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
-    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute
+    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
+    sandbox_creations_per_minute = EXCLUDED.sandbox_creations_per_minute
 `
 
 type SetOrgRunLimitsParams struct {
-	OrgID                pgtype.UUID
-	MaxConcurrentRuns    pgtype.Int4
-	TriggerConcurrency   pgtype.Int4
-	TriggerRatePerMinute pgtype.Int4
+	OrgID                     pgtype.UUID
+	MaxConcurrentRuns         pgtype.Int4
+	TriggerConcurrency        pgtype.Int4
+	TriggerRatePerMinute      pgtype.Int4
+	SandboxCreationsPerMinute pgtype.Int4
 }
 
-// The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
-// platform default. It touches only these three columns, so the latency overrides and the other
+// The org's run concurrency, trigger queue and sandbox creation limits (DB2, ADR 0066, issues #462
+// and #27); NULL is the platform default. It touches only these four columns, so the latency overrides and the other
 // settings stay.
 func (q *Queries) SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams) error {
 	_, err := q.db.Exec(ctx, setOrgRunLimits,
@@ -231,6 +315,7 @@ func (q *Queries) SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams
 		arg.MaxConcurrentRuns,
 		arg.TriggerConcurrency,
 		arg.TriggerRatePerMinute,
+		arg.SandboxCreationsPerMinute,
 	)
 	return err
 }
@@ -238,10 +323,10 @@ func (q *Queries) SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams
 const upsertOrgSettings = `-- name: UpsertOrgSettings :one
 INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds,
                           max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute,
-                          sandbox_wait_cap_seconds)
+                          sandbox_wait_cap_seconds, sandbox_creations_per_minute)
 VALUES ($1, $2, $3, $4,
         $5, $6, $7,
-        $8)
+        $8, $9)
 ON CONFLICT (org_id) DO UPDATE
 SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     park_warm_seconds = EXCLUDED.park_warm_seconds,
@@ -249,19 +334,21 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     max_concurrent_runs = EXCLUDED.max_concurrent_runs,
     trigger_concurrency = EXCLUDED.trigger_concurrency,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
-    sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds
-RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd
+    sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds,
+    sandbox_creations_per_minute = EXCLUDED.sandbox_creations_per_minute
+RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute
 `
 
 type UpsertOrgSettingsParams struct {
-	OrgID                 pgtype.UUID
-	IdleTimeoutSeconds    pgtype.Int4
-	ParkWarmSeconds       pgtype.Int4
-	QueueWaitSeconds      pgtype.Int4
-	MaxConcurrentRuns     pgtype.Int4
-	TriggerConcurrency    pgtype.Int4
-	TriggerRatePerMinute  pgtype.Int4
-	SandboxWaitCapSeconds pgtype.Int4
+	OrgID                     pgtype.UUID
+	IdleTimeoutSeconds        pgtype.Int4
+	ParkWarmSeconds           pgtype.Int4
+	QueueWaitSeconds          pgtype.Int4
+	MaxConcurrentRuns         pgtype.Int4
+	TriggerConcurrency        pgtype.Int4
+	TriggerRatePerMinute      pgtype.Int4
+	SandboxWaitCapSeconds     pgtype.Int4
+	SandboxCreationsPerMinute pgtype.Int4
 }
 
 func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error) {
@@ -274,6 +361,7 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		arg.TriggerConcurrency,
 		arg.TriggerRatePerMinute,
 		arg.SandboxWaitCapSeconds,
+		arg.SandboxCreationsPerMinute,
 	)
 	var i OrgSetting
 	err := row.Scan(
@@ -291,6 +379,7 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		&i.RunContentRetentionDays,
 		&i.HomeBackupRetentionDays,
 		&i.ContinuationTaskSpendUsd,
+		&i.SandboxCreationsPerMinute,
 	)
 	return i, err
 }

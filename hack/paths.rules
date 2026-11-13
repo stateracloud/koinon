@@ -261,6 +261,7 @@ script-check - hack/dep-age-check-test.sh
 script-check - hack/ubuntu-snapshot-bump_test.sh
 script-check - hack/buf-breaking-against-test.sh
 script-check - hack/lane-gates-test.sh
+script-check - hack/board-test.sh
 script-check - hack/generate-test.sh
 script-check - hack/ci-supersede-test.sh
 script-check - hack/ci-concurrency-test.sh
@@ -289,6 +290,8 @@ script-skip - hack/go-test-test.sh
 script-skip - hack/ship-test.sh
 script-skip - hack/preflight-test.sh
 script-skip - hack/release-gate-test.sh
+script-skip - hack/release-drill-wait-test.sh
+script-skip - hack/release-test-images-test.sh
 script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
 script-skip - hack/migrate-lint.sh

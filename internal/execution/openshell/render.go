@@ -236,6 +236,7 @@ func sandboxFromProto(s *openshellv1.Sandbox) execution.Sandbox {
 		Labels:        s.GetMetadata().GetLabels(),
 		Phase:         phase,
 		PolicyVersion: s.GetStatus().GetCurrentPolicyVersion(),
+		Enforcement:   enforcementOf(s.GetSpec().GetPolicy()),
 	}
 	if s.GetStatus().ExitCode != nil {
 		code := s.GetStatus().GetExitCode()
@@ -269,4 +270,25 @@ func resourcesStruct(s execution.SandboxSpec) map[string]any {
 		}
 	}
 	return out
+}
+
+// enforcementOf reads the enforcement mode of the inspected endpoints of a sandbox policy as the
+// gateway reports it (execution.Enforcement*): enforce when every endpoint with a protocol is
+// enforced (L4-only endpoints are allow-lists with no audit mode, so they count as enforced), audit
+// when any is not, unknown without a policy.
+func enforcementOf(p *sandboxv1.SandboxPolicy) string {
+	if p == nil {
+		return execution.EnforcementUnknown
+	}
+	for _, rule := range p.GetNetworkPolicies() {
+		for _, ep := range rule.GetEndpoints() {
+			if ep.GetProtocol() == "" {
+				continue // L4 only: an allow-list OpenShell always enforces; it has no audit mode
+			}
+			if ep.GetEnforcement() != sandboxv1.NetworkEnforcementMode_NETWORK_ENFORCEMENT_MODE_ENFORCE {
+				return execution.EnforcementAudit
+			}
+		}
+	}
+	return execution.EnforcementEnforce
 }

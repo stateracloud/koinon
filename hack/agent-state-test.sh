@@ -183,6 +183,18 @@ locktests() { # locktests <locker>
 	[[ $n -eq 40 ]] && ok "$locker: 40 concurrent pending adds, none lost" || bad "$locker: concurrent pending adds: $n of 40"
 	n=$(grep -c '^| #1' "$lanes")
 	[[ $n -eq 10 ]] && ok "$locker: 10 lane adds beside them, none lost" || bad "$locker: concurrent lane adds: $n of 10"
+	# 40 writers started at once (#867): the wait for the lock grows with the queue, so the default
+	# timeout must outlast it. A lost add used to be a "could not take" exit after 10s.
+	rm -f "$pending"
+	pids=()
+	for w in $(seq 1 40); do
+		"$script" pending add "burst line $w" >"$tmp/burst.$w" 2>&1 &
+		pids+=($!)
+	done
+	wait "${pids[@]}"
+	n=$(grep -c 'burst line' "$pending")
+	[[ $n -eq 40 ]] && ok "$locker: 40 simultaneous pending adds, all landed" || bad "$locker: simultaneous adds: $n of 40 ($(cat "$tmp"/burst.* | sort -u | head -1))"
+	rm -f "$tmp"/burst.*
 	[[ -z $(find "$KOINON_STATE_DIR" -name '.tmp.*') ]] && ok "$locker: no temp files left" || bad "$locker: temp files left"
 
 	# a holder that is running: the next writer times out
