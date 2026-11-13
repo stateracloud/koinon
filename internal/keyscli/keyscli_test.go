@@ -785,7 +785,8 @@ var _ = Describe("koinon-api keys", func() {
 			use(service)
 			kms.DecryptOnly.Store(true)
 			Expect(tool.Add(ctx, kekC)).To(MatchError(secretstore.ErrKeyAdminWraps))
-			Expect(tool.Add(ctx, kekC)).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
+			// The refused ID stays recorded: IDs are never reused.
+			Expect(tool.Add(ctx, "kek-20261023-kmsb")).To(MatchError(ContainSubstring("new KEKs are wrapped by the key-admin Job")))
 
 			fresh := fake.NewClientset()
 			store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek", Wrappers: service}

@@ -359,25 +359,24 @@ func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 }
 
 // RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
-// keys.forget event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
+// keys.forget or keys.add.intent event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
 // after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
 //
-// Not covered: an add whose event was lost (the audit is optional, [AuditOptional]) and whose KEK was
-// removed by hand before the next start-up observation records a key-set state is never recorded (interim
-// gap, tracked in #862; exit: Add records the ID durably before it saves the Secret). The
+// Add records the ID ([ActionAddIntent]) before it saves the Secret and fails closed when that write
+// fails, so an ID that was ever added is always in the chain. The
 // query scans the keys.% events; that is fine while the chain is small (add a partial index on action if
 // it grows).
 func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
 	var found bool
 	err := pool.QueryRow(ctx, `SELECT EXISTS (
 SELECT 1 FROM install_audit_events
-WHERE (action IN ($1, $2) AND target_kind = 'kek' AND target_id = $3)
+WHERE (action IN ($1, $2, $4) AND target_kind = 'kek' AND target_id = $3)
    OR (action LIKE 'keys.%' AND (
         summary #> '{before,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
      OR summary #> '{after,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
      OR summary #> '{before,retired}' @> to_jsonb($3::text)
      OR summary #> '{after,retired}' @> to_jsonb($3::text))))`,
-		ActionRetire, ForgetAction, id).Scan(&found)
+		ActionRetire, ForgetAction, id, ActionAddIntent).Scan(&found)
 	return found, err
 }
 
@@ -939,6 +938,14 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	key := make([]byte, secretstore.KeySize)
 	if _, err := rand.Read(key); err != nil {
 		return err
+	}
+	// Record the ID durably before any key under it exists, in its own transaction (the Change's
+	// is still open until the add event). A failed write fails closed, with AuditOptional too: no
+	// Secret is saved, so no ID goes unrecorded. Same shape as the .started event of rewrap.
+	if a := t.auditor(); a != nil {
+		if err := a.Record(ctx, Event{Command: "add", Action: ActionAddIntent, TargetKind: "kek", TargetID: id}); err != nil {
+			return fmt.Errorf("nothing was changed: %w", err)
+		}
 	}
 	ks.Keys[id] = key
 	if err := t.Store.Save(ctx, ks); err != nil {
