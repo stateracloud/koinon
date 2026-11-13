@@ -73,7 +73,7 @@ query='query($org: String!, $number: Int!, $endCursor: String) {
 }'
 
 fetch() {
-	local tmp items issues
+	local tmp
 	mkdir -p "$state_dir" || return 1
 	tmp=$(mktemp -d "$state_dir/board.XXXXXX") || return 1
 	# shellcheck disable=SC2064

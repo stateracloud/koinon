@@ -57,8 +57,8 @@ eq "TTL 0 never serves the cache" "$(calls)" 8
 
 cp "$tmp/state/board.json" "$tmp/board.keep"
 FAKE_GH_FAIL=1 "$script" --refresh ready >/dev/null 2>"$tmp/err"; eq "a failed fetch exits 1" "$?" 1
-grep -q 'board query failed' "$tmp/err" && ok || bad "a failed fetch says why"
-cmp -s "$tmp/state/board.json" "$tmp/board.keep" && ok || bad "a failed fetch keeps the old cache"
+if grep -q 'board query failed' "$tmp/err"; then ok; else bad "a failed fetch says why"; fi
+if cmp -s "$tmp/state/board.json" "$tmp/board.keep"; then ok; else bad "a failed fetch keeps the old cache"; fi
 if compgen -G "$tmp/state/board.*" | grep -qv 'board.json$'; then bad "no temp dir is left behind"; else ok; fi
 
 rm -rf "$tmp/state"
