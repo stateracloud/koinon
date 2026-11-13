@@ -29,6 +29,7 @@ if [[ $1 == --list ]]; then
 	exit 0
 fi
 g=$2
+[[ -z ${STUB_SLEEP:-} ]] || sleep "$STUB_SLEEP"
 v=STUB_$g
 case ${!v:-ok} in
 ok) echo "$g ok 1s" ;;
@@ -260,6 +261,57 @@ expect "vitest failure beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail
 # Hooks print a warning.
 run STUB_GATES="go"
 expect "hook warning" 0 'warning: test hook LANE_GATES_PREFLIGHT is set'
+
+# --start / --wait (#654): detach, a verdict file, the same lines and exit codes, 75 while running.
+startrun() { # <env assignments...>: sets vfile
+	vfile=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" "$@" bash "$script" --start "$nonempty_base" 2>/dev/null)
+}
+waitrun() { out=$(cd "$repo" && bash "$script" --wait "$@" 2>&1); rc=$?; }
+startrun STUB_GATES="go tidy"
+total=$((total + 1))
+[[ -f $vfile ]] || { echo "FAIL: --start printed no verdict file ($vfile)"; fails=$((fails + 1)); }
+waitrun "$vfile" --max 30
+expect "start/wait pass" 0 '^gate=go rc=0 .*verdict=pass' '^gate=tidy .*verdict=pass' '^lane-gates ok'
+waitrun "$vfile" --max 0
+expect "wait again after the end" 0 '^lane-gates ok'
+startrun STUB_GATES="go tidy" STUB_go=fail
+waitrun "$vfile" --max 30
+expect "start/wait fail" 1 '^gate=go .*verdict=fail' '^gate=tidy .*verdict=pass' '^lane-gates FAIL'
+startrun STUB_GATES="go" STUB_go=incomplete
+waitrun "$vfile" --max 30
+expect "start/wait notrun" 3 '^gate=go .*verdict=notrun' '^lane-gates INCOMPLETE'
+startrun STUB_GATES="go" STUB_SLEEP=6
+waitrun "$vfile" --max 0
+expect "wait while running" 75 'still running'
+waitrun "$vfile" --max 60
+expect "wait finishes the slow run" 0 '^gate=go .*verdict=pass'
+# A run killed without an exit code is a failure, not "still running" for ever.
+mkdir "$tmp/dead"
+: >"$tmp/dead/verdict"
+echo 999999 >"$tmp/dead/pid"
+waitrun "$tmp/dead/verdict" --max 5
+expect "wait on a vanished run" 1 'gone and left no exit code'
+waitrun "$tmp/none/verdict"
+expect "wait on a missing file" 2 'no verdict file'
+waitrun
+expect "wait without a file" 2 'needs the verdict file'
+waitrun "$vfile" --max x
+expect "wait bad max" 2 '--max needs a number'
+out=$(cd "$repo" && bash "$script" --start no-such-ref-xyz 2>&1); rc=$?
+expect "start unknown base" 2 'unknown base'
+
+# --start by a relative path from a subdirectory: the run must find the script (the first cut did not).
+mkdir -p "$repo/hack" "$repo/sub"
+cp hack/lane-gates.sh hack/paths-lib.sh hack/paths.rules "$repo/hack/"
+vfile=$(cd "$repo/sub" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash ../hack/lane-gates.sh --start "$nonempty_base" 2>/dev/null)
+waitrun "$vfile" --max 30
+expect "start by a relative path from a subdirectory" 0 '^gate=go .*verdict=pass' '^lane-gates ok'
+# A run that dies with a code that is no verdict (here 127) is a failure with its tail, not that code.
+mkdir "$tmp/odd"
+echo "bash: boom: command not found" >"$tmp/odd/verdict"
+echo 127 >"$tmp/odd/rc"
+waitrun "$tmp/odd/verdict"
+expect "wait maps a non-verdict exit code to 1" 1 'exited 127 before it had a verdict' 'command not found'
 
 # Usage errors.
 out=$(cd "$repo" && bash "$script" --nope 2>&1); rc=$?

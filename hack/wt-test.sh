@@ -86,6 +86,58 @@ rm -f "$tmp/kw/foo/h.txt"
 export KOINON_ALLOWED_IDENTITIES='t <t@example.invalid>'
 check "new refuses a bad name" refuses wt new ../x
 
+# pre-push (#654): the worktree's hooks scan what a push sends. A fake gitleaks records its arguments.
+mkdir -p "$tmp/glbin"
+cat >"$tmp/glbin/gitleaks" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_GITLEAKS_LOG"
+[ -z "${FAKE_GITLEAKS_LEAK:-}" ] || { echo "leaks found: 1" >&2; exit 1; }
+SH
+chmod +x "$tmp/glbin/gitleaks"
+export FAKE_GITLEAKS_LOG="$tmp/gitleaks.log"
+: >"$FAKE_GITLEAKS_LOG"
+foo0=$(git -C "$tmp/kw/foo" rev-parse HEAD)
+git -C "$tmp/kw/foo" checkout -q -b push-test
+echo p1 >"$tmp/kw/foo/p.txt"
+git -C "$tmp/kw/foo" add p.txt
+git -C "$tmp/kw/foo" commit -q -m p1
+check "a new branch push is scanned against the remote's refs" env PATH="$tmp/glbin:$PATH" git -C "$tmp/kw/foo" push -q origin push-test
+check "new branch scan range" grep -qx "git --redact --no-banner --log-opts=$(git -C "$tmp/kw/foo" rev-parse HEAD) --not --remotes=origin ." "$FAKE_GITLEAKS_LOG"
+: >"$FAKE_GITLEAKS_LOG"
+old_sha=$(git -C "$tmp/kw/foo" rev-parse HEAD)
+echo p2 >>"$tmp/kw/foo/p.txt"
+git -C "$tmp/kw/foo" commit -q -am p2
+check "an update push is scanned" env PATH="$tmp/glbin:$PATH" git -C "$tmp/kw/foo" push -q origin push-test
+check "update scan range is remote..local" grep -qx "git --redact --no-banner --log-opts=$old_sha..$(git -C "$tmp/kw/foo" rev-parse HEAD) ." "$FAKE_GITLEAKS_LOG"
+echo p3 >>"$tmp/kw/foo/p.txt"
+git -C "$tmp/kw/foo" commit -q -am p3
+check "a leak refuses the push" refuses env PATH="$tmp/glbin:$PATH" FAKE_GITLEAKS_LEAK=1 git -C "$tmp/kw/foo" push -q origin push-test
+check "the refused commit is not on the remote" test "$(git -C "$tmp/origin.git" rev-parse push-test)" != "$(git -C "$tmp/kw/foo" rev-parse HEAD)"
+check "KOINON_SKIP_GITLEAKS lets it through" env PATH="$tmp/glbin:$PATH" FAKE_GITLEAKS_LEAK=1 KOINON_SKIP_GITLEAKS=1 git -C "$tmp/kw/foo" push -q origin push-test
+: >"$FAKE_GITLEAKS_LOG"
+check "a delete push is not scanned and goes through" env PATH="$tmp/glbin:$PATH" FAKE_GITLEAKS_LEAK=1 git -C "$tmp/kw/foo" push -q origin :push-test
+check "no scan ran for the delete" test ! -s "$FAKE_GITLEAKS_LOG"
+# a force push over a remote tip this clone never fetched: scanned like a new branch, not skipped
+: >"$FAKE_GITLEAKS_LOG"
+git -C "$tmp/kw/foo" checkout -q -b push-test2
+echo q1 >"$tmp/kw/foo/q.txt"
+git -C "$tmp/kw/foo" add q.txt
+git -C "$tmp/kw/foo" commit -q -m q1
+git -C "$tmp/kw/foo" push -q origin push-test2
+git -C "$tmp/kw/foo" commit -q --amend -m q1b
+git -C "$tmp/kw/foo" update-ref -d refs/remotes/origin/push-test2
+echo "$(git -C "$tmp/kw/foo" rev-parse HEAD) $(git -C "$tmp/kw/foo" rev-parse HEAD) refs/heads/x 1111111111111111111111111111111111111111" |
+  (cd "$tmp/kw/foo" && PATH="$tmp/glbin:$PATH" hack/githooks/pre-push origin url) >/dev/null 2>&1
+check "an unknown remote sha scans like a new branch" grep -q -- "--not --remotes=origin" "$FAKE_GITLEAKS_LOG"
+: >"$FAKE_GITLEAKS_LOG"
+echo "$(git -C "$tmp/kw/foo" rev-parse HEAD) $(git -C "$tmp/kw/foo" rev-parse HEAD) refs/heads/x 0000000000000000000000000000000000000000" |
+  (cd "$tmp/kw/foo" && PATH="$tmp/glbin:$PATH" hack/githooks/pre-push https://example.invalid/r.git url) >/dev/null 2>&1
+check "a push to a URL scans what no remote-tracking ref has" grep -q -- "--not --remotes ." "$FAKE_GITLEAKS_LOG"
+check "KOINON_SKIP_GITLEAKS=0 does not skip" refuses env PATH="$tmp/glbin:$PATH" FAKE_GITLEAKS_LEAK=1 KOINON_SKIP_GITLEAKS=0 git -C "$tmp/kw/foo" push -q origin push-test2 --force
+git -C "$tmp/kw/foo" branch -q -D push-test2 2>/dev/null || true
+git -C "$tmp/kw/foo" checkout -q --detach "$foo0"
+git -C "$tmp/kw/foo" branch -q -D push-test
+
 # new --branch, --from
 echo two >>a.txt
 git commit -q -am two

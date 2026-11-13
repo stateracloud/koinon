@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Scans what a push sends with gitleaks (AGENTS.md: scan every commit before pushing; #654). Per pushed
+# ref it runs `gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .`; a new branch
+# scans what the remote does not have yet (<local sha> --not --remotes=<remote>). A delete pushes no
+# commit and is skipped. A leak refuses the push. A machine without gitleaks gets a warning and the push
+# goes on (CI scans every commit of a pull request). KOINON_SKIP_GITLEAKS=1 turns the hook off for one push.
+# Git calls it with <remote name> <url> and one stdin line per ref: <local ref> <local sha> <remote ref> <remote sha>.
+remote=$1
+refs=$(cat)
+zero=0000000000000000000000000000000000000000
+status=0
+if [ "${KOINON_SKIP_GITLEAKS:-}" = 1 ]; then
+	:
+elif ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-push: gitleaks is not installed; this push is not scanned (CI scans every commit)" >&2
+else
+	while read -r _ local_sha _ remote_sha; do
+		[ -n "$local_sha" ] || continue
+		[ "$local_sha" = "$zero" ] && continue # a delete
+		# A remote sha this clone does not have (a force push over an unfetched tip) is a bad range, which
+		# gitleaks reports as "0 commits scanned" and exit 0: treat it like a new branch.
+		if [ "$remote_sha" = "$zero" ] || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+			# $remote is a URL when pushing to one: then scan what no remote-tracking ref has.
+			if git remote | grep -qxF -- "$remote"; then not="--remotes=$remote"; else not="--remotes"; fi
+			opts="$local_sha --not $not"
+		else
+			opts="$remote_sha..$local_sha"
+		fi
+		if ! gitleaks git --redact --no-banner --log-opts="$opts" . >&2; then
+			echo "pre-push: gitleaks found a leak (or failed) in $opts; push refused. Fix it in a new commit's history before pushing: a leak fixed in a later commit still fails CI." >&2
+			status=1
+		fi
+	done <<<"$refs"
+fi
+[ "$status" -eq 0 ] || exit "$status"
+# core.hooksPath replaces .git/hooks, so chain to a personal hook of the same name there (koinon#350).
+personal=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/hooks/pre-push
+if [ -x "$personal" ]; then
+	printf '%s\n' "$refs" | "$personal" "$@"
+	exit $?
+fi
+exit 0

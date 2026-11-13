@@ -24,7 +24,7 @@
 # command also appends a log line.
 #
 # State dir: $KOINON_STATE_DIR (default ${XDG_CONFIG_HOME:-~/.config}/koinon/state). Lock wait: $KOINON_STATE_LOCK_TIMEOUT
-# seconds (default 10). Exit: 0 ok, 1 error (no such lane, no match, lock timeout), 2 usage.
+# seconds (default 60: it must outlast a full queue of writers, each holding the lock for a whole bash start, not just one holder). Exit: 0 ok, 1 error (no such lane, no match, lock timeout), 2 usage.
 # Internal, not for callers: --locked-token, KOINON_STATE_LOCKED, KOINON_STATE_LOCKER (force flock or perl),
 # KOINON_STATE_TESTONLY_HOLD (a test hook: hold the lock until killed).
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -55,11 +55,13 @@ if [[ ${1:-} == --locked-token ]]; then
 fi
 orig_args=("$@")
 # shellcheck disable=SC2016  # perl code, no shell expansion wanted
-perl_locker='use Fcntl qw(:flock F_SETFD); use Time::HiRes qw(time);
+perl_locker='use Fcntl qw(:flock F_SETFD);
 my ($f, $t, @cmd) = @ARGV;
 open(my $fh, ">>", $f) or do { print STDERR "agent-state: cannot open $f: $!\n"; exit 1 };
-my $end = time + $t;
-until (flock($fh, LOCK_EX | LOCK_NB)) { exit 75 if time >= $end; select(undef, undef, undef, 0.05); }
+$SIG{ALRM} = sub { exit 75 };
+alarm($t);
+flock($fh, LOCK_EX) or do { print STDERR "agent-state: flock $f: $!\n"; exit 1 };
+alarm(0);
 fcntl($fh, F_SETFD, 0);
 exec @cmd or do { print STDERR "agent-state: exec failed: $!\n"; exit 1 };'
 lock() {
@@ -71,7 +73,8 @@ lock() {
 		return 0
 	fi
 	mkdir -p "$state_dir"
-	local token="$$-$RANDOM$RANDOM-$SECONDS" t=${KOINON_STATE_LOCK_TIMEOUT:-10} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
+	local token="$$-$RANDOM$RANDOM-$SECONDS" t=${KOINON_STATE_LOCK_TIMEOUT:-60} lf="$state_dir/.lock" locker=${KOINON_STATE_LOCKER:-} rc=0
+	[[ $t =~ ^[1-9][0-9]*$ ]] || die "KOINON_STATE_LOCK_TIMEOUT must be a whole number of seconds, 1 or more (got '$t')"
 	if [[ -z $locker ]]; then if command -v flock >/dev/null 2>&1; then locker=flock; else locker=perl; fi; fi
 	case $locker in
 	flock) flock -w "$t" -E 75 "$lf" env "KOINON_STATE_LOCKED=$token" "$BASH" "$0" --locked-token "$token" "${orig_args[@]}" || rc=$? ;;

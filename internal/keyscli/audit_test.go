@@ -54,10 +54,39 @@ func auditMark(ctx context.Context) int64 {
 	return seq
 }
 
+// intentsSince lists the target IDs of the keys.add.intent events after mark; keyEventsSince leaves them out.
+func intentsSince(ctx context.Context, mark int64) []string {
+	GinkgoHelper()
+	rows, err := pool.Query(ctx, `SELECT target_id FROM install_audit_events WHERE chain_seq > $1 AND action = $2 ORDER BY chain_seq`, mark, keyscli.ActionAddIntent)
+	Expect(err).NotTo(HaveOccurred())
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		Expect(rows.Scan(&id)).To(Succeed())
+		out = append(out, id)
+	}
+	Expect(rows.Err()).NotTo(HaveOccurred())
+	return out
+}
+
+// saveProbe runs before on every Save, and saves only when it returns nil.
+type saveProbe struct {
+	keyscli.Store
+	before func(ctx context.Context) error
+}
+
+func (p saveProbe) Save(ctx context.Context, ks keyscli.KeySet) error {
+	if err := p.before(ctx); err != nil {
+		return err
+	}
+	return p.Store.Save(ctx, ks)
+}
+
 func keyEventsSince(ctx context.Context, mark int64) []keyEvent {
 	GinkgoHelper()
 	rows, err := pool.Query(ctx, `SELECT actor_kind, actor_id, action, target_kind, target_id, summary
-		FROM install_audit_events WHERE chain_seq > $1 AND starts_with(action, 'keys.') AND action <> 'keys.forget' ORDER BY chain_seq`, mark)
+		FROM install_audit_events WHERE chain_seq > $1 AND starts_with(action, 'keys.') AND action NOT IN ('keys.forget', 'keys.add.intent') ORDER BY chain_seq`, mark)
 	Expect(err).NotTo(HaveOccurred())
 	defer rows.Close()
 	var out []keyEvent
@@ -386,8 +415,43 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(keyEventsSince(ctx, mark)).To(BeEmpty())
 		})
 
-		It("keeps the change and says so when the event cannot be written", func(ctx SpecContext) {
+		It("fails closed on add when the audit write fails: no Secret change, no unrecorded ID", func(ctx SpecContext) {
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error { return errors.New("koinon_test database down") }}
+			tool.AuditOptional = true
+			err := tool.Add(ctx, kekB)
+			Expect(err).To(MatchError(ContainSubstring("the KEK was not added")))
+			Expect(errors.Is(err, keyscli.ErrNotAudited)).To(BeFalse())
+			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(kekB), "no Secret was saved")
+			seen, err := keyscli.RecordedID(ctx, pool, kekB)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeFalse())
+		})
+
+		It("records the new ID before the Secret is saved, so a failed save still leaves the ID spent", func(ctx SpecContext) {
+			mark := auditMark(ctx)
+			var recordedAtSave bool
+			tool.Store = saveProbe{Store: tool.Store, before: func(ctx context.Context) error {
+				var err error
+				recordedAtSave, err = keyscli.RecordedID(ctx, pool, kekB)
+				Expect(err).NotTo(HaveOccurred())
+				return errors.New("koinon_test save refused")
+			}}
+			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("save refused")))
+			Expect(recordedAtSave).To(BeTrue(), "the ID is in the chain when the Save starts")
+			Expect(intentsSince(ctx, mark)).To(Equal([]string{kekB}))
+			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(kekB))
+			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("IDs are never reused")))
+		})
+
+		It("keeps the change and says so when only the add event cannot be written", func(ctx SpecContext) {
+			var n int
+			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error {
+				n++
+				if n == 1 {
+					return nil // the intent
+				}
+				return errors.New("koinon_test database down")
+			}}
 			Expect(tool.Add(ctx, kekB)).To(MatchError(keyscli.ErrNotAudited))
 			Expect(newKeySet(ctx).Keys).To(HaveKey(kekB), "the change stands")
 		})
@@ -1017,7 +1081,7 @@ var _ = Describe("key-admin Job events", func() {
 		Expect(kekIDs(section(es[1], "after"))).To(HaveLen(2))
 	})
 
-	It("warns and carries on when it cannot read the chain, and waits for it once for the whole run", func(ctx SpecContext) {
+	It("creates the Secret but adds no KEK when it cannot read the chain, and waits for it once for the whole run", func(ctx SpecContext) {
 		unmigrated, err := pgxpool.New(ctx, pgtest.Run(ctx)) // no install_audit_events table
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(unmigrated.Close)
@@ -1025,13 +1089,14 @@ var _ = Describe("key-admin Job events", func() {
 		a.Audit = &keyscli.Auditor{Pool: unmigrated, Actor: keyscli.ActorKeyAdmin, Wait: time.Second}
 
 		start := time.Now()
-		Expect(a.Run(ctx)).To(Succeed())
+		// The Secret is created with a warning; the KEK add fails closed, because its ID cannot be recorded.
+		Expect(a.Run(ctx)).To(MatchError(ContainSubstring("the KEK was not added")))
+		Expect(out.String()).To(And(ContainSubstring("WARNING"), ContainSubstring("could not be read")))
 		// One retry pause is 2s; a budget per call would pay it for the Secret and again for the added KEK.
 		Expect(time.Since(start)).To(BeNumerically("<", 3500*time.Millisecond))
-		Expect(out.String()).To(And(ContainSubstring("WARNING"), ContainSubstring("could not be read"), ContainSubstring("keys.observed")))
 		ks, err := jobStore().Load(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ks.Keys).To(HaveLen(2), "the Secret and the added KEK stand")
+		Expect(ks.Keys).To(HaveLen(1), "the Secret stands, the KEK was not added")
 	})
 
 	It("records the recovery of a lost active KEK as keys.add then keys.activate", func(ctx SpecContext) {
