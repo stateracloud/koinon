@@ -229,6 +229,9 @@ type Sandbox struct {
 	Labels        map[string]string
 	Phase         Phase
 	PolicyVersion uint32
+	// Enforcement is the network enforcement mode of the sandbox's policy as the gateway reports it
+	// (ADR 0045): see the Enforcement constants. Empty when the backend does not report a policy.
+	Enforcement string
 	// ExitCode is the main process's last exit code, if it has exited.
 	ExitCode *int32
 	// Reason and Message describe the latest condition that is not true, if any.
@@ -294,4 +297,17 @@ const (
 	DeleteAccepted DeleteOutcome = "accepted"
 	// DeleteAbsent: there was no such sandbox.
 	DeleteAbsent DeleteOutcome = "absent"
+)
+
+// The network enforcement modes a sandbox's policy can be in (ADR 0045, ADR 0075). Koinon renders
+// every inspected endpoint as enforced, and the evidence of a run checks that the sandbox still says so.
+const (
+	// EnforcementEnforce: every inspected (L7) endpoint enforces, and there is at least one.
+	EnforcementEnforce = "enforce"
+	// EnforcementAudit: some inspected endpoint only audits. ADR 0045 forbids it.
+	EnforcementAudit = "audit"
+	// EnforcementNone: the policy has no inspected endpoint, so no mode applies.
+	EnforcementNone = "none"
+	// EnforcementUnknown: the gateway reported no policy.
+	EnforcementUnknown = "unknown"
 )

@@ -39,6 +39,9 @@ type Metrics struct {
 	// a result it saw (an error reply or a cut call), or a reply of a method it has no reading for. No
 	// label; the session they set both legs on is in the guard's warning.
 	Unseen prometheus.Counter
+	// RecordErrors counts decisions the guard could not write to leak_guard_decisions (lab run
+	// evidence, #926). The call is not refused for it; the gap shows here and in the log. No label.
+	RecordErrors prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -64,6 +67,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_api_mcp_guard_unseen_replies_total",
 			Help: "Replies the MCP leak guard passed without reading (a tool call with no result it saw, or a reply of a method it cannot read), so their session holds both legs.",
 		}),
+		RecordErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_api_mcp_guard_record_errors_total",
+			Help: "Decisions of the MCP leak guard that could not be written to the decision records.",
+		}),
 	}
 	for _, a := range actions {
 		for _, r := range reasons {
@@ -75,7 +82,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Legs.WithLabelValues("untrusted_input")
 	m.Legs.WithLabelValues("private_data")
 	if reg != nil {
-		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen)
+		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors)
 	}
 	return m
 }
@@ -107,6 +114,12 @@ func (m *Metrics) evicted(n int64) {
 	}
 }
 
+func (m *Metrics) recordFailed() {
+	if m != nil {
+		m.RecordErrors.Inc()
+	}
+}
+
 func (m *Metrics) unseen(n int64) {
 	if m != nil {
 		m.Unseen.Add(float64(n))
@@ -127,5 +140,5 @@ func (m *Metrics) legs(l Legs) {
 
 // Collectors are the metrics to register.
 func (m *Metrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen}
+	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors}
 }

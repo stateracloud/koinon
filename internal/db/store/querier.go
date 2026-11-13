@@ -598,6 +598,8 @@ type Querier interface {
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	GetRunEvidenceRun(ctx context.Context, arg GetRunEvidenceRunParams) (Run, error)
+	GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceSandboxParams) (AgentSandbox, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
 	GetRunTraced(ctx context.Context, arg GetRunTracedParams) (pgtype.Bool, error)
@@ -661,6 +663,13 @@ type Querier interface {
 	// No row: another writer created it first; read it with GetHomeRepository.
 	InsertHomeRepository(ctx context.Context, arg InsertHomeRepositoryParams) (HomeRepository, error)
 	InsertHomeRepositoryEpoch(ctx context.Context, arg InsertHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Lab run evidence (issue #926): the leak guard's decision records and what an export reads. Every
+	// query takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	// One decision of the MCP leak guard. The agent's running run is read in the same statement, so a
+	// decision costs one round trip. No argument, payload or matched text is stored.
+	InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGuardDecisionParams) error
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -1065,6 +1074,10 @@ type Querier interface {
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	ListRunEvidenceDecisions(ctx context.Context, arg ListRunEvidenceDecisionsParams) ([]LeakGuardDecision, error)
+	// Pages of the run's events in write order.
+	ListRunEvidenceEvents(ctx context.Context, arg ListRunEvidenceEventsParams) ([]RunEvent, error)
+	ListRunEvidenceTurns(ctx context.Context, arg ListRunEvidenceTurnsParams) ([]RunTurn, error)
 	// The model calls of a run in a turn's window, for the trace router's model-call spans (ADR 0074,
 	// decision 3): the ledger's rows with the provider type and ID of the model the agent asked for. The
 	// model name is the one the agent used, with or without the org slug the gateway prefixes. A row at or
@@ -1412,6 +1425,9 @@ type Querier interface {
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
+	// The network enforcement mode observed in the sandbox's policy (ADR 0045): enforce, audit, none or
+	// unknown. Kept apart from RecordAgentSandbox, which many paths call without an observed sandbox.
+	SetAgentSandboxEnforcement(ctx context.Context, arg SetAgentSandboxEnforcementParams) error
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Stores an operator message and nothing else. A note written from outside the agent's work item
@@ -1562,8 +1578,14 @@ type Querier interface {
 	StartLeakGuardFeed(ctx context.Context, arg StartLeakGuardFeedParams) (int64, error)
 	// The questions became visible: their recipients start waiting now.
 	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
+	// The same sums for one home generation of an agent, over every run that was in it.
+	SumGenerationEvidenceOutbound(ctx context.Context, arg SumGenerationEvidenceOutboundParams) ([]SumGenerationEvidenceOutboundRow, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
+	// The bytes that left the org for each external sink: the payload of every external call the guard
+	// passed or a decider approved, per run, per home generation and per MCP server. A call refused, or
+	// parked for a person, sent nothing.
+	SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)
 	// A fetch that returned other values for a model, or the same as the effective price, replaces the
