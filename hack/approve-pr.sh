@@ -25,7 +25,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: ${0##*/} <base-url> <cookie-jar> <org-id> <owner/name>" >&2
+  echo "usage: ${0##*/} <base-url> <cookie-jar> <org-id> <[github:|gitea:]owner/name>" >&2
   exit 2
 fi
 # shellcheck disable=SC2034 # base and jar are read by hack/lib/approver-session.sh

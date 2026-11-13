@@ -10,6 +10,9 @@
 # Usage: hack/answer-question.sh <base-url> <cookie-jar> <org-id> <run-id> <question-id>
 #   base-url, cookie-jar, org-id   as in hack/approve-pr.sh
 #   run-id, question-id            the question must be open, belong to that run and be addressed to the approver
+#                                  question-id may be the word `latest`: an unattended run does not know the ID, so
+#                                  the script takes the one open question of that run, and refuses (exit 3, nothing
+#                                  sent) when the run has none (after the wait) or more than one
 # The answer comes from the environment, exactly one of:
 #   KOINON_ANSWER_CHOICE  one of the question's choices, verbatim (the script refuses any other text)
 #   KOINON_ANSWER_TEXT    free text
@@ -44,7 +47,16 @@ svc=koinon.question.v1alpha1.QuestionService
 deadline=$((SECONDS + wait_s))
 while :; do
   list=$(rpc "$svc" ListQuestions "$(jq -n --arg o "$org" '{orgId: $o}')") || exit 1
-  q=$(jq -c --arg id "$qid" --arg r "$run" '[.questions[]? | select(.id == $id and .runId == $r and .state == "QUESTION_STATE_OPEN")] | first // empty' <<<"$list")
+  if [[ $qid == latest ]]; then
+    n=$(jq --arg r "$run" '[.questions[]? | select(.runId == $r and .state == "QUESTION_STATE_OPEN")] | length' <<<"$list")
+    if ((n > 1)); then
+      echo "run $run has $n open questions in org $org; name one by its ID instead of latest" >&2
+      exit 3
+    fi
+    q=$(jq -c --arg r "$run" '[.questions[]? | select(.runId == $r and .state == "QUESTION_STATE_OPEN")] | first // empty' <<<"$list")
+  else
+    q=$(jq -c --arg id "$qid" --arg r "$run" '[.questions[]? | select(.id == $id and .runId == $r and .state == "QUESTION_STATE_OPEN")] | first // empty' <<<"$list")
+  fi
   [[ -n $q ]] && break
   if ((SECONDS >= deadline)); then
     echo "no open question $qid of run $run in org $org" >&2
@@ -53,6 +65,7 @@ while :; do
   sleep 3
 done
 
+qid=$(jq -r '.id' <<<"$q")
 if [[ -n $choice ]]; then
   jq -e --arg c "$choice" '.choices // [] | index($c) != null' <<<"$q" >/dev/null ||
     { echo "question $qid has no such choice; its choices are: $(jq -c '.choices // []' <<<"$q")" >&2; exit 1; }

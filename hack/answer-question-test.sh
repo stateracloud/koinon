@@ -115,6 +115,26 @@ KOINON_ANSWER_CHOICE=Yes KOINON_APPROVER_PASSWORD=koinon_test_wrong answerer 1 r
 check "$out" "login as drill-admin: HTTP 401" "a refused login is exit 1"
 stop
 
+# `latest` takes the one open question of the run.
+start "$qs"
+KOINON_ANSWER_CHOICE="Skip" answerer 0 run-1 latest
+check "$out" "answered q-want of run run-1" "latest answers the one open question of the run"
+check "$(cat "$tmp/calls")" '"questionId": "q-want"' "latest sends the ID it found"
+nocheck "$(cat "$tmp/calls")" 'q-other' "latest leaves another run's question alone"
+stop
+
+start '[{"id":"q-done","runId":"run-1","state":"QUESTION_STATE_ANSWERED","choices":["Yes"]}]'
+KOINON_ANSWER_CHOICE="Yes" answerer 3 run-1 latest
+check "$out" "no open question latest of run run-1" "latest with no open question is exit 3"
+nocheck "$(cat "$tmp/calls")" 'AnswerQuestion' "latest with no open question sends nothing"
+stop
+
+start '[{"id":"q-a","runId":"run-1","state":"QUESTION_STATE_OPEN","choices":["Yes"]},{"id":"q-b","runId":"run-1","state":"QUESTION_STATE_OPEN","choices":["Yes"]}]'
+KOINON_ANSWER_CHOICE="Yes" answerer 3 run-1 latest
+check "$out" "has 2 open questions" "latest with two open questions is exit 3"
+nocheck "$(cat "$tmp/calls")" 'AnswerQuestion' "latest with two open questions sends nothing"
+stop
+
 rc=0
 usage=$("$repo/hack/answer-question.sh" only-one-arg 2>&1) || rc=$?
 [[ $rc == 2 ]] || { echo "FAIL: the wrong argument count exits $rc, want 2" >&2; fail=1; }

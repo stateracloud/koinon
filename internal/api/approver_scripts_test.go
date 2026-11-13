@@ -119,20 +119,19 @@ var _ = Describe("the scripted approver (hack/answer-question.sh, hack/approve-p
 
 	It("answers the one open question of a parked run by its run and question ID, and the run resumes", func(ctx SpecContext) {
 		g := scenarios.GiteaAsk
-		q := e.openQuestion(ctx, f)
+		q := e.openQuestionWith(ctx, f, g.Question, g.Choices, g.Default)
 		ad := e.agentd("agentd-script")
 		run := ad.mustClaim(ctx, f.org)
 		_, err := ad.q.ParkRun(ctx, store.ParkRunParams{OrgID: run.OrgID, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonInputRequired})
 		Expect(err).NotTo(HaveOccurred())
 
 		By("a choice the question does not offer is refused and changes nothing")
-		// The scenario's own answer is not one of this fixture's choices (post, do not post).
-		out, code := script(ctx, []string{"KOINON_ANSWER_CHOICE=" + g.Answer}, "answer-question.sh", e.srv.URL, jar, f.org, f.run.GetId(), q.ID.String())
+		out, code := script(ctx, []string{"KOINON_ANSWER_CHOICE=not one of the choices"}, "answer-question.sh", e.srv.URL, jar, f.org, f.run.GetId(), q.ID.String())
 		Expect(code).To(Equal(1), out)
 		Expect(out).To(ContainSubstring("no such choice"))
 
 		By("a question of another run is not found")
-		post := []string{"KOINON_ANSWER_CHOICE=post"}
+		post := []string{"KOINON_ANSWER_CHOICE=" + g.Answer}
 		out, code = script(ctx, post, "answer-question.sh", e.srv.URL, jar, f.org, "00000000-0000-0000-0000-000000000000", q.ID.String())
 		Expect(code).To(Equal(3), out)
 
@@ -144,7 +143,7 @@ var _ = Describe("the scripted approver (hack/answer-question.sh, hack/approve-p
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetQuestions()).To(HaveLen(1))
 		Expect(got.GetQuestions()[0].GetState()).To(Equal(questionv1alpha1.QuestionState_QUESTION_STATE_ANSWERED))
-		Expect(got.GetQuestions()[0].GetAnswer()).To(Equal("post"))
+		Expect(got.GetQuestions()[0].GetAnswer()).To(Equal(g.Answer))
 		Expect(got.GetQuestions()[0].GetAnswerKind()).To(Equal(questionv1alpha1.AnswerKind_ANSWER_KIND_CHOICE))
 		resumed, err := ad.q.GetRun(ctx, store.GetRunParams{OrgID: run.OrgID, ID: run.ID})
 		Expect(err).NotTo(HaveOccurred())
