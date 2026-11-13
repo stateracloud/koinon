@@ -450,6 +450,30 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	budgetv1alpha1connect.BudgetServiceGetOrgContinuationLimitsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetOrgContinuationLimits(ctx, &budgetv1alpha1.GetOrgContinuationLimitsRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetOrgContinuationTaskSpendProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: "10"})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceGetAgentContinuationLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetAgentContinuationLimits(ctx, &budgetv1alpha1.GetAgentContinuationLimitsRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetAgentContinuationLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{
+				OrgId: org, AgentId: f.agent.GetId(), Override: &budgetv1alpha1.ContinuationOverride{TaskSpendUsd: "10"},
+			})
+		},
+	},
 	budgetv1alpha1connect.BudgetServiceListNotificationsProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

@@ -99,6 +99,24 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('says why a task waits on its owner after a run hit its time limit', () => {
+    const items = buildTimeline(
+      [
+        taskEvent(1, 100, 'status.changed', { from: 'working', to: 'input_required', reason: 'continuation_limit' }),
+        taskEvent(2, 200, 'status.changed', { from: 'working', to: 'input_required', reason: 'task_spend_cap' }),
+        taskEvent(3, 300, 'status.changed', { from: 'working', to: 'input_required', reason: 'continuation_agent_unavailable' }),
+        taskEvent(4, 400, 'status.changed', { from: 'working', to: 'input_required', reason: 'something_new' }),
+      ],
+      {},
+    )
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Moved from Working to Input required: the task used all its continuation runs',
+      'Moved from Working to Input required: the task reached its spend cap, so it was not continued',
+      'Moved from Working to Input required: the agent cannot take runs (it is not active or is marked unhealthy)',
+      'Moved from Working to Input required',
+    ])
+  })
+
   it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(

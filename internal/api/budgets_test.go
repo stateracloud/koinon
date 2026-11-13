@@ -111,6 +111,65 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(n).To(Equal(2))
 	})
 
+	It("lets admins set the continuation caps of the org and of an agent, audited (issue #99)", func(ctx SpecContext) {
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		member := e.userIn(ctx, org, store.OrgRoleMember)
+		a := owner.activeAgent(ctx, org)
+
+		got, err := budgets(admin).GetOrgContinuationLimits(ctx, &budgetv1alpha1.GetOrgContinuationLimitsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetLimits().GetOverridden()).To(BeFalse())
+		Expect(got.GetLimits().GetTaskSpendUsd()).To(Equal(got.GetLimits().GetPlatformDefaultTaskSpendUsd()))
+
+		_, err = budgets(member).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: "7"})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		for _, bad := range []string{"abc", "-1", "0"} {
+			_, err = budgets(admin).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: bad})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad)
+		}
+		set, err := budgets(admin).SetOrgContinuationTaskSpend(ctx, &budgetv1alpha1.SetOrgContinuationTaskSpendRequest{OrgId: org, TaskSpendUsd: "7.50"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(set.GetLimits().GetTaskSpendUsd()).To(Equal("7.50"))
+		Expect(set.GetLimits().GetOverridden()).To(BeTrue())
+
+		By("an agent follows the template's count and the org's cap until it is overridden")
+		ag, err := budgets(admin).GetAgentContinuationLimits(ctx, &budgetv1alpha1.GetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		l := ag.GetLimits()
+		Expect(l.GetEffective()).To(Equal(l.GetTemplateDefault()))
+		Expect(l.GetEffective().GetTaskSpendUsd()).To(Equal("7.50"))
+		Expect(l.GetOverride().MaxContinuations).To(BeNil())
+
+		_, err = budgets(member).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.ContinuationOverride{TaskSpendUsd: "3"}})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		eleven, zero := int32(11), int32(0)
+		for _, bad := range []*budgetv1alpha1.ContinuationOverride{{MaxContinuations: &eleven}, {TaskSpendUsd: "abc"}, {TaskSpendUsd: "-1"}, {TaskSpendUsd: "0"}} {
+			_, err = budgets(admin).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: bad})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), bad.String())
+		}
+		two := int32(2)
+		over, err := budgets(admin).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.ContinuationOverride{MaxContinuations: &two, TaskSpendUsd: "3"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(over.GetLimits().GetEffective().GetMaxContinuations()).To(Equal(int32(2)))
+		Expect(over.GetLimits().GetEffective().GetTaskSpendUsd()).To(Equal("3.00"))
+		Expect(over.GetLimits().GetTemplateDefault()).To(Equal(l.GetTemplateDefault()))
+
+		By("0 switches continuation off for the agent; clearing everything follows the defaults again")
+		off, err := budgets(admin).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId(), Override: &budgetv1alpha1.ContinuationOverride{MaxContinuations: &zero}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(off.GetLimits().GetEffective().GetMaxContinuations()).To(BeZero())
+		Expect(off.GetLimits().GetOverride().MaxContinuations).NotTo(BeNil())
+		cleared, err := budgets(admin).SetAgentContinuationLimits(ctx, &budgetv1alpha1.SetAgentContinuationLimitsRequest{OrgId: org, AgentId: a.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cleared.GetLimits().GetEffective()).To(Equal(l.GetTemplateDefault()))
+
+		var n int
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.agent_continuation_limits.set'`, org).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(3))
+		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.org_continuation_task_spend.set'`, org).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+	})
+
 	It("lists every org's cap, ceiling and spend for platform admins only", func(ctx SpecContext) {
 		_, err := budgets(owner).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))

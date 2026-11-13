@@ -10,6 +10,7 @@ import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
 import { AgentKeepWarm } from '@/components/agent-keep-warm'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentModel } from '@/components/agent-model'
+import { AgentContinuationLimits } from '@/components/agent-continuation-limits'
 import { AgentRunLimits } from '@/components/agent-run-limits'
 import { AgentSandboxResources } from '@/components/agent-sandbox-resources'
 import { AgentTriggers } from '@/components/agent-triggers'
@@ -131,6 +132,7 @@ export function AgentPage() {
       {isApprover(org.role) && <AgentSandboxResources agent={a} />}
       {isApprover(org.role) && <AgentKeepWarm agent={a} />}
       {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
+      {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentContinuationLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}
       {isApprover(org.role) && <AgentMcpServers agentId={a.id} />}

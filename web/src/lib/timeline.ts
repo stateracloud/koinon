@@ -119,6 +119,21 @@ function approvalText(kind: string, p: JsonObject): { text: string; url?: string
   }
 }
 
+// blockedReason says why a task waits on its owner after a run hit its time limit and could not be
+// continued (issue #99): the "reason" of the status.changed event the scheduler writes.
+function blockedReason(reason: string | undefined): string | undefined {
+  switch (reason) {
+    case 'continuation_limit':
+      return 'the task used all its continuation runs'
+    case 'task_spend_cap':
+      return "the task reached its spend cap, so it was not continued"
+    case 'continuation_agent_unavailable':
+      return "the agent cannot take runs (it is not active or is marked unhealthy)"
+    default:
+      return undefined
+  }
+}
+
 function taskItem(ev: TaskEvent): TimelineItem {
   const key = `t:${ev.seq}`
   const at = ms(ev.createdAt)
@@ -138,7 +153,8 @@ function taskItem(ev: TaskEvent): TimelineItem {
     case 'status.changed': {
       const from = stateLabel(taskStateFromName(str(p.from)))
       const to = stateLabel(taskStateFromName(str(p.to)))
-      return { key, at, type: 'note', text: `Moved from ${from} to ${to}` }
+      const why = blockedReason(str(p.reason))
+      return { key, at, type: 'note', text: `Moved from ${from} to ${to}${why ? `: ${why}` : ''}` }
     }
     case 'run.queued':
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} queued`, runId }

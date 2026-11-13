@@ -49,6 +49,24 @@ turns:
     usage:
       inputTokens: 110
       outputTokens: 30
+  # The pending approval of the seed (#927): the agent calls the fake MCP server's ask-tier write tool, which
+  # parks the run on an approval. The restored copy must still hold that approval, pending.
+  - when:
+      userContains: "drill-approval"
+      toolResult: default-tracker-ask_write_item
+    text: "approval requested"
+    usage:
+      inputTokens: 120
+      outputTokens: 4
+  - when:
+      userContains: "drill-approval"
+    toolCalls:
+      - name: default-tracker-ask_write_item
+        arguments:
+          title: from the drill
+    usage:
+      inputTokens: 110
+      outputTokens: 30
   - text: "drill ok"
     usage:
       inputTokens: 100
