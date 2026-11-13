@@ -189,7 +189,7 @@ var _ = Describe("latency defaults", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(Equal(orgsettings.Settings{
 				IdleTimeout: 10 * time.Minute, ParkWarm: 15 * time.Minute, QueueWait: 5 * time.Minute,
-				MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60,
+				MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60, SandboxCreationsPerMinute: 10,
 				SandboxWaitCap: time.Hour, RunContentRetention: 30 * 24 * time.Hour,
 				HomeBackupRetention:   7 * 24 * time.Hour,
 				ContinuationTaskSpend: orgsettings.DefaultContinuationTaskSpend,

@@ -81,7 +81,7 @@ func newOrgLimitsCommand() *cobra.Command {
 		},
 	}
 
-	var maxRuns, trigConc, trigRate int
+	var maxRuns, trigConc, trigRate, creations int
 	set := &cobra.Command{
 		Use:   "set",
 		Short: "Change the org's run limits; a limit you do not name stays, 0 returns it to the platform default",
@@ -98,8 +98,11 @@ func newOrgLimitsCommand() *cobra.Command {
 			if f.Changed("trigger-rate-per-minute") {
 				p.TriggerRatePerMinute = &trigRate
 			}
+			if f.Changed("sandbox-creations-per-minute") {
+				p.SandboxCreationsPerMinute = &creations
+			}
 			if p == (orgsettings.RunLimitsPatch{}) {
-				return errors.New("name a limit to change: --max-concurrent-runs, --trigger-concurrency or --trigger-rate-per-minute")
+				return errors.New("name a limit to change: --max-concurrent-runs, --trigger-concurrency, --trigger-rate-per-minute or --sandbox-creations-per-minute")
 			}
 			svc, id, closeFn, err := open(cmd)
 			if err != nil {
@@ -123,13 +126,15 @@ func newOrgLimitsCommand() *cobra.Command {
 		orgsettings.MinTriggerConcurrency, orgsettings.MaxTriggerConcurrency, orgsettings.DefaultTriggerConcurrency))
 	set.Flags().IntVar(&trigRate, "trigger-rate-per-minute", 0, fmt.Sprintf("trigger items of the org that may start per minute (%d to %d; default %d)",
 		orgsettings.MinTriggerRatePerMinute, orgsettings.MaxTriggerRatePerMinute, orgsettings.DefaultTriggerRatePerMinute))
+	set.Flags().IntVar(&creations, "sandbox-creations-per-minute", 0, fmt.Sprintf("sandboxes the reconciler creates or starts for the org per minute; more wait (%d to %d; default %d)",
+		orgsettings.MinSandboxCreationsPerMinute, orgsettings.MaxSandboxCreationsPerMinute, orgsettings.DefaultSandboxCreationsPerMinute))
 	root.AddCommand(show, set)
 	return root
 }
 
 func printLimits(w io.Writer, l orgsettings.RunLimits) {
-	_, _ = fmt.Fprintf(w, "max-concurrent-runs      %d\ntrigger-concurrency      %d\ntrigger-rate-per-minute  %d\n",
-		l.MaxConcurrentRuns, l.TriggerConcurrency, l.TriggerRatePerMinute)
+	_, _ = fmt.Fprintf(w, "max-concurrent-runs          %d\ntrigger-concurrency          %d\ntrigger-rate-per-minute      %d\nsandbox-creations-per-minute %d\n",
+		l.MaxConcurrentRuns, l.TriggerConcurrency, l.TriggerRatePerMinute, l.SandboxCreationsPerMinute)
 }
 
 // resolveOrg takes the --org value as an org ID, else as a slug.
