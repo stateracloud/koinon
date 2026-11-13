@@ -76,4 +76,4 @@ func TestEscape(t *testing.T) {
 	RunSpecs(t, "Escape Suite")
 }
 
-var _ = AfterSuite(func(ctx SpecContext) { deleteWorkspace(ctx) }, NodeTimeout(2*time.Minute))
+var _ = AfterSuite(func(ctx SpecContext) { deleteWorkspace(ctx) }, NodeTimeout(4*time.Minute))

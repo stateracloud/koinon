@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -97,6 +98,7 @@ func (g *gateway) sandbox(ctx context.Context, spec execution.SandboxSpec) {
 	}
 	_, err := g.b.CreateSandbox(ctx, g.workspace, spec)
 	Expect(err).NotTo(HaveOccurred())
+	sandboxNames.add(spec.Name)
 	DeferCleanup(func(ctx context.Context) error {
 		_, err := g.b.DeleteSandbox(ctx, g.workspace, spec.Name)
 		return err
@@ -173,10 +175,36 @@ func (g *gateway) curlGatewayHeaders(ctx context.Context, sandbox, method, url s
 // headerMark separates the body from the headers in curlGatewayHeaders' output.
 const headerMark = "--koinon-headers--"
 
+// sandboxNames are the sandboxes this run created; deleteWorkspace clears their draft policy chunks.
+var sandboxNames = &nameSet{}
+
+type nameSet struct {
+	mu    sync.Mutex
+	names []string
+}
+
+func (n *nameSet) add(name string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.names = append(n.names, name)
+}
+
+func (n *nameSet) all() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.names...)
+}
+
 // deleteWorkspace removes the run's workspace record through the gateway, for
 // KOINON_ESCAPE_DELETE_WORKSPACE=1 (the kind e2e, test/e2e/escape-openshell.sh): deleting only the
 // namespace leaves the record, and a rerun then finds a workspace without a namespace. Run it after
 // the last spec, which needs the namespace.
+//
+// The gateway refuses to delete a workspace that still holds a draft policy chunk (old issue 640),
+// and a sandbox proposes chunks until its pod is gone: the specs' cleanups only ask for deletion.
+// So it stops the sources first (waits until the workspace lists no sandbox), then clears the
+// chunks of every sandbox of this run and waits until none is left, then deletes the workspace.
+// Each wait is on that condition, not on time.
 func deleteWorkspace(ctx context.Context) {
 	GinkgoHelper()
 	if os.Getenv("KOINON_ESCAPE_DELETE_WORKSPACE") != "1" || os.Getenv("KOINON_OPENSHELL_ENDPOINT") == "" {
@@ -191,5 +219,20 @@ func deleteWorkspace(ctx context.Context) {
 	})
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = b.Close() }()
-	Expect(b.DeleteWorkspace(ctx, envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape"))).To(Succeed())
+	workspace := envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape")
+	Eventually(func(g Gomega) {
+		names, err := b.ListSandboxNames(ctx, workspace)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(names).To(BeEmpty(), "sandboxes still in the workspace")
+	}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+	Eventually(func(g Gomega) {
+		for _, name := range sandboxNames.all() {
+			_, err := b.ClearDraftChunks(ctx, workspace, name)
+			g.Expect(err).NotTo(HaveOccurred())
+			left, err := b.DraftChunks(ctx, workspace, name)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(left).To(BeZero(), "draft policy chunks of sandbox %s", name)
+		}
+	}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+	Expect(b.DeleteWorkspace(ctx, workspace)).To(Succeed())
 }

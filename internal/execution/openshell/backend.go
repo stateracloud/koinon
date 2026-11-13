@@ -159,6 +159,54 @@ func (b *Backend) DeleteWorkspace(ctx context.Context, name string) error {
 	return wrap("DeleteWorkspace", err)
 }
 
+// ListSandboxNames returns the names of the sandboxes in a workspace, including ones being
+// deleted. It is not part of execution.Backend: the escape suite uses it to wait until the
+// workspace holds no sandbox before it deletes the workspace.
+func (b *Backend) ListSandboxNames(ctx context.Context, workspace string) ([]string, error) {
+	var names []string
+	token := ""
+	for {
+		resp, err := b.c.ListSandboxes(ctx, &openshellv1.ListSandboxesRequest{WorkspaceScope: scope(workspace), PageSize: 1000, PageToken: token})
+		if err != nil {
+			return nil, wrap("ListSandboxNames", err)
+		}
+		for _, s := range resp.GetSandboxes() {
+			names = append(names, s.GetMetadata().GetName())
+		}
+		if token = resp.GetNextPageToken(); token == "" {
+			return names, nil
+		}
+	}
+}
+
+// ClearDraftChunks drops the draft policy chunks of one sandbox and returns how many it dropped.
+// A sandbox the gateway no longer knows has none. It is not part of execution.Backend: a sandbox
+// proposes policy chunks while it runs, and the gateway refuses to delete a workspace that still
+// holds one (old issue 640).
+func (b *Backend) ClearDraftChunks(ctx context.Context, workspace, sandbox string) (uint32, error) {
+	resp, err := b.c.ClearDraftChunks(ctx, &openshellv1.ClearDraftChunksRequest{WorkspaceScope: scope(workspace), Sandbox: sandbox})
+	if werr := wrap("ClearDraftChunks", err); werr != nil {
+		if errors.Is(werr, execution.ErrNotFound) {
+			return 0, nil
+		}
+		return 0, werr
+	}
+	return resp.GetChunksCleared(), nil
+}
+
+// DraftChunks returns how many draft policy chunks a sandbox holds in any state; zero for a
+// sandbox the gateway no longer knows.
+func (b *Backend) DraftChunks(ctx context.Context, workspace, sandbox string) (int, error) {
+	resp, err := b.c.GetDraftPolicy(ctx, &openshellv1.GetDraftPolicyRequest{WorkspaceScope: scope(workspace), Sandbox: sandbox})
+	if werr := wrap("DraftChunks", err); werr != nil {
+		if errors.Is(werr, execution.ErrNotFound) {
+			return 0, nil
+		}
+		return 0, werr
+	}
+	return len(resp.GetChunks()), nil
+}
+
 func workspaceFromProto(w *datamodelv1.Workspace) execution.Workspace {
 	return execution.Workspace{
 		Name:   w.GetMetadata().GetName(),
