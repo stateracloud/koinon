@@ -50,6 +50,8 @@ run "a short digest fails" 1 "digest:" "$(df short 'FROM alpine@sha256:abc123\n'
 run "a digest in an ARG default passes" 0 "" "$(df argdig "ARG BASE=alpine:3.20@sha256:$d64\nFROM \${BASE}\n")"
 run "an ARG default without a digest fails" 1 "digest: base image \${BASE}" "$(df argtag 'ARG BASE=alpine:3.20\nFROM ${BASE}\n')"
 run "an ARG without a default is the caller's" 0 "" "$(df argnone 'ARG BASE\nFROM ${BASE}\n')"
+run "a stage ARG without a default does not hide an unpinned global default" 1 "digest: base image \${BASE}" "$(df stagenone 'ARG BASE=ubuntu:24.04\nFROM scratch AS a\nARG BASE\nFROM ${BASE}\n')"
+run "a pinned stage ARG does not hide an unpinned global default" 1 "digest: base image \${BASE}" "$(df stagepin "ARG BASE=ubuntu:24.04\nFROM scratch AS a\nARG BASE=alpine:3.20@sha256:$d64\nFROM \${BASE}\n")"
 run "tag with an @\${ARG} digest passes when the ARG is a digest" 0 "" "$(df atarg "ARG D=sha256:$d64\nFROM golang:1.27@\${D}\n")"
 run "tag with an @\${ARG} digest fails when the ARG is not" 1 "digest:" "$(df atbad 'ARG D=latest\nFROM golang:1.27@${D}\n')"
 run "a stage chosen by ARG passes" 0 "" "$(df stagearg "FROM alpine@sha256:$d64 AS fetch-amd64\nARG TARGETARCH\nFROM fetch-\${TARGETARCH} AS fetch\n")"
@@ -65,6 +67,9 @@ run "ENV TOKEN fails" 1 "secret: TOKEN" "$(df envtoken "FROM alpine@sha256:$d64\
 run "ENV with the legacy form fails" 1 "secret: API_KEY" "$(df envlegacy "FROM alpine@sha256:$d64\nENV API_KEY not-a-real-key\n")"
 run "ARG with a secret name fails" 1 "secret: GITHUB_TOKEN" "$(df argtoken "FROM alpine@sha256:$d64\nARG GITHUB_TOKEN\n")"
 run "a second name in one ENV fails" 1 "secret: DB_PASSWORD" "$(df env2 "FROM alpine@sha256:$d64\nENV A=1 \\\\\n    DB_PASSWORD=x\n")"
+run "a PAT name fails" 1 "secret: GH_PAT" "$(df envpat "FROM alpine@sha256:$d64\nARG GH_PAT\n")"
+run "an AUTH name fails" 1 "secret: NPM_AUTH" "$(df envauth "FROM alpine@sha256:$d64\nENV NPM_AUTH=x\n")"
+run "PATH and AUTHOR are not secret names" 0 "" "$(df envword "FROM alpine@sha256:$d64\nENV PATH=/x AUTHOR=me GH_PAT_FILE=/a NPM_AUTH_PATH=/b\n")"
 run "a _FILE name passes" 0 "" "$(df envfile "FROM alpine@sha256:$d64\nENV TOKEN_FILE=/run/secrets/t\n")"
 run "an ordinary name passes" 0 "" "$(df envok "FROM alpine@sha256:$d64\nENV PI_TELEMETRY=0 GOTOOLCHAIN=local\n")"
 

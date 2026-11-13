@@ -12,7 +12,7 @@
 #        digest  every base image (FROM) is pinned by digest. The image may come from an ARG: its
 #                default must hold @sha256:<64 hex> (an ARG without a default is supplied by the
 #                caller and is not checked). A previous stage and `scratch` need no digest.
-#        secret  no ENV or ARG is named like a secret (TOKEN, SECRET, PASSWORD, API_KEY, ...): the value
+#        secret  no ENV or ARG is named like a secret (TOKEN, SECRET, PASSWORD, API_KEY, PAT, AUTH, ...): the value
 #                lands in the image history. Use a BuildKit secret mount (see hack/e2e-toolchain/Dockerfile).
 #                Names ending _FILE or _PATH (a path, not the value) are fine. Values are gitleaks' job.
 #      Apt retries are hack/apt-retries-test.sh (#149), not repeated here.
@@ -43,7 +43,8 @@ check() {
 				for (i = 1; i <= n; i++) {
 					k = w[i]; v = ""
 					if (index(k, "=")) { v = substr(k, index(k, "=") + 1); k = substr(k, 1, index(k, "=") - 1) }
-					argdef[k] = (index(w[i], "=") ? v : "\001")
+					# Docker resolves FROM ${X} from the global ARGs only (before the first FROM)
+					if (!seenfrom) argdef[k] = (index(w[i], "=") ? v : "\001")
 					secret_check(k)
 				}
 			} else if (kw == "ENV") {
@@ -57,6 +58,7 @@ check() {
 				img = w[i]; name = ""
 				if (toupper(w[i + 1]) == "AS") name = tolower(w[i + 2])
 				digest_check(img)
+				seenfrom = 1
 				if (name != "") stages[name] = 1
 			}
 			instr = ""
@@ -71,7 +73,7 @@ check() {
 		}
 		function allowed(rule) { return (allow ~ ("(^| )" rule "( |$)")) }
 		function secret_check(k) {
-			if (toupper(k) ~ /(TOKEN|SECRET|PASSW(OR)?D|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL)/ && toupper(k) !~ /_(FILE|PATH)$/ && !allowed("secret"))
+			if (toupper(k) ~ /(TOKEN|SECRET|PASSW(OR)?D|(^|_)(PAT|AUTH)(_|$)|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL)/ && toupper(k) !~ /_(FILE|PATH)$/ && !allowed("secret"))
 				printf "%s:%d: secret: %s is named like a secret; its value would be in the image history (use a BuildKit secret mount, or # dockerfile-lint: allow=secret <reason>)\n", FILENAME, start, k
 		}
 		function digest_check(img,   ref, d) {
