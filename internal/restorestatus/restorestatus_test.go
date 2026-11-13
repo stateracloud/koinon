@@ -100,6 +100,24 @@ var _ = Describe("Build", func() {
 		Expect(r.Quarantine.Tokens + r.Quarantine.Sessions).To(BeZero())
 	})
 
+	It("does not list a removed target as in use (#940)", func(ctx SpecContext) {
+		_, err := pool.Exec(ctx, `DELETE FROM install_binding`)
+		Expect(err).NotTo(HaveOccurred())
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		_, err = pool.Exec(ctx, `INSERT INTO connections (org_id, connector, display_name, secret_name, source, managed_by_secret, removed_at)
+			VALUES ($1, 'github', 'gone-connection', 'gone-conn-secret', 'secret', 'gone', now()),
+			       ($1, 'github', 'live-connection', 'live-conn-secret', 'secret', 'live', NULL)`, org)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := restorestatus.Build(ctx, pool, "own-mark-hash")
+		Expect(err).NotTo(HaveOccurred())
+		var names []string
+		for _, t := range r.Targets {
+			names = append(names, t.Name)
+		}
+		Expect(names).To(ContainElement("live-connection"))
+		Expect(names).NotTo(ContainElement("gone-connection"))
+	})
+
 	It("reports whether a release is pending, the importer's removals and the org limits (ADR 0110 decisions 1 and 7)", func(ctx SpecContext) {
 		for _, stmt := range []string{`DELETE FROM install_binding`, `DELETE FROM restore_accepted_removals`} {
 			_, err := pool.Exec(ctx, stmt)
@@ -126,16 +144,17 @@ var _ = Describe("Build", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.Blocking()).To(BeEmpty())
 
-		By("after the release the removals wait, and the check still blocks while they are in the plan")
+		By("after the release the removals wait; the check reports them and does not block the upgrade (#940)")
 		_, err = installbinding.New(pool, "own-mark-hash", false, nil).Settle(ctx, []installbinding.Removal{gone}, false)
 		Expect(err).NotTo(HaveOccurred())
 		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: plan})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.Release.Pending).To(BeFalse())
 		Expect(r.Importer.Waiting).To(ConsistOf(gone))
-		Expect(r.Blocking()).To(ConsistOf(gone))
+		Expect(r.Importer.NeedsAccept).To(BeTrue(), "still reported as waiting")
+		Expect(r.Blocking()).To(BeEmpty(), "waiting rows do not fail a later helm upgrade")
 		r, err = restorestatus.Build(ctx, pool, "own-mark-hash", restorestatus.Options{PlanRemovals: func(context.Context) ([]installbinding.Removal, error) { return nil, nil }})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(r.Blocking()).To(BeEmpty(), "the Secret came back: nothing waits for the accept")
+		Expect(r.Importer.NeedsAccept).To(BeFalse(), "the Secret came back: nothing waits for the accept")
 	})
 })

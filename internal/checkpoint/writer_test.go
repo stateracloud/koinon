@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
@@ -78,6 +80,63 @@ var _ = Describe("Writer", func() {
 		Expect(got).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(got).NotTo(HaveKey("notes/b.md"))
 		Expect(w.Verify(ctx, prefix, "koinon_test_not-a-real-token", r2.SnapshotID)).To(Succeed())
+	})
+
+	It("writes nothing to the bucket in restore-only mode (#940)", func() {
+		bucket := GinkgoT().TempDir()
+		src := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir()}
+		pw := "koinon_test_not-a-real-token"
+		r, err := src.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+
+		state := func() map[string]string {
+			out := map[string]string{}
+			Expect(filepath.WalkDir(bucket, func(p string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return err
+				}
+				fi, err := d.Info()
+				Expect(err).NotTo(HaveOccurred())
+				out[p] = fmt.Sprintf("%d@%d", fi.Size(), fi.ModTime().UnixNano())
+				return nil
+			})).To(Succeed())
+			return out
+		}
+		before := state()
+
+		ro := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir(), ReadOnly: true}
+		var out bytes.Buffer
+		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, &out)).To(Succeed())
+		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
+		Expect(ro.Verify(ctx, prefix, pw, r.SnapshotID)).To(Succeed())
+		snaps, err := ro.Snapshots(ctx, prefix, pw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(HaveLen(1))
+		Expect(state()).To(Equal(before), "no blob was put, rewritten or deleted")
+
+		By("the repository the writer opens refuses a write (kopia's read-only wrapper), unlike a normal one")
+		open := func(w *checkpoint.Writer, payload string) error {
+			work := GinkgoT().TempDir()
+			rep, err := w.OpenForTest(ctx, work, prefix, pw)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = rep.Close(ctx) }()
+			return repo.WriteSession(ctx, rep, repo.WriteSessionOptions{Purpose: "test"}, func(ctx context.Context, wr repo.RepositoryWriter) error {
+				w := wr.NewObjectWriter(ctx, object.WriterOptions{})
+				if _, err := w.Write([]byte(payload)); err != nil {
+					return err
+				}
+				_, err := w.Result()
+				return err
+			})
+		}
+		Expect(open(src, "koinon_test_payload-one")).To(Succeed())
+		Expect(open(ro, "koinon_test_payload-two")).NotTo(Succeed())
+		Expect(state()).NotTo(Equal(before), "the normal writer's probe did write, so the read-only one is told apart")
+		before = state()
+
+		_, err = ro.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c2"})
+		Expect(err).To(MatchError(ContainSubstring(checkpoint.ReadOnlyError)))
+		Expect(state()).To(Equal(before))
 	})
 
 	It("does not open a repository with another password", func() {

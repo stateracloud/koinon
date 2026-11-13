@@ -328,7 +328,7 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 		return nil, err
 	}
 	return &agentd.Checkpoints{
-		Store: &checkpoint.Writer{Storage: s3, Scratch: cfg.checkpointScratch},
+		Store: &checkpoint.Writer{Storage: s3, Scratch: cfg.checkpointScratch, ReadOnly: cfg.checkpointReadOnly},
 		Repositories: checkpoint.Remote{
 			HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL,
 			Key: func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) },

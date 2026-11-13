@@ -306,9 +306,9 @@ func hostsSection(r *Report, row installbinding.Row, st installbinding.State, c 
 
 func targetsSection(ctx context.Context, pool *pgxpool.Pool, r *Report) error {
 	rows, err := pool.Query(ctx, `
-		SELECT 'mcp-server', org_id::text, name, admin_disabled_at IS NOT NULL FROM mcp_servers
-		UNION ALL SELECT 'model-provider', org_id::text, name, admin_disabled_at IS NOT NULL FROM providers
-		UNION ALL SELECT 'connection', org_id::text, display_name, admin_disabled_at IS NOT NULL FROM connections
+		SELECT 'mcp-server', org_id::text, name, admin_disabled_at IS NOT NULL FROM mcp_servers WHERE removed_at IS NULL
+		UNION ALL SELECT 'model-provider', org_id::text, name, admin_disabled_at IS NOT NULL FROM providers WHERE removed_at IS NULL
+		UNION ALL SELECT 'connection', org_id::text, display_name, admin_disabled_at IS NOT NULL FROM connections WHERE removed_at IS NULL
 		UNION ALL SELECT 'trace-destination', org_id::text, name, admin_disabled_at IS NOT NULL FROM trace_destinations
 		UNION ALL SELECT 'platform-trace-destination', '', 'platform', admin_disabled_at IS NOT NULL FROM platform_trace_destination
 		ORDER BY 1, 2, 3`)
@@ -341,20 +341,24 @@ func importerSection(ctx context.Context, pool *pgxpool.Pool, r *Report, opt Opt
 			return fmt.Errorf("plan the importer's removals: %w", err)
 		}
 	}
-	r.Importer.NeedsAccept = len(r.Blocking()) > 0
+	r.Importer.NeedsAccept = !opt.AcceptImporterDeletions && (r.Release.Pending && len(r.Importer.Planned) > 0 || len(r.stillWaiting()) > 0)
 	return nil
 }
 
-// Blocking returns the removals that make a release refuse (the restore-release-check Job fails on
-// them): without restore.acceptImporterDeletions, every planned removal while a release is pending,
-// and later every planned removal that still waits (ADR 0110 decision 1).
+// Blocking returns the removals that make the release check fail (the restore-release-check Job): only
+// while a release is pending, and without restore.acceptImporterDeletions, every planned removal. Rows
+// that wait after the release do not block an upgrade; the Job refuses nothing else (ADR 0110 decision
+// 1), and koinon_restore_release_pending and its alert tell the operator they wait.
 func (r Report) Blocking() []installbinding.Removal {
-	if r.Importer.AcceptImporterDeletions {
+	if r.Importer.AcceptImporterDeletions || !r.Release.Pending {
 		return nil
 	}
-	if r.Release.Pending {
-		return r.Importer.Planned
-	}
+	return r.Importer.Planned
+}
+
+// stillWaiting returns the waiting removals the importer would still make: they stay plan-only until
+// the value is true, and a release done now would leave them waiting.
+func (r Report) stillWaiting() []installbinding.Removal {
 	planned := map[installbinding.Removal]bool{}
 	for _, x := range r.Importer.Planned {
 		planned[x] = true

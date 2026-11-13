@@ -46,6 +46,11 @@ type Writer struct {
 	// Scratch is a directory for the staged home and kopia's cache (an emptyDir). Required.
 	Scratch string
 	Limits  Limits
+	// ReadOnly is restore-only mode (checkpoints.readOnly, ADR 0110 decision 4): the repository opens with
+	// kopia's ClientOptions.ReadOnly, so any write through it fails (a guard: kopia's read paths do not write
+	// today, but a bucket the source still owns must stay untouched whatever a later path does), Backup fails
+	// with [ReadOnlyError], and DeleteRepository refuses.
+	ReadOnly bool
 }
 
 // Meta is stamped on a snapshot as tags: what checkpoints resync records for a snapshot that no
@@ -157,6 +162,9 @@ func (w *Writer) limits() Limits {
 // repository on first use, then applies the retention policy. The snapshot is complete only when
 // Backup returns a result.
 func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream io.Reader, m Meta) (Result, error) {
+	if w.ReadOnly {
+		return Result{}, errors.New(ReadOnlyError)
+	}
 	work, err := os.MkdirTemp(w.Scratch, "backup-")
 	if err != nil {
 		return Result{}, err
@@ -342,7 +350,7 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 	cfg := filepath.Join(work, "repo.config")
 	connect := func() error {
 		return repo.Connect(ctx, cfg, st, password, &repo.ConnectOptions{
-			ClientOptions:  repo.ClientOptions{Hostname: source.Host, Username: source.UserName},
+			ClientOptions:  repo.ClientOptions{Hostname: source.Host, Username: source.UserName, ReadOnly: w.ReadOnly},
 			CachingOptions: content.CachingOptions{CacheDirectory: filepath.Join(work, "cache")},
 		})
 	}

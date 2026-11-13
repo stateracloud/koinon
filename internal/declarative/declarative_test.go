@@ -556,6 +556,42 @@ var _ = Describe("Importer", func() {
 			}
 		}
 
+		It("records one removal per Secret when two connections share it, so the release does not fail (#940)", func(ctx SpecContext) {
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			_, err := pool.Exec(ctx, `INSERT INTO connections (org_id, connector, display_name, config, secret_name, secret_fingerprint, source, managed_by_secret)
+				SELECT org_id, connector, display_name || ' twin', config, secret_name || '-twin', secret_fingerprint, source, managed_by_secret
+				FROM connections WHERE org_id = $1 AND managed_by_secret = 'gh'`, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "gh", metav1.DeleteOptions{})).To(Succeed())
+
+			By("the copy was held: the first unheld pass releases it and records the removal once, waiting")
+			_, err = pool.Exec(ctx, `DELETE FROM install_binding`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `INSERT INTO install_binding (mark, held_since) VALUES (NULL, now())`)
+			Expect(err).NotTo(HaveOccurred())
+			imp.Release = installbinding.New(pool, "hash-copy", false, nil)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM restore_accepted_removals WHERE kind = $1 AND secret_name = 'gh'`, declarative.TypeConnection).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1), "one row for the Secret, not one per connection (UNIQUE (org_id, kind, secret_name))")
+			rows, err := store.New(pool).ListConnections(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(HaveLen(2))
+			for _, c := range rows {
+				Expect(c.RemovedAt.Valid).To(BeFalse(), "waiting for the accept")
+			}
+
+			By("the accept marks both connections removed")
+			imp.AcceptRemovals = true
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ = store.New(pool).ListConnections(ctx, org)
+			for _, c := range rows {
+				Expect(c.RemovedAt.Valid).To(BeTrue())
+			}
+			Expect(auditOf(ctx, "connection.undeclare")).To(HaveLen(2))
+		})
+
 		It("imports a GitHub App connection into the store, read-only and audited as the Secret", func(ctx SpecContext) {
 			put(ctx, "gh", declarative.TypeConnection, slug, conn())
 			Expect(imp.Sync(ctx)).To(Succeed())
