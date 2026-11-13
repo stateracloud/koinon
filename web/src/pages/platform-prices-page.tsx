@@ -43,32 +43,32 @@ function PlatformPrices() {
   const [refused, setRefused] = useState<string>()
   const [checking, setChecking] = useState(false)
   const settings = useQuery(PriceService.method.getPriceRefreshSettings, {})
-  const say = (m: string) => {
+  const say = (message: string) => {
     setRefused(undefined)
-    setNotice(m)
+    setNotice(message)
   }
-  const refuse = (m: string) => {
+  const refuse = (message: string) => {
     setNotice(undefined)
-    setRefused(m)
+    setRefused(message)
   }
   async function check() {
     setChecking(true)
     try {
-      const r = await actions.checkSources()
-      const failed = Object.entries(r.failed)
-      say(`Checked ${r.fetched.length} source(s); ${r.proposals} proposal(s) made or refreshed.${failed.map(([s, why]) => ` ${s} failed: ${why}.`).join('')}`)
+      const result = await actions.checkSources()
+      const failed = Object.entries(result.failed)
+      say(`Checked ${result.fetched.length} source(s); ${result.proposals} proposal(s) made or refreshed.${failed.map(([source, why]) => ` ${source} failed: ${why}.`).join('')}`)
     } catch (e) {
       refuse(ConnectError.from(e).rawMessage)
     } finally {
       setChecking(false)
     }
   }
-  const s = settings.data
+  const priceSettings = settings.data
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">Platform prices</h1>
-        <Button size="sm" className="ml-auto" onClick={check} disabled={checking || s?.mode === 'off'} title={s?.mode === 'off' ? 'Price refresh is off on this install' : undefined}>
+        <Button size="sm" className="ml-auto" onClick={check} disabled={checking || priceSettings?.mode === 'off'} title={priceSettings?.mode === 'off' ? 'Price refresh is off on this install' : undefined}>
           Check sources
         </Button>
       </div>
@@ -76,11 +76,11 @@ function PlatformPrices() {
         The platform list sits between an org’s own prices and the default list that ships with Koinon. A source only proposes: nothing changes until a person accepts it here, or the install’s bounded auto-apply does.
         Every version is kept; a rollback writes a new version.
       </p>
-      {s && (
+      {priceSettings && (
         <p className="text-muted-foreground text-sm" role="group" aria-label="Refresh setting">
-          Scheduled refresh: {s.mode}
-          {s.mode !== 'off' && `, every ${s.interval}`}; auto-apply up to {s.maxChangePercent}% and {s.maxAutoPerDay} a day. Set by the install’s Helm values.
-          {!s.recorded && ' (Defaults: koinon-api has not recorded a setting yet.)'}
+          Scheduled refresh: {priceSettings.mode}
+          {priceSettings.mode !== 'off' && `, every ${priceSettings.interval}`}; auto-apply up to {priceSettings.maxChangePercent}% and {priceSettings.maxAutoPerDay} a day. Set by the install’s Helm values.
+          {!priceSettings.recorded && ' (Defaults: koinon-api has not recorded a setting yet.)'}
         </p>
       )}
       {notice && (
@@ -206,7 +206,7 @@ function ProposalCard({ p, say, refuse, actions }: { p: PriceProposal } & Feedba
   const [maxOutput, setMaxOutput] = useState('')
   const [busy, setBusy] = useState(false)
   const needsConfirm = p.class === 'confirm'
-  const needsMax = !!p.proposed && p.proposed.maxOutput === 0
+  const needsMax = p.proposed?.maxOutput === 0
   const refusedClass = p.class === 'refused'
   const maxN = Number(maxOutput)
   const maxBad = needsMax && (!Number.isInteger(maxN) || maxN < 1)
@@ -214,8 +214,8 @@ function ProposalCard({ p, say, refuse, actions }: { p: PriceProposal } & Feedba
     e.preventDefault()
     setBusy(true)
     try {
-      const r = await actions.accept(p.id, typed, needsMax ? maxN : 0)
-      say(`Accepted ${p.model}: platform price version ${r.version} written.${r.warnings.map((w) => ` ${w}`).join('')}`)
+      const result = await actions.accept(p.id, typed, needsMax ? maxN : 0)
+      say(`Accepted ${p.model}: platform price version ${result.version} written.${result.warnings.map((warning) => ` ${warning}`).join('')}`)
     } catch (err) {
       refuse(ConnectError.from(err).rawMessage)
     } finally {
@@ -335,8 +335,8 @@ function VersionRow({ v, latest, open, onToggle, say, refuse, actions }: { v: Pl
               consequence={`Writes a new version equal to version ${String(v.version)}, from now on. Requests already charged keep their price.`}
               confirmLabel="Roll back"
               onConfirm={async () => {
-                const r = await actions.rollback(v.version)
-                say(`Platform price version ${String(r.version)} written, equal to version ${String(v.version)}.`)
+                const result = await actions.rollback(v.version)
+                say(`Platform price version ${String(result.version)} written, equal to version ${String(v.version)}.`)
               }}
               onError={refuse}
             />
@@ -407,7 +407,7 @@ function Explain() {
   const [providerType, setProviderType] = useState('openrouter')
   const [model, setModel] = useState('')
   const [ask, setAsk] = useState<{ providerType: string; model: string }>()
-  const res = useQuery(PriceService.method.explainPlatformPrice, ask ?? { providerType: '', model: '' }, { enabled: !!ask })
+  const res = useQuery(PriceService.method.explainPlatformPrice, ask ?? { providerType: '', model: '' }, { enabled: Boolean(ask) })
   return (
     <section aria-labelledby="explain" className="grid gap-3">
       <h2 id="explain" className="text-lg font-semibold">

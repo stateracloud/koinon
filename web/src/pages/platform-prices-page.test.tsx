@@ -55,7 +55,7 @@ function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof pr
       listPriceProposals: (req) => ({ proposals: proposals.filter((p) => !req.class || p.class === req.class) }),
       acceptPriceProposal: (req) => {
         calls.accepts.push(req)
-        const p = proposals.find((x) => x.id === req.id)
+        const p = proposals.find((proposal) => proposal.id === req.id)
         if (p?.class === 'confirm' && req.confirm !== p.model) throw reasoned('type the model id', Code.InvalidArgument, 'CONFIRM_MISMATCH')
         proposals = proposals.filter((x) => x.id !== req.id)
         return { version: 3n, warnings: [] }
@@ -86,6 +86,13 @@ function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof pr
   return calls
 }
 
+// The list item that holds a heading; a missing one fails the spec with a message.
+function listItemOf(heading: HTMLElement): HTMLElement {
+  const item = heading.closest('li')
+  if (!item) throw new Error(`no list item around "${heading.textContent}"`)
+  return item
+}
+
 describe('Platform prices page', () => {
   it('is for platform admins only', async () => {
     setup({ platformAdmin: false })
@@ -94,7 +101,7 @@ describe('Platform prices page', () => {
 
   it('shows a proposal with its diff and provenance, and accepts a needs-review one', async () => {
     const calls = setup({ proposals: [proposal('p1', 'gpt-x', 'needs_review')] })
-    expect(await screen.findByText(/input \$3 → \$4/)).toBeInTheDocument()
+    expect(await screen.findByText(/input \$3 → \$4/u)).toBeInTheDocument()
     expect(screen.getByText('Agreeing sources')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Accept gpt-x' }))
     await waitFor(() => expect(calls.accepts).toHaveLength(1))
@@ -129,7 +136,7 @@ describe('Platform prices page', () => {
 
   it('dismisses after a confirmation', async () => {
     const calls = setup({ proposals: [proposal('p5', 'gpt-x', 'needs_review')] })
-    const card = (await screen.findByRole('heading', { name: 'gpt-x' })).closest('li')!
+    const card = listItemOf(await screen.findByRole('heading', { name: 'gpt-x' }))
     await userEvent.click(within(card).getByRole('button', { name: /Dismiss/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Dismiss proposal' }))
     await waitFor(() => expect(calls.dismisses).toEqual(['p5']))
@@ -137,8 +144,8 @@ describe('Platform prices page', () => {
 
   it('rolls back to an older version after a confirmation, with no rollback on the newest', async () => {
     const calls = setup()
-    const v1 = (await screen.findByRole('heading', { name: 'Version 1' })).closest('li')!
-    const v2 = screen.getByRole('heading', { name: 'Version 2' }).closest('li')!
+    const v1 = listItemOf(await screen.findByRole('heading', { name: 'Version 1' }))
+    const v2 = listItemOf(screen.getByRole('heading', { name: 'Version 2' }))
     expect(within(v2).queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument()
     await userEvent.click(within(v1).getByRole('button', { name: /Roll back/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Roll back' }))
@@ -148,7 +155,7 @@ describe('Platform prices page', () => {
 
   it('shows prices with their price_ref when a version is opened', async () => {
     setup()
-    const v2 = (await screen.findByRole('heading', { name: 'Version 2' })).closest('li')!
+    const v2 = listItemOf(await screen.findByRole('heading', { name: 'Version 2' }))
     await userEvent.click(within(v2).getByRole('button', { name: /Show changes in version 2/ }))
     expect(await within(v2).findByText('platform@2#gpt-x')).toBeInTheDocument()
   })
