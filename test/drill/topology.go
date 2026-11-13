@@ -48,54 +48,16 @@ type Install struct {
 	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
-// OIDC is the external identity provider the source and the restored copy must both accept (`oidc-signin`). The
-// client is a standing PUBLIC client (PKCE only, no client secret: the chart's clientSecret stays empty), so the
-// topology names only the issuer, the client ID and the two personas. The chart's oidc values are set from them on
-// both installs, with a redirect URL on the fixed local port of that side (OIDCSourcePort, OIDCTargetPort): the
-// lab's client allows exactly those two callbacks.
-type OIDC struct {
-	// IssuerURL is the provider's issuer (https). ClientID is the standing client the drill uses.
-	IssuerURL string `yaml:"issuerUrl" json:"issuerUrl"`
-	ClientID  string `yaml:"clientId" json:"clientId"`
-	// Admin and Member are the two personas: an org admin and an org member. The IdP group of each is mapped to
-	// the role in the default org (groupMappings), so the same user holds the same role on both sides.
-	Admin  Persona `yaml:"admin" json:"admin"`
-	Member Persona `yaml:"member" json:"member"`
-}
-
-// Persona is one OIDC test user. Its passkey (a CDP WebAuthn credential) comes from the environment, see Env.
-type Persona struct {
-	// Group is the IdP group the user belongs to (the lab uses koinon-admins and koinon-users).
-	Group string `yaml:"group" json:"group"`
-}
-
-// The fixed local ports of the OIDC browser forwards. The redirect URL of each install is
-// http://127.0.0.1:<port>/auth/oidc/callback, and the lab's client allows those two URLs.
+// The fixed local ports of the OIDC flow's forwards. The redirect URL of each install is
+// http://127.0.0.1:<port>/auth/oidc/callback, and the drill's own provider allows exactly those two (fakeidp.go).
 const (
 	OIDCSourcePort = 18181
 	OIDCTargetPort = 18182
 )
 
-// OIDCRedirect is the callback URL of an install whose API the browser reaches on 127.0.0.1:port.
+// OIDCRedirect is the callback URL of an install whose API the drill reaches on 127.0.0.1:port.
 func OIDCRedirect(port int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/auth/oidc/callback", port)
-}
-
-// The personas, in the order the check runs them.
-const (
-	PersonaAdmin  = "admin"
-	PersonaMember = "member"
-)
-
-// OIDCEnvFields are the fields of a persona's environment, each KOINON_DRILL_OIDC_<PERSONA>_<FIELD> (for example
-// KOINON_DRILL_OIDC_ADMIN_PRIVATE_KEY). They are the fields of a CDP WebAuthn.addCredential call plus the login
-// name and the origin of the issuer's relying party. The values live in the operator's environment and never in
-// a file of the repository; nothing logs them.
-var OIDCEnvFields = []string{"USERNAME", "CREDENTIAL_ID", "RP_ID", "ORIGIN", "PRIVATE_KEY", "USER_HANDLE", "SIGN_COUNT"}
-
-// OIDCEnv is the name of one persona environment variable.
-func OIDCEnv(persona, field string) string {
-	return "KOINON_DRILL_OIDC_" + strings.ToUpper(persona) + "_" + field
 }
 
 // Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
@@ -125,11 +87,7 @@ type Topology struct {
 	// NamespaceLabels are added to every namespace the drill creates, before the hook is applied (a lab
 	// selects namespaces by them, for example to let a secret store serve them).
 	NamespaceLabels map[string]string `yaml:"namespaceLabels,omitempty" json:"namespaceLabels,omitempty"`
-	// OIDC describes the external identity provider of the `oidc-signin` check. The check exists only when it
-	// is set. The issuer and the client are inputs of the topology; the user's credentials are never in the
-	// file (OIDCEnv names the environment variables they come from).
-	OIDC *OIDC `yaml:"oidc,omitempty" json:"oidc,omitempty"`
-	// FakesNamespace holds the drill's fake model server and its object store.
+	// FakesNamespace holds the drill's fake model server, fake MCP server, OIDC provider and object store.
 	FakesNamespace string `yaml:"fakesNamespace" json:"fakesNamespace"`
 	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root, or absolute).
 	ChartPath  string `yaml:"chartPath" json:"chartPath"`
@@ -145,6 +103,9 @@ type Topology struct {
 	FakeMCPImage string `yaml:"fakeMcpImage" json:"fakeMcpImage"`
 	// ObjectStoreImage is the S3 server for home checkpoints (phase 2), pinned by digest: SeaweedFS, Apache-2.0.
 	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
+	// FakeIdPImage is the drill's OIDC provider, Dex (Apache-2.0), pinned by digest. It is the upstream image, not
+	// one the release builds: kind pulls it from ghcr.io, and a lab mirrors it by that digest.
+	FakeIdPImage string `yaml:"fakeIdpImage" json:"fakeIdpImage"`
 	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
 	Registry string `yaml:"registry,omitempty" json:"registry,omitempty"`
 	// ImageRegistry, when set, is passed to the chart as image.registry. Only run.sh writes it, for the kind
@@ -236,11 +197,6 @@ func (t *Topology) Validate() error {
 			return fmt.Errorf("namespaceLabels %q: value %q is not a valid label value", k, v)
 		}
 	}
-	if t.OIDC != nil {
-		if err := t.OIDC.validate(); err != nil {
-			return fmt.Errorf("oidc: %w", err)
-		}
-	}
 	if t.Source.Namespace == t.Target.Namespace {
 		return fmt.Errorf("source and target use the same namespace %q: the target is a fresh one", t.Source.Namespace)
 	}
@@ -271,11 +227,14 @@ func (t *Topology) Validate() error {
 	for name, v := range map[string]string{
 		"chartPath": t.ChartPath, "valuesFile": t.ValuesFile, "gatewayChart": t.GatewayChart,
 		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage, "fakeMcpImage": t.FakeMCPImage,
-		"objectStoreImage": t.ObjectStoreImage,
+		"objectStoreImage": t.ObjectStoreImage, "fakeIdpImage": t.FakeIdPImage,
 	} {
 		if v == "" {
 			return fmt.Errorf("%s is empty", name)
 		}
+	}
+	if !strings.Contains(t.FakeIdPImage, "@sha256:") {
+		return fmt.Errorf("fakeIdpImage %q is not pinned by digest (name@sha256:...)", t.FakeIdPImage)
 	}
 	if t.RunNowCalls < 3 {
 		return fmt.Errorf("runNowCalls is %d: at least 3, so that at least 2 stay ENQUEUED and the queue check means something", t.RunNowCalls)
@@ -293,22 +252,6 @@ var (
 	labelKeyRE   = regexp.MustCompile(`^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?$`)
 	labelValueRE = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?)?$`)
 )
-
-func (o *OIDC) validate() error {
-	if !strings.HasPrefix(o.IssuerURL, "https://") {
-		return fmt.Errorf("issuerUrl %q must be an https URL", o.IssuerURL)
-	}
-	if o.ClientID == "" {
-		return fmt.Errorf("clientId is empty")
-	}
-	if o.Admin.Group == "" || o.Member.Group == "" {
-		return fmt.Errorf("admin.group and member.group are required")
-	}
-	if o.Admin.Group == o.Member.Group {
-		return fmt.Errorf("admin and member are in the same group %q: the check compares two roles", o.Admin.Group)
-	}
-	return nil
-}
 
 // NamespaceManifest is the Namespace object the drill creates: the run label, then the operator's labels.
 func NamespaceManifest(ns, runID string, labels map[string]string) string {

@@ -187,7 +187,7 @@ func checkFakeModelManifest(t *testing.T, id string) {
 
 func TestValuesOverlayHoldsAndNamesTheGateway(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-dst-a1b2c3", Service: "openshell-dst-a1b2c3", ClientTLSSecret: "openshell-dst-a1b2c3-client-tls"}
-	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-dst-a1b2c3", true, "", nil, nil, 0)
+	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-dst-a1b2c3", true, "", nil, drill.OIDCSourcePort)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestFakeModelScriptParses(t *testing.T) {
 
 func TestValuesOverlayTurnsCheckpointsOnWithAShortArchive(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-src-a1b2c3", Service: "openshell-src-a1b2c3", ClientTLSSecret: "openshell-src-a1b2c3-client-tls"}
-	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", &drill.Checkpoints{ArchiveAfter: "1m", IdleTimeout: "2m"}, nil, 0)
+	s, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", &drill.Checkpoints{ArchiveAfter: "1m", IdleTimeout: "2m"}, drill.OIDCTargetPort)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestValuesOverlayTurnsCheckpointsOnWithAShortArchive(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, s)
 		}
 	}
-	off, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", nil, nil, 0)
+	off, err := drill.ValuesOverlay("koinon-drill-fakes-a1b2c3", gw, "drill-src-a1b2c3", false, "", nil, drill.OIDCSourcePort)
 	if err != nil {
 		t.Fatal(err)
 	}

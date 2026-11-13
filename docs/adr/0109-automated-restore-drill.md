@@ -161,6 +161,44 @@ edited.
 - **Sandbox enforcement.** Every run on the restored copy reports sandbox enforcement `enforce`, read through
   `koinon-api run-evidence export` in the target's api pod (#955, ADR 0045). This is a released check.
 
+## Amendment 2026-11-13 (a drill-owned OIDC provider, #983)
+
+- **Why.** The `oidc-signin` check first signed in through an external identity provider (the lab's Pocket ID) with a
+  virtual WebAuthn passkey. A lab run failed on the provider's first-time consent page, not on Koinon: the check
+  depended on the provider's pages, its re-authentication and rate limits and its translated text, and it needed
+  two private keys and a counter in a secret store. It also proved little of the restore. Koinon writes the
+  IdP-sourced group memberships again at each login (`internal/auth/oidc.go`), so a role read after the target
+  sign-in proves the mapping config, not the restored rows.
+- **Decision.** The drill runs its own provider, Dex (`ghcr.io/dexidp/dex:v2.46.1`, Apache-2.0, pinned by its index
+  digest in the topology field `fakeIdpImage`), in the fakes namespace, next to the fake model. Memory storage, the
+  password database, `skipApprovalScreen`, PKCE enforced, one public static client `koinon-drill` with the two loopback
+  redirect URLs of the drill, and three static users: `drill-admin` (group `koinon-admins`), `drill-member` and
+  `drill-disabled` (group `koinon-users`). Their password is one obviously fake string; the bcrypt hash is made at run
+  time (`test/drill/fakeidp.go`), so none is committed. The release builds nothing for it: kind pulls the upstream image
+  by digest and a lab mirrors that digest. Every run starts with an empty provider, so nothing outlives a run.
+- **Issuer.** `http://dex.<fakes namespace>.svc.cluster.local:5556/dex`, one string for koinon-api, the Go client and
+  Chromium. koinon-api reaches it by cluster DNS. The drill host reaches it through a port-forward on a fixed local
+  port: the Go client maps the name in its dialer, Chromium with `--host-resolver-rules` and a proxy bypass entry. The
+  chart overlay always turns OIDC on for it, with the scopes `email`, `profile` and `groups` and the same group mappings.
+  The topology's `oidc:` block for an external issuer, the persona passkey environment (`KOINON_DRILL_OIDC_*`), the CDP
+  WebAuthn code and `oidc-signcounts.json` are gone.
+- **The checks (every profile).** `oidc-source` (a step before the backup): a Go HTTP client with a cookie jar runs the
+  authorization code flow through the install's real `/auth/oidc/start` and `/auth/oidc/callback` for the three users,
+  records each user ID and each role from `WhoAmI`, then disables `drill-disabled` in Koinon (`users.deleted_at`; the
+  product has no API for it) and checks that the source's callback now answers 403. `oidc-signin` on the restored copy:
+  first, before any sign-in, the restored rows (the same user IDs, the group membership role in the default org, the
+  disabled state) and the user count; then the Go flow for the admin and the member gives the same user ID and the same
+  roles and makes no user, and the disabled user gets 403 at the callback. Kind runs all of it, so every rc has the proof.
+- **The lab adds one browser sign-in.** The lab profile (`browserSignin: true`) also signs the admin in on the copy
+  through the Dex login form with Playwright (`web/e2e-drill/oidc.spec.ts`), then checks the Inbox, a reload and
+  `WhoAmI` (same user ID, same role). The step does not wait for a heading. After each action it waits for the first of
+  "back at Koinon", a known Dex page (login form, wrong password, approval page, connector chooser, second factor, Dex
+  error page) or a refusal of the callback, and fails with a named error (`web/src/lib/drill-dex.ts`; the Go flow uses
+  the same rules in `test/drill/oidcflow.go`; both are tested against fixture pages in `test/drill/testdata/dex`).
+- **Not covered.** The restore hold's 503 at the callback (the copy refuses OIDC logins until the release step) is not
+  checked: the check runs after the release. Whether Koinon works with a given product (Pocket ID, Keycloak) is a
+  compatibility question, not a restore one; it belongs in a separate smoke, not in this gate.
+
 ## Alternatives considered
 
 - **Extend `backup-restore.sh`.** Cheapest now, but bash assertions give no report, test only an

@@ -8,6 +8,8 @@
 #   <registry>/koinon-fakemodel   the fake model server (cmd/koinon-fakemodel; test/drill's fakeModelImage)
 #   <registry>/koinon-fakemcp     the fake MCP server (cmd/koinon-fakemcp; test/drill's fakeMcpImage)
 #   <registry>/rt1-*              the RT1 fixture images (hack/rt1-fixtures-build.sh, test/fixtures/rt1)
+# Not built here: Dex, the drill's OIDC provider (test/drill's fakeIdpImage), and SeaweedFS. They are upstream images
+# that the topology pins by digest; the lab mirrors them by that digest (ADR 0109, amendment 2026-11-13).
 # They are not product images: nothing installs them, the chart does not reference them, and they carry
 # no support promise. Tags are the release version without the "v" (the release images' rule).
 #
