@@ -152,7 +152,12 @@ func (r *runner) start(ctx context.Context, owner string, ps corev1.PodSpec, c c
 		r.started = append(r.started, ctr)
 	}
 	if err != nil {
-		panic(fmt.Sprintf("start %s: %v\n%s", w.Name, err, w.Logs(ctx)))
+		// A container that never started has no logs, and asking a nil one would hide the error.
+		logs := ""
+		if ctr != nil {
+			logs = w.Logs(ctx)
+		}
+		panic(fmt.Sprintf("start %s: %v\n%s", w.Name, err, logs))
 	}
 	return w
 }
