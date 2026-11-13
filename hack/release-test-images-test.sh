@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests hack/release-test-images.sh with stubbed ko, crane and docker: it names nine images under the
-# registry (koinon-fakemodel and the eight RT1 fixtures), tags without the "v", writes a digest ref per
+# Tests hack/release-test-images.sh with stubbed ko, crane and docker: it names ten images under the
+# registry (koinon-fakemodel, koinon-fakemcp and the eight RT1 fixtures), tags without the "v", writes a digest ref per
 # image, and fails when the fixtures output is short or the tag is not a release tag.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -47,13 +47,22 @@ run() { # args: exit code; stderr in $tmp/err
 }
 
 check "a release candidate tag publishes" "$(run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs")" 0
-check "...nine refs" "$(wc -l <"$tmp/refs" | tr -d ' ')" 9
-check "...all digest refs" "$(grep -cE '^[a-z0-9-]+ ghcr\.io/o/r/[a-z0-9-]+@sha256:[0-9a-f]{64}$' "$tmp/refs")" 9
+check "...ten refs" "$(wc -l <"$tmp/refs" | tr -d ' ')" 10
+check "...all digest refs" "$(grep -cE '^[a-z0-9-]+ ghcr\.io/o/r/[a-z0-9-]+@sha256:[0-9a-f]{64}$' "$tmp/refs")" 10
 check "...the fake model server is koinon-fakemodel" "$(awk '$1 == "koinon-fakemodel" { print $2 ~ /^ghcr.io\/o\/r\/koinon-fakemodel@/ }' "$tmp/refs")" 1
+check "...the fake MCP server is koinon-fakemcp" "$(awk '$1 == "koinon-fakemcp" { print $2 ~ /^ghcr.io\/o\/r\/koinon-fakemcp@/ }' "$tmp/refs")" 1
 check "...the fixtures are rt1-*" "$(grep -c '^rt1-' "$tmp/refs")" 8
-check "...the four ko builds use the tag without the v" "$(grep -c -- '--tags 0.1.0-rc.2 ' "$tmp/calls")" 4
+check "...the five ko builds use the tag without the v" "$(grep -c -- '--tags 0.1.0-rc.2 ' "$tmp/calls")" 5
 check "...every image also gets the release version" "$(grep -c '^crane tag .* 0.1.0-rc.2$' "$tmp/calls")" 8
 check "...no v tag is pushed" "$(grep -c 'v0.1.0' "$tmp/calls")" 0
+
+# The drill topology must not require an image the release does not publish (#952): every image field that
+# Validate() rejects as empty (test/drill/topology.go) and that is a koinon-fake* server must be in the list.
+required=$(grep -oE '"(fake[A-Za-z]*Image|fakeMcpImage)": t\.' "$here/../test/drill/topology.go" | grep -oE 'fake[A-Za-z]+' | sort -u | tr '\n' ' ')
+check "the drill requires the fake model and MCP images (the grep still finds them)" "$required" "fakeMcpImage fakeModelImage "
+for f in koinon-fakemodel koinon-fakemcp; do
+	check "...$f is published" "$(grep -c "^fakes=(.*\b$f\b" "$script")" 1
+done
 
 check "a final tag publishes too" "$(run ghcr.io/o/r v0.1.0 "$tmp/refs2")" 0
 check "a tag that is not a release tag fails" "$(run ghcr.io/o/r main "$tmp/refs3")" 1
