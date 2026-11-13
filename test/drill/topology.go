@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +48,37 @@ type Install struct {
 	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
+// OIDC is the external identity provider the restored copy must accept (`oidc-signin`). The lab has a standing
+// public client for it; the chart's oidc values are set from these fields on both installs, so the source and the
+// restored copy trust the same issuer.
+type OIDC struct {
+	// IssuerURL is the provider's issuer (https). ClientID is the standing client the drill uses.
+	IssuerURL string `yaml:"issuerUrl" json:"issuerUrl"`
+	ClientID  string `yaml:"clientId" json:"clientId"`
+	// ClientSecretName is the Secret (key client-secret) in each install's namespace that holds the client's
+	// secret; empty means a public client. The operator's namespaceHook creates it (ExternalSecret or other).
+	ClientSecretName string `yaml:"clientSecretName,omitempty" json:"clientSecretName,omitempty"`
+	// RedirectURL is the callback the client allows. The browser reaches the restored API through a
+	// port-forward on localhost, so the client must allow this URL; the default is
+	// http://localhost:<port>/auth/oidc/callback with the fixed port below.
+	RedirectURL string `yaml:"redirectUrl,omitempty" json:"redirectUrl,omitempty"`
+	// LocalPort is the fixed local port the drill forwards the restored API to for this check, so the
+	// redirect URL of the client is stable. Default 18080.
+	LocalPort int `yaml:"localPort,omitempty" json:"localPort,omitempty"`
+}
+
+// The environment variables of the `oidc-signin` check. They carry the drill user's name and the virtual
+// authenticator's credential (a base64 PKCS#8 key and a credential ID the lab registered for that user at the
+// provider); the values live in the operator's environment and never in a file of the repository.
+const (
+	EnvOIDCUser          = "KOINON_DRILL_OIDC_USER"
+	EnvOIDCCredentialID  = "KOINON_DRILL_OIDC_CREDENTIAL_ID"
+	EnvOIDCPrivateKey    = "KOINON_DRILL_OIDC_PRIVATE_KEY"
+	EnvOIDCUserHandle    = "KOINON_DRILL_OIDC_USER_HANDLE"
+	EnvOIDCRPID          = "KOINON_DRILL_OIDC_RP_ID"
+	DefaultOIDCLocalPort = 18080
+)
+
 // Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
 // outside the repository, only this schema is in it).
 type Topology struct {
@@ -64,6 +96,20 @@ type Topology struct {
 	Context string  `yaml:"context" json:"context"`
 	Source  Install `yaml:"source" json:"source"`
 	Target  Install `yaml:"target" json:"target"`
+	// NamespaceHook is a manifest file the operator supplies (a path relative to the repository root, or
+	// absolute; a lab keeps it outside the repository). After the drill creates each of its namespaces it
+	// applies the file there with `kubectl apply -n <namespace>`, so the operator can add the access objects the
+	// topology needs (for example ExternalSecrets that bring a credential in). The repository carries the
+	// mechanism only: no lab endpoint or store is named in it. Objects in the file must not name a namespace
+	// of their own (kubectl refuses a mismatch). The namespace goes away with the objects at the end of the run.
+	NamespaceHook string `yaml:"namespaceHook,omitempty" json:"namespaceHook,omitempty"`
+	// NamespaceLabels are added to every namespace the drill creates, before the hook is applied (a lab
+	// selects namespaces by them, for example to let a secret store serve them).
+	NamespaceLabels map[string]string `yaml:"namespaceLabels,omitempty" json:"namespaceLabels,omitempty"`
+	// OIDC describes the external identity provider of the `oidc-signin` check. The check exists only when it
+	// is set. The issuer and the client are inputs of the topology; the user's credentials are never in the
+	// file (OIDCEnv names the environment variables they come from).
+	OIDC *OIDC `yaml:"oidc,omitempty" json:"oidc,omitempty"`
 	// FakesNamespace holds the drill's fake model server and its object store.
 	FakesNamespace string `yaml:"fakesNamespace" json:"fakesNamespace"`
 	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root, or absolute).
@@ -152,6 +198,24 @@ func (t *Topology) Validate() error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
+	for k := range t.NamespaceLabels {
+		if k == RunLabel {
+			return fmt.Errorf("namespaceLabels %q is the drill's own run label", k)
+		}
+		if !labelKeyRE.MatchString(k) {
+			return fmt.Errorf("namespaceLabels key %q is not a valid label key", k)
+		}
+	}
+	for k, v := range t.NamespaceLabels {
+		if !labelValueRE.MatchString(v) {
+			return fmt.Errorf("namespaceLabels %q: value %q is not a valid label value", k, v)
+		}
+	}
+	if t.OIDC != nil {
+		if err := t.OIDC.validate(); err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+	}
 	if t.Source.Namespace == t.Target.Namespace {
 		return fmt.Errorf("source and target use the same namespace %q: the target is a fresh one", t.Source.Namespace)
 	}
@@ -198,6 +262,58 @@ func (t *Topology) Validate() error {
 		return fmt.Errorf("releasedWait is empty")
 	}
 	return nil
+}
+
+var (
+	labelKeyRE   = regexp.MustCompile(`^([a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?$`)
+	labelValueRE = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?)?$`)
+)
+
+func (o *OIDC) validate() error {
+	if !strings.HasPrefix(o.IssuerURL, "https://") {
+		return fmt.Errorf("issuerUrl %q must be an https URL", o.IssuerURL)
+	}
+	if o.ClientID == "" {
+		return fmt.Errorf("clientId is empty")
+	}
+	if o.LocalPort < 0 || o.LocalPort > 65535 {
+		return fmt.Errorf("localPort %d is not a port", o.LocalPort)
+	}
+	if o.RedirectURL != "" && !strings.HasPrefix(o.RedirectURL, "http") {
+		return fmt.Errorf("redirectUrl %q must be an http(s) URL", o.RedirectURL)
+	}
+	return nil
+}
+
+// Port is the local port of the forward, with the default applied.
+func (o *OIDC) Port() int {
+	if o.LocalPort == 0 {
+		return DefaultOIDCLocalPort
+	}
+	return o.LocalPort
+}
+
+// Redirect is the callback URL, with the default applied.
+func (o *OIDC) Redirect() string {
+	if o.RedirectURL != "" {
+		return o.RedirectURL
+	}
+	return fmt.Sprintf("http://localhost:%d/auth/oidc/callback", o.Port())
+}
+
+// NamespaceManifest is the Namespace object the drill creates: the run label, then the operator's labels.
+func NamespaceManifest(ns, runID string, labels map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: %q\n", ns, RunLabel, runID)
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "    %s: %q\n", k, labels[k])
+	}
+	return b.String()
 }
 
 // GatewayIDPrefix starts every gateway ID the drill uses; the sweep refuses any other.

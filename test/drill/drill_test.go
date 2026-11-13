@@ -140,8 +140,13 @@ func onSuiteEnd(f func(context.Context)) { cleanups = append(cleanups, f) }
 func ensureNamespace(ctx context.Context, ns string) {
 	GinkgoHelper()
 	must(drill.CheckNamespace(ns), ns)
-	_, err := kube.KubectlStdin(ctx, fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    %s: \"%s\"\n", ns, drill.RunLabel, runID), "apply", "-f", "-")
+	_, err := kube.KubectlStdin(ctx, drill.NamespaceManifest(ns, runID, top.NamespaceLabels), "apply", "-f", "-")
 	must(err, "create namespace "+ns)
+	// The operator's hook (topology namespaceHook): the access objects this topology needs in every namespace.
+	if top.NamespaceHook != "" {
+		_, err = kube.Kubectl(ctx, "-n", ns, "apply", "-f", top.Path(repoRoot, top.NamespaceHook))
+		must(err, "apply the namespace hook "+top.NamespaceHook+" in "+ns)
+	}
 	onSuiteEnd(func(ctx context.Context) {
 		if os.Getenv("KOINON_DRILL_KEEP") == "1" {
 			return
@@ -207,7 +212,7 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 	_, err = kube.KubectlStdin(ctx, drill.CheckpointSecretManifest(in.Namespace, runID, top.FakesNamespace), "apply", "-f", "-")
 	must(err, "create the checkpoint storage Secret")
 
-	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass, cp)
+	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass, cp, top.OIDC)
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")

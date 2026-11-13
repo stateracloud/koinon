@@ -9,6 +9,8 @@
 #   KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your lab file> \
 #   test/drill/run.sh
 # (optional: KOINON_DRILL_WEB_PASSWORD=<admin password of the restored copy>; the default is the seeded fake one.)
+# The oidc-signin check reads the drill user from the environment, never from a file: KOINON_DRILL_OIDC_USER,
+# KOINON_DRILL_OIDC_CREDENTIAL_ID, KOINON_DRILL_OIDC_PRIVATE_KEY, KOINON_DRILL_OIDC_USER_HANDLE, KOINON_DRILL_OIDC_RP_ID.
 # Then upload the result to the rc release the final tag promotes, as drill-result-lab.json (docs/dev/releasing.md).
 #
 # {run} is the run ID. Namespaces must start with koinon-drill-; gateway IDs with drill-.
@@ -31,6 +33,22 @@ target:
   gatewayRelease: openshell-dst-{run}
   gatewayId: drill-dst-{run}
 fakesNamespace: koinon-drill-fakes-{run}
+# The per-namespace hook (#927): after the drill creates each of its namespaces it adds these labels and applies
+# this manifest there (`kubectl apply -n <namespace> -f`). The file is the operator's, kept outside the repository
+# next to this one: it holds the access objects the lab needs in a fresh namespace (for example ExternalSecrets that
+# bring the OIDC client secret or a registry pull secret in). Objects in it must not name a namespace.
+namespaceHook: /etc/example/koinon-drill/namespace-hook.yaml
+namespaceLabels:
+  lab.stateracloud.com/openbao: "true"
+# The `oidc-signin` check (#927): sign in on the restored copy as an external identity provider user. The issuer
+# and the standing client are topology inputs; the user and the virtual authenticator's credential come from the
+# environment (see test/drill/README or web/e2e-drill/oidc.spec.ts). Both installs trust the same issuer. The
+# client must allow the redirect URL below (the drill forwards the restored API to that local port).
+oidc:
+  issuerUrl: https://idp.example.invalid/realms/drill
+  clientId: koinon-drill
+  clientSecretName: drill-oidc-client
+  localPort: 18080
 chartPath: charts/koinon
 # Base values for the chart on your cluster (relative to the repository root, or an absolute path). The
 # kind values (test/e2e/kind/koinon-values.yaml) are a starting point; set your storage class and image

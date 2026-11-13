@@ -80,3 +80,70 @@ func TestAnAbsolutePathIsKeptAndARelativeOneIsRootedInTheRepository(t *testing.T
 		t.Errorf("relative: %q", got)
 	}
 }
+
+func TestTheNamespaceManifestCarriesTheRunLabelAndTheOperatorsLabels(t *testing.T) {
+	got := drill.NamespaceManifest("koinon-drill-src-abc123", "abc123", map[string]string{"lab.example.invalid/store": "true", "a.example.invalid/x": "y"})
+	for _, want := range []string{
+		"name: koinon-drill-src-abc123\n",
+		drill.RunLabel + ": \"abc123\"\n",
+		"    a.example.invalid/x: \"y\"\n    lab.example.invalid/store: \"true\"\n", // sorted
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, got)
+		}
+	}
+	if plain := drill.NamespaceManifest("koinon-drill-src-abc123", "abc123", nil); strings.Count(plain, "\n    ") != 1 {
+		t.Errorf("no operator labels, want the name and the run label only:\n%s", plain)
+	}
+}
+
+func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
+	b, err := os.ReadFile("topology/lab.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, err := drill.LoadTopology("topology/lab.example.yaml", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top.NamespaceHook == "" || top.NamespaceLabels["lab.stateracloud.com/openbao"] != "true" || top.OIDC == nil {
+		t.Errorf("the lab example should show the hook, the label and the OIDC inputs: %+v", top)
+	}
+	if got := top.OIDC.Redirect(); got != "http://localhost:18080/auth/oidc/callback" {
+		t.Errorf("default redirect: %q", got)
+	}
+	dir := t.TempDir()
+	for name, mod := range map[string]func(string) string{
+		"the run label":   func(s string) string { return s + "\nnamespaceLabels: {" + drill.RunLabel + ": x}\n" },
+		"bad label key":   func(s string) string { return strings.Replace(s, "lab.stateracloud.com/openbao:", "'-bad key':", 1) },
+		"bad label value": func(s string) string { return strings.Replace(s, "openbao: \"true\"", "openbao: \"not valid!\"", 1) },
+		"http issuer":     func(s string) string { return strings.Replace(s, "issuerUrl: https://", "issuerUrl: http://", 1) },
+		"no client":       func(s string) string { return strings.Replace(s, "clientId: koinon-drill", "clientId: \"\"", 1) },
+	} {
+		f := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
+		if err := os.WriteFile(f, []byte(mod(string(b))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := drill.LoadTopology(f, "abc123"); err == nil {
+			t.Errorf("%s: loaded, want an error", name)
+		}
+	}
+}
+
+func TestTheOIDCValuesReachTheChartOnlyWhenSet(t *testing.T) {
+	gw := drill.Gateway{Namespace: "koinon-drill-os-src-abc123", Service: "openshell", ClientTLSSecret: "c"}
+	on, err := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil,
+		&drill.OIDC{IssuerURL: "https://idp.example.invalid/realms/drill", ClientID: "koinon-drill", ClientSecretName: "drill-oidc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"issuerUrl: https://idp.example.invalid/realms/drill", "clientId: koinon-drill", "existingSecret: drill-oidc", "redirectUrl: http://localhost:18080/auth/oidc/callback"} {
+		if !strings.Contains(on, want) {
+			t.Errorf("overlay lacks %q:\n%s", want, on)
+		}
+	}
+	off, _ := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil, nil)
+	if strings.Contains(off, "oidc") {
+		t.Errorf("no OIDC input, but the overlay has it:\n%s", off)
+	}
+}

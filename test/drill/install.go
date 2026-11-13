@@ -31,8 +31,9 @@ func FakeModelURL(fakesNS string) string {
 // install: the fake model's host in the egress policy, the install's own gateway, its gateway ID and its client TLS
 // Secret, and the hold. The base file is the kind quickstart's (test/e2e/kind/koinon-values.yaml).
 //
-// cp turns home checkpoints on (ADR 0032); a nil cp leaves them off.
-func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, storageClass string, cp *Checkpoints) (string, error) {
+// cp turns home checkpoints on (ADR 0032); a nil cp leaves them off. oidc, when set, turns the chart's OIDC login on
+// for the topology's issuer and client (group mappings and the like stay in the operator's values file).
+func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, storageClass string, cp *Checkpoints, oidc *OIDC) (string, error) {
 	pg := map[string]any{"cnpg": map[string]any{"storage": map[string]any{"size": "1Gi"}}}
 	if storageClass != "" {
 		pg["cnpg"].(map[string]any)["storage"].(map[string]any)["storageClass"] = storageClass
@@ -61,6 +62,13 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 		// The preflight reads the gateway's ConfigMap and workload by name; the chart's defaults name the
 		// shared "openshell" install, whose gateway_id is "openshell". The gateway chart's fullname is its release name.
 		"preflight": map[string]any{"openshell": map[string]any{"namespace": gw.Namespace, "configMap": gw.Service + "-config", "workload": gw.Service}},
+	}
+	if oidc != nil {
+		o := map[string]any{"enabled": true, "issuerUrl": oidc.IssuerURL, "clientId": oidc.ClientID, "redirectUrl": oidc.Redirect()}
+		if oidc.ClientSecretName != "" {
+			o["clientSecret"] = map[string]any{"existingSecret": oidc.ClientSecretName, "key": "client-secret"}
+		}
+		v["oidc"] = o
 	}
 	if cp != nil {
 		v["checkpoints"] = map[string]any{"enabled": true, "s3": map[string]any{"existingSecret": CheckpointSecretName, "bucket": CheckpointBucket}}
