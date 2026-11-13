@@ -139,6 +139,26 @@ edited.
   A webhook notification kind would let a real sink replace the lock; that is a product decision.
 - **RTO** gains the sub-time `dbosRecovery` (release to the recovered workflow).
 
+## Amendment 2026-11-13 (phase 3, #518)
+
+- **Two profiles.** A topology file names its `profile`, `kind` or `lab`, and `drill-result.json` carries it
+  (`topology.profile`). The release gate tells the results apart by that field, not by a file name. The lab's own
+  topology file (hosts, contexts, registries, storage classes) stays outside the repository; the repository holds the
+  schema and a made-up example (`test/drill/topology/lab.example.yaml`) that a test keeps loadable. Paths in a topology
+  may be absolute, so the lab's values file can live outside the tree.
+- **The browser check.** The lab profile has `browserSignin: true`, which adds the check `browser-signin`: a
+  Playwright spec (`web/e2e-drill`) signs in through the shipped web UI of the restored API. The spec is in the tree
+  only when the topology asks for it, because no drill spec skips (decision 3). Kind does not run it (the
+  alternative below stands: a browser for every check is slow; one sign-in on the lab is the limit).
+- **The gate.** `hack/release-gate.sh` demands, for an rc tag, a `drill-logs` artifact for the commit whose result
+  says that commit, profile `kind` and verdict `pass`; for a final tag, a `drill-result-lab.json` asset on the release
+  of the rc it promotes (the highest `vX.Y.Z-rc.N` whose commit has the final commit's tree), with that rc's commit,
+  profile `lab` and verdict `pass`. A check that is not `pass` or `known-gap` makes any result red. Known gaps do not
+  block, and the gate prints them. Whether a final tag may carry known gaps is for the v0.1.0 checklist (#313) to decide.
+- **Sign-in on the copy.** The drill seeds a fixed fake admin password, so the restored copy signs in with it. After a
+  real disaster an operator has no such password: the break-glass request (#512) makes one, and the same spec takes it
+  from `KOINON_DRILL_WEB_PASSWORD`.
+
 ## Alternatives considered
 
 - **Extend `backup-restore.sh`.** Cheapest now, but bash assertions give no report, test only an

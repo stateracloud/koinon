@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +18,12 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/stateracloud/koinon/internal/project"
+)
+
+// The two drill profiles (ADR 0109 decision 2).
+const (
+	ProfileKind = "kind"
+	ProfileLab  = "lab"
 )
 
 // NamespacePrefix starts every namespace the drill creates or touches. The sweep and the topology
@@ -44,6 +51,14 @@ type Install struct {
 // outside the repository, only this schema is in it).
 type Topology struct {
 	Name string `yaml:"name" json:"name"`
+	// Profile is "kind" (CI, the gate of an rc tag) or "lab" (the home lab, the gate of a final tag). The
+	// release gate (hack/release-gate.sh) reads it from drill-result.json, so a kind result cannot stand in
+	// for a lab one whatever the file is called.
+	Profile string `yaml:"profile" json:"profile"`
+	// BrowserSignin adds the `browser-signin` check: a Playwright spec signs in through the web UI on the
+	// restored copy (web/e2e-drill). Needs pnpm and a Chromium for Playwright on the machine that runs the
+	// drill. The lab profile turns it on; kind does not (ADR 0109: a browser for every check is too slow).
+	BrowserSignin bool `yaml:"browserSignin,omitempty" json:"browserSignin,omitempty"`
 	// Context is the kube context. The kubeconfig is never read from here: the run takes KUBECONFIG
 	// from its environment (run.sh refuses an empty one).
 	Context string  `yaml:"context" json:"context"`
@@ -51,7 +66,7 @@ type Topology struct {
 	Target  Install `yaml:"target" json:"target"`
 	// FakesNamespace holds the drill's fake model server and its object store.
 	FakesNamespace string `yaml:"fakesNamespace" json:"fakesNamespace"`
-	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root).
+	// ChartPath is the chart under test; ValuesFile the base values (relative to the repository root, or absolute).
 	ChartPath  string `yaml:"chartPath" json:"chartPath"`
 	ValuesFile string `yaml:"valuesFile" json:"valuesFile"`
 	// Gateway chart: an OCI reference with its version, and the values file for it.
@@ -76,6 +91,15 @@ type Topology struct {
 	HeldObserve time.Duration `yaml:"heldObserve" json:"heldObserve"`
 	// ReleasedWait bounds each wait of the released checks.
 	ReleasedWait time.Duration `yaml:"releasedWait" json:"releasedWait"`
+}
+
+// Path resolves a file named in the topology: relative to the repository root, or as it is when absolute (a
+// lab values file kept outside the repository).
+func (t *Topology) Path(repoRoot, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(repoRoot, p)
 }
 
 // LoadTopology reads and checks a topology file, and expands {run} with runID.
@@ -112,6 +136,12 @@ func (t *Topology) expand(runID string) {
 func (t *Topology) Validate() error {
 	if t.Context == "" {
 		return fmt.Errorf("context is empty: a drill always names its kube context")
+	}
+	if t.Profile != ProfileKind && t.Profile != ProfileLab {
+		return fmt.Errorf("profile %q is neither %q nor %q: the release gate tells the two results apart by it", t.Profile, ProfileKind, ProfileLab)
+	}
+	if t.Profile == ProfileLab && !t.BrowserSignin {
+		return fmt.Errorf("the lab profile needs browserSignin: true (#518: the lab gate includes the browser sign-in)")
 	}
 	for name, ns := range map[string]string{
 		"source.namespace": t.Source.Namespace, "source.gatewayNamespace": t.Source.GatewayNamespace,

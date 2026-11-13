@@ -629,3 +629,38 @@ Polling is the ingress of decision 7 for a code host that cannot reach Koinon. A
   all keys, Koinon stores a due time per row. Revalidating every poll and keeping the validator per
   credential follow Prow's ghcache (kubernetes-sigs/prow, Apache-2.0). No code was copied, and none
   from Daytona (AGPL).
+
+## Amendment (2026-11-12, issue #27): the sandbox creation rate lives in Postgres with the run limits
+
+Settles where the per-org limit on sandbox creations per minute lives (maintainer decision on the
+issue, 2026-11-11: with the run limits, not on the DBOS queue).
+
+- **Where.** In Postgres, next to `max_concurrent_runs`, tuned in `org_settings` and audited with it
+  (`org.run_limits.set`, which now carries `sandbox_creations_per_minute`; `koinon-api org-limits set
+  --sandbox-creations-per-minute`). A DBOS queue limit would not see the reconciler's creations, which
+  are not queue items, and would be a second place for per-org limits.
+- **What counts.** A creation is a `CreateSandbox` or a `StartSandbox` of a stopped sandbox: both are the
+  cold starts a burst of schedules causes. Each is a row in `sandbox_creations` (migration 00086, keyed
+  `(org_id, id)`, composite foreign key to the agent), written by the reconciler before the backend call
+  in the same transaction that counts the last minute. A per-org advisory lock serializes concurrent
+  reconciler workers, so the limit is exact, not a racing bound. A creation whose backend call fails gives
+  its slot back when the call certainly did not make the sandbox (a timeout, a cancellation or an
+  unavailable or unknown outcome keeps the slot spent, which errs toward fewer creations), so an agent
+  that keeps failing cannot starve the org's healthy agents (the agent's own
+  unhealthy marking and the pass interval bound the retries). The writer prunes rows older than an hour.
+  The wake-for-backup start in the home gate of a recreate is not counted; the recreate cap bounds it.
+- **Default 10 per org per minute**, 1 to 10000 in `org_settings.sandbox_creations_per_minute` (NULL is
+  the default).
+- **A burst queues; it does not fail.** An agent held back with no sandbox records phase
+  `WaitingForCreationRate` and a stable message; one with a stopped sandbox keeps its observed phase and
+  only the message changes. The time to the next slot is in the log. Its runs stay queued or starting and
+  the next reconciler pass retries. The
+  sandbox wait cap (an hour) and `queue_wait` requeue apply as before, so at the default 10 a minute a
+  burst at the 20-run cap clears in two minutes, far inside the 5-minute wait. Another org is never
+  affected. The counter `koinon_reconciler_sandbox_creations_held_total` has no org label (ADR 0023).
+- **Limits, not fixed here.** Slots go to agents in the order the reconciler visits them, not first in,
+  first out, so under a sustained overload beyond the rate a later agent can wait until the sandbox wait
+  cap fails its run. A held pass repeats the pre-create steps (key and GitHub record ensure), and the run
+  failure cause does not yet name the creation rate. Both are follow-ups.
+- **Not a run claim condition.** `run_claimable` is unchanged: a held run keeps its place, and a sandbox
+  that is already up serves it without a slot.
