@@ -51,7 +51,7 @@
 #       (pr-wait.sh's code passes through).
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
-# Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS replace the helper scripts; PR_MERGE_NEEDS_E2E replaces needs-e2e.sh
+# Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS, PR_MERGE_CLAIM replace the helper scripts; PR_MERGE_NEEDS_E2E replaces needs-e2e.sh
 # (with PR_MERGE_TEST=1).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -123,6 +123,26 @@ if [ "$(jq -r '.isDraft' <<<"$json")" = true ]; then
   echo "DRAFT: PR $pr is a draft; mark it ready for review first (hack/ship.sh --ready, gh pr ready)" >&2
   exit 5
 fi
+
+# Claim warning (#961; warn only, never refuses): the merge releases the claim (ADR 0104), so tell the caller when an
+# issue this PR closes is held by another lane or another login. The caller is the gh login (KOINON_CLAIM_HUMAN
+# overrides) and KOINON_LANE (default main). `claim.sh show` output is `holder: <login>[/host/session]#<lane>`.
+claim_sh=${PR_MERGE_CLAIM:-$here/claim.sh}
+me_lane=${KOINON_LANE:-main}
+me_login=""
+for n in $(jq -r '.closingIssuesReferences[]?.number' <<<"$json"); do
+  shown=$("$claim_sh" show "$n" 2>/dev/null) || continue
+  [[ $shown == *": held"* ]] || continue
+  holder=$(sed -n 's/^ *holder: //p' <<<"$shown" | head -n1)
+  [ -n "$holder" ] || continue
+  h_login=${holder%%#*}
+  h_login=${h_login%%/*}
+  if [[ $holder == *'#'* ]]; then h_lane=${holder##*#}; else h_lane=main; fi
+  [ -n "$me_login" ] || me_login=${KOINON_CLAIM_HUMAN:-$(gh api user --jq .login 2>/dev/null || true)}
+  if [ "${h_login,,}" != "${me_login,,}" ] || [ "$h_lane" != "$me_lane" ]; then
+    echo "pr-merge: WARNING: #$n is claimed by $holder, not your lane ($me_login#$me_lane); ask the holder or your human" >&2
+  fi
+done
 
 # --admin is for `.github/**` pull requests only (ADR 0105): judged on the PR's own file list, not on the local
 # checkout. `gh pr view --json files` stops at 100 files, so page through the API. Fail closed: an unreadable or

@@ -18,6 +18,7 @@ mkdir -p "$tmp/bin"
 export FAKE_DIR="$tmp/fake" PATH="$tmp/bin:$PATH"
 export PR_MERGE_WAIT="$tmp/bin/wait"
 export PR_MERGE_THREADS="$tmp/bin/threads" PR_MERGE_TEST=1 GH_REPO=o/r
+export PR_MERGE_CLAIM="$tmp/bin/claimshow"
 export PR_MERGE_REQUIRED="$tmp/required.txt"
 
 printf '# comment\naggregator go\nquick checks\nexternal dco\nadvisory flavors\n' >"$PR_MERGE_REQUIRED"
@@ -32,6 +33,7 @@ apijq() { # <file> <gh args...>: print the file through the call's --jq filter
   jq -r "$q" "$f"
 }
 case "$1 $2" in
+"api user") echo "${ME_LOGIN:-me}" ;;
 "pr view")
   sed "s/\"mergeStateStatus\":\"CLEAN\"/\"mergeStateStatus\":\"${MSTATE:-CLEAN}\"/" "$FAKE_DIR/pr.json" ;;
 "pr merge") exit "${MERGE_RC:-0}" ;;
@@ -72,6 +74,13 @@ show)
   esac ;;
 *) exit 2 ;;
 esac
+SH
+cat >"$tmp/bin/claimshow" <<'SH'
+#!/usr/bin/env bash
+# claim.sh show <N> stand-in: CLAIM_HOLDER unset prints "no claim"; else a held claim in claim.sh's format.
+echo "showclaim $*" >>"$FAKE_DIR/calls"
+if [ -z "${CLAIM_HOLDER:-}" ]; then echo "#$2: no claim"; exit 0; fi
+printf '#%s: held\n  holder: %s\n  lane:   x\n' "$2" "$CLAIM_HOLDER"
 SH
 cat >"$tmp/bin/wait" <<'SH'
 #!/usr/bin/env bash
@@ -614,5 +623,19 @@ for b in err empty; do
   CICH_BODY="$tmp/cich-$b.sh" PR_MERGE_CI_CHANGES="" PR_MERGE_NEEDS_E2E="" run 7 --admin
   check "a base copy that gives no answer ($b) is treated as flavors needed" 10 nomerge
 done
+
+# Claim warning (#961): warn only, never refuse; silent for no claim or the caller's own lane.
+for c in "other lane|me#lane2|1" "other login|you#main|1" "other login, old holder|you/host/s1#main|1" "own lane|me#main|0" "own lane, no lane suffix|me|0" "no claim||0"; do
+  IFS='|' read -r name holder want <<<"$c"
+  setup false "$green"
+  CLAIM_HOLDER=$holder run 7
+  check "claim warning ($name): still merges" 0 merge
+  got=0
+  grep -q 'WARNING: #647 is claimed by' <<<"$out" && got=1
+  [ "$got" = "$want" ] || { echo "FAIL: claim warning ($name): want $want, got $got: $out" >&2; fail=1; }
+  [ "$want" = 0 ] || grep -q "claimed by $holder, .*ask the holder or your human" <<<"$out" || { echo "FAIL: warning names the holder ($name)" >&2; fail=1; }
+done
+KOINON_LANE=lane2 CLAIM_HOLDER="me#lane2" run 7
+grep -q 'WARNING' <<<"$out" && { echo "FAIL: KOINON_LANE=lane2 is the own lane" >&2; fail=1; }
 
 exit "$fail"

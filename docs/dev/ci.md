@@ -935,8 +935,7 @@ draft, runs `pr-wait.sh --checks` (`--require e2e` is gone and exits 64),
 reads every required context of `hack/ci-required.txt` on the head SHA with the shared verdict (below; success or
 skipped), re-reads the PR (not OPEN: exit 3; head not origin's branch tip: exit 6 `STALE-HEAD`), runs
 `gh pr merge --merge` (`--admin`, else `--auto`), then reads the PR again and prints what GitHub did, not what was asked: `merged`, `added to the merge queue` (only when GitHub says the PR is in the queue), `auto-merge armed but NOT queued: ... required review` (a PR blocked by `required_reviewers` or a rule that is no failed check: it merges only after that is met) or `auto-merge enabled`, and only after that
-succeeded a PR comment with the head SHA and the number of contexts it read. It does not call
-`claim.sh`, and `--lane` is a usage error (ADR 0104). `pr-wait.sh --checks` exits 5 on a draft. After
+succeeded a PR comment with the head SHA and the number of contexts it read. It does not take or release a claim, and `--lane` is a usage error (ADR 0104). It reads the claim of each issue the PR closes (`claim.sh show`) and, when the holder is another login or another lane than yours (`KOINON_LANE`, default `main`), prints one `WARNING: #N is claimed by <holder> ... ask the holder or your human` line and goes on (#961: warn only, never refuses; no claim or your own lane prints nothing). `pr-wait.sh --checks` exits 5 on a draft. After
 `ready_for_review` it ignores only the draft's `ci` workflow runs, in every mode (with or without
 `--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
 re-run of a draft run is ignored too). A draft run is green by skipping, so it must never decide. A red or
