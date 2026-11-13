@@ -42,7 +42,7 @@ fakesNamespace: koinon-drill-fakes-{run}
 # bring the OIDC client secret or a registry pull secret in). Objects in it must not name a namespace.
 namespaceHook: /etc/example/koinon-drill/namespace-hook.yaml
 namespaceLabels:
-  lab.stateracloud.com/openbao: "true"
+  example.invalid/secret-store: "true"
 # The `oidc-signin` check (#927): the two personas sign in through an external identity provider, on the source
 # before it is lost and on the restored copy, and each keeps its role. The issuer and the standing client are
 # topology inputs. The client is PUBLIC (PKCE only; the chart's clientSecret stays empty). The drill gives the

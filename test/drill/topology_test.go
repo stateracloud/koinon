@@ -106,7 +106,7 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if top.NamespaceHook == "" || top.NamespaceLabels["lab.stateracloud.com/openbao"] != "true" || top.OIDC == nil {
+	if top.NamespaceHook == "" || top.NamespaceLabels["example.invalid/secret-store"] != "true" || top.OIDC == nil {
 		t.Errorf("the lab example should show the hook, the label and the OIDC inputs: %+v", top)
 	}
 	if got := drill.OIDCRedirect(drill.OIDCSourcePort); got != "http://127.0.0.1:18181/auth/oidc/callback" {
@@ -117,9 +117,11 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 	}
 	dir := t.TempDir()
 	for name, mod := range map[string]func(string) string{
-		"the run label":   func(s string) string { return s + "\nnamespaceLabels: {" + drill.RunLabel + ": x}\n" },
-		"bad label key":   func(s string) string { return strings.Replace(s, "lab.stateracloud.com/openbao:", "'-bad key':", 1) },
-		"bad label value": func(s string) string { return strings.Replace(s, "openbao: \"true\"", "openbao: \"not valid!\"", 1) },
+		"the run label": func(s string) string { return s + "\nnamespaceLabels: {" + drill.RunLabel + ": x}\n" },
+		"bad label key": func(s string) string { return strings.Replace(s, "example.invalid/secret-store:", "'-bad key':", 1) },
+		"bad label value": func(s string) string {
+			return strings.Replace(s, "secret-store: \"true\"", "secret-store: \"not valid!\"", 1)
+		},
 		"http issuer":     func(s string) string { return strings.Replace(s, "issuerUrl: https://", "issuerUrl: http://", 1) },
 		"no client":       func(s string) string { return strings.Replace(s, "clientId: koinon-drill", "clientId: \"\"", 1) },
 		"one group":       func(s string) string { return strings.Replace(s, "group: koinon-users", "group: koinon-admins", 1) },
@@ -137,8 +139,10 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 
 func TestTheOIDCValuesReachTheChartOnlyWhenSet(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-src-abc123", Service: "openshell", ClientTLSSecret: "c"}
-	oidc := &drill.OIDC{IssuerURL: "https://idp.example.invalid/realms/drill", ClientID: "koinon-drill",
-		Admin: drill.Persona{Group: "koinon-admins"}, Member: drill.Persona{Group: "koinon-users"}}
+	oidc := &drill.OIDC{
+		IssuerURL: "https://idp.example.invalid/realms/drill", ClientID: "koinon-drill",
+		Admin: drill.Persona{Group: "koinon-admins"}, Member: drill.Persona{Group: "koinon-users"},
+	}
 	for port, redirect := range map[int]string{
 		drill.OIDCSourcePort: "redirectUrl: http://127.0.0.1:18181/auth/oidc/callback",
 		drill.OIDCTargetPort: "redirectUrl: http://127.0.0.1:18182/auth/oidc/callback",
@@ -147,8 +151,10 @@ func TestTheOIDCValuesReachTheChartOnlyWhenSet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"issuerUrl: https://idp.example.invalid/realms/drill", "clientId: koinon-drill", redirect,
-			"koinon-admins: admin", "koinon-users: member"} {
+		for _, want := range []string{
+			"issuerUrl: https://idp.example.invalid/realms/drill", "clientId: koinon-drill", redirect,
+			"koinon-admins: admin", "koinon-users: member",
+		} {
 			if !strings.Contains(on, want) {
 				t.Errorf("overlay for port %d lacks %q:\n%s", port, want, on)
 			}

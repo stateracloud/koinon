@@ -542,8 +542,8 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		archive.session = sql(ctx, &src, fmt.Sprintf("SELECT harness_session_id FROM tasks WHERE id = '%s'", archive.task))
 		Expect(archive.session).NotTo(BeEmpty(), "the marker run made a harness session")
 
-		By("two local users, through koinon-api users create: an org admin and a member of the default org")
-		for _, u := range []struct{ name, role string }{{drill.OrgAdminUser, "admin"}, {drill.MemberUser, "member"}} {
+		By("three local users, through koinon-api users create: an org admin, a member and a break-glass target (members of the default org)")
+		for _, u := range []struct{ name, role string }{{drill.OrgAdminUser, "admin"}, {drill.MemberUser, "member"}, {drill.BreakGlassUser, "member"}} {
 			out, err := kube.ExecStdin(ctx, src.in.Namespace, "deploy/"+src.name("api"), drill.SeededPassword, "koinon-api", "users", "create",
 				"--org", "default", "--username", u.name, "--role", u.role, "--password-stdin", "--must-change-password=false")
 			must(err, "users create "+u.name+": "+out)
@@ -912,11 +912,12 @@ stringData:
 			By("negative: a wrong password is refused for a seeded user")
 			_, err := e2eclient.New(dst.client.Base).Login(ctx, drill.MemberUser, drill.SeededPassword+"-wrong")
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("401"), "a wrong password is an authentication failure, not another error")
 		})
 
 		// The seeded approval (#927): still pending on the restored copy, with the same exact call, and a
 		// member cannot decide it (ADR 0049).
-		It("keeps the pending approval, and a member cannot decide it", Label("pending-approval"), func(ctx SpecContext) {
+		It("keeps the pending approval; a member cannot decide it and the org admin can", Label("pending-approval"), func(ctx SpecContext) {
 			needs("release", "seed")
 			Expect(pending.approval).NotTo(BeEmpty(), "the seed made an approval")
 			read := func(c *e2eclient.Client) *approvalv1alpha1.Approval {
@@ -938,12 +939,21 @@ stringData:
 			_, err = mem.Login(ctx, drill.MemberUser, drill.SeededPassword)
 			must(err, "log in as the member")
 			_, err = mem.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: dst.org, ApprovalId: pending.approval, ArgsSha256: pending.argsSHA256})
-			Expect(err).To(HaveOccurred(), "a member must not approve")
+			Expect(connect.CodeOf(err)).To(Equal(connect.CodePermissionDenied), "a member must not approve: %v", err)
 			Expect(read(ad).GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
+
+			By("the org admin approves it on the restored copy, and the parked call runs exactly once")
+			_, err = ad.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: dst.org, ApprovalId: pending.approval, ArgsSha256: pending.argsSHA256})
+			must(err, "the org admin approves on the restored copy")
+			Eventually(func(g Gomega) {
+				a := read(ad)
+				g.Expect(a.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), a.GetError())
+				g.Expect(a.GetExecutions()).To(BeEquivalentTo(1))
+			}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
 		})
 
 		// The break-glass request (#512) on the restore target, with an age key made when the suite started
-		// (#927): the operator regains the org admin's login without kubectl exec.
+		// (#927): the operator regains a local user's login (the check resets drill-breakglass, which nothing else uses) without kubectl exec.
 		It("signs in with the result of a break-glass request", Label("recovery-signin"), func(ctx SpecContext) {
 			needs("release", "seed")
 			ns := dst.in.Namespace
@@ -989,23 +999,30 @@ spec:
   requesterGroups: %s
   nonce: %s
   recipientPublicKey: %s
-`, name, ns, drill.OrgAdminUser, user, groups, nonce, recoveryKey.Recipient().String())
+`, name, ns, drill.BreakGlassUser, user, groups, nonce, recoveryKey.Recipient().String())
 				_, err := kube.KubectlStdin(ctx, cr, "create", "-f", "-")
 				must(err, "create the PlatformAdminRecovery")
 			}
-			phase := func(name string) (string, string) {
-				GinkgoHelper()
+			phase := func(name string) (string, string, error) {
 				out, err := kube.Kubectl(ctx, "-n", ns, "get", "platformadminrecoveries.recovery.koinon.dev", name, "-o", "jsonpath={.status.phase}{\"\\n\"}{.status.reason}")
-				must(err, "read the request")
 				p, r, _ := strings.Cut(out, "\n")
-				return p, r
+				return p, r, err
+			}
+			// until polls the request to a phase; a transient kubectl error is retried and a refusal names its reason.
+			until := func(name, want string) {
+				GinkgoHelper()
+				Eventually(func(g Gomega) {
+					p, reason, err := phase(name)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(p).To(Equal(want), "request %s: reason %q", name, reason)
+				}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 			}
 			nb := make([]byte, 16)
 			_, _ = rand.Read(nb)
 			nonce := hex.EncodeToString(nb)
 			name := "drill-" + strings.ToLower(nonce[:8])
 			request(name, nonce)
-			Eventually(func() string { p, _ := phase(name); return p }).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal("Done"))
+			until(name, "Done")
 
 			sealed, err := kube.Kubectl(ctx, "-n", ns, "get", "platformadminrecoveries.recovery.koinon.dev", name, "-o", "jsonpath={.status.sealedResult}")
 			must(err, "read the sealed result")
@@ -1018,7 +1035,7 @@ spec:
 				ChangeRequired     bool
 			}
 			must(json.Unmarshal(plain, &res), "the result")
-			Expect(res.Username).To(Equal(drill.OrgAdminUser))
+			Expect(res.Username).To(Equal(drill.BreakGlassUser))
 			Expect(res.Password).NotTo(BeEmpty())
 			Expect(bytes.Contains([]byte(sealed), []byte(res.Password))).To(BeFalse(), "the password is only in the sealed form")
 
@@ -1026,14 +1043,14 @@ spec:
 			change, err := c.Login(ctx, res.Username, res.Password)
 			must(err, "log in with the break-glass password")
 			Expect(change).To(BeTrue(), "a reset password must be changed at the first login")
-			_, err = e2eclient.New(dst.client.Base).Login(ctx, drill.OrgAdminUser, drill.SeededPassword)
+			_, err = e2eclient.New(dst.client.Base).Login(ctx, drill.BreakGlassUser, drill.SeededPassword)
 			Expect(err).To(HaveOccurred(), "the reset replaced the seeded password")
 
 			By("negative: the same nonce again is refused")
 			dup := "drill-dup-" + strings.ToLower(nonce[:8])
 			request(dup, nonce)
-			Eventually(func() string { p, _ := phase(dup); return p }).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal("Refused"))
-			_, reason := phase(dup)
+			until(dup, "Refused")
+			_, reason, _ := phase(dup)
 			Expect(reason).To(ContainSubstring("nonce"))
 		})
 

@@ -13,7 +13,8 @@
 #   repo        owner/name; the pending approval whose target is github:<owner>/<name>
 # The login comes from the environment, never from an argument (an argument shows in the process list):
 #   KOINON_APPROVER_USER and KOINON_APPROVER_PASSWORD.
-# Exit: 0 approved (or already approved with the same hash), 1 an API refusal, 2 usage, 3 no pending approval.
+# Nothing secret is on a command line: the login body goes to curl on stdin and the Cookie header through a 0600 file.
+# The approval list is read as one page. Exit: 0 approved, 1 an API refusal, 2 usage, 3 no pending approval.
 # With KOINON_APPROVER_WAIT=<seconds> the script waits that long for the approval to appear (the run parks on it
 # some time after the task starts); default 0 (look once).
 
@@ -38,16 +39,19 @@ svc=$base/koinon.approval.v1alpha1.ApprovalService
 # cookie_header builds the Cookie header from the jar. curl's own jar handling would not send the Secure
 # __Host- session cookie over the plain-HTTP port-forward the drill uses.
 cookie_header() {
-  awk -F'\t' '/^#HttpOnly_/ || !/^#/ { if (NF >= 7) printf "%s%s=%s", sep, $6, $7; sep="; " }' "$jar"
+  awk -F'\t' 'BEGIN { printf "Cookie: " } /^#HttpOnly_/ || !/^#/ { if (NF >= 7) printf "%s%s=%s", sep, $6, $7; sep="; " }' "$jar"
 }
 
 # rpc <Method> <json>: a Connect unary call with the session; prints the body. The Connect-Protocol-Version
 # header is the CSRF guard of cookie sessions (ADR 0022). A non-200 answer prints the body and fails.
 rpc() {
-  local out status
+  local out hdr status
   out=$(mktemp "${TMPDIR:-/tmp}/approve-pr.XXXXXX")
+  hdr=$(mktemp "${TMPDIR:-/tmp}/approve-pr-hdr.XXXXXX") # the session cookie, not on the command line
+  cookie_header >"$hdr"
   status=$(curl -sS -o "$out" -w '%{http_code}' -X POST "$svc/$1" \
-    -H 'Content-Type: application/json' -H 'Connect-Protocol-Version: 1' -H "Cookie: $(cookie_header)" -d "$2")
+    -H 'Content-Type: application/json' -H 'Connect-Protocol-Version: 1' -H "@$hdr" --data-binary @- <<<"$2")
+  rm -f "$hdr"
   if [[ $status != 200 ]]; then
     echo "$1: HTTP $status: $(cat "$out")" >&2
     rm -f "$out"
@@ -59,8 +63,9 @@ rpc() {
 
 umask 077
 : >"$jar"
-login=$(jq -n --arg u "$KOINON_APPROVER_USER" --arg p "$KOINON_APPROVER_PASSWORD" '{username: $u, password: $p}')
-status=$(curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -X POST "$base/auth/login" -H 'Content-Type: application/json' -d "$login")
+# jq reads the login from its environment and curl reads the body from stdin: neither has it in its arguments.
+status=$(jq -n '{username: env.KOINON_APPROVER_USER, password: env.KOINON_APPROVER_PASSWORD}' |
+  curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -X POST "$base/auth/login" -H 'Content-Type: application/json' --data-binary @-)
 [[ $status == 200 ]] || { echo "login as $KOINON_APPROVER_USER: HTTP $status" >&2; exit 1; }
 grep -q 'session' "$jar" || { echo "login answered 200 but set no session cookie" >&2; exit 1; }
 

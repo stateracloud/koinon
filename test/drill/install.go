@@ -12,10 +12,13 @@ import (
 // SeededPassword is the fixed fake password the seed gives the bootstrap admin.
 const SeededPassword = "koinon_test_not-a-real-password"
 
-// The local users the seed adds (#927): an org admin and a member of the default org, both with SeededPassword.
+// The local users the seed adds (#927): an org admin, a member and a break-glass target (a member), all of the default org with SeededPassword.
 const (
 	OrgAdminUser = "drill-admin"
 	MemberUser   = "drill-member"
+	// BreakGlassUser is a third local user (a member) that only the recovery-signin check resets, so the
+	// password of the others stays what the seed set.
+	BreakGlassUser = "drill-breakglass"
 	// ApprovalTask is the message that makes the fake model call the fake MCP server's ask-tier write tool.
 	ApprovalTask = "drill-approval: please call the tracker's write tool."
 	// ApprovalTool is that tool as the agent sees it (<org>-<server>-ask_<tool>).

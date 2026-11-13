@@ -37,7 +37,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if body.get("password") != "koinon_test_not-a-real-password":
                 return self.reply(401, {"error": "bad login"})
             return self.reply(200, {"passwordChangeRequired": False},
-                              [("Set-Cookie", "koinon_session=fake-session-token; Path=/; HttpOnly")])
+                              [("Set-Cookie", "__Host-koinon_session=fake-session-token; Path=/; Secure; HttpOnly")])
         if "fake-session-token" not in self.headers.get("Cookie", ""):
             return self.reply(401, {"code": "unauthenticated"})
         if self.headers.get("Connect-Protocol-Version") != "1":
