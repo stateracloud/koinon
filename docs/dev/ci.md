@@ -355,6 +355,10 @@ persona, no key material) in the result directory for the lab to write back, wha
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
 scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
 
+The check `enforcement` (#955) runs `koinon-api run-evidence export` (#926) in the target's api pod for every run of the restored
+copy and reads the sandbox enforcement mode it prints. It passes only with at least one run and `enforce` on every run; `unknown`, `audit`,
+`none` and zero runs fail. It runs on every profile (kind and lab); `hack/release-gate.sh` reads checks generically and needs no change.
+
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
 `hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.
@@ -663,7 +667,18 @@ settings. `hack/apt-retries-test.sh` (the `scripts` job) fails on any apt call w
 chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it when envtest does
 not start.
 
-Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, gitleaks, kind, ko, the
+Every Dockerfile in the tree (`hack/testdata/` fixtures excepted) is linted by `hack/dockerfile-lint.sh`
+(#175; preflight gate `dockerfile`, steps of the `scripts` CI job). It runs hadolint, pinned in
+`hack/versions.env` and configured by `.hadolint.yaml` (warning and above fail), and an awk pass for the two
+rules hadolint has no rule for: a base image is pinned by `@sha256:` digest (also through an ARG default;
+an ARG without a default is the caller's), and no ENV or ARG is named like a secret (TOKEN, SECRET,
+PASSWORD, API_KEY, ...; a `_FILE` or `_PATH` name is fine; values are gitleaks' job). An exception is
+`# dockerfile-lint: allow=digest <reason>` (or `allow=secret`) on the line above the instruction; for a
+hadolint rule, `# hadolint ignore=DLxxxx` with a reason. Without hadolint the script exits 3
+(INCOMPLETE) after the awk pass; CI sets `KOINON_REQUIRE=hadolint`, which makes that a failure.
+Apt retries stay in `hack/apt-retries-test.sh`. `hack/dockerfile-lint-test.sh` tests the rules offline.
+
+Pinned tools and manifests from GitHub releases (shellcheck, actionlint, zizmor, hadolint, gitleaks, kind, ko, the
 gateway-api, CNPG, kube-network-policies and agent-sandbox manifests) are fetched with
 `hack/fetch-pinned.sh URL SHA256 DEST`: `curl --retry 5 --retry-all-errors --retry-delay 5`, then
 the sha256 check, and a file already there with the right sha256 is not fetched again (#431;

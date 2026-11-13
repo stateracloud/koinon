@@ -8,8 +8,8 @@
 # starts the drill (e2e-kind.yml, up to two hours), the gate first waits for that run to finish
 # (hack/release-drill-wait.sh, which only waits and never judges) and then judges the drill-result.json it left;
 # the gate stays the one judge and fails closed. The result it judged is attached to the draft release as
-# drill-result.json (#928). The `test-images` job also publishes the fake model server and the RT1 fixture
-# images at the tagged commit; they are test images for the lab drills, not product images.
+# drill-result.json (#928). The `test-images` job also publishes the fake model and fake MCP servers and the RT1
+# fixture images at the tagged commit; they are test images for the lab drills, not product images.
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
@@ -143,8 +143,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          id=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)] | first | .id // empty")
-          [[ -n $id ]] || { echo "no draft release for $TAG" >&2; exit 1; }
+          # The list can lag a draft created a moment before (rc.20, run 43413276481, #958), and
+          # releases/tags/{tag} does not return drafts, so look again for up to about 60 s.
+          id=
+          for _ in $(seq 12); do
+            id=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)] | first | .id // empty")
+            [[ -n $id ]] && break
+            sleep 5
+          done
+          [[ -n $id ]] || { echo "no draft release for $TAG after 60 s" >&2; exit 1; }
           jq -e '.commit and .verdict == "pass"' drill-result/drill-result.json >/dev/null
           gh api --method POST "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=drill-result.json" \
             -H 'Content-Type: application/json' --input drill-result/drill-result.json >/dev/null
@@ -274,8 +281,9 @@ jobs:
           hack/release-harness.sh --merge "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" \
             "$(<harness-digests/amd64)" "$(<harness-digests/arm64)" >>"$GITHUB_OUTPUT"
 
-  # The test images the lab drills need (#928): the fake model server and the RT1 fixture images, built at the
-  # tagged commit and pushed under the same repository path as the release images (koinon-fakemodel, rt1-*; tags
+  # The test images the lab drills need (#928, #952): the fake model and fake MCP servers and the RT1 fixture
+  # images, built at the tagged commit and pushed under the same repository path as the release images
+  # (koinon-fakemodel, koinon-fakemcp, rt1-*; tags
   # without the "v"). TEST images, not product images: the chart never references them and nothing installs them
   # in production. The lab mirrors them by digest because it cannot build images. Signed by `sign-test-images`.
   test-images:

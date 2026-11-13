@@ -158,6 +158,8 @@ edited.
 - **Sign-in on the copy.** The drill seeds a fixed fake admin password, so the restored copy signs in with it. After a
   real disaster an operator has no such password: the break-glass request (#512) makes one, and the same spec takes it
   from `KOINON_DRILL_WEB_PASSWORD`.
+- **Sandbox enforcement.** Every run on the restored copy reports sandbox enforcement `enforce`, read through
+  `koinon-api run-evidence export` in the target's api pod (#955, ADR 0045). This is a released check.
 
 ## Alternatives considered
 

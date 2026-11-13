@@ -234,7 +234,8 @@ Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again w
 
 The workflow's `test-images` job publishes the images that the lab drills need, built at the tagged
 commit, under the release images' repository path: `ghcr.io/<owner>/<repo>/koinon-fakemodel` (the fake model
-server of `test/drill`, `cmd/koinon-fakemodel`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
+server of `test/drill`, `cmd/koinon-fakemodel`), `ghcr.io/<owner>/<repo>/koinon-fakemcp` (the fake MCP server,
+`cmd/koinon-fakemcp`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
 images of `hack/rt1-fixtures-build.sh`; `rt1-prometheus`, `rt1-searxng` and `rt1-searxng-mcp` are copies of
 pinned upstream images, unmodified). Tags are the release version without the `v` (the upstream copies also
 keep their upstream tag). The lab cannot build images, so it mirrors them by digest; the job's artifact
@@ -244,6 +245,15 @@ signing of the release images). These are **test images, not product images**: t
 them, nothing installs them in production, and they carry no support promise. A signature says only that this
 workflow pushed the digest at that commit. A new GHCR package starts private: after the first rc, make each
 public in its package settings if the lab pulls anonymously (as under [Make the packages public](#make-the-packages-public)).
+
+Adding an image needs no package setup: the first push creates the package. GHCR links a new package to the
+repository (which is what gives the workflow's `GITHUB_TOKEN` write access) asynchronously, so the first
+manifest PUT can answer `DENIED: requested access to the resource is denied` while the blobs and the SBOM go
+up (#950; v0.1.0-rc.19 needed one re-run per new package). `hack/push-retry-lib.sh` retries a push that failed
+with DENIED, 5 attempts with 3, 6, 12 and 24 seconds between them (`PUSH_RETRY_ATTEMPTS`, `PUSH_RETRY_DELAY`);
+any other error fails at once. A DENIED that lasts all five attempts (about 45 seconds of waiting) is a real permission problem: check the
+package's **Manage Actions access** and the job's `packages: write`. The release images pushed by GoReleaser
+and the `flavors` jobs are not covered; if a new image of those hits it, re-run the job and open an issue.
 
 ## Make the packages public
 

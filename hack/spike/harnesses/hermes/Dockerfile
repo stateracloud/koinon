@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Spike harness: Hermes Agent v0.22.3 from its official image (Python 3.14 in /opt/hermes).
 # HERMES_HOME moves state to the sandbox workspace; the config is copied there on start.
+# dockerfile-lint: allow=digest spike under hack/spike, built by hand for an experiment and never shipped; the version tag is the spike subject
 FROM docker.io/nousresearch/hermes-agent:v0.22.3
+# spike under hack/spike, built by hand for an experiment and never shipped; no runtime user hardening wanted
+# hadolint ignore=DL3002
 USER root
 COPY config.yaml /etc/koinon/hermes/config.yaml
 COPY koinon-hermes /usr/local/bin/koinon-hermes

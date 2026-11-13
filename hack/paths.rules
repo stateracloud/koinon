@@ -202,6 +202,8 @@ gate shell \.sh$
 gate actionlint ^\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)$
 gate zizmor ^\.github/(workflows/[^/]*\.ya?ml|actions/.*\.ya?ml|zizmor\.ya?ml|dependabot\.ya?ml)$
 gate runnerlint ^(\.github/(workflows/[^/]*\.ya?ml|actionlint\.ya?ml)|hack/runner-lint[^/]*\.sh)$
+gate dockerfile (^|/)(Dockerfile[^/]*|[^/]*\.Dockerfile)$
+gate dockerfile ^(\.hadolint\.ya?ml|hack/dockerfile-lint[^/]*\.sh|hack/versions\.env)$
 gate pinned \.sh$
 gate pinned ^\.github/workflows/[^/]*\.yml$
 gate pinned ^\.github/actions/
@@ -302,8 +304,10 @@ script-skip - hack/flavor-tag-test.sh # the earlier name, an alias link, kept un
 script-skip - hack/wt-test.sh
 script-skip - hack/wt-install-test.sh
 script-skip - hack/e2e-bisect-test.sh
-# Covered by another preflight gate (versions, mktemp, pinned, bash5, audit, adr).
+# Covered by another preflight gate (versions, dockerfile, mktemp, pinned, bash5, audit, adr).
 script-skip - hack/versions-check.sh
+script-skip - hack/dockerfile-lint-test.sh
+script-skip - hack/dockerfile-lint.sh
 script-skip - hack/mktemp-lint-test.sh
 script-skip - hack/mktemp-lint.sh
 script-skip - hack/pinned-download-lint.sh

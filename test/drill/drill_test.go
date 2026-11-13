@@ -1398,6 +1398,31 @@ spec:
 			Expect(err).To(HaveOccurred(), "the source's session cookie is accepted by the target (ADR 0110 decision 3)")
 			Expect(connect.CodeOf(err)).To(Equal(connect.CodeUnauthenticated), "the target must refuse the source's session cookie as unauthenticated (ADR 0110 decision 3), got: %v", err)
 		})
+
+		It("reports sandbox enforcement enforce for every run", Label("enforcement"), func(ctx SpecContext) {
+			needs("release")
+			// The evidence is read through `koinon-api run-evidence export` in the target's api pod (#926, #955):
+			// the code path the product and the lab use. Only the enforcement field is read, which no scrubber
+			// touches. The scrubber is skipped (--no-org-secrets) because the api pod mounts no KEK dir, and the drill
+			// reads only the summary's Enforcement line. The api image is distroless (no shell, no rm), so the
+			// export directory stays in the pod's /tmp until the drill's namespace is torn down.
+			rows := sql(ctx, &dst, "SELECT org_id || ' ' || id FROM runs ORDER BY id")
+			modes := map[string]string{}
+			for _, row := range strings.Split(rows, "\n") {
+				if strings.TrimSpace(row) == "" {
+					continue
+				}
+				org, run, ok := strings.Cut(strings.TrimSpace(row), " ")
+				Expect(ok).To(BeTrue(), "run row %q", row)
+				out, err := kube.Exec(ctx, dst.in.Namespace, "deploy/"+dst.name("api"), "koinon-api", "run-evidence", "export", "--org", org, "--run", run, "--out", "/tmp/drill-evidence-"+run, "--no-org-secrets")
+				must(err, "export the evidence of run "+run+": "+out)
+				mode, err := drill.ParseExportEnforcement(out)
+				must(err, "run "+run)
+				modes[run] = mode
+			}
+			AddReportEntry("sandbox enforcement by run", modes)
+			Expect(drill.VerifyEnforcement(modes)).To(Succeed())
+		}, NodeTimeout(15*time.Minute))
 	})
 
 	step("finish: the data lost (RPO) and the time taken (RTO)", func(ctx SpecContext) {
