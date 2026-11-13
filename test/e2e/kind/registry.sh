@@ -27,8 +27,8 @@
 #
 #   registry.sh start            create or start the registry and the caches and join them to the kind network, creating
 #                                it as kind would when missing (idempotent; no cluster needed; #956)
-#   registry.sh attach <cluster> join the cluster's kind network, write the nodes' hosts.toml files and the
-#                                ConfigMap (idempotent); the kube context is kind-<cluster>
+#   registry.sh attach <cluster> write the nodes' hosts.toml files and the ConfigMap (idempotent; joins the
+#                                kind network only a container that start did not join); the kube context is kind-<cluster>
 #   registry.sh stop [--force]   remove the containers; the cached blobs stay (KIND_PROXY_PURGE=1 also removes the volumes).
 #                                Every kind cluster on the host shares them, so stop refuses while one exists
 #                                (another lane's run may be using them); --force stops them anyway
