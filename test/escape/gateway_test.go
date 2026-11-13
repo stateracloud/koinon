@@ -144,8 +144,35 @@ func (g *gateway) remove(ctx context.Context, name string) error {
 		}
 		return nil
 	})
-	_, deleteErr := g.b.DeleteSandbox(ctx, g.workspace, name)
-	return errors.Join(stopErr, clearErr, deleteErr)
+	outcome, deleteErr := g.b.DeleteSandbox(ctx, g.workspace, name)
+	var goneErr error
+	if deleteErr == nil && outcome != execution.DeleteCompleted && outcome != execution.DeleteAbsent {
+		// The gateway accepted the delete and the record still exists. A provider that a sandbox
+		// record still references cannot be deleted (FailedPrecondition, issue 978), and the
+		// provider cleanup runs next, so wait here. A sandbox that stays is a real leak: report it.
+		goneErr = waitSandboxGone(ctx, name, 2*time.Minute, func(ctx context.Context) error {
+			_, err := g.b.GetSandbox(ctx, g.workspace, name)
+			return err
+		})
+	}
+	return errors.Join(stopErr, clearErr, deleteErr, goneErr)
+}
+
+// waitSandboxGone polls get until it reports execution.ErrNotFound, within timeout (bounded; no
+// retry of the delete itself). It returns an error when the sandbox still exists after that or
+// when get fails otherwise.
+func waitSandboxGone(ctx context.Context, name string, timeout time.Duration, get func(context.Context) error) error {
+	return pollUntil(ctx, timeout, func() error {
+		err := get(ctx)
+		switch {
+		case err == nil:
+			return fmt.Errorf("sandbox %s still exists after delete", name)
+		case errors.Is(err, execution.ErrNotFound):
+			return nil
+		default:
+			return err
+		}
+	})
 }
 
 // pollUntil calls check every two seconds until it returns nil, the timeout passes or ctx ends,
