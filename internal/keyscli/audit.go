@@ -43,6 +43,10 @@ const (
 	// StartedSuffix is appended to ActionRewrap or ActionReencrypt for the optional event written
 	// before the per-row loop.
 	StartedSuffix = ".started"
+	// ActionAddIntent is the event Add writes, and commits, before it saves the Secret: the new KEK
+	// ID is in the chain before any key bytes under it exist, so [RecordedID] sees an ID whose add event
+	// was lost and whose KEK was then removed by hand.
+	ActionAddIntent = ActionAdd + ".intent"
 )
 
 // Actors of the key events (ADR 0100 decision 2). The CLI's actor is audit.CLI("keys <command>").

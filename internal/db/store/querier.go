@@ -198,6 +198,8 @@ type Querier interface {
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
+	// Creations of the org in the last minute.
+	CountOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) (int32, error)
 	CountPriceProposalsByClassState(ctx context.Context) ([]CountPriceProposalsByClassStateRow, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
@@ -1170,6 +1172,8 @@ type Querier interface {
 	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
 	// cannot be added to two connections at once. Held until the transaction ends.
 	LockOrgMCPHosts(ctx context.Context, orgID pgtype.UUID) error
+	// Serializes the reconciler workers that reserve a creation for one org, for the transaction.
+	LockOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error
 	// Serializes the writers of one org's fetch-trusted list: the cap is checked under this lock.
 	LockOrgSettings(ctx context.Context, orgID pgtype.UUID) (pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1283,6 +1287,7 @@ type Querier interface {
 	// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
 	// Their acks go with them.
 	PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error)
+	PruneOrgSandboxCreations(ctx context.Context, orgID pgtype.UUID) error
 	// Blanks the payload of up to @batch_size content events (@kinds: messages, thoughts, tool calls)
 	// of one run (issue #69). The row stays, so the run page keeps its skeleton and seq stays gap-free;
 	// only the payload goes and content_purged_at says when. A kind that is a key of @strip (a JSON
@@ -1322,6 +1327,7 @@ type Querier interface {
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
+	RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error)
 	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
 	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
 	// The router's health: a batch was accepted.
@@ -1343,6 +1349,9 @@ type Querier interface {
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
 	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
+	// Gives a slot back when the backend call it was taken for failed, so a failing agent cannot starve
+	// the org's healthy ones.
+	ReleaseSandboxCreation(ctx context.Context, arg ReleaseSandboxCreationParams) error
 	ReleaseSandboxRestore(ctx context.Context, arg ReleaseSandboxRestoreParams) error
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
@@ -1411,6 +1420,8 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	// Ends every live session of the user (the operator's password reset).
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Seconds until the oldest creation still inside the minute leaves it, so a slot frees.
+	SandboxCreationSlotFreesIn(ctx context.Context, orgID pgtype.UUID) (float64, error)
 	// Stores one poll's outcome.
 	SaveCodeHostPoll(ctx context.Context, arg SaveCodeHostPollParams) error
 	SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunParams) error
@@ -1513,8 +1524,8 @@ type Querier interface {
 	// How many days a finished run's stored content is kept (issue #69); NULL is the platform default.
 	// It touches only this column, so the latency and limit overrides stay.
 	SetOrgRunContentRetention(ctx context.Context, arg SetOrgRunContentRetentionParams) error
-	// The org's run concurrency and trigger queue limits (DB2, ADR 0066, issue #462); NULL is the
-	// platform default. It touches only these three columns, so the latency overrides and the other
+	// The org's run concurrency, trigger queue and sandbox creation limits (DB2, ADR 0066, issues #462
+	// and #27); NULL is the platform default. It touches only these four columns, so the latency overrides and the other
 	// settings stay.
 	SetOrgRunLimits(ctx context.Context, arg SetOrgRunLimitsParams) error
 	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
