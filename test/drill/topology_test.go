@@ -54,10 +54,12 @@ func TestAProfileIsRequiredAndTheLabNeedsTheBrowser(t *testing.T) {
 	}
 	dir := t.TempDir()
 	for name, mod := range map[string]func(string) string{
-		"no profile":       func(s string) string { return strings.Replace(s, "profile: lab\n", "", 1) },
-		"unknown profile":  func(s string) string { return strings.Replace(s, "profile: lab", "profile: staging", 1) },
-		"lab, no browser":  func(s string) string { return strings.Replace(s, "browserSignin: true", "browserSignin: false", 1) },
-		"lab, not in repo": func(s string) string { return strings.Replace(s, "namespace: koinon-drill-src-", "namespace: prod-", 1) },
+		"no profile":      func(s string) string { return strings.Replace(s, "profile: lab\n", "", 1) },
+		"unknown profile": func(s string) string { return strings.Replace(s, "profile: lab", "profile: staging", 1) },
+		"lab, no browser": func(s string) string { return strings.Replace(s, "browserSignin: true", "browserSignin: false", 1) },
+		"lab, not in repo": func(s string) string {
+			return strings.Replace(s, "namespace: koinon-drill-src-", "namespace: prod-", 1)
+		},
 	} {
 		f := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
 		if err := os.WriteFile(f, []byte(mod(string(b))), 0o600); err != nil {

@@ -805,7 +805,7 @@ stringData:
 				}
 				logFile, err := os.Create(filepath.Join(outDir, "browser-signin.log"))
 				must(err, "create the browser sign-in log")
-				defer logFile.Close()
+				defer func() { _ = logFile.Close() }()
 				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill")
 				// The password goes in the environment of the child only, never on its command line or into a log.
 				cmd.Env = append(os.Environ(),
