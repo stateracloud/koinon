@@ -83,7 +83,7 @@ expect 1 web/e2e/login.spec.ts
 expect 1 internal/agentd/run_test.go              # tests outside test/e2e
 expect 1 internal/services/agents/service_test.go
 expect 1 test/fakemodel/server_test.go
-expect 0 harnesses/opencode/prompts/system.md   # flavors' Markdown can be prompts
+expect 0 harnesses/opencode/prompts/system.md   # harnesses' Markdown can be prompts
 expect 0 Makefile
 expect 0 go.work
 expect 1 hack/chart-check.sh

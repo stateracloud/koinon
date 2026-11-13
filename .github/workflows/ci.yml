@@ -45,9 +45,9 @@ jobs:
   # so required checks still pass when it does not apply.
   #
   # hack/ci-skip-heavy.sh also switches every heavy output below to false (the go, tidy, web, generate,
-  # chart, chartsmoke, escape, flavors, shell and scripts outputs) in two cases, so those jobs are skipped: a draft pull request (`go` and `web` then report success with
+  # chart, chartsmoke, escape, harnesses, shell and scripts outputs) in two cases, so those jobs are skipped: a draft pull request (`go` and `web` then report success with
   # "draft: not run"; marking it ready runs everything on the same head), and a push to main whose
-  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and flavor-publish always run.
+  # tree a successful merge_group `ci` run already tested (the queue build). `changes`, `quick checks` (old issue 594) and harness-publish always run.
   # `tidy` (go-tidy, go-lint), `shell` (lint-shell) and `scripts` are path-gated too (#572). Read the script's header before changing this.
   changes:
     name: changes
@@ -66,14 +66,14 @@ jobs:
       reason: ${{ steps.skip.outputs.reason }}
       go_test_lab: ${{ steps.lab.outputs.go_test_lab }}
       go_test_lab_reason: ${{ steps.lab.outputs.go_test_lab_reason }}
-      flavors_publish: ${{ steps.paths.outputs.flavors_publish }}
+      harnesses_publish: ${{ steps.paths.outputs.harnesses_publish }}
       go: ${{ steps.paths.outputs.go }}
       web: ${{ steps.paths.outputs.web }}
       generate: ${{ steps.paths.outputs.generate }}
       chart: ${{ steps.paths.outputs.chart }}
       chartsmoke: ${{ steps.paths.outputs.chartsmoke }}
       escape: ${{ steps.paths.outputs.escape }}
-      flavors: ${{ steps.paths.outputs.flavors }}
+      harnesses: ${{ steps.paths.outputs.harnesses }}
       opencodeplugin: ${{ steps.paths.outputs.opencodeplugin }}
       tidy: ${{ steps.paths.outputs.tidy }}
       vuln: ${{ steps.paths.outputs.vuln }}
@@ -85,7 +85,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # hack/ci-changes.sh asks `go list` for the packages the flavors suite builds.
+      # hack/ci-changes.sh asks `go list` for the packages the harnesses suite builds.
       - id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -278,7 +278,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
-      # test/flavors needs the flavor images, which the flavors job builds and tests.
+      # test/harnesses needs the harness images, which the harnesses job builds and tests.
       - run: hack/go-test.sh
         env:
           # Pull requests reuse the results of packages with no Docker, database or cluster input (hack/go-test-cacheable.sh); main and the merge queue run everything with -count=1 (issue 43).
@@ -866,10 +866,10 @@ jobs:
         uses: ./.github/actions/setup-go-cache
       - run: hack/needs-e2e-test.sh
       - run: hack/e2e-commands-check.sh
-      - name: flavor-tag-test (needs a UTF-8 locale with its own collation)
+      - name: harness-tag-test (needs a UTF-8 locale with its own collation)
         run: |
           sudo locale-gen en_US.UTF-8
-          hack/flavor-tag-test.sh
+          hack/harness-tag-test.sh
       - run: hack/koinon-fetch-test.sh
       - run: hack/fetch-pinned-test.sh
       - run: hack/e2e-parts-test.sh
@@ -1081,20 +1081,20 @@ jobs:
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          package_json_file: flavors/opencode/plugins/package.json
+          package_json_file: harnesses/opencode/plugins/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+          cache-dependency-path: harnesses/opencode/plugins/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-        working-directory: flavors/opencode/plugins
+        working-directory: harnesses/opencode/plugins
 
   # Koinon's own OpenCode plugins (koinon.core, ADR 0093 decision 4): a CI-only pnpm dev project
-  # under flavors/opencode/plugins/ type-checks the plugin TypeScript against the pinned OpenCode
+  # under harnesses/opencode/plugins/ type-checks the plugin TypeScript against the pinned OpenCode
   # release's own types and runs its unit tests. Nothing it installs enters the image (only
-  # index.ts is COPYed, flavors/opencode/Dockerfile); the `flavors` job below, which builds that
-  # image and runs test/flavors, is the proof the plugin loads at runtime. Steps mirror web-lint's
+  # index.ts is COPYed, harnesses/opencode/Dockerfile); the `harnesses` job below, which builds that
+  # image and runs test/harnesses, is the proof the plugin loads at runtime. Steps mirror web-lint's
   # pnpm setup (same action pins).
   opencode-plugin:
     needs: changes
@@ -1104,45 +1104,45 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: flavors/opencode/plugins
+        working-directory: harnesses/opencode/plugins
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
-          package_json_file: flavors/opencode/plugins/package.json
+          package_json_file: harnesses/opencode/plugins/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: flavors/opencode/plugins/pnpm-lock.yaml
+          cache-dependency-path: harnesses/opencode/plugins/pnpm-lock.yaml
       - name: types pin matches the image's OpenCode pin (ADR 0093 decisions 4 and 5)
         run: |
           types=$(node -p "require('./package.json').devDependencies['@opencode/plugin']")
           image=$(sed -nE 's#.*/cli-linux-(x64|arm64)-([0-9][0-9.]*)\.tgz.*#\2#p' ../Dockerfile | sort -u | paste -sd ' ' -)
           if [ "$image" != "$types" ]; then
-            echo "::error file=flavors/opencode/plugins/package.json::@opencode/plugin is $types; flavors/opencode/Dockerfile pins OpenCode $image"
+            echo "::error file=harnesses/opencode/plugins/package.json::@opencode/plugin is $types; harnesses/opencode/Dockerfile pins OpenCode $image"
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run test
 
-  # Flavor contract suite (plan item E3, old issue 76): the flavor image is built from this
-  # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
+  # Harness contract suite (plan item E3, old issue 76): the harness image is built from this
+  # tree (tags are per source tree, hack/harness-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
-  # a fake key; it never reaches a real or paid model. Required, but it runs in the merge queue and on main only, not on pull requests (#572, #128); flavor-publish below is push-only.
-  flavors:
+  # a fake key; it never reaches a real or paid model. Required, but it runs in the merge queue and on main only, not on pull requests (#572, #128); harness-publish below is push-only.
+  harnesses:
     needs: changes
     # Not on a pull request (#572, #128): the merge queue and main run it, and the queue run is the required one.
     # A job-level skip reports success, so the required name still reports on a pull request.
-    if: github.event_name != 'pull_request' && needs.changes.outputs.flavors == 'true'
-    name: flavors
+    if: github.event_name != 'pull_request' && needs.changes.outputs.harnesses == 'true'
+    name: harnesses
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      # The flavor image, the builder's own store and the layer cache outgrow the runner's disk
+      # The harness image, the builder's own store and the layer cache outgrow the runner's disk
       # (the first run died with "no space left on device"); drop what the job does not use.
       - name: Free disk space
         run: |
@@ -1161,35 +1161,35 @@ jobs:
       # never writes the cache main reads (#145). The key is the build inputs' hash; a changed input
       # starts from the newest older entry through the restore prefix.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: flavorcache
+        id: harnesscache
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
-          restore-keys: flavors-
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
+          restore-keys: harnesses-
       # GITHUB_TOKEN authenticates the Dockerfile's GitHub release downloads as a BuildKit secret
-      # (make flavors passes it); anonymous downloads intermittently fail from shared runner IPs.
-      - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
+      # (make harnesses passes it); anonymous downloads intermittently fail from shared runner IPs.
+      - run: make harnesses HARNESS_CACHE=${{ runner.temp }}/harness-cache
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - run: go test -count=1 ./test/flavors/...
+      - run: go test -count=1 ./test/harnesses/...
         env:
           KOINON_REQUIRE: docker
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.flavorcache.outputs.cache-hit != 'true'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.harnesscache.outputs.cache-hit != 'true'
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
 
-  # On main only: publish the flavor image under its content tag (hack/flavor-tag.sh) so the kind
+  # On main only: publish the harness image under its content tag (hack/harness-tag.sh) so the kind
   # e2e pulls it instead of building it. A separate job, so only it holds packages: write and
-  # pull requests never do. The layer cache the flavors job just saved makes the build a cache hit.
-  flavor-publish:
-    name: flavor-publish
-    needs: [changes, flavors]
-    # Always runs on main when the flavors changed, also when the flavors job was switched off because
+  # pull requests never do. The layer cache the harnesses job just saved makes the build a cache hit.
+  harness-publish:
+    name: harness-publish
+    needs: [changes, harnesses]
+    # Always runs on main when the harnesses changed, also when the harnesses job was switched off because
     # the merge queue already ran this tree (ADR 0094 amendment): publishing is not a test. A failed or
-    # cancelled flavors job still stops it. flavors_publish is the value before the switch.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.flavors_publish == 'true' && (needs.flavors.result == 'success' || needs.flavors.result == 'skipped') }}
+    # cancelled harnesses job still stops it. harnesses_publish is the value before the switch.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.harnesses_publish == 'true' && (needs.harnesses.result == 'success' || needs.harnesses.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -1201,24 +1201,24 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: flavorcache
+        id: harnesscache
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
-          restore-keys: flavors-
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
+          restore-keys: harnesses-
       - name: Log in to ghcr.io
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      - name: Push ghcr.io/<repo>/flavors/opencode:<content tag>
+      - name: Push ghcr.io/<repo>/harnesses/opencode:<content tag>
         id: build
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          tag=$(hack/flavor-tag.sh opencode)
-          image="ghcr.io/$REPO/flavors/opencode:$tag"
+          tag=$(hack/harness-tag.sh opencode)
+          image="ghcr.io/$REPO/harnesses/opencode:$tag"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
             echo "$image already exists"
             exit 0
@@ -1227,25 +1227,25 @@ jobs:
           [[ -z ${GITHUB_TOKEN:-} ]] || secret=(--secret "id=github_token,env=GITHUB_TOKEN")
           # The new cache goes to its own directory (buildx must not read and write one), then
           # replaces the restored one for the save step below.
-          # The commit time pins the timestamps, as in the release (hack/release-flavor.sh, #176).
+          # The commit time pins the timestamps, as in the release (hack/release-harness.sh, #176).
           docker buildx build --output type=registry,rewrite-timestamp=true \
             --build-arg "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" \
-            --build-context common=flavors/common "${secret[@]}" \
-            --cache-from "type=local,src=$RUNNER_TEMP/flavor-cache/opencode" \
-            --cache-to "type=local,dest=$RUNNER_TEMP/flavor-cache-new/opencode,mode=max" \
-            --tag "$image" flavors/opencode
-          rm -rf "$RUNNER_TEMP/flavor-cache"
-          mv "$RUNNER_TEMP/flavor-cache-new" "$RUNNER_TEMP/flavor-cache"
+            --build-context common=harnesses/common "${secret[@]}" \
+            --cache-from "type=local,src=$RUNNER_TEMP/harness-cache/opencode" \
+            --cache-to "type=local,dest=$RUNNER_TEMP/harness-cache-new/opencode,mode=max" \
+            --tag "$image" harnesses/opencode
+          rm -rf "$RUNNER_TEMP/harness-cache"
+          mv "$RUNNER_TEMP/harness-cache-new" "$RUNNER_TEMP/harness-cache"
           echo "cache_written=true" >>"$GITHUB_OUTPUT"
       # Main saves what its builds wrote: this job builds on every main push that changes the
-      # flavors, also the ones where the flavors job was skipped (#595).
+      # harnesses, also the ones where the harnesses job was skipped (#595).
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success() && steps.build.outputs.cache_written == 'true' && steps.flavorcache.outputs.cache-hit != 'true'
+        if: success() && steps.build.outputs.cache_written == 'true' && steps.harnesscache.outputs.cache-hit != 'true'
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
       # The escape suite's probe image (#482), pushed under its content tag (hack/probe-tag.sh) so the
-      # kind e2e pulls it and runs no apt step. Its base is the OpenCode flavor's pinned BASE.
+      # kind e2e pulls it and runs no apt step. Its base is the OpenCode harness's pinned BASE.
       - name: Push ghcr.io/<repo>/spike-probe:<content tag>
         continue-on-error: true # a miss only means the e2e builds the probe itself
         env:
@@ -1257,5 +1257,5 @@ jobs:
             echo "$image already exists"
             exit 0
           fi
-          base=$(sed -n 's/^ARG BASE=//p' flavors/opencode/Dockerfile | head -n 1)
+          base=$(sed -n 's/^ARG BASE=//p' harnesses/opencode/Dockerfile | head -n 1)
           docker buildx build --push --build-arg "BASE=$base" --tag "$image" hack/spike/probe

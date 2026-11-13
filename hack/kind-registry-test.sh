@@ -117,7 +117,7 @@ check "KIND_REGISTRY moves the repository" test "$(KIND_REGISTRY=r.test:1 CLUSTE
 for f in test/e2e/kind/images.sh test/e2e/run.sh test/drill/run.sh test/e2e/escape-openshell.sh; do
   check "$f takes the image repository from imagerepo.sh" grep -q 'imagerepo.sh' "$f"
 done
-check "images.sh pushes nothing outside the cluster's path" bash -c "! grep -v '^ *#' test/e2e/kind/images.sh | grep -q 'KO_DOCKER_REPO=\$REGISTRY\|\$REGISTRY/flavors'"
+check "images.sh pushes nothing outside the cluster's path" bash -c "! grep -v '^ *#' test/e2e/kind/images.sh | grep -q 'KO_DOCKER_REPO=\$REGISTRY\|\$REGISTRY/harnesses'"
 
 # Two lanes at once (#600 review).
 rm "$STATE/c-kind-registry"

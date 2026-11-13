@@ -4,7 +4,7 @@
 # Decides whether the `changes` job of ci.yml switches the heavy jobs off, and applies
 # the decision to the output of hack/ci-changes.sh. The heavy jobs are the ones `changes` gates: go-*
 # (through `go`), web-* (through `web`), generated code, chart, chart smoke, escape (admission),
-# flavors and opencode plugin. A job switched off by its `if:` reports success, so every required check still reports.
+# harnesses and opencode plugin. A job switched off by its `if:` reports success, so every required check still reports.
 # On a push to main with skip=true, `scripts` and `lint-shell` are skipped too (their own `if:`
 # in ci.yml, not an output of this script): the merge queue already ran them on this tree.
 # `quick-checks` and `changes` always run.
@@ -14,8 +14,8 @@
 #                                  job go-test is satisfied by an external run (old issue 610), see below
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
 #                                  prints them back: the heavy names become false when SKIP=true.
-#                                  Always adds flavors_publish=<the flavors value before the switch>,
-#                                  because flavor-publish (a push to main, it publishes an image)
+#                                  Always adds harnesses_publish=<the harnesses value before the switch>,
+#                                  because harness-publish (a push to main, it publishes an image)
 #                                  must run whatever is skipped.
 #
 # decide, by event (EVENT_NAME, REPO, GH_TOKEN, and per event):
@@ -37,7 +37,7 @@
 #                     whole suite on exactly these files. A pull request head's green never counts (a
 #                     draft run is green by skipping), and an admin merge has no queue run, so its push
 #                     runs everything (ADR 0094, amendment);
-#                   - flavors (required in the queue) succeeded on that queue commit, or nothing the flavors suite
+#                   - harnesses (required in the queue) succeeded on that queue commit, or nothing the harnesses suite
 #                     builds from changed between the first parent and SHA (hack/ci-changes.sh).
 #                 Only read rights are used (contents, checks, actions). Any doubt (an API error, no
 #                 queue run, a shallow clone, an unknown event) is skip=false.
@@ -55,7 +55,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-heavy=(go web generate chart chartsmoke escape flavors opencodeplugin tidy vuln fuzz shell scripts)
+heavy=(go web generate chart chartsmoke escape harnesses opencodeplugin tidy vuln fuzz shell scripts)
 
 emit() { echo "skip=$1"; echo "reason=$2"; }
 
@@ -86,7 +86,7 @@ queue_head() {
 
 # decide_push: skip when a successful merge_group run (the queue build) tested this very tree.
 decide_push() {
-	local parents changed tree_m qhead rc=0 flavors_line conclusion runs
+	local parents changed tree_m qhead rc=0 harnesses_line conclusion runs
 	if [[ ${REF:-} != refs/heads/main || -z ${SHA:-} || -z ${REPO:-} ]]; then
 		emit false "not a push to main: running everything"
 		return
@@ -116,18 +116,18 @@ decide_push() {
 		return
 		;;
 	esac
-	# flavors is skipped on a pull request and may be skipped on the queue commit when nothing it builds from changed, so a green queue run does not always prove it, and flavor-publish ships what it tested:
-	# an image is published untested unless flavors passed on the queue commit or nothing it builds from changed.
+	# harnesses is skipped on a pull request and may be skipped on the queue commit when nothing it builds from changed, so a green queue run does not always prove it, and harness-publish ships what it tested:
+	# an image is published untested unless harnesses passed on the queue commit or nothing it builds from changed.
 	if ! runs=$(gh api --paginate "repos/$REPO/commits/$qhead/check-runs?per_page=100" \
 		--jq '.check_runs[] | select(.app.slug == "github-actions") | [.name, .id, .status, (.conclusion // "none")] | @tsv' 2>/dev/null); then
 		emit false "cannot read the check runs of the queue commit $qhead: running everything"
 		return
 	fi
-	conclusion=$(sort -t$'\t' -k1,1 -k2,2n <<<"$runs" | awk -F'\t' '$1 == "flavors" { last = $0 } END { print last }' | awk -F'\t' '$3 == "completed" { print $4 }')
+	conclusion=$(sort -t$'\t' -k1,1 -k2,2n <<<"$runs" | awk -F'\t' '$1 == "harnesses" { last = $0 } END { print last }' | awk -F'\t' '$3 == "completed" { print $4 }')
 	if [[ $conclusion != success ]]; then
 		changed=$(git diff --name-only "${p[1]}" "$SHA" 2>/dev/null) || changed=
-		if [[ -z $changed ]] || ! flavors_line=$("$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'flavors=.*') || [[ $flavors_line != flavors=false ]]; then
-			emit false "flavors did not pass on the queue commit $qhead (${conclusion:-no completed run}) and files it builds from may have changed: running everything"
+		if [[ -z $changed ]] || ! harnesses_line=$("$root/hack/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'harnesses=.*') || [[ $harnesses_line != harnesses=false ]]; then
+			emit false "harnesses did not pass on the queue commit $qhead (${conclusion:-no completed run}) and files it builds from may have changed: running everything"
 			return
 		fi
 	fi
@@ -162,13 +162,13 @@ decide() {
 }
 
 apply() {
-	local line name value flavors=true h skip=false
+	local line name value harnesses=true h skip=false
 	[[ ${SKIP:-} == true ]] && skip=true
 	while IFS= read -r line; do
 		[[ -n $line ]] || continue
 		name=${line%%=*}
 		value=${line#*=}
-		[[ $name != flavors ]] || flavors=$value
+		[[ $name != harnesses ]] || harnesses=$value
 		if [[ $skip == true ]]; then
 			for h in "${heavy[@]}"; do
 				[[ $name == "$h" ]] && value=false
@@ -176,7 +176,7 @@ apply() {
 		fi
 		echo "$name=$value"
 	done
-	echo "flavors_publish=$flavors"
+	echo "harnesses_publish=$harnesses"
 }
 
 case ${1:-} in

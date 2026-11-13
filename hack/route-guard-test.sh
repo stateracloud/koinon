@@ -54,13 +54,13 @@ esac
 jq -r "$jq_expr" "$f"
 EOF2
 chmod +x "$tmp/bin/gh"
-printf '# c\naggregator go\nquick checks\nchart\nexternal dco\nexternal e2e result\nadvisory flavors\n' >"$tmp/required.txt"
+printf '# c\naggregator go\nquick checks\nchart\nexternal dco\nexternal e2e result\nadvisory harnesses\n' >"$tmp/required.txt"
 export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" REPO=o/r SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa REQUIRED="$tmp/required.txt" POLL_SLEEP=0 POLL_MAX=0
 
 fails=0
 job() { printf '{"name":"%s","status":"%s","conclusion":%s}' "$1" "${3:-completed}" "$([[ ${2:-success} == null ]] && echo null || echo "\"${2:-success}\"")"; }
 jobs_file() { local IFS=,; printf '{"jobs":[%s]}' "$*" >"$tmp/${F:-jobs.json}"; }
-all_green_jobs() { jobs_file "$(job go)" "$(job 'quick checks')" "$(job chart skipped)" "$(job flavors failure)"; }
+all_green_jobs() { jobs_file "$(job go)" "$(job 'quick checks')" "$(job chart skipped)" "$(job harnesses failure)"; }
 chk() { printf '{"id":%s,"name":"%s","status":"completed","conclusion":"%s","app":{"id":%s}}' "$1" "$2" "$3" "${4:-15368}"; }
 checks_file() { local IFS=,; printf '{"check_runs":[%s]}' "$*" >"$tmp/checks.json"; }
 green_checks() { checks_file "$(chk 1 go success)" "$(chk 2 'quick checks' success)" "$(chk 3 chart skipped)" "$(chk 4 dco success)" "$(chk 5 'e2e result' success)" "$(chk 6 review success)"; }
@@ -89,12 +89,12 @@ has() { if grep -q -- "$2" "$tmp/calls"; then ok "$1"; else bad "$1 (no /$2/ in 
 hasnt() { if grep -q -- "$2" "$tmp/calls"; then bad "$1 (found /$2/)"; else ok "$1"; fi; }
 exit0() { if [[ $rc == 0 ]]; then ok "$1: exit 0"; else bad "$1: exit $rc"; fi; }
 
-# 1. a queue merge: the required jobs passed on a merge_group run of the pushed tree (flavors red, advisory). No issue.
+# 1. a queue merge: the required jobs passed on a merge_group run of the pushed tree (harnesses red, advisory). No issue.
 reset
 mq_run_on tree1
 run
-exit0 "queue merge, flavors red"
-hasnt "queue merge, flavors red: no issue" 'issue create\|issue comment'
+exit0 "queue merge, harnesses red"
+hasnt "queue merge, harnesses red: no issue" 'issue create\|issue comment'
 hasnt "queue merge: no pull request lookup" 'commits/.*/pulls'
 
 # 1b. the run is still in progress but the required jobs are done (the queue merged on them): no issue

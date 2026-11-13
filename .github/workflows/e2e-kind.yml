@@ -151,7 +151,7 @@ jobs:
     if: needs.decide.outputs.needed == 'true'
     permissions:
       contents: read
-      packages: read # the flavor image CI's flavors job pushed to GHCR
+      packages: read # the harness image CI's harnesses job pushed to GHCR
     runs-on: ubuntu-24.04
     timeout-minutes: 35 # the job takes about 14 minutes (#572); the nightly adds 20 seconds
     defaults:
@@ -234,44 +234,44 @@ jobs:
           tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
+      - name: Log in to GHCR (reads the harness image; a miss falls back to building it)
         env:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || true
 
-      # Pull the flavor image first (#572): when the flavors job pushed this flavors/ tree to GHCR (the usual
+      # Pull the harness image first (#572): when the harnesses job pushed this harnesses/ tree to GHCR (the usual
       # case), the layer cache and buildx below are not needed and are skipped. test/e2e/kind/images.sh finds
       # the pulled image in the daemon and does not pull it again.
-      - name: Pull the flavor image
-        id: flavorpull
+      - name: Pull the harness image
+        id: harnesspull
         env:
-          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
+          HARNESS_PULL_REPO: ghcr.io/${{ github.repository }}/harnesses/opencode
         run: |
-          tag=$(hack/flavor-tag.sh opencode) || tag=""
-          if [[ -n $tag ]] && docker pull -q "$FLAVOR_PULL_REPO:$tag" >/dev/null; then
-            echo "pulled $FLAVOR_PULL_REPO:$tag"
+          tag=$(hack/harness-tag.sh opencode) || tag=""
+          if [[ -n $tag ]] && docker pull -q "$HARNESS_PULL_REPO:$tag" >/dev/null; then
+            echo "pulled $HARNESS_PULL_REPO:$tag"
             echo "pulled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "no pullable flavor image for tag '$tag'; the run builds it"
+            echo "no pullable harness image for tag '$tag'; the run builds it"
             echo "pulled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The flavor image is built here only when the pull above missed. The docker-container driver is
-      # needed to import the layer cache the flavors job saved on main; this job only restores it
+      # The harness image is built here only when the pull above missed. The docker-container driver is
+      # needed to import the layer cache the harnesses job saved on main; this job only restores it
       # (a pull request never writes it, #145).
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: steps.flavorpull.outputs.pulled != 'true'
+        if: steps.harnesspull.outputs.pulled != 'true'
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.flavorpull.outputs.pulled != 'true'
+        if: steps.harnesspull.outputs.pulled != 'true'
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
-          restore-keys: flavors-
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
+          restore-keys: harnesses-
 
       # The pull-through caches (test/e2e/kind/registry.sh, #45) keep the third-party images the install pulls
       # (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies, agentgateway) in this directory. Restore
-      # only: main's quickstart job saves it, as for the flavor cache above, so a pull request or a dispatch on an
+      # only: main's quickstart job saves it, as for the harness cache above, so a pull request or a dispatch on an
       # arbitrary commit never writes what main reads. A miss still works, the caches pull through from upstream.
       # No restore-keys: the caches never expire blobs (TTL 0), so a new key starts empty and holds only what the
       # current pins pull, instead of growing by every old pin set.
@@ -292,15 +292,15 @@ jobs:
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
-          # The flavor image the step above pulled (the flavors job pushed it for this flavors/ tree). Empty after
+          # The harness image the step above pulled (the harnesses job pushed it for this harnesses/ tree). Empty after
           # a miss, so images.sh goes straight to the build and does not try the pull again.
-          FLAVOR_PULL_REPO: ${{ steps.flavorpull.outputs.pulled == 'true' && format('ghcr.io/{0}/flavors/opencode', github.repository) || '' }}
-          # The escape suite's probe image: pulled when flavor-publish pushed this hack/spike/probe tree
+          HARNESS_PULL_REPO: ${{ steps.harnesspull.outputs.pulled == 'true' && format('ghcr.io/{0}/harnesses/opencode', github.repository) || '' }}
+          # The escape suite's probe image: pulled when harness-publish pushed this hack/spike/probe tree
           # (hack/probe-tag.sh), so the run needs no apt mirror (#482). A miss builds it.
           PROBE_PULL_REPO: ghcr.io/${{ github.repository }}/spike-probe
-          # A flavor build (the pull missed) imports the restored layer cache and authenticates the
+          # A harness build (the pull missed) imports the restored layer cache and authenticates the
           # Dockerfile's GitHub release downloads with the workflow token as a BuildKit secret.
-          FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
@@ -442,7 +442,7 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
-      packages: read # the flavor image
+      packages: read # the harness image
     outputs:
       red: ${{ steps.verdict.outputs.red }} # `needs.drill.result` is "success" under continue-on-error, so the job says it itself
     runs-on: ubuntu-24.04
@@ -497,11 +497,11 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/flavor-cache
-          key: flavors-${{ hashFiles('flavors/**') }}
-          restore-keys: flavors-
+          path: ${{ runner.temp }}/harness-cache
+          key: harnesses-${{ hashFiles('harnesses/**') }}
+          restore-keys: harnesses-
 
-      - name: Log in to GHCR (reads the flavor image; a miss falls back to building it)
+      - name: Log in to GHCR (reads the harness image; a miss falls back to building it)
         env:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
@@ -509,7 +509,7 @@ jobs:
 
       # The pull-through caches (test/e2e/kind/registry.sh, #45) keep the third-party images the install pulls
       # (CloudNativePG, OpenShell, Agent Sandbox, kube-network-policies, agentgateway) in this directory. Restore
-      # only: main's quickstart job saves it, as for the flavor cache above, so a pull request or a dispatch on an
+      # only: main's quickstart job saves it, as for the harness cache above, so a pull request or a dispatch on an
       # arbitrary commit never writes what main reads. A miss still works, the caches pull through from upstream.
       # No restore-keys: the caches never expire blobs (TTL 0), so a new key starts empty and holds only what the
       # current pins pull, instead of growing by every old pin set.
@@ -526,8 +526,8 @@ jobs:
           OUT: ${{ runner.temp }}/drill
           KEEP: "0"
           DRILL_KEEP_CLUSTER: "1" # the workflow deletes the cluster in its own step, after collecting resource use
-          FLAVOR_PULL_REPO: ghcr.io/${{ github.repository }}/flavors/opencode
-          FLAVOR_CACHE: ${{ runner.temp }}/flavor-cache
+          HARNESS_PULL_REPO: ghcr.io/${{ github.repository }}/harnesses/opencode
+          HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/drill/run.sh 2>&1 | tee "$RUNNER_TEMP/drill.log"

@@ -47,7 +47,7 @@ of it.
   [Testing layers](docs/dev/ci.md#testing-layers) · [what `ci` runs when](docs/dev/ci.md#what-ci-runs-when)
 - Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The merge queue's `quickstart` on
   main plus the PR is the only e2e proof (ADR 0105). A pull request runs it only with the `e2e` label
-  (advisory; #572). `flavors` is required but runs in the queue and on main, not on pull requests.
+  (advisory; #572). `harnesses` is required but runs in the queue and on main, not on pull requests.
   Remote and lab runs, and what happens when main's e2e goes red:
   [maintainer commands](docs/maintainers/agent-workflow.md#commands).
 - A new `ci.yml` job goes into `hack/ci-required.txt` (or is listed advisory) in the same PR; a

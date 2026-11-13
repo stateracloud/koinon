@@ -25,7 +25,7 @@ n=0
 # A passing tree: one workflow with a required job, permissions, a pinned action and a timeout.
 good_tree() { # DIR
 	mkdir -p "$1/.github/workflows" "$1/hack" "$1/web"
-	printf '%s\n' '# SPDX-License-Identifier: Apache-2.0' 'aggregator go' 'quick checks' 'advisory flavors' >"$1/hack/ci-required.txt"
+	printf '%s\n' '# SPDX-License-Identifier: Apache-2.0' 'aggregator go' 'quick checks' 'advisory harnesses' >"$1/hack/ci-required.txt"
 	cat >"$1/.github/workflows/ci.yml" <<EOF
 name: ci
 on:

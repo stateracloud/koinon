@@ -124,7 +124,7 @@ run STUB_GATES="go web" STUB_go=fail STUB_web=skip
 expect "fail beats notrun" 1 'gate=go .*verdict=fail' 'gate=web .*verdict=notrun'
 
 # Heavy CI jobs from ci-changes.sh: pass, fail, and machine problems.
-# A stub docker on PATH decides whether the Docker-needing jobs (chartsmoke, flavors) can run.
+# A stub docker on PATH decides whether the Docker-needing jobs (chartsmoke, harnesses) can run.
 mkdir "$tmp/bin-up" "$tmp/bin-down"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/docker"
 printf '#!/bin/sh\nexit 0\n' >"$tmp/bin-up/helm"
@@ -133,8 +133,8 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/bin-down/docker"
 chmod +x "$tmp/bin-up/helm" "$tmp/bin-up/go" "$tmp/bin-up/docker" "$tmp/bin-down/docker"
 # Escape and chartsmoke need helm/go on PATH; put $tmp/bin-up first so the cases run offline
 # without the host's tools (#349). bin-down's docker (exit 1) must precede bin-up's docker.
-run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke flavors escape"
-expect "jobs pass" 0 '^gate=chartsmoke .*verdict=pass' '^gate=flavors .*verdict=pass' '^gate=escape .*verdict=pass'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke harnesses escape"
+expect "jobs pass" 0 '^gate=chartsmoke .*verdict=pass' '^gate=harnesses .*verdict=pass' '^gate=escape .*verdict=pass'
 run PATH="$tmp/bin-down:$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke escape"
 expect "no docker daemon" 3 '^gate=chartsmoke rc=0 .*verdict=notrun reason="docker unavailable"' '^gate=escape .*verdict=pass'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=fail
@@ -233,8 +233,8 @@ expect "ci-changes fails" 1 'ci-changes.*failed|changes-bad failed' 'no merge ba
 # A missing tool for a heavy job is notrun with the tool named.
 run LANE_GATES_MISSING_TOOLS="helm" STUB_GATES="" STUB_JOBS="escape"
 expect "helm missing" 3 '^gate=escape .*verdict=notrun reason="helm not installed"'
-run LANE_GATES_MISSING_TOOLS="go" PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke flavors escape"
-expect "go missing" 3 '^gate=chartsmoke .*verdict=notrun reason="go not installed"' '^gate=flavors .*verdict=notrun reason="go not installed"' '^gate=escape .*verdict=notrun reason="go not installed"'
+run LANE_GATES_MISSING_TOOLS="go" PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="chartsmoke harnesses escape"
+expect "go missing" 3 '^gate=chartsmoke .*verdict=notrun reason="go not installed"' '^gate=harnesses .*verdict=notrun reason="go not installed"' '^gate=escape .*verdict=notrun reason="go not installed"'
 
 # preflight --list crashing is never "ok".
 run STUB_GATES="go" STUB_LIST_RC=2

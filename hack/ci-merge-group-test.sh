@@ -238,11 +238,11 @@ for name in claim dco gitleaks 'e2e result'; do
 		fail=$((fail + 1))
 	fi
 done
-# #572, #128: `flavors` is required and does not run on a pull request; a job-level skip reports success there, and the
-# queue (merge_group) and main (push) builds run it when the flavor inputs changed.
-flavors_if=$(awk '/^  flavors:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/ci.yml")
-check "ci.yml: flavors is skipped on pull_request and gated on its path output otherwise" test "$flavors_if" = "github.event_name != 'pull_request' && needs.changes.outputs.flavors == 'true'"
-check "hack/ci-required.txt: flavors is required, not advisory" bash -c 'grep -qx "flavors" "$1" && ! grep -q "^advisory flavors" "$1"' _ "$repo/hack/ci-required.txt"
+# #572, #128: `harnesses` is required and does not run on a pull request; a job-level skip reports success there, and the
+# queue (merge_group) and main (push) builds run it when the harness inputs changed.
+harnesses_if=$(awk '/^  harnesses:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/ci.yml")
+check "ci.yml: harnesses is skipped on pull_request and gated on its path output otherwise" test "$harnesses_if" = "github.event_name != 'pull_request' && needs.changes.outputs.harnesses == 'true'"
+check "hack/ci-required.txt: harnesses is required, not advisory" bash -c 'grep -qx "harnesses" "$1" && ! grep -q "^advisory harnesses" "$1"' _ "$repo/hack/ci-required.txt"
 # `e2e result` reads `decide`; a skipped decide on a queue build would hand the gate an empty output.
 decide_if=$(awk '/^  decide:/ { j = 1; next } j && /^  [a-z]/ { j = 0 } j && /^    if:/ { sub(/^    if: */, ""); print; exit }' "$wfdir/e2e-kind.yml")
 check "e2e-kind.yml: decide's if: is true on merge_group" test "$decide_if" = "(github.event_name != 'pull_request' || !github.event.pull_request.draft) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) && inputs.suite != 'drill'"

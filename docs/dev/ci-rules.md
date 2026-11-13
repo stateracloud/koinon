@@ -104,7 +104,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Web unit | `web-test` | yes | yes | as above | - | - | - | minutes | yes (`web`) |
 | Web e2e (mocked) | `web-e2e` | yes | yes | as above | - | - | - | minutes | yes (`web`) |
 | Kind e2e quickstart | `quickstart`, gate `e2e result` | label `e2e` only | yes, when relevant | batched | yes | tag needs a green one | optional | about 15 min | yes, in the queue |
-| Flavors image build | `flavors` | - | yes | publish | - | - | - | up to 60 min job limit | yes in the queue |
+| Harnesses image build | `harnesses` | - | yes | publish | - | - | - | up to 60 min job limit | yes in the queue |
 | Workflow security lint | `zizmor` (step of `lint-shell`, ADR 0111) | yes | yes | yes | - | - | - | seconds | yes |
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
 | CodeQL | `codeql` workflow | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
