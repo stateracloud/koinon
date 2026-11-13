@@ -991,12 +991,39 @@ buckets of a request; org prices win over the default list. Admins and owners.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
+| AcceptPriceProposal | `koinon.budget.v1alpha1.AcceptPriceProposalRequest` | `koinon.budget.v1alpha1.AcceptPriceProposalResponse` | - | AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of class confirm needs the model id typed out; a new model without an output limit needs max_output. |
+| CheckPriceSources | `koinon.budget.v1alpha1.CheckPriceSourcesRequest` | `koinon.budget.v1alpha1.CheckPriceSourcesResponse` | - | CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It makes proposals and applies nothing. |
+| DiffPlatformPriceVersions | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse` | - | DiffPlatformPriceVersions returns what changed between two versions of the platform list. |
+| DismissPriceProposal | `koinon.budget.v1alpha1.DismissPriceProposalRequest` | `koinon.budget.v1alpha1.DismissPriceProposalResponse` | - | DismissPriceProposal closes a proposal; the same values from the same source do not come back. |
+| ExplainPlatformPrice | `koinon.budget.v1alpha1.ExplainPlatformPriceRequest` | `koinon.budget.v1alpha1.ExplainPlatformPriceResponse` | - | ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its price_ref. |
 | GetDefaultPriceChanges | `koinon.budget.v1alpha1.GetDefaultPriceChangesRequest` | `koinon.budget.v1alpha1.GetDefaultPriceChangesResponse` | - | GetDefaultPriceChanges returns what changed between two versions of the default list. An empty from_version means the version before to_version; an empty to_version the current one. |
 | GetDefaultPrices | `koinon.budget.v1alpha1.GetDefaultPricesRequest` | `koinon.budget.v1alpha1.GetDefaultPricesResponse` | - | GetDefaultPrices returns the default list this installation runs. |
+| GetPlatformPriceVersion | `koinon.budget.v1alpha1.GetPlatformPriceVersionRequest` | `koinon.budget.v1alpha1.GetPlatformPriceVersionResponse` | - | GetPlatformPriceVersion returns one version with its entries and their provenance. |
+| GetPriceProposal | `koinon.budget.v1alpha1.GetPriceProposalRequest` | `koinon.budget.v1alpha1.GetPriceProposalResponse` | - | GetPriceProposal returns one proposal. |
+| GetPriceRefreshSettings | `koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest` | `koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse` | - | GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting is Helm-owned: there is no write. |
 | ListFlaggedPrices | `koinon.budget.v1alpha1.ListFlaggedPricesRequest` | `koinon.budget.v1alpha1.ListFlaggedPricesResponse` | - | ListFlaggedPrices returns price entries whose recomputed cost differs from the gateway's by more than 1%. |
+| ListPlatformPriceVersions | `koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse` | - | ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries. |
+| ListPriceProposals | `koinon.budget.v1alpha1.ListPriceProposalsRequest` | `koinon.budget.v1alpha1.ListPriceProposalsResponse` | - | ListPriceProposals lists proposals, newest first. Empty state or class mean all. |
+| ListPriceSourceFetches | `koinon.budget.v1alpha1.ListPriceSourceFetchesRequest` | `koinon.budget.v1alpha1.ListPriceSourceFetchesResponse` | - | ListPriceSourceFetches returns the fetch log, newest first. |
 | ListPrices | `koinon.budget.v1alpha1.ListPricesRequest` | `koinon.budget.v1alpha1.ListPricesResponse` | - | ListPrices returns every version of the org's prices, newest first per name. |
 | RetirePrice | `koinon.budget.v1alpha1.RetirePriceRequest` | `koinon.budget.v1alpha1.RetirePriceResponse` | - | RetirePrice ends a named price now. Its versions stay for the ledger entries that cite them. |
+| RollbackPlatformPrices | `koinon.budget.v1alpha1.RollbackPlatformPricesRequest` | `koinon.budget.v1alpha1.RollbackPlatformPricesResponse` | - | RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are never edited or deleted. |
 | SetPrice | `koinon.budget.v1alpha1.SetPriceRequest` | `koinon.budget.v1alpha1.SetPriceResponse` | - | SetPrice adds a version of a named price. Earlier versions never change, and requests before valid_from keep the price they were charged at. |
+
+### Message AcceptPriceProposalRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| confirm | 2 | `string` | singular |  | confirm is the model id typed out, for a proposal of class confirm. |
+| max_output | 3 | `int32` | singular |  | max_output is the entry's output limit in tokens; required when the source reports none. |
+
+### Message AcceptPriceProposalResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `int64` | singular |  |  |
+| warnings | 2 | `string` | repeated |  |  |
 
 ### Message AgentBudget
 
@@ -1029,6 +1056,18 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | template_default | 4 | `koinon.budget.v1alpha1.RunLimitValues` | singular |  | template_default is the agent's active version (the template's values). |
 | override | 5 | `koinon.budget.v1alpha1.RunLimitValues` | singular |  | override is what an admin set; unset fields follow the template. |
 
+### Message CheckPriceSourcesRequest
+
+No fields.
+
+### Message CheckPriceSourcesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| fetched | 1 | `string` | repeated |  |  |
+| failed | 2 | `map<string, string>` | map |  | failed maps a source id to why it failed. |
+| proposals | 3 | `int32` | singular |  |  |
+
 ### Message ContinuationOverride
 
 ContinuationOverride is what an admin set on one agent.
@@ -1046,6 +1085,49 @@ ContinuationValues are the continuation limits of one task of an agent.
 | --- | --- | --- | --- | --- | --- |
 | max_continuations | 1 | `int32` | singular |  | max_continuations is the continuation runs a task gets; 0 means continuation is off. |
 | task_spend_usd | 2 | `string` | singular |  | task_spend_usd is the task's spend (all its runs) at which no further continuation starts. |
+
+### Message DiffPlatformPriceVersionsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from_version | 1 | `int64` | singular |  | from_version 0 means the version before to_version; to_version 0 the newest. |
+| to_version | 2 | `int64` | singular |  |  |
+
+### Message DiffPlatformPriceVersionsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from_version | 1 | `int64` | singular |  |  |
+| to_version | 2 | `int64` | singular |  |  |
+| changes | 3 | `koinon.budget.v1alpha1.PriceChange` | repeated |  |  |
+
+### Message DismissPriceProposalRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+
+### Message DismissPriceProposalResponse
+
+No fields.
+
+### Message ExplainPlatformPriceRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| provider_type | 1 | `string` | singular |  |  |
+| model | 2 | `string` | singular |  |  |
+
+### Message ExplainPlatformPriceResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| layer | 1 | `string` | singular |  | layer is platform or default. |
+| price_ref | 2 | `string` | singular |  |  |
+| entry | 3 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 4 | `int64` | singular |  | platform_version is set for layer platform. |
+| list_version | 5 | `string` | singular |  | list_version is set for layer default. |
+| provenance | 6 | `koinon.budget.v1alpha1.PriceProvenance` | singular |  | provenance is set for layer platform. |
 
 ### Message FlaggedPrice
 
@@ -1155,6 +1237,45 @@ ContinuationValues are the continuation limits of one task of an agent.
 | --- | --- | --- | --- | --- | --- |
 | limits | 1 | `koinon.budget.v1alpha1.OrgContinuationLimits` | singular |  |  |
 
+### Message GetPlatformPriceVersionRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `int64` | singular |  |  |
+
+### Message GetPlatformPriceVersionResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `koinon.budget.v1alpha1.PlatformPriceVersion` | singular |  |  |
+
+### Message GetPriceProposalRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+
+### Message GetPriceProposalResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| proposal | 1 | `koinon.budget.v1alpha1.PriceProposal` | singular |  |  |
+
+### Message GetPriceRefreshSettingsRequest
+
+No fields.
+
+### Message GetPriceRefreshSettingsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| mode | 1 | `string` | singular |  | mode is auto, off or on. |
+| interval | 2 | `string` | singular |  | interval is a Go duration such as "6h0m0s". |
+| max_change_percent | 3 | `int32` | singular |  |  |
+| max_auto_per_day | 4 | `int32` | singular |  |  |
+| recorded | 5 | `bool` | singular |  | recorded is false before koinon-api ever recorded a setting; the values are then the defaults. |
+| updated_at | 6 | `google.protobuf.Timestamp` | singular |  |  |
+
 ### Message ListAgentBudgetsRequest
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1203,6 +1324,44 @@ No fields.
 | --- | --- | --- | --- | --- | --- |
 | orgs | 1 | `koinon.budget.v1alpha1.OrgBudgetSummary` | repeated |  |  |
 | month_start | 2 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message ListPlatformPriceVersionsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limit | 1 | `int32` | singular |  | limit defaults to 100, at most 500. |
+
+### Message ListPlatformPriceVersionsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| versions | 1 | `koinon.budget.v1alpha1.PlatformPriceVersion` | repeated |  |  |
+
+### Message ListPriceProposalsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| state | 1 | `string` | singular |  |  |
+| class | 2 | `string` | singular |  |  |
+| limit | 3 | `int32` | singular |  | limit defaults to 100, at most 1000. |
+
+### Message ListPriceProposalsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| proposals | 1 | `koinon.budget.v1alpha1.PriceProposal` | repeated |  |  |
+
+### Message ListPriceSourceFetchesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limit | 1 | `int32` | singular |  | limit defaults to 100, at most 1000. |
+
+### Message ListPriceSourceFetchesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| fetches | 1 | `koinon.budget.v1alpha1.PriceSourceFetch` | repeated |  |  |
 
 ### Message ListPricesRequest
 
@@ -1273,6 +1432,31 @@ No fields.
 | platform_default_task_spend_usd | 2 | `string` | singular |  | platform_default_task_spend_usd is what an org that sets none gets. |
 | overridden | 3 | `bool` | singular |  | overridden is true when the org set its own value. |
 
+### Message PlatformPriceEntry
+
+PlatformPriceEntry is one entry of a platform version with its provenance.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| entry | 1 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| price_ref | 2 | `string` | singular |  | price_ref is the ref a ledger entry cites for it: platform@&lt;version&gt;#&lt;id&gt;. |
+| provenance | 3 | `koinon.budget.v1alpha1.PriceProvenance` | singular |  |  |
+
+### Message PlatformPriceVersion
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `int64` | singular |  |  |
+| created_at | 2 | `google.protobuf.Timestamp` | singular |  |  |
+| valid_from | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| actor | 4 | `string` | singular |  | actor is who wrote it: "user &lt;id&gt;", "cli &lt;command&gt;" or "system koinon-api:price-refresh". |
+| reason | 5 | `string` | singular |  |  |
+| rule_set_version | 6 | `string` | singular |  |  |
+| proposal_ids | 7 | `string` | repeated |  |  |
+| restored_from | 8 | `int64` | singular |  | restored_from is the version a rollback copied, 0 otherwise. |
+| entries | 9 | `koinon.budget.v1alpha1.PlatformPriceEntry` | repeated |  | entries is empty in a list. |
+| bad_entries | 10 | `int32` | singular |  |  |
+
 ### Message PriceChange
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1311,6 +1495,77 @@ PriceMatch holds exactly one of glob and regex.
 | --- | --- | --- | --- | --- | --- |
 | glob | 1 | `string` | singular |  |  |
 | regex | 2 | `string` | singular |  |  |
+
+### Message PriceProposal
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| source | 2 | `string` | singular |  |  |
+| origin | 3 | `string` | singular |  | origin is how the proposal arrived (a fetch trigger or "import"). |
+| provider_type | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  |  |
+| current_ref | 6 | `string` | singular |  | current_ref is the price_ref in use for the model, empty for a new model. |
+| current | 7 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| proposed | 8 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| changes | 9 | `koinon.budget.v1alpha1.PriceRateChange` | repeated |  |  |
+| provenance | 10 | `koinon.budget.v1alpha1.PriceProvenance` | singular |  |  |
+| agreeing_sources | 11 | `string` | repeated |  |  |
+| class | 12 | `string` | singular |  | class is auto, needs_review, confirm or refused. |
+| failed_rules | 13 | `string` | singular |  |  |
+| state | 14 | `string` | singular |  | state is open, accepted, dismissed or superseded. |
+| created_at | 15 | `google.protobuf.Timestamp` | singular |  |  |
+| decided_at | 16 | `google.protobuf.Timestamp` | singular |  |  |
+| decided_by | 17 | `string` | singular |  |  |
+| applied_version | 18 | `int64` | singular |  | applied_version is the platform version an accepted proposal wrote. |
+
+### Message PriceProvenance
+
+PriceProvenance is where a platform price came from (ADR 0098 decision 4).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| source | 1 | `string` | singular |  | source is the source id ("openrouter") or "manual". |
+| url | 2 | `string` | singular |  |  |
+| fetched_at | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| sha256 | 4 | `string` | singular |  |  |
+| commit_sha | 5 | `string` | singular |  |  |
+| committed_at | 6 | `google.protobuf.Timestamp` | singular |  |  |
+| etag | 7 | `string` | singular |  |  |
+| licence | 8 | `string` | singular |  |  |
+| agreeing_sources | 9 | `string` | repeated |  |  |
+| proposal_id | 10 | `string` | singular |  |  |
+| approver | 11 | `string` | singular |  | approver is who accepted it: "user &lt;id&gt;", "cli &lt;command&gt;" or "system koinon-api:price-refresh". |
+| rule_set_version | 12 | `string` | singular |  |  |
+| approved_at | 13 | `google.protobuf.Timestamp` | singular |  |  |
+| vouched_by | 14 | `string` | singular |  |  |
+
+### Message PriceRateChange
+
+PriceRateChange is one rate that differs between the price in use and the proposed one.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| bucket | 1 | `string` | singular |  |  |
+| context_over | 2 | `int64` | singular |  | context_over is the tier the rate belongs to; 0 is the base rate. |
+| from | 3 | `string` | singular |  | from is empty when the bucket is added, to when it is removed. |
+| to | 4 | `string` | singular |  |  |
+
+### Message PriceSourceFetch
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| source | 2 | `string` | singular |  |  |
+| url | 3 | `string` | singular |  |  |
+| fetched_at | 4 | `google.protobuf.Timestamp` | singular |  |  |
+| result | 5 | `string` | singular |  | result is ok, failed or refused. |
+| error | 6 | `string` | singular |  |  |
+| sha256 | 7 | `string` | singular |  |  |
+| etag | 8 | `string` | singular |  |  |
+| commit_sha | 9 | `string` | singular |  |  |
+| model_count | 10 | `int32` | singular |  |  |
+| trigger | 11 | `string` | singular |  | trigger is schedule, cli or import. |
 
 ### Message PriceTier
 
@@ -1367,6 +1622,18 @@ means unset; a free model needs an explicit "0".
 ### Message RetirePriceResponse
 
 No fields.
+
+### Message RollbackPlatformPricesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `int64` | singular |  |  |
+
+### Message RollbackPlatformPricesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| version | 1 | `int64` | singular |  | version is the new version, equal to the one rolled back to. |
 
 ### Message RunLimitValues
 

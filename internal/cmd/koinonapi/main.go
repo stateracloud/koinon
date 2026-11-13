@@ -874,6 +874,9 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return fmt.Errorf("price refresh: %w", err)
 	}
+	// The platform price RPCs (PriceService, platform admin) accept, dismiss and fetch through the
+	// same refresher as the loop below and the prices commands.
+	svc.BindPriceRefresher(refresher)
 	// Startup bookkeeping never depends on a platform admin existing (a fresh install has none until
 	// the first login): without one, the change is recorded and logged, not audited in an org. Nor
 	// does it wait for the install audit writer's grant (ADR 0100 decision 1.1a): on an upgrade of a

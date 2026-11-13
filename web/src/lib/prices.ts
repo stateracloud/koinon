@@ -240,3 +240,41 @@ export function sinceTimestamp(days: number, now = Date.now()) {
 export function formatWhen(ts: { seconds: bigint; nanos: number } | undefined): string {
   return ts ? timestampDate(ts as Parameters<typeof timestampDate>[0]).toLocaleString() : ''
 }
+
+/** rateChangeLine says one rate of a proposal in words: "input $3 → $4", "tier over 200000: output added at $9". */
+export function rateChangeLine(c: { bucket: string; contextOver: bigint; from: string; to: string }): string {
+  const bucket = c.bucket.replaceAll('_', ' ')
+  const where = c.contextOver > 0n ? ` (over ${c.contextOver} tokens)` : ''
+  if (!c.from) return `${bucket}${where} added at $${c.to}`
+  if (!c.to) return `${bucket}${where} removed (was $${c.from})`
+  return `${bucket}${where} $${c.from} → $${c.to}`
+}
+
+/** classLabel names a proposal class for a person. */
+export function classLabel(c: string): string {
+  switch (c) {
+    case 'auto':
+      return 'Auto'
+    case 'needs_review':
+      return 'Needs review'
+    case 'confirm':
+      return 'Confirm'
+    case 'refused':
+      return 'Refused'
+    default:
+      return c
+  }
+}
+
+/** actorLabel says who wrote a version or approved a price: the auto-apply, a person or a command. */
+export function actorLabel(actor: string): string {
+  if (actor.startsWith('system ')) return `Auto (${actor.slice('system '.length)})`
+  if (actor.startsWith('user ')) return `User ${actor.slice('user '.length)}`
+  if (actor.startsWith('cli ')) return `Command: ${actor.slice('cli '.length)}`
+  return actor || 'unknown'
+}
+
+/** shortHash shows the start of a hash or commit, enough to compare. */
+export function shortHash(h: string): string {
+  return h.length > 12 ? h.slice(0, 12) : h
+}

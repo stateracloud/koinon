@@ -1426,6 +1426,1935 @@ func (x *ListFlaggedPricesResponse) GetFlagged() []*FlaggedPrice {
 	return nil
 }
 
+// PriceProvenance is where a platform price came from (ADR 0098 decision 4).
+type PriceProvenance struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// source is the source id ("openrouter") or "manual".
+	Source          string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	Url             string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	FetchedAt       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
+	Sha256          string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	CommitSha       string                 `protobuf:"bytes,5,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
+	CommittedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=committed_at,json=committedAt,proto3" json:"committed_at,omitempty"`
+	Etag            string                 `protobuf:"bytes,7,opt,name=etag,proto3" json:"etag,omitempty"`
+	Licence         string                 `protobuf:"bytes,8,opt,name=licence,proto3" json:"licence,omitempty"`
+	AgreeingSources []string               `protobuf:"bytes,9,rep,name=agreeing_sources,json=agreeingSources,proto3" json:"agreeing_sources,omitempty"`
+	ProposalId      string                 `protobuf:"bytes,10,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
+	// approver is who accepted it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+	Approver       string                 `protobuf:"bytes,11,opt,name=approver,proto3" json:"approver,omitempty"`
+	RuleSetVersion string                 `protobuf:"bytes,12,opt,name=rule_set_version,json=ruleSetVersion,proto3" json:"rule_set_version,omitempty"`
+	ApprovedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=approved_at,json=approvedAt,proto3" json:"approved_at,omitempty"`
+	VouchedBy      string                 `protobuf:"bytes,14,opt,name=vouched_by,json=vouchedBy,proto3" json:"vouched_by,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PriceProvenance) Reset() {
+	*x = PriceProvenance{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PriceProvenance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PriceProvenance) ProtoMessage() {}
+
+func (x *PriceProvenance) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PriceProvenance.ProtoReflect.Descriptor instead.
+func (*PriceProvenance) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *PriceProvenance) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetFetchedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FetchedAt
+	}
+	return nil
+}
+
+func (x *PriceProvenance) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetCommitSha() string {
+	if x != nil {
+		return x.CommitSha
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetCommittedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CommittedAt
+	}
+	return nil
+}
+
+func (x *PriceProvenance) GetEtag() string {
+	if x != nil {
+		return x.Etag
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetLicence() string {
+	if x != nil {
+		return x.Licence
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetAgreeingSources() []string {
+	if x != nil {
+		return x.AgreeingSources
+	}
+	return nil
+}
+
+func (x *PriceProvenance) GetProposalId() string {
+	if x != nil {
+		return x.ProposalId
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetApprover() string {
+	if x != nil {
+		return x.Approver
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetRuleSetVersion() string {
+	if x != nil {
+		return x.RuleSetVersion
+	}
+	return ""
+}
+
+func (x *PriceProvenance) GetApprovedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ApprovedAt
+	}
+	return nil
+}
+
+func (x *PriceProvenance) GetVouchedBy() string {
+	if x != nil {
+		return x.VouchedBy
+	}
+	return ""
+}
+
+// PriceRateChange is one rate that differs between the price in use and the proposed one.
+type PriceRateChange struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Bucket string                 `protobuf:"bytes,1,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	// context_over is the tier the rate belongs to; 0 is the base rate.
+	ContextOver int64 `protobuf:"varint,2,opt,name=context_over,json=contextOver,proto3" json:"context_over,omitempty"`
+	// from is empty when the bucket is added, to when it is removed.
+	From          string `protobuf:"bytes,3,opt,name=from,proto3" json:"from,omitempty"`
+	To            string `protobuf:"bytes,4,opt,name=to,proto3" json:"to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PriceRateChange) Reset() {
+	*x = PriceRateChange{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PriceRateChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PriceRateChange) ProtoMessage() {}
+
+func (x *PriceRateChange) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PriceRateChange.ProtoReflect.Descriptor instead.
+func (*PriceRateChange) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PriceRateChange) GetBucket() string {
+	if x != nil {
+		return x.Bucket
+	}
+	return ""
+}
+
+func (x *PriceRateChange) GetContextOver() int64 {
+	if x != nil {
+		return x.ContextOver
+	}
+	return 0
+}
+
+func (x *PriceRateChange) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *PriceRateChange) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+type PriceProposal struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Source string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// origin is how the proposal arrived (a fetch trigger or "import").
+	Origin       string `protobuf:"bytes,3,opt,name=origin,proto3" json:"origin,omitempty"`
+	ProviderType string `protobuf:"bytes,4,opt,name=provider_type,json=providerType,proto3" json:"provider_type,omitempty"`
+	Model        string `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	// current_ref is the price_ref in use for the model, empty for a new model.
+	CurrentRef      string             `protobuf:"bytes,6,opt,name=current_ref,json=currentRef,proto3" json:"current_ref,omitempty"`
+	Current         *PriceEntry        `protobuf:"bytes,7,opt,name=current,proto3" json:"current,omitempty"`
+	Proposed        *PriceEntry        `protobuf:"bytes,8,opt,name=proposed,proto3" json:"proposed,omitempty"`
+	Changes         []*PriceRateChange `protobuf:"bytes,9,rep,name=changes,proto3" json:"changes,omitempty"`
+	Provenance      *PriceProvenance   `protobuf:"bytes,10,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	AgreeingSources []string           `protobuf:"bytes,11,rep,name=agreeing_sources,json=agreeingSources,proto3" json:"agreeing_sources,omitempty"`
+	// class is auto, needs_review, confirm or refused.
+	Class       string `protobuf:"bytes,12,opt,name=class,proto3" json:"class,omitempty"`
+	FailedRules string `protobuf:"bytes,13,opt,name=failed_rules,json=failedRules,proto3" json:"failed_rules,omitempty"`
+	// state is open, accepted, dismissed or superseded.
+	State     string                 `protobuf:"bytes,14,opt,name=state,proto3" json:"state,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	DecidedAt *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=decided_at,json=decidedAt,proto3" json:"decided_at,omitempty"`
+	DecidedBy string                 `protobuf:"bytes,17,opt,name=decided_by,json=decidedBy,proto3" json:"decided_by,omitempty"`
+	// applied_version is the platform version an accepted proposal wrote.
+	AppliedVersion int64 `protobuf:"varint,18,opt,name=applied_version,json=appliedVersion,proto3" json:"applied_version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PriceProposal) Reset() {
+	*x = PriceProposal{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PriceProposal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PriceProposal) ProtoMessage() {}
+
+func (x *PriceProposal) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PriceProposal.ProtoReflect.Descriptor instead.
+func (*PriceProposal) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *PriceProposal) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetOrigin() string {
+	if x != nil {
+		return x.Origin
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetProviderType() string {
+	if x != nil {
+		return x.ProviderType
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetCurrentRef() string {
+	if x != nil {
+		return x.CurrentRef
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetCurrent() *PriceEntry {
+	if x != nil {
+		return x.Current
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetProposed() *PriceEntry {
+	if x != nil {
+		return x.Proposed
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetChanges() []*PriceRateChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetProvenance() *PriceProvenance {
+	if x != nil {
+		return x.Provenance
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetAgreeingSources() []string {
+	if x != nil {
+		return x.AgreeingSources
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetClass() string {
+	if x != nil {
+		return x.Class
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetFailedRules() string {
+	if x != nil {
+		return x.FailedRules
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetDecidedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DecidedAt
+	}
+	return nil
+}
+
+func (x *PriceProposal) GetDecidedBy() string {
+	if x != nil {
+		return x.DecidedBy
+	}
+	return ""
+}
+
+func (x *PriceProposal) GetAppliedVersion() int64 {
+	if x != nil {
+		return x.AppliedVersion
+	}
+	return 0
+}
+
+type ListPriceProposalsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	State string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	Class string                 `protobuf:"bytes,2,opt,name=class,proto3" json:"class,omitempty"`
+	// limit defaults to 100, at most 1000.
+	Limit         int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPriceProposalsRequest) Reset() {
+	*x = ListPriceProposalsRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPriceProposalsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPriceProposalsRequest) ProtoMessage() {}
+
+func (x *ListPriceProposalsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPriceProposalsRequest.ProtoReflect.Descriptor instead.
+func (*ListPriceProposalsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ListPriceProposalsRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ListPriceProposalsRequest) GetClass() string {
+	if x != nil {
+		return x.Class
+	}
+	return ""
+}
+
+func (x *ListPriceProposalsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListPriceProposalsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Proposals     []*PriceProposal       `protobuf:"bytes,1,rep,name=proposals,proto3" json:"proposals,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPriceProposalsResponse) Reset() {
+	*x = ListPriceProposalsResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPriceProposalsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPriceProposalsResponse) ProtoMessage() {}
+
+func (x *ListPriceProposalsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPriceProposalsResponse.ProtoReflect.Descriptor instead.
+func (*ListPriceProposalsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ListPriceProposalsResponse) GetProposals() []*PriceProposal {
+	if x != nil {
+		return x.Proposals
+	}
+	return nil
+}
+
+type GetPriceProposalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPriceProposalRequest) Reset() {
+	*x = GetPriceProposalRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPriceProposalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPriceProposalRequest) ProtoMessage() {}
+
+func (x *GetPriceProposalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPriceProposalRequest.ProtoReflect.Descriptor instead.
+func (*GetPriceProposalRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *GetPriceProposalRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetPriceProposalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Proposal      *PriceProposal         `protobuf:"bytes,1,opt,name=proposal,proto3" json:"proposal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPriceProposalResponse) Reset() {
+	*x = GetPriceProposalResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPriceProposalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPriceProposalResponse) ProtoMessage() {}
+
+func (x *GetPriceProposalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPriceProposalResponse.ProtoReflect.Descriptor instead.
+func (*GetPriceProposalResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *GetPriceProposalResponse) GetProposal() *PriceProposal {
+	if x != nil {
+		return x.Proposal
+	}
+	return nil
+}
+
+type AcceptPriceProposalRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// confirm is the model id typed out, for a proposal of class confirm.
+	Confirm string `protobuf:"bytes,2,opt,name=confirm,proto3" json:"confirm,omitempty"`
+	// max_output is the entry's output limit in tokens; required when the source reports none.
+	MaxOutput     int32 `protobuf:"varint,3,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptPriceProposalRequest) Reset() {
+	*x = AcceptPriceProposalRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptPriceProposalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptPriceProposalRequest) ProtoMessage() {}
+
+func (x *AcceptPriceProposalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptPriceProposalRequest.ProtoReflect.Descriptor instead.
+func (*AcceptPriceProposalRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *AcceptPriceProposalRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AcceptPriceProposalRequest) GetConfirm() string {
+	if x != nil {
+		return x.Confirm
+	}
+	return ""
+}
+
+func (x *AcceptPriceProposalRequest) GetMaxOutput() int32 {
+	if x != nil {
+		return x.MaxOutput
+	}
+	return 0
+}
+
+type AcceptPriceProposalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Warnings      []string               `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptPriceProposalResponse) Reset() {
+	*x = AcceptPriceProposalResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptPriceProposalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptPriceProposalResponse) ProtoMessage() {}
+
+func (x *AcceptPriceProposalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptPriceProposalResponse.ProtoReflect.Descriptor instead.
+func (*AcceptPriceProposalResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AcceptPriceProposalResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *AcceptPriceProposalResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
+type DismissPriceProposalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DismissPriceProposalRequest) Reset() {
+	*x = DismissPriceProposalRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DismissPriceProposalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DismissPriceProposalRequest) ProtoMessage() {}
+
+func (x *DismissPriceProposalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DismissPriceProposalRequest.ProtoReflect.Descriptor instead.
+func (*DismissPriceProposalRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *DismissPriceProposalRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DismissPriceProposalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DismissPriceProposalResponse) Reset() {
+	*x = DismissPriceProposalResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DismissPriceProposalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DismissPriceProposalResponse) ProtoMessage() {}
+
+func (x *DismissPriceProposalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DismissPriceProposalResponse.ProtoReflect.Descriptor instead.
+func (*DismissPriceProposalResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{29}
+}
+
+type PriceSourceFetch struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Source    string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Url       string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	FetchedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
+	// result is ok, failed or refused.
+	Result     string `protobuf:"bytes,5,opt,name=result,proto3" json:"result,omitempty"`
+	Error      string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	Sha256     string `protobuf:"bytes,7,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Etag       string `protobuf:"bytes,8,opt,name=etag,proto3" json:"etag,omitempty"`
+	CommitSha  string `protobuf:"bytes,9,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
+	ModelCount int32  `protobuf:"varint,10,opt,name=model_count,json=modelCount,proto3" json:"model_count,omitempty"`
+	// trigger is schedule, cli or import.
+	Trigger       string `protobuf:"bytes,11,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PriceSourceFetch) Reset() {
+	*x = PriceSourceFetch{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PriceSourceFetch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PriceSourceFetch) ProtoMessage() {}
+
+func (x *PriceSourceFetch) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PriceSourceFetch.ProtoReflect.Descriptor instead.
+func (*PriceSourceFetch) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *PriceSourceFetch) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetFetchedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FetchedAt
+	}
+	return nil
+}
+
+func (x *PriceSourceFetch) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetEtag() string {
+	if x != nil {
+		return x.Etag
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetCommitSha() string {
+	if x != nil {
+		return x.CommitSha
+	}
+	return ""
+}
+
+func (x *PriceSourceFetch) GetModelCount() int32 {
+	if x != nil {
+		return x.ModelCount
+	}
+	return 0
+}
+
+func (x *PriceSourceFetch) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+type ListPriceSourceFetchesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// limit defaults to 100, at most 1000.
+	Limit         int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPriceSourceFetchesRequest) Reset() {
+	*x = ListPriceSourceFetchesRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPriceSourceFetchesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPriceSourceFetchesRequest) ProtoMessage() {}
+
+func (x *ListPriceSourceFetchesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPriceSourceFetchesRequest.ProtoReflect.Descriptor instead.
+func (*ListPriceSourceFetchesRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ListPriceSourceFetchesRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListPriceSourceFetchesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Fetches       []*PriceSourceFetch    `protobuf:"bytes,1,rep,name=fetches,proto3" json:"fetches,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPriceSourceFetchesResponse) Reset() {
+	*x = ListPriceSourceFetchesResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPriceSourceFetchesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPriceSourceFetchesResponse) ProtoMessage() {}
+
+func (x *ListPriceSourceFetchesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPriceSourceFetchesResponse.ProtoReflect.Descriptor instead.
+func (*ListPriceSourceFetchesResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ListPriceSourceFetchesResponse) GetFetches() []*PriceSourceFetch {
+	if x != nil {
+		return x.Fetches
+	}
+	return nil
+}
+
+// PlatformPriceEntry is one entry of a platform version with its provenance.
+type PlatformPriceEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Entry *PriceEntry            `protobuf:"bytes,1,opt,name=entry,proto3" json:"entry,omitempty"`
+	// price_ref is the ref a ledger entry cites for it: platform@<version>#<id>.
+	PriceRef      string           `protobuf:"bytes,2,opt,name=price_ref,json=priceRef,proto3" json:"price_ref,omitempty"`
+	Provenance    *PriceProvenance `protobuf:"bytes,3,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlatformPriceEntry) Reset() {
+	*x = PlatformPriceEntry{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlatformPriceEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlatformPriceEntry) ProtoMessage() {}
+
+func (x *PlatformPriceEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlatformPriceEntry.ProtoReflect.Descriptor instead.
+func (*PlatformPriceEntry) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *PlatformPriceEntry) GetEntry() *PriceEntry {
+	if x != nil {
+		return x.Entry
+	}
+	return nil
+}
+
+func (x *PlatformPriceEntry) GetPriceRef() string {
+	if x != nil {
+		return x.PriceRef
+	}
+	return ""
+}
+
+func (x *PlatformPriceEntry) GetProvenance() *PriceProvenance {
+	if x != nil {
+		return x.Provenance
+	}
+	return nil
+}
+
+type PlatformPriceVersion struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Version   int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ValidFrom *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
+	// actor is who wrote it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+	Actor          string   `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason         string   `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	RuleSetVersion string   `protobuf:"bytes,6,opt,name=rule_set_version,json=ruleSetVersion,proto3" json:"rule_set_version,omitempty"`
+	ProposalIds    []string `protobuf:"bytes,7,rep,name=proposal_ids,json=proposalIds,proto3" json:"proposal_ids,omitempty"`
+	// restored_from is the version a rollback copied, 0 otherwise.
+	RestoredFrom int64 `protobuf:"varint,8,opt,name=restored_from,json=restoredFrom,proto3" json:"restored_from,omitempty"`
+	// entries is empty in a list.
+	Entries       []*PlatformPriceEntry `protobuf:"bytes,9,rep,name=entries,proto3" json:"entries,omitempty"`
+	BadEntries    int32                 `protobuf:"varint,10,opt,name=bad_entries,json=badEntries,proto3" json:"bad_entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlatformPriceVersion) Reset() {
+	*x = PlatformPriceVersion{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlatformPriceVersion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlatformPriceVersion) ProtoMessage() {}
+
+func (x *PlatformPriceVersion) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlatformPriceVersion.ProtoReflect.Descriptor instead.
+func (*PlatformPriceVersion) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *PlatformPriceVersion) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *PlatformPriceVersion) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *PlatformPriceVersion) GetValidFrom() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidFrom
+	}
+	return nil
+}
+
+func (x *PlatformPriceVersion) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *PlatformPriceVersion) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *PlatformPriceVersion) GetRuleSetVersion() string {
+	if x != nil {
+		return x.RuleSetVersion
+	}
+	return ""
+}
+
+func (x *PlatformPriceVersion) GetProposalIds() []string {
+	if x != nil {
+		return x.ProposalIds
+	}
+	return nil
+}
+
+func (x *PlatformPriceVersion) GetRestoredFrom() int64 {
+	if x != nil {
+		return x.RestoredFrom
+	}
+	return 0
+}
+
+func (x *PlatformPriceVersion) GetEntries() []*PlatformPriceEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *PlatformPriceVersion) GetBadEntries() int32 {
+	if x != nil {
+		return x.BadEntries
+	}
+	return 0
+}
+
+type ListPlatformPriceVersionsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// limit defaults to 100, at most 500.
+	Limit         int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPlatformPriceVersionsRequest) Reset() {
+	*x = ListPlatformPriceVersionsRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPlatformPriceVersionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPlatformPriceVersionsRequest) ProtoMessage() {}
+
+func (x *ListPlatformPriceVersionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPlatformPriceVersionsRequest.ProtoReflect.Descriptor instead.
+func (*ListPlatformPriceVersionsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ListPlatformPriceVersionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListPlatformPriceVersionsResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Versions      []*PlatformPriceVersion `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPlatformPriceVersionsResponse) Reset() {
+	*x = ListPlatformPriceVersionsResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPlatformPriceVersionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPlatformPriceVersionsResponse) ProtoMessage() {}
+
+func (x *ListPlatformPriceVersionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPlatformPriceVersionsResponse.ProtoReflect.Descriptor instead.
+func (*ListPlatformPriceVersionsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *ListPlatformPriceVersionsResponse) GetVersions() []*PlatformPriceVersion {
+	if x != nil {
+		return x.Versions
+	}
+	return nil
+}
+
+type GetPlatformPriceVersionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPlatformPriceVersionRequest) Reset() {
+	*x = GetPlatformPriceVersionRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPlatformPriceVersionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPlatformPriceVersionRequest) ProtoMessage() {}
+
+func (x *GetPlatformPriceVersionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPlatformPriceVersionRequest.ProtoReflect.Descriptor instead.
+func (*GetPlatformPriceVersionRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *GetPlatformPriceVersionRequest) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type GetPlatformPriceVersionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       *PlatformPriceVersion  `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPlatformPriceVersionResponse) Reset() {
+	*x = GetPlatformPriceVersionResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPlatformPriceVersionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPlatformPriceVersionResponse) ProtoMessage() {}
+
+func (x *GetPlatformPriceVersionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPlatformPriceVersionResponse.ProtoReflect.Descriptor instead.
+func (*GetPlatformPriceVersionResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *GetPlatformPriceVersionResponse) GetVersion() *PlatformPriceVersion {
+	if x != nil {
+		return x.Version
+	}
+	return nil
+}
+
+type DiffPlatformPriceVersionsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// from_version 0 means the version before to_version; to_version 0 the newest.
+	FromVersion   int64 `protobuf:"varint,1,opt,name=from_version,json=fromVersion,proto3" json:"from_version,omitempty"`
+	ToVersion     int64 `protobuf:"varint,2,opt,name=to_version,json=toVersion,proto3" json:"to_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiffPlatformPriceVersionsRequest) Reset() {
+	*x = DiffPlatformPriceVersionsRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiffPlatformPriceVersionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiffPlatformPriceVersionsRequest) ProtoMessage() {}
+
+func (x *DiffPlatformPriceVersionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiffPlatformPriceVersionsRequest.ProtoReflect.Descriptor instead.
+func (*DiffPlatformPriceVersionsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *DiffPlatformPriceVersionsRequest) GetFromVersion() int64 {
+	if x != nil {
+		return x.FromVersion
+	}
+	return 0
+}
+
+func (x *DiffPlatformPriceVersionsRequest) GetToVersion() int64 {
+	if x != nil {
+		return x.ToVersion
+	}
+	return 0
+}
+
+type DiffPlatformPriceVersionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromVersion   int64                  `protobuf:"varint,1,opt,name=from_version,json=fromVersion,proto3" json:"from_version,omitempty"`
+	ToVersion     int64                  `protobuf:"varint,2,opt,name=to_version,json=toVersion,proto3" json:"to_version,omitempty"`
+	Changes       []*PriceChange         `protobuf:"bytes,3,rep,name=changes,proto3" json:"changes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiffPlatformPriceVersionsResponse) Reset() {
+	*x = DiffPlatformPriceVersionsResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiffPlatformPriceVersionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiffPlatformPriceVersionsResponse) ProtoMessage() {}
+
+func (x *DiffPlatformPriceVersionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiffPlatformPriceVersionsResponse.ProtoReflect.Descriptor instead.
+func (*DiffPlatformPriceVersionsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *DiffPlatformPriceVersionsResponse) GetFromVersion() int64 {
+	if x != nil {
+		return x.FromVersion
+	}
+	return 0
+}
+
+func (x *DiffPlatformPriceVersionsResponse) GetToVersion() int64 {
+	if x != nil {
+		return x.ToVersion
+	}
+	return 0
+}
+
+func (x *DiffPlatformPriceVersionsResponse) GetChanges() []*PriceChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+type RollbackPlatformPricesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackPlatformPricesRequest) Reset() {
+	*x = RollbackPlatformPricesRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackPlatformPricesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackPlatformPricesRequest) ProtoMessage() {}
+
+func (x *RollbackPlatformPricesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackPlatformPricesRequest.ProtoReflect.Descriptor instead.
+func (*RollbackPlatformPricesRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *RollbackPlatformPricesRequest) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type RollbackPlatformPricesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// version is the new version, equal to the one rolled back to.
+	Version       int64 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackPlatformPricesResponse) Reset() {
+	*x = RollbackPlatformPricesResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackPlatformPricesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackPlatformPricesResponse) ProtoMessage() {}
+
+func (x *RollbackPlatformPricesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackPlatformPricesResponse.ProtoReflect.Descriptor instead.
+func (*RollbackPlatformPricesResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *RollbackPlatformPricesResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type GetPriceRefreshSettingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPriceRefreshSettingsRequest) Reset() {
+	*x = GetPriceRefreshSettingsRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPriceRefreshSettingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPriceRefreshSettingsRequest) ProtoMessage() {}
+
+func (x *GetPriceRefreshSettingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPriceRefreshSettingsRequest.ProtoReflect.Descriptor instead.
+func (*GetPriceRefreshSettingsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{43}
+}
+
+type GetPriceRefreshSettingsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// mode is auto, off or on.
+	Mode string `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
+	// interval is a Go duration such as "6h0m0s".
+	Interval         string `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	MaxChangePercent int32  `protobuf:"varint,3,opt,name=max_change_percent,json=maxChangePercent,proto3" json:"max_change_percent,omitempty"`
+	MaxAutoPerDay    int32  `protobuf:"varint,4,opt,name=max_auto_per_day,json=maxAutoPerDay,proto3" json:"max_auto_per_day,omitempty"`
+	// recorded is false before koinon-api ever recorded a setting; the values are then the defaults.
+	Recorded      bool                   `protobuf:"varint,5,opt,name=recorded,proto3" json:"recorded,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPriceRefreshSettingsResponse) Reset() {
+	*x = GetPriceRefreshSettingsResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPriceRefreshSettingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPriceRefreshSettingsResponse) ProtoMessage() {}
+
+func (x *GetPriceRefreshSettingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPriceRefreshSettingsResponse.ProtoReflect.Descriptor instead.
+func (*GetPriceRefreshSettingsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetInterval() string {
+	if x != nil {
+		return x.Interval
+	}
+	return ""
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetMaxChangePercent() int32 {
+	if x != nil {
+		return x.MaxChangePercent
+	}
+	return 0
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetMaxAutoPerDay() int32 {
+	if x != nil {
+		return x.MaxAutoPerDay
+	}
+	return 0
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetRecorded() bool {
+	if x != nil {
+		return x.Recorded
+	}
+	return false
+}
+
+func (x *GetPriceRefreshSettingsResponse) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+type CheckPriceSourcesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckPriceSourcesRequest) Reset() {
+	*x = CheckPriceSourcesRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckPriceSourcesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckPriceSourcesRequest) ProtoMessage() {}
+
+func (x *CheckPriceSourcesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckPriceSourcesRequest.ProtoReflect.Descriptor instead.
+func (*CheckPriceSourcesRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{45}
+}
+
+type CheckPriceSourcesResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Fetched []string               `protobuf:"bytes,1,rep,name=fetched,proto3" json:"fetched,omitempty"`
+	// failed maps a source id to why it failed.
+	Failed        map[string]string `protobuf:"bytes,2,rep,name=failed,proto3" json:"failed,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Proposals     int32             `protobuf:"varint,3,opt,name=proposals,proto3" json:"proposals,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckPriceSourcesResponse) Reset() {
+	*x = CheckPriceSourcesResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckPriceSourcesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckPriceSourcesResponse) ProtoMessage() {}
+
+func (x *CheckPriceSourcesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckPriceSourcesResponse.ProtoReflect.Descriptor instead.
+func (*CheckPriceSourcesResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *CheckPriceSourcesResponse) GetFetched() []string {
+	if x != nil {
+		return x.Fetched
+	}
+	return nil
+}
+
+func (x *CheckPriceSourcesResponse) GetFailed() map[string]string {
+	if x != nil {
+		return x.Failed
+	}
+	return nil
+}
+
+func (x *CheckPriceSourcesResponse) GetProposals() int32 {
+	if x != nil {
+		return x.Proposals
+	}
+	return 0
+}
+
+type ExplainPlatformPriceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProviderType  string                 `protobuf:"bytes,1,opt,name=provider_type,json=providerType,proto3" json:"provider_type,omitempty"`
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainPlatformPriceRequest) Reset() {
+	*x = ExplainPlatformPriceRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainPlatformPriceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainPlatformPriceRequest) ProtoMessage() {}
+
+func (x *ExplainPlatformPriceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainPlatformPriceRequest.ProtoReflect.Descriptor instead.
+func (*ExplainPlatformPriceRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ExplainPlatformPriceRequest) GetProviderType() string {
+	if x != nil {
+		return x.ProviderType
+	}
+	return ""
+}
+
+func (x *ExplainPlatformPriceRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+type ExplainPlatformPriceResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// layer is platform or default.
+	Layer    string      `protobuf:"bytes,1,opt,name=layer,proto3" json:"layer,omitempty"`
+	PriceRef string      `protobuf:"bytes,2,opt,name=price_ref,json=priceRef,proto3" json:"price_ref,omitempty"`
+	Entry    *PriceEntry `protobuf:"bytes,3,opt,name=entry,proto3" json:"entry,omitempty"`
+	// platform_version is set for layer platform.
+	PlatformVersion int64 `protobuf:"varint,4,opt,name=platform_version,json=platformVersion,proto3" json:"platform_version,omitempty"`
+	// list_version is set for layer default.
+	ListVersion string `protobuf:"bytes,5,opt,name=list_version,json=listVersion,proto3" json:"list_version,omitempty"`
+	// provenance is set for layer platform.
+	Provenance    *PriceProvenance `protobuf:"bytes,6,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainPlatformPriceResponse) Reset() {
+	*x = ExplainPlatformPriceResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainPlatformPriceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainPlatformPriceResponse) ProtoMessage() {}
+
+func (x *ExplainPlatformPriceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainPlatformPriceResponse.ProtoReflect.Descriptor instead.
+func (*ExplainPlatformPriceResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ExplainPlatformPriceResponse) GetLayer() string {
+	if x != nil {
+		return x.Layer
+	}
+	return ""
+}
+
+func (x *ExplainPlatformPriceResponse) GetPriceRef() string {
+	if x != nil {
+		return x.PriceRef
+	}
+	return ""
+}
+
+func (x *ExplainPlatformPriceResponse) GetEntry() *PriceEntry {
+	if x != nil {
+		return x.Entry
+	}
+	return nil
+}
+
+func (x *ExplainPlatformPriceResponse) GetPlatformVersion() int64 {
+	if x != nil {
+		return x.PlatformVersion
+	}
+	return 0
+}
+
+func (x *ExplainPlatformPriceResponse) GetListVersion() string {
+	if x != nil {
+		return x.ListVersion
+	}
+	return ""
+}
+
+func (x *ExplainPlatformPriceResponse) GetProvenance() *PriceProvenance {
+	if x != nil {
+		return x.Provenance
+	}
+	return nil
+}
+
 var File_koinon_budget_v1alpha1_price_proto protoreflect.FileDescriptor
 
 const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
@@ -1558,7 +3487,171 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x120\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"[\n" +
 	"\x19ListFlaggedPricesResponse\x12>\n" +
-	"\aflagged\x18\x01 \x03(\v2$.koinon.budget.v1alpha1.FlaggedPriceR\aflagged2\xc9\x05\n" +
+	"\aflagged\x18\x01 \x03(\v2$.koinon.budget.v1alpha1.FlaggedPriceR\aflagged\"\x88\x04\n" +
+	"\x0fPriceProvenance\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x129\n" +
+	"\n" +
+	"fetched_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\x12\x16\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1d\n" +
+	"\n" +
+	"commit_sha\x18\x05 \x01(\tR\tcommitSha\x12=\n" +
+	"\fcommitted_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\vcommittedAt\x12\x12\n" +
+	"\x04etag\x18\a \x01(\tR\x04etag\x12\x18\n" +
+	"\alicence\x18\b \x01(\tR\alicence\x12)\n" +
+	"\x10agreeing_sources\x18\t \x03(\tR\x0fagreeingSources\x12\x1f\n" +
+	"\vproposal_id\x18\n" +
+	" \x01(\tR\n" +
+	"proposalId\x12\x1a\n" +
+	"\bapprover\x18\v \x01(\tR\bapprover\x12(\n" +
+	"\x10rule_set_version\x18\f \x01(\tR\x0eruleSetVersion\x12;\n" +
+	"\vapproved_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"approvedAt\x12\x1d\n" +
+	"\n" +
+	"vouched_by\x18\x0e \x01(\tR\tvouchedBy\"p\n" +
+	"\x0fPriceRateChange\x12\x16\n" +
+	"\x06bucket\x18\x01 \x01(\tR\x06bucket\x12!\n" +
+	"\fcontext_over\x18\x02 \x01(\x03R\vcontextOver\x12\x12\n" +
+	"\x04from\x18\x03 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x04 \x01(\tR\x02to\"\xed\x05\n" +
+	"\rPriceProposal\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
+	"\x06origin\x18\x03 \x01(\tR\x06origin\x12#\n" +
+	"\rprovider_type\x18\x04 \x01(\tR\fproviderType\x12\x14\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12\x1f\n" +
+	"\vcurrent_ref\x18\x06 \x01(\tR\n" +
+	"currentRef\x12<\n" +
+	"\acurrent\x18\a \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\acurrent\x12>\n" +
+	"\bproposed\x18\b \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\bproposed\x12A\n" +
+	"\achanges\x18\t \x03(\v2'.koinon.budget.v1alpha1.PriceRateChangeR\achanges\x12G\n" +
+	"\n" +
+	"provenance\x18\n" +
+	" \x01(\v2'.koinon.budget.v1alpha1.PriceProvenanceR\n" +
+	"provenance\x12)\n" +
+	"\x10agreeing_sources\x18\v \x03(\tR\x0fagreeingSources\x12\x14\n" +
+	"\x05class\x18\f \x01(\tR\x05class\x12!\n" +
+	"\ffailed_rules\x18\r \x01(\tR\vfailedRules\x12\x14\n" +
+	"\x05state\x18\x0e \x01(\tR\x05state\x129\n" +
+	"\n" +
+	"created_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"decided_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tdecidedAt\x12\x1d\n" +
+	"\n" +
+	"decided_by\x18\x11 \x01(\tR\tdecidedBy\x12'\n" +
+	"\x0fapplied_version\x18\x12 \x01(\x03R\x0eappliedVersion\"]\n" +
+	"\x19ListPriceProposalsRequest\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x14\n" +
+	"\x05class\x18\x02 \x01(\tR\x05class\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"a\n" +
+	"\x1aListPriceProposalsResponse\x12C\n" +
+	"\tproposals\x18\x01 \x03(\v2%.koinon.budget.v1alpha1.PriceProposalR\tproposals\")\n" +
+	"\x17GetPriceProposalRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"]\n" +
+	"\x18GetPriceProposalResponse\x12A\n" +
+	"\bproposal\x18\x01 \x01(\v2%.koinon.budget.v1alpha1.PriceProposalR\bproposal\"e\n" +
+	"\x1aAcceptPriceProposalRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aconfirm\x18\x02 \x01(\tR\aconfirm\x12\x1d\n" +
+	"\n" +
+	"max_output\x18\x03 \x01(\x05R\tmaxOutput\"S\n" +
+	"\x1bAcceptPriceProposalResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\x12\x1a\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"-\n" +
+	"\x1bDismissPriceProposalRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x1e\n" +
+	"\x1cDismissPriceProposalResponse\"\xbb\x02\n" +
+	"\x10PriceSourceFetch\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x129\n" +
+	"\n" +
+	"fetched_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\x12\x16\n" +
+	"\x06result\x18\x05 \x01(\tR\x06result\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x16\n" +
+	"\x06sha256\x18\a \x01(\tR\x06sha256\x12\x12\n" +
+	"\x04etag\x18\b \x01(\tR\x04etag\x12\x1d\n" +
+	"\n" +
+	"commit_sha\x18\t \x01(\tR\tcommitSha\x12\x1f\n" +
+	"\vmodel_count\x18\n" +
+	" \x01(\x05R\n" +
+	"modelCount\x12\x18\n" +
+	"\atrigger\x18\v \x01(\tR\atrigger\"5\n" +
+	"\x1dListPriceSourceFetchesRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"d\n" +
+	"\x1eListPriceSourceFetchesResponse\x12B\n" +
+	"\afetches\x18\x01 \x03(\v2(.koinon.budget.v1alpha1.PriceSourceFetchR\afetches\"\xb4\x01\n" +
+	"\x12PlatformPriceEntry\x128\n" +
+	"\x05entry\x18\x01 \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\x05entry\x12\x1b\n" +
+	"\tprice_ref\x18\x02 \x01(\tR\bpriceRef\x12G\n" +
+	"\n" +
+	"provenance\x18\x03 \x01(\v2'.koinon.budget.v1alpha1.PriceProvenanceR\n" +
+	"provenance\"\xad\x03\n" +
+	"\x14PlatformPriceVersion\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\x129\n" +
+	"\n" +
+	"created_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"valid_from\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tvalidFrom\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12(\n" +
+	"\x10rule_set_version\x18\x06 \x01(\tR\x0eruleSetVersion\x12!\n" +
+	"\fproposal_ids\x18\a \x03(\tR\vproposalIds\x12#\n" +
+	"\rrestored_from\x18\b \x01(\x03R\frestoredFrom\x12D\n" +
+	"\aentries\x18\t \x03(\v2*.koinon.budget.v1alpha1.PlatformPriceEntryR\aentries\x12\x1f\n" +
+	"\vbad_entries\x18\n" +
+	" \x01(\x05R\n" +
+	"badEntries\"8\n" +
+	" ListPlatformPriceVersionsRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"m\n" +
+	"!ListPlatformPriceVersionsResponse\x12H\n" +
+	"\bversions\x18\x01 \x03(\v2,.koinon.budget.v1alpha1.PlatformPriceVersionR\bversions\":\n" +
+	"\x1eGetPlatformPriceVersionRequest\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\"i\n" +
+	"\x1fGetPlatformPriceVersionResponse\x12F\n" +
+	"\aversion\x18\x01 \x01(\v2,.koinon.budget.v1alpha1.PlatformPriceVersionR\aversion\"d\n" +
+	" DiffPlatformPriceVersionsRequest\x12!\n" +
+	"\ffrom_version\x18\x01 \x01(\x03R\vfromVersion\x12\x1d\n" +
+	"\n" +
+	"to_version\x18\x02 \x01(\x03R\ttoVersion\"\xa4\x01\n" +
+	"!DiffPlatformPriceVersionsResponse\x12!\n" +
+	"\ffrom_version\x18\x01 \x01(\x03R\vfromVersion\x12\x1d\n" +
+	"\n" +
+	"to_version\x18\x02 \x01(\x03R\ttoVersion\x12=\n" +
+	"\achanges\x18\x03 \x03(\v2#.koinon.budget.v1alpha1.PriceChangeR\achanges\"9\n" +
+	"\x1dRollbackPlatformPricesRequest\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\":\n" +
+	"\x1eRollbackPlatformPricesResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\" \n" +
+	"\x1eGetPriceRefreshSettingsRequest\"\xff\x01\n" +
+	"\x1fGetPriceRefreshSettingsResponse\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\x12\x1a\n" +
+	"\binterval\x18\x02 \x01(\tR\binterval\x12,\n" +
+	"\x12max_change_percent\x18\x03 \x01(\x05R\x10maxChangePercent\x12'\n" +
+	"\x10max_auto_per_day\x18\x04 \x01(\x05R\rmaxAutoPerDay\x12\x1a\n" +
+	"\brecorded\x18\x05 \x01(\bR\brecorded\x129\n" +
+	"\n" +
+	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x1a\n" +
+	"\x18CheckPriceSourcesRequest\"\xe5\x01\n" +
+	"\x19CheckPriceSourcesResponse\x12\x18\n" +
+	"\afetched\x18\x01 \x03(\tR\afetched\x12U\n" +
+	"\x06failed\x18\x02 \x03(\v2=.koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntryR\x06failed\x12\x1c\n" +
+	"\tproposals\x18\x03 \x01(\x05R\tproposals\x1a9\n" +
+	"\vFailedEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"X\n" +
+	"\x1bExplainPlatformPriceRequest\x12#\n" +
+	"\rprovider_type\x18\x01 \x01(\tR\fproviderType\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"\xa2\x02\n" +
+	"\x1cExplainPlatformPriceResponse\x12\x14\n" +
+	"\x05layer\x18\x01 \x01(\tR\x05layer\x12\x1b\n" +
+	"\tprice_ref\x18\x02 \x01(\tR\bpriceRef\x128\n" +
+	"\x05entry\x18\x03 \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\x05entry\x12)\n" +
+	"\x10platform_version\x18\x04 \x01(\x03R\x0fplatformVersion\x12!\n" +
+	"\flist_version\x18\x05 \x01(\tR\vlistVersion\x12G\n" +
+	"\n" +
+	"provenance\x18\x06 \x01(\v2'.koinon.budget.v1alpha1.PriceProvenanceR\n" +
+	"provenance2\xbc\x12\n" +
 	"\fPriceService\x12h\n" +
 	"\n" +
 	"ListPrices\x12).koinon.budget.v1alpha1.ListPricesRequest\x1a*.koinon.budget.v1alpha1.ListPricesResponse\"\x03\x90\x02\x01\x12]\n" +
@@ -1566,7 +3659,19 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\vRetirePrice\x12*.koinon.budget.v1alpha1.RetirePriceRequest\x1a+.koinon.budget.v1alpha1.RetirePriceResponse\x12z\n" +
 	"\x10GetDefaultPrices\x12/.koinon.budget.v1alpha1.GetDefaultPricesRequest\x1a0.koinon.budget.v1alpha1.GetDefaultPricesResponse\"\x03\x90\x02\x01\x12\x8c\x01\n" +
 	"\x16GetDefaultPriceChanges\x125.koinon.budget.v1alpha1.GetDefaultPriceChangesRequest\x1a6.koinon.budget.v1alpha1.GetDefaultPriceChangesResponse\"\x03\x90\x02\x01\x12}\n" +
-	"\x11ListFlaggedPrices\x120.koinon.budget.v1alpha1.ListFlaggedPricesRequest\x1a1.koinon.budget.v1alpha1.ListFlaggedPricesResponse\"\x03\x90\x02\x01BSZQgithub.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1b\x06proto3"
+	"\x11ListFlaggedPrices\x120.koinon.budget.v1alpha1.ListFlaggedPricesRequest\x1a1.koinon.budget.v1alpha1.ListFlaggedPricesResponse\"\x03\x90\x02\x01\x12\x80\x01\n" +
+	"\x12ListPriceProposals\x121.koinon.budget.v1alpha1.ListPriceProposalsRequest\x1a2.koinon.budget.v1alpha1.ListPriceProposalsResponse\"\x03\x90\x02\x01\x12z\n" +
+	"\x10GetPriceProposal\x12/.koinon.budget.v1alpha1.GetPriceProposalRequest\x1a0.koinon.budget.v1alpha1.GetPriceProposalResponse\"\x03\x90\x02\x01\x12~\n" +
+	"\x13AcceptPriceProposal\x122.koinon.budget.v1alpha1.AcceptPriceProposalRequest\x1a3.koinon.budget.v1alpha1.AcceptPriceProposalResponse\x12\x81\x01\n" +
+	"\x14DismissPriceProposal\x123.koinon.budget.v1alpha1.DismissPriceProposalRequest\x1a4.koinon.budget.v1alpha1.DismissPriceProposalResponse\x12\x8c\x01\n" +
+	"\x16ListPriceSourceFetches\x125.koinon.budget.v1alpha1.ListPriceSourceFetchesRequest\x1a6.koinon.budget.v1alpha1.ListPriceSourceFetchesResponse\"\x03\x90\x02\x01\x12\x95\x01\n" +
+	"\x19ListPlatformPriceVersions\x128.koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest\x1a9.koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse\"\x03\x90\x02\x01\x12\x8f\x01\n" +
+	"\x17GetPlatformPriceVersion\x126.koinon.budget.v1alpha1.GetPlatformPriceVersionRequest\x1a7.koinon.budget.v1alpha1.GetPlatformPriceVersionResponse\"\x03\x90\x02\x01\x12\x95\x01\n" +
+	"\x19DiffPlatformPriceVersions\x128.koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest\x1a9.koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse\"\x03\x90\x02\x01\x12\x87\x01\n" +
+	"\x16RollbackPlatformPrices\x125.koinon.budget.v1alpha1.RollbackPlatformPricesRequest\x1a6.koinon.budget.v1alpha1.RollbackPlatformPricesResponse\x12\x8f\x01\n" +
+	"\x17GetPriceRefreshSettings\x126.koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest\x1a7.koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse\"\x03\x90\x02\x01\x12x\n" +
+	"\x11CheckPriceSources\x120.koinon.budget.v1alpha1.CheckPriceSourcesRequest\x1a1.koinon.budget.v1alpha1.CheckPriceSourcesResponse\x12\x86\x01\n" +
+	"\x14ExplainPlatformPrice\x123.koinon.budget.v1alpha1.ExplainPlatformPriceRequest\x1a4.koinon.budget.v1alpha1.ExplainPlatformPriceResponse\"\x03\x90\x02\x01BSZQgithub.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1b\x06proto3"
 
 var (
 	file_koinon_budget_v1alpha1_price_proto_rawDescOnce sync.Once
@@ -1580,28 +3685,59 @@ func file_koinon_budget_v1alpha1_price_proto_rawDescGZIP() []byte {
 	return file_koinon_budget_v1alpha1_price_proto_rawDescData
 }
 
-var file_koinon_budget_v1alpha1_price_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_koinon_budget_v1alpha1_price_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_koinon_budget_v1alpha1_price_proto_goTypes = []any{
-	(*Rates)(nil),                          // 0: koinon.budget.v1alpha1.Rates
-	(*PriceTier)(nil),                      // 1: koinon.budget.v1alpha1.PriceTier
-	(*PriceMatch)(nil),                     // 2: koinon.budget.v1alpha1.PriceMatch
-	(*PriceEntry)(nil),                     // 3: koinon.budget.v1alpha1.PriceEntry
-	(*PriceVersion)(nil),                   // 4: koinon.budget.v1alpha1.PriceVersion
-	(*ListPricesRequest)(nil),              // 5: koinon.budget.v1alpha1.ListPricesRequest
-	(*ListPricesResponse)(nil),             // 6: koinon.budget.v1alpha1.ListPricesResponse
-	(*SetPriceRequest)(nil),                // 7: koinon.budget.v1alpha1.SetPriceRequest
-	(*SetPriceResponse)(nil),               // 8: koinon.budget.v1alpha1.SetPriceResponse
-	(*RetirePriceRequest)(nil),             // 9: koinon.budget.v1alpha1.RetirePriceRequest
-	(*RetirePriceResponse)(nil),            // 10: koinon.budget.v1alpha1.RetirePriceResponse
-	(*GetDefaultPricesRequest)(nil),        // 11: koinon.budget.v1alpha1.GetDefaultPricesRequest
-	(*GetDefaultPricesResponse)(nil),       // 12: koinon.budget.v1alpha1.GetDefaultPricesResponse
-	(*GetDefaultPriceChangesRequest)(nil),  // 13: koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
-	(*PriceChange)(nil),                    // 14: koinon.budget.v1alpha1.PriceChange
-	(*GetDefaultPriceChangesResponse)(nil), // 15: koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
-	(*FlaggedPrice)(nil),                   // 16: koinon.budget.v1alpha1.FlaggedPrice
-	(*ListFlaggedPricesRequest)(nil),       // 17: koinon.budget.v1alpha1.ListFlaggedPricesRequest
-	(*ListFlaggedPricesResponse)(nil),      // 18: koinon.budget.v1alpha1.ListFlaggedPricesResponse
-	(*timestamppb.Timestamp)(nil),          // 19: google.protobuf.Timestamp
+	(*Rates)(nil),                             // 0: koinon.budget.v1alpha1.Rates
+	(*PriceTier)(nil),                         // 1: koinon.budget.v1alpha1.PriceTier
+	(*PriceMatch)(nil),                        // 2: koinon.budget.v1alpha1.PriceMatch
+	(*PriceEntry)(nil),                        // 3: koinon.budget.v1alpha1.PriceEntry
+	(*PriceVersion)(nil),                      // 4: koinon.budget.v1alpha1.PriceVersion
+	(*ListPricesRequest)(nil),                 // 5: koinon.budget.v1alpha1.ListPricesRequest
+	(*ListPricesResponse)(nil),                // 6: koinon.budget.v1alpha1.ListPricesResponse
+	(*SetPriceRequest)(nil),                   // 7: koinon.budget.v1alpha1.SetPriceRequest
+	(*SetPriceResponse)(nil),                  // 8: koinon.budget.v1alpha1.SetPriceResponse
+	(*RetirePriceRequest)(nil),                // 9: koinon.budget.v1alpha1.RetirePriceRequest
+	(*RetirePriceResponse)(nil),               // 10: koinon.budget.v1alpha1.RetirePriceResponse
+	(*GetDefaultPricesRequest)(nil),           // 11: koinon.budget.v1alpha1.GetDefaultPricesRequest
+	(*GetDefaultPricesResponse)(nil),          // 12: koinon.budget.v1alpha1.GetDefaultPricesResponse
+	(*GetDefaultPriceChangesRequest)(nil),     // 13: koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
+	(*PriceChange)(nil),                       // 14: koinon.budget.v1alpha1.PriceChange
+	(*GetDefaultPriceChangesResponse)(nil),    // 15: koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
+	(*FlaggedPrice)(nil),                      // 16: koinon.budget.v1alpha1.FlaggedPrice
+	(*ListFlaggedPricesRequest)(nil),          // 17: koinon.budget.v1alpha1.ListFlaggedPricesRequest
+	(*ListFlaggedPricesResponse)(nil),         // 18: koinon.budget.v1alpha1.ListFlaggedPricesResponse
+	(*PriceProvenance)(nil),                   // 19: koinon.budget.v1alpha1.PriceProvenance
+	(*PriceRateChange)(nil),                   // 20: koinon.budget.v1alpha1.PriceRateChange
+	(*PriceProposal)(nil),                     // 21: koinon.budget.v1alpha1.PriceProposal
+	(*ListPriceProposalsRequest)(nil),         // 22: koinon.budget.v1alpha1.ListPriceProposalsRequest
+	(*ListPriceProposalsResponse)(nil),        // 23: koinon.budget.v1alpha1.ListPriceProposalsResponse
+	(*GetPriceProposalRequest)(nil),           // 24: koinon.budget.v1alpha1.GetPriceProposalRequest
+	(*GetPriceProposalResponse)(nil),          // 25: koinon.budget.v1alpha1.GetPriceProposalResponse
+	(*AcceptPriceProposalRequest)(nil),        // 26: koinon.budget.v1alpha1.AcceptPriceProposalRequest
+	(*AcceptPriceProposalResponse)(nil),       // 27: koinon.budget.v1alpha1.AcceptPriceProposalResponse
+	(*DismissPriceProposalRequest)(nil),       // 28: koinon.budget.v1alpha1.DismissPriceProposalRequest
+	(*DismissPriceProposalResponse)(nil),      // 29: koinon.budget.v1alpha1.DismissPriceProposalResponse
+	(*PriceSourceFetch)(nil),                  // 30: koinon.budget.v1alpha1.PriceSourceFetch
+	(*ListPriceSourceFetchesRequest)(nil),     // 31: koinon.budget.v1alpha1.ListPriceSourceFetchesRequest
+	(*ListPriceSourceFetchesResponse)(nil),    // 32: koinon.budget.v1alpha1.ListPriceSourceFetchesResponse
+	(*PlatformPriceEntry)(nil),                // 33: koinon.budget.v1alpha1.PlatformPriceEntry
+	(*PlatformPriceVersion)(nil),              // 34: koinon.budget.v1alpha1.PlatformPriceVersion
+	(*ListPlatformPriceVersionsRequest)(nil),  // 35: koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest
+	(*ListPlatformPriceVersionsResponse)(nil), // 36: koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse
+	(*GetPlatformPriceVersionRequest)(nil),    // 37: koinon.budget.v1alpha1.GetPlatformPriceVersionRequest
+	(*GetPlatformPriceVersionResponse)(nil),   // 38: koinon.budget.v1alpha1.GetPlatformPriceVersionResponse
+	(*DiffPlatformPriceVersionsRequest)(nil),  // 39: koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest
+	(*DiffPlatformPriceVersionsResponse)(nil), // 40: koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse
+	(*RollbackPlatformPricesRequest)(nil),     // 41: koinon.budget.v1alpha1.RollbackPlatformPricesRequest
+	(*RollbackPlatformPricesResponse)(nil),    // 42: koinon.budget.v1alpha1.RollbackPlatformPricesResponse
+	(*GetPriceRefreshSettingsRequest)(nil),    // 43: koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest
+	(*GetPriceRefreshSettingsResponse)(nil),   // 44: koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse
+	(*CheckPriceSourcesRequest)(nil),          // 45: koinon.budget.v1alpha1.CheckPriceSourcesRequest
+	(*CheckPriceSourcesResponse)(nil),         // 46: koinon.budget.v1alpha1.CheckPriceSourcesResponse
+	(*ExplainPlatformPriceRequest)(nil),       // 47: koinon.budget.v1alpha1.ExplainPlatformPriceRequest
+	(*ExplainPlatformPriceResponse)(nil),      // 48: koinon.budget.v1alpha1.ExplainPlatformPriceResponse
+	nil,                                       // 49: koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
+	(*timestamppb.Timestamp)(nil),             // 50: google.protobuf.Timestamp
 }
 var file_koinon_budget_v1alpha1_price_proto_depIdxs = []int32{
 	0,  // 0: koinon.budget.v1alpha1.PriceTier.rates:type_name -> koinon.budget.v1alpha1.Rates
@@ -1611,39 +3747,88 @@ var file_koinon_budget_v1alpha1_price_proto_depIdxs = []int32{
 	2,  // 4: koinon.budget.v1alpha1.PriceVersion.match:type_name -> koinon.budget.v1alpha1.PriceMatch
 	0,  // 5: koinon.budget.v1alpha1.PriceVersion.rates:type_name -> koinon.budget.v1alpha1.Rates
 	1,  // 6: koinon.budget.v1alpha1.PriceVersion.tiers:type_name -> koinon.budget.v1alpha1.PriceTier
-	19, // 7: koinon.budget.v1alpha1.PriceVersion.valid_from:type_name -> google.protobuf.Timestamp
-	19, // 8: koinon.budget.v1alpha1.PriceVersion.retired_at:type_name -> google.protobuf.Timestamp
-	19, // 9: koinon.budget.v1alpha1.PriceVersion.created_at:type_name -> google.protobuf.Timestamp
+	50, // 7: koinon.budget.v1alpha1.PriceVersion.valid_from:type_name -> google.protobuf.Timestamp
+	50, // 8: koinon.budget.v1alpha1.PriceVersion.retired_at:type_name -> google.protobuf.Timestamp
+	50, // 9: koinon.budget.v1alpha1.PriceVersion.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 10: koinon.budget.v1alpha1.ListPricesResponse.prices:type_name -> koinon.budget.v1alpha1.PriceVersion
 	2,  // 11: koinon.budget.v1alpha1.SetPriceRequest.match:type_name -> koinon.budget.v1alpha1.PriceMatch
 	0,  // 12: koinon.budget.v1alpha1.SetPriceRequest.rates:type_name -> koinon.budget.v1alpha1.Rates
 	1,  // 13: koinon.budget.v1alpha1.SetPriceRequest.tiers:type_name -> koinon.budget.v1alpha1.PriceTier
-	19, // 14: koinon.budget.v1alpha1.SetPriceRequest.valid_from:type_name -> google.protobuf.Timestamp
+	50, // 14: koinon.budget.v1alpha1.SetPriceRequest.valid_from:type_name -> google.protobuf.Timestamp
 	4,  // 15: koinon.budget.v1alpha1.SetPriceResponse.price:type_name -> koinon.budget.v1alpha1.PriceVersion
 	3,  // 16: koinon.budget.v1alpha1.GetDefaultPricesResponse.entries:type_name -> koinon.budget.v1alpha1.PriceEntry
 	3,  // 17: koinon.budget.v1alpha1.PriceChange.before:type_name -> koinon.budget.v1alpha1.PriceEntry
 	3,  // 18: koinon.budget.v1alpha1.PriceChange.after:type_name -> koinon.budget.v1alpha1.PriceEntry
 	14, // 19: koinon.budget.v1alpha1.GetDefaultPriceChangesResponse.changes:type_name -> koinon.budget.v1alpha1.PriceChange
-	19, // 20: koinon.budget.v1alpha1.FlaggedPrice.last_seen:type_name -> google.protobuf.Timestamp
-	19, // 21: koinon.budget.v1alpha1.ListFlaggedPricesRequest.since:type_name -> google.protobuf.Timestamp
+	50, // 20: koinon.budget.v1alpha1.FlaggedPrice.last_seen:type_name -> google.protobuf.Timestamp
+	50, // 21: koinon.budget.v1alpha1.ListFlaggedPricesRequest.since:type_name -> google.protobuf.Timestamp
 	16, // 22: koinon.budget.v1alpha1.ListFlaggedPricesResponse.flagged:type_name -> koinon.budget.v1alpha1.FlaggedPrice
-	5,  // 23: koinon.budget.v1alpha1.PriceService.ListPrices:input_type -> koinon.budget.v1alpha1.ListPricesRequest
-	7,  // 24: koinon.budget.v1alpha1.PriceService.SetPrice:input_type -> koinon.budget.v1alpha1.SetPriceRequest
-	9,  // 25: koinon.budget.v1alpha1.PriceService.RetirePrice:input_type -> koinon.budget.v1alpha1.RetirePriceRequest
-	11, // 26: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:input_type -> koinon.budget.v1alpha1.GetDefaultPricesRequest
-	13, // 27: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:input_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
-	17, // 28: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:input_type -> koinon.budget.v1alpha1.ListFlaggedPricesRequest
-	6,  // 29: koinon.budget.v1alpha1.PriceService.ListPrices:output_type -> koinon.budget.v1alpha1.ListPricesResponse
-	8,  // 30: koinon.budget.v1alpha1.PriceService.SetPrice:output_type -> koinon.budget.v1alpha1.SetPriceResponse
-	10, // 31: koinon.budget.v1alpha1.PriceService.RetirePrice:output_type -> koinon.budget.v1alpha1.RetirePriceResponse
-	12, // 32: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:output_type -> koinon.budget.v1alpha1.GetDefaultPricesResponse
-	15, // 33: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:output_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
-	18, // 34: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:output_type -> koinon.budget.v1alpha1.ListFlaggedPricesResponse
-	29, // [29:35] is the sub-list for method output_type
-	23, // [23:29] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	50, // 23: koinon.budget.v1alpha1.PriceProvenance.fetched_at:type_name -> google.protobuf.Timestamp
+	50, // 24: koinon.budget.v1alpha1.PriceProvenance.committed_at:type_name -> google.protobuf.Timestamp
+	50, // 25: koinon.budget.v1alpha1.PriceProvenance.approved_at:type_name -> google.protobuf.Timestamp
+	3,  // 26: koinon.budget.v1alpha1.PriceProposal.current:type_name -> koinon.budget.v1alpha1.PriceEntry
+	3,  // 27: koinon.budget.v1alpha1.PriceProposal.proposed:type_name -> koinon.budget.v1alpha1.PriceEntry
+	20, // 28: koinon.budget.v1alpha1.PriceProposal.changes:type_name -> koinon.budget.v1alpha1.PriceRateChange
+	19, // 29: koinon.budget.v1alpha1.PriceProposal.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
+	50, // 30: koinon.budget.v1alpha1.PriceProposal.created_at:type_name -> google.protobuf.Timestamp
+	50, // 31: koinon.budget.v1alpha1.PriceProposal.decided_at:type_name -> google.protobuf.Timestamp
+	21, // 32: koinon.budget.v1alpha1.ListPriceProposalsResponse.proposals:type_name -> koinon.budget.v1alpha1.PriceProposal
+	21, // 33: koinon.budget.v1alpha1.GetPriceProposalResponse.proposal:type_name -> koinon.budget.v1alpha1.PriceProposal
+	50, // 34: koinon.budget.v1alpha1.PriceSourceFetch.fetched_at:type_name -> google.protobuf.Timestamp
+	30, // 35: koinon.budget.v1alpha1.ListPriceSourceFetchesResponse.fetches:type_name -> koinon.budget.v1alpha1.PriceSourceFetch
+	3,  // 36: koinon.budget.v1alpha1.PlatformPriceEntry.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
+	19, // 37: koinon.budget.v1alpha1.PlatformPriceEntry.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
+	50, // 38: koinon.budget.v1alpha1.PlatformPriceVersion.created_at:type_name -> google.protobuf.Timestamp
+	50, // 39: koinon.budget.v1alpha1.PlatformPriceVersion.valid_from:type_name -> google.protobuf.Timestamp
+	33, // 40: koinon.budget.v1alpha1.PlatformPriceVersion.entries:type_name -> koinon.budget.v1alpha1.PlatformPriceEntry
+	34, // 41: koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse.versions:type_name -> koinon.budget.v1alpha1.PlatformPriceVersion
+	34, // 42: koinon.budget.v1alpha1.GetPlatformPriceVersionResponse.version:type_name -> koinon.budget.v1alpha1.PlatformPriceVersion
+	14, // 43: koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse.changes:type_name -> koinon.budget.v1alpha1.PriceChange
+	50, // 44: koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse.updated_at:type_name -> google.protobuf.Timestamp
+	49, // 45: koinon.budget.v1alpha1.CheckPriceSourcesResponse.failed:type_name -> koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
+	3,  // 46: koinon.budget.v1alpha1.ExplainPlatformPriceResponse.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
+	19, // 47: koinon.budget.v1alpha1.ExplainPlatformPriceResponse.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
+	5,  // 48: koinon.budget.v1alpha1.PriceService.ListPrices:input_type -> koinon.budget.v1alpha1.ListPricesRequest
+	7,  // 49: koinon.budget.v1alpha1.PriceService.SetPrice:input_type -> koinon.budget.v1alpha1.SetPriceRequest
+	9,  // 50: koinon.budget.v1alpha1.PriceService.RetirePrice:input_type -> koinon.budget.v1alpha1.RetirePriceRequest
+	11, // 51: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:input_type -> koinon.budget.v1alpha1.GetDefaultPricesRequest
+	13, // 52: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:input_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
+	17, // 53: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:input_type -> koinon.budget.v1alpha1.ListFlaggedPricesRequest
+	22, // 54: koinon.budget.v1alpha1.PriceService.ListPriceProposals:input_type -> koinon.budget.v1alpha1.ListPriceProposalsRequest
+	24, // 55: koinon.budget.v1alpha1.PriceService.GetPriceProposal:input_type -> koinon.budget.v1alpha1.GetPriceProposalRequest
+	26, // 56: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:input_type -> koinon.budget.v1alpha1.AcceptPriceProposalRequest
+	28, // 57: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:input_type -> koinon.budget.v1alpha1.DismissPriceProposalRequest
+	31, // 58: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:input_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesRequest
+	35, // 59: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest
+	37, // 60: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:input_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionRequest
+	39, // 61: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest
+	41, // 62: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:input_type -> koinon.budget.v1alpha1.RollbackPlatformPricesRequest
+	43, // 63: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:input_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest
+	45, // 64: koinon.budget.v1alpha1.PriceService.CheckPriceSources:input_type -> koinon.budget.v1alpha1.CheckPriceSourcesRequest
+	47, // 65: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:input_type -> koinon.budget.v1alpha1.ExplainPlatformPriceRequest
+	6,  // 66: koinon.budget.v1alpha1.PriceService.ListPrices:output_type -> koinon.budget.v1alpha1.ListPricesResponse
+	8,  // 67: koinon.budget.v1alpha1.PriceService.SetPrice:output_type -> koinon.budget.v1alpha1.SetPriceResponse
+	10, // 68: koinon.budget.v1alpha1.PriceService.RetirePrice:output_type -> koinon.budget.v1alpha1.RetirePriceResponse
+	12, // 69: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:output_type -> koinon.budget.v1alpha1.GetDefaultPricesResponse
+	15, // 70: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:output_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
+	18, // 71: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:output_type -> koinon.budget.v1alpha1.ListFlaggedPricesResponse
+	23, // 72: koinon.budget.v1alpha1.PriceService.ListPriceProposals:output_type -> koinon.budget.v1alpha1.ListPriceProposalsResponse
+	25, // 73: koinon.budget.v1alpha1.PriceService.GetPriceProposal:output_type -> koinon.budget.v1alpha1.GetPriceProposalResponse
+	27, // 74: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:output_type -> koinon.budget.v1alpha1.AcceptPriceProposalResponse
+	29, // 75: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:output_type -> koinon.budget.v1alpha1.DismissPriceProposalResponse
+	32, // 76: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:output_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesResponse
+	36, // 77: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse
+	38, // 78: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:output_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionResponse
+	40, // 79: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse
+	42, // 80: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:output_type -> koinon.budget.v1alpha1.RollbackPlatformPricesResponse
+	44, // 81: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:output_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse
+	46, // 82: koinon.budget.v1alpha1.PriceService.CheckPriceSources:output_type -> koinon.budget.v1alpha1.CheckPriceSourcesResponse
+	48, // 83: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:output_type -> koinon.budget.v1alpha1.ExplainPlatformPriceResponse
+	66, // [66:84] is the sub-list for method output_type
+	48, // [48:66] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_koinon_budget_v1alpha1_price_proto_init() }
@@ -1657,7 +3842,7 @@ func file_koinon_budget_v1alpha1_price_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_budget_v1alpha1_price_proto_rawDesc), len(file_koinon_budget_v1alpha1_price_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

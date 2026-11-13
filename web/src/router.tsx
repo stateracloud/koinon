@@ -23,6 +23,7 @@ import { LoginPage } from '@/pages/login-page'
 import { TaskPage } from '@/pages/task-page'
 import { ObservabilityPage } from '@/pages/observability-page'
 import { PlatformObservabilityPage } from '@/pages/platform-observability-page'
+import { PlatformPricesPage } from '@/pages/platform-prices-page'
 
 export type RouterContext = { queryClient: QueryClient }
 
@@ -86,6 +87,7 @@ export const pricesRoute = createRoute({ getParentRoute: () => appRoute, path: '
 export const budgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/budgets', component: BudgetsPage })
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/budgets', component: PlatformBudgetsPage })
 export const observabilityRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/observability', component: ObservabilityPage })
+export const platformPricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/prices', component: PlatformPricesPage })
 export const platformObservabilityRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/observability', component: PlatformObservabilityPage })
 export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/tokens', component: TokensPage })
 
@@ -110,6 +112,7 @@ const routeTree = rootRoute.addChildren([
     budgetsRoute,
     platformBudgetsRoute,
     observabilityRoute,
+    platformPricesRoute,
     platformObservabilityRoute,
     tokensRoute,
   ]),
