@@ -1582,6 +1582,7 @@ type AgentSandbox struct {
 	ArchivedAt          pgtype.Timestamptz
 	Reason              string
 	HomeDirtiedAt       pgtype.Timestamptz
+	Enforcement         string
 }
 
 type AgentVersion struct {
@@ -1924,6 +1925,27 @@ type KekFingerprint struct {
 	KeyID       string
 	FirstSeen   pgtype.Timestamptz
 	ActivatedAt pgtype.Timestamptz
+}
+
+type LeakGuardDecision struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	AgentID        pgtype.UUID
+	Generation     string
+	RunID          pgtype.UUID
+	Server         string
+	Tool           string
+	SinkClass      string
+	Action         string
+	Reason         string
+	Reasons        []string
+	MatchCount     int32
+	MatchLength    int32
+	MatchEncoding  string
+	PayloadBytes   int32
+	UntrustedInput pgtype.Bool
+	PrivateData    pgtype.Bool
+	CreatedAt      pgtype.Timestamptz
 }
 
 type LeakGuardFingerprint struct {

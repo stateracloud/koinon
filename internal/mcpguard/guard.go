@@ -334,6 +334,7 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	class := string(f.class)
 	g.metrics.decided(out.Verdict, class, g.now().Sub(start))
 	g.logDecision(call, out, f)
+	g.recordDecision(ctx, call, out, f)
 	return out
 }
 
@@ -350,6 +351,13 @@ type decisionFacts struct {
 	// opens is the caller whose session opens the call once it passes: set when its result would
 	// set a leg (#254).
 	opens *caller
+	// who is the org, agent and MCP server of the call, set once the guard identified them; the
+	// decision record (recordDecision) needs it, so a call refused before that has none.
+	who *caller
+	// generation is the home generation the call was decided in, when the guard read it.
+	generation string
+	// payloadBytes is the size of the call's payload arguments.
+	payloadBytes int
 }
 
 // logDecision logs every refusal and every call sent to a person (an ask target or an approval),
@@ -382,6 +390,9 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	if c.exempt {
 		return Outcome{Verdict: Verdict{Action: Pass, Reason: ReasonExempt}}, nil
 	}
+	if !c.own {
+		f.who = &c
+	}
 	if c.own {
 		// An own tool nobody declared brings both legs (OwnResultLegs), so its reply must be seen too.
 		if OwnResultLegs(call.Tool).Any() {
@@ -405,6 +416,7 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	}
 	a, err := g.assess(ctx, c, decl, call.Arguments, true)
 	f.class, f.run, f.feedStalled, f.replyUnseen = a.class, a.run, a.feedStalled, a.replyUnseen
+	f.generation, f.payloadBytes = a.generation, a.args.PayloadBytes()
 	if a.legsRead {
 		l := a.legs
 		f.legs = &l
@@ -514,6 +526,8 @@ type assessment struct {
 	// replyUnseen: a call the guard passed has no result it saw yet, so the legs were taken as both
 	// (#254).
 	replyUnseen bool
+	// generation is the home generation of the agent's sandbox, once read (external calls).
+	generation string
 }
 
 func (a assessment) risk() map[string]any {
@@ -577,6 +591,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	if live {
 		a.run = "found"
 	}
+	a.generation = gen
 	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
 	row, err := g.state.Ensure(ctx, sess)
 	if err != nil {

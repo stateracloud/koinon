@@ -1925,7 +1925,23 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID)
+	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID); err != nil {
+		return err
+	}
+	return r.recordEnforcement(ctx, w, sb.Enforcement)
+}
+
+// recordEnforcement stores the enforcement mode the observed sandbox reports (ADR 0045), the
+// field a run's evidence shows. A backend that reports none leaves the recorded value.
+func (r *Reconciler) recordEnforcement(ctx context.Context, w *work, mode string) error {
+	if mode == "" || w.sb.Enforcement == mode {
+		return nil
+	}
+	if err := r.q.SetAgentSandboxEnforcement(ctx, store.SetAgentSandboxEnforcementParams{OrgID: w.org.ID, AgentID: w.agent.ID, Enforcement: mode}); err != nil {
+		return fmt.Errorf("record sandbox enforcement: %w", err)
+	}
+	w.sb.Enforcement = mode
+	return nil
 }
 
 // recordState stores a state without an observed sandbox; the recorded home generation is kept.

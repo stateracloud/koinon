@@ -178,21 +178,22 @@ To record:
 Scrubbing changes the text: a replaced email address no longer matches the read it came from, and a
 truncated result is shorter than the one the guard saw. Report the match rates with that caveat.
 
-**What is missing before a recorded corpus can be measured.** These are not built yet; until they are,
-the measurement has not been run on real traffic:
+**Recording a corpus from a run (#926, #51).** `koinon-api run-evidence export --org O --run R --out DIR`
+writes the run's evidence as JSON Lines (scrubbed, host names masked), and `koinon-api run-evidence
+to-corpus --dir DIR [--declarations FILE]` turns it into corpus lines:
 
-- **A converter from OTLP spans to corpus lines.** Nothing turns `execute_tool` spans into `call` lines
-  or a sandbox read into a `feed` line; the format is ready for one.
-- **The org's declarations.** The `org`, `server` and `tool` lines (trusted hosts, code-host repos and
-  their visibility, each server's legs, each tool's declaration) are not on the spans. Take them from
-  the admin API at recording time, by hand.
-- **The MCP server of a call.** A span carries the tool name as the harness saw it, not the guard's
-  server record; the converter must map it back.
-- **The home generation.** Spans carry the run and the agent, not the generation, so the per-generation
-  questions (both legs per generation, the cap's scope) need the generation from the database at
-  recording time.
-- **Feeds.** agentd's reports of sandbox reads to the guard are not in the trace; a recorded corpus can
-  only approximate them from `koinon.tool.kind` read tools.
+- A `call` line for each MCP tool call of the run, paired in order with the leak guard's decision
+  records of that server and tool. The decision gives the server and the home generation; the
+  `acp.tool_call` events give the arguments and the result.
+- A `feed` line for each finished tool call of another kind, with the legs agentd's feed would have set.
+- The org's declarations (`org`, `server`, `tool` lines) are not in the export. Pass them with
+  `--declarations` from the admin API; a server it does not declare is written with no legs and named on
+  stderr, and its numbers measure nothing until you declare it.
+- `koinon-api run-evidence verify --dir DIR --deny <host>` fails when the export holds a host name you list.
+
+What is still approximate: the feeds (a recorded corpus has the finished tool call, not agentd's exact
+report), the match count (the guard reports one match span), and calls that the guard never saw (own
+tools, the approval executor).
 
 ### 5. Clean up
 
