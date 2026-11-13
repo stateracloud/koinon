@@ -117,7 +117,7 @@ generate: ## Regenerate protobuf, sqlc and admin API code
 # The tag is dev-<12 hex of a hash of the harness's build context> (hack/harness-tag.sh), so worktrees
 # on different branches never overwrite each other's image; test/harnesses computes the same tag.
 # HARNESS_TAG=x forces one tag for every harness.
-# The FLAVOR_* names are the earlier ones, read until the workflows use the new ones (#610).
+# The FLAVOR_* names are the earlier ones, read until step 4 of #610 removes them.
 HARNESS_TAG       ?= $(FLAVOR_TAG)
 HARNESS_PLATFORMS ?= $(FLAVOR_PLATFORMS)
 harness_tag        = $(or $(HARNESS_TAG),$(shell hack/harness-tag.sh $(1)))
