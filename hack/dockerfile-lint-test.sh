@@ -8,6 +8,9 @@
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
+# The fixtures and the stub scripts hold a literal ${...} on purpose (a Dockerfile ARG reference, a stub's own
+# variables), so single quotes are right and SC2016 does not apply to this file.
+# shellcheck disable=SC2016
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 lint=$root/hack/dockerfile-lint.sh
