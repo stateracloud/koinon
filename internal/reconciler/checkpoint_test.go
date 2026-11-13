@@ -391,6 +391,39 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		})
 	})
 
+	// Restore-only checkpoints (ADR 0110 decision 4): agentd writes no backup, so nothing may wait for one.
+	Describe("restore-only checkpoints", func() {
+		BeforeEach(func() {
+			cfg.CheckpointsReadOnly = true
+			bump()
+		})
+
+		It("blocks a recreation at once with the restore-only reason and files no request", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			_, err := q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).To(HaveOccurred(), "nothing claims a request: none is filed")
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			Expect(a.UnhealthyReason.String).To(ContainSubstring("restore-only checkpoints"))
+		})
+
+		It("recreates from the newest complete snapshot taken since the home was last written", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			done := finish(ctx, true)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+		})
+	})
+
 	// The gates count from when the home was last written (a harness ran), not from the sandbox's
 	// last activity (old issue 329, ADR 0032 amendment): a wake or a start writes nothing.
 	Describe("the home-written clock", func() {

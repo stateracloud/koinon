@@ -21,6 +21,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/installbinding"
 )
 
 const (
@@ -267,6 +268,11 @@ func (s *Service) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		token, _, err = s.createSession(ctx, q, b, user, store.AuthMethodOidc)
 		return err
 	})
+	if errors.Is(err, installbinding.ErrReleasePending) {
+		s.log.Warn("oidc login refused: the restore release step has not run")
+		http.Error(w, installbinding.ErrReleasePending.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if errors.Is(err, errUserDisabled) {
 		http.Error(w, "this account is disabled", http.StatusForbidden)
 		return

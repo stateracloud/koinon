@@ -543,6 +543,12 @@ checkpoints:
     pathStyle: true
   # Time between a running sandbox's checkpoints.
   interval: 1h
+  # Restore-only mode (ADR 0110 decision 4): koinon-agentd restores homes from the bucket and lists
+  # its snapshots, but creates no snapshot, applies no retention and deletes no repository. Set it on
+  # a restored copy that still points at its source's bucket (a drill or staging copy): without it the
+  # copy writes into the source's kopia repositories and prunes them. Leave it false on a live install
+  # and on a replacement that owns the bucket.
+  readOnly: false
   # Size limit of the emptyDir where koinon-agentd stages a home while it is saved or restored.
   # A home stages up to 4Gi (checkpoint.DefaultLimits); 2 backups and 1 restore run at once
   # (agentd Checkpoints.Concurrency and RestoreConcurrency), plus about 2Gi for kopia's caches:
@@ -656,6 +662,16 @@ restoreHold: false
 recovery:
   enabled: true
   subjects: []
+
+# The release of a restored copy (ADR 0110 decision 1). A restored copy has none of its source's declarative
+# Secrets, so its importer would remove every provider, MCP server and connection the source declared. The
+# release step records those removals and keeps them waiting; they happen only with this on. The
+# restore-release-check Job (a pre-upgrade hook while restoreHold is false) fails `helm upgrade` when the
+# release would remove something and this is false, so the install stays held. Set it for the release of a
+# drill or staging copy whose removals you accept, and remove it afterwards: a value left set accepts every
+# removal that waits at the next koinon-api start.
+restore:
+  acceptImporterDeletions: false
 
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
 # <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works:

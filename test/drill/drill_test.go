@@ -37,6 +37,8 @@ import (
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
+	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/test/drill"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 )
@@ -70,8 +72,12 @@ var (
 	fakeAtRelease int
 	// sourceSession is the source admin's session cookie, for the quarantine check.
 	sourceSession string
-	snapshotUnix  int64 // when the backup began: a fire due after it is not in the dump
-	releasedUnix  int64
+	// sourceMCPServer is the ID of the MCP server the source declares, which the copy disables while held.
+	sourceMCPServer string
+	snapshotUnix    int64 // when the backup began: a fire due after it is not in the dump
+	releasedUnix    int64
+	// heldStatus is GET /restore/status on the held copy, compared with what the release does.
+	heldStatus restorestatus.Report
 
 	// archive is the agent the archive check restores: no trigger, one task that wrote the marker into its home.
 	archive struct {
@@ -300,6 +306,29 @@ func openAPI(ctx context.Context, s *side) {
 	s.client = e2eclient.New("http://" + addr)
 }
 
+// signInAdmin signs in on s with the seeded password and makes an admin token of s itself. A held copy
+// refuses the source's API token (another install mark, ADR 0110 decision 3), so the drill never reuses
+// it there; a password login works on a copy and makes a session and token with the copy's mark.
+func signInAdmin(ctx context.Context, s *side, tokenName string) {
+	GinkgoHelper()
+	openAPI(ctx, s)
+	Eventually(func() error {
+		c := e2eclient.New(s.client.Base)
+		change, err := c.Login(ctx, "admin", drill.SeededPassword)
+		if err == nil && change {
+			return fmt.Errorf("the restored admin must not need a password change")
+		}
+		if err == nil {
+			s.client = c
+		}
+		return err
+	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+	s.org = orgOf(ctx, s.client)
+	tok, err := s.client.Tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{OrgId: s.org, Name: tokenName, Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN})
+	must(err, "create a token on "+s.in.Release)
+	s.token = tok.GetSecret()
+}
+
 func orgOf(ctx context.Context, c *e2eclient.Client) string {
 	GinkgoHelper()
 	me, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
@@ -383,16 +412,6 @@ func secretValue(ctx context.Context, ns, name, key string) string {
 	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(out))
 	must(err, "decode secret "+name)
 	return string(b)
-}
-
-// knownGap runs a probe of behaviour a product issue will fix. A finding fails the spec with
-// "known gap: #N"; no finding means the gap is closed, which the report says so the marker can go.
-func knownGap(issue, what string, probe func() (finding string)) {
-	GinkgoHelper()
-	if f := probe(); f != "" {
-		Fail(drill.GapMessage(issue, what+": "+f))
-	}
-	AddReportEntry("known-gap-closed", fmt.Sprintf("%s (%s) passes: remove the known-gap label from this spec", issue, what))
 }
 
 var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
@@ -482,6 +501,13 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		Expect(code).To(Equal(http.StatusCreated), string(body))
 		code, body = admin(ctx, &src, http.MethodPut, "/default-model", fmt.Sprintf(`{"model":%q}`, drill.ModelName))
 		Expect(code).To(Equal(http.StatusOK), string(body))
+
+		By("an MCP server, which the copy turns off while it is held (ADR 0110 decision 5)")
+		code, body = admin(ctx, &src, http.MethodPost, "/mcp-servers", `{"name":"drill-mcp","url":"https://mcp.example.com/mcp"}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+		var drillMCP struct{ ID string }
+		must(json.Unmarshal(body, &drillMCP), "mcp server")
+		sourceMCPServer = drillMCP.ID
 
 		By("an agent with a * * * * * schedule")
 		ts, err := c.Templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
@@ -804,7 +830,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			Expect(b).NotTo(Equal(a), "the target must not own the source's OpenShell objects (ADR 0106)")
 		})
 
-		It("only reports what its importer finds while held", Label("known-gap", "importer"), func(ctx SpecContext) {
+		It("only reports what its importer finds while held", Label("hold", "importer"), func(ctx SpecContext) {
 			needs("restore")
 			// A declared provider Secret appears in the target's namespace while it is held.
 			secret := fmt.Sprintf(`apiVersion: v1
@@ -827,23 +853,67 @@ stringData:
 			_, err := kube.KubectlStdin(ctx, secret, "apply", "-f", "-")
 			must(err, "declare a provider")
 			time.Sleep(60 * time.Second)
-			// The source's API token is refused on the copy (ADR 0110 decision 3), so read the table, not the API.
-			// Count only served rows (removed_at IS NULL and disabled_reason IS NULL): that is what GET /providers meant.
-			declared := sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared' AND removed_at IS NULL AND disabled_reason IS NULL")
-			knownGap("#516", "the importer only reports while the install is held", func() string {
-				if declared > 0 {
-					return "the importer created the declared provider while the install was held"
-				}
-				return ""
-			})
+			// The source's token is refused on the copy (ADR 0110 decision 3); the database is the
+			// first check, the API the second.
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM providers WHERE name = 'drill-declared' AND removed_at IS NULL AND disabled_reason IS NULL")).To(BeZero(),
+				"the importer created the declared provider while the install was held (ADR 0110 decision 1)")
+			signInAdmin(ctx, &dst, "drill-held")
+			code, body := admin(ctx, &dst, http.MethodGet, "/providers")
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			Expect(string(body)).NotTo(ContainSubstring("drill-declared"), "the importer created the declared provider while the install was held (ADR 0110 decision 1)")
+			evs, err := kube.Kubectl(ctx, "-n", dst.in.Namespace, "get", "events", "--field-selector", "reason=HeldNotApplied", "-o", "name")
+			must(err, "list the HeldNotApplied events")
+			Expect(evs).NotTo(BeEmpty(), "the importer left no HeldNotApplied Event on the declared Secret")
 		}, NodeTimeout(5*time.Minute))
 
-		It("can disable its MCP servers", Label("known-gap", "mcp-disable"), func(ctx SpecContext) {
+		It("can disable its MCP servers, and cannot enable one", Label("hold", "mcp-disable"), func(ctx SpecContext) {
 			needs("restore")
-			knownGap("#516", "a held copy can disable the MCP servers it restored", func() string {
-				return "there is no disable flag for MCP servers on a held install"
-			})
-		})
+			Expect(sourceMCPServer).NotTo(BeEmpty(), "the source declared no MCP server")
+			if dst.token == "" {
+				signInAdmin(ctx, &dst, "drill-held")
+			}
+			path := "/outward-targets/mcp-server/" + sourceMCPServer + "/disabled"
+			code, body := admin(ctx, &dst, http.MethodPut, path, `{"disabled":true,"note":"restore drill"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			code, body = admin(ctx, &dst, http.MethodGet, "/mcp-servers/"+sourceMCPServer)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			Expect(string(body)).To(ContainSubstring(`"adminDisabled"`), "the MCP server does not show as admin-disabled")
+			code, body = admin(ctx, &dst, http.MethodPut, path, `{"disabled":false}`)
+			Expect(code).To(Equal(http.StatusConflict), "enable while held must be refused: "+string(body))
+			Expect(string(body)).To(ContainSubstring(restorehold.ErrHeld.Error()))
+		}, NodeTimeout(5*time.Minute))
+
+		It("shows in restore status what the release will do", Label("hold", "restore-status"), func(ctx SpecContext) {
+			needs("restore")
+			if dst.token == "" {
+				signInAdmin(ctx, &dst, "drill-held")
+			}
+			code, body := admin(ctx, &dst, http.MethodGet, "/restore/status")
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			AddReportEntry("restore status, held", string(body))
+			var r restorestatus.Report
+			must(json.Unmarshal(body, &r), "decode the restore status")
+			Expect(r.Binding.State).To(Equal("copy"))
+			Expect(r.Release.Pending).To(BeTrue(), "a held copy has a release pending")
+			Expect(r.Binding.HeldSince).NotTo(BeNil())
+			Expect(r.DumpTokens.DumpTime).NotTo(BeNil(), "the dump time is known from held_since")
+			kinds := map[string]bool{}
+			disabledMCP := false
+			for _, t := range r.Targets {
+				kinds[t.Kind] = true
+				disabledMCP = disabledMCP || (t.Kind == "mcp-server" && t.Disabled)
+			}
+			Expect(kinds).To(HaveKey("mcp-server"), "the seeded MCP server is listed")
+			Expect(kinds).To(HaveKey("model-provider"), "the seeded provider is listed")
+			Expect(disabledMCP).To(BeTrue(), "the MCP server disabled while held shows as disabled")
+			Expect(r.Release.DueTriggers).NotTo(BeEmpty(), "the every-minute schedule has a catch-up fire due")
+			wf := 0
+			for _, w := range r.Release.DBOS {
+				wf += w.Enqueued
+			}
+			Expect(wf).To(BeNumerically(">=", len(enqueued)), "the workflows ENQUEUED at the backup are listed")
+			heldStatus = r
+		}, NodeTimeout(5*time.Minute))
 	})
 
 	step("release: the guide's release block", func(ctx SpecContext) {
@@ -874,22 +944,7 @@ stringData:
 	Describe("released", func() {
 		It("signs in with the seeded password", Label("signin"), func(ctx SpecContext) {
 			needs("release")
-			openAPI(ctx, &dst)
-			Eventually(func() error {
-				c := e2eclient.New(dst.client.Base)
-				change, err := c.Login(ctx, "admin", drill.SeededPassword)
-				if err == nil && change {
-					return fmt.Errorf("the restored admin must not need a password change")
-				}
-				if err == nil {
-					dst.client = c
-				}
-				return err
-			}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-			dst.org = orgOf(ctx, dst.client)
-			tok, err := dst.client.Tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{OrgId: dst.org, Name: "drill-dst", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN})
-			must(err, "create a token on the target")
-			dst.token = tok.GetSecret()
+			signInAdmin(ctx, &dst, "drill-dst")
 		})
 
 		// The seeded local users (#927): the restore kept both, with their roles and password hashes.
@@ -1107,6 +1162,31 @@ spec:
 			}, NodeTimeout(20*time.Minute))
 		}
 
+		// The guide releases with kubectl set env, so the restore-release-check Job does not run (as with
+		// helm --no-hooks) and restore.acceptImporterDeletions is not set: the release step in koinon-api
+		// still revokes every session and records restore.release once, and the removals the restore
+		// brought in stay waiting (ADR 0110 decision 1).
+		It("releases once: sessions revoked, removals waiting without the accept", Label("hold", "release-gate"), func(ctx SpecContext) {
+			needs("release")
+			Expect(heldStatus.Binding.State).NotTo(BeEmpty(), "the held restore status was not read")
+			Eventually(func() int {
+				return sqlInt(ctx, &dst, "SELECT count(*) FROM install_audit_events WHERE action = 'restore.release'")
+			}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal(1))
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM install_audit_events WHERE action = 'restore.sessions_revoked'")).To(Equal(1))
+			Expect(sqlInt(ctx, &dst, "SELECT count(*) FROM sessions WHERE created_at < (SELECT released_at FROM install_binding)")).To(BeZero(),
+				"a session made before the release survived it")
+			code, body := admin(ctx, &dst, http.MethodGet, "/restore/status")
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			AddReportEntry("restore status, released", string(body))
+			var r restorestatus.Report
+			must(json.Unmarshal(body, &r), "decode the restore status")
+			Expect(r.Release.Pending).To(BeFalse())
+			Expect(r.Release.PlanHash).NotTo(BeEmpty(), "restore.release records the plan hash")
+			Expect(r.Importer.Accepted).To(BeEmpty(), "nothing was accepted")
+			Expect(r.Importer.Waiting).To(ConsistOf(heldStatus.Importer.Planned), "the removals restore status planned while held wait for the accept")
+			Expect(metric(ctx, &dst, "api", "koinon_restore_release_pending")).To(BeEquivalentTo(map[bool]int{true: 1, false: 0}[len(r.Importer.Waiting) > 0]))
+		}, NodeTimeout(5*time.Minute))
+
 		It("sends the seeded provider key to the fake model", Label("provider-key"), func(ctx SpecContext) {
 			needs("release")
 			Eventually(func(g Gomega) {
@@ -1275,7 +1355,7 @@ spec:
 			Expect(drill.DiffObjects(baseline, after)).To(BeEmpty(), "the target changed objects of the source's gateway")
 		})
 
-		It("refuses a session token of the source", Label("quarantine"), func(ctx SpecContext) {
+		It("refuses a session token of the source", Label("isolation", "quarantine"), func(ctx SpecContext) {
 			needs("release")
 			c := e2eclient.New(dst.client.Base)
 			c.SetSession(sourceSession)

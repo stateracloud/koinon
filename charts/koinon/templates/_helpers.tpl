@@ -335,6 +335,11 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ include "koinon.otlpTracesTokenDir" . | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
+{{- if (.Values.restore).acceptImporterDeletions }}
+{{- /* ADR 0110 decision 1: accept the declarative removals a restore brought in. NOTES warns while it is set. */}}
+- name: KOINON_RESTORE_ACCEPT_IMPORTER_DELETIONS
+  value: "true"
+{{- end }}
 {{- with include "koinon.publicUrl" . }}
 - name: KOINON_PUBLIC_URL
   value: {{ . | quote }}
@@ -985,6 +990,10 @@ it carries no credentials.
   value: "true"
 - name: KOINON_CHECKPOINTS_INTERVAL
   value: {{ .Values.checkpoints.interval | quote }}
+{{- if .Values.checkpoints.readOnly }}
+- name: KOINON_CHECKPOINTS_READ_ONLY
+  value: "true"
+{{- end }}
 - name: KOINON_CHECKPOINTS_S3_BUCKET
   value: {{ .Values.checkpoints.s3.bucket | quote }}
 {{- range $env, $key := dict "KOINON_CHECKPOINTS_S3_ENDPOINT" "endpoint" "KOINON_CHECKPOINTS_S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}

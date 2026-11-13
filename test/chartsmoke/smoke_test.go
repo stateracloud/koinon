@@ -135,6 +135,9 @@ func describeMode(name, valuesFile string) {
 			var weights []int
 			add := func(o runtime.Object) {
 				m := mustMeta(o)
+				if m.GetAnnotations()["helm.sh/hook"] == "pre-upgrade" {
+					return // an upgrade-only hook: it has its own spec below
+				}
 				if w, pre, hook := hookOf(m); hook {
 					Expect(pre).To(BeTrue(), "%s %s is a hook of a kind this suite does not run: %s", kindOf(o), m.GetName(), m.GetAnnotations()["helm.sh/hook"])
 					if _, ok := hooks[w]; !ok {
@@ -210,6 +213,36 @@ func describeMode(name, valuesFile string) {
 				}
 			}
 		}, SpecTimeout(5*time.Minute))
+
+		// The restore release check (ADR 0110 decision 1, issue 516) is a pre-upgrade hook: it starts koinon-api
+		// as "restore release-check" with the migration role's database URL, the install mark Secret (optional)
+		// and POD_NAMESPACE. Here it runs against the migrated database of a plain install: a first release has
+		// no pending release, so it must exit 0 and print the report. (No Kubernetes API is reachable from the
+		// runner, so the importer plan is left out; the importer's own specs cover the plan.)
+		It("runs the restore release check against the migrated database and passes", func(ctx SpecContext) {
+			var job *batchv1.Job
+			for _, j := range r.Jobs {
+				if strings.HasSuffix(j.Name, "-restore-release-check") {
+					job = j
+				}
+			}
+			if strings.HasSuffix(name, "restore-hold") {
+				// A held install renders no release check: the hold is the check (ADR 0110 decision 1).
+				Expect(job).To(BeNil(), "a held install renders no restore-release-check Job")
+				return
+			}
+			Expect(job).NotTo(BeNil(), "the chart renders the restore-release-check Job while restoreHold is off")
+			Expect(job.Annotations).To(HaveKeyWithValue("helm.sh/hook", "pre-upgrade"))
+			Expect(job.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"restore", "release-check"}))
+			// The Job's ServiceAccount, Role and RoleBinding are pre-upgrade hooks of lower weight: Helm
+			// creates them before the Job, and the install spec above skipped them.
+			for _, o := range r.Objects {
+				if mustMeta(o).GetAnnotations()["helm.sh/hook"] == "pre-upgrade" {
+					Expect(applyObject(ctx, cl, o)).To(Succeed(), "the check's ServiceAccount, Role or RoleBinding")
+				}
+			}
+			runJob(ctx, rn, job)
+		}, SpecTimeout(3*time.Minute))
 
 		// With a KMS (ADR 0085 decision 12) the key-admin Job, a plain Job of the release, created the
 		// KEK Secret and added the KEK keyAdmin.addKey names, each wrapped by the KMS: the Secret

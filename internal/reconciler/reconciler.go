@@ -163,6 +163,11 @@ type Config struct {
 	// archived only after its home was backed up, and a recreated sandbox keeps its home
 	// generation and gets the home restored. koinon-agentd writes the checkpoints.
 	Checkpoints bool
+	// CheckpointsReadOnly is the restore-only mode (checkpoints.readOnly, ADR 0110 decision 4):
+	// koinon-agentd writes no backup, so nothing waits for one. A recreation uses the newest complete
+	// snapshot when it was taken since the home was last written, and otherwise is blocked with the
+	// reason at once; an idle stop does not wait (it keeps the volume).
+	CheckpointsReadOnly bool
 	// CheckpointStopWait is how long an idle stop waits for its checkpoint. Default
 	// DefaultCheckpointStopWait.
 	CheckpointStopWait time.Duration

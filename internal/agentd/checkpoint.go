@@ -84,6 +84,11 @@ type Checkpoints struct {
 	Retry time.Duration
 	// SandboxWait is how long a request waits for its sandbox to be ready (default 30 minutes).
 	SandboxWait time.Duration
+	// ReadOnly is the restore-only mode (ADR 0110 decision 4): the pool restores homes from existing
+	// snapshots and lists them for checkpoints resync, but creates no snapshot, applies no retention and
+	// deletes no repository, so an install that shares its source's bucket (a restored copy) cannot
+	// change what the source stored. A request nothing will take is failed at once with checkpoint.ReadOnlyError.
+	ReadOnly bool
 	// Concurrency is how many backups run at once (default 2).
 	Concurrency int
 	// RestoreConcurrency is how many restores stage a home at once (default 1). A restore stages
@@ -137,7 +142,9 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
 		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
 		// Seeds take the backup slots the requests left free (seed.go).
-		safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, seeds, &wg) })
+		if !c.ReadOnly {
+			safego.Do(p.log, "seed-tick", func() { p.seedTick(ctx, slots, seeds, &wg) })
+		}
 		// Resyncs (resync.go) beside the loop, one pass at a time: listing a bucket of many agents
 		// takes a while, and needs no backup slot.
 		select {
@@ -158,7 +165,7 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 			})
 		default:
 		}
-		if now := time.Now(); now.Sub(swept) >= c.Sweep {
+		if now := time.Now(); !c.ReadOnly && now.Sub(swept) >= c.Sweep {
 			// Beside the loop: a long sweep (serial blob deletes) must not delay the ticks.
 			// A sweep that is still running means this one is skipped.
 			select {
@@ -191,10 +198,22 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 	}
 	for _, org := range orgs {
 		// Ephemeral agents are skipped by the query (the active version's ephemeral flag).
-		if _, err := p.q.RequestHourlyHomeCheckpoints(ctx, store.RequestHourlyHomeCheckpointsParams{
-			OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()),
-		}); err != nil && ctx.Err() == nil {
-			p.log.Warn("checkpoints: requesting hourly checkpoints failed", "err", err)
+		if !c.ReadOnly {
+			if _, err := p.q.RequestHourlyHomeCheckpoints(ctx, store.RequestHourlyHomeCheckpointsParams{
+				OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()),
+			}); err != nil && ctx.Err() == nil {
+				p.log.Warn("checkpoints: requesting hourly checkpoints failed", "err", err)
+			}
+		}
+		if c.ReadOnly {
+			// Restore-only: no writer will ever take a request (a stop, a recreation or a person asked for
+			// one), so fail it at once with the reason instead of after SandboxWait with a wrong one.
+			if _, err := p.q.FailStaleHomeCheckpoints(ctx, store.FailStaleHomeCheckpointsParams{
+				OrgID: org, WaitSeconds: 0, Error: pgtype.Text{String: checkpoint.ReadOnlyError, Valid: true},
+			}); err != nil && ctx.Err() == nil {
+				p.log.Warn("checkpoints: failing requests in restore-only mode failed", "err", err)
+			}
+			continue
 		}
 		wait := int32(c.SandboxWait.Seconds())
 		if _, err := p.q.FailStaleHomeCheckpoints(ctx, store.FailStaleHomeCheckpointsParams{
