@@ -25,7 +25,7 @@ follows; `docs/agents/subagent-brief.md` wins over it) to its deny reason.
 | `agent-spawn-check.sh` | Agent | a spawn without `model`; a spawn whose prompt does not name `docs/agents/subagent-brief.md` (Explore, claude-code-guide, web-fetch, statusline-setup, claude-security:* and fork are exempt) | `agent-spawn-check_test.sh` |
 | `read-result-check.sh` | Read | a Read of a saved `tool-results/` file without `limit` | `read-hooks_test.sh` |
 | `bash-read-check.sh` | Bash | printing much of a file or of several files in one call (`cat` of two files, `sed -n` past 210 lines, ...) | `read-hooks_test.sh` |
-| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more, or the same wait spelled as perl `select`, `tail -f /dev/null`, `timeout N tail -f`, `read -t N` or python `time.sleep`; `run_in_background` is allowed | `sleep-chain-check_test.sh` |
+| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more, or the same wait spelled as perl `select`, `tail -f /dev/null`, `timeout N tail -f`, `read -t N` python `time.sleep`, `/bin/sleep` or a FIFO made with `mkfifo` and then read; it ignores the word sleep inside quoted text and data heredocs (a heredoc fed to python, perl, ruby or node still counts as code); `run_in_background` is allowed | `sleep-chain-check_test.sh` |
 | `grilling-question-check.sh` | Skill | nothing; when the grilling skill loads it adds the rule that every question goes through `AskUserQuestion` | `grilling-question-check_test.sh` |
 | `question-checklist-check.sh` | AskUserQuestion | nothing; it adds a checklist before each question (already answered by a rule? researched? answerable cold?) | `question-checklist-check_test.sh` |
 | `prose-question-stop-check.sh` | Stop | blocks the stop once when the reply ends in a question and the turn made no `AskUserQuestion` call; never twice in a row | `prose-question-stop-check_test.sh` |
@@ -58,7 +58,7 @@ The value must be exactly `1`. Any other value, or no variable, leaves the hooks
    committed). An `export KOINON_MAINTAINER_HOOKS=1` in `~/.zshrc` reaches only a CLI started from
    that shell, not the desktop app.
 3. Start a new session. Check: a foreground `sleep 10` in the Bash tool is refused with
-   `Sleep chain blocked`.
+   `Foreground wait blocked`.
 
 ### In a Claude Code cloud environment
 

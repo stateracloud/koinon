@@ -43,15 +43,27 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
 - Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
 - Call hack scripts by absolute path (`<worktree>/hack/x.sh`), never `cd X && hack/x.sh`.
-- No standalone `sleep`, and no `until … sleep` loop in the foreground. To wait on a pull request use
-  `hack/pr-wait.sh`. For anything else: `run_in_background`, then keep working or end the turn; wait
-  on a condition with Monitor and an until-loop that tests it (the Monitor tool needs a
-  `description`). Never sleep-then-read, never Monitor a bare sleep, and never `pgrep`/`pkill`
+- Wait with `hack/pr-wait.sh` (for a pull request) or with a command that you start with
+  `run_in_background`; end the turn and the task notifies you. A pause under another name is a sleep
+  (`/bin/sleep`, `read -t`, perl `select`, python `time.sleep`, a read from a FIFO): never run one in
+  the foreground. The hook `hack/hooks/sleep-chain-check.sh` enforces this. Never `pgrep`/`pkill`
   another lane's processes. Never `pkill`/`pgrep` by script name (`pkill -f hack/preflight.sh` kills
   every lane's run): stop your own preflight with `hack/preflight.sh --stop`, which uses the pid file
   of your worktree's log directory.
 - Remove worktrees only through `hack/wt.sh rm <name>` (or `hack/wt.sh gc`), never `git worktree remove` or `rm -rf`: it refuses a worktree that has a live claim, a process in it, uncommitted changes or unpushed commits, because another session may be using it. `--force` is for your own worktree only.
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
+
+## Security work (auth, rate limits, keys)
+- A change to authentication, a rate limit, session handling or key handling starts with a threat
+  model. Write it before code. Name: the attacker (who, with what access), the assets (what they want),
+  and the abuse cases. Include the abuse of the defence itself: an attacker who triggers a lockout or
+  a rate limit against a victim's account is a denial of service that we built.
+- Do the prior-art step before code (how do other systems solve this, and which attacks did they
+  meet). Put the result in the PR, in a `## Threat model` section after "Prior art": Attacker,
+  Assets, Abuse cases (each: fixed in <sha> / test <name> / accepted risk, reason).
+- Test each abuse case. A case you do not fix goes in the PR as "accepted risk" with the reason.
+- If fix round 2 of the review still finds a major problem, stop. Do not start round 3. Ask the
+  maintainer whether to redesign. Say what the repeated problem is.
 
 ## Check and ship
 - `hack/lane-gates.sh` is the blocking form: preflight's gates plus the heavy CI jobs, one `verdict=` line each, `notrun` (not `fail`) when the machine cannot run one. Do not poll logs.
