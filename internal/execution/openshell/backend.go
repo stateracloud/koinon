@@ -179,10 +179,10 @@ func (b *Backend) ListSandboxNames(ctx context.Context, workspace string) ([]str
 	}
 }
 
-// ClearDraftChunks drops the draft policy chunks of one sandbox and returns how many it dropped.
-// A sandbox the gateway no longer knows has none. It is not part of execution.Backend: a sandbox
-// proposes policy chunks while it runs, and the gateway refuses to delete a workspace that still
-// holds one (old issue 640).
+// ClearDraftChunks drops the pending draft policy chunks of one sandbox and returns how many it
+// dropped. The gateway finds the sandbox by name, so call it while the sandbox still exists: a
+// deleted sandbox is NotFound, which counts as zero chunks. It is not part of execution.Backend:
+// the gateway refuses to delete a workspace that still holds a draft chunk (old issue 640).
 func (b *Backend) ClearDraftChunks(ctx context.Context, workspace, sandbox string) (uint32, error) {
 	resp, err := b.c.ClearDraftChunks(ctx, &openshellv1.ClearDraftChunksRequest{WorkspaceScope: scope(workspace), Sandbox: sandbox})
 	if werr := wrap("ClearDraftChunks", err); werr != nil {
@@ -194,11 +194,11 @@ func (b *Backend) ClearDraftChunks(ctx context.Context, workspace, sandbox strin
 	return resp.GetChunksCleared(), nil
 }
 
-// DraftChunks returns how many draft policy chunks a sandbox holds in any state; zero for a
+// PendingDraftChunks returns how many pending draft policy chunks a sandbox holds; zero for a
 // sandbox the gateway no longer knows.
-func (b *Backend) DraftChunks(ctx context.Context, workspace, sandbox string) (int, error) {
-	resp, err := b.c.GetDraftPolicy(ctx, &openshellv1.GetDraftPolicyRequest{WorkspaceScope: scope(workspace), Sandbox: sandbox})
-	if werr := wrap("DraftChunks", err); werr != nil {
+func (b *Backend) PendingDraftChunks(ctx context.Context, workspace, sandbox string) (int, error) {
+	resp, err := b.c.GetDraftPolicy(ctx, &openshellv1.GetDraftPolicyRequest{WorkspaceScope: scope(workspace), Sandbox: sandbox, StatusFilter: "pending"})
+	if werr := wrap("PendingDraftChunks", err); werr != nil {
 		if errors.Is(werr, execution.ErrNotFound) {
 			return 0, nil
 		}
