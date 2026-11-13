@@ -75,7 +75,7 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 		return Summary{}, err
 	}
 	var sum Summary
-	var bufs = map[string]*bytes.Buffer{}
+	bufs := map[string]*bytes.Buffer{}
 	for _, f := range Files {
 		bufs[f] = &bytes.Buffer{}
 	}
@@ -137,7 +137,7 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 			after = ev.Seq
 			sum.Events++
 		}
-		if int32(len(evs)) < page {
+		if len(evs) < int(page) {
 			break
 		}
 	}

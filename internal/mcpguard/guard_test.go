@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -22,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gstruct"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -37,8 +40,10 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/runevidence"
 	"github.com/stateracloud/koinon/internal/sinkclass"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/tracing/scrub"
 )
 
 // secretPage is private text a tool result carries; it is long enough for several fingerprints.
@@ -283,6 +288,123 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		var risk []byte
 		Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
 		Expect(string(risk)).To(ContainSubstring(`"taint"`))
+	})
+
+	Describe("run evidence (#926)", func() {
+		type decisionRow struct {
+			Server, Tool, SinkClass, Action, Reason, Generation string
+			MatchCount, PayloadBytes                            int
+		}
+		decisions := func(ctx SpecContext) []decisionRow {
+			GinkgoHelper()
+			rows, err := pool.Query(ctx, `SELECT server, tool, sink_class, action, reason, generation, match_count, payload_bytes
+				FROM leak_guard_decisions WHERE org_id = $1 ORDER BY created_at, id`, org)
+			Expect(err).NotTo(HaveOccurred())
+			defer rows.Close()
+			var out []decisionRow
+			for rows.Next() {
+				var d decisionRow
+				Expect(rows.Scan(&d.Server, &d.Tool, &d.SinkClass, &d.Action, &d.Reason, &d.Generation, &d.MatchCount, &d.PayloadBytes)).To(Succeed())
+				out = append(out, d)
+			}
+			Expect(rows.Err()).NotTo(HaveOccurred())
+			return out
+		}
+		runID := func(ctx SpecContext) pgtype.UUID {
+			GinkgoHelper()
+			var id pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM runs WHERE org_id = $1`, org).Scan(&id)).To(Succeed())
+			return id
+		}
+
+		It("records passes and refusals with the sink class and match count, and never an argument value", func(ctx SpecContext) {
+			Expect(result(ctx, "wiki", "read_page", secretPage).GetPass()).NotTo(BeNil())
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green marker-koinon-test-arg"}))).To(BeTrue())
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]}))).To(BeFalse())
+
+			got := decisions(ctx)
+			Expect(got).To(HaveLen(2))
+			Expect(got[0]).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Server": Equal("tracker"), "Tool": Equal("post_message"), "SinkClass": Equal("external-high"),
+				"Action": Equal("pass"), "MatchCount": Equal(0), "Generation": Equal("gen-" + slug),
+			}))
+			Expect(got[0].PayloadBytes).To(BeNumerically(">", 0))
+			Expect(got[1].Action).NotTo(Equal("pass"))
+			Expect(got[1].MatchCount).To(Equal(1))
+
+			var dump string
+			Expect(pool.QueryRow(ctx, `SELECT coalesce(string_agg(t::text, ' '), '') FROM leak_guard_decisions t WHERE org_id = $1`, org).Scan(&dump)).To(Succeed())
+			Expect(dump).NotTo(ContainSubstring("marker-koinon-test-arg"))
+			Expect(dump).NotTo(ContainSubstring("retention plan"))
+		})
+
+		It("sums the bytes that left per sink, run and generation, leaving out what did not leave", func(ctx SpecContext) {
+			// One real pass; reading its reply gives the session both legs, so the next call is parked.
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "one"}))).To(BeTrue())
+			Expect(result(ctx, "tracker", "post_message", "ok").GetPass()).NotTo(BeNil())
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "two"}))).To(BeFalse())
+			real, err := q.SumRunEvidenceOutbound(ctx, store.SumRunEvidenceOutboundParams{OrgID: org, RunID: runID(ctx)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(real).To(HaveLen(1))
+			Expect(real[0].Calls).To(BeEquivalentTo(1)) // the parked call left nothing
+
+			add := func(gen, server, class, action string, n int32) {
+				GinkgoHelper()
+				Expect(q.InsertLeakGuardDecision(ctx, store.InsertLeakGuardDecisionParams{
+					OrgID: org, AgentID: agent.ID, Generation: gen, Server: server, Tool: "t", SinkClass: class, Action: action,
+					Reason: "clean", Reasons: []string{"clean"}, PayloadBytes: n,
+				})).To(Succeed())
+			}
+			add("gen-a", "chat", "external-low", "pass", 100)
+			add("gen-a", "chat", "external-low", "approve", 20) // parked for a person: sent nothing
+			add("gen-b", "chat", "external-low", "pass", 7)
+			add("gen-a", "chat", "external-low", "refuse", 5000) // sent nothing
+			add("gen-a", "wiki", "internal", "pass", 9000)       // stayed inside
+			sums, err := q.SumRunEvidenceOutbound(ctx, store.SumRunEvidenceOutboundParams{OrgID: org, RunID: runID(ctx)})
+			Expect(err).NotTo(HaveOccurred())
+			got := map[string]int64{}
+			for _, r := range sums {
+				got[r.Generation+"/"+r.Server] = r.PayloadBytes
+			}
+			Expect(got).To(HaveKeyWithValue("gen-a/chat", int64(100)))
+			Expect(got).To(HaveKeyWithValue("gen-b/chat", int64(7)))
+			Expect(got).NotTo(HaveKey("gen-a/wiki"))
+		})
+
+		It("exports the run as JSON Lines with no secret, no argument host and the enforcement mode", func(ctx SpecContext) {
+			Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
+			Expect(q.SetAgentSandboxEnforcement(ctx, store.SetAgentSandboxEnforcementParams{OrgID: org, AgentID: agent.ID, Enforcement: "enforce"})).To(Succeed())
+			rid := runID(ctx)
+			_, err := pool.Exec(ctx, `INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload) VALUES ($1, $2, 1, 1, 'acp.tool_call', $3)`,
+				org, rid, `{"sessionUpdate":"tool_call","toolCallId":"t1","title":"koinon_tracker_post_message","rawInput":{"url":"https://lab-db.corp.example.com/x","token":"koinon_test_not-a-real-token"}}`)
+			Expect(err).NotTo(HaveOccurred())
+
+			dir := GinkgoT().TempDir()
+			hosts, err := runevidence.NewHostMasker()
+			Expect(err).NotTo(HaveOccurred())
+			e := runevidence.Exporter{Q: q, Scrubber: scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("koinon_test_not-a-real-token")}), Hosts: hosts}
+			sum, err := e.Export(ctx, org, rid, runevidence.DirSink(dir))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sum.Enforcement).To(Equal("enforce"))
+			Expect(sum.Decisions).To(Equal(1))
+			Expect(sum.Events).To(Equal(1))
+			Expect(sum.Outbound).To(BeNumerically(">", 0))
+
+			for _, f := range runevidence.Files {
+				b, err := os.ReadFile(filepath.Join(dir, f))
+				Expect(err).NotTo(HaveOccurred(), f)
+				for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+					if l != "" {
+						Expect(json.Valid([]byte(l))).To(BeTrue(), f+": "+l)
+					}
+				}
+				Expect(string(b)).NotTo(ContainSubstring("koinon_test_not-a-real-token"), f)
+				Expect(string(b)).NotTo(ContainSubstring("example.com"), f)
+			}
+			run, err := os.ReadFile(filepath.Join(dir, runevidence.FileRun))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(run)).To(ContainSubstring(`"enforcement":"enforce"`))
+		})
 	})
 
 	// The exfil case of #70: what an agent does when fake-model output tells it to fetch

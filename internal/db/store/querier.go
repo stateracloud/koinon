@@ -1583,8 +1583,8 @@ type Querier interface {
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// The bytes that left the org for each external sink: the payload of every external call the guard
-	// passed or a decider approved, per run, per home generation and per MCP server. A call refused, or
-	// parked for a person, sent nothing.
+	// passed, per run, per home generation and per MCP server. A call refused, or
+	// parked for a person's approval (action 'approve'), sent nothing at that moment.
 	SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)

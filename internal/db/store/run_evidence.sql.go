@@ -330,7 +330,7 @@ const sumGenerationEvidenceOutbound = `-- name: SumGenerationEvidenceOutbound :m
 SELECT server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
-  AND action IN ('pass', 'approve') AND sink_class IN ('external-low', 'external-high')
+  AND action = 'pass' AND sink_class IN ('external-low', 'external-high')
 GROUP BY server, sink_class
 ORDER BY server, sink_class
 `
@@ -377,7 +377,7 @@ func (q *Queries) SumGenerationEvidenceOutbound(ctx context.Context, arg SumGene
 const sumRunEvidenceOutbound = `-- name: SumRunEvidenceOutbound :many
 SELECT generation, server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
-WHERE org_id = $1 AND run_id = $2 AND action IN ('pass', 'approve')
+WHERE org_id = $1 AND run_id = $2 AND action = 'pass'
   AND sink_class IN ('external-low', 'external-high')
 GROUP BY generation, server, sink_class
 ORDER BY generation, server, sink_class
@@ -397,8 +397,8 @@ type SumRunEvidenceOutboundRow struct {
 }
 
 // The bytes that left the org for each external sink: the payload of every external call the guard
-// passed or a decider approved, per run, per home generation and per MCP server. A call refused, or
-// parked for a person, sent nothing.
+// passed, per run, per home generation and per MCP server. A call refused, or
+// parked for a person's approval (action 'approve'), sent nothing at that moment.
 func (q *Queries) SumRunEvidenceOutbound(ctx context.Context, arg SumRunEvidenceOutboundParams) ([]SumRunEvidenceOutboundRow, error) {
 	rows, err := q.db.Query(ctx, sumRunEvidenceOutbound, arg.OrgID, arg.RunID)
 	if err != nil {

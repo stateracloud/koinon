@@ -22,11 +22,11 @@ ORDER BY created_at, id;
 
 -- name: SumRunEvidenceOutbound :many
 -- The bytes that left the org for each external sink: the payload of every external call the guard
--- passed or a decider approved, per run, per home generation and per MCP server. A call refused, or
--- parked for a person, sent nothing.
+-- passed, per run, per home generation and per MCP server. A call refused, or
+-- parked for a person's approval (action 'approve'), sent nothing at that moment.
 SELECT generation, server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
-WHERE org_id = @org_id AND run_id = @run_id AND action IN ('pass', 'approve')
+WHERE org_id = @org_id AND run_id = @run_id AND action = 'pass'
   AND sink_class IN ('external-low', 'external-high')
 GROUP BY generation, server, sink_class
 ORDER BY generation, server, sink_class;
@@ -59,6 +59,6 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND enforcement IS DISTINCT FROM
 SELECT server, sink_class, count(*)::bigint AS calls, sum(payload_bytes)::bigint AS payload_bytes
 FROM leak_guard_decisions
 WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation
-  AND action IN ('pass', 'approve') AND sink_class IN ('external-low', 'external-high')
+  AND action = 'pass' AND sink_class IN ('external-low', 'external-high')
 GROUP BY server, sink_class
 ORDER BY server, sink_class;
