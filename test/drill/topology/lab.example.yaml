@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# EXAMPLE of the lab profile (ADR 0109 decision 2, #518). Every name, registry and class below is made up: the
+# real file describes the home lab and lives OUTSIDE the repository (the operator keeps it, for example in
+# ~/.config/koinon/lab/), because the lab's topology never goes into git. Copy this file there and replace the
+# values; test/drill/topology_test.go checks that this example still loads, so the schema cannot drift.
+#
+# Run (the operator supplies the kubeconfig; the drill reads no ambient one):
+#   KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your lab file> \
+#   test/drill/run.sh
+# (optional: KOINON_DRILL_WEB_PASSWORD=<admin password of the restored copy>; the default is the seeded fake one.)
+# Then upload the result to the rc release the final tag promotes, as drill-result-lab.json (docs/dev/releasing.md).
+#
+# {run} is the run ID. Namespaces must start with koinon-drill-; gateway IDs with drill-.
+name: lab-example
+profile: lab
+# The lab gate includes the browser sign-in (web/e2e-drill). The machine that runs the drill needs pnpm
+# and a Chromium for Playwright (`pnpm --dir web exec playwright install chromium`).
+browserSignin: true
+context: example-lab-context
+source:
+  namespace: koinon-drill-src-{run}
+  release: koinon-drill-src-{run}
+  gatewayNamespace: koinon-drill-os-src-{run}
+  gatewayRelease: openshell-src-{run}
+  gatewayId: drill-src-{run}
+target:
+  namespace: koinon-drill-dst-{run}
+  release: koinon-drill-dst-{run}
+  gatewayNamespace: koinon-drill-os-dst-{run}
+  gatewayRelease: openshell-dst-{run}
+  gatewayId: drill-dst-{run}
+fakesNamespace: koinon-drill-fakes-{run}
+chartPath: charts/koinon
+# Base values for the chart on your cluster (relative to the repository root, or an absolute path). The
+# kind values (test/e2e/kind/koinon-values.yaml) are a starting point; set your storage class and image
+# registry in your own copy, kept outside the repository.
+valuesFile: test/e2e/kind/koinon-values.yaml
+gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart
+gatewayVersion: 0.1.7
+gatewayValues: test/e2e/kind/openshell-values.yaml
+# Images on YOUR registry (the lab nodes cannot read the CI runner's local one).
+fakeModelImage: registry.example.invalid/koinon/koinon-fakemodel:e2e
+objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
+registry: registry.example.invalid
+imageRegistry: registry.example.invalid/koinon
+storageClass: example-storage-class
+runNowCalls: 3
+heldObserve: 100s
+releasedWait: 8m

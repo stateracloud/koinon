@@ -10,6 +10,7 @@
 # DRILL_TOPOLOGY file (the lab) sets imageRegistry only to override the chart's image.registry; `registry` is
 # descriptive and changes nothing.
 name: kind
+profile: kind
 context: kind-koinon-e1
 source:
   namespace: koinon-drill-src-{run}

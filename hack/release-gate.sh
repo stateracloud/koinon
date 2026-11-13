@@ -312,5 +312,111 @@ else
 	echo "FAIL: kind e2e (quickstart job): $got; run the e2e-kind workflow on $SHA" >&2
 	failed=1
 fi
+# The restore drill (ADR 0109 decision 2, #518): "rc: kind; final: lab". An rc tag needs a green drill on
+# kind for its commit: the `drill` job of e2e-kind.yml (nightly, on an rc tag push, or a dispatch) uploads
+# the artifact `drill-logs` with drill-result.json in it, and the newest artifact for this commit whose
+# result says commit == SHA, profile kind and verdict pass is the evidence. A final tag needs a green drill
+# on the home lab for the rc it promotes: the newest rc tag of the same version whose commit has this
+# commit's tree, and a `drill-result-lab.json` among that rc release's assets (the operator uploads it after
+# a lab run: docs/dev/releasing.md). Known gaps (ADR 0109 decision 3) do not turn a verdict red; they are
+# printed. Everything that cannot be read fails closed.
+DRILL_ARTIFACT_LIMIT=${DRILL_ARTIFACT_LIMIT:-30}
+[[ $DRILL_ARTIFACT_LIMIT =~ ^([1-9][0-9]?|100)$ ]] ||
+	fail "DRILL_ARTIFACT_LIMIT '$DRILL_ARTIFACT_LIMIT' is not an integer from 1 to 100"
+DRILL_LAB_ASSET=drill-result-lab.json
+
+# drill_verdict <file> <commit> <profile>: prints why the result is not green (and returns 1), or prints
+# the known gaps (possibly none) and returns 0. A result with no check, or with a check that is neither
+# pass nor known-gap, is never green, whatever its verdict field says.
+drill_verdict() {
+	jq -rs --arg c "$2" --arg p "$3" '
+		def verdict: if type != "object" then "not a drill-result.json object"
+		elif .commit != $c then "it is for commit \(.commit // "none"), not \($c)"
+		elif .topology.profile != $p then "its profile is \(.topology.profile // "none"), not \($p)"
+		elif .verdict != "pass" then "its verdict is \(.verdict // "none")"
+		elif ((.checks // []) | length) == 0 then "it has no check"
+		elif ((.checks // []) | map(select(.verdict != "pass" and .verdict != "known-gap")) | length) > 0 then "a check is neither pass nor known-gap"
+		elif $p == "lab" and ((.topology.browserSignin != true) or (((.checks // []) | map(select(.name == "browser-signin" and .verdict == "pass")) | length) != 1)) then "the lab result has no passing browser-signin check"
+		else "OK known gaps: " + (([.knownGaps[]? | (.issue | tostring) + " " + .name] | join(", ")) | if . == "" then "none" else . end) end;
+		if length != 1 then "not exactly one result in the file" else (.[0] | verdict) end' "$1" 2>/dev/null |
+		awk 'BEGIN { rc = 1 } NR == 1 && /^OK / { sub(/^OK /, ""); rc = 0 } { print; n++ } END { if (n == 0) { print "unreadable drill-result.json"; rc = 1 } exit (n == 1 ? rc : 1) }'
+}
+
+# kind_drill: ok when a green kind drill result for SHA is among the drill-logs artifacts.
+kind_drill() {
+	local rows id why='' seen=0 dir
+	dir=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-drill.XXXXXX") || return 2
+	rows=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=drill-logs&per_page=$DRILL_ARTIFACT_LIMIT" \
+		--jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$SHA\" and .workflow_run.head_repository_id == .workflow_run.repository_id) | .id") || { rm -rf "$dir"; return 2; }
+	for id in $rows; do
+		seen=1
+		gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" >"$dir/a.zip" 2>/dev/null || { why="artifact $id could not be downloaded"; continue; }
+		unzip -p "$dir/a.zip" '*drill-result.json' >"$dir/r.json" 2>/dev/null || { why="artifact $id has no drill-result.json (the suite did not finish)"; continue; }
+		if why=$(drill_verdict "$dir/r.json" "$SHA" kind); then
+			echo "ok: kind restore drill (artifact $id; $why)"
+			rm -rf "$dir"
+			return 0
+		fi
+		why="artifact $id: $why"
+	done
+	rm -rf "$dir"
+	if ((seen == 0)); then
+		echo "FAIL: restore drill on kind: no drill-logs artifact for $SHA among the newest $DRILL_ARTIFACT_LIMIT; run the e2e-kind workflow with suite=drill on $SHA (the drill of an rc tag push takes up to two hours, so run it before tagging, or re-run the release gate job once it is green; a dispatch with -f commit is not found)" >&2
+	else
+		echo "FAIL: restore drill on kind: no green result for $SHA (last: $why)" >&2
+	fi
+	return 1
+}
+
+# lab_drill: ok when the rc this final tag promotes has a green lab result among its release assets.
+lab_drill() {
+	local core=${TAG%%-rc.*} rc rc_sha tree rc_tree asset why dir
+	git fetch --no-tags --quiet origin "+refs/tags/$core-rc.*:refs/tags/$core-rc.*" 2>/dev/null || true
+	tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha) || return 2
+	rc=
+	while read -r t; do
+		[[ -n $t ]] || continue
+		rc_sha=$(git rev-list -n1 "$t") || continue
+		rc_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$rc_sha" --jq .tree.sha) || return 2
+		if [[ $rc_tree == "$tree" ]]; then rc=$t; break; fi
+	done < <(git tag --list "$core-rc.*" | sort -t. -k4 -n -r)
+	if [[ -z $rc ]]; then
+		echo "FAIL: restore drill on the lab: no $core-rc.N tag points at a commit with the tree of $SHA; a final tag promotes an rc" >&2
+		return 1
+	fi
+	asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$rc" --jq ".assets[] | select(.name == \"$DRILL_LAB_ASSET\") | .id" | head -n1) || {
+		echo "FAIL: restore drill on the lab: cannot read the release of $rc" >&2
+		return 1
+	}
+	if [[ -z $asset ]]; then
+		echo "FAIL: restore drill on the lab: release $rc has no $DRILL_LAB_ASSET; run the lab drill on $rc_sha and upload its drill-result.json under that name" >&2
+		return 1
+	fi
+	dir=$(mktemp -d "${TMPDIR:-/tmp}/release-gate-drill.XXXXXX") || return 2
+	if ! gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$asset" >"$dir/r.json" 2>/dev/null; then
+		rm -rf "$dir"
+		echo "FAIL: restore drill on the lab: cannot download $DRILL_LAB_ASSET of $rc" >&2
+		return 1
+	fi
+	if why=$(drill_verdict "$dir/r.json" "$rc_sha" lab); then
+		echo "ok: lab restore drill ($rc at $rc_sha; $why)"
+		rm -rf "$dir"
+		return 0
+	fi
+	rm -rf "$dir"
+	echo "FAIL: restore drill on the lab: $DRILL_LAB_ASSET of $rc: $why" >&2
+	return 1
+}
+
+drc=0
+if [[ $TAG == *-rc.* ]]; then kind_drill || drc=$?; else lab_drill || drc=$?; fi
+case $drc in
+0) ;;
+1) failed=1 ;;
+*)
+	echo "FAIL: restore drill: an API call failed" >&2
+	failed=1
+	;;
+esac
 ((failed == 0)) || fail "required checks have not all succeeded on $SHA"
 echo "release gate passed for $TAG at $SHA"
