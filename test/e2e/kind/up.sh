@@ -46,7 +46,8 @@ step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 done_step() { echo "-- $1: $(( $(date +%s) - ts ))s"; }
 
 # The push registry and the pull-through caches (#45) outlive the cluster; they start before it so a
-# cache is warm for the first pull, and join the cluster's network once it exists.
+# cache is warm for the first pull, and join the kind network at start (registry.sh creates it as kind
+# would, #956), before any push; attach writes the nodes' hosts.toml and the ConfigMap.
 step "local registry and pull-through caches"
 "$here/registry.sh" start
 done_step registry-start
