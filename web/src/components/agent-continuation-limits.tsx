@@ -32,7 +32,7 @@ export function AgentContinuationLimits({ agent }: { agent: Agent }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: BudgetService, cardinality: undefined }) }),
   })
   const [editing, setEditing] = useState(false)
-  const l = limits.data?.limits
+  const loaded = limits.data?.limits
   if (limits.error) {
     return (
       <Alert variant="destructive" role="alert">
@@ -40,19 +40,19 @@ export function AgentContinuationLimits({ agent }: { agent: Agent }) {
       </Alert>
     )
   }
-  if (!l?.effective || !l.templateDefault || !l.override) return <p role="status">Loading the continuation limits…</p>
-  const overridden = l.override.maxContinuations !== undefined || l.override.taskSpendUsd !== ''
+  if (!loaded?.effective || !loaded.templateDefault || !loaded.override) return <p role="status">Loading the continuation limits…</p>
+  const overridden = loaded.override.maxContinuations !== undefined || loaded.override.taskSpendUsd !== ''
   return (
     <section aria-label="Continuation limits" className="bg-card grid gap-2 rounded-lg border p-4 text-sm">
       <h2 className="font-semibold">Continuation limits</h2>
       <p>
-        {describe(l.effective)}. When a run hits its time limit, the task continues in a new run until it used all its continuation runs or reached the spend cap; then it waits on its owner.
-        {overridden ? ` Changed from ${describe(l.templateDefault)}.` : ' These are the template’s and the org’s values.'}
+        {describe(loaded.effective)}. When a run hits its time limit, the task continues in a new run until it used all its continuation runs or reached the spend cap; then it waits on its owner.
+        {overridden ? ` Changed from ${describe(loaded.templateDefault)}.` : ' These are the template’s and the org’s values.'}
       </p>
       {editing ? (
         <ContinuationForm
-          current={l.override}
-          template={l.templateDefault}
+          current={loaded.override}
+          template={loaded.templateDefault}
           pending={save.isPending}
           error={save.error ? ConnectError.from(save.error).rawMessage : undefined}
           onCancel={() => setEditing(false)}
@@ -103,12 +103,12 @@ function ContinuationForm({
       <div className="flex flex-wrap items-start gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="continuation-count">Continuation runs</Label>
-          <Input id="continuation-count" inputMode="numeric" value={count} placeholder={String(template.maxContinuations)} onChange={(e) => setCount(e.target.value)} aria-invalid={touched && !!problems.count} />
+          <Input id="continuation-count" inputMode="numeric" value={count} placeholder={String(template.maxContinuations)} onChange={(e) => setCount(e.target.value)} aria-invalid={touched && Boolean(problems.count)} />
           {touched && problems.count && <p className="text-destructive text-xs">{problems.count}</p>}
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="continuation-spend">Task spend cap (USD)</Label>
-          <Input id="continuation-spend" inputMode="decimal" value={spend} placeholder={template.taskSpendUsd} onChange={(e) => setSpend(e.target.value)} aria-invalid={touched && !!problems.spend} />
+          <Input id="continuation-spend" inputMode="decimal" value={spend} placeholder={template.taskSpendUsd} onChange={(e) => setSpend(e.target.value)} aria-invalid={touched && Boolean(problems.spend)} />
           {touched && problems.spend && <p className="text-destructive text-xs">{problems.spend}</p>}
         </div>
       </div>

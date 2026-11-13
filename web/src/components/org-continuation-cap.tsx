@@ -24,7 +24,7 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: BudgetService, cardinality: undefined }) }),
   })
   const [editing, setEditing] = useState(false)
-  const l = limits.data?.limits
+  const loaded = limits.data?.limits
   if (limits.error) {
     return (
       <Alert variant="destructive" role="alert">
@@ -32,7 +32,7 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
       </Alert>
     )
   }
-  if (!l) return <p role="status">Loading the continuation cap…</p>
+  if (!loaded) return <p role="status">Loading the continuation cap…</p>
   return (
     <section aria-labelledby="continuation-cap" className="grid gap-3">
       <h2 id="continuation-cap" className="text-lg font-semibold">
@@ -43,11 +43,11 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
         cap.
       </p>
       <p className="text-sm">
-        {formatUSD(l.taskSpendUsd)} per task. {l.overridden ? `The platform default is ${formatUSD(l.platformDefaultTaskSpendUsd)}.` : 'This is the platform default.'}
+        {formatUSD(loaded.taskSpendUsd)} per task. {loaded.overridden ? `The platform default is ${formatUSD(loaded.platformDefaultTaskSpendUsd)}.` : 'This is the platform default.'}
       </p>
       {editing ? (
         <CapForm
-          initial={l.overridden ? l.taskSpendUsd : ''}
+          initial={loaded.overridden ? loaded.taskSpendUsd : ''}
           pending={save.isPending}
           error={save.error ? ConnectError.from(save.error).rawMessage : undefined}
           onSave={(usd) => save.mutateAsync({ orgId, taskSpendUsd: usd }).then(() => setEditing(false))}
