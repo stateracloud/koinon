@@ -29,7 +29,7 @@ var _ = Describe("the enforcement mode read from a sandbox's policy (ADR 0045, #
 	It("is audit when any inspected endpoint does not enforce", func() {
 		Expect(openshell.EnforcementOf(policy(ep("rest", enforce), ep("rest", 0)))).To(Equal(execution.EnforcementAudit))
 	})
-	It("is none when no endpoint is inspected", func() {
-		Expect(openshell.EnforcementOf(policy(ep("", 0)))).To(Equal(execution.EnforcementNone))
+	It("is enforce for L4-only endpoints, which OpenShell has no audit mode for", func() {
+		Expect(openshell.EnforcementOf(policy(ep("", 0)))).To(Equal(execution.EnforcementEnforce))
 	})
 })

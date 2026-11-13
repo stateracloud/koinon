@@ -8,7 +8,7 @@
 --     holds an argument, a payload or a matched text. The outbound bytes of a sink per run and per
 --     home generation are a SUM over this table (SumRunEvidenceOutbound), so there is one source.
 --   * agent_sandboxes.enforcement: the network enforcement mode the reconciler observed in the
---     sandbox's policy (enforce, audit, none or unknown), so a script can check ADR 0045 for a run.
+--     sandbox's policy (enforce, audit or unknown; the check also allows none), so a script can check ADR 0045 for a run.
 --
 -- New table and a new column with a default: an expand migration, legal on a patch line (ADR 0085).
 
