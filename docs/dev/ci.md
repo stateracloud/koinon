@@ -355,6 +355,10 @@ persona, no key material) in the result directory for the lab to write back, wha
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
 scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
 
+The check `enforcement` (#955) runs `koinon-api run-evidence export` (#926) in the target's api pod for every run of the restored
+copy and reads the sandbox enforcement mode it prints. It passes only with at least one run and `enforce` on every run; `unknown`, `audit`,
+`none` and zero runs fail. It runs on every profile (kind and lab); `hack/release-gate.sh` reads checks generically and needs no change.
+
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
 `hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.
