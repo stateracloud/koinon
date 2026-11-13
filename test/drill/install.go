@@ -12,6 +12,16 @@ import (
 // SeededPassword is the fixed fake password the seed gives the bootstrap admin.
 const SeededPassword = "koinon_test_not-a-real-password"
 
+// The local users the seed adds (#927): an org admin and a member of the default org, both with SeededPassword.
+const (
+	OrgAdminUser = "drill-admin"
+	MemberUser   = "drill-member"
+	// ApprovalTask is the message that makes the fake model call the fake MCP server's ask-tier write tool.
+	ApprovalTask = "drill-approval: please call the tracker's write tool."
+	// ApprovalTool is that tool as the agent sees it (<org>-<server>-ask_<tool>).
+	ApprovalTool = "default-tracker-ask_write_item"
+)
+
 // SeededProviderKey is the fake provider key the seed enters; the fake model must see it again
 // after the restore.
 const SeededProviderKey = "koinon_test_not-a-real-key"
@@ -26,6 +36,17 @@ const TriggerID = "every-minute"
 func FakeModelURL(fakesNS string) string {
 	return fmt.Sprintf("http://fakemodel.%s.svc:8080/v1", fakesNS)
 }
+
+// FakeMCPURL is the URL the seed registers the fake MCP server under.
+func FakeMCPURL(fakesNS string) string {
+	return fmt.Sprintf("http://fakemcp.%s.svc:8080/mcp", fakesNS)
+}
+
+// Fake MCP server credential: the header the gateway injects and its (obviously fake) value.
+const (
+	FakeMCPHeader = "X-Api-Key"
+	FakeMCPKey    = "koinon_test_not-a-real-token"
+)
 
 // ValuesOverlay is the part of the Koinon chart values that differs from the base file for one
 // install: the fake model's host in the egress policy, the install's own gateway, its gateway ID and its client TLS
@@ -53,7 +74,7 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 		"api":         map[string]any{"durable": map[string]any{"enabled": true}},
 		"restoreHold": hold,
 		"postgres":    pg,
-		"egress":      map[string]any{"allowedInternalHosts": []string{fmt.Sprintf("fakemodel.%s.svc:8080", fakesNS)}},
+		"egress":      map[string]any{"allowedInternalHosts": []string{fmt.Sprintf("fakemodel.%s.svc:8080", fakesNS), fmt.Sprintf("fakemcp.%s.svc:8080", fakesNS)}},
 		"networkPolicy": map[string]any{"gatewayEgressTo": []any{map[string]any{
 			"to":    []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": fakesNS}}}},
 			"ports": []any{map[string]any{"port": 8080}},
@@ -283,4 +304,52 @@ spec:
   ports:
     - {name: http, port: 8080, targetPort: http}
 `, ns, runID, RunLabel, image, indented)
+}
+
+// FakeMCPManifest is the fake MCP server (cmd/koinon-fakemcp) in the fakes namespace. It serves
+// read_item, write_item and fetch_url, and refuses a request without the credential header; the drill
+// registers it with FakeMCPKey so the agent's ask-tier call parks for an approval.
+func FakeMCPManifest(ns, runID, image string) string {
+	return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakemcp
+  namespace: %[1]s
+  labels: {app: fakemcp, %[3]s: "%[2]s"}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakemcp}
+  template:
+    metadata:
+      labels: {app: fakemcp, %[3]s: "%[2]s"}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fakemcp
+          image: %[4]s
+          imagePullPolicy: IfNotPresent
+          args: ["-addr", ":8080", "-header", "%[5]s", "-value", "%[6]s"]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakemcp
+  namespace: %[1]s
+  labels:
+    %[3]s: "%[2]s"
+spec:
+  selector: {app: fakemcp}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+`, ns, runID, RunLabel, image, FakeMCPHeader, FakeMCPKey)
 }

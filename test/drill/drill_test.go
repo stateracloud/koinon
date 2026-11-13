@@ -3,10 +3,14 @@
 package drill_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,12 +22,15 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect/v2"
+	"filippo.io/age"
+	"filippo.io/age/armor"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
@@ -70,6 +77,19 @@ var (
 		session     string // the task's harness session ID on the source
 		snapshot    string // the stop checkpoint's snapshot ID on the source
 	}
+	// pending is the approval the seed leaves pending: an agent's call to the fake MCP server's ask-tier write tool (#927).
+	pending struct {
+		approval, argsSHA256, task string
+	}
+	// recoveryKey is the age identity of the break-glass request, made when the suite starts (#927): the private
+	// half never leaves this process.
+	recoveryKey = func() *age.X25519Identity {
+		id, err := age.GenerateX25519Identity()
+		if err != nil {
+			panic(err)
+		}
+		return id
+	}()
 	// dead are the notification workflows the source left PENDING, and the executor that ran them.
 	dead struct {
 		workflows []string
@@ -90,6 +110,16 @@ func browserProfile() bool {
 	return err == nil && t.BrowserSignin
 }
 
+// oidcProfile says whether the topology names an OIDC issuer, for the same reason as browserProfile.
+func oidcProfile() bool {
+	f := os.Getenv("KOINON_DRILL_TOPOLOGY")
+	if f == "" {
+		return false
+	}
+	t, err := drill.LoadTopology(f, "tree000")
+	return err == nil && t.OIDC != nil
+}
+
 func needs(steps ...string) {
 	GinkgoHelper()
 	for _, s := range steps {
@@ -101,8 +131,8 @@ func needs(steps ...string) {
 const stepTimeout = 20 * time.Minute
 
 // seedTimeout covers the seed step's waits with margin: the scheduled run and the marker run (each
-// up to releasedWait, 8m in topology/kind.yaml) and 20m for archived_at, about 36m, plus the API calls.
-const seedTimeout = 45 * time.Minute
+// up to releasedWait, 8m in topology/kind.yaml) and 20m for archived_at, about 36m, plus the fake MCP server's health (up to 8m) and the approval run (up to 8m), plus the API calls.
+const seedTimeout = 60 * time.Minute
 
 // step names a step of the drill in the report; check names come from the label. A step whose
 // waits add up to more than stepTimeout passes its own budget.
@@ -380,6 +410,12 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		_, err = kube.Kubectl(ctx, "-n", top.FakesNamespace, "rollout", "status", "deploy/fakemodel", "--timeout=3m")
 		must(err, "fake model rollout")
 
+		By("a fake MCP server: the seed's pending approval is an agent's call to its ask-tier write tool")
+		_, err = kube.KubectlStdin(ctx, drill.FakeMCPManifest(top.FakesNamespace, runID, top.FakeMCPImage), "apply", "-f", "-")
+		must(err, "apply the fake MCP server")
+		_, err = kube.Kubectl(ctx, "-n", top.FakesNamespace, "rollout", "status", "deploy/fakemcp", "--timeout=3m")
+		must(err, "fake MCP rollout")
+
 		By("an S3 server for home checkpoints, and the bucket")
 		_, err = kube.KubectlStdin(ctx, drill.ObjectStoreManifest(top.FakesNamespace, runID, top.ObjectStoreImage), "apply", "-f", "-")
 		must(err, "apply the object store")
@@ -502,6 +538,54 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		Expect(archive.snapshot).NotTo(BeEmpty(), "the archived agent has a complete checkpoint")
 		archive.session = sql(ctx, &src, fmt.Sprintf("SELECT harness_session_id FROM tasks WHERE id = '%s'", archive.task))
 		Expect(archive.session).NotTo(BeEmpty(), "the marker run made a harness session")
+
+		By("two local users, through koinon-api users create: an org admin and a member of the default org")
+		for _, u := range []struct{ name, role string }{{drill.OrgAdminUser, "admin"}, {drill.MemberUser, "member"}} {
+			out, err := kube.ExecStdin(ctx, src.in.Namespace, "deploy/"+src.name("api"), drill.SeededPassword, "koinon-api", "users", "create",
+				"--org", "default", "--username", u.name, "--role", u.role, "--password-stdin", "--must-change-password=false")
+			must(err, "users create "+u.name+": "+out)
+		}
+
+		By("a pending approval: a fake MCP server, an agent that may call its write tool, one task that parks")
+		code, body = admin(ctx, &src, http.MethodPost, "/mcp-servers", fmt.Sprintf(`{"name":"tracker","url":%q,"credentialHeader":%q,"credentialValue":%q}`,
+			drill.FakeMCPURL(top.FakesNamespace), drill.FakeMCPHeader, drill.FakeMCPKey))
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+		var mcp struct{ ID string }
+		must(json.Unmarshal(body, &mcp), "the MCP server")
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, &src, http.MethodGet, "/mcp-servers/"+mcp.ID)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+			var st struct {
+				Health, HealthReason string
+				ToolsSyncedAt        *time.Time
+			}
+			g.Expect(json.Unmarshal(body, &st)).To(Succeed())
+			g.Expect(st.Health).To(Equal("healthy"), st.HealthReason)
+			g.Expect(st.ToolsSyncedAt).NotTo(BeNil())
+		}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+		approver, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+			OrgId: src.org, TemplateId: tmpl, DisplayName: "Approval agent", Harness: harness.OpenCode,
+		})
+		must(err, "create the approval agent")
+		_, err = c.Agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: src.org, AgentId: approver.GetAgent().GetId(), Version: approver.GetAgent().GetLatestVersion()})
+		must(err, "activate the approval agent")
+		code, body = admin(ctx, &src, http.MethodPut, "/agents/"+approver.GetAgent().GetId()+"/mcp-servers", fmt.Sprintf(`{"servers":[{"serverId":%q}]}`, mcp.ID))
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		ask, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: src.org, AgentId: approver.GetAgent().GetId(), Title: "Tracker write", Message: drill.ApprovalTask,
+		})
+		must(err, "create the approval task")
+		pending.task = ask.GetTask().GetId()
+		Eventually(func(g Gomega) {
+			list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: src.org, TicketId: pending.task})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(list.GetApprovals()).To(HaveLen(1))
+			got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: src.org, ApprovalId: list.GetApprovals()[0].GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(got.GetApproval().GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
+			pending.approval, pending.argsSHA256 = got.GetApproval().GetId(), got.GetApproval().GetArgsSha256()
+		}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
+		Expect(pending.argsSHA256).NotTo(BeEmpty())
 
 		By("low org trigger limits, then Run now N times: N-1 stay ENQUEUED")
 		out, err := kube.Exec(ctx, src.in.Namespace, "deploy/"+src.name("api"), "koinon-api", "org-limits", "set", "--org", "default",
@@ -795,6 +879,155 @@ stringData:
 			dst.token = tok.GetSecret()
 		})
 
+		// The seeded local users (#927): the restore kept both, with their roles and password hashes.
+		It("keeps the seeded local users and their roles", Label("local-users"), func(ctx SpecContext) {
+			needs("release", "seed")
+			for _, u := range []struct {
+				name string
+				role authv1alpha1.OrgRole
+			}{{drill.OrgAdminUser, authv1alpha1.OrgRole_ORG_ROLE_ADMIN}, {drill.MemberUser, authv1alpha1.OrgRole_ORG_ROLE_MEMBER}} {
+				c := e2eclient.New(dst.client.Base)
+				change, err := c.Login(ctx, u.name, drill.SeededPassword)
+				must(err, "log in as "+u.name+" on the restored copy")
+				Expect(change).To(BeFalse(), "%s chose its password on the source", u.name)
+				me, err := c.Auth.WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+				must(err, "who am I as "+u.name)
+				role := authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED
+				for _, m := range me.GetMemberships() {
+					if m.GetOrgSlug() == "default" {
+						role = m.GetRole()
+					}
+				}
+				Expect(role).To(Equal(u.role), "%s's role in the default org", u.name)
+			}
+			By("negative: a wrong password is refused for a seeded user")
+			_, err := e2eclient.New(dst.client.Base).Login(ctx, drill.MemberUser, drill.SeededPassword+"-wrong")
+			Expect(err).To(HaveOccurred())
+		})
+
+		// The seeded approval (#927): still pending on the restored copy, with the same exact call, and a
+		// member cannot decide it (ADR 0049).
+		It("keeps the pending approval, and a member cannot decide it", Label("pending-approval"), func(ctx SpecContext) {
+			needs("release", "seed")
+			Expect(pending.approval).NotTo(BeEmpty(), "the seed made an approval")
+			read := func(c *e2eclient.Client) *approvalv1alpha1.Approval {
+				GinkgoHelper()
+				got, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: dst.org, ApprovalId: pending.approval})
+				must(err, "get the approval on the restored copy")
+				return got.GetApproval()
+			}
+			ad := e2eclient.New(dst.client.Base)
+			_, err := ad.Login(ctx, drill.OrgAdminUser, drill.SeededPassword)
+			must(err, "log in as the org admin")
+			got := read(ad)
+			Expect(got.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
+			Expect(got.GetArgsSha256()).To(Equal(pending.argsSHA256), "the restored approval is for the same exact call")
+			Expect(got.GetCanDecide()).To(BeTrue(), "an org admin may decide")
+
+			By("negative: the member is refused, and the approval stays pending")
+			mem := e2eclient.New(dst.client.Base)
+			_, err = mem.Login(ctx, drill.MemberUser, drill.SeededPassword)
+			must(err, "log in as the member")
+			_, err = mem.Approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: dst.org, ApprovalId: pending.approval, ArgsSha256: pending.argsSHA256})
+			Expect(err).To(HaveOccurred(), "a member must not approve")
+			Expect(read(ad).GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
+		})
+
+		// The break-glass request (#512) on the restore target, with an age key made when the suite started
+		// (#927): the operator regains the org admin's login without kubectl exec.
+		It("signs in with the result of a break-glass request", Label("recovery-signin"), func(ctx SpecContext) {
+			needs("release", "seed")
+			ns := dst.in.Namespace
+			who, err := kube.Kubectl(ctx, "auth", "whoami", "-o", "json")
+			must(err, "kubectl auth whoami")
+			var me struct {
+				Status struct {
+					UserInfo struct {
+						Username string
+						Groups   []string
+					}
+				}
+			}
+			must(json.Unmarshal([]byte(who), &me), "whoami")
+			user := me.Status.UserInfo.Username
+			Expect(user).NotTo(BeEmpty())
+			roles, err := kube.Kubectl(ctx, "-n", ns, "get", "role", "-o", "name")
+			must(err, "list roles")
+			role := ""
+			for _, r := range strings.Fields(roles) {
+				if strings.HasSuffix(r, "-platform-recovery") {
+					role = strings.TrimPrefix(r, "role.rbac.authorization.k8s.io/")
+				}
+			}
+			Expect(role).NotTo(BeEmpty(), "the chart's recovery requester Role")
+			// Bind the drill's own Kubernetes user to it, as the guide tells an operator to (recovery.subjects).
+			if _, err := kube.Kubectl(ctx, "-n", ns, "create", "rolebinding", "drill-recovery", "--role="+role, "--user="+user); err != nil {
+				Expect(err.Error()).To(ContainSubstring("already exists"))
+			}
+
+			request := func(name, nonce string) {
+				GinkgoHelper()
+				groups, _ := json.Marshal(me.Status.UserInfo.Groups)
+				cr := fmt.Sprintf(`apiVersion: recovery.koinon.dev/v1alpha1
+kind: PlatformAdminRecovery
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  action: reset-password
+  user: %s
+  requester: %q
+  requesterGroups: %s
+  nonce: %s
+  recipientPublicKey: %s
+`, name, ns, drill.OrgAdminUser, user, groups, nonce, recoveryKey.Recipient().String())
+				_, err := kube.KubectlStdin(ctx, cr, "create", "-f", "-")
+				must(err, "create the PlatformAdminRecovery")
+			}
+			phase := func(name string) (string, string) {
+				GinkgoHelper()
+				out, err := kube.Kubectl(ctx, "-n", ns, "get", "platformadminrecoveries.recovery.koinon.dev", name, "-o", "jsonpath={.status.phase}{\"\\n\"}{.status.reason}")
+				must(err, "read the request")
+				p, r, _ := strings.Cut(out, "\n")
+				return p, r
+			}
+			nb := make([]byte, 16)
+			_, _ = rand.Read(nb)
+			nonce := hex.EncodeToString(nb)
+			name := "drill-" + strings.ToLower(nonce[:8])
+			request(name, nonce)
+			Eventually(func() string { p, _ := phase(name); return p }).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal("Done"))
+
+			sealed, err := kube.Kubectl(ctx, "-n", ns, "get", "platformadminrecoveries.recovery.koinon.dev", name, "-o", "jsonpath={.status.sealedResult}")
+			must(err, "read the sealed result")
+			r, err := age.Decrypt(armor.NewReader(strings.NewReader(sealed)), recoveryKey)
+			must(err, "open the sealed result with the run's age key")
+			plain, err := io.ReadAll(r)
+			must(err, "read the result")
+			var res struct {
+				Username, Password string
+				ChangeRequired     bool
+			}
+			must(json.Unmarshal(plain, &res), "the result")
+			Expect(res.Username).To(Equal(drill.OrgAdminUser))
+			Expect(res.Password).NotTo(BeEmpty())
+			Expect(bytes.Contains([]byte(sealed), []byte(res.Password))).To(BeFalse(), "the password is only in the sealed form")
+
+			c := e2eclient.New(dst.client.Base)
+			change, err := c.Login(ctx, res.Username, res.Password)
+			must(err, "log in with the break-glass password")
+			Expect(change).To(BeTrue(), "a reset password must be changed at the first login")
+			_, err = e2eclient.New(dst.client.Base).Login(ctx, drill.OrgAdminUser, drill.SeededPassword)
+			Expect(err).To(HaveOccurred(), "the reset replaced the seeded password")
+
+			By("negative: the same nonce again is refused")
+			dup := "drill-dup-" + strings.ToLower(nonce[:8])
+			request(dup, nonce)
+			Eventually(func() string { p, _ := phase(dup); return p }).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Equal("Refused"))
+			_, reason := phase(dup)
+			Expect(reason).To(ContainSubstring("nonce"))
+		})
+
 		// The lab profile only (topology browserSignin, #518): the spec exists in the tree only then, because a
 		// drill spec never skips (ADR 0109 decision 3) and a notrun check would turn the result red.
 		if browserProfile() {
@@ -811,7 +1044,7 @@ stringData:
 				logFile, err := os.Create(filepath.Join(outDir, "browser-signin.log"))
 				must(err, "create the browser sign-in log")
 				defer func() { _ = logFile.Close() }()
-				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill")
+				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "signin.spec")
 				// The password goes in the environment of the child only, never on its command line or into a log.
 				cmd.Env = append(os.Environ(),
 					"KOINON_DRILL_WEB_URL=http://"+addr,
@@ -820,6 +1053,32 @@ stringData:
 				)
 				cmd.Stdout, cmd.Stderr = logFile, logFile
 				must(cmd.Run(), "the Playwright sign-in spec on the restored copy (see browser-signin.log)")
+			}, NodeTimeout(10*time.Minute))
+		}
+
+		// The OIDC issuer (topology oidc, #927): the spec exists in the tree only when the topology names an
+		// issuer, because a drill spec never skips. A virtual WebAuthn authenticator signs in as the standing
+		// client's test user; the credential comes from the environment, never from the repository.
+		if oidcProfile() {
+			It("signs in through the OIDC issuer", Label("oidc-signin"), func(ctx SpecContext) {
+				needs("release")
+				for _, e := range []string{drill.EnvOIDCUser, drill.EnvOIDCCredentialID, drill.EnvOIDCPrivateKey, drill.EnvOIDCUserHandle, drill.EnvOIDCRPID} {
+					Expect(os.Getenv(e)).NotTo(BeEmpty(), "%s: the OIDC test user's passkey (see test/drill/topology/lab.example.yaml)", e)
+				}
+				// The redirect URL names a fixed local port, so the forward is on that port.
+				_, stop, err := kube.PortForwardOn(context.WithoutCancel(ctx), dst.in.Namespace, "svc/"+dst.name("api"), top.OIDC.Port(), 8080)
+				must(err, "port-forward the API of "+dst.in.Release+" on the OIDC redirect port")
+				defer stop()
+				logFile, err := os.Create(filepath.Join(outDir, "oidc-signin.log"))
+				must(err, "create the OIDC sign-in log")
+				defer func() { _ = logFile.Close() }()
+				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "oidc.spec")
+				cmd.Env = append(os.Environ(),
+					"KOINON_DRILL_WEB_URL="+strings.TrimSuffix(top.OIDC.Redirect(), "/auth/oidc/callback"),
+					"PLAYWRIGHT_OUTPUT_DIR="+filepath.Join(outDir, "oidc-signin"),
+				)
+				cmd.Stdout, cmd.Stderr = logFile, logFile
+				must(cmd.Run(), "the Playwright OIDC spec on the restored copy (see oidc-signin.log): it signs in with the passkey, and an authenticator without it does not")
 			}, NodeTimeout(10*time.Minute))
 		}
 

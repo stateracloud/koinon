@@ -59,6 +59,7 @@ gatewayVersion: 0.1.7
 gatewayValues: test/e2e/kind/openshell-values.yaml
 # Images on YOUR registry (the lab nodes cannot read the CI runner's local one).
 fakeModelImage: registry.example.invalid/koinon/koinon-fakemodel:e2e
+fakeMcpImage: registry.example.invalid/koinon/koinon-fakemcp:e2e
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
 registry: registry.example.invalid
 imageRegistry: registry.example.invalid/koinon

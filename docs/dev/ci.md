@@ -328,6 +328,20 @@ environment of that process). The spec exists only when the topology says `brows
 skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
 rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
 
+Phase 4 (#927) seeds users and an approval and checks the sign-ins on the restored copy. The seed adds an org admin
+(`drill-admin`) and a member (`drill-member`) with `koinon-api users create` (the supported path for a second local
+user; the password goes in on stdin), and one pending approval: a fake MCP server (topology `fakeMcpImage`) with an
+ask-tier write tool and an agent whose task makes the fake model call it. The checks, each with one negative case:
+`local-users` (both sign in on the restored copy with their roles; a wrong password is refused), `pending-approval`
+(still pending with the same `args_sha256`; the member cannot approve it), `recovery-signin` (a `PlatformAdminRecovery`
+reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
+in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin` (`web/e2e-drill/oidc.spec.ts`
+signs in through the issuer with a virtual WebAuthn authenticator that holds the test user's passkey, which comes from
+`KOINON_DRILL_OIDC_USER`, `_CREDENTIAL_ID`, `_PRIVATE_KEY`, `_USER_HANDLE` and `_RP_ID`; an authenticator without the
+credential does not sign in). The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
+scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
+
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
 `hack/e2e-commands-check.sh` requires every block of `backup-restore.e1` to be run by `backup-restore.sh` or by the drill.

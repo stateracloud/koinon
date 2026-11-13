@@ -90,6 +90,16 @@ func (k *Kube) Exec(ctx context.Context, ns, target string, command ...string) (
 	return k.Kubectl(ctx, append([]string{"-n", ns, "exec", target, "--"}, command...)...)
 }
 
+// ExecStdin is Exec with stdin, for a secret that must not be on a command line.
+func (k *Kube) ExecStdin(ctx context.Context, ns, target, stdin string, command ...string) (string, error) {
+	return k.KubectlStdin(ctx, stdin, append([]string{"-n", ns, "exec", "-i", target, "--"}, command...)...)
+}
+
+// PortForwardOn is PortForward on a fixed local port, for a redirect URL that names it.
+func (k *Kube) PortForwardOn(ctx context.Context, ns, target string, local, port int) (string, func(), error) {
+	return k.portForward(ctx, ns, target, fmt.Sprintf("%d:%d", local, port))
+}
+
 // Primary returns the CNPG primary pod of an install.
 func (k *Kube) Primary(ctx context.Context, ns, release string) (string, error) {
 	out, err := k.Kubectl(ctx, "-n", ns, "get", "pod", "-l", "cnpg.io/cluster="+release+"-pg,cnpg.io/instanceRole=primary", "-o", "name")
@@ -119,8 +129,12 @@ var forwardRE = regexp.MustCompile(`Forwarding from 127\.0\.0\.1:(\d+) ->`)
 // PortForward forwards a random local port to target's port and returns "127.0.0.1:<port>" and a
 // stop function. The forward ends when ctx ends or stop is called.
 func (k *Kube) PortForward(ctx context.Context, ns, target string, port int) (string, func(), error) {
+	return k.portForward(ctx, ns, target, fmt.Sprintf(":%d", port))
+}
+
+func (k *Kube) portForward(ctx context.Context, ns, target, ports string) (string, func(), error) {
 	pctx, cancel := context.WithCancel(ctx)
-	c := k.cmd(pctx, "kubectl", "-n", ns, "port-forward", "--address", "127.0.0.1", target, fmt.Sprintf(":%d", port))
+	c := k.cmd(pctx, "kubectl", "-n", ns, "port-forward", "--address", "127.0.0.1", target, ports)
 	stdout, err := c.StdoutPipe()
 	if err != nil {
 		cancel()

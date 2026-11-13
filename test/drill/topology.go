@@ -121,6 +121,9 @@ type Topology struct {
 	GatewayValues  string `yaml:"gatewayValues" json:"gatewayValues"`
 	// FakeModelImage is the fake model server's image on this cluster.
 	FakeModelImage string `yaml:"fakeModelImage" json:"fakeModelImage"`
+	// FakeMCPImage is the fake MCP server's image on this cluster: the seed's pending approval is an
+	// agent's call to its ask-tier write tool.
+	FakeMCPImage string `yaml:"fakeMcpImage" json:"fakeMcpImage"`
 	// ObjectStoreImage is the S3 server for home checkpoints (phase 2), pinned by digest: SeaweedFS, Apache-2.0.
 	ObjectStoreImage string `yaml:"objectStoreImage" json:"objectStoreImage"`
 	// Registry is the image registry of this topology (empty on kind: images are loaded into the node).
@@ -198,6 +201,9 @@ func (t *Topology) Validate() error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
+	if t.FakeMCPImage == "" {
+		return fmt.Errorf("fakeMcpImage is empty: the seed's pending approval needs the fake MCP server's image")
+	}
 	for k := range t.NamespaceLabels {
 		if k == RunLabel {
 			return fmt.Errorf("namespaceLabels %q is the drill's own run label", k)
@@ -245,7 +251,7 @@ func (t *Topology) Validate() error {
 	}
 	for name, v := range map[string]string{
 		"chartPath": t.ChartPath, "valuesFile": t.ValuesFile, "gatewayChart": t.GatewayChart,
-		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage,
+		"gatewayVersion": t.GatewayVersion, "gatewayValues": t.GatewayValues, "fakeModelImage": t.FakeModelImage, "fakeMcpImage": t.FakeMCPImage,
 		"objectStoreImage": t.ObjectStoreImage,
 	} {
 		if v == "" {
