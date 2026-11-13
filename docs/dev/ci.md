@@ -664,7 +664,7 @@ chart smoke suite keeps the envtest kube-apiserver and etcd output and prints it
 not start.
 
 Every Dockerfile in the tree (`hack/testdata/` fixtures excepted) is linted by `hack/dockerfile-lint.sh`
-(#175; preflight gate `dockerfile`, the `dockerfile lint` CI job). It runs hadolint, pinned in
+(#175; preflight gate `dockerfile`, steps of the `scripts` CI job). It runs hadolint, pinned in
 `hack/versions.env` and configured by `.hadolint.yaml` (warning and above fail), and an awk pass for the two
 rules hadolint has no rule for: a base image is pinned by `@sha256:` digest (also through an ARG default;
 an ARG without a default is the caller's), and no ENV or ARG is named like a secret (TOKEN, SECRET,
