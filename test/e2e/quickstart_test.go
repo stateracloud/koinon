@@ -984,6 +984,110 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
+	// AG1 (issue 9): the pod that owns a run is killed mid-turn, and another replica takes the run over
+	// under a new ownership epoch (ADR 0030). It sits before the image_pull spec, which breaks the
+	// harness image for every later run. Run alone with SUITE_LABEL='smoke || failover'.
+	It("8. an agentd pod killed mid-run: another replica takes the run over under a new epoch, it completes, and no event is recorded or delivered twice", Label("failover"), func(ctx SpecContext) {
+		t.begin()
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		kc := func(args ...string) string {
+			GinkgoHelper()
+			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			return strings.TrimSpace(string(out))
+		}
+
+		By("two agentd replicas, so a second one can take the run over")
+		DeferCleanup(func(ctx context.Context) {
+			kc("-n", "koinon", "scale", "deploy/koinon-agentd", "--replicas=1")
+			kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
+		})
+		kc("-n", "koinon", "scale", "deploy/koinon-agentd", "--replicas=2")
+		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
+		Eventually(func() string {
+			return kc("-n", "koinon", "get", "deploy/koinon-agentd", "-o", "jsonpath={.status.readyReplicas}")
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Equal("2"))
+
+		By("a slow model (every answer waits 40 s), so the run is mid-turn when its owner dies")
+		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-failover","provider":"anthropic","match":{"glob":"claude-failover"},`+
+			`"prices":{"input":"3.00","output":"15.00"},"maxOutput":4096}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+		modelPath := "/agents/" + agent.GetId() + "/model"
+		DeferCleanup(func(ctx context.Context) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		})
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"claude-failover"}`)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+
+		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: org, AgentId: agent.GetId(), Title: "Failover probe", Message: "Run the failover probe and say when it is done.",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		runID := res.GetRun().GetId()
+		// One WatchRun stream from seq 0 for the whole run: it must survive the pod's death (the API is
+		// not the pod that dies) and deliver each event once.
+		fw := watchRun(context.WithoutCancel(ctx), c, org, runID, 0)
+		delivered := collectEvents(fw)
+
+		By("the run is running on one replica and its model request is in flight")
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		var before runOwner
+		Eventually(func(g Gomega) {
+			before = readRunOwner(ctx, g, kubectl, runID)
+			g.Expect(before.State).To(Equal("running"))
+			g.Expect(before.Owner).NotTo(BeEmpty())
+			g.Expect(fakeModelRequests(ctx, g, fakeModel, "claude-failover")).NotTo(BeEmpty(), "the harness asked the model")
+		}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+		Expect(before.Takeovers).To(BeZero())
+		By(fmt.Sprintf("deleting the owner, pod %s (epoch %d), with no grace period: no drain, no hand-over", before.Owner, before.Epoch))
+		kc("-n", "koinon", "delete", "pod", before.Owner, "--grace-period=0", "--force", "--wait=false")
+
+		By("the lease runs out and the other replica takes the run over under a higher epoch")
+		var after runOwner
+		Eventually(func(g Gomega) {
+			after = readRunOwner(ctx, g, kubectl, runID)
+			g.Expect(after.Takeovers).To(BeNumerically(">=", 1))
+			g.Expect(after.Owner).NotTo(Equal(before.Owner))
+			g.Expect(after.Epoch).To(BeNumerically(">", before.Epoch))
+		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+		Expect(after.Owner).To(HavePrefix("koinon-agentd-"), "the new owner is a koinon-agentd pod")
+
+		By("the run completes")
+		var done *runv1alpha1.Run
+		Eventually(func(g Gomega) {
+			got, err := c.Runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: runID})
+			g.Expect(err).NotTo(HaveOccurred())
+			done = got.GetRun()
+			g.Expect(terminal(done.GetState())).To(BeTrue(), "run is %s", done.GetState())
+		}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(3 * time.Second).Should(Succeed())
+		Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), done.GetOutcomeReason())
+
+		By("the stored events have no gap and no repeat, and none was written under the old epoch after the takeover")
+		stored := readRunEvents(ctx, Default, kubectl, runID)
+		Expect(stored).NotTo(BeEmpty())
+		checkNoDuplicateEvents(Default, stored)
+		epochs := map[int64]bool{}
+		for _, e := range stored {
+			epochs[e.Epoch] = true
+		}
+		Expect(epochs).To(HaveKey(before.Epoch), "events of the first owner")
+		Expect(epochs).To(HaveKey(after.Epoch), "events of the new owner")
+
+		By("the WatchRun client saw every event exactly once, in order")
+		want := make([]int64, 0, len(stored))
+		for _, e := range stored {
+			want = append(want, e.Seq)
+		}
+		// The stream stays open after the terminal state; give it a moment to deliver the last events.
+		Eventually(delivered.seqs).WithTimeout(time.Minute).WithPolling(time.Second).Should(Equal(want))
+		t.end("8. agentd pod killed mid-run: takeover under a new epoch, no duplicate events")
+	})
+
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")

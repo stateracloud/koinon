@@ -27,3 +27,4 @@ stringData:
   models: |
     - name: claude-e2e
     - name: claude-haiku-5-5
+    - name: claude-failover

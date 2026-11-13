@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A slow Claude-style model for the agentd failover e2e (issue 9, step 8 of test/e2e): every request
+# waits 40 seconds before it answers, so the e2e can delete the koinon-agentd pod that owns the run
+# while the model request is in flight, and the run is still mid-turn when the lease runs out and
+# another replica takes it over. After the takeover the harness asks again (the resume note, then the
+# end-of-turn note) and each answer waits the same 40 seconds. The Messages format, like claude-e2e.
+model: claude-failover
+faults:
+  delay: 40s
+turns:
+  - when:
+      userContains: "Your turn is over"
+    text: "Notes: the failover probe finished on a second agentd replica."
+    usage:
+      inputTokens: 1700
+      outputTokens: 12
+  - when:
+      userContains: "interrupted during your last turn"
+    text: "The failover probe is done."
+    usage:
+      inputTokens: 1650
+      outputTokens: 10
+  - when:
+      userContains: "failover probe"
+    text: "The failover probe is done."
+    usage:
+      inputTokens: 1600
+      outputTokens: 10
+  - text: "Failover probe"
+    usage:
+      inputTokens: 100
+      outputTokens: 5
