@@ -499,9 +499,9 @@ func entryProto(e pricing.Entry) *budgetv1alpha1.PriceEntry {
 	return &budgetv1alpha1.PriceEntry{
 		Id: e.ID, Provider: e.Provider, Match: &budgetv1alpha1.PriceMatch{Glob: e.Match.Glob, Regex: e.Match.Regex}, ValidFrom: e.ValidFrom,
 		Rates: ratesProto(e.Prices), Tiers: tiersProto(e.Tiers), Tokenizer: e.Tokenizer, Ratio: e.Ratio,
-		ToolOverheadTokens: int32(e.ToolOverheadTokens), //nolint:gosec // validated to at most 100000
-		HiddenThinking:     e.HiddenThinking,
-		SourceUrl:          e.Source.URL, SourceAccessed: e.Source.Accessed, Note: e.Note,
+		ToolOverheadTokens: int32(e.ToolOverheadTokens),                     //nolint:gosec // validated to at most 100000
+		HiddenThinking:     e.HiddenThinking, MaxOutput: int32(e.MaxOutput), //nolint:gosec // validated to at most 10M
+		SourceUrl: e.Source.URL, SourceAccessed: e.Source.Accessed, Note: e.Note,
 	}
 }
 

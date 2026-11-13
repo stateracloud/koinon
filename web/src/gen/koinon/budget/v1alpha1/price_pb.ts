@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/budget/v1alpha1/price.proto.
  */
 export const file_koinon_budget_v1alpha1_price: GenFile = /*@__PURE__*/
-  fileDesc("CiJrb2lub24vYnVkZ2V0L3YxYWxwaGExL3ByaWNlLnByb3RvEhZrb2lub24uYnVkZ2V0LnYxYWxwaGExImIKBVJhdGVzEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCSJPCglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEiwKBXJhdGVzGAIgASgLMh0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SYXRlcyIpCgpQcmljZU1hdGNoEgwKBGdsb2IYASABKAkSDQoFcmVnZXgYAiABKAki+QIKClByaWNlRW50cnkSCgoCaWQYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSMQoFbWF0Y2gYAyABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlTWF0Y2gSEgoKdmFsaWRfZnJvbRgEIAEoCRIsCgVyYXRlcxgFIAEoCzIdLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUmF0ZXMSMAoFdGllcnMYBiADKAsyIS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlVGllchIRCgl0b2tlbml6ZXIYByABKAkSDQoFcmF0aW8YCCABKAkSHAoUdG9vbF9vdmVyaGVhZF90b2tlbnMYCSABKAUSFwoPaGlkZGVuX3RoaW5raW5nGAogASgIEhIKCnNvdXJjZV91cmwYCyABKAkSFwoPc291cmNlX2FjY2Vzc2VkGAwgASgJEgwKBG5vdGUYDSABKAkSEgoKbWF4X291dHB1dBgOIAEoBSKCBAoMUHJpY2VWZXJzaW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcHJvdmlkZXIYAyABKAkSMQoFbWF0Y2gYBCABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlTWF0Y2gSLAoFcmF0ZXMYBSABKAsyHS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJhdGVzEjAKBXRpZXJzGAYgAygLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVRpZXISEQoJdG9rZW5pemVyGAcgASgJEg0KBXJhdGlvGAggASgJEi4KCnZhbGlkX2Zyb20YCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnJldGlyZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNyZWF0ZWRfYnkYCyABKAkSLgoKY3JlYXRlZF9hdBgMIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKbWF4X291dHB1dBgNIAEoBRIcChR0b29sX292ZXJoZWFkX3Rva2VucxgOIAEoBRIXCg9oaWRkZW5fdGhpbmtpbmcYDyABKAgSDAoEbm90ZRgQIAEoCRIUCgxuZWVkc19yZXZpZXcYESABKAgiIwoRTGlzdFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkoKEkxpc3RQcmljZXNSZXNwb25zZRI0CgZwcmljZXMYASADKAsyJC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlVmVyc2lvbiLxAgoPU2V0UHJpY2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHByb3ZpZGVyGAMgASgJEjEKBW1hdGNoGAQgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZU1hdGNoEiwKBXJhdGVzGAUgASgLMh0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SYXRlcxIwCgV0aWVycxgGIAMoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VUaWVyEhEKCXRva2VuaXplchgHIAEoCRINCgVyYXRpbxgIIAEoCRIcChR0b29sX292ZXJoZWFkX3Rva2VucxgJIAEoBRIXCg9oaWRkZW5fdGhpbmtpbmcYCiABKAgSLgoKdmFsaWRfZnJvbRgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKbWF4X291dHB1dBgMIAEoBSJZChBTZXRQcmljZVJlc3BvbnNlEjMKBXByaWNlGAEgASgLMiQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVZlcnNpb24SEAoId2FybmluZ3MYAiADKAkiMgoSUmV0aXJlUHJpY2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRuYW1lGAIgASgJIhUKE1JldGlyZVByaWNlUmVzcG9uc2UiKQoXR2V0RGVmYXVsdFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJInsKGEdldERlZmF1bHRQcmljZXNSZXNwb25zZRIPCgd2ZXJzaW9uGAEgASgJEhkKEXByZXZpb3VzX3ZlcnNpb25zGAIgAygJEjMKB2VudHJpZXMYAyADKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlRW50cnkiWQodR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhQKDGZyb21fdmVyc2lvbhgCIAEoCRISCgp0b192ZXJzaW9uGAMgASgJIrIBCgtQcmljZUNoYW5nZRIMCgRraW5kGAEgASgJEgoKAmlkGAIgASgJEhIKCnZhbGlkX2Zyb20YAyABKAkSMgoGYmVmb3JlGAQgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZUVudHJ5EjEKBWFmdGVyGAUgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZUVudHJ5Eg4KBmZpZWxkcxgGIAMoCSKAAQoeR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1Jlc3BvbnNlEhQKDGZyb21fdmVyc2lvbhgBIAEoCRISCgp0b192ZXJzaW9uGAIgASgJEjQKB2NoYW5nZXMYAyADKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlQ2hhbmdlIvoBCgxGbGFnZ2VkUHJpY2USEQoJcHJpY2VfcmVmGAEgASgJEg0KBW1vZGVsGAIgASgJEhAKCHJlcXVlc3RzGAMgASgDEi0KCWxhc3Rfc2VlbhgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIY29zdF91c2QYBSABKAkSGAoQZ2F0ZXdheV9jb3N0X3VzZBgGIAEoCRIUCgxnYXRld2F5X2RpZmYYByABKAMSFQoNdXNhZ2VfbWlzc2luZxgIIAEoAxIZChFtYXhfb3V0cHV0X2NhcHBlZBgJIAEoAxITCgtwcmljZV9lcnJvchgKIAEoAyJVChhMaXN0RmxhZ2dlZFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEikKBXNpbmNlGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJSChlMaXN0RmxhZ2dlZFByaWNlc1Jlc3BvbnNlEjUKB2ZsYWdnZWQYASADKAsyJC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkZsYWdnZWRQcmljZTLJBQoMUHJpY2VTZXJ2aWNlEmgKCkxpc3RQcmljZXMSKS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RQcmljZXNSZXF1ZXN0Gioua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UHJpY2VzUmVzcG9uc2UiA5ACARJdCghTZXRQcmljZRInLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UHJpY2VSZXF1ZXN0Gigua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRQcmljZVJlc3BvbnNlEmYKC1JldGlyZVByaWNlEioua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SZXRpcmVQcmljZVJlcXVlc3QaKy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJldGlyZVByaWNlUmVzcG9uc2USegoQR2V0RGVmYXVsdFByaWNlcxIvLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0RGVmYXVsdFByaWNlc1JlcXVlc3QaMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldERlZmF1bHRQcmljZXNSZXNwb25zZSIDkAIBEowBChZHZXREZWZhdWx0UHJpY2VDaGFuZ2VzEjUua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXREZWZhdWx0UHJpY2VDaGFuZ2VzUmVxdWVzdBo2LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1Jlc3BvbnNlIgOQAgESfQoRTGlzdEZsYWdnZWRQcmljZXMSMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RGbGFnZ2VkUHJpY2VzUmVxdWVzdBoxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdEZsYWdnZWRQcmljZXNSZXNwb25zZSIDkAIBQlNaUWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2J1ZGdldC92MWFscGhhMTtidWRnZXR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("CiJrb2lub24vYnVkZ2V0L3YxYWxwaGExL3ByaWNlLnByb3RvEhZrb2lub24uYnVkZ2V0LnYxYWxwaGExImIKBVJhdGVzEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCSJPCglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEiwKBXJhdGVzGAIgASgLMh0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SYXRlcyIpCgpQcmljZU1hdGNoEgwKBGdsb2IYASABKAkSDQoFcmVnZXgYAiABKAki+QIKClByaWNlRW50cnkSCgoCaWQYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSMQoFbWF0Y2gYAyABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlTWF0Y2gSEgoKdmFsaWRfZnJvbRgEIAEoCRIsCgVyYXRlcxgFIAEoCzIdLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUmF0ZXMSMAoFdGllcnMYBiADKAsyIS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlVGllchIRCgl0b2tlbml6ZXIYByABKAkSDQoFcmF0aW8YCCABKAkSHAoUdG9vbF9vdmVyaGVhZF90b2tlbnMYCSABKAUSFwoPaGlkZGVuX3RoaW5raW5nGAogASgIEhIKCnNvdXJjZV91cmwYCyABKAkSFwoPc291cmNlX2FjY2Vzc2VkGAwgASgJEgwKBG5vdGUYDSABKAkSEgoKbWF4X291dHB1dBgOIAEoBSKCBAoMUHJpY2VWZXJzaW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcHJvdmlkZXIYAyABKAkSMQoFbWF0Y2gYBCABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlTWF0Y2gSLAoFcmF0ZXMYBSABKAsyHS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJhdGVzEjAKBXRpZXJzGAYgAygLMiEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVRpZXISEQoJdG9rZW5pemVyGAcgASgJEg0KBXJhdGlvGAggASgJEi4KCnZhbGlkX2Zyb20YCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnJldGlyZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNyZWF0ZWRfYnkYCyABKAkSLgoKY3JlYXRlZF9hdBgMIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKbWF4X291dHB1dBgNIAEoBRIcChR0b29sX292ZXJoZWFkX3Rva2VucxgOIAEoBRIXCg9oaWRkZW5fdGhpbmtpbmcYDyABKAgSDAoEbm90ZRgQIAEoCRIUCgxuZWVkc19yZXZpZXcYESABKAgiIwoRTGlzdFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkoKEkxpc3RQcmljZXNSZXNwb25zZRI0CgZwcmljZXMYASADKAsyJC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlVmVyc2lvbiLxAgoPU2V0UHJpY2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHByb3ZpZGVyGAMgASgJEjEKBW1hdGNoGAQgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZU1hdGNoEiwKBXJhdGVzGAUgASgLMh0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SYXRlcxIwCgV0aWVycxgGIAMoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VUaWVyEhEKCXRva2VuaXplchgHIAEoCRINCgVyYXRpbxgIIAEoCRIcChR0b29sX292ZXJoZWFkX3Rva2VucxgJIAEoBRIXCg9oaWRkZW5fdGhpbmtpbmcYCiABKAgSLgoKdmFsaWRfZnJvbRgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKbWF4X291dHB1dBgMIAEoBSJZChBTZXRQcmljZVJlc3BvbnNlEjMKBXByaWNlGAEgASgLMiQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVZlcnNpb24SEAoId2FybmluZ3MYAiADKAkiMgoSUmV0aXJlUHJpY2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIMCgRuYW1lGAIgASgJIhUKE1JldGlyZVByaWNlUmVzcG9uc2UiKQoXR2V0RGVmYXVsdFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJInsKGEdldERlZmF1bHRQcmljZXNSZXNwb25zZRIPCgd2ZXJzaW9uGAEgASgJEhkKEXByZXZpb3VzX3ZlcnNpb25zGAIgAygJEjMKB2VudHJpZXMYAyADKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlRW50cnkiWQodR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhQKDGZyb21fdmVyc2lvbhgCIAEoCRISCgp0b192ZXJzaW9uGAMgASgJIrIBCgtQcmljZUNoYW5nZRIMCgRraW5kGAEgASgJEgoKAmlkGAIgASgJEhIKCnZhbGlkX2Zyb20YAyABKAkSMgoGYmVmb3JlGAQgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZUVudHJ5EjEKBWFmdGVyGAUgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZUVudHJ5Eg4KBmZpZWxkcxgGIAMoCSKAAQoeR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1Jlc3BvbnNlEhQKDGZyb21fdmVyc2lvbhgBIAEoCRISCgp0b192ZXJzaW9uGAIgASgJEjQKB2NoYW5nZXMYAyADKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlQ2hhbmdlIvoBCgxGbGFnZ2VkUHJpY2USEQoJcHJpY2VfcmVmGAEgASgJEg0KBW1vZGVsGAIgASgJEhAKCHJlcXVlc3RzGAMgASgDEi0KCWxhc3Rfc2VlbhgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIY29zdF91c2QYBSABKAkSGAoQZ2F0ZXdheV9jb3N0X3VzZBgGIAEoCRIUCgxnYXRld2F5X2RpZmYYByABKAMSFQoNdXNhZ2VfbWlzc2luZxgIIAEoAxIZChFtYXhfb3V0cHV0X2NhcHBlZBgJIAEoAxITCgtwcmljZV9lcnJvchgKIAEoAyJVChhMaXN0RmxhZ2dlZFByaWNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEikKBXNpbmNlGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJSChlMaXN0RmxhZ2dlZFByaWNlc1Jlc3BvbnNlEjUKB2ZsYWdnZWQYASADKAsyJC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkZsYWdnZWRQcmljZSLzAgoPUHJpY2VQcm92ZW5hbmNlEg4KBnNvdXJjZRgBIAEoCRILCgN1cmwYAiABKAkSLgoKZmV0Y2hlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc2hhMjU2GAQgASgJEhIKCmNvbW1pdF9zaGEYBSABKAkSMAoMY29tbWl0dGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIMCgRldGFnGAcgASgJEg8KB2xpY2VuY2UYCCABKAkSGAoQYWdyZWVpbmdfc291cmNlcxgJIAMoCRITCgtwcm9wb3NhbF9pZBgKIAEoCRIQCghhcHByb3ZlchgLIAEoCRIYChBydWxlX3NldF92ZXJzaW9uGAwgASgJEi8KC2FwcHJvdmVkX2F0GA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgp2b3VjaGVkX2J5GA4gASgJIlEKD1ByaWNlUmF0ZUNoYW5nZRIOCgZidWNrZXQYASABKAkSFAoMY29udGV4dF9vdmVyGAIgASgDEgwKBGZyb20YAyABKAkSCgoCdG8YBCABKAkiswQKDVByaWNlUHJvcG9zYWwSCgoCaWQYASABKAkSDgoGc291cmNlGAIgASgJEg4KBm9yaWdpbhgDIAEoCRIVCg1wcm92aWRlcl90eXBlGAQgASgJEg0KBW1vZGVsGAUgASgJEhMKC2N1cnJlbnRfcmVmGAYgASgJEjMKB2N1cnJlbnQYByABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlRW50cnkSNAoIcHJvcG9zZWQYCCABKAsyIi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlRW50cnkSOAoHY2hhbmdlcxgJIAMoCzInLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VSYXRlQ2hhbmdlEjsKCnByb3ZlbmFuY2UYCiABKAsyJy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlUHJvdmVuYW5jZRIYChBhZ3JlZWluZ19zb3VyY2VzGAsgAygJEg0KBWNsYXNzGAwgASgJEhQKDGZhaWxlZF9ydWxlcxgNIAEoCRINCgVzdGF0ZRgOIAEoCRIuCgpjcmVhdGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpkZWNpZGVkX2F0GBAgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpkZWNpZGVkX2J5GBEgASgJEhcKD2FwcGxpZWRfdmVyc2lvbhgSIAEoAyJIChlMaXN0UHJpY2VQcm9wb3NhbHNSZXF1ZXN0Eg0KBXN0YXRlGAEgASgJEg0KBWNsYXNzGAIgASgJEg0KBWxpbWl0GAMgASgFIlYKGkxpc3RQcmljZVByb3Bvc2Fsc1Jlc3BvbnNlEjgKCXByb3Bvc2FscxgBIAMoCzIlLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VQcm9wb3NhbCIlChdHZXRQcmljZVByb3Bvc2FsUmVxdWVzdBIKCgJpZBgBIAEoCSJTChhHZXRQcmljZVByb3Bvc2FsUmVzcG9uc2USNwoIcHJvcG9zYWwYASABKAsyJS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlUHJvcG9zYWwiTQoaQWNjZXB0UHJpY2VQcm9wb3NhbFJlcXVlc3QSCgoCaWQYASABKAkSDwoHY29uZmlybRgCIAEoCRISCgptYXhfb3V0cHV0GAMgASgFIkAKG0FjY2VwdFByaWNlUHJvcG9zYWxSZXNwb25zZRIPCgd2ZXJzaW9uGAEgASgDEhAKCHdhcm5pbmdzGAIgAygJIikKG0Rpc21pc3NQcmljZVByb3Bvc2FsUmVxdWVzdBIKCgJpZBgBIAEoCSIeChxEaXNtaXNzUHJpY2VQcm9wb3NhbFJlc3BvbnNlIuIBChBQcmljZVNvdXJjZUZldGNoEgoKAmlkGAEgASgJEg4KBnNvdXJjZRgCIAEoCRILCgN1cmwYAyABKAkSLgoKZmV0Y2hlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGcmVzdWx0GAUgASgJEg0KBWVycm9yGAYgASgJEg4KBnNoYTI1NhgHIAEoCRIMCgRldGFnGAggASgJEhIKCmNvbW1pdF9zaGEYCSABKAkSEwoLbW9kZWxfY291bnQYCiABKAUSDwoHdHJpZ2dlchgLIAEoCSIuCh1MaXN0UHJpY2VTb3VyY2VGZXRjaGVzUmVxdWVzdBINCgVsaW1pdBgBIAEoBSJbCh5MaXN0UHJpY2VTb3VyY2VGZXRjaGVzUmVzcG9uc2USOQoHZmV0Y2hlcxgBIAMoCzIoLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VTb3VyY2VGZXRjaCKXAQoSUGxhdGZvcm1QcmljZUVudHJ5EjEKBWVudHJ5GAEgASgLMiIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZUVudHJ5EhEKCXByaWNlX3JlZhgCIAEoCRI7Cgpwcm92ZW5hbmNlGAMgASgLMicua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVByb3ZlbmFuY2UivwIKFFBsYXRmb3JtUHJpY2VWZXJzaW9uEg8KB3ZlcnNpb24YASABKAMSLgoKY3JlYXRlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdmFsaWRfZnJvbRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWN0b3IYBCABKAkSDgoGcmVhc29uGAUgASgJEhgKEHJ1bGVfc2V0X3ZlcnNpb24YBiABKAkSFAoMcHJvcG9zYWxfaWRzGAcgAygJEhUKDXJlc3RvcmVkX2Zyb20YCCABKAMSOwoHZW50cmllcxgJIAMoCzIqLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUGxhdGZvcm1QcmljZUVudHJ5EhMKC2JhZF9lbnRyaWVzGAogASgFIjEKIExpc3RQbGF0Zm9ybVByaWNlVmVyc2lvbnNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFImMKIUxpc3RQbGF0Zm9ybVByaWNlVmVyc2lvbnNSZXNwb25zZRI+Cgh2ZXJzaW9ucxgBIAMoCzIsLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUGxhdGZvcm1QcmljZVZlcnNpb24iMQoeR2V0UGxhdGZvcm1QcmljZVZlcnNpb25SZXF1ZXN0Eg8KB3ZlcnNpb24YASABKAMiYAofR2V0UGxhdGZvcm1QcmljZVZlcnNpb25SZXNwb25zZRI9Cgd2ZXJzaW9uGAEgASgLMiwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QbGF0Zm9ybVByaWNlVmVyc2lvbiJMCiBEaWZmUGxhdGZvcm1QcmljZVZlcnNpb25zUmVxdWVzdBIUCgxmcm9tX3ZlcnNpb24YASABKAMSEgoKdG9fdmVyc2lvbhgCIAEoAyKDAQohRGlmZlBsYXRmb3JtUHJpY2VWZXJzaW9uc1Jlc3BvbnNlEhQKDGZyb21fdmVyc2lvbhgBIAEoAxISCgp0b192ZXJzaW9uGAIgASgDEjQKB2NoYW5nZXMYAyADKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlByaWNlQ2hhbmdlIjAKHVJvbGxiYWNrUGxhdGZvcm1QcmljZXNSZXF1ZXN0Eg8KB3ZlcnNpb24YASABKAMiMQoeUm9sbGJhY2tQbGF0Zm9ybVByaWNlc1Jlc3BvbnNlEg8KB3ZlcnNpb24YASABKAMiIAoeR2V0UHJpY2VSZWZyZXNoU2V0dGluZ3NSZXF1ZXN0IrkBCh9HZXRQcmljZVJlZnJlc2hTZXR0aW5nc1Jlc3BvbnNlEgwKBG1vZGUYASABKAkSEAoIaW50ZXJ2YWwYAiABKAkSGgoSbWF4X2NoYW5nZV9wZXJjZW50GAMgASgFEhgKEG1heF9hdXRvX3Blcl9kYXkYBCABKAUSEAoIcmVjb3JkZWQYBSABKAgSLgoKdXBkYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiGgoYQ2hlY2tQcmljZVNvdXJjZXNSZXF1ZXN0Ir0BChlDaGVja1ByaWNlU291cmNlc1Jlc3BvbnNlEg8KB2ZldGNoZWQYASADKAkSTQoGZmFpbGVkGAIgAygLMj0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5DaGVja1ByaWNlU291cmNlc1Jlc3BvbnNlLkZhaWxlZEVudHJ5EhEKCXByb3Bvc2FscxgDIAEoBRotCgtGYWlsZWRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIkMKG0V4cGxhaW5QbGF0Zm9ybVByaWNlUmVxdWVzdBIVCg1wcm92aWRlcl90eXBlGAEgASgJEg0KBW1vZGVsGAIgASgJIuABChxFeHBsYWluUGxhdGZvcm1QcmljZVJlc3BvbnNlEg0KBWxheWVyGAEgASgJEhEKCXByaWNlX3JlZhgCIAEoCRIxCgVlbnRyeRgDIAEoCzIiLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUHJpY2VFbnRyeRIYChBwbGF0Zm9ybV92ZXJzaW9uGAQgASgDEhQKDGxpc3RfdmVyc2lvbhgFIAEoCRI7Cgpwcm92ZW5hbmNlGAYgASgLMicua29pbm9uLmJ1ZGdldC52MWFscGhhMS5QcmljZVByb3ZlbmFuY2UyvBIKDFByaWNlU2VydmljZRJoCgpMaXN0UHJpY2VzEikua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UHJpY2VzUmVxdWVzdBoqLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdFByaWNlc1Jlc3BvbnNlIgOQAgESXQoIU2V0UHJpY2USJy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldFByaWNlUmVxdWVzdBooLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UHJpY2VSZXNwb25zZRJmCgtSZXRpcmVQcmljZRIqLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuUmV0aXJlUHJpY2VSZXF1ZXN0Gisua29pbm9uLmJ1ZGdldC52MWFscGhhMS5SZXRpcmVQcmljZVJlc3BvbnNlEnoKEEdldERlZmF1bHRQcmljZXMSLy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldERlZmF1bHRQcmljZXNSZXF1ZXN0GjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXREZWZhdWx0UHJpY2VzUmVzcG9uc2UiA5ACARKMAQoWR2V0RGVmYXVsdFByaWNlQ2hhbmdlcxI1LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0RGVmYXVsdFByaWNlQ2hhbmdlc1JlcXVlc3QaNi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldERlZmF1bHRQcmljZUNoYW5nZXNSZXNwb25zZSIDkAIBEn0KEUxpc3RGbGFnZ2VkUHJpY2VzEjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0RmxhZ2dlZFByaWNlc1JlcXVlc3QaMS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RGbGFnZ2VkUHJpY2VzUmVzcG9uc2UiA5ACARKAAQoSTGlzdFByaWNlUHJvcG9zYWxzEjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UHJpY2VQcm9wb3NhbHNSZXF1ZXN0GjIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UHJpY2VQcm9wb3NhbHNSZXNwb25zZSIDkAIBEnoKEEdldFByaWNlUHJvcG9zYWwSLy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldFByaWNlUHJvcG9zYWxSZXF1ZXN0GjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRQcmljZVByb3Bvc2FsUmVzcG9uc2UiA5ACARJ+ChNBY2NlcHRQcmljZVByb3Bvc2FsEjIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BY2NlcHRQcmljZVByb3Bvc2FsUmVxdWVzdBozLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuQWNjZXB0UHJpY2VQcm9wb3NhbFJlc3BvbnNlEoEBChREaXNtaXNzUHJpY2VQcm9wb3NhbBIzLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuRGlzbWlzc1ByaWNlUHJvcG9zYWxSZXF1ZXN0GjQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5EaXNtaXNzUHJpY2VQcm9wb3NhbFJlc3BvbnNlEowBChZMaXN0UHJpY2VTb3VyY2VGZXRjaGVzEjUua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UHJpY2VTb3VyY2VGZXRjaGVzUmVxdWVzdBo2LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdFByaWNlU291cmNlRmV0Y2hlc1Jlc3BvbnNlIgOQAgESlQEKGUxpc3RQbGF0Zm9ybVByaWNlVmVyc2lvbnMSOC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RQbGF0Zm9ybVByaWNlVmVyc2lvbnNSZXF1ZXN0Gjkua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0UGxhdGZvcm1QcmljZVZlcnNpb25zUmVzcG9uc2UiA5ACARKPAQoXR2V0UGxhdGZvcm1QcmljZVZlcnNpb24SNi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldFBsYXRmb3JtUHJpY2VWZXJzaW9uUmVxdWVzdBo3LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0UGxhdGZvcm1QcmljZVZlcnNpb25SZXNwb25zZSIDkAIBEpUBChlEaWZmUGxhdGZvcm1QcmljZVZlcnNpb25zEjgua29pbm9uLmJ1ZGdldC52MWFscGhhMS5EaWZmUGxhdGZvcm1QcmljZVZlcnNpb25zUmVxdWVzdBo5LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuRGlmZlBsYXRmb3JtUHJpY2VWZXJzaW9uc1Jlc3BvbnNlIgOQAgEShwEKFlJvbGxiYWNrUGxhdGZvcm1QcmljZXMSNS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlJvbGxiYWNrUGxhdGZvcm1QcmljZXNSZXF1ZXN0GjYua29pbm9uLmJ1ZGdldC52MWFscGhhMS5Sb2xsYmFja1BsYXRmb3JtUHJpY2VzUmVzcG9uc2USjwEKF0dldFByaWNlUmVmcmVzaFNldHRpbmdzEjYua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRQcmljZVJlZnJlc2hTZXR0aW5nc1JlcXVlc3QaNy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldFByaWNlUmVmcmVzaFNldHRpbmdzUmVzcG9uc2UiA5ACARJ4ChFDaGVja1ByaWNlU291cmNlcxIwLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuQ2hlY2tQcmljZVNvdXJjZXNSZXF1ZXN0GjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5DaGVja1ByaWNlU291cmNlc1Jlc3BvbnNlEoYBChRFeHBsYWluUGxhdGZvcm1QcmljZRIzLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuRXhwbGFpblBsYXRmb3JtUHJpY2VSZXF1ZXN0GjQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5FeHBsYWluUGxhdGZvcm1QcmljZVJlc3BvbnNlIgOQAgFCU1pRZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYnVkZ2V0L3YxYWxwaGExO2J1ZGdldHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * Rates are USD per million tokens as decimal strings with at most 6 fraction digits. Empty
@@ -717,6 +717,945 @@ export const ListFlaggedPricesResponseSchema: GenMessage<ListFlaggedPricesRespon
   messageDesc(file_koinon_budget_v1alpha1_price, 18);
 
 /**
+ * PriceProvenance is where a platform price came from (ADR 0098 decision 4).
+ *
+ * @generated from message koinon.budget.v1alpha1.PriceProvenance
+ */
+export type PriceProvenance = Message<"koinon.budget.v1alpha1.PriceProvenance"> & {
+  /**
+   * source is the source id ("openrouter") or "manual".
+   *
+   * @generated from field: string source = 1;
+   */
+  source: string;
+
+  /**
+   * @generated from field: string url = 2;
+   */
+  url: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp fetched_at = 3;
+   */
+  fetchedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string sha256 = 4;
+   */
+  sha256: string;
+
+  /**
+   * @generated from field: string commit_sha = 5;
+   */
+  commitSha: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp committed_at = 6;
+   */
+  committedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string etag = 7;
+   */
+  etag: string;
+
+  /**
+   * @generated from field: string licence = 8;
+   */
+  licence: string;
+
+  /**
+   * @generated from field: repeated string agreeing_sources = 9;
+   */
+  agreeingSources: string[];
+
+  /**
+   * @generated from field: string proposal_id = 10;
+   */
+  proposalId: string;
+
+  /**
+   * approver is who accepted it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+   *
+   * @generated from field: string approver = 11;
+   */
+  approver: string;
+
+  /**
+   * @generated from field: string rule_set_version = 12;
+   */
+  ruleSetVersion: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp approved_at = 13;
+   */
+  approvedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string vouched_by = 14;
+   */
+  vouchedBy: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PriceProvenance.
+ * Use `create(PriceProvenanceSchema)` to create a new message.
+ */
+export const PriceProvenanceSchema: GenMessage<PriceProvenance> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 19);
+
+/**
+ * PriceRateChange is one rate that differs between the price in use and the proposed one.
+ *
+ * @generated from message koinon.budget.v1alpha1.PriceRateChange
+ */
+export type PriceRateChange = Message<"koinon.budget.v1alpha1.PriceRateChange"> & {
+  /**
+   * @generated from field: string bucket = 1;
+   */
+  bucket: string;
+
+  /**
+   * context_over is the tier the rate belongs to; 0 is the base rate.
+   *
+   * @generated from field: int64 context_over = 2;
+   */
+  contextOver: bigint;
+
+  /**
+   * from is empty when the bucket is added, to when it is removed.
+   *
+   * @generated from field: string from = 3;
+   */
+  from: string;
+
+  /**
+   * @generated from field: string to = 4;
+   */
+  to: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PriceRateChange.
+ * Use `create(PriceRateChangeSchema)` to create a new message.
+ */
+export const PriceRateChangeSchema: GenMessage<PriceRateChange> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 20);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.PriceProposal
+ */
+export type PriceProposal = Message<"koinon.budget.v1alpha1.PriceProposal"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * origin is how the proposal arrived (a fetch trigger or "import").
+   *
+   * @generated from field: string origin = 3;
+   */
+  origin: string;
+
+  /**
+   * @generated from field: string provider_type = 4;
+   */
+  providerType: string;
+
+  /**
+   * @generated from field: string model = 5;
+   */
+  model: string;
+
+  /**
+   * current_ref is the price_ref in use for the model, empty for a new model.
+   *
+   * @generated from field: string current_ref = 6;
+   */
+  currentRef: string;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceEntry current = 7;
+   */
+  current?: PriceEntry | undefined;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceEntry proposed = 8;
+   */
+  proposed?: PriceEntry | undefined;
+
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.PriceRateChange changes = 9;
+   */
+  changes: PriceRateChange[];
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceProvenance provenance = 10;
+   */
+  provenance?: PriceProvenance | undefined;
+
+  /**
+   * @generated from field: repeated string agreeing_sources = 11;
+   */
+  agreeingSources: string[];
+
+  /**
+   * class is auto, needs_review, confirm or refused.
+   *
+   * @generated from field: string class = 12;
+   */
+  class: string;
+
+  /**
+   * @generated from field: string failed_rules = 13;
+   */
+  failedRules: string;
+
+  /**
+   * state is open, accepted, dismissed or superseded.
+   *
+   * @generated from field: string state = 14;
+   */
+  state: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 15;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp decided_at = 16;
+   */
+  decidedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string decided_by = 17;
+   */
+  decidedBy: string;
+
+  /**
+   * applied_version is the platform version an accepted proposal wrote.
+   *
+   * @generated from field: int64 applied_version = 18;
+   */
+  appliedVersion: bigint;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PriceProposal.
+ * Use `create(PriceProposalSchema)` to create a new message.
+ */
+export const PriceProposalSchema: GenMessage<PriceProposal> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 21);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPriceProposalsRequest
+ */
+export type ListPriceProposalsRequest = Message<"koinon.budget.v1alpha1.ListPriceProposalsRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string class = 2;
+   */
+  class: string;
+
+  /**
+   * limit defaults to 100, at most 1000.
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPriceProposalsRequest.
+ * Use `create(ListPriceProposalsRequestSchema)` to create a new message.
+ */
+export const ListPriceProposalsRequestSchema: GenMessage<ListPriceProposalsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 22);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPriceProposalsResponse
+ */
+export type ListPriceProposalsResponse = Message<"koinon.budget.v1alpha1.ListPriceProposalsResponse"> & {
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.PriceProposal proposals = 1;
+   */
+  proposals: PriceProposal[];
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPriceProposalsResponse.
+ * Use `create(ListPriceProposalsResponseSchema)` to create a new message.
+ */
+export const ListPriceProposalsResponseSchema: GenMessage<ListPriceProposalsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 23);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPriceProposalRequest
+ */
+export type GetPriceProposalRequest = Message<"koinon.budget.v1alpha1.GetPriceProposalRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPriceProposalRequest.
+ * Use `create(GetPriceProposalRequestSchema)` to create a new message.
+ */
+export const GetPriceProposalRequestSchema: GenMessage<GetPriceProposalRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 24);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPriceProposalResponse
+ */
+export type GetPriceProposalResponse = Message<"koinon.budget.v1alpha1.GetPriceProposalResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceProposal proposal = 1;
+   */
+  proposal?: PriceProposal | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPriceProposalResponse.
+ * Use `create(GetPriceProposalResponseSchema)` to create a new message.
+ */
+export const GetPriceProposalResponseSchema: GenMessage<GetPriceProposalResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 25);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.AcceptPriceProposalRequest
+ */
+export type AcceptPriceProposalRequest = Message<"koinon.budget.v1alpha1.AcceptPriceProposalRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * confirm is the model id typed out, for a proposal of class confirm.
+   *
+   * @generated from field: string confirm = 2;
+   */
+  confirm: string;
+
+  /**
+   * max_output is the entry's output limit in tokens; required when the source reports none.
+   *
+   * @generated from field: int32 max_output = 3;
+   */
+  maxOutput: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.AcceptPriceProposalRequest.
+ * Use `create(AcceptPriceProposalRequestSchema)` to create a new message.
+ */
+export const AcceptPriceProposalRequestSchema: GenMessage<AcceptPriceProposalRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 26);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.AcceptPriceProposalResponse
+ */
+export type AcceptPriceProposalResponse = Message<"koinon.budget.v1alpha1.AcceptPriceProposalResponse"> & {
+  /**
+   * @generated from field: int64 version = 1;
+   */
+  version: bigint;
+
+  /**
+   * @generated from field: repeated string warnings = 2;
+   */
+  warnings: string[];
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.AcceptPriceProposalResponse.
+ * Use `create(AcceptPriceProposalResponseSchema)` to create a new message.
+ */
+export const AcceptPriceProposalResponseSchema: GenMessage<AcceptPriceProposalResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 27);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.DismissPriceProposalRequest
+ */
+export type DismissPriceProposalRequest = Message<"koinon.budget.v1alpha1.DismissPriceProposalRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.DismissPriceProposalRequest.
+ * Use `create(DismissPriceProposalRequestSchema)` to create a new message.
+ */
+export const DismissPriceProposalRequestSchema: GenMessage<DismissPriceProposalRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 28);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.DismissPriceProposalResponse
+ */
+export type DismissPriceProposalResponse = Message<"koinon.budget.v1alpha1.DismissPriceProposalResponse"> & {
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.DismissPriceProposalResponse.
+ * Use `create(DismissPriceProposalResponseSchema)` to create a new message.
+ */
+export const DismissPriceProposalResponseSchema: GenMessage<DismissPriceProposalResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 29);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.PriceSourceFetch
+ */
+export type PriceSourceFetch = Message<"koinon.budget.v1alpha1.PriceSourceFetch"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * @generated from field: string url = 3;
+   */
+  url: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp fetched_at = 4;
+   */
+  fetchedAt?: Timestamp | undefined;
+
+  /**
+   * result is ok, failed or refused.
+   *
+   * @generated from field: string result = 5;
+   */
+  result: string;
+
+  /**
+   * @generated from field: string error = 6;
+   */
+  error: string;
+
+  /**
+   * @generated from field: string sha256 = 7;
+   */
+  sha256: string;
+
+  /**
+   * @generated from field: string etag = 8;
+   */
+  etag: string;
+
+  /**
+   * @generated from field: string commit_sha = 9;
+   */
+  commitSha: string;
+
+  /**
+   * @generated from field: int32 model_count = 10;
+   */
+  modelCount: number;
+
+  /**
+   * trigger is schedule, cli or import.
+   *
+   * @generated from field: string trigger = 11;
+   */
+  trigger: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PriceSourceFetch.
+ * Use `create(PriceSourceFetchSchema)` to create a new message.
+ */
+export const PriceSourceFetchSchema: GenMessage<PriceSourceFetch> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 30);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPriceSourceFetchesRequest
+ */
+export type ListPriceSourceFetchesRequest = Message<"koinon.budget.v1alpha1.ListPriceSourceFetchesRequest"> & {
+  /**
+   * limit defaults to 100, at most 1000.
+   *
+   * @generated from field: int32 limit = 1;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPriceSourceFetchesRequest.
+ * Use `create(ListPriceSourceFetchesRequestSchema)` to create a new message.
+ */
+export const ListPriceSourceFetchesRequestSchema: GenMessage<ListPriceSourceFetchesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 31);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPriceSourceFetchesResponse
+ */
+export type ListPriceSourceFetchesResponse = Message<"koinon.budget.v1alpha1.ListPriceSourceFetchesResponse"> & {
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.PriceSourceFetch fetches = 1;
+   */
+  fetches: PriceSourceFetch[];
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPriceSourceFetchesResponse.
+ * Use `create(ListPriceSourceFetchesResponseSchema)` to create a new message.
+ */
+export const ListPriceSourceFetchesResponseSchema: GenMessage<ListPriceSourceFetchesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 32);
+
+/**
+ * PlatformPriceEntry is one entry of a platform version with its provenance.
+ *
+ * @generated from message koinon.budget.v1alpha1.PlatformPriceEntry
+ */
+export type PlatformPriceEntry = Message<"koinon.budget.v1alpha1.PlatformPriceEntry"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceEntry entry = 1;
+   */
+  entry?: PriceEntry | undefined;
+
+  /**
+   * price_ref is the ref a ledger entry cites for it: platform@<version>#<id>.
+   *
+   * @generated from field: string price_ref = 2;
+   */
+  priceRef: string;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceProvenance provenance = 3;
+   */
+  provenance?: PriceProvenance | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PlatformPriceEntry.
+ * Use `create(PlatformPriceEntrySchema)` to create a new message.
+ */
+export const PlatformPriceEntrySchema: GenMessage<PlatformPriceEntry> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 33);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.PlatformPriceVersion
+ */
+export type PlatformPriceVersion = Message<"koinon.budget.v1alpha1.PlatformPriceVersion"> & {
+  /**
+   * @generated from field: int64 version = 1;
+   */
+  version: bigint;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 2;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp valid_from = 3;
+   */
+  validFrom?: Timestamp | undefined;
+
+  /**
+   * actor is who wrote it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+   *
+   * @generated from field: string actor = 4;
+   */
+  actor: string;
+
+  /**
+   * @generated from field: string reason = 5;
+   */
+  reason: string;
+
+  /**
+   * @generated from field: string rule_set_version = 6;
+   */
+  ruleSetVersion: string;
+
+  /**
+   * @generated from field: repeated string proposal_ids = 7;
+   */
+  proposalIds: string[];
+
+  /**
+   * restored_from is the version a rollback copied, 0 otherwise.
+   *
+   * @generated from field: int64 restored_from = 8;
+   */
+  restoredFrom: bigint;
+
+  /**
+   * entries is empty in a list.
+   *
+   * @generated from field: repeated koinon.budget.v1alpha1.PlatformPriceEntry entries = 9;
+   */
+  entries: PlatformPriceEntry[];
+
+  /**
+   * @generated from field: int32 bad_entries = 10;
+   */
+  badEntries: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.PlatformPriceVersion.
+ * Use `create(PlatformPriceVersionSchema)` to create a new message.
+ */
+export const PlatformPriceVersionSchema: GenMessage<PlatformPriceVersion> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 34);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest
+ */
+export type ListPlatformPriceVersionsRequest = Message<"koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest"> & {
+  /**
+   * limit defaults to 100, at most 500.
+   *
+   * @generated from field: int32 limit = 1;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest.
+ * Use `create(ListPlatformPriceVersionsRequestSchema)` to create a new message.
+ */
+export const ListPlatformPriceVersionsRequestSchema: GenMessage<ListPlatformPriceVersionsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 35);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse
+ */
+export type ListPlatformPriceVersionsResponse = Message<"koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse"> & {
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.PlatformPriceVersion versions = 1;
+   */
+  versions: PlatformPriceVersion[];
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse.
+ * Use `create(ListPlatformPriceVersionsResponseSchema)` to create a new message.
+ */
+export const ListPlatformPriceVersionsResponseSchema: GenMessage<ListPlatformPriceVersionsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 36);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPlatformPriceVersionRequest
+ */
+export type GetPlatformPriceVersionRequest = Message<"koinon.budget.v1alpha1.GetPlatformPriceVersionRequest"> & {
+  /**
+   * @generated from field: int64 version = 1;
+   */
+  version: bigint;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPlatformPriceVersionRequest.
+ * Use `create(GetPlatformPriceVersionRequestSchema)` to create a new message.
+ */
+export const GetPlatformPriceVersionRequestSchema: GenMessage<GetPlatformPriceVersionRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 37);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPlatformPriceVersionResponse
+ */
+export type GetPlatformPriceVersionResponse = Message<"koinon.budget.v1alpha1.GetPlatformPriceVersionResponse"> & {
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PlatformPriceVersion version = 1;
+   */
+  version?: PlatformPriceVersion | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPlatformPriceVersionResponse.
+ * Use `create(GetPlatformPriceVersionResponseSchema)` to create a new message.
+ */
+export const GetPlatformPriceVersionResponseSchema: GenMessage<GetPlatformPriceVersionResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 38);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest
+ */
+export type DiffPlatformPriceVersionsRequest = Message<"koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest"> & {
+  /**
+   * from_version 0 means the version before to_version; to_version 0 the newest.
+   *
+   * @generated from field: int64 from_version = 1;
+   */
+  fromVersion: bigint;
+
+  /**
+   * @generated from field: int64 to_version = 2;
+   */
+  toVersion: bigint;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest.
+ * Use `create(DiffPlatformPriceVersionsRequestSchema)` to create a new message.
+ */
+export const DiffPlatformPriceVersionsRequestSchema: GenMessage<DiffPlatformPriceVersionsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 39);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse
+ */
+export type DiffPlatformPriceVersionsResponse = Message<"koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse"> & {
+  /**
+   * @generated from field: int64 from_version = 1;
+   */
+  fromVersion: bigint;
+
+  /**
+   * @generated from field: int64 to_version = 2;
+   */
+  toVersion: bigint;
+
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.PriceChange changes = 3;
+   */
+  changes: PriceChange[];
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse.
+ * Use `create(DiffPlatformPriceVersionsResponseSchema)` to create a new message.
+ */
+export const DiffPlatformPriceVersionsResponseSchema: GenMessage<DiffPlatformPriceVersionsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 40);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.RollbackPlatformPricesRequest
+ */
+export type RollbackPlatformPricesRequest = Message<"koinon.budget.v1alpha1.RollbackPlatformPricesRequest"> & {
+  /**
+   * @generated from field: int64 version = 1;
+   */
+  version: bigint;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.RollbackPlatformPricesRequest.
+ * Use `create(RollbackPlatformPricesRequestSchema)` to create a new message.
+ */
+export const RollbackPlatformPricesRequestSchema: GenMessage<RollbackPlatformPricesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 41);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.RollbackPlatformPricesResponse
+ */
+export type RollbackPlatformPricesResponse = Message<"koinon.budget.v1alpha1.RollbackPlatformPricesResponse"> & {
+  /**
+   * version is the new version, equal to the one rolled back to.
+   *
+   * @generated from field: int64 version = 1;
+   */
+  version: bigint;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.RollbackPlatformPricesResponse.
+ * Use `create(RollbackPlatformPricesResponseSchema)` to create a new message.
+ */
+export const RollbackPlatformPricesResponseSchema: GenMessage<RollbackPlatformPricesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 42);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest
+ */
+export type GetPriceRefreshSettingsRequest = Message<"koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest"> & {
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest.
+ * Use `create(GetPriceRefreshSettingsRequestSchema)` to create a new message.
+ */
+export const GetPriceRefreshSettingsRequestSchema: GenMessage<GetPriceRefreshSettingsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 43);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse
+ */
+export type GetPriceRefreshSettingsResponse = Message<"koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse"> & {
+  /**
+   * mode is auto, off or on.
+   *
+   * @generated from field: string mode = 1;
+   */
+  mode: string;
+
+  /**
+   * interval is a Go duration such as "6h0m0s".
+   *
+   * @generated from field: string interval = 2;
+   */
+  interval: string;
+
+  /**
+   * @generated from field: int32 max_change_percent = 3;
+   */
+  maxChangePercent: number;
+
+  /**
+   * @generated from field: int32 max_auto_per_day = 4;
+   */
+  maxAutoPerDay: number;
+
+  /**
+   * recorded is false before koinon-api ever recorded a setting; the values are then the defaults.
+   *
+   * @generated from field: bool recorded = 5;
+   */
+  recorded: boolean;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp updated_at = 6;
+   */
+  updatedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse.
+ * Use `create(GetPriceRefreshSettingsResponseSchema)` to create a new message.
+ */
+export const GetPriceRefreshSettingsResponseSchema: GenMessage<GetPriceRefreshSettingsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 44);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.CheckPriceSourcesRequest
+ */
+export type CheckPriceSourcesRequest = Message<"koinon.budget.v1alpha1.CheckPriceSourcesRequest"> & {
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.CheckPriceSourcesRequest.
+ * Use `create(CheckPriceSourcesRequestSchema)` to create a new message.
+ */
+export const CheckPriceSourcesRequestSchema: GenMessage<CheckPriceSourcesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 45);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.CheckPriceSourcesResponse
+ */
+export type CheckPriceSourcesResponse = Message<"koinon.budget.v1alpha1.CheckPriceSourcesResponse"> & {
+  /**
+   * @generated from field: repeated string fetched = 1;
+   */
+  fetched: string[];
+
+  /**
+   * failed maps a source id to why it failed.
+   *
+   * @generated from field: map<string, string> failed = 2;
+   */
+  failed: { [key: string]: string };
+
+  /**
+   * @generated from field: int32 proposals = 3;
+   */
+  proposals: number;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.CheckPriceSourcesResponse.
+ * Use `create(CheckPriceSourcesResponseSchema)` to create a new message.
+ */
+export const CheckPriceSourcesResponseSchema: GenMessage<CheckPriceSourcesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 46);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ExplainPlatformPriceRequest
+ */
+export type ExplainPlatformPriceRequest = Message<"koinon.budget.v1alpha1.ExplainPlatformPriceRequest"> & {
+  /**
+   * @generated from field: string provider_type = 1;
+   */
+  providerType: string;
+
+  /**
+   * @generated from field: string model = 2;
+   */
+  model: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ExplainPlatformPriceRequest.
+ * Use `create(ExplainPlatformPriceRequestSchema)` to create a new message.
+ */
+export const ExplainPlatformPriceRequestSchema: GenMessage<ExplainPlatformPriceRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 47);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ExplainPlatformPriceResponse
+ */
+export type ExplainPlatformPriceResponse = Message<"koinon.budget.v1alpha1.ExplainPlatformPriceResponse"> & {
+  /**
+   * layer is platform or default.
+   *
+   * @generated from field: string layer = 1;
+   */
+  layer: string;
+
+  /**
+   * @generated from field: string price_ref = 2;
+   */
+  priceRef: string;
+
+  /**
+   * @generated from field: koinon.budget.v1alpha1.PriceEntry entry = 3;
+   */
+  entry?: PriceEntry | undefined;
+
+  /**
+   * platform_version is set for layer platform.
+   *
+   * @generated from field: int64 platform_version = 4;
+   */
+  platformVersion: bigint;
+
+  /**
+   * list_version is set for layer default.
+   *
+   * @generated from field: string list_version = 5;
+   */
+  listVersion: string;
+
+  /**
+   * provenance is set for layer platform.
+   *
+   * @generated from field: koinon.budget.v1alpha1.PriceProvenance provenance = 6;
+   */
+  provenance?: PriceProvenance | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ExplainPlatformPriceResponse.
+ * Use `create(ExplainPlatformPriceResponseSchema)` to create a new message.
+ */
+export const ExplainPlatformPriceResponseSchema: GenMessage<ExplainPlatformPriceResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_price, 48);
+
+/**
  * PriceService manages an org's own prices and shows the default price list (plan item PV2,
  * ADR 0056). A price is a rate per usage type, in USD per million tokens, for non-overlapping
  * buckets of a request; org prices win over the default list. Admins and owners.
@@ -786,6 +1725,131 @@ export const PriceService: GenService<{
     methodKind: "unary";
     input: typeof ListFlaggedPricesRequestSchema;
     output: typeof ListFlaggedPricesResponseSchema;
+  },
+  /**
+   * ListPriceProposals lists proposals, newest first. Empty state or class mean all.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.ListPriceProposals
+   */
+  listPriceProposals: {
+    methodKind: "unary";
+    input: typeof ListPriceProposalsRequestSchema;
+    output: typeof ListPriceProposalsResponseSchema;
+  },
+  /**
+   * GetPriceProposal returns one proposal.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.GetPriceProposal
+   */
+  getPriceProposal: {
+    methodKind: "unary";
+    input: typeof GetPriceProposalRequestSchema;
+    output: typeof GetPriceProposalResponseSchema;
+  },
+  /**
+   * AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of
+   * class confirm needs the model id typed out; a new model without an output limit needs max_output.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.AcceptPriceProposal
+   */
+  acceptPriceProposal: {
+    methodKind: "unary";
+    input: typeof AcceptPriceProposalRequestSchema;
+    output: typeof AcceptPriceProposalResponseSchema;
+  },
+  /**
+   * DismissPriceProposal closes a proposal; the same values from the same source do not come back.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.DismissPriceProposal
+   */
+  dismissPriceProposal: {
+    methodKind: "unary";
+    input: typeof DismissPriceProposalRequestSchema;
+    output: typeof DismissPriceProposalResponseSchema;
+  },
+  /**
+   * ListPriceSourceFetches returns the fetch log, newest first.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches
+   */
+  listPriceSourceFetches: {
+    methodKind: "unary";
+    input: typeof ListPriceSourceFetchesRequestSchema;
+    output: typeof ListPriceSourceFetchesResponseSchema;
+  },
+  /**
+   * ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions
+   */
+  listPlatformPriceVersions: {
+    methodKind: "unary";
+    input: typeof ListPlatformPriceVersionsRequestSchema;
+    output: typeof ListPlatformPriceVersionsResponseSchema;
+  },
+  /**
+   * GetPlatformPriceVersion returns one version with its entries and their provenance.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion
+   */
+  getPlatformPriceVersion: {
+    methodKind: "unary";
+    input: typeof GetPlatformPriceVersionRequestSchema;
+    output: typeof GetPlatformPriceVersionResponseSchema;
+  },
+  /**
+   * DiffPlatformPriceVersions returns what changed between two versions of the platform list.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions
+   */
+  diffPlatformPriceVersions: {
+    methodKind: "unary";
+    input: typeof DiffPlatformPriceVersionsRequestSchema;
+    output: typeof DiffPlatformPriceVersionsResponseSchema;
+  },
+  /**
+   * RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are
+   * never edited or deleted.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices
+   */
+  rollbackPlatformPrices: {
+    methodKind: "unary";
+    input: typeof RollbackPlatformPricesRequestSchema;
+    output: typeof RollbackPlatformPricesResponseSchema;
+  },
+  /**
+   * GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting
+   * is Helm-owned: there is no write.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings
+   */
+  getPriceRefreshSettings: {
+    methodKind: "unary";
+    input: typeof GetPriceRefreshSettingsRequestSchema;
+    output: typeof GetPriceRefreshSettingsResponseSchema;
+  },
+  /**
+   * CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It
+   * makes proposals and applies nothing.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.CheckPriceSources
+   */
+  checkPriceSources: {
+    methodKind: "unary";
+    input: typeof CheckPriceSourcesRequestSchema;
+    output: typeof CheckPriceSourcesResponseSchema;
+  },
+  /**
+   * ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
+   * price_ref.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice
+   */
+  explainPlatformPrice: {
+    methodKind: "unary";
+    input: typeof ExplainPlatformPriceRequestSchema;
+    output: typeof ExplainPlatformPriceResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_budget_v1alpha1_price, 0);

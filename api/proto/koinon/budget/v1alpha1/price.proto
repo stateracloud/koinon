@@ -40,6 +40,66 @@ service PriceService {
   rpc ListFlaggedPrices(ListFlaggedPricesRequest) returns (ListFlaggedPricesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // The platform price list (ADR 0098 slice 3). Every RPC below is for a platform admin only, and
+  // every write goes through the same internal/prices functions as `koinon-api prices`, so the
+  // install audit events are identical.
+
+  // ListPriceProposals lists proposals, newest first. Empty state or class mean all.
+  rpc ListPriceProposals(ListPriceProposalsRequest) returns (ListPriceProposalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetPriceProposal returns one proposal.
+  rpc GetPriceProposal(GetPriceProposalRequest) returns (GetPriceProposalResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // AcceptPriceProposal writes a proposal into a new platform version, from now on. A proposal of
+  // class confirm needs the model id typed out; a new model without an output limit needs max_output.
+  rpc AcceptPriceProposal(AcceptPriceProposalRequest) returns (AcceptPriceProposalResponse);
+
+  // DismissPriceProposal closes a proposal; the same values from the same source do not come back.
+  rpc DismissPriceProposal(DismissPriceProposalRequest) returns (DismissPriceProposalResponse);
+
+  // ListPriceSourceFetches returns the fetch log, newest first.
+  rpc ListPriceSourceFetches(ListPriceSourceFetchesRequest) returns (ListPriceSourceFetchesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListPlatformPriceVersions lists the versions of the platform list, newest first, without entries.
+  rpc ListPlatformPriceVersions(ListPlatformPriceVersionsRequest) returns (ListPlatformPriceVersionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetPlatformPriceVersion returns one version with its entries and their provenance.
+  rpc GetPlatformPriceVersion(GetPlatformPriceVersionRequest) returns (GetPlatformPriceVersionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // DiffPlatformPriceVersions returns what changed between two versions of the platform list.
+  rpc DiffPlatformPriceVersions(DiffPlatformPriceVersionsRequest) returns (DiffPlatformPriceVersionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RollbackPlatformPrices writes a new version equal to an earlier one, from now on. Versions are
+  // never edited or deleted.
+  rpc RollbackPlatformPrices(RollbackPlatformPricesRequest) returns (RollbackPlatformPricesResponse);
+
+  // GetPriceRefreshSettings reads the scheduled refresh setting koinon-api runs with. The setting
+  // is Helm-owned: there is no write.
+  rpc GetPriceRefreshSettings(GetPriceRefreshSettingsRequest) returns (GetPriceRefreshSettingsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It
+  // makes proposals and applies nothing.
+  rpc CheckPriceSources(CheckPriceSourcesRequest) returns (CheckPriceSourcesResponse);
+
+  // ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
+  // price_ref.
+  rpc ExplainPlatformPrice(ExplainPlatformPriceRequest) returns (ExplainPlatformPriceResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Rates are USD per million tokens as decimal strings with at most 6 fraction digits. Empty
@@ -205,4 +265,228 @@ message ListFlaggedPricesRequest {
 
 message ListFlaggedPricesResponse {
   repeated FlaggedPrice flagged = 1;
+}
+
+// ---- The platform price list
+
+// PriceProvenance is where a platform price came from (ADR 0098 decision 4).
+message PriceProvenance {
+  // source is the source id ("openrouter") or "manual".
+  string source = 1;
+  string url = 2;
+  google.protobuf.Timestamp fetched_at = 3;
+  string sha256 = 4;
+  string commit_sha = 5;
+  google.protobuf.Timestamp committed_at = 6;
+  string etag = 7;
+  string licence = 8;
+  repeated string agreeing_sources = 9;
+  string proposal_id = 10;
+  // approver is who accepted it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+  string approver = 11;
+  string rule_set_version = 12;
+  google.protobuf.Timestamp approved_at = 13;
+  string vouched_by = 14;
+}
+
+// PriceRateChange is one rate that differs between the price in use and the proposed one.
+message PriceRateChange {
+  string bucket = 1;
+  // context_over is the tier the rate belongs to; 0 is the base rate.
+  int64 context_over = 2;
+  // from is empty when the bucket is added, to when it is removed.
+  string from = 3;
+  string to = 4;
+}
+
+message PriceProposal {
+  string id = 1;
+  string source = 2;
+  // origin is how the proposal arrived (a fetch trigger or "import").
+  string origin = 3;
+  string provider_type = 4;
+  string model = 5;
+  // current_ref is the price_ref in use for the model, empty for a new model.
+  string current_ref = 6;
+  PriceEntry current = 7;
+  PriceEntry proposed = 8;
+  repeated PriceRateChange changes = 9;
+  PriceProvenance provenance = 10;
+  repeated string agreeing_sources = 11;
+  // class is auto, needs_review, confirm or refused.
+  string class = 12;
+  string failed_rules = 13;
+  // state is open, accepted, dismissed or superseded.
+  string state = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp decided_at = 16;
+  string decided_by = 17;
+  // applied_version is the platform version an accepted proposal wrote.
+  int64 applied_version = 18;
+}
+
+message ListPriceProposalsRequest {
+  string state = 1;
+  string class = 2;
+  // limit defaults to 100, at most 1000.
+  int32 limit = 3;
+}
+
+message ListPriceProposalsResponse {
+  repeated PriceProposal proposals = 1;
+}
+
+message GetPriceProposalRequest {
+  string id = 1;
+}
+
+message GetPriceProposalResponse {
+  PriceProposal proposal = 1;
+}
+
+message AcceptPriceProposalRequest {
+  string id = 1;
+  // confirm is the model id typed out, for a proposal of class confirm.
+  string confirm = 2;
+  // max_output is the entry's output limit in tokens; required when the source reports none.
+  int32 max_output = 3;
+}
+
+message AcceptPriceProposalResponse {
+  int64 version = 1;
+  repeated string warnings = 2;
+}
+
+message DismissPriceProposalRequest {
+  string id = 1;
+}
+
+message DismissPriceProposalResponse {}
+
+message PriceSourceFetch {
+  string id = 1;
+  string source = 2;
+  string url = 3;
+  google.protobuf.Timestamp fetched_at = 4;
+  // result is ok, failed or refused.
+  string result = 5;
+  string error = 6;
+  string sha256 = 7;
+  string etag = 8;
+  string commit_sha = 9;
+  int32 model_count = 10;
+  // trigger is schedule, cli or import.
+  string trigger = 11;
+}
+
+message ListPriceSourceFetchesRequest {
+  // limit defaults to 100, at most 1000.
+  int32 limit = 1;
+}
+
+message ListPriceSourceFetchesResponse {
+  repeated PriceSourceFetch fetches = 1;
+}
+
+// PlatformPriceEntry is one entry of a platform version with its provenance.
+message PlatformPriceEntry {
+  PriceEntry entry = 1;
+  // price_ref is the ref a ledger entry cites for it: platform@<version>#<id>.
+  string price_ref = 2;
+  PriceProvenance provenance = 3;
+}
+
+message PlatformPriceVersion {
+  int64 version = 1;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Timestamp valid_from = 3;
+  // actor is who wrote it: "user <id>", "cli <command>" or "system koinon-api:price-refresh".
+  string actor = 4;
+  string reason = 5;
+  string rule_set_version = 6;
+  repeated string proposal_ids = 7;
+  // restored_from is the version a rollback copied, 0 otherwise.
+  int64 restored_from = 8;
+  // entries is empty in a list.
+  repeated PlatformPriceEntry entries = 9;
+  int32 bad_entries = 10;
+}
+
+message ListPlatformPriceVersionsRequest {
+  // limit defaults to 100, at most 500.
+  int32 limit = 1;
+}
+
+message ListPlatformPriceVersionsResponse {
+  repeated PlatformPriceVersion versions = 1;
+}
+
+message GetPlatformPriceVersionRequest {
+  int64 version = 1;
+}
+
+message GetPlatformPriceVersionResponse {
+  PlatformPriceVersion version = 1;
+}
+
+message DiffPlatformPriceVersionsRequest {
+  // from_version 0 means the version before to_version; to_version 0 the newest.
+  int64 from_version = 1;
+  int64 to_version = 2;
+}
+
+message DiffPlatformPriceVersionsResponse {
+  int64 from_version = 1;
+  int64 to_version = 2;
+  repeated PriceChange changes = 3;
+}
+
+message RollbackPlatformPricesRequest {
+  int64 version = 1;
+}
+
+message RollbackPlatformPricesResponse {
+  // version is the new version, equal to the one rolled back to.
+  int64 version = 1;
+}
+
+message GetPriceRefreshSettingsRequest {}
+
+message GetPriceRefreshSettingsResponse {
+  // mode is auto, off or on.
+  string mode = 1;
+  // interval is a Go duration such as "6h0m0s".
+  string interval = 2;
+  int32 max_change_percent = 3;
+  int32 max_auto_per_day = 4;
+  // recorded is false before koinon-api ever recorded a setting; the values are then the defaults.
+  bool recorded = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message CheckPriceSourcesRequest {}
+
+message CheckPriceSourcesResponse {
+  repeated string fetched = 1;
+  // failed maps a source id to why it failed.
+  map<string, string> failed = 2;
+  int32 proposals = 3;
+}
+
+message ExplainPlatformPriceRequest {
+  string provider_type = 1;
+  string model = 2;
+}
+
+message ExplainPlatformPriceResponse {
+  // layer is platform or default.
+  string layer = 1;
+  string price_ref = 2;
+  PriceEntry entry = 3;
+  // platform_version is set for layer platform.
+  int64 platform_version = 4;
+  // list_version is set for layer default.
+  string list_version = 5;
+  // provenance is set for layer platform.
+  PriceProvenance provenance = 6;
 }
