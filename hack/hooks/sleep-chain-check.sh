@@ -47,7 +47,7 @@ max_seconds=5
 # body removed) or code (the interpreter code only: the bodies of heredocs fed to python, perl, ruby or
 # node, and the quoted argument of an interpreter call with -c or -e).
 scan() {
-printf '%s\n' "$cmd" | LC_ALL=C awk -v mode="$1" -v sq="'" '
+printf '%s\n' "${2-$cmd}" | LC_ALL=C awk -v mode="$1" -v sq="'" '
 BEGIN { RS = "\001" }
 function sep() { out = out " ; " }
 {
@@ -92,7 +92,7 @@ function sep() { out = out " ; " }
     }
     if (c == "\\") { k++; out = out "x"; continue }
     if (c == sq || c == "\"") {
-      cap = (out ~ /(^|[^A-Za-z0-9_])(python[0-9.]*|perl|ruby|node)[ \t]+(-[A-Za-z-]+[ \t]+)*-[A-Za-z]*[ce][ \t]*$/)
+      cap = (out ~ /(^|[^A-Za-z0-9_])(python[0-9.]*|perl|ruby|node|bash|sh|zsh)[ \t]+(-[^ \t]+([ \t]+[^- \t][^ \t]*)?[ \t]+)*-[A-Za-z]*[ceE][ \t]*$/)
       st = (c == sq) ? 1 : 2; out = out "Q"; continue
     }
     if (c == "#" && (out == "" || substr(out, length(out)) ~ /[ \t]/)) {
@@ -131,6 +131,14 @@ END { if (mode == "total") printf "%d\n", sum }'
 total=$(scan total)
 shell_text=$(scan shell)
 code_text=$(scan code)
+# The quoted argument of bash|sh|zsh -c is code too, and may call an interpreter itself: scan each
+# layer again, a bounded number of times.
+layer=$code_text
+for _ in 1 2 3; do
+  [ -n "$layer" ] || break
+  layer=$(scan code "$layer")
+  code_text+=$'\n'$layer
+done
 
 # Other spellings of a wait of 5 s or more. Shell-level ones are matched on the shell text (quoted text
 # and heredoc bodies removed, so the word in a commit message or a payload file is data); the

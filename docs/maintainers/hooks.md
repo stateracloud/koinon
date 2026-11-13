@@ -25,12 +25,14 @@ follows; `docs/agents/subagent-brief.md` wins over it) to its deny reason.
 | `agent-spawn-check.sh` | Agent | a spawn without `model`; a spawn whose prompt does not name `docs/agents/subagent-brief.md` (Explore, claude-code-guide, web-fetch, statusline-setup, claude-security:* and fork are exempt) | `agent-spawn-check_test.sh` |
 | `read-result-check.sh` | Read | a Read of a saved `tool-results/` file without `limit` | `read-hooks_test.sh` |
 | `bash-read-check.sh` | Bash | printing much of a file or of several files in one call (`cat` of two files, `sed -n` past 210 lines, ...) | `read-hooks_test.sh` |
-| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more, or the same wait spelled as perl `select`, `tail -f /dev/null`, `timeout N tail -f`, `read -t N` python `time.sleep`, `/bin/sleep` or a FIFO made with `mkfifo` and then read; it ignores the word sleep inside quoted text and data heredocs (a heredoc fed to python, perl, ruby or node still counts as code); `run_in_background` is allowed | `sleep-chain-check_test.sh` |
+| `sleep-chain-check.sh` | Bash | a foreground call whose literal `sleep`s add up to 5 s or more, or the same wait spelled as perl `select`, `tail -f /dev/null`, `timeout N tail -f`, `read -t N`, python `time.sleep`, `/bin/sleep` or a FIFO made with `mkfifo` and then read; it ignores the word sleep inside quoted text and data heredocs (a heredoc fed to python, perl, ruby or node still counts as code, and so does the quoted argument of `python -c`, `perl -e`/`-E` and `bash|sh|zsh -c`, which is scanned again for nested interpreter calls); `run_in_background` is allowed | `sleep-chain-check_test.sh` |
 | `grilling-question-check.sh` | Skill | nothing; when the grilling skill loads it adds the rule that every question goes through `AskUserQuestion` | `grilling-question-check_test.sh` |
 | `question-checklist-check.sh` | AskUserQuestion | nothing; it adds a checklist before each question (already answered by a rule? researched? answerable cold?) | `question-checklist-check_test.sh` |
 | `prose-question-stop-check.sh` | Stop | blocks the stop once when the reply ends in a question and the turn made no `AskUserQuestion` call; never twice in a row | `prose-question-stop-check_test.sh` |
 | `context-cap-check.sh` | PostToolUse | nothing; past 300k tokens of context (`KOINON_CONTEXT_CAP`) it adds a request to compact, once per 50k step. `context-cap-check.sh status` is a status-line text (not registered) | `context-cap-check_test.sh` |
 | `codegraph-prompt-check.sh` | UserPromptSubmit | nothing; it wraps `codegraph prompt-hook` and skips it for short prompts, notifications and the main checkout | `codegraph-prompt-check_test.sh` |
+
+Known gaps of `sleep-chain-check.sh` (not blocked, same as before): `echo ... | python3`, `cat <<EOF | python3`, `ruby -e 'sleep N'`, `node -e setTimeout`, `/usr/bin/env sleep N`, `eval "sleep N"`, and `time.sleep` inside a quoted plain echo.
 
 The tests need only bash 5 and jq; `make adr-lint` and the `ci` workflow run them, and they check
 both the refusals and that each hook is silent without the variable. The guards table,

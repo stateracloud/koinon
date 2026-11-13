@@ -124,6 +124,11 @@ case_ deny 'f=/tmp/ff; mkfifo $f && head -n1 $f'
 case_ allow '/bin/sleep 10' true
 case_ allow 'perl -e '"'"'select(undef,undef,undef,12)'"'"'' true
 case_ allow $'mkfifo /tmp/f\ncat /tmp/f' true
+# Interpreter calls nested in a shell -c, perl -E, python options before -c.
+case_ deny "bash -c 'python3 -c \"import time; time.sleep(30)\"'"
+case_ deny "sh -c \"perl -e 'select(undef,undef,undef,10)'\""
+case_ deny "perl -E 'select(undef,undef,undef,10)'"
+case_ deny "python3 -X dev -c 'import time; time.sleep(30)'"
 # Short waits and unrelated commands stay allowed.
 case_ allow '/bin/sleep 2'
 case_ allow 'perl -e '"'"'select(undef,undef,undef,0.2)'"'"
