@@ -28,11 +28,30 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		return n
 	}
 
+	It("sets the sandbox creation rate, keeps it when another limit changes, and audits it (issue #27)", func(ctx SpecContext) {
+		org, _, _ := pgtest.NewOrg(ctx, pool)
+		five, three := 5, 3
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &five})).To(Succeed())
+		got, _ := svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(5))
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &three})).To(Succeed())
+		got, _ = svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(5), "a change to another limit keeps it")
+		var after int
+		Expect(pool.QueryRow(ctx, `SELECT (summary->'after'->>'sandbox_creations_per_minute')::int FROM audit_events WHERE org_id = $1 AND action = 'org.run_limits.set' ORDER BY id LIMIT 1`, org).Scan(&after)).To(Succeed())
+		Expect(after).To(Equal(5))
+		zero, over := 0, 10001
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &over})).NotTo(Succeed())
+		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{SandboxCreationsPerMinute: &zero})).To(Succeed())
+		got, _ = svc.RunLimits(ctx, org)
+		Expect(got.SandboxCreationsPerMinute).To(Equal(10), "0 returns it to the default")
+	})
+
 	It("defaults, changes only the patched fields, resets with 0, and audits real changes", func(ctx SpecContext) {
 		org, _, _ := pgtest.NewOrg(ctx, pool)
 		got, err := svc.RunLimits(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60, SandboxCreationsPerMinute: 10}))
 
 		// An unrelated override stays when a limit changes.
 		idle := 3 * time.Minute
@@ -41,7 +60,7 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		two, rate := 2, 5
 		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &two, TriggerRatePerMinute: &rate})).To(Succeed())
 		got, _ = svc.RunLimits(ctx, org)
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 2, TriggerConcurrency: 4, TriggerRatePerMinute: 5}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 2, TriggerConcurrency: 4, TriggerRatePerMinute: 5, SandboxCreationsPerMinute: 10}))
 		st, err := orgsettings.Get(ctx, store.New(pool), org, orgsettings.Defaults())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(st.IdleTimeout).To(Equal(idle), "the other overrides stay")
@@ -56,7 +75,7 @@ var _ = Describe("Org run limits (issue #462)", func() {
 		zero := 0
 		Expect(svc.SetRunLimits(ctx, org, actor, orgsettings.RunLimitsPatch{MaxConcurrentRuns: &zero})).To(Succeed())
 		got, _ = svc.RunLimits(ctx, org)
-		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 5}))
+		Expect(got).To(Equal(orgsettings.RunLimits{MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 5, SandboxCreationsPerMinute: 10}))
 		Expect(events(ctx, org)).To(Equal(2))
 	})
 
