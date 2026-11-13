@@ -26,6 +26,8 @@ FROM ${BASE} AS fetch-arm64
 ADD --checksum=sha256:22352e200630ec61a48a65b9f5c2b627328ae5002658d81c067f67c5fb689898 \
     https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.2.6.tgz /tmp/opencode.tgz
 
+# hadolint reads a stage name with an ARG suffix as an untagged image; both are stages defined above, which hack/dockerfile-lint.sh accepts
+# hadolint ignore=DL3006
 FROM fetch-${TARGETARCH} AS fetch
 # a failing /opencode prints nothing, so the grep on its output fails and so does the step
 # hadolint ignore=DL4006
@@ -96,6 +98,8 @@ ADD --checksum=sha256:697db34dabb21562fe84487a2ccd031fbd45382b89c2cbdec8ef31682c
 ADD --checksum=sha256:81471889c77b2161a3e4dcdb1b2e6ca382e485766132d92d5fe1d7497e7dd2d9 https://raw.githubusercontent.com/ast-grep/ast-grep/0.51.0/LICENSE /ast-grep
 ADD --checksum=sha256:075c33400ffcb0c586dd106a029d3e733e9da3693f8fcb9cebfc651c8a2f14e3 https://raw.githubusercontent.com/duckdb/duckdb/v2.0.0/LICENSE /duckdb
 
+# hadolint reads a stage name with an ARG suffix as an untagged image; both are stages defined above, which hack/dockerfile-lint.sh accepts
+# hadolint ignore=DL3006
 FROM fetch-tools-${TARGETARCH} AS tools
 # every pipe ends in the command whose status decides: head/grep read the version a failing tool never printed, so a missing tool still fails the step
 # hadolint ignore=DL4006

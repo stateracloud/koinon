@@ -10,14 +10,15 @@
 # digest and no secret-named ENV/ARG. Apt retries are hack/apt-retries-test.sh (#149).
 failure-threshold: warning
 no-color: true
-# Switched off for every Dockerfile, each for a reason that holds tree-wide:
+# Why hadolint and not `docker buildx build --check` (#175): hadolint is one static binary, pinned by
+# version and sha256 (hack/versions.env), and needs neither a BuildKit daemon nor network; `--check`
+# needs both and reports only the build-time checks.
+#
+# Switched off for every Dockerfile, for a reason that holds tree-wide:
 #  - DL3008 (pin apt package versions): reproducibility comes from one dated Ubuntu snapshot
-#    (snapshot.ubuntu.com, UBUNTU_SNAPSHOT in harnesses/opencode/Dockerfile) on a digest-pinned base, and
-#    hack/apt-retries-test.sh checks the apt steps; per-package pins would break on every snapshot bump.
-#    The toolchain and spike images are build or test tooling, not shipped to users.
-#  - DL3006 (tag the image): hadolint reads `FROM ${BASE}` as untagged, but every base is pinned by
-#    digest (through an ARG default or the caller's --build-arg), which hack/dockerfile-lint.sh
-#    checks and which is stricter than a tag.
+#    (snapshot.ubuntu.com, UBUNTU_SNAPSHOT in harnesses/opencode/Dockerfile) in the shipped image on a
+#    digest-pinned base, and hack/apt-retries-test.sh checks the apt steps; per-package pins would
+#    break on every snapshot bump. The throwaway and tooling stages and images (the CA and download
+#    stages, the e2e toolchain, the spikes) install from the live archive and ship nothing to users.
 ignored:
   - DL3008
-  - DL3006

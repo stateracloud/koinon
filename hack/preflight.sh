@@ -381,7 +381,6 @@ run_gate() { # <gate>
 	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
-	dockerfile) command -v hadolint >/dev/null || { echo "dockerfile skip (hadolint not installed; CI pins $HADOLINT_VERSION, hack/versions.env; hack/dockerfile-lint.sh alone still runs the digest and secret rules)"; return; } ;;
 	fuzz) command -v go >/dev/null || { echo "fuzz skip (go not installed; CI runs hack/go-fuzz.sh)"; return; } ;;
 	vuln) command -v go >/dev/null || { echo "vuln skip (go not installed; CI runs govulncheck $GOVULNCHECK_VERSION, hack/versions.env)"; return; } ;;
 	zizmor) command -v zizmor >/dev/null || { echo "zizmor skip (zizmor not installed; CI pins $ZIZMOR_VERSION: brew install zizmor, or the release binary, see hack/versions.env)"; return; }

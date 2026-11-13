@@ -37,7 +37,7 @@ check() {
 			if (instr == "") return
 			rest = instr
 			sub(/^[A-Za-z]+[ \t]+/, "", rest)
-			kw = toupper(substr(instr, 1, index(instr, " ") ? index(instr, " ") - 1 : length(instr)))
+			kw = instr; sub(/[ \t].*$/, "", kw); kw = toupper(kw)
 			if (kw == "ARG") {
 				n = split(rest, w, /[ \t]+/)
 				for (i = 1; i <= n; i++) {
@@ -96,6 +96,8 @@ check() {
 			if (!allowed("digest"))
 				printf "%s:%d: digest: base image %s is not pinned by @sha256:<digest> (or # dockerfile-lint: allow=digest <reason>)\n", FILENAME, start, img
 		}
+		# a heredoc body (RUN <<EOF ... EOF) is shell or data, not instructions: skip to its terminator
+		hd != "" { t = $0; sub(/^\t+/, "", t); if (t == hd) hd = ""; next }
 		/^[ \t]*#/ {
 			if (instr == "") {
 				if (match($0, /dockerfile-lint:[ \t]*allow=[a-z]+[ \t]+[^ \t]/)) {
@@ -113,7 +115,10 @@ check() {
 			sub(/\\[ \t]*$/, "", line)
 			sub(/^[ \t]+/, "", line)
 			instr = (instr == "" ? "" : instr " ") line
-			if (!cont) flush()
+			if (match(line, /(^|[ \t])<<-?["\047]?[A-Za-z_][A-Za-z0-9_]*/)) {
+				newhd = substr(line, RSTART, RLENGTH); sub(/^[ \t]*<<-?["\047]?/, "", newhd)
+			}
+			if (!cont) { flush(); hd = newhd; newhd = "" }
 		}
 		END { flush() }
 	' "$1"

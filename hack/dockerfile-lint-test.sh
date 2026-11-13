@@ -55,6 +55,10 @@ run "tag with an @\${ARG} digest fails when the ARG is not" 1 "digest:" "$(df at
 run "a stage chosen by ARG passes" 0 "" "$(df stagearg "FROM alpine@sha256:$d64 AS fetch-amd64\nARG TARGETARCH\nFROM fetch-\${TARGETARCH} AS fetch\n")"
 run "--platform is skipped" 0 "" "$(df plat "FROM --platform=linux/amd64 alpine@sha256:$d64\n")"
 run "a line continuation in FROM's neighbours does not hide it" 1 "digest:" "$(df cont 'RUN echo a \\\n  b\nFROM alpine:3\n')"
+run "a tab after FROM does not hide an unpinned base" 1 "digest:" "$(df tabfrom 'FROM\talpine:3\n')"
+run "a tab after ARG does not hide a secret name" 1 "secret: GITHUB_TOKEN" "$(df tabarg "FROM alpine@sha256:$d64\nARG\tGITHUB_TOKEN\n")"
+run "a heredoc body is not parsed as instructions" 0 "" "$(df heredoc "FROM alpine@sha256:$d64\nRUN <<EOF\nFROM nowhere\nENV API_KEY=x\nEOF\nENV A=1\n")"
+run "an instruction after a heredoc is still checked" 1 "digest:" "$(df afterhd "FROM alpine@sha256:$d64\nRUN <<-EOF\n\tx\n\tEOF\nFROM alpine:3\n")"
 
 # --- the secret rule
 run "ENV TOKEN fails" 1 "secret: TOKEN" "$(df envtoken "FROM alpine@sha256:$d64\nENV TOKEN=koinon_test_not-a-real-token\n")"

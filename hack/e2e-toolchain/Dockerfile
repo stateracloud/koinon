@@ -40,7 +40,6 @@ ENV GOTOOLCHAIN=local
 # while the harness images pin against an Ubuntu snapshot (harnesses/opencode/Dockerfile) because they
 # ship. Everything that decides the e2e's behaviour (go, kind, ko, helm, kubectl, buildx) is pinned
 # above by version and sha256.
-# hadolint ignore=DL3008
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
  && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ca-certificates curl git jq make netcat-openbsd openssl procps unzip \
  && rm -rf /var/lib/apt/lists/*
