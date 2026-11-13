@@ -79,7 +79,7 @@ func newRestoreCommand() *cobra.Command {
 		Use:   "release-check",
 		Short: "Fail when a release would remove declared items and the removals are not accepted",
 		Long: "The pre-upgrade check of the chart (the restore-release-check Job, ADR 0110 decision 1): prints the report and " +
-			"exits non-zero when a release is pending (or removals wait) and the importer plan holds a removal while " +
+			"exits non-zero when a release is pending and the importer plan holds a removal while " +
 			"restore.acceptImporterDeletions is not true, so helm upgrade stops before any Deployment changes. It exits 0 " +
 			"when the schema does not exist yet (a first install) and when nothing blocks.",
 		Args: cobra.NoArgs,
@@ -115,8 +115,8 @@ func newRestoreCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !installbinding.Pending(owner, row, st != installbinding.StateUnknown) && len(waiting) == 0 {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "restore release check: no release is pending and no removal waits; nothing to check")
+			if !installbinding.Pending(owner, row, st != installbinding.StateUnknown) {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "restore release check: no release is pending; nothing to check (%d removal(s) wait for restore.acceptImporterDeletions and block no upgrade)"+"\n", len(waiting))
 				return nil
 			}
 			r, err := report(cmd, true)

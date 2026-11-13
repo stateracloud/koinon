@@ -47,8 +47,9 @@ type Writer struct {
 	Scratch string
 	Limits  Limits
 	// ReadOnly is restore-only mode (checkpoints.readOnly, ADR 0110 decision 4): the repository opens with
-	// kopia's ClientOptions.ReadOnly, so a restore, verify or listing writes no blob (kopia would otherwise
-	// write _log_ and index blobs to a bucket the source still owns), and Backup fails with [ReadOnlyError].
+	// kopia's ClientOptions.ReadOnly, so any write through it fails (a guard: kopia's read paths do not write
+	// today, but a bucket the source still owns must stay untouched whatever a later path does), Backup fails
+	// with [ReadOnlyError], and DeleteRepository refuses.
 	ReadOnly bool
 }
 

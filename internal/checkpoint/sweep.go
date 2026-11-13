@@ -31,6 +31,9 @@ var laterEpoch = regexp.MustCompile(`^r[0-9]`)
 // touched; a repository that was never written has nothing to delete. It needs no password: it
 // reads no blob. Deleting again after a failure picks up where it stopped.
 func (w *Writer) DeleteRepository(ctx context.Context, prefix string) (int, error) {
+	if w.ReadOnly {
+		return 0, errors.New(ReadOnlyError)
+	}
 	if !strings.HasSuffix(prefix, "/") || !strings.HasPrefix(prefix, "orgs/") {
 		return 0, fmt.Errorf("checkpoint: %q is not a repository prefix", prefix)
 	}

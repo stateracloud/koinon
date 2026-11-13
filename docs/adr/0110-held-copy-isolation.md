@@ -219,6 +219,8 @@ that lost its mark loses every CI and integration token at once).
 
 ### 4. A copy does not write to the source's checkpoints or send logins to its URL
 
+**Narrowed by the amendment of 2026-11-13: the runtime guard, the OIDC 409, the metric and the alert are not built; the chart switch is.**
+
 The chart cannot see the source's values, but the database knows them: `install_binding` holds the source's outward
 targets (decision 0).
 
@@ -526,7 +528,7 @@ Each part is one pull request. The drill specs of its decisions move from known 
   the claim, the unbound row and the hold re-assert (`held_since`), the mark on koinon-api (chart smoke),
   `install_mark` on tokens and sessions, the refusal reason and metric, `RebindToken`, and the internal
   `adopt-restore` function. Depends on nothing.
-- **(b2) Runtime guards** (decision 4). The target comparison in koinon-api and agentd, restore-only checkpoints,
+- **(b2) Runtime guards** (decision 4; only the chart switch and NOTES warning were built, see the amendment of 2026-11-13). The target comparison in koinon-api and agentd, restore-only checkpoints,
   OIDC off, `koinon_restore_isolation_conflict` and its alert, `checkpoints.readOnly` and the NOTES warning.
   Depends on (b1).
 - **(c) Importer gate, release step and `restore-release-check` Job** (decisions 1, 2). The dry-run mode of the
@@ -558,12 +560,13 @@ Review of the first implementation (#939) found three gaps between this ADR and 
 - **Decision 4, the runtime guard is not built; the chart switch is the guard.** In state `copy` nothing compares the
   targets, agentd does not enter restore-only mode by itself, `/auth/oidc/*` does not answer 409, and neither
   `koinon_restore_isolation_conflict` nor the alert `KoinonRestoreIsolationConflict` exists. What decision 4 ships is
-  the chart value `checkpoints.readOnly` (restore-only mode, which now also opens the kopia repository read-only,
-  so a restore, verify or listing puts no blob in the source's bucket) and the NOTES.txt warning when `restoreHold`
+  the chart value `checkpoints.readOnly` (restore-only mode, which now also opens the kopia repository read-only
+  and refuses `DeleteRepository`, so no path through the writer can put or delete a blob in the source's bucket) and the NOTES.txt warning when `restoreHold`
   is true with checkpoints on and `readOnly` false. The case the runtime guard would catch is a copy whose operator
   left the checkpoint bucket and the public or OIDC redirect URL at the source's values with `readOnly` false. It
-  is left to the operator and to `restore status`, which prints the recorded targets and marks those equal to the
-  configured ones. Reason: the guard needs the recorded targets in the hot paths of three binaries and a second OIDC
+  is left to the operator and to `restore status`, which prints the recorded targets (checkpoint endpoint and bucket
+  included) and, in the admin API, marks the public URL and OIDC redirect URL when equal to the configured ones;
+  it does not compare the checkpoint target. Reason: the guard needs the recorded targets in the hot paths of three binaries and a second OIDC
   failure mode, and the drill and the NOTES warning already cover the supported flows. The guard can be built later
   without a schema change (the targets are in `install_binding`); until then the sentence "Held or released, the
   guard holds" of decision 4 and the alert of Consequences do not apply.

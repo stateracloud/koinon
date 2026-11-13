@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
@@ -111,6 +113,26 @@ var _ = Describe("Writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(snaps).To(HaveLen(1))
 		Expect(state()).To(Equal(before), "no blob was put, rewritten or deleted")
+
+		By("the repository the writer opens refuses a write (kopia's read-only wrapper), unlike a normal one")
+		open := func(w *checkpoint.Writer, payload string) error {
+			work := GinkgoT().TempDir()
+			rep, err := w.OpenForTest(ctx, work, prefix, pw)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = rep.Close(ctx) }()
+			return repo.WriteSession(ctx, rep, repo.WriteSessionOptions{Purpose: "test"}, func(ctx context.Context, wr repo.RepositoryWriter) error {
+				w := wr.NewObjectWriter(ctx, object.WriterOptions{})
+				if _, err := w.Write([]byte(payload)); err != nil {
+					return err
+				}
+				_, err := w.Result()
+				return err
+			})
+		}
+		Expect(open(src, "koinon_test_payload-one")).To(Succeed())
+		Expect(open(ro, "koinon_test_payload-two")).NotTo(Succeed())
+		Expect(state()).NotTo(Equal(before), "the normal writer's probe did write, so the read-only one is told apart")
+		before = state()
 
 		_, err = ro.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c2"})
 		Expect(err).To(MatchError(ContainSubstring(checkpoint.ReadOnlyError)))
