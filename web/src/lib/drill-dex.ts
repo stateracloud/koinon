@@ -14,11 +14,16 @@ export interface DexPage {
 
 const entities: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#34;': '"', '&#39;': "'" }
 
-const text = (s: string): string =>
-  s
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(amp|lt|gt|quot|#34|#39);/g, (m) => entities[m] ?? m)
-    .trim()
+// text strips tags until none is left (one pass leaves "<script" in "<scr<script>ipt>"), then decodes entities once,
+// last, so a decoded "&lt;" cannot become a tag that is then missed. One pass decodes "&amp;lt;" to "&lt;".
+const text = (markup: string): string => {
+  let stripped = markup
+  for (let previous = ''; previous !== stripped; ) {
+    previous = stripped
+    stripped = stripped.replace(/<[^>]*>/g, '')
+  }
+  return stripped.replace(/&(amp|lt|gt|quot|#34|#39);/g, (entity) => entities[entity] ?? entity).trim()
+}
 
 // classifyDexPage tells which Dex page an HTML body is. The order matters: the approval and the MFA pages carry
 // buttons and error boxes that look like the chooser and the wrong-password page.
@@ -59,6 +64,6 @@ export function dexPageError(page: DexPage, login: string): Error | undefined {
 // callbackError is the named error for an answer of Koinon's /auth/oidc/callback that is not a redirect.
 export function callbackError(status: number, body: string): Error | undefined {
   if (status < 400) return undefined
-  const b = body.trim()
-  return new Error(`koinon callback ${status}: ${b.length > 200 ? `${b.slice(0, 200)}...` : b}`)
+  const trimmed = body.trim()
+  return new Error(`koinon callback ${status}: ${trimmed.length > 200 ? `${trimmed.slice(0, 200)}...` : trimmed}`)
 }

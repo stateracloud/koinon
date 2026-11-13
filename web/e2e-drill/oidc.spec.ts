@@ -35,9 +35,9 @@ async function signInThroughDex(page: Page, login: string, password: string): Pr
   // The callback's own answer: a 4xx or 5xx there is the install's refusal (state, nonce, token, disabled user,
   // restore release pending), not a page of Dex.
   let callback: Response | undefined
-  page.on('response', (r) => {
-    const u = new URL(r.url())
-    if (u.origin === web && u.pathname === '/auth/oidc/callback') callback = r
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (url.origin === web && url.pathname === '/auth/oidc/callback') callback = response
   })
 
   await page.goto('/')

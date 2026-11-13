@@ -40,3 +40,17 @@ describe('the drill reads the pages of its own Dex', () => {
     expect(callbackError(503, 'x'.repeat(300))?.message).toHaveLength('koinon callback 503: '.length + 203)
   })
 })
+
+describe('the drill strips markup from a Dex page without leaving a tag', () => {
+  const headingOf = (inner: string): string => classifyDexPage(`<h2 class="theme-heading">${inner}</h2>`).heading
+  it('strips a tag nested in a tag', () => {
+    // The inner tag goes first and the outer one is left without its opening, so no "<" survives.
+    expect(headingOf('<scr<script>ipt>alert(1)</script>')).toBe('ipt>alert(1)')
+  })
+  it('decodes an escaped tag to literal text after the strip', () => {
+    expect(headingOf('&lt;b&gt;')).toBe('<b>')
+  })
+  it('decodes &amp;lt; once, to &lt;', () => {
+    expect(headingOf('&amp;lt;')).toBe('&lt;')
+  })
+})
