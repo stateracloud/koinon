@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The RT3 shape (docs/dev/real-model-tests.md) with a fake model: the agent asks a person one question with
+# ask_user (with choices), and once the answer arrives it opens a pull request with create_pull_request on its
+# code host (a Gitea target in the scripted-approver test, #967) and reports the outcome. The run parks twice:
+# on the question, then on the pull request's approval. hack/answer-question.sh and hack/approve-pr.sh
+# stand in for the person; test/scenarios (GiteaAsk) holds the question and the answer the scripts use.
+#
+# Selection is stateless: the first turn whose `when` holds answers the request (see repo-helper.yaml). Tool
+# names match behind a harness's MCP prefix. The resumed run's prompt carries the answer
+# ("the person answered: ...", internal/agentd/park.go) and later the approval's outcome.
+model: repo-helper-ask
+turns:
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "Your turn is over"
+    text: "Notes: asked one question, then proposed the pull request."
+    usage:
+      inputTokens: 1600
+      cachedInputTokens: 1400
+      outputTokens: 18
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "approved and executed by Koinon"
+    text: "The pull request is open."
+    usage:
+      inputTokens: 1500
+      cachedInputTokens: 1350
+      outputTokens: 12
+  - when:
+      systemContains: "# Repo helper"
+      toolResult: create_pull_request
+    text: I asked for approval to open the pull request "Add hello.md". It will be opened once approved.
+    usage:
+      inputTokens: 1350
+      cachedInputTokens: 1200
+      outputTokens: 24
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "the person answered"
+    toolCalls:
+      - name: create_pull_request
+        arguments:
+          branch: koinon/add-hello-md
+          title: Add hello.md
+          body: Adds hello.md as requested in the task.
+          files:
+            - path: hello.md
+              content: "hello from koinon\n"
+    usage:
+      inputTokens: 1300
+      outputTokens: 60
+  - when:
+      systemContains: "# Repo helper"
+      toolResult: ask_user
+    text: I asked the question. I will go on once it is answered.
+    usage:
+      inputTokens: 1250
+      cachedInputTokens: 1100
+      outputTokens: 16
+  - when:
+      systemContains: "# Repo helper"
+    toolCalls:
+      - name: ask_user
+        arguments:
+          question: Add hello.md to the repository?
+          choices: ["add it", "do not add it"]
+          default: do not add it
+    usage:
+      inputTokens: 1200
+      outputTokens: 40

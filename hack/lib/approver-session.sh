@@ -25,9 +25,10 @@ approver_wait_seconds() {
 }
 
 # cookie_header builds the Cookie header from the jar. curl's own jar handling would not send the Secure
-# __Host- session cookie over the plain-HTTP port-forward the drill uses.
+# __Host- session cookie over the plain-HTTP port-forward the drill uses. A blank line of the jar must not
+# add a separator: a header that starts with "; " is not one cookie list, and the real server ignores it (#967).
 cookie_header() {
-  awk -F'\t' 'BEGIN { printf "Cookie: " } /^#HttpOnly_/ || !/^#/ { if (NF >= 7) printf "%s%s=%s", sep, $6, $7; sep="; " }' "$jar"
+  awk -F'\t' 'BEGIN { printf "Cookie: " } /^#HttpOnly_/ || !/^#/ { if (NF >= 7) { printf "%s%s=%s", sep, $6, $7; sep="; " } }' "$jar"
 }
 
 # rpc <Service> <Method> <json>: a Connect unary call with the session, for example

@@ -39,7 +39,9 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.reply(401, {"error": "bad login"})
             return self.reply(200, {"passwordChangeRequired": False},
                               [("Set-Cookie", "__Host-koinon_session=fake-session-token; Path=/; Secure; HttpOnly")])
-        if "fake-session-token" not in self.headers.get("Cookie", ""):
+        # As strict as the server's http.ParseCookie: "a=b; c=d" only, no empty item (the jar has blank lines).
+        items = self.headers.get("Cookie", "").split("; ")
+        if "__Host-koinon_session=fake-session-token" not in items or "" in items:
             return self.reply(401, {"code": "unauthenticated"})
         if self.headers.get("Connect-Protocol-Version") != "1":
             return self.reply(403, {"code": "csrf"})

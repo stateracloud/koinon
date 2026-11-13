@@ -125,6 +125,9 @@ Create the agents from the templates the stories need and run them from the UI o
   `KOINON_APPROVER_PASSWORD` (an org admin or owner for the approval; a member or above for the question) and wait
   `KOINON_APPROVER_WAIT` seconds for the item to appear. Their tests are `hack/answer-question-test.sh` and
   `hack/approve-pr-test.sh` (`make adr-lint`).
+  Both also run against the real API in `internal/api` (`approver_scripts_test.go`), with the fake-model script
+  `test/fakemodel/scripts/repo-helper-ask.yaml` (an `ask_user` question, then `create_pull_request`) as the shape
+  they stand in for; its data is `scenarios.GiteaAsk` in `test/scenarios`.
 
 Watch spend on the Budgets page while a story runs, and stop the window if it exceeds your plan.
 
