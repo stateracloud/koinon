@@ -61,6 +61,20 @@ KOINON_DOCKER=$bin/no-such-docker host_docker_preflight || fail "no docker CLI i
 rc=0
 out=$(KOINON_DOCKER_PING_SECONDS=1 KOINON_DOCKER=$bin/docker-hang host_docker_preflight 2>&1) || rc=$?
 { [[ $rc == 3 ]] && grep -q 'did not answer' <<<"$out"; } || fail "hung docker: rc=$rc out=$out"
+# Issue 945: a daemon that is slow (2 s) but healthy passes under the default ping deadline; `info`
+# that never answers is a skip off a Mac and a stop on one; Mac drift still stops the run.
+stub docker-slow 'case $1 in version) sleep 2;; info) date -u +%Y-%m-%dT%H:%M:%S.123456789Z;; esac'
+stub docker-slow-info 'case $1 in version) ;; info) exec sleep 30;; esac'
+stub docker-skew-split "case \$1 in version) ;; info) echo $skew_iso;; esac"
+KOINON_UNAME=$bin/uname-linux KOINON_DOCKER=$bin/docker-slow host_docker_preflight || fail "a slow healthy daemon must pass"
+out=$(KOINON_UNAME=$bin/uname-linux KOINON_DOCKER_CLOCK_SECONDS=1 KOINON_DOCKER=$bin/docker-slow-info host_docker_preflight 2>&1) || fail "slow info off a Mac must pass: $out"
+grep -q 'skipping the clock check' <<<"$out" || fail "no skip note for slow info: $out"
+rc=0
+out=$(KOINON_UNAME=$bin/uname-mac KOINON_DOCKER_CLOCK_SECONDS=1 KOINON_DOCKER=$bin/docker-slow-info host_docker_preflight 2>&1) || rc=$?
+{ [[ $rc == 3 ]] && grep -q 'no clock' <<<"$out"; } || fail "slow info on a Mac: rc=$rc out=$out"
+rc=0
+out=$(KOINON_UNAME=$bin/uname-mac KOINON_DOCKER=$bin/docker-skew-split host_docker_preflight 2>&1) || rc=$?
+{ [[ $rc == 3 ]] && grep -q 'orb restart' <<<"$out"; } || fail "Mac drift: rc=$rc out=$out"
 echo "ok: docker preflight passes, stops on skew and on a hang, skips without a daemon"
 
 # An offset time parses to the same instant as the Z time.
