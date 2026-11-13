@@ -420,6 +420,7 @@ func TestReview2Leaks(t *testing.T) {
 		{"text json-ish password with spaces", `log {"password": "notreal pw words"} end`, "pw words"},
 		{"text accessToken json", `log {"accessToken":"notreal-access-js"}`, "notreal-access-js"},
 		{"ya29", "t=ya29." + fk(30), "ya29." + fk(8)},
+		{"openai legacy", "t=sk-" + fk(48), "sk-" + fk(8)},
 		{"GOCSPX", "s=GOCSPX-" + fk(28), "GOCSPX-" + fk(8)},
 		{"npm", "//registry/:_authToken=npm_" + fake(fakeAlpha, 36, 0), "npm_" + fake(fakeAlpha, 8, 0)},
 		{"glsa", "glsa_" + fk(32) + "_" + fake(fakeHex, 8, 0), "glsa_" + fk(8)},

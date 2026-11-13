@@ -8,8 +8,8 @@
 // and the bounds that decide whether it may apply by itself, are pure functions in rules.go.
 // Nothing here touches the database or the clock beyond the fetch time it is given.
 //
-// Only OpenRouter has an adapter so far (slice 1 of #265). The adapters for models.dev, LiteLLM
-// and genai-prices are later slices.
+// The adapters are OpenRouter, LiteLLM and genai-prices (both read at a commit at least 24 hours
+// old) and models.dev (proposals only).
 package pricefetch
 
 import (
@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"slices"
 	"sort"
 	"time"
@@ -31,17 +32,42 @@ import (
 
 // Source ids: the fixed set of adapters (also the values of the metrics' source label).
 const (
-	SourceOpenRouter = "openrouter"
+	SourceOpenRouter  = "openrouter"
+	SourceLiteLLM     = "litellm"
+	SourceGenaiPrices = "genai-prices"
+	// SourceModelsDev proposes only: it never counts towards auto-apply or agreement (decision 7).
+	SourceModelsDev = "models-dev"
 	// SourceManual marks a price a person typed from a provider page.
 	SourceManual = "manual"
 )
 
 // Sources lists the adapters. Metric labels use only these.
-var Sources = []string{SourceOpenRouter}
+var Sources = []string{SourceOpenRouter, SourceLiteLLM, SourceGenaiPrices, SourceModelsDev}
 
 // sourceProviderTypes are the provider types each source prices. The refresh's auto mode fetches a
 // source only while some org has a provider of one of these types.
-var sourceProviderTypes = map[string][]string{SourceOpenRouter: {"openrouter"}}
+//
+// LiteLLM, genai-prices and models.dev price the same three direct providers, where the aggregator
+// lists the provider's own models (ADR 0098 decision 2.2, amendment of 2026-11-12).
+var sourceProviderTypes = map[string][]string{
+	SourceOpenRouter:  {"openrouter"},
+	SourceLiteLLM:     {"anthropic", "deepseek", "openai"},
+	SourceGenaiPrices: {"anthropic", "deepseek", "openai"},
+	SourceModelsDev:   {"anthropic", "deepseek", "openai"},
+}
+
+// firstHand are the provider types for which a source's own value may auto-apply (maintainer
+// decision 2026-11-07 on issue #337): the providers it tracks first-hand. For every other provider
+// type an aggregator only proposes. models.dev has none: it only proposes (decision 7).
+var firstHand = map[string][]string{
+	SourceLiteLLM:     {"anthropic", "deepseek", "openai"},
+	SourceGenaiPrices: {"anthropic", "deepseek", "openai"},
+}
+
+// FirstHand says whether source tracks providerType first-hand, so that its value may auto-apply.
+func FirstHand(source, providerType string) bool {
+	return slices.Contains(firstHand[source], providerType)
+}
 
 // ProviderTypesOf returns the provider types a source prices (nil for an unknown source).
 func ProviderTypesOf(source string) []string { return sourceProviderTypes[source] }
@@ -62,7 +88,13 @@ func PricedProviderTypes() []string {
 }
 
 // Licences recorded in the provenance (ADR 0098 decision 4).
-const LicenceOpenRouter = "OpenRouter terms"
+const (
+	LicenceOpenRouter = "OpenRouter terms"
+	// The aggregators are MIT; the repository is named so that the copyright line stays findable.
+	LicenceLiteLLM     = "MIT (github.com/BerriAI/litellm)"
+	LicenceGenaiPrices = "MIT (github.com/pydantic/genai-prices)"
+	LicenceModelsDev   = "MIT (github.com/anomalyco/models.dev)"
+)
 
 // MaxBodyBytes caps the body of a source (ADR 0098 decision 2.3).
 const MaxBodyBytes = 16 << 20
@@ -95,6 +127,9 @@ type Snapshot struct {
 	// ETag and CommitSHA are the source's own version marks, where it has one.
 	ETag      string `json:"etag,omitempty"`
 	CommitSHA string `json:"commitSha,omitempty"`
+	// CommittedAt is when CommitSHA was committed. A pinned source reads the file at a commit at
+	// least CommitCooldown older than FetchedAt.
+	CommittedAt time.Time `json:"committedAt,omitzero"`
 	// Count is how many models the body listed, whether or not they could be normalized.
 	Count  int     `json:"count"`
 	Offers []Offer `json:"offers"`
@@ -110,6 +145,30 @@ type Adapter interface {
 	// Fetch downloads and normalizes the list. A body that cannot be used is an error; the model-count
 	// floors are checked by CheckFloor, which needs the last good fetch.
 	Fetch(ctx context.Context, now time.Time) (Snapshot, error)
+}
+
+// NewAdapter returns the adapter for a source id, nil for an unknown one. client may be nil.
+func NewAdapter(source string, client *http.Client) Adapter {
+	switch source {
+	case SourceOpenRouter:
+		return NewOpenRouter(client)
+	case SourceLiteLLM:
+		return NewLiteLLM(client)
+	case SourceGenaiPrices:
+		return NewGenaiPrices(client)
+	case SourceModelsDev:
+		return NewModelsDev(client)
+	}
+	return nil
+}
+
+// NewAdapters returns every adapter, in the order of Sources.
+func NewAdapters(client *http.Client) []Adapter {
+	out := make([]Adapter, 0, len(Sources))
+	for _, s := range Sources {
+		out = append(out, NewAdapter(s, client))
+	}
+	return out
 }
 
 // RefusedError is a body that parsed but fails a floor: too few models, or fewer than half of the

@@ -132,6 +132,27 @@ off (ADR 0068), with no release.
    away. `koinon-api` logs a count-only warning at start and on every tick while models of a priced
    provider type have no price, and exports `koinon_price_unpriced_models{provider_type}`
    (ADR 0023: no org or model label).
+
+   **Amendment, 2026-11-12 (slice 2, issue #337).** The adapters price these provider types:
+
+   | Source | Provider types | Auto-applies for | Proposes only for |
+   | --- | --- | --- | --- |
+   | `openrouter` | `openrouter` | `openrouter` | |
+   | `litellm` | `anthropic`, `deepseek`, `openai` | `anthropic`, `deepseek`, `openai` | every other type |
+   | `genai-prices` | `anthropic`, `deepseek`, `openai` | `anthropic`, `deepseek`, `openai` | every other type |
+   | `models-dev` | `anthropic`, `deepseek`, `openai` | none | every type |
+
+   In `auto` a source is fetched while a provider of one of its types is in use, so an install with
+   an Anthropic, DeepSeek or OpenAI provider fetches LiteLLM, genai-prices and models.dev, and one
+   with an OpenRouter provider fetches OpenRouter. `on` fetches all four. LiteLLM and genai-prices
+   auto-apply only for the types they track first-hand (maintainer decision on issue #337,
+   2026-11-07); for any other type they propose and an admin accepts. This replaces the "two
+   independent sources must agree" path of decision 3 and decision 7: agreement no longer makes an
+   aggregator's price apply by itself. It is a veto instead. When two sources that may auto-apply
+   return different values for one model, both proposals go to review. The sources that agree are
+   listed in the proposal. If two sources return the same values, the change is applied once and the
+   other proposal is superseded. Other providers' models that LiteLLM lists (Bedrock, Vertex, Azure,
+   and so on) are not read.
 3. **Fetch rules.**
    - Pinned hosts per adapter (`openrouter.ai`, `models.dev`, `api.github.com`,
      `raw.githubusercontent.com`), HTTPS only, no redirects, a body cap (16 MiB) and a strict
@@ -143,7 +164,12 @@ off (ADR 0068), with no release.
 4. **Source pinning.** A GitHub-hosted source (LiteLLM, genai-prices) is read at a commit, never at
    a branch head. The adapter takes the newest commit of the default branch that is at least 24
    hours old, and reads the file at that SHA. A broken or malicious commit that is reverted within a
-   day therefore never reaches a proposal. This is ADR 0079's cooldown applied to data. OpenRouter
+   day therefore never reaches a proposal. Amended 2026-11-12: the adapter reads the newest 30
+   commits of the file and pins the newest commit that is at least 24 hours old **and** whose
+   successor, the next commit that touched the file, came at least 24 hours after it (or that has
+   none). A bad commit that was replaced within a day is skipped for good, not only while it is
+   young. Committer dates are set by whoever commits, so this bounds an honest mistake, not a
+   maintainer who backdates a commit. This is ADR 0079's cooldown applied to data. OpenRouter
    has no commit; for it a value counts only after two fetches at least 24 hours apart returned it
    unchanged. models.dev `api.json` has no commit either, and it only ever makes proposals (decision
    7), so it needs no pinning rule.
@@ -179,18 +205,20 @@ holds. They are constants in code. Helm can tighten them, never loosen them.
 | Same set of priced buckets: no bucket added or removed (adding `cache_read` changes caching, ADR 0068) | required |
 | Each rate moves by at most this much, measured against the **last person-reviewed rate** (the default list or the last platform version a person wrote), so repeated small moves cannot add up | 25% up or down |
 | No rate goes to zero from a non-zero value | required |
-| Agreement: the model's primary source, where one exists (OpenRouter for `openrouter` providers), or else at least two independent sources with the same normalized value | required |
+| Agreement: the source is the model's primary source (OpenRouter for `openrouter` providers) or tracks the provider type first-hand (LiteLLM and genai-prices for `anthropic`, `deepseek` and `openai`, decision 2.2 amendment of 2026-11-12), and no other source that may auto-apply returns other values | required |
 | Pinning: a GitHub source at a commit at least 24 hours old; a live source unchanged across two fetches 24 hours apart | required |
 | At most this many entries auto-applied in one day; above it, all of that day's changes wait (a large batch looks like a broken source) | 10 |
 
-"Independent" means a separate maintainer and data path. models.dev's `openrouter` provider is a bot
-copy of OpenRouter's API, so it does not count as a second source for an OpenRouter route. For a
-direct Anthropic model there is no provider list, so two independent sources, such as OpenRouter and
-LiteLLM, must agree. models.dev never counts towards auto-apply (decision 7).
+Amended 2026-11-12: agreement is a veto, not a vote. A source that tracks the provider type
+first-hand may auto-apply on its own; if another source that may auto-apply returns other values for
+the model, both proposals wait for a person. models.dev's `openrouter` provider is a bot copy of
+OpenRouter's API and is not read. For a direct Anthropic model there is no provider list, so LiteLLM
+or genai-prices supply the price. models.dev never counts towards auto-apply or agreement
+(decision 7).
 
 **Waits for a person** (class `needs_review`): a new model (until the 2026-11-07 amendment below), a new or removed bucket, a tier change, a
-move over 25%, a price only one aggregator reports, sources that disagree, and any rule above that
-fails. The proposal says which rule failed, with the numbers.
+move over 25%, a price from a source that does not track the provider type first-hand, sources that
+disagree, and any rule above that fails. The proposal says which rule failed, with the numbers.
 
 **Needs a second, typed confirmation** (class `confirm`): the admin types the model `id` to accept.
 
@@ -305,23 +333,28 @@ records the page URL and "manual" as its source.
 
 ### 7. Sources and terms
 
-- **OpenRouter.** Each install fetches it for itself. Koinon never ships OpenRouter's data, in the
-  repository, an image or a bundle (maintainer decision of 2026-10-31 on issue #68). It is the
-  primary source for `openrouter` providers.
+- **OpenRouter.** Each install fetches it for itself. It is the primary source for `openrouter`
+  providers. Amended 2026-11-12 (maintainer decision on issue #105): prices taken from OpenRouter's
+  public price data (`/api/v1/models`) may be stored in the built-in price list, each entry with its
+  source URL and the date it was read; the weekly `review-prices` workflow keeps them fresh. This
+  replaces the decision of 2026-10-31 on issue #68 (Koinon never ships OpenRouter's data). Other
+  OpenRouter data (model metadata, descriptions, rankings) is still not shipped.
 - **models.dev, LiteLLM, genai-prices.** MIT. Their licence and copyright line go in the provenance.
-  They are aggregators: on their own they never auto-apply a change for a direct provider; two must
-  agree. Only LiteLLM's repository file is read, never its PyPI package.
+  They are aggregators. LiteLLM and genai-prices auto-apply only for the provider types they track
+  first-hand (decision 2.2, amendment of 2026-11-12); everything else is a proposal. Only LiteLLM's
+  repository file is read, never its PyPI package.
 - **models.dev makes proposals only** (maintainer decision 2026-11-06). It never counts towards
   auto-apply, as a primary source or as one of two. It has no versioned feed: `api.json` is rebuilt
   from about 1,000 TOML files that change more than 100 times a day, mostly bot syncs copied from other
   catalogues, and wrong prices have been merged and reverted several times (for example commits
   `cd7c70b4` and `6a0da0a9` in `github.com/anomalyco/models.dev`, formerly `sst/models.dev`).
-  Auto-apply relies on the provider's own source, or on two independent sources such as OpenRouter
-  and LiteLLM.
+  Auto-apply relies on the provider's own source, or on an aggregator for the provider types it tracks
+  first-hand, held back by a commit at least 24 hours old.
 - **genai-prices lags** the providers (no Claude 5.5 family on 2026-11-06). A model it lacks is not
   a disagreement; it just does not count as an agreeing source.
-- **Anthropic** has no machine-readable list. Its models auto-apply only on agreement of two
-  aggregators, and a person checks its page for everything else.
+- **Anthropic** has no machine-readable list. Its models auto-apply from LiteLLM or genai-prices
+  (a disagreement between them sends both to review), and a person checks its page for everything
+  else.
 - `docs/ops/prices.md` keeps its rule for the default list (primary sources only). It gains a
   section for the platform list: the bounds, the classes and how to read the provenance.
 

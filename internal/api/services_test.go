@@ -482,10 +482,11 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(got.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 			Expect(got.GetOutcomeReason()).To(ContainSubstring("wall-clock cap"))
 			ticket := member.getTicket(ctx, org, tOver.GetId())
-			last := ticket.GetEvents()[len(ticket.GetEvents())-1]
-			Expect(last.GetKind()).To(Equal("run.canceled"))
+			last := lastEventOfKind(ticket, "run.canceled")
 			Expect(last.GetActorKind()).To(Equal(ticketv1alpha1.ActorKind_ACTOR_KIND_SYSTEM))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "wall_clock_cap"))
+
+			ad.finish(ctx, ad.mustClaim(ctx, org)) // the continuation run of the first ticket (issue #99)
 
 			// Started 40 minutes ago but parked for 20 of them: within the cap.
 			_, rIn := member.createTicket(ctx, org, agent.GetId(), "patient")
@@ -521,8 +522,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(Equal(1))
 			ticket := member.getTicket(ctx, org, t.GetId())
-			last := ticket.GetEvents()[len(ticket.GetEvents())-1]
-			Expect(last.GetKind()).To(Equal("run.canceled"))
+			last := lastEventOfKind(ticket, "run.canceled") // the continuation run's queueing follows it
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "wall_clock_cap"))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summary", "partial"))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summarySource", "reply"))

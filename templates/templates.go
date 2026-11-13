@@ -260,6 +260,10 @@ type RunLimits struct {
 	MaxModelRequests int64 `json:"maxModelRequests,omitempty"`
 	// MaxSpendUSD is the run's spend by the ledger's settled cost. Optional like MaxModelRequests.
 	MaxSpendUSD USD `json:"maxSpendUSD,omitempty"`
+	// MaxContinuations is how many continuation runs a task of this agent gets after a run hits its
+	// time limit (issue #99, ADR 0081 amendment 2026-11-12). Optional: nil means the platform
+	// default of 3; 0 switches continuation off. An admin's per-agent override applies over it.
+	MaxContinuations *int `json:"maxContinuations,omitempty"`
 	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0081). A template may still
 	// carry it; nothing reads it.
 	//

@@ -25,7 +25,7 @@
 // gateway names for an API key not scoped to one.
 //
 // A provider of type anthropic or openai at its own API URL may also set costApiKey (an admin key
-// that may read the provider's cost API) with costScope (the Anthropic workspace ID or "default",
+// that may read the provider's cost API) with costScope (the Anthropic workspace ID or API key ID,
 // or the OpenAI project ID or API key ID). Koinon-reconciler reads the cost API once a day and
 // records the ledger's difference. The key is sealed like apiKey and never returned or logged;
 // leaving both out removes a stored cost key.

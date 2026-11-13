@@ -866,7 +866,7 @@ func serve(ctx context.Context, cfg config) error {
 		return fmt.Errorf("--prices-refresh-interval %s is below the minimum %s", cfg.pricesRefreshInterval, minPricesRefreshInterval)
 	}
 	refresher, err := prices.NewRefresher(priceSvc, prices.RefreshConfig{
-		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
+		Adapters: pricefetch.NewAdapters(httpClient()),
 		Bounds:   pricefetch.Bounds{MaxChangePercent: cfg.pricesMaxChange, MaxAutoPerDay: cfg.pricesMaxAutoPerDay},
 		Metrics:  priceMetrics,
 		Catalog:  orcatalog.New(pool),

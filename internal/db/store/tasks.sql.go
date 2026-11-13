@@ -65,6 +65,54 @@ func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams
 	return i, err
 }
 
+const bumpTaskContinuation = `-- name: BumpTaskContinuation :one
+UPDATE tasks
+SET continuation_count = continuation_count + 1
+WHERE org_id = $1 AND id = $2 AND continuation_count < $3::int
+  AND state NOT IN ('completed', 'canceled', 'failed')
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count
+`
+
+type BumpTaskContinuationParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+	Max   int32
+}
+
+// Counts one more continuation run on a task that is not ended, only while the count is below
+// max (issue #99). No row: the limit is reached or the task has ended.
+func (q *Queries) BumpTaskContinuation(ctx context.Context, arg BumpTaskContinuationParams) (Task, error) {
+	row := q.db.QueryRow(ctx, bumpTaskContinuation, arg.OrgID, arg.ID, arg.Max)
+	var i Task
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Title,
+		&i.AgentID,
+		&i.CreatedByUserID,
+		&i.HarnessSessionID,
+		&i.HarnessSessionCwd,
+		&i.LastEventSeq,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
+		&i.State,
+		&i.CreatedByKind,
+		&i.CreatedByAgentID,
+		&i.CreatedByTriggerID,
+		&i.NotifyKind,
+		&i.NotifyUserID,
+		&i.NotifyRole,
+		&i.NotifyChannelID,
+		&i.ContinuationCount,
+	)
+	return i, err
+}
+
 const createTask = `-- name: CreateTask :one
 
 INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id,
@@ -74,7 +122,7 @@ VALUES ($1, $2, $3, $4,
         $5, $6,
         $7,
         $8, $9, $10)
-RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count
 `
 
 type CreateTaskParams struct {
@@ -132,6 +180,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
@@ -143,7 +192,7 @@ SET state = $1::task_state,
 WHERE tasks.org_id = $2 AND tasks.id = $3 AND tasks.state = ANY(($4::text[])::task_state[])
   AND $1::task_state IN ('completed', 'failed')
   AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.org_id = tasks.org_id AND runs.task_id = tasks.id AND runs.state = 'queued')
-RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count
 `
 
 type EndTaskFromParams struct {
@@ -188,12 +237,13 @@ func (q *Queries) EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task,
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
 
 const getTask = `-- name: GetTask :one
-SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id FROM tasks
+SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count FROM tasks
 WHERE org_id = $1 AND id = $2
 `
 
@@ -229,12 +279,13 @@ func (q *Queries) GetTask(ctx context.Context, arg GetTaskParams) (Task, error) 
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
 
 const getTaskForUpdate = `-- name: GetTaskForUpdate :one
-SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id FROM tasks
+SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count FROM tasks
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -273,6 +324,7 @@ func (q *Queries) GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdatePara
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
@@ -400,7 +452,7 @@ func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessage
 }
 
 const listTasks = `-- name: ListTasks :many
-SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id FROM tasks
+SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count FROM tasks
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -438,6 +490,7 @@ func (q *Queries) ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, err
 			&i.NotifyUserID,
 			&i.NotifyRole,
 			&i.NotifyChannelID,
+			&i.ContinuationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -450,7 +503,7 @@ func (q *Queries) ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, err
 }
 
 const listTasksByStates = `-- name: ListTasksByStates :many
-SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id FROM tasks
+SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count FROM tasks
 WHERE org_id = $1 AND state = ANY(($2::text[])::task_state[])
 ORDER BY created_at, id
 `
@@ -495,6 +548,7 @@ func (q *Queries) ListTasksByStates(ctx context.Context, arg ListTasksByStatesPa
 			&i.NotifyUserID,
 			&i.NotifyRole,
 			&i.NotifyChannelID,
+			&i.ContinuationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -516,7 +570,7 @@ WHERE t.org_id = $4 AND t.id = $5
       SELECT 1 FROM runs r
       WHERE r.org_id = $4 AND r.task_id = t.id AND r.id = $6
         AND r.epoch = $7 AND r.state IN ('starting', 'running'))
-RETURNING t.org_id, t.id, t.title, t.agent_id, t.created_by_user_id, t.harness_session_id, t.harness_session_cwd, t.last_event_seq, t.finished_at, t.created_at, t.updated_at, t.harness_session_generation, t.agent_summary, t.agent_summary_at, t.session_restart_pending, t.state, t.created_by_kind, t.created_by_agent_id, t.created_by_trigger_id, t.notify_kind, t.notify_user_id, t.notify_role, t.notify_channel_id
+RETURNING t.org_id, t.id, t.title, t.agent_id, t.created_by_user_id, t.harness_session_id, t.harness_session_cwd, t.last_event_seq, t.finished_at, t.created_at, t.updated_at, t.harness_session_generation, t.agent_summary, t.agent_summary_at, t.session_restart_pending, t.state, t.created_by_kind, t.created_by_agent_id, t.created_by_trigger_id, t.notify_kind, t.notify_user_id, t.notify_role, t.notify_channel_id, t.continuation_count
 `
 
 type SetTaskHarnessSessionParams struct {
@@ -567,6 +621,7 @@ func (q *Queries) SetTaskHarnessSession(ctx context.Context, arg SetTaskHarnessS
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
@@ -577,7 +632,7 @@ SET state = $1::task_state,
     finished_at = CASE WHEN $1::task_state IN ('completed', 'canceled', 'failed')
                        THEN coalesce(finished_at, now()) END
 WHERE org_id = $2 AND id = $3
-RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count
 `
 
 type SetTaskStateParams struct {
@@ -615,6 +670,7 @@ func (q *Queries) SetTaskState(ctx context.Context, arg SetTaskStateParams) (Tas
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }
@@ -624,7 +680,7 @@ UPDATE tasks
 SET state = $1::task_state
 WHERE org_id = $2 AND id = $3 AND state = ANY(($4::text[])::task_state[])
   AND $1::task_state NOT IN ('completed', 'canceled', 'failed')
-RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id
+RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count
 `
 
 type SetTaskStateFromParams struct {
@@ -669,6 +725,7 @@ func (q *Queries) SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromPara
 		&i.NotifyUserID,
 		&i.NotifyRole,
 		&i.NotifyChannelID,
+		&i.ContinuationCount,
 	)
 	return i, err
 }

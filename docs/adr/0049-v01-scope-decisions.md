@@ -125,9 +125,9 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 
 - **Org isolation:** every query takes `org_id`, tables keep the scaffold's `(org_id, id)` keys,
   and an org-isolation test suite runs in CI from v0.1.
-- **v0.1 is private.** Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
+- **v0.1 is private.** _(Changed: the packages are public, signed first; see the amendment of 2026-11-12 below and [0027](0027-repo-and-versioning.md).)_ Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
   Signing and SBOM attestations are wired in the release workflow but switched on when the
-  repository goes public, because keyless cosign writes names and digests to the public Rekor log.
+  repository goes public _(Changed: when the packages are made public, see the amendment of 2026-11-12)_, because keyless cosign writes names and digests to the public Rekor log.
   The repository stays `stateracloud/koinon` (amended 2026-10-26: it was `procoduck/koinon`); the org name is chosen when going public.
 - **v0.1 is done** when the quickstart passes on the home lab with Kata and a real model (recorded
   run) and the same steps pass as a kind e2e test in CI without Kata, against the fake model server.
@@ -357,8 +357,8 @@ from templates costs nothing until work arrives.
   to pass; the others start on demand. Keep-warm sandboxes count toward resources (old issue 314).
 - **Cost.** The first run of an agent now waits for its sandbox to start (image pull, home volume);
   that wait is the one `agentd` already has for a stopped or archived sandbox. Preparing the image
-  and the home volume at activation without starting the pod is not built: tracked in #101. A per-org rate limit on
-  sandbox starts is tracked in #27.
+  and the home volume at activation without starting the pod is not built: tracked in #101 (closed by
+  the 2026-11-12 amendment below). A per-org rate limit on sandbox starts is tracked in #27.
 - **API and UI (#100).** `AgentService.SetAgentKeepWarm` sets or withdraws the request; admins and
   owners only, audited (`agent.keep_warm.set`), refused on an archived agent. `Agent.keep_warm` is the
   request and `Agent.keep_warm_granted` the outcome. Only the reconciler knows the cap, so each pass
@@ -366,3 +366,33 @@ from templates costs nothing until work arrives.
   read it; a new request reads "not granted" until the next pass. The agent page has a "Keep warm"
   control that says whether the cap granted it. The admin REST API (`/admin/v1`) has no keep-warm
   endpoint yet.
+
+## Amendment (2026-11-12): preparing a keep-warm agent at activation (#101)
+
+Decision (maintainer, 2026-11-11): prepare ahead only for keep-warm agents; other agents prepare on
+their first run.
+
+A keep-warm agent already gets its sandbox at activation (the 2026-11-01 amendment): the reconciler
+creates it and starts it, so the image is pulled to the node and the home volume exists before the
+first run. For that agent there is nothing left to prepare, and its first run already skips the pull
+and the volume creation. The storage cost of that prepared volume is the one keep-warm already
+carries: one home volume per granted keep-warm agent, so at most `reconciler.keepWarmPerOrg` volumes
+per org (the volume outlives a stop, for example after the request is withdrawn, until the sandbox is
+deleted). Koinon does not size the volume: OpenShell's workspace default does, so an operator reads
+the cost as volumes × that size. Agents that are not keep-warm gain no volume
+before their first run, so bulk-creating agents from templates stays free.
+
+Decision on #101: it is closed with this record. Preparing without starting the pod for every agent
+needs a backend call that creates a sandbox stopped or pulls an image alone; OpenShell offers neither
+(`CreateSandbox` starts the sandbox and the volume lives and dies with it, see `RetentionRetain`), so
+it is not built. Creating and then stopping a sandbox would start the pod, which #101 rules out, and
+costs a start per agent. The spec "prepares only the keep-warm agent at activation" in
+`internal/reconciler/latency_test.go` shows that a prepared agent's first run creates nothing.
+
+## Amendment (#854, 2026-11-12): packages public, signed first
+
+The decision of 2026-11-12 supersedes "v0.1 is private" for the registry: the images and the OCI chart on
+`ghcr.io/stateracloud/koinon/*` are public, with signing and SBOM attestations switched on before the first
+public release (the `RELEASE_SIGNING` switch of the release workflow), and a pre-alpha notice on the docs site and its README. The reason
+for deferring signing, the public Rekor log, is accepted now. Record: ADR [0027](0027-repo-and-versioning.md),
+amendment of 2026-11-12.

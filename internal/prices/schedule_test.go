@@ -258,7 +258,7 @@ var _ = Describe("the price refresh modes (maintainer decision 2026-11-07)", fun
 		Expect(err).NotTo(HaveOccurred())
 		got, err := r.ReportUnpriced(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(map[string]int{"openrouter": 2}))
+		Expect(got).To(Equal(map[string]int{"openrouter": 2, "anthropic": 0, "deepseek": 0, "openai": 0}), "every provider type a source prices is reported, so a gauge falls back to 0")
 		Expect(testutil.ToFloat64(m.Unpriced.WithLabelValues("openrouter"))).To(BeEquivalentTo(2))
 	})
 })

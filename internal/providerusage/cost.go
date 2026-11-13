@@ -22,12 +22,13 @@ import (
 // A CostSource reads what a direct provider billed one part of an account for one UTC day, from the
 // provider's cost API, with an admin key that is not the provider's inference key. The ledger's
 // daily reconciliation compares it with the ledger's sum of the provider's entries for the day (ADR
-// 0056, amendment 2026-11-06). Anthropic's cost report is by workspace, so there the scope must hold
-// this provider's key alone for the figures to compare; OpenAI's reports by project or by API key.
+// 0056, amendment 2026-11-06). Anthropic's analytics cost reads a workspace or one API key; a
+// workspace must hold this provider's key alone for the figures to compare. OpenAI's reads a
+// project or one API key.
 //
 // A source asks for exactly one bucket, the requested day, and reads only a bucket that starts at
-// that day: a report without it is an error, never $0, so a missing day reads as an error and not
-// as out of tolerance.
+// that day: a report that cannot be complete for it is an error, never $0, so a missing day reads
+// as an error and not as out of tolerance.
 //
 // A source asks only its own pinned endpoint, follows no redirect, and serves only providers whose
 // inference URL is that provider's own API, so the bill it reads is the one the ledger's entries ran
@@ -45,7 +46,7 @@ type CostSource interface {
 type CostProvider struct {
 	// AdminKey reads the cost API; it never leaves the request to the provider.
 	AdminKey string
-	// Scope is the workspace or project the provider's key belongs to, or (OpenAI) the key's ID.
+	// Scope is the workspace or project the provider's key belongs to, or the key's own ID.
 	Scope string
 }
 
@@ -141,102 +142,125 @@ func ratOf(name, field, s string) (*big.Rat, error) {
 	return r, nil
 }
 
-// AnthropicCost reads the Admin API's cost report: GET
-// https://api.anthropic.com/v1/organizations/cost_report, grouped by workspace, one 1-day bucket
-// (https://platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve, read
-// 2026-11-06). The Admin key goes in the x-api-key header (Bearer is for OAuth tokens only,
-// https://platform.claude.com/docs/en/manage-claude/admin-api). amount is a decimal string in the
-// currency's lowest unit (cents); a bucket's starting_at is the day it covers. The default
-// workspace has no workspace_id; its scope is "default". The endpoint is marked legacy; its
-// successor is /v1/organizations/analytics/cost.
+// AnthropicCost reads the Usage and Cost Analytics API: GET
+// https://api.anthropic.com/v1/organizations/analytics/cost, filtered to and grouped by the scope
+// (a workspace or one API key), one 1-day bucket
+// (https://platform.claude.com/docs/en/api/beta/organization/analytics/cost and
+// https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api, read 2026-11-12).
+// It replaces the legacy /v1/organizations/cost_report (ADR 0056, amendment 2026-11-12). The Admin
+// key goes in the x-api-key header (Bearer carries OAuth tokens only); the API is beta and needs
+// the anthropic-beta header. A row's cost.amount is a decimal string in fractional cents (six
+// places); the default workspace has a real workspace ID like any other, so there is no "default"
+// scope. A combination with no cost has no row, so a day is complete only when data_refreshed_at
+// is at or after its end: a report refreshed earlier is an error, never $0.
 type AnthropicCost struct {
 	Client *http.Client
 }
 
 // AnthropicCostURL is the one URL Anthropic's cost source asks.
-const AnthropicCostURL = "https://api.anthropic.com/v1/organizations/cost_report"
+const AnthropicCostURL = "https://api.anthropic.com/v1/organizations/analytics/cost"
 
-// AnthropicDefaultWorkspace is the scope of Anthropic's default workspace.
-const AnthropicDefaultWorkspace = "default"
+// Anthropic's API version and the beta header of the analytics API.
+const (
+	anthropicVersion       = "2026-10-21"
+	anthropicAnalyticsBeta = "analytics-usage-cost-2026-08-24"
+)
+
+// anthropicAPIKey is Anthropic's API key ID form (the key's ID, never the key).
+var anthropicAPIKey = regexp.MustCompile(`^apikey_[A-Za-z0-9]{1,120}$`)
 
 // Serves implements CostSource.
 func (AnthropicCost) Serves(providerURL string) bool {
 	return servesHost(providerURL, "api.anthropic.com")
 }
 
-// ValidScope implements CostSource: "default" or a workspace ID.
+// ValidScope implements CostSource: a workspace ID or an API key ID.
 func (AnthropicCost) ValidScope(scope string) bool {
-	return scope == AnthropicDefaultWorkspace || modelformat.ValidWorkspaceID(scope)
+	return modelformat.ValidWorkspaceID(scope) || anthropicAPIKey.MatchString(scope)
 }
 
 type anthropicCostReport struct {
 	Data []struct {
 		StartingAt string `json:"starting_at"`
-		Results    []struct {
-			Currency    string  `json:"currency"`
-			Amount      string  `json:"amount"`
+		Group      struct {
 			WorkspaceID *string `json:"workspace_id"`
-		} `json:"results"`
+			APIKeyID    *string `json:"api_key_id"`
+		} `json:"group"`
+		Cost struct {
+			Currency string `json:"currency"`
+			Amount   string `json:"amount"`
+		} `json:"cost"`
 	} `json:"data"`
-	HasMore  bool   `json:"has_more"`
-	NextPage string `json:"next_page"`
+	HasMore         bool    `json:"has_more"`
+	NextPage        string  `json:"next_page"`
+	DataRefreshedAt *string `json:"data_refreshed_at"`
 }
 
 // DayCost implements CostSource.
 func (a AnthropicCost) DayCost(ctx context.Context, p CostProvider, day time.Time) (money.USD, error) {
 	if !a.ValidScope(p.Scope) {
-		return 0, fmt.Errorf("providerusage: anthropic: %q is not a workspace", p.Scope)
+		return 0, fmt.Errorf("providerusage: anthropic: %q is not a workspace or API key ID", p.Scope)
+	}
+	filter, group := "workspace_ids[]", "workspace_id"
+	if anthropicAPIKey.MatchString(p.Scope) {
+		filter, group = "api_key_ids[]", "api_key_id"
 	}
 	day = day.UTC().Truncate(24 * time.Hour)
-	total, page, found := new(big.Rat), "", false
+	end := day.Add(24 * time.Hour)
+	total, page := new(big.Rat), ""
 	for range maxCostPages {
 		q := url.Values{
-			"starting_at":  {day.Format(time.RFC3339)},
-			"ending_at":    {day.Add(24 * time.Hour).Format(time.RFC3339)},
-			"bucket_width": {"1d"},
-			"group_by[]":   {"workspace_id"},
-			"limit":        {"1"},
+			"starting_at":       {day.Format(time.RFC3339)},
+			"ending_at":         {end.Format(time.RFC3339)},
+			"time_bucket_width": {"1d"},
+			"group_by[]":        {group},
+			filter:              {p.Scope},
+			"limit":             {"1000"},
 		}
 		if page != "" {
 			q.Set("page", page)
 		}
 		var rep anthropicCostReport
-		h := http.Header{"X-Api-Key": {p.AdminKey}, "Anthropic-Version": {"2023-06-01"}}
-		if err := getJSON(ctx, a.Client, "anthropic cost report", AnthropicCostURL+"?"+q.Encode(), h, &rep); err != nil {
+		h := http.Header{"X-Api-Key": {p.AdminKey}, "Anthropic-Version": {anthropicVersion}, "Anthropic-Beta": {anthropicAnalyticsBeta}}
+		if err := getJSON(ctx, a.Client, "anthropic analytics cost", AnthropicCostURL+"?"+q.Encode(), h, &rep); err != nil {
 			return 0, err
 		}
-		for _, b := range rep.Data {
-			if start, err := time.Parse(time.RFC3339, b.StartingAt); err != nil || !start.Equal(day) {
+		// Every page reads one snapshot; a snapshot older than the day's end misses part of it.
+		if rep.DataRefreshedAt == nil {
+			return 0, fmt.Errorf("providerusage: anthropic analytics cost: no data for %s yet", day.Format(time.DateOnly))
+		}
+		if at, err := time.Parse(time.RFC3339, *rep.DataRefreshedAt); err != nil || at.Before(end) {
+			return 0, fmt.Errorf("providerusage: anthropic analytics cost: data for %s not complete yet", day.Format(time.DateOnly))
+		}
+		for _, r := range rep.Data {
+			if start, err := time.Parse(time.RFC3339, r.StartingAt); err != nil || !start.Equal(day) {
 				continue
 			}
-			found = true
-			for _, r := range b.Results {
-				ws := AnthropicDefaultWorkspace
-				if r.WorkspaceID != nil && *r.WorkspaceID != "" {
-					ws = *r.WorkspaceID
-				}
-				if ws != p.Scope {
-					continue
-				}
-				if !strings.EqualFold(r.Currency, "USD") {
-					return 0, fmt.Errorf("providerusage: anthropic cost report: currency %q is not USD", r.Currency)
-				}
-				cents, err := ratOf("anthropic cost report", "amount", r.Amount)
-				if err != nil {
-					return 0, err
-				}
-				total.Add(total, cents.Quo(cents, big.NewRat(100, 1)))
+			id := r.Group.WorkspaceID
+			if group == "api_key_id" {
+				id = r.Group.APIKeyID
 			}
+			if id == nil || *id != p.Scope {
+				continue
+			}
+			if !strings.EqualFold(r.Cost.Currency, "USD") {
+				return 0, fmt.Errorf("providerusage: anthropic analytics cost: currency %q is not USD", r.Cost.Currency)
+			}
+			cents, err := ratOf("anthropic analytics cost", "cost.amount", r.Cost.Amount)
+			if err != nil {
+				return 0, err
+			}
+			total.Add(total, cents.Quo(cents, big.NewRat(100, 1)))
 		}
-		if !rep.HasMore || rep.NextPage == "" {
-			if !found {
-				return 0, fmt.Errorf("providerusage: anthropic cost report: no bucket for %s", day.Format(time.DateOnly))
-			}
+		if !rep.HasMore {
 			return money.FromRat(total)
+		}
+		if rep.NextPage == "" {
+			return 0, fmt.Errorf("providerusage: anthropic analytics cost: more rows but no next page")
 		}
 		page = rep.NextPage
 	}
-	return 0, fmt.Errorf("providerusage: anthropic cost report: more than %d pages", maxCostPages)
+	return 0, fmt.Errorf("providerusage: anthropic analytics cost: more than %d pages", maxCostPages)
 }
 
 // OpenAICost reads the organization costs API: GET https://api.openai.com/v1/organization/costs,

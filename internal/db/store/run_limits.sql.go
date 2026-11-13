@@ -11,8 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAgentRunLimits = `-- name: ClearAgentRunLimits :exec
+UPDATE agent_run_limits
+SET max_model_requests = NULL, max_spend_usd = NULL, max_duration_secs = NULL
+WHERE org_id = $1 AND agent_id = $2
+`
+
+type ClearAgentRunLimitsParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Clears the agent's run-limit overrides and leaves its continuation overrides.
+func (q *Queries) ClearAgentRunLimits(ctx context.Context, arg ClearAgentRunLimitsParams) error {
+	_, err := q.db.Exec(ctx, clearAgentRunLimits, arg.OrgID, arg.AgentID)
+	return err
+}
+
 const deleteAgentRunLimits = `-- name: DeleteAgentRunLimits :execrows
-DELETE FROM agent_run_limits WHERE org_id = $1 AND agent_id = $2
+DELETE FROM agent_run_limits
+WHERE org_id = $1 AND agent_id = $2
+  AND max_continuations IS NULL AND task_spend_usd IS NULL
 `
 
 type DeleteAgentRunLimitsParams struct {
@@ -20,6 +39,8 @@ type DeleteAgentRunLimitsParams struct {
 	AgentID pgtype.UUID
 }
 
+// Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns
+// those two columns); clear the run overrides first (ClearAgentRunLimits).
 func (q *Queries) DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteAgentRunLimits, arg.OrgID, arg.AgentID)
 	if err != nil {
@@ -28,9 +49,33 @@ func (q *Queries) DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLi
 	return result.RowsAffected(), nil
 }
 
+const getAgentContinuationLimits = `-- name: GetAgentContinuationLimits :one
+SELECT max_continuations, coalesce(task_spend_usd::text, '')::text AS task_spend_usd
+FROM agent_run_limits
+WHERE org_id = $1 AND agent_id = $2
+`
+
+type GetAgentContinuationLimitsParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type GetAgentContinuationLimitsRow struct {
+	MaxContinuations pgtype.Int4
+	TaskSpendUsd     string
+}
+
+// The agent's continuation overrides (issue #99); NULL follows the template and the org.
+func (q *Queries) GetAgentContinuationLimits(ctx context.Context, arg GetAgentContinuationLimitsParams) (GetAgentContinuationLimitsRow, error) {
+	row := q.db.QueryRow(ctx, getAgentContinuationLimits, arg.OrgID, arg.AgentID)
+	var i GetAgentContinuationLimitsRow
+	err := row.Scan(&i.MaxContinuations, &i.TaskSpendUsd)
+	return i, err
+}
+
 const getAgentRunLimits = `-- name: GetAgentRunLimits :one
 
-SELECT org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+SELECT org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
        updated_by, updated_at
 FROM agent_run_limits
 WHERE org_id = $1 AND agent_id = $2
@@ -184,8 +229,29 @@ func (q *Queries) GetRunUsage(ctx context.Context, arg GetRunUsageParams) (GetRu
 	return i, err
 }
 
+const getTaskSpend = `-- name: GetTaskSpend :one
+SELECT coalesce(sum(s.cost_usd), 0)::text AS cost_usd
+FROM spend_entries s
+JOIN runs r ON r.org_id = s.org_id AND r.id = s.run_id
+WHERE s.org_id = $1 AND r.task_id = $2
+`
+
+type GetTaskSpendParams struct {
+	OrgID  pgtype.UUID
+	TaskID pgtype.UUID
+}
+
+// What the task's runs have spent, by the ledger's settled cost: the figure the per-task cap is
+// checked against (issue #99).
+func (q *Queries) GetTaskSpend(ctx context.Context, arg GetTaskSpendParams) (string, error) {
+	row := q.db.QueryRow(ctx, getTaskSpend, arg.OrgID, arg.TaskID)
+	var cost_usd string
+	err := row.Scan(&cost_usd)
+	return cost_usd, err
+}
+
 const listAgentRunLimits = `-- name: ListAgentRunLimits :many
-SELECT org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+SELECT org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
        updated_by, updated_at
 FROM agent_run_limits
 WHERE org_id = $1
@@ -230,6 +296,34 @@ func (q *Queries) ListAgentRunLimits(ctx context.Context, orgID pgtype.UUID) ([]
 	return items, nil
 }
 
+const setAgentContinuationLimits = `-- name: SetAgentContinuationLimits :exec
+INSERT INTO agent_run_limits (org_id, agent_id, max_continuations, task_spend_usd, updated_by)
+VALUES ($1, $2, $3, ($4::text)::numeric, $5)
+ON CONFLICT (org_id, agent_id) DO UPDATE
+SET max_continuations = EXCLUDED.max_continuations, task_spend_usd = EXCLUDED.task_spend_usd,
+    updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type SetAgentContinuationLimitsParams struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	MaxContinuations pgtype.Int4
+	TaskSpendUsd     pgtype.Text
+	UpdatedBy        string
+}
+
+// Replaces the agent's continuation overrides only; the run-limit overrides stay. NULL clears one.
+func (q *Queries) SetAgentContinuationLimits(ctx context.Context, arg SetAgentContinuationLimitsParams) error {
+	_, err := q.db.Exec(ctx, setAgentContinuationLimits,
+		arg.OrgID,
+		arg.AgentID,
+		arg.MaxContinuations,
+		arg.TaskSpendUsd,
+		arg.UpdatedBy,
+	)
+	return err
+}
+
 const setAgentRunLimits = `-- name: SetAgentRunLimits :one
 INSERT INTO agent_run_limits (org_id, agent_id, max_model_requests, max_spend_usd, max_duration_secs, updated_by)
 VALUES ($1, $2, $3, ($4::text)::numeric,
@@ -237,7 +331,7 @@ VALUES ($1, $2, $3, ($4::text)::numeric,
 ON CONFLICT (org_id, agent_id) DO UPDATE
 SET max_model_requests = EXCLUDED.max_model_requests, max_spend_usd = EXCLUDED.max_spend_usd,
     max_duration_secs = EXCLUDED.max_duration_secs, updated_by = EXCLUDED.updated_by, updated_at = now()
-RETURNING org_id, agent_id, max_model_requests, max_spend_usd::text AS max_spend_usd, max_duration_secs,
+RETURNING org_id, agent_id, max_model_requests, coalesce(max_spend_usd::text, '')::text AS max_spend_usd, max_duration_secs,
           updated_by, updated_at
 `
 

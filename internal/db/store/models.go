@@ -1549,6 +1549,8 @@ type AgentRunLimit struct {
 	MaxDurationSecs  pgtype.Int4
 	UpdatedBy        string
 	UpdatedAt        pgtype.Timestamptz
+	MaxContinuations pgtype.Int4
+	TaskSpendUsd     pgtype.Numeric
 }
 
 type AgentSandbox struct {
@@ -2200,6 +2202,7 @@ type OrgSetting struct {
 	LeakMatchThreshold        pgtype.Int4
 	RunContentRetentionDays   pgtype.Int4
 	HomeBackupRetentionDays   pgtype.Int4
+	ContinuationTaskSpendUsd  pgtype.Numeric
 	SandboxCreationsPerMinute pgtype.Int4
 }
 
@@ -2680,6 +2683,7 @@ type Task struct {
 	NotifyUserID             pgtype.UUID
 	NotifyRole               NullOrgRole
 	NotifyChannelID          pgtype.UUID
+	ContinuationCount        int32
 }
 
 type TaskEvent struct {

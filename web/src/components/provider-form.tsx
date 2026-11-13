@@ -246,10 +246,10 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="provider-cost-scope">Cost scope</Label>
-            <Input id="provider-cost-scope" value={costScope} onChange={(e) => setCostScope(e.target.value)} placeholder={type === 'anthropic' ? 'wrkspc_… or default' : 'proj_… or key_…'} autoComplete="off" spellCheck={false} disabled={removeCostKey} aria-invalid={Boolean(touched && costScopeError)} aria-describedby={touched && costScopeError ? 'provider-cost-scope-help provider-cost-scope-error' : 'provider-cost-scope-help'} />
+            <Input id="provider-cost-scope" value={costScope} onChange={(e) => setCostScope(e.target.value)} placeholder={type === 'anthropic' ? 'wrkspc_… or apikey_…' : 'proj_… or key_…'} autoComplete="off" spellCheck={false} disabled={removeCostKey} aria-invalid={Boolean(touched && costScopeError)} aria-describedby={touched && costScopeError ? 'provider-cost-scope-help provider-cost-scope-error' : 'provider-cost-scope-help'} />
             <p id="provider-cost-scope-help" className="text-muted-foreground text-xs">
               {type === 'anthropic'
-                ? 'The workspace whose cost is this provider key’s: its ID (wrkspc_…), or default for the default workspace. Needed with a cost key.'
+                ? 'The workspace whose cost is this provider key’s: its ID (wrkspc_…), or one API key’s ID (apikey_…). Needed with a cost key.'
                 : 'The OpenAI project ID (proj_…) or API key ID (key_…, the key’s ID, never the key) whose cost is this provider key’s. Needed with a cost key.'}
             </p>
             {touched && costScopeError && (

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,5 +242,60 @@ func TestEntryIDAndBuildEntry(t *testing.T) {
 	// An offer with problems cannot become an entry.
 	if _, err := BuildEntry(Offer{Model: "fake/x", ProviderType: "openrouter", Problems: []string{"negative price"}}, nil, SourceOpenRouter, now); err == nil {
 		t.Error("an offer with problems must be refused")
+	}
+}
+
+// TestClassifyAggregators covers ADR 0098 decision 3 for the GitHub-hosted and the proposals-only
+// sources: agreeing and disagreeing sources, a source that does not track the provider first-hand,
+// models.dev, and a pinned commit at the edge of its cooldown.
+func TestClassifyAggregators(t *testing.T) {
+	cur := entry("openai-fake-model-a", "1", "2", "")
+	cur.Provider, cur.ID = "openai", "openai-fake-model-a"
+	prop := entry(cur.ID, "1.1", "2.2", "")
+	prop.Provider = "openai"
+	for _, c := range []struct {
+		name        string
+		source      string
+		provider    string
+		agreeing    []string
+		disagreeing []string
+		pinned      bool
+		age         time.Duration
+		stable      bool
+		current     *pricing.Entry
+		want        Class
+		rule        string
+	}{
+		{"litellm first-hand, pinned a day", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, true, 24 * time.Hour, false, &cur, ClassAuto, ""},
+		{"genai-prices first-hand, pinned a day", SourceGenaiPrices, "openai", []string{SourceGenaiPrices}, nil, true, 25 * time.Hour, false, &cur, ClassAuto, ""},
+		{"both aggregators agree", SourceLiteLLM, "openai", []string{SourceLiteLLM, SourceGenaiPrices}, nil, true, 30 * time.Hour, false, &cur, ClassAuto, ""},
+		{"agreeing models.dev adds nothing and holds nothing back", SourceLiteLLM, "openai", []string{SourceLiteLLM, SourceModelsDev}, nil, true, 30 * time.Hour, false, &cur, ClassAuto, ""},
+		{"commit 23h59m old", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, true, 24*time.Hour - time.Minute, false, &cur, ClassNeedsReview, "pinning"},
+		{"commit 24h old", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, true, 24 * time.Hour, false, &cur, ClassAuto, ""},
+		{"another aggregator disagrees", SourceLiteLLM, "openai", []string{SourceLiteLLM}, []string{SourceGenaiPrices}, true, 30 * time.Hour, false, &cur, ClassNeedsReview, "returns other values"},
+		{"a provider it does not track first-hand", SourceLiteLLM, "fake-type", []string{SourceLiteLLM, SourceGenaiPrices}, nil, true, 30 * time.Hour, false, &cur, ClassNeedsReview, "only proposes"},
+		{"models.dev only proposes", SourceModelsDev, "openai", []string{SourceModelsDev}, nil, false, 0, true, &cur, ClassNeedsReview, "only proposes"},
+		{"models.dev with every other source agreeing", SourceModelsDev, "openai", []string{SourceModelsDev, SourceLiteLLM, SourceGenaiPrices}, nil, false, 0, true, &cur, ClassNeedsReview, "only proposes"},
+		{"openrouter is not first-hand for openai", SourceOpenRouter, "openai", []string{SourceOpenRouter}, nil, false, 0, true, &cur, ClassNeedsReview, "only proposes"},
+		{"a pinned source still obeys the 25 percent bound", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, true, 30 * time.Hour, false, &cur, ClassNeedsReview, "more than 25%"},
+		{"a new model from a pinned first-hand source", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, true, 30 * time.Hour, false, nil, ClassAuto, ""},
+		{"an unpinned source needs two fetches", SourceLiteLLM, "openai", []string{SourceLiteLLM}, nil, false, 0, false, &cur, ClassNeedsReview, "two fetches"},
+	} {
+		p := prop
+		p.Provider = c.provider
+		if c.name == "a pinned source still obeys the 25 percent bound" {
+			p = entry(cur.ID, "2", "4", "")
+			p.Provider = c.provider
+		}
+		v := Classify(Facts{
+			Origin: "fetch", Source: c.source, Current: c.current, Proposed: p, Agreeing: c.agreeing, Disagreeing: c.disagreeing,
+			Stable: c.stable, Pinned: c.pinned, CommitAge: c.age,
+		}, DefaultBounds)
+		if v.Class != c.want {
+			t.Errorf("%s: class %s, want %s (rules: %v)", c.name, v.Class, c.want, v.Failed)
+		}
+		if c.rule != "" && !strings.Contains(strings.Join(v.Failed, "; "), c.rule) {
+			t.Errorf("%s: rules %v do not mention %q", c.name, v.Failed, c.rule)
+		}
 	}
 }

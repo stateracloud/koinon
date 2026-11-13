@@ -108,3 +108,10 @@ DELETE FROM sandbox_creations WHERE org_id = @org_id AND id = @id;
 
 -- name: PruneOrgSandboxCreations :exec
 DELETE FROM sandbox_creations WHERE org_id = @org_id AND created_at < now() - interval '1 hour';
+
+-- name: SetOrgContinuationTaskSpend :exec
+-- The org's default per-task USD cap for continuation runs (issue #99); NULL is the platform
+-- default. It touches only this column, so the other settings stay.
+INSERT INTO org_settings (org_id, continuation_task_spend_usd)
+VALUES (@org_id, (sqlc.narg(continuation_task_spend_usd)::text)::numeric)
+ON CONFLICT (org_id) DO UPDATE SET continuation_task_spend_usd = EXCLUDED.continuation_task_spend_usd;
