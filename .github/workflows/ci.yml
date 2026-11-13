@@ -911,6 +911,7 @@ jobs:
       - run: hack/e2e-decide-test.sh
       - run: hack/kind-registry-test.sh
       - run: hack/drill-issue-test.sh
+      - run: hack/drill-sweep-test.sh
       - run: hack/e2e-bisect-test.sh
       - run: hack/hooks/agent-spawn-check_test.sh
       - run: hack/hooks/read-hooks_test.sh

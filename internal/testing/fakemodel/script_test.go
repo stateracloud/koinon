@@ -179,6 +179,43 @@ turns:
 			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
 		})
 
+		It("asks one question with ask_user, then proposes the pull request once the answer arrives (repo-helper-ask)", func(ctx SpecContext) {
+			scripts, err := fakemodel.LoadDir(exampleScripts)
+			Expect(err).NotTo(HaveOccurred())
+			_, ts := start(scripts...)
+			url := ts.URL + "/v1/chat/completions"
+			system := map[string]any{"role": "system", "content": "# Koinon\n\n# Repo helper\n"}
+			tools := []map[string]any{
+				{"type": "function", "function": map[string]any{"name": "koinon_ask_user"}},
+				{"type": "function", "function": map[string]any{"name": "koinon_create_pull_request"}},
+			}
+			step := func(messages ...map[string]any) oaCompletion {
+				var c oaCompletion
+				decode(post(ctx, url, map[string]any{"model": "repo-helper-ask", "messages": append([]map[string]any{system}, messages...), "tools": tools}), &c)
+				return c
+			}
+			task := userMsg("Add hello.md, ask first")
+			first := step(task)
+			call := first.Choices[0].Message.ToolCalls[0]
+			Expect(call.Function.Name).To(Equal("koinon_ask_user"))
+			Expect(call.Function.Arguments).To(MatchJSON(`{"question":"Add hello.md to the repository?","choices":["add it","do not add it"],"default":"do not add it"}`))
+
+			asked := []map[string]any{
+				task,
+				{"role": "assistant", "content": nil, "tool_calls": []map[string]any{{
+					"id": call.ID, "type": "function",
+					"function": map[string]any{"name": call.Function.Name, "arguments": call.Function.Arguments},
+				}}},
+				{"role": "tool", "tool_call_id": call.ID, "content": `{"status":"open"}`},
+			}
+			Expect(step(asked...).Choices[0].FinishReason).To(Equal("stop"))
+
+			answered := append(asked, map[string]any{"role": "assistant", "content": "I asked."},
+				userMsg("[Koinon] Your run was paused ... the person answered: \"add it\""))
+			pr := step(answered...)
+			Expect(pr.Choices[0].Message.ToolCalls[0].Function.Name).To(Equal("koinon_create_pull_request"))
+		})
+
 		It("keeps the scripted name when no declared tool or several match it", func(ctx SpecContext) {
 			_, ts := start(fakemodel.Script{Model: "m", Turns: []fakemodel.Turn{
 				{ToolCalls: []fakemodel.ToolCall{{Name: "ping"}}},

@@ -65,6 +65,27 @@ var PullRequest = pullRequest{
 	},
 }
 
+// GiteaAsk is the RT3 shape (script repo-helper-ask.yaml, #967): the agent asks one question with ask_user,
+// and once it is answered it proposes a pull request on a Gitea target. The scripted approver
+// (hack/answer-question.sh, hack/approve-pr.sh) answers and approves it without a person.
+var GiteaAsk = giteaAsk{
+	Model:     "repo-helper-ask",
+	AskTool:   "ask_user",
+	Question:  "Add hello.md to the repository?",
+	Choices:   []string{"add it", "do not add it"},
+	Default:   "do not add it",
+	Answer:    "add it",
+	PRTool:    "create_pull_request",
+	Connector: "gitea",
+}
+
+type giteaAsk struct {
+	Model, AskTool, Question string
+	Choices                  []string
+	Default, Answer          string
+	PRTool, Connector        string
+}
+
 type pullRequest struct {
 	Model, Repository, Base                          string
 	Suggestion, Title, File, Content                 string

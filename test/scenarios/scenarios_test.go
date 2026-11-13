@@ -81,6 +81,40 @@ var _ = Describe("the repo-helper scenario", func() {
 	})
 })
 
+var _ = Describe("the ask-then-pull-request scenario", func() {
+	It("asks the question the scenario names, with its choices and default, then proposes the pull request", func() {
+		g := scenarios.GiteaAsk
+		all, err := fakemodel.LoadFS(fakemodelscripts.FS, "scripts")
+		Expect(err).NotTo(HaveOccurred())
+		var script fakemodel.Script
+		for _, s := range all {
+			if s.Model == g.Model {
+				script = s
+			}
+		}
+		Expect(script.Model).To(Equal(g.Model), "the script exists")
+		var ask, pr *fakemodel.Turn
+		for i, t := range script.Turns {
+			for _, c := range t.ToolCalls {
+				switch c.Name {
+				case g.AskTool:
+					ask = &script.Turns[i]
+					Expect(c.Arguments).To(HaveKeyWithValue("question", g.Question))
+					Expect(c.Arguments).To(HaveKeyWithValue("default", g.Default))
+					Expect(c.Arguments["choices"]).To(ConsistOf(g.Choices[0], g.Choices[1]))
+				case g.PRTool:
+					pr = &script.Turns[i]
+				}
+			}
+		}
+		Expect(ask).NotTo(BeNil(), "a turn calls "+g.AskTool)
+		Expect(pr).NotTo(BeNil(), "a turn calls "+g.PRTool)
+		Expect(pr.When.UserContains).To(Equal("the person answered"), "the pull request comes after the answer")
+		Expect(g.Choices).To(ContainElement(g.Answer), "the scripted answer is one of the choices")
+		Expect(g.Choices).To(ContainElement(g.Default))
+	})
+})
+
 var _ = Describe("the scenario's ledger checks", func() {
 	l := scenarios.PullRequest.Ledger
 	refused := scenarios.Entry{UpstreamStatus: 400, CostZero: true, ChargeWaived: "provider type openai does not bill refused requests"}

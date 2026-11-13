@@ -22,14 +22,20 @@ import (
 // server and agentd's turn end do.
 func (e *env) openQuestion(ctx context.Context, f orgFixture) store.Question {
 	GinkgoHelper()
+	return e.openQuestionWith(ctx, f, "Post the reply?", []string{"post", "do not post"}, "do not post")
+}
+
+// openQuestionWith opens a question of the fixture's run with the given text, choices and default.
+func (e *env) openQuestionWith(ctx context.Context, f orgFixture, question string, choices []string, def string) store.Question {
+	GinkgoHelper()
 	var row store.Question
 	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
 		qq := store.New(tx)
 		var err error
 		row, _, err = questions.Create(ctx, qq, questions.Ask{
 			Org: uuid(f.org), Task: uuid(f.ticket.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
-			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: uuid(f.owner.userID)}, Recipients: []pgtype.UUID{uuid(f.owner.userID)}, Question: "Post the reply?", Draft: "Fixed in 1.2.",
-			Choices: []string{"post", "do not post"}, Default: "do not post", ExpiresAt: time.Now().Add(time.Hour),
+			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: uuid(f.owner.userID)}, Recipients: []pgtype.UUID{uuid(f.owner.userID)}, Question: question, Draft: "Fixed in 1.2.",
+			Choices: choices, Default: def, ExpiresAt: time.Now().Add(time.Hour),
 		})
 		if err != nil {
 			return err

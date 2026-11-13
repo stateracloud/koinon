@@ -117,6 +117,18 @@ Create the agents from the templates the stories need and run them from the UI o
   with the code-host connector ([GitHub](https://koinon.stateracloud.com/docs/operate/github-app/),
   [Gitea](https://koinon.stateracloud.com/docs/operate/gitea/)). Answer its `ask_user` question from the inbox and
   approve the pull request.
+  With no person at the UI, two scripts stand in (the run plan holds the answer text, never the model):
+  `hack/answer-question.sh <base-url> <cookie-jar> <org-id> <run-id> <question-id>` answers that one open
+  question (the question ID `latest` picks the run's only open question and refuses, exit 3, when it has none or
+  more than one: an unattended run does not know the ID) with `KOINON_ANSWER_CHOICE` (one of its choices, verbatim) or `KOINON_ANSWER_TEXT`, and
+  `hack/approve-pr.sh <base-url> <cookie-jar> <org-id> <gitea:|github:>owner/name` approves the pending pull
+  request (a bare `owner/name` means `github:`). Both sign in with `KOINON_APPROVER_USER` and
+  `KOINON_APPROVER_PASSWORD` (an org admin or owner for the approval; a member or above for the question) and wait
+  `KOINON_APPROVER_WAIT` seconds for the item to appear. Their tests are `hack/answer-question-test.sh` and
+  `hack/approve-pr-test.sh` (`make adr-lint`).
+  Both also run against the real API in `internal/api` (`approver_scripts_test.go`), with the fake-model script
+  `test/fakemodel/scripts/repo-helper-ask.yaml` (an `ask_user` question, then `create_pull_request`) as the shape
+  they stand in for; its data is `scenarios.GiteaAsk` in `test/scenarios`.
 
 Watch spend on the Budgets page while a story runs, and stop the window if it exceeds your plan.
 

@@ -268,6 +268,10 @@ func (s *Server) lookupErr(err error, what string) error {
 	return errors.New("internal error; try again later")
 }
 
+// Target is the target string of an approval on a code host: the connector type and the repository,
+// "github:owner/name" or "gitea:owner/name". hack/approve-pr.sh matches approvals by it.
+func Target(connector, repo string) string { return connector + ":" + repo }
+
 // authorise checks the run's grant for tool and returns the preset's
 // decision and the target repository.
 func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, string, error) {
@@ -385,7 +389,7 @@ func (s *Server) checkBranchFree(ctx context.Context, c caller, branch, argsSHA2
 	}
 	if found {
 		_, err := s.q.GetApprovalRequestByCall(ctx, store.GetApprovalRequestByCallParams{
-			OrgID: c.org.ID, RunID: c.run.ID, Tool: ToolCreatePullRequest, Target: connector + ":" + b.Targets[0], ArgsSha256: argsSHA256,
+			OrgID: c.org.ID, RunID: c.run.ID, Tool: ToolCreatePullRequest, Target: Target(connector, b.Targets[0]), ArgsSha256: argsSHA256,
 		})
 		switch {
 		case err == nil:
@@ -527,7 +531,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	params := store.CreateApprovalRequestParams{
 		CallBinding: binding,
 		OrgID:       c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
-		Connector: connector, Tool: tool, Target: connector + ":" + repo,
+		Connector: connector, Tool: tool, Target: Target(connector, repo),
 		ArgsJson: string(canonical), ArgsSha256: HashArgs(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(s.ttl), Valid: true},
@@ -609,7 +613,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 // and a call a person decides needs no check; neither is clean. leak is the risk for the card
 // when the check holds the call for a person.
 func (s *Server) leakCheck(ctx context.Context, c caller, decision connectors.Decision, risk any, connector, tool, repo string, canonical, binding []byte) (clean bool, leak map[string]any, err error) {
-	target := connector + ":" + repo
+	target := Target(connector, repo)
 	_, err = s.q.GetApprovalRequestByCall(ctx, store.GetApprovalRequestByCallParams{
 		OrgID: c.org.ID, RunID: c.run.ID, Tool: tool, Target: target, ArgsSha256: HashArgs(canonical),
 	})
