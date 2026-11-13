@@ -43,13 +43,15 @@ import (
 
 // side is one Koinon install the drill talks to.
 type side struct {
-	in      drill.Install
-	gw      drill.Gateway
-	org     string
-	agent   string
-	token   string // an admin token, once made
-	client  *e2eclient.Client
-	stopFwd func()
+	in    drill.Install
+	gw    drill.Gateway
+	org   string
+	agent string
+	token string // an admin token, once made
+	// oidcPort is the fixed local port the browser reaches this install on for oidc-signin (the redirect URL's port).
+	oidcPort int
+	client   *e2eclient.Client
+	stopFwd  func()
 }
 
 func (s *side) name(component string) string { return s.in.Release + "-" + component }
@@ -242,7 +244,7 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 	_, err = kube.KubectlStdin(ctx, drill.CheckpointSecretManifest(in.Namespace, runID, top.FakesNamespace), "apply", "-f", "-")
 	must(err, "create the checkpoint storage Secret")
 
-	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass, cp, top.OIDC)
+	overlay, err := drill.ValuesOverlay(top.FakesNamespace, s.gw, s.in.GatewayID, hold, top.StorageClass, cp, top.OIDC, s.oidcPort)
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
@@ -438,6 +440,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 
 	step("gateways: one OpenShell gateway for each install", func(ctx SpecContext) {
 		src.in, dst.in = top.Source, top.Target
+		src.oidcPort, dst.oidcPort = drill.OIDCSourcePort, drill.OIDCTargetPort
 		src.gw = installGateway(ctx, top.Source)
 		dst.gw = installGateway(ctx, top.Target)
 		Expect(src.gw.Namespace).NotTo(Equal(dst.gw.Namespace))
@@ -627,6 +630,12 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 		Expect(accepted).To(BeNumerically(">=", 1), "no Run now call was accepted: %v", replies)
 		AddReportEntry("run-now replies", fmt.Sprintf("%v", replies))
+
+		// The OIDC personas sign in once on the source (topology oidc, #927), so their users exist before the backup
+		// and the restored copy has to keep them: the role each holds is recorded here and compared after the release.
+		if oidcProfile() {
+			oidcSignIn(ctx, &src, "source", false)
+		}
 	}, seedTimeout)
 
 	step("backup: the guide's backup blocks, then the source is lost", func(ctx SpecContext) {
@@ -1057,29 +1066,26 @@ spec:
 		}
 
 		// The OIDC issuer (topology oidc, #927): the spec exists in the tree only when the topology names an
-		// issuer, because a drill spec never skips. A virtual WebAuthn authenticator signs in as the standing
-		// client's test user; the credential comes from the environment, never from the repository.
+		// issuer, because a drill spec never skips. Virtual WebAuthn authenticators sign in as the two personas;
+		// their credentials come from the environment, never from the repository.
 		if oidcProfile() {
-			It("signs in through the OIDC issuer", Label("oidc-signin"), func(ctx SpecContext) {
-				needs("release")
-				for _, e := range []string{drill.EnvOIDCUser, drill.EnvOIDCCredentialID, drill.EnvOIDCPrivateKey, drill.EnvOIDCUserHandle, drill.EnvOIDCRPID} {
-					Expect(os.Getenv(e)).NotTo(BeEmpty(), "%s: the OIDC test user's passkey (see test/drill/topology/lab.example.yaml)", e)
+			It("signs in through the OIDC issuer, and each user keeps the role", Label("oidc-signin"), func(ctx SpecContext) {
+				needs("release", "seed")
+				oidcSignIn(ctx, &dst, "target", true)
+				var before, after map[string]oidcRoles
+				readJSON(oidcFile("roles-source"), &before)
+				readJSON(oidcFile("roles-target"), &after)
+				for _, persona := range []string{drill.PersonaAdmin, drill.PersonaMember} {
+					Expect(before).To(HaveKey(persona))
+					Expect(after).To(HaveKey(persona), "the %s persona signed in on the restored copy", persona)
+					Expect(after[persona].UserID).To(Equal(before[persona].UserID), "the %s persona is the same user after the restore", persona)
+					Expect(after[persona].Roles).To(Equal(before[persona].Roles), "the %s persona keeps its role in every org after the restore", persona)
 				}
-				// The redirect URL names a fixed local port, so the forward is on that port.
-				_, stop, err := kube.PortForwardOn(context.WithoutCancel(ctx), dst.in.Namespace, "svc/"+dst.name("api"), top.OIDC.Port(), 8080)
-				must(err, "port-forward the API of "+dst.in.Release+" on the OIDC redirect port")
-				defer stop()
-				logFile, err := os.Create(filepath.Join(outDir, "oidc-signin.log"))
-				must(err, "create the OIDC sign-in log")
-				defer func() { _ = logFile.Close() }()
-				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "oidc.spec")
-				cmd.Env = append(os.Environ(),
-					"KOINON_DRILL_WEB_URL="+strings.TrimSuffix(top.OIDC.Redirect(), "/auth/oidc/callback"),
-					"PLAYWRIGHT_OUTPUT_DIR="+filepath.Join(outDir, "oidc-signin"),
-				)
-				cmd.Stdout, cmd.Stderr = logFile, logFile
-				must(cmd.Run(), "the Playwright OIDC spec on the restored copy (see oidc-signin.log): it signs in with the passkey, and an authenticator without it does not")
-			}, NodeTimeout(10*time.Minute))
+				// And the two personas differ: the admin group maps to admin, the member group to member.
+				Expect(after[drill.PersonaAdmin].Roles).NotTo(Equal(after[drill.PersonaMember].Roles))
+				// The lab writes the new signCount of each passkey back after the run: username and signCount only.
+				Expect(os.Rename(oidcFile("signcount-target"), filepath.Join(outDir, "oidc-signcounts.json"))).To(Succeed())
+			}, NodeTimeout(20*time.Minute))
 		}
 
 		It("sends the seeded provider key to the fake model", Label("provider-key"), func(ctx SpecContext) {
@@ -1340,4 +1346,66 @@ func fireKey(workflowID string) (source, key string, ok bool) {
 		return "trigger", parts[2], true
 	}
 	return "", "", false
+}
+
+// oidcRoles is what the oidc-signin spec records for one persona: the user and the role in each org.
+type oidcRoles struct {
+	Username string            `json:"username"`
+	UserID   string            `json:"userId"`
+	Roles    map[string]string `json:"roles"`
+}
+
+// oidcFile is a work file of the oidc-signin check. They are in workDir (not the result directory) except the
+// signCount file the lab reads, which the check moves to outDir at the end.
+func oidcFile(name string) string { return filepath.Join(workDir, "oidc-"+name+".json") }
+
+func readJSON(path string, v any) {
+	GinkgoHelper()
+	b, err := os.ReadFile(path)
+	must(err, "read "+path)
+	must(json.Unmarshal(b, v), "parse "+path)
+}
+
+// oidcSignIn runs web/e2e-drill/oidc.spec.ts against one install, which the browser reaches on 127.0.0.1 at the
+// side's fixed port (the redirect URL the install was given). tag is "source" or "target". The target run starts
+// each authenticator at the signCount the source run left, so the issuer never sees a counter go back. negative
+// adds the case of an authenticator without the credential.
+func oidcSignIn(ctx context.Context, s *side, tag string, negative bool) {
+	GinkgoHelper()
+	// All fields of both personas, checked by name only; the values are never printed.
+	for _, persona := range []string{drill.PersonaAdmin, drill.PersonaMember} {
+		for _, f := range drill.OIDCEnvFields {
+			Expect(os.Getenv(drill.OIDCEnv(persona, f))).NotTo(BeEmpty(), "%s: the %s persona's passkey (see test/drill/topology/lab.example.yaml)", drill.OIDCEnv(persona, f), persona)
+		}
+	}
+	_, stop, err := kube.PortForwardOn(context.WithoutCancel(ctx), s.in.Namespace, "svc/"+s.name("api"), s.oidcPort, 8080)
+	must(err, "port-forward the API of "+s.in.Release+" on the OIDC redirect port")
+	defer stop()
+	logFile, err := os.Create(filepath.Join(outDir, "oidc-signin-"+tag+".log"))
+	must(err, "create the OIDC sign-in log")
+	defer func() { _ = logFile.Close() }()
+	for _, f := range []string{"roles-" + tag, "signcount-" + tag} {
+		_ = os.Remove(oidcFile(f))
+	}
+	cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "oidc.spec")
+	cmd.Env = append(os.Environ(),
+		"KOINON_DRILL_WEB_URL=http://127.0.0.1:"+strconv.Itoa(s.oidcPort),
+		"KOINON_DRILL_OIDC_ROLES_OUT="+oidcFile("roles-"+tag),
+		"KOINON_DRILL_OIDC_SIGNCOUNT_OUT="+oidcFile("signcount-"+tag),
+		"PLAYWRIGHT_OUTPUT_DIR="+filepath.Join(outDir, "oidc-signin-"+tag),
+	)
+	if tag == "target" {
+		var counts map[string]struct {
+			SignCount int `json:"signCount"`
+		}
+		readJSON(oidcFile("signcount-source"), &counts)
+		for persona, c := range counts {
+			cmd.Env = append(cmd.Env, drill.OIDCEnv(persona, "SIGN_COUNT")+"="+strconv.Itoa(c.SignCount))
+		}
+	}
+	if negative {
+		cmd.Env = append(cmd.Env, "KOINON_DRILL_OIDC_NEGATIVE=1")
+	}
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	must(cmd.Run(), "the Playwright OIDC spec on the "+tag+" (see oidc-signin-"+tag+".log): each persona signs in with the passkey, and an authenticator without it does not")
 }

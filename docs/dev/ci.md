@@ -335,10 +335,14 @@ ask-tier write tool and an agent whose task makes the fake model call it. The ch
 `local-users` (both sign in on the restored copy with their roles; a wrong password is refused), `pending-approval`
 (still pending with the same `args_sha256`; the member cannot approve it), `recovery-signin` (a `PlatformAdminRecovery`
 reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
-in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin` (`web/e2e-drill/oidc.spec.ts`
-signs in through the issuer with a virtual WebAuthn authenticator that holds the test user's passkey, which comes from
-`KOINON_DRILL_OIDC_USER`, `_CREDENTIAL_ID`, `_PRIVATE_KEY`, `_USER_HANDLE` and `_RP_ID`; an authenticator without the
-credential does not sign in). The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
+in; the same nonce again is refused) and, when the topology has an `oidc:` block, `oidc-signin`
+(`web/e2e-drill/oidc.spec.ts`: an admin and a member persona sign in through the issuer with virtual WebAuthn
+authenticators, first on the source in the seed step and then on the restored copy; the same user must hold the same
+role, and an authenticator without the credential does not sign in). The OIDC client is public (PKCE, no secret); the
+browser reaches the source on `127.0.0.1:18181` and the target on `127.0.0.1:18182` (fixed ports, the redirect URLs the
+lab's client allows). The passkeys come from `KOINON_DRILL_OIDC_<ADMIN|MEMBER>_<FIELD>` (fields in
+`test/drill/topology/lab.example.yaml`), and the check leaves `oidc-signcounts.json` (username and signCount per
+persona, no key material) in the result directory for the lab to write back. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
 and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
 scripted approver for any install (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`).
 

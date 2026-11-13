@@ -48,36 +48,55 @@ type Install struct {
 	GatewayID string `yaml:"gatewayId" json:"gatewayId"`
 }
 
-// OIDC is the external identity provider the restored copy must accept (`oidc-signin`). The lab has a standing
-// public client for it; the chart's oidc values are set from these fields on both installs, so the source and the
-// restored copy trust the same issuer.
+// OIDC is the external identity provider the source and the restored copy must both accept (`oidc-signin`). The
+// client is a standing PUBLIC client (PKCE only, no client secret: the chart's clientSecret stays empty), so the
+// topology names only the issuer, the client ID and the two personas. The chart's oidc values are set from them on
+// both installs, with a redirect URL on the fixed local port of that side (OIDCSourcePort, OIDCTargetPort): the
+// lab's client allows exactly those two callbacks.
 type OIDC struct {
 	// IssuerURL is the provider's issuer (https). ClientID is the standing client the drill uses.
 	IssuerURL string `yaml:"issuerUrl" json:"issuerUrl"`
 	ClientID  string `yaml:"clientId" json:"clientId"`
-	// ClientSecretName is the Secret (key client-secret) in each install's namespace that holds the client's
-	// secret; empty means a public client. The operator's namespaceHook creates it (ExternalSecret or other).
-	ClientSecretName string `yaml:"clientSecretName,omitempty" json:"clientSecretName,omitempty"`
-	// RedirectURL is the callback the client allows. The browser reaches the restored API through a
-	// port-forward on localhost, so the client must allow this URL; the default is
-	// http://localhost:<port>/auth/oidc/callback with the fixed port below.
-	RedirectURL string `yaml:"redirectUrl,omitempty" json:"redirectUrl,omitempty"`
-	// LocalPort is the fixed local port the drill forwards the restored API to for this check, so the
-	// redirect URL of the client is stable. Default 18080.
-	LocalPort int `yaml:"localPort,omitempty" json:"localPort,omitempty"`
+	// Admin and Member are the two personas: an org admin and an org member. The IdP group of each is mapped to
+	// the role in the default org (groupMappings), so the same user holds the same role on both sides.
+	Admin  Persona `yaml:"admin" json:"admin"`
+	Member Persona `yaml:"member" json:"member"`
 }
 
-// The environment variables of the `oidc-signin` check. They carry the drill user's name and the virtual
-// authenticator's credential (a base64 PKCS#8 key and a credential ID the lab registered for that user at the
-// provider); the values live in the operator's environment and never in a file of the repository.
+// Persona is one OIDC test user. Its passkey (a CDP WebAuthn credential) comes from the environment, see Env.
+type Persona struct {
+	// Group is the IdP group the user belongs to (the lab uses koinon-admins and koinon-users).
+	Group string `yaml:"group" json:"group"`
+}
+
+// The fixed local ports of the OIDC browser forwards. The redirect URL of each install is
+// http://127.0.0.1:<port>/auth/oidc/callback, and the lab's client allows those two URLs.
 const (
-	EnvOIDCUser          = "KOINON_DRILL_OIDC_USER"
-	EnvOIDCCredentialID  = "KOINON_DRILL_OIDC_CREDENTIAL_ID" //nolint:gosec // the name of a variable, not a credential
-	EnvOIDCPrivateKey    = "KOINON_DRILL_OIDC_PRIVATE_KEY"
-	EnvOIDCUserHandle    = "KOINON_DRILL_OIDC_USER_HANDLE"
-	EnvOIDCRPID          = "KOINON_DRILL_OIDC_RP_ID"
-	DefaultOIDCLocalPort = 18080
+	OIDCSourcePort = 18181
+	OIDCTargetPort = 18182
 )
+
+// OIDCRedirect is the callback URL of an install whose API the browser reaches on 127.0.0.1:port.
+func OIDCRedirect(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/auth/oidc/callback", port)
+}
+
+// The personas, in the order the check runs them.
+const (
+	PersonaAdmin  = "admin"
+	PersonaMember = "member"
+)
+
+// OIDCEnvFields are the fields of a persona's environment, each KOINON_DRILL_OIDC_<PERSONA>_<FIELD> (for example
+// KOINON_DRILL_OIDC_ADMIN_PRIVATE_KEY). They are the fields of a CDP WebAuthn.addCredential call plus the login
+// name and the origin of the issuer's relying party. The values live in the operator's environment and never in
+// a file of the repository; nothing logs them.
+var OIDCEnvFields = []string{"USERNAME", "CREDENTIAL_ID", "RP_ID", "ORIGIN", "PRIVATE_KEY", "USER_HANDLE", "SIGN_COUNT"}
+
+// OIDCEnv is the name of one persona environment variable.
+func OIDCEnv(persona, field string) string {
+	return "KOINON_DRILL_OIDC_" + strings.ToUpper(persona) + "_" + field
+}
 
 // Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
 // outside the repository, only this schema is in it).
@@ -282,29 +301,13 @@ func (o *OIDC) validate() error {
 	if o.ClientID == "" {
 		return fmt.Errorf("clientId is empty")
 	}
-	if o.LocalPort < 0 || o.LocalPort > 65535 {
-		return fmt.Errorf("localPort %d is not a port", o.LocalPort)
+	if o.Admin.Group == "" || o.Member.Group == "" {
+		return fmt.Errorf("admin.group and member.group are required")
 	}
-	if o.RedirectURL != "" && !strings.HasPrefix(o.RedirectURL, "http") {
-		return fmt.Errorf("redirectUrl %q must be an http(s) URL", o.RedirectURL)
+	if o.Admin.Group == o.Member.Group {
+		return fmt.Errorf("admin and member are in the same group %q: the check compares two roles", o.Admin.Group)
 	}
 	return nil
-}
-
-// Port is the local port of the forward, with the default applied.
-func (o *OIDC) Port() int {
-	if o.LocalPort == 0 {
-		return DefaultOIDCLocalPort
-	}
-	return o.LocalPort
-}
-
-// Redirect is the callback URL, with the default applied.
-func (o *OIDC) Redirect() string {
-	if o.RedirectURL != "" {
-		return o.RedirectURL
-	}
-	return fmt.Sprintf("http://localhost:%d/auth/oidc/callback", o.Port())
 }
 
 // NamespaceManifest is the Namespace object the drill creates: the run label, then the operator's labels.

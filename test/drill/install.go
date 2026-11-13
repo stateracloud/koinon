@@ -53,8 +53,8 @@ const (
 // Secret, and the hold. The base file is the kind quickstart's (test/e2e/kind/koinon-values.yaml).
 //
 // cp turns home checkpoints on (ADR 0032); a nil cp leaves them off. oidc, when set, turns the chart's OIDC login on
-// for the topology's issuer and client (group mappings and the like stay in the operator's values file).
-func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, storageClass string, cp *Checkpoints, oidc *OIDC) (string, error) {
+// for the topology's issuer and client, with the redirect URL on oidcPort (the fixed local port of that side).
+func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, storageClass string, cp *Checkpoints, oidc *OIDC, oidcPort int) (string, error) {
 	pg := map[string]any{"cnpg": map[string]any{"storage": map[string]any{"size": "1Gi"}}}
 	if storageClass != "" {
 		pg["cnpg"].(map[string]any)["storage"].(map[string]any)["storageClass"] = storageClass
@@ -85,11 +85,12 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 		"preflight": map[string]any{"openshell": map[string]any{"namespace": gw.Namespace, "configMap": gw.Service + "-config", "workload": gw.Service}},
 	}
 	if oidc != nil {
-		o := map[string]any{"enabled": true, "issuerUrl": oidc.IssuerURL, "clientId": oidc.ClientID, "redirectUrl": oidc.Redirect()}
-		if oidc.ClientSecretName != "" {
-			o["clientSecret"] = map[string]any{"existingSecret": oidc.ClientSecretName, "key": "client-secret"}
+		// A public client: clientSecret.existingSecret stays empty (PKCE only). The groups map to roles in the
+		// default org, so a persona keeps its role on the restored copy.
+		v["oidc"] = map[string]any{
+			"enabled": true, "issuerUrl": oidc.IssuerURL, "clientId": oidc.ClientID, "redirectUrl": OIDCRedirect(oidcPort),
+			"groupMappings": map[string]string{oidc.Admin.Group: "admin", oidc.Member.Group: "member"},
 		}
-		v["oidc"] = o
 	}
 	if cp != nil {
 		v["checkpoints"] = map[string]any{"enabled": true, "s3": map[string]any{"existingSecret": CheckpointSecretName, "bucket": CheckpointBucket}}

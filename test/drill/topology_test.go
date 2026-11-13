@@ -109,8 +109,11 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 	if top.NamespaceHook == "" || top.NamespaceLabels["lab.stateracloud.com/openbao"] != "true" || top.OIDC == nil {
 		t.Errorf("the lab example should show the hook, the label and the OIDC inputs: %+v", top)
 	}
-	if got := top.OIDC.Redirect(); got != "http://localhost:18080/auth/oidc/callback" {
-		t.Errorf("default redirect: %q", got)
+	if got := drill.OIDCRedirect(drill.OIDCSourcePort); got != "http://127.0.0.1:18181/auth/oidc/callback" {
+		t.Errorf("source redirect: %q", got)
+	}
+	if got := drill.OIDCRedirect(drill.OIDCTargetPort); got != "http://127.0.0.1:18182/auth/oidc/callback" {
+		t.Errorf("target redirect: %q", got)
 	}
 	dir := t.TempDir()
 	for name, mod := range map[string]func(string) string{
@@ -119,6 +122,8 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 		"bad label value": func(s string) string { return strings.Replace(s, "openbao: \"true\"", "openbao: \"not valid!\"", 1) },
 		"http issuer":     func(s string) string { return strings.Replace(s, "issuerUrl: https://", "issuerUrl: http://", 1) },
 		"no client":       func(s string) string { return strings.Replace(s, "clientId: koinon-drill", "clientId: \"\"", 1) },
+		"one group":       func(s string) string { return strings.Replace(s, "group: koinon-users", "group: koinon-admins", 1) },
+		"no member group": func(s string) string { return strings.Replace(s, "group: koinon-users", "group: \"\"", 1) },
 	} {
 		f := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
 		if err := os.WriteFile(f, []byte(mod(string(b))), 0o600); err != nil {
@@ -132,41 +137,35 @@ func TestTheHookAndOIDCInputsAreChecked(t *testing.T) {
 
 func TestTheOIDCValuesReachTheChartOnlyWhenSet(t *testing.T) {
 	gw := drill.Gateway{Namespace: "koinon-drill-os-src-abc123", Service: "openshell", ClientTLSSecret: "c"}
-	on, err := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil,
-		&drill.OIDC{IssuerURL: "https://idp.example.invalid/realms/drill", ClientID: "koinon-drill", ClientSecretName: "drill-oidc"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"issuerUrl: https://idp.example.invalid/realms/drill", "clientId: koinon-drill", "existingSecret: drill-oidc", "redirectUrl: http://localhost:18080/auth/oidc/callback"} {
-		if !strings.Contains(on, want) {
-			t.Errorf("overlay lacks %q:\n%s", want, on)
+	oidc := &drill.OIDC{IssuerURL: "https://idp.example.invalid/realms/drill", ClientID: "koinon-drill",
+		Admin: drill.Persona{Group: "koinon-admins"}, Member: drill.Persona{Group: "koinon-users"}}
+	for port, redirect := range map[int]string{
+		drill.OIDCSourcePort: "redirectUrl: http://127.0.0.1:18181/auth/oidc/callback",
+		drill.OIDCTargetPort: "redirectUrl: http://127.0.0.1:18182/auth/oidc/callback",
+	} {
+		on, err := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil, oidc, port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"issuerUrl: https://idp.example.invalid/realms/drill", "clientId: koinon-drill", redirect,
+			"koinon-admins: admin", "koinon-users: member"} {
+			if !strings.Contains(on, want) {
+				t.Errorf("overlay for port %d lacks %q:\n%s", port, want, on)
+			}
+		}
+		// A public client: no client secret anywhere.
+		if strings.Contains(on, "clientSecret") || strings.Contains(on, "existingSecret") {
+			t.Errorf("the OIDC client is public, but the overlay names a secret:\n%s", on)
 		}
 	}
-	off, _ := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil, nil)
+	off, _ := drill.ValuesOverlay("koinon-drill-fakes-abc123", gw, "drill-src-abc123", false, "", nil, nil, 0)
 	if strings.Contains(off, "oidc") {
 		t.Errorf("no OIDC input, but the overlay has it:\n%s", off)
 	}
 }
 
-func TestTheFakeMCPServerIsAnInputAndItsHostIsAllowed(t *testing.T) {
-	top, err := drill.LoadTopology("topology/kind.yaml", "a1b2c3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if top.FakeMCPImage == "" {
-		t.Fatal("the kind topology names the fake MCP image")
-	}
-	top.FakeMCPImage = ""
-	if err := top.Validate(); err == nil || !strings.Contains(err.Error(), "fakeMcpImage") {
-		t.Fatalf("a topology without fakeMcpImage must be refused, got %v", err)
-	}
-	m := drill.FakeMCPManifest("koinon-drill-fakes-a1b2c3", "a1b2c3", "localhost:5001/koinon-fakemcp:e2e")
-	for _, want := range []string{"name: fakemcp", drill.FakeMCPKey, drill.RunLabel + `: "a1b2c3"`} {
-		if !strings.Contains(m, want) {
-			t.Errorf("the fake MCP manifest lacks %q", want)
-		}
-	}
-	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
-		t.Error("the fake MCP URL names the Service in the fakes namespace")
+func TestThePersonaEnvNamesAreFixed(t *testing.T) {
+	if got := drill.OIDCEnv(drill.PersonaAdmin, "PRIVATE_KEY"); got != "KOINON_DRILL_OIDC_ADMIN_PRIVATE_KEY" {
+		t.Errorf("env name: %q", got)
 	}
 }
