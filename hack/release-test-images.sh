@@ -33,8 +33,8 @@ trap 'rm -f "$refs"' EXIT
 # shellcheck source=hack/push-retry-lib.sh
 . "$root/hack/push-retry-lib.sh"
 
-# The fake servers the drills need, one ko image each (cmd/<name>). test/drill's Validate() requires an image
-# for each of them; hack/release-test-images-test.sh checks that every image the topology requires is here.
+# The fake servers the drills need, one ko image each (cmd/<name>). TestEveryImageTheDrillRequiresIsPublishedOrAllowlisted
+# (test/drill/topology_test.go) checks this list against the drill topology's image fields.
 fakes=(koinon-fakemodel koinon-fakemcp)
 
 # Multi-arch ko images (the kind drill runs on either architecture).

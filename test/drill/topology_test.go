@@ -208,7 +208,8 @@ var publishedFakes = map[string]string{
 	"FakeMCPImage":   "koinon-fakemcp",
 }
 
-// unpublishedImages are image fields Validate() requires that the release deliberately does not publish.
+// unpublishedImages are image fields the release deliberately does not publish; they are allowed even when
+// Validate() requires them.
 var unpublishedImages = map[string]string{
 	// The S3 server for home checkpoints is an upstream image (SeaweedFS), pinned by digest in the topology.
 	"ObjectStoreImage": "upstream image, pinned by digest; not built by this repository",
@@ -248,8 +249,9 @@ func imageFields(v reflect.Value, into map[string]*string) {
 	}
 }
 
-// The drill topology must not require an image the release does not publish (#952). Validate() is the
-// single source of truth: blank each image field in turn and see which ones it rejects.
+// The drill topology must not require an image the release does not publish (#952). Two checks: every field
+// in publishedFakes names an image hack/release-test-images.sh pushes, and every image field Validate()
+// rejects when blank (today only fakeMcpImage) is published or allowlisted.
 func TestEveryImageTheDrillRequiresIsPublishedOrAllowlisted(t *testing.T) {
 	top, err := drill.LoadTopology("topology/kind.yaml", "abc123")
 	if err != nil {
@@ -259,6 +261,9 @@ func TestEveryImageTheDrillRequiresIsPublishedOrAllowlisted(t *testing.T) {
 	imageFields(reflect.ValueOf(top).Elem(), fields)
 	if len(fields) == 0 {
 		t.Fatal("no *Image fields found in Topology")
+	}
+	if err := top.Validate(); err != nil {
+		t.Fatalf("topology/kind.yaml must validate before fields are blanked: %v", err)
 	}
 
 	published := map[string]bool{}
