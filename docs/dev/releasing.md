@@ -250,7 +250,7 @@ repository (which is what gives the workflow's `GITHUB_TOKEN` write access) asyn
 manifest PUT can answer `DENIED: requested access to the resource is denied` while the blobs and the SBOM go
 up (#950; v0.1.0-rc.19 needed one re-run per new package). `hack/push-retry-lib.sh` retries a push that failed
 with DENIED, 5 attempts with 3, 6, 12 and 24 seconds between them (`PUSH_RETRY_ATTEMPTS`, `PUSH_RETRY_DELAY`);
-any other error fails at once. A DENIED that lasts the whole minute is a real permission problem: check the
+any other error fails at once. A DENIED that lasts all five attempts (about 45 seconds of waiting) is a real permission problem: check the
 package's **Manage Actions access** and the job's `packages: write`. The release images pushed by GoReleaser
 and the `flavors` jobs are not covered; if a new image of those hits it, re-run the job and open an issue.
 

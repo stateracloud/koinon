@@ -19,6 +19,7 @@
 #   PUSH_RETRY_ATTEMPTS  total attempts, default 5
 #   PUSH_RETRY_DELAY     seconds before the second attempt, default 3; it doubles each time (3+6+12+24 = 45 s)
 #
+# The match is "denied: requested access" in any case: ko and crane print DENIED, docker and buildx print denied.
 # stdout of the command passes through; stderr is shown as it comes and also inspected.
 
 push_retry() {
@@ -26,16 +27,18 @@ push_retry() {
 	errf=$(mktemp "${TMPDIR:-/tmp}/push-retry.XXXXXX") || return 1
 	while :; do
 		rc=0
-		"$@" 2> >(tee "$errf" >&2) || rc=$?
-		wait # the tee process substitution finished, errf is complete
-		((rc == 0)) && { rm -f "$errf"; return 0; }
-		if ! grep -q 'DENIED' "$errf"; then
-			rm -f "$errf"
+		# stderr goes through tee in a pipeline, which waits for tee, so errf is complete below; stdout passes through
+		# on fd 3 untouched. The command's own status is written to a file (PIPESTATUS is unreliable with set -e).
+		{ { "$@" && echo 0 >"$errf.rc" || echo $? >"$errf.rc"; } 2>&1 >&3 3>&- | tee "$errf" >&2 3>&-; } 3>&1 || true
+		rc=$(cat "$errf.rc") && rm -f "$errf.rc"
+		((rc == 0)) && { rm -f "$errf" "$errf.rc"; return 0; }
+		if ! grep -qi 'denied: requested access' "$errf"; then
+			rm -f "$errf" "$errf.rc"
 			return "$rc"
 		fi
 		if ((n >= attempts)); then
 			echo "push retry: still DENIED after $n attempts: $*" >&2
-			rm -f "$errf"
+			rm -f "$errf" "$errf.rc"
 			return "$rc"
 		fi
 		echo "push retry: DENIED (attempt $n of $attempts; a new GHCR package is linked to the repository asynchronously, #950), again in ${delay}s: $*" >&2

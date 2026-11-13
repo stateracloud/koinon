@@ -82,5 +82,23 @@ check "another error fails at once" "$(KO_FAIL_N=99 KO_FAIL_MSG='PUT: UNAUTHORIZ
 check "...with no retry" "$(cat "$tmp/ko-n")" 1
 check "...and no retry message" "$(grep -c 'push retry' "$tmp/err")" 0
 
+# Lower-case docker wording, the rt1 path (run -> push_retry), and stdout passing through a retry.
+cat >"$tmp/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "docker $*" >>"$TMP/calls"
+if [[ $1 == buildx && $2 == build ]]; then
+	n=$(($(cat "$TMP/dk-n" 2>/dev/null || echo 0) + 1))
+	echo "$n" >"$TMP/dk-n"
+	if ((n <= ${DK_FAIL_N:-0})); then echo "${DK_MSG:-denied: requested access to the resource is denied}" >&2; exit 1; fi
+fi
+STUB
+rm -f "$tmp/dk-n"
+check "docker's lower-case denied is retried" "$(DK_FAIL_N=2 run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs8")" 0
+check "...three buildx attempts for the first image, one for the second" "$(cat "$tmp/dk-n")" 4
+check "...and the fixtures output still came through" "$(grep -c '^refs\|rt1-' "$tmp/refs8")" 8
+rm -f "$tmp/dk-n"
+check "a local permission denied is not retried" "$(DK_FAIL_N=9 DK_MSG="permission denied while trying to connect to the docker socket" run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs9")" 1
+check "...one attempt only" "$(cat "$tmp/dk-n")" 1
+
 ((fails == 0)) || { echo "$fails failed" >&2; exit 1; }
 echo "all passed"
