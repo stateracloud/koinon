@@ -1403,7 +1403,9 @@ spec:
 			needs("release")
 			// The evidence is read through `koinon-api run-evidence export` in the target's api pod (#926, #955):
 			// the code path the product and the lab use. Only the enforcement field is read, which no scrubber
-			// touches, so the org's stored credentials are not loaded (--no-org-secrets); the export is not kept.
+			// touches. The scrubber is skipped (--no-org-secrets) because the api pod mounts no KEK dir, and the drill
+			// reads only the summary's Enforcement line. The api image is distroless (no shell, no rm), so the
+			// export directory stays in the pod's /tmp until the drill's namespace is torn down.
 			rows := sql(ctx, &dst, "SELECT org_id || ' ' || id FROM runs ORDER BY id")
 			modes := map[string]string{}
 			for _, row := range strings.Split(rows, "\n") {
