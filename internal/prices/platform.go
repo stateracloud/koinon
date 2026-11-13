@@ -32,11 +32,13 @@ var AutoActor = audit.System("koinon-api:price-refresh")
 // Provenance is where a platform price came from (ADR 0098 decision 4).
 type Provenance struct {
 	// Source is the source id ("openrouter") or "manual" for a price a person typed.
-	Source          string    `json:"source"`
-	URL             string    `json:"url,omitempty"`
-	FetchedAt       time.Time `json:"fetchedAt,omitzero"`
-	SHA256          string    `json:"sha256,omitempty"`
-	CommitSHA       string    `json:"commitSha,omitempty"`
+	Source    string    `json:"source"`
+	URL       string    `json:"url,omitempty"`
+	FetchedAt time.Time `json:"fetchedAt,omitzero"`
+	SHA256    string    `json:"sha256,omitempty"`
+	CommitSHA string    `json:"commitSha,omitempty"`
+	// CommittedAt is the date of CommitSHA; the commit is at least 24 hours older than FetchedAt.
+	CommittedAt     time.Time `json:"committedAt,omitzero"`
 	ETag            string    `json:"etag,omitempty"`
 	Licence         string    `json:"licence,omitempty"`
 	AgreeingSources []string  `json:"agreeingSources,omitempty"`

@@ -192,8 +192,15 @@ func EntryID(providerType, model string) string {
 
 // SourceURL is where a source's prices are read, for the entry's source field.
 func SourceURL(source string) string {
-	if source == SourceOpenRouter {
+	switch source {
+	case SourceOpenRouter:
 		return OpenRouterURL
+	case SourceLiteLLM:
+		return "https://" + githubRawHost + "/" + liteLLMRepo + "/HEAD/" + liteLLMFile
+	case SourceGenaiPrices:
+		return "https://" + githubRawHost + "/" + genaiPricesRepo + "/HEAD/" + genaiPricesFile
+	case SourceModelsDev:
+		return ModelsDevURL
 	}
 	return ""
 }
@@ -260,8 +267,16 @@ type Facts struct {
 	Proposed pricing.Entry
 	// Agreeing are the sources that returned this model's proposed values, this one included.
 	Agreeing []string
+	// Disagreeing are the other sources that can auto-apply for the provider type and whose latest
+	// values for the model differ from the proposed ones.
+	Disagreeing []string
 	// Stable: a live source returned the values unchanged across two fetches at least StabilityWindow apart.
 	Stable bool
+	// Pinned: the source read the values at a commit (CommitSHA set), CommitAge old when it did. A
+	// pinned source needs no second fetch, but the commit must be at least StabilityWindow old
+	// (ADR 0098 decision 2.4).
+	Pinned    bool
+	CommitAge time.Duration
 }
 
 // Verdict is the classification of one proposal.
@@ -278,23 +293,21 @@ var primarySources = map[string]string{"openrouter": SourceOpenRouter}
 
 // independent says whether a source counts as a separate maintainer and data path for a provider
 // type. models.dev never counts towards auto-apply (ADR 0098 decision 7).
-func independent(_, source string) bool { return source != "models-dev" }
+func independent(_, source string) bool { return source != SourceModelsDev }
 
-// Agrees applies the agreement rule: the model's primary source, where one exists, or else at
-// least two independent sources with the same normalized value.
-func Agrees(providerType, source string, agreeing []string) bool {
+// Agrees applies the agreement rule: the provider type's primary source where one exists
+// (OpenRouter for openrouter), or else a source that tracks the provider type first-hand
+// (FirstHand; maintainer decision 2026-11-07 on issue #337). Any other source, an aggregator for a
+// provider it does not track first-hand and models.dev everywhere, only proposes. Other sources
+// that disagree are a separate rule (Facts.Disagreeing); sources that agree add nothing to it.
+func Agrees(providerType, source string, _ []string) bool {
+	if !independent(providerType, source) {
+		return false
+	}
 	if p, ok := primarySources[providerType]; ok {
 		return source == p
 	}
-	n := 0
-	seen := map[string]bool{}
-	for _, s := range agreeing {
-		if !seen[s] && independent(providerType, s) {
-			seen[s] = true
-			n++
-		}
-	}
-	return n >= 2
+	return FirstHand(source, providerType)
 }
 
 func rateOf(s string) (money.Rate, bool) {
@@ -385,9 +398,16 @@ func Classify(f Facts, b Bounds) Verdict {
 	case f.Origin != "fetch":
 		review = append(review, "an uploaded file is never applied by itself: a person reviews it")
 	case !Agrees(f.Proposed.Provider, f.Source, f.Agreeing):
-		review = append(review, fmt.Sprintf("agreement: %s is not the provider's own list and fewer than two independent sources agree (%s)", f.Source, strings.Join(f.Agreeing, ", ")))
+		review = append(review, fmt.Sprintf("agreement: %s does not track %s first-hand and is not its primary source, so it only proposes (sources returning these values: %s)", f.Source, f.Proposed.Provider, strings.Join(f.Agreeing, ", ")))
+	case len(f.Disagreeing) > 0:
+		review = append(review, fmt.Sprintf("agreement: %s returns other values for this model", strings.Join(f.Disagreeing, ", ")))
 	}
-	if f.Origin == "fetch" && !f.Stable {
+	switch {
+	case f.Origin != "fetch" || f.Stable:
+	case f.Pinned && f.CommitAge >= StabilityWindow:
+	case f.Pinned:
+		review = append(review, fmt.Sprintf("pinning: the commit %s read is %s old, under the %s cooldown", f.Source, f.CommitAge.Round(time.Second), StabilityWindow))
+	default:
 		review = append(review, fmt.Sprintf("pinning: %s has not returned these values in two fetches at least %s apart yet", f.Source, StabilityWindow))
 	}
 	v.Failed = append(confirm, review...)

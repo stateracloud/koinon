@@ -1549,6 +1549,8 @@ type AgentRunLimit struct {
 	MaxDurationSecs  pgtype.Int4
 	UpdatedBy        string
 	UpdatedAt        pgtype.Timestamptz
+	MaxContinuations pgtype.Int4
+	TaskSpendUsd     pgtype.Numeric
 }
 
 type AgentSandbox struct {
@@ -2187,19 +2189,20 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                   pgtype.UUID
-	IdleTimeoutSeconds      pgtype.Int4
-	ParkWarmSeconds         pgtype.Int4
-	QueueWaitSeconds        pgtype.Int4
-	CreatedAt               pgtype.Timestamptz
-	UpdatedAt               pgtype.Timestamptz
-	MaxConcurrentRuns       pgtype.Int4
-	TriggerConcurrency      pgtype.Int4
-	TriggerRatePerMinute    pgtype.Int4
-	SandboxWaitCapSeconds   pgtype.Int4
-	LeakMatchThreshold      pgtype.Int4
-	RunContentRetentionDays pgtype.Int4
-	HomeBackupRetentionDays pgtype.Int4
+	OrgID                    pgtype.UUID
+	IdleTimeoutSeconds       pgtype.Int4
+	ParkWarmSeconds          pgtype.Int4
+	QueueWaitSeconds         pgtype.Int4
+	CreatedAt                pgtype.Timestamptz
+	UpdatedAt                pgtype.Timestamptz
+	MaxConcurrentRuns        pgtype.Int4
+	TriggerConcurrency       pgtype.Int4
+	TriggerRatePerMinute     pgtype.Int4
+	SandboxWaitCapSeconds    pgtype.Int4
+	LeakMatchThreshold       pgtype.Int4
+	RunContentRetentionDays  pgtype.Int4
+	HomeBackupRetentionDays  pgtype.Int4
+	ContinuationTaskSpendUsd pgtype.Numeric
 }
 
 type OrgTraceSetting struct {
@@ -2671,6 +2674,7 @@ type Task struct {
 	NotifyUserID             pgtype.UUID
 	NotifyRole               NullOrgRole
 	NotifyChannelID          pgtype.UUID
+	ContinuationCount        int32
 }
 
 type TaskEvent struct {

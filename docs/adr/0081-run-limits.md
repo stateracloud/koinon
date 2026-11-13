@@ -210,3 +210,47 @@ for a setting this ADR itself calls ignored.
 What a cheaper option would cost later: keeping the fields required would have forced every custom
 template to be edited at upgrade time, and a hard default inside the schema would have hidden the
 fallback from the version record.
+
+## Amendment 2026-11-12 (issue 99): continuation runs after a time cap, and a per-task USD cap
+
+Decided 2026-10-28 for after v0.1.0, and 2026-11-11 for the cap's scope: an org default with a
+per-agent override. This is the per-task spend scope that decision 4 left open, in the form the
+wrap-up note of [0066](0066-triggers-and-scheduling.md) asked for.
+
+1. **A run canceled at its wall-clock cap is followed by a continuation run of the same task.** The
+   task keeps its sandbox lifecycle and its timeline; the new run is queued with the origin of the
+   canceled one, and a system message (`source: continuation`, with the number) tells the agent that
+   its previous run stopped at the time limit. Both writers of the time-cap cancel do it in the
+   cancel's transaction: the run's owner (`runoutcome.Config.AfterTimeLimit`, wired by agentd) and the
+   sweep (`CancelOverTimeLimit`); both call `scheduler.ContinueAfterTimeLimit`. A failure rolls the
+   cancel back, so a task is never left with a canceled run and no next step. The request and spend
+   limits of a run are not continued: they say the run loops or costs too much, which a new run would
+   repeat.
+2. **At most 3 per task**, counted in `tasks.continuation_count`. The count is the template's
+   `limits.run.maxContinuations` (0 to 10; unset is 3), over which an admin's per-agent override
+   applies (`agent_run_limits.max_continuations`). 0 switches continuation off for the agent: the
+   task is left as any cancel leaves it.
+3. **Only while the task has budget.** The per-task cap is the sum of the settled cost of every run of
+   the task (`GetTaskSpend`; the same ledger figure as the run level). The org's default is
+   `org_settings.continuation_task_spend_usd` (platform default $20.00, four runs at the default run
+   limit); the agent's own cap is `agent_run_limits.task_spend_usd` and wins. A continuation starts
+   only while the task's spend is below the cap. The per-run limits still end each run; this is the
+   bound on the sum. It is checked when the continuation would start, so a task can pass the cap by
+   what its last run spent, as a run can pass its own limit by one in-flight response.
+4. **After the last one, or at the cap, the task goes to `input_required`** ("blocked on you"), with a
+   `status.changed` event whose `reason` is `continuation_limit`, `task_spend_cap` or
+   `continuation_agent_unavailable` (the agent was archived or is unhealthy) and the counts and
+   amounts in the payload. A person's message resumes it as any input-required task. The count is per
+   task and is not reset by the message: a task that used its 3 continuations is blocked again at its
+   next time cap. The step runs in a savepoint of the cancel's transaction: if it fails (for example
+   an agent version that no longer parses), the failure is logged and the run stays canceled, so a
+   task's configuration problem never keeps a run past its time limit or stops the sweep.
+5. **Schema.** Additive (`00088`): `tasks.continuation_count`, `org_settings.continuation_task_spend_usd`,
+   `agent_run_limits.max_continuations` and `task_spend_usd`. The per-agent override rows are written by
+   `budget.Service.SetAgentContinuationLimits`, the org default by
+   `budget.Service.SetOrgContinuationTaskSpend`; neither touches the other overrides of its row. They
+   have no API method yet (a proto change, tracked in issue 923).
+
+What a cheaper option would cost later: counting continuations on the run (a chain through
+`continued_from`) would have needed a recursive read at every cap, and a cap checked only per run
+would let three continuations spend four times the run limit with nothing bounding the task.

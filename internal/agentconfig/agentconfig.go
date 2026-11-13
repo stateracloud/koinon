@@ -22,6 +22,19 @@ const (
 	DefaultMaxModelRequests = int64(200)
 )
 
+// DefaultMaxContinuations is the number of continuation runs a task gets after a time cap when
+// neither the template nor the agent sets one (issue #99).
+const DefaultMaxContinuations = 3
+
+// MaxContinuations returns the continuation runs a task of this version gets: the template's
+// value, or the platform default when it sets none. 0 is a value: no continuation.
+func (c Config) MaxContinuations() int {
+	if m := c.Limits.Run.MaxContinuations; m != nil {
+		return *m
+	}
+	return DefaultMaxContinuations
+}
+
 // DefaultMaxSpend is the run spend limit of a version that sets none: $5.
 var DefaultMaxSpend = money.FromCents(500)
 

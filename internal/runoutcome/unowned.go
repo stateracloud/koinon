@@ -144,8 +144,9 @@ func CancelForAgent(ctx context.Context, q *store.Queries, org, agentID pgtype.U
 // CancelOverTimeLimit cancels every owned run of the org past its wall-clock cap, with the note of
 // runreply.TimeLimitNote: the same note the run's owner writes when it stops the run at its time
 // limit itself (Owner.CancelAtTimeLimit). A failure to read the summary leaves it out; the cancel
-// does not wait on it.
-func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID) ([]store.Run, error) {
+// does not wait on it. after, when not nil, runs for each canceled run in the same transaction
+// (see Config.AfterTimeLimit).
+func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID, after RunStep) ([]store.Run, error) {
 	q := store.New(db)
 	runs, err := q.CancelRunsOverWallClock(ctx, store.CancelRunsOverWallClockParams{
 		OrgID: org, OutcomeReason: "wall-clock cap exceeded",
@@ -167,9 +168,34 @@ func CancelOverTimeLimit(ctx context.Context, db TxDB, org pgtype.UUID) ([]store
 		if err != nil {
 			return nil, err
 		}
+		if after != nil {
+			if err := after(ctx, q, r); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// runAfter runs the step that follows a time-limit cancel in a savepoint of db. A step that fails
+// is rolled back and logged, and the cancel stands: a configuration problem of one task must not
+// keep its run past its time limit, nor stop the sweep for the orgs after it. An error opening the
+// savepoint is returned, as the transaction is then unusable.
+func runAfter(ctx context.Context, db TxDB, run store.Run, step RunStep) error {
+	if step == nil {
+		return nil
+	}
+	sp, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := step(ctx, store.New(sp), run); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.Warn("what follows a run's time limit failed; the run stays canceled", "run", run.ID.String(), "err", err)
+		return nil
+	}
+	return sp.Commit(ctx)
 }
 
 type summaryOf struct{ text, source string }

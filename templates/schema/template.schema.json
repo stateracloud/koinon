@@ -166,6 +166,12 @@
                   "pattern": "^(0|[1-9][0-9]{0,5})(\\.[0-9]{1,2})?$",
                   "not": {"pattern": "^0(\\.0{1,2})?$"}
                 },
+                "maxContinuations": {
+                  "description": "Continuation runs a task gets after a run hits its time limit (ADR 0081 amendment 2026-11-12). Optional: without it a task gets the platform default of 3. 0 switches continuation off. A continuation starts only while the task's spend is below the per-task USD cap (the org's default, or the agent's own); after the last one the task goes to input-required.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
                 "maxTokens": {
                   "description": "Deprecated and ignored: tokens are reported, not enforced (ADR 0081). Still accepted, so a template that sets only it validates; the platform defaults then apply to its runs.",
                   "type": "integer",

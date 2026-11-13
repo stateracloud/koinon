@@ -18,6 +18,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // Platform defaults (ADR 0066 decision 11).
@@ -36,6 +37,10 @@ const (
 	DefaultTriggerConcurrency   = 4
 	DefaultTriggerRatePerMinute = 60
 )
+
+// DefaultContinuationTaskSpend is the per-task USD cap for continuation runs of an org that sets
+// none: four runs at the platform's default run spend limit of $5 (issue #99).
+var DefaultContinuationTaskSpend = money.FromCents(2000)
 
 // Settings are the effective tunables of one org.
 type Settings struct {
@@ -58,6 +63,9 @@ type Settings struct {
 	// HomeBackupRetention is how long an old home backup repository is kept after a key change
 	// (homebackup.go).
 	HomeBackupRetention time.Duration
+	// ContinuationTaskSpend is the most a task may have spent for a continuation run to start after
+	// a run hit its time limit (issue #99). An agent's own cap overrides it.
+	ContinuationTaskSpend money.USD
 }
 
 // Defaults are the platform defaults a Settings falls back to.
@@ -67,6 +75,7 @@ func Defaults() Settings {
 		SandboxWaitCap: DefaultSandboxWaitCap, RunContentRetention: DefaultRunContentRetention,
 		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
 		TriggerRatePerMinute: DefaultTriggerRatePerMinute, HomeBackupRetention: DefaultHomeBackupRetention,
+		ContinuationTaskSpend: DefaultContinuationTaskSpend,
 	}
 }
 
@@ -110,7 +119,24 @@ func apply(def Settings, row store.OrgSetting) Settings {
 	if row.HomeBackupRetentionDays.Valid {
 		def.HomeBackupRetention = time.Duration(row.HomeBackupRetentionDays.Int32) * 24 * time.Hour
 	}
+	if row.ContinuationTaskSpendUsd.Valid {
+		if v, err := row.ContinuationTaskSpendUsd.Value(); err == nil {
+			if str, _ := v.(string); str != "" {
+				if u, err := money.ParseNumeric(str); err == nil && u > 0 {
+					def.ContinuationTaskSpend = u
+				}
+			}
+		}
+	}
 	return def
+}
+
+// SetContinuationTaskSpend sets the org's default per-task USD cap for continuation runs; zero is
+// the platform default. The other settings stay.
+func SetContinuationTaskSpend(ctx context.Context, q *store.Queries, org pgtype.UUID, v money.USD) error {
+	return q.SetOrgContinuationTaskSpend(ctx, store.SetOrgContinuationTaskSpendParams{
+		OrgID: org, ContinuationTaskSpendUsd: pgtype.Text{String: v.Numeric(), Valid: v > 0},
+	})
 }
 
 // Override is a change to the org's settings; a nil field means the platform default.

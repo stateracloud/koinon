@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -239,7 +240,7 @@ func newRefresher(ctx context.Context, pool *pgxpool.Pool, metrics *prices.Metri
 		return nil, err
 	}
 	return prices.NewRefresher(svc, prices.RefreshConfig{
-		Adapters: []pricefetch.Adapter{pricefetch.NewOpenRouter(httpClient())},
+		Adapters: pricefetch.NewAdapters(httpClient()),
 		Bounds:   bounds,
 		Metrics:  metrics,
 		Catalog:  orcatalog.New(pool),
@@ -250,21 +251,44 @@ func httpClient() *http.Client { return &http.Client{Timeout: 60 * time.Second} 
 
 // fetchToFile fetches every source and writes the snapshots to path, without a database.
 func fetchToFile(ctx context.Context, path string, w io.Writer) error {
-	a := pricefetch.NewOpenRouter(httpClient())
-	snap, err := a.Fetch(ctx, time.Now())
-	if err != nil {
-		return err
+	var snaps []pricefetch.Snapshot
+	var failed []string
+	for _, a := range pricefetch.NewAdapters(httpClient()) {
+		snap, err := a.Fetch(ctx, time.Now())
+		if err == nil {
+			err = pricefetch.CheckFloor(snap, minModels(a), 0)
+		}
+		if err != nil {
+			// One source failing (a GitHub source still in its 24 hour cooldown, an outage) does not
+			// stop the others from being exported.
+			failed = append(failed, fmt.Sprintf("%s: %v", a.Name(), err))
+			_, _ = fmt.Fprintf(w, "skipped %s: %v\n", a.Name(), err)
+			continue
+		}
+		snaps = append(snaps, snap)
 	}
-	if err := pricefetch.CheckFloor(snap, pricefetch.OpenRouterMinModels, 0); err != nil {
-		return err
+	if len(snaps) == 0 {
+		return fmt.Errorf("no source could be fetched: %s", strings.Join(failed, "; "))
 	}
-	b, err := pricefetch.EncodeFile([]pricefetch.Snapshot{snap})
+	b, err := pricefetch.EncodeFile(snaps)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "wrote %d models from %s to %s\n", snap.Count, snap.Source, path)
-	return err
+	for _, snap := range snaps {
+		if _, err := fmt.Fprintf(w, "wrote %d models from %s to %s\n", snap.Count, snap.Source, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// minModels is the model-count floor of an adapter.
+func minModels(a pricefetch.Adapter) int {
+	if f, ok := a.(interface{ MinModels() int }); ok {
+		return f.MinModels()
+	}
+	return 1
 }

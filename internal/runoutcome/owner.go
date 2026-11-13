@@ -63,6 +63,10 @@ type DB interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// RunStep is a step that runs in the transaction in which a run ends, after the run and its task
+// events are written. An error rolls the whole end back.
+type RunStep func(ctx context.Context, q *store.Queries, run store.Run) error
+
 // Metrics counts what the verbs did. A nil Metrics counts nothing.
 type Metrics interface {
 	// Finished counts a run that ended, parked or succeeded, by state.
@@ -85,6 +89,10 @@ type Config struct {
 	// Now is the clock of the park's default expiry; nil is time.Now.
 	Now     func() time.Time
 	Metrics Metrics
+	// AfterTimeLimit, when set, runs in the transaction that cancels the run at its wall-clock cap
+	// (CancelAtTimeLimit). agentd wires scheduler.ContinueAfterTimeLimit: it queues a continuation
+	// run, or blocks the task on its owner (issue #99). Nil does nothing.
+	AfterTimeLimit RunStep
 	// Stop reports a reason, besides the fence, why the worker must not write (the pool is shutting
 	// down). It is asked before a database error is read as a fence, and its error is returned as it
 	// is. Nil means there is none.
