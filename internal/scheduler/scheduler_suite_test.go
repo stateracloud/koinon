@@ -161,6 +161,61 @@ var _ = Describe("one queued run per task", func() {
 		other, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: second.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(other.State).To(Equal(store.RunStateQueued))
+
+		runEvents, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: w.org, RunID: first.ID, MaxEvents: 100})
+		Expect(err).NotTo(HaveOccurred())
+		var runKinds []string
+		for _, e := range runEvents {
+			runKinds = append(runKinds, e.Kind)
+		}
+		Expect(runKinds).To(ContainElement(runoutcome.KindRunCanceled))
+		Expect(runKinds).NotTo(ContainElement("run.requeued"))
+		taskEvents, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: w.org, TaskID: w.task.ID, MaxEvents: 100})
+		Expect(err).NotTo(HaveOccurred())
+		found := false
+		for _, e := range taskEvents {
+			if e.Kind == runoutcome.KindRunCanceled && e.RunID == first.ID {
+				found = true
+				Expect(string(e.Payload)).To(ContainSubstring(string(runoutcome.ReasonSuperseded)))
+			}
+		}
+		Expect(found).To(BeTrue(), "a task event says why the run was canceled")
+	})
+
+	It("does not deadlock when a cancel and a requeue meet on one starting run", func(ctx SpecContext) {
+		for range 10 {
+			w := newWorld(ctx)
+			first, _, err := w.enqueue(ctx, w.task)
+			Expect(err).NotTo(HaveOccurred())
+			claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
+			Expect(err).NotTo(HaveOccurred())
+			own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
+			start := make(chan struct{})
+			cancelErr := make(chan error, 1)
+			requeueErr := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				<-start
+				cancelErr <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+					_, err := runoutcome.CancelUnowned(ctx, q.WithTx(tx), w.org, first.ID,
+						runoutcome.Cancellation{Reason: runoutcome.ReasonUser, Message: "canceled by a person"})
+					return err
+				})
+			}()
+			go func() {
+				defer GinkgoRecover()
+				<-start
+				requeueErr <- own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")
+			}()
+			close(start)
+			// A lost race is a fence or a missing row; a deadlock is any other error.
+			if err := <-cancelErr; err != nil {
+				Expect(err).To(MatchError(pgx.ErrNoRows))
+			}
+			if err := <-requeueErr; err != nil {
+				Expect(err).To(MatchError(runoutcome.ErrFenced))
+			}
+		}
 	})
 
 	It("still requeues a run when no other run of the task is queued", func(ctx SpecContext) {

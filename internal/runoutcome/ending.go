@@ -432,25 +432,51 @@ func (o *Owner) postReply(ctx context.Context, q *store.Queries) error {
 func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 	superseded := false
 	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
-		// Lock order of scheduler.LockTask: the task row before any run row. A message that
-		// queues a run of the task holds this lock, so no queued run appears between the check
-		// in RequeueRun and its write (runs_one_queued_per_task).
+		// Lock order of scheduler.LockTask: a path that ends a run locks the run row, then the
+		// task row (the cancel paths and the sweep do the same). A message that queues a run of
+		// the task holds the task lock, so no queued run appears between the check below and the
+		// write of RequeueRun (runs_one_queued_per_task).
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: o.run.OrgID, ID: o.run.ID})
+		if err != nil {
+			return err
+		}
+		if run.Epoch != o.run.Epoch || run.State != store.RunStateStarting {
+			return pgx.ErrNoRows
+		}
 		if _, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: o.run.OrgID, ID: o.run.TaskID}); err != nil {
 			return err
 		}
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]string{"reason": reason})
-		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-			Kind: "run.requeued", Payload: payload, SourceSeq: src,
-		}); err != nil {
+		runs, err := q.ListRunsForTask(ctx, store.ListRunsForTaskParams{OrgID: o.run.OrgID, TaskID: o.run.TaskID})
+		if err != nil {
 			return err
 		}
+		for _, other := range runs {
+			if other.ID != o.run.ID && other.State == store.RunStateQueued {
+				superseded = true
+			}
+		}
+		if !superseded {
+			payload, _ := json.Marshal(map[string]string{"reason": reason})
+			if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+				OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+				Kind: "run.requeued", Payload: payload, SourceSeq: src,
+			}); err != nil {
+				return err
+			}
+		}
 		r, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch})
-		// Another run of the task is queued already: this one ended as superseded instead.
-		superseded = r.State == store.RunStateCanceled
+		if err != nil {
+			return err
+		}
+		// Another run of the task is queued already: this one ended as canceled, and the run and
+		// task timelines say why, like every other cancel.
+		if superseded {
+			_, err = recordCanceled(ctx, q, r, Cancellation{Reason: ReasonSuperseded, Message: "superseded by a queued run of the task",
+				Extra: map[string]any{"requeueReason": reason}})
+		}
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

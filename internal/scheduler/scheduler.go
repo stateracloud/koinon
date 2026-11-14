@@ -10,7 +10,8 @@
 //     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
 //     0081). Tokens are reported by RecordUsage, not enforced.
 //   - One queued run per task: the enqueue paths take the task's row lock first, through LockTask
-//     (lock order: task row, then agent row, then run rows), and the unique index
+//     (lock order of an enqueue path: task row, then agent row; a path that ends a run locks the run row,
+//     then the task row), and the unique index
 //     runs_one_queued_per_task refuses what the lock was meant to prevent.
 //   - Every cancel writes a run event and a task event saying why.
 //
@@ -56,9 +57,10 @@ var ErrQueuedRunExists = errors.New("the task has a queued run already")
 const queuedRunIndex = "runs_one_queued_per_task"
 
 // LockTask takes the task's row lock and returns the task as it is now. It is the first step of
-// every path that queues a run of the task, and the only place that says the lock order: task row,
-// then agent row, then run rows (ClaimNextRun locks agent then run; the paths that end a run lock the
-// task before the run, see runoutcome.Owner.Requeue). The lock lasts to the end of the transaction, so the
+// every path that queues a run of the task, and the only place that says the lock order. An enqueue
+// path locks the task row, then the agent row (ClaimNextRun locks agent then run). A path that ends
+// a run locks the run row, then the task row (cancel, limits, sweep and runoutcome.Owner.Requeue);
+// an enqueue path holds no lock on a starting run, so the two orders cannot meet in a cycle. The lock lasts to the end of the transaction, so the
 // caller must be in one: LockTask returns an error when the lock did not outlast the statement.
 // Locking a row the transaction holds already costs nothing.
 func LockTask(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Task, error) {
