@@ -178,6 +178,14 @@ SET sandbox_wait_started_at = coalesce(sandbox_wait_started_at, @started::timest
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state IN ('starting', 'running')
 RETURNING sandbox_wait_started_at;
 
+-- name: CarrySandboxWaitToQueued :execrows
+-- A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
+-- run of the task, which takes over its place in the queue. The earlier start wins, so the total
+-- wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+UPDATE runs
+SET sandbox_wait_started_at = least(coalesce(sandbox_wait_started_at, @started::timestamptz), @started::timestamptz)
+WHERE org_id = @org_id AND task_id = @task_id AND id <> @id AND state = 'queued';
+
 -- name: ClearSandboxWaitForAgent :execrows
 -- The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 -- run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses

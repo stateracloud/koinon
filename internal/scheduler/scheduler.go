@@ -9,10 +9,8 @@
 //     agent's override): a wall-clock limit enforced by Sweeper, and a model-request limit and a
 //     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
 //     0081). Tokens are reported by RecordUsage, not enforced.
-//   - One queued run per task: the enqueue paths take the task's row lock first, through LockTask
-//     (lock order of an enqueue path: task row, then agent row; a path that ends a run locks the run row,
-//     then the task row), and the unique index
-//     runs_one_queued_per_task refuses what the lock was meant to prevent.
+//   - One queued run per task: the enqueue paths take the task's row lock first, through LockTask,
+//     and the unique index runs_one_queued_per_task refuses what the lock was meant to prevent.
 //   - Every cancel writes a run event and a task event saying why.
 //
 // Functions taking a *store.Queries run inside the caller's transaction.
@@ -57,12 +55,19 @@ var ErrQueuedRunExists = errors.New("the task has a queued run already")
 const queuedRunIndex = "runs_one_queued_per_task"
 
 // LockTask takes the task's row lock and returns the task as it is now. It is the first step of
-// every path that queues a run of the task, and the only place that says the lock order. An enqueue
-// path locks the task row, then the agent row (ClaimNextRun locks agent then run). A path that ends
-// a run locks the run row, then the task row (cancel, limits, sweep and runoutcome.Owner.Requeue);
-// an enqueue path holds no lock on a starting run, so the two orders cannot meet in a cycle. The lock lasts to the end of the transaction, so the
-// caller must be in one: LockTask returns an error when the lock did not outlast the statement.
-// Locking a row the transaction holds already costs nothing.
+// every path that queues a run of the task. The lock lasts to the end of the transaction, so the
+// caller must be in one: LockTask checks that, and returns an error when the lock did not outlast
+// the statement. It does not check the lock order, and it cannot: nothing here knows which other
+// locks the transaction holds.
+//
+// Lock order, kept by hand. An enqueue path locks the task row and no run row (it inserts a new
+// one). A path that ends a run locks the run row first, then the task row (it appends a task
+// event): runoutcome.Owner.Requeue does it explicitly, and CancelForAgent, the limit checks and the
+// sweep do it through their UPDATE of runs followed by the task event. Requeue cannot call LockTask
+// (runoutcome cannot import scheduler, which imports it), so its copy of the order is a comment
+// there. The enqueue order (task) and the end order (run, task) take no two locks in opposite
+// orders, so they cannot wait on each other in a cycle. Locking a row the transaction holds
+// already costs nothing.
 func LockTask(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Task, error) {
 	task, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: org, ID: id})
 	if err != nil {

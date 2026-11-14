@@ -4,9 +4,13 @@ package scheduler_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
@@ -60,6 +64,25 @@ func (w *world) newTask(ctx context.Context) store.Task {
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: w.org, Title: "t", AgentID: w.agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: w.user})
 	Expect(err).NotTo(HaveOccurred())
 	return t
+}
+
+// blindQueuedCheck is a transaction whose HasQueuedRunForTask says no, as if a caller had read the
+// answer before another transaction queued a run. It lets a spec reach the insert that the unique
+// index refuses.
+type blindQueuedCheck struct{ pgx.Tx }
+
+type noRow struct{}
+
+func (noRow) Scan(dest ...any) error {
+	*dest[0].(*bool) = false
+	return nil
+}
+
+func (b blindQueuedCheck) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "name: HasQueuedRunForTask") {
+		return noRow{}
+	}
+	return b.Tx.QueryRow(ctx, sql, args...)
 }
 
 // enqueue queues a run of the task in its own transaction.
@@ -135,7 +158,22 @@ var _ = Describe("one queued run per task", func() {
 		_, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: w.org, AgentID: w.agent, TaskID: w.task.ID, MaxWallClockSeconds: 1800})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: w.org, AgentID: w.agent, TaskID: w.task.ID, MaxWallClockSeconds: 1800})
-		Expect(err).To(HaveOccurred(), "runs_one_queued_per_task")
+		var pgErr *pgconn.PgError
+		Expect(errors.As(err, &pgErr)).To(BeTrue(), "the error is a database error: %v", err)
+		Expect(pgErr.Code).To(Equal("23505"))
+		Expect(pgErr.ConstraintName).To(Equal("runs_one_queued_per_task"))
+	})
+
+	It("maps the refusal to ErrQueuedRunExists when the check before the insert is blind", func(ctx SpecContext) {
+		w := newWorld(ctx)
+		_, _, err := w.enqueue(ctx, w.task)
+		Expect(err).NotTo(HaveOccurred())
+		err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			_, _, err := scheduler.Enqueue(ctx, store.New(blindQueuedCheck{tx}), w.task)
+			return err
+		})
+		Expect(err).To(MatchError(scheduler.ErrQueuedRunExists))
+		Expect(w.queuedRuns(ctx, w.task)).To(Equal(1))
 	})
 
 	It("ends a run that is requeued while another run of the task is queued, as superseded", func(ctx SpecContext) {
@@ -145,6 +183,10 @@ var _ = Describe("one queued run per task", func() {
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(claimed.ID).To(Equal(first.ID))
+		// The first run has waited for its sandbox for ten minutes.
+		waitStart := pgtype.Timestamptz{Time: time.Now().Add(-10 * time.Minute).Truncate(time.Microsecond), Valid: true}
+		_, err = q.MarkRunSandboxWait(ctx, store.MarkRunSandboxWaitParams{Started: waitStart, OrgID: w.org, ID: first.ID, Epoch: claimed.Epoch})
+		Expect(err).NotTo(HaveOccurred())
 		// A message arrives while the first run waits for its sandbox: it queues a second run.
 		second, queued, err := w.enqueue(ctx, w.task)
 		Expect(err).NotTo(HaveOccurred())
@@ -161,6 +203,8 @@ var _ = Describe("one queued run per task", func() {
 		other, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: second.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(other.State).To(Equal(store.RunStateQueued))
+		Expect(other.SandboxWaitStartedAt.Valid).To(BeTrue(), "the queued run carries the wait start")
+		Expect(other.SandboxWaitStartedAt.Time).To(BeTemporally("==", waitStart.Time))
 
 		runEvents, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: w.org, RunID: first.ID, MaxEvents: 100})
 		Expect(err).NotTo(HaveOccurred())

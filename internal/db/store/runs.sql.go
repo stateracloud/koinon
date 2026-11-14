@@ -379,6 +379,35 @@ func (q *Queries) CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOve
 	return items, nil
 }
 
+const carrySandboxWaitToQueued = `-- name: CarrySandboxWaitToQueued :execrows
+UPDATE runs
+SET sandbox_wait_started_at = least(coalesce(sandbox_wait_started_at, $1::timestamptz), $1::timestamptz)
+WHERE org_id = $2 AND task_id = $3 AND id <> $4 AND state = 'queued'
+`
+
+type CarrySandboxWaitToQueuedParams struct {
+	Started pgtype.Timestamptz
+	OrgID   pgtype.UUID
+	TaskID  pgtype.UUID
+	ID      pgtype.UUID
+}
+
+// A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
+// run of the task, which takes over its place in the queue. The earlier start wins, so the total
+// wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+func (q *Queries) CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, carrySandboxWaitToQueued,
+		arg.Started,
+		arg.OrgID,
+		arg.TaskID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimNextRun = `-- name: ClaimNextRun :one
 WITH next AS (
     SELECT r.id AS run_id, r.agent_id

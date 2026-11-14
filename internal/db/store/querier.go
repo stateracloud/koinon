@@ -80,6 +80,10 @@ type Querier interface {
 	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
 	// from every API replica: a run canceled by one sweep no longer matches.
 	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
+	// A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
+	// run of the task, which takes over its place in the queue. The earlier start wins, so the total
+	// wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+	CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error)
 	// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
 	// gone): the verifier compares the two (ADR 0100 decision 4.1).
 	CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.UUID) ([]CheckAnchoredHeadsRow, error)

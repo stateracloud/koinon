@@ -478,6 +478,16 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 				Reason: ReasonSuperseded, Message: "superseded by a queued run of the task",
 				Extra: map[string]any{"requeueReason": reason},
 			})
+			if err != nil {
+				return err
+			}
+			// The queued run takes this run's place, so it takes the start of the wait too: the
+			// sandbox wait cap counts the whole wait (ADR 0066, amendment 2026-10-28).
+			if r.SandboxWaitStartedAt.Valid {
+				_, err = q.CarrySandboxWaitToQueued(ctx, store.CarrySandboxWaitToQueuedParams{
+					OrgID: o.run.OrgID, TaskID: o.run.TaskID, ID: o.run.ID, Started: r.SandboxWaitStartedAt,
+				})
+			}
 		}
 		return err
 	})
