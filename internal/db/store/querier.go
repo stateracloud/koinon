@@ -65,7 +65,10 @@ type Querier interface {
 	BumpTaskContinuation(ctx context.Context, arg BumpTaskContinuationParams) (Task, error)
 	// asked | open -> canceled, for a run that ended without them being answered.
 	CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQuestionsForRunParams) ([]Question, error)
-	// Archiving an agent cancels every run it has not finished.
+	// Archiving an agent cancels every run it has not finished. It locks the runs in id order (the
+	// rule for every statement that locks more than one run row, see runlock.LockTask), so it
+	// cannot wait for a run in a cycle with Owner.Requeue, which locks in the order run R, then task T,
+	// then the queued run Q (with SKIP LOCKED, so it never waits for Q).
 	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// pending -> canceled, for a run that finished without them (for example a
 	// user canceled the parked run).
@@ -78,8 +81,19 @@ type Querier interface {
 	CancelRun(ctx context.Context, arg CancelRunParams) (Run, error)
 	// Cancels owned runs that have been owned longer than their wall-clock cap
 	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
-	// from every API replica: a run canceled by one sweep no longer matches.
+	// from every API replica: a run canceled by one sweep no longer matches. Locks the runs in id
+	// order (see CancelOpenRunsForAgent).
 	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
+	// A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
+	// run of the task, which takes over its place in the queue. The earlier start wins, so the total
+	// wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+	// Skips a queued run that another transaction holds (SKIP LOCKED): the caller holds the task row
+	// lock, and whoever holds the queued run's lock holds no task lock (the task-first paths wait on
+	// ours). The holder is a short lock of another path: a cancel, the claim scan,
+	// ClearSandboxWaitForAgent, or a FOR KEY SHARE lock from an insert that references the queued run.
+	// A missed carry only starts a new wait clock. That is rare and accepted: waiting for the
+	// lock here would put a queued-run lock after the task lock, the order that deadlocks (issue 1015).
+	CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error)
 	// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
 	// gone): the verifier compares the two (ADR 0100 decision 4.1).
 	CheckAnchoredHeads(ctx context.Context, anchorEventID pgtype.UUID) ([]CheckAnchoredHeadsRow, error)
@@ -158,7 +172,7 @@ type Querier interface {
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
-	// runs_sandbox_waiting.
+	// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
 	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
 	// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
 	// LOCKED lets two results of one tool close two calls.
@@ -1393,6 +1407,13 @@ type Querier interface {
 	// 2026-10-28). The time since the
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
+	//
+	// One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
+	// queued already (a message arrived while this run was starting, and queued a run that will see
+	// every message), this run does not wait a second time: it is canceled as superseded, which is an
+	// end state for it and not an error. The caller decides once (HasQueuedRunForTask, under the task
+	// row lock, so that no enqueue slips in between the check and the write) and passes the result as
+	// @superseded; the index is the backstop.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
 	// The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
 	// whose declaration was not the default already, with what they had, so the caller can audit each.
@@ -1620,6 +1641,10 @@ type Querier interface {
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
+	// Whether the caller is in a transaction that holds a row lock (a locked row gives the
+	// transaction an id; outside a transaction the lock ended with the statement). The scheduler
+	// asserts it after GetTaskForUpdate. Org-scoped through the task it names.
+	TaskLockHeld(ctx context.Context, arg TaskLockHeldParams) (pgtype.Bool, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	// The sanitised content is unchanged; the report columns still follow what the server published, so a

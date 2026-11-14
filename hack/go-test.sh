@@ -103,6 +103,7 @@ write_rc() { [[ -z ${KOINON_RC_FILE:-} ]] || echo "$1" >"$KOINON_RC_FILE"; }
 PARALLEL_SUITES=(
 	./internal/agentd
 	./internal/runoutcome
+	./internal/scheduler
 	./internal/api
 	./internal/durable
 	./internal/checkpoint

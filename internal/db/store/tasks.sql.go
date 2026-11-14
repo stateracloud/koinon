@@ -729,3 +729,23 @@ func (q *Queries) SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromPara
 	)
 	return i, err
 }
+
+const taskLockHeld = `-- name: TaskLockHeld :one
+SELECT EXISTS (SELECT 1 FROM tasks WHERE org_id = $1 AND id = $2)
+       AND pg_current_xact_id_if_assigned() IS NOT NULL
+`
+
+type TaskLockHeldParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Whether the caller is in a transaction that holds a row lock (a locked row gives the
+// transaction an id; outside a transaction the lock ended with the statement). The scheduler
+// asserts it after GetTaskForUpdate. Org-scoped through the task it names.
+func (q *Queries) TaskLockHeld(ctx context.Context, arg TaskLockHeldParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, taskLockHeld, arg.OrgID, arg.ID)
+	var column_1 pgtype.Bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
