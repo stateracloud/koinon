@@ -130,6 +130,7 @@ for i in "${!args[@]}"; do [[ ${args[$i]} == --jq ]] && jqexpr=${args[$((i + 1))
 case "$1 $2" in
 "run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
 "run view") jq -r "${jqexpr:-.}" "$FX/view-$3.json" ;;
+"api repos/x/y/actions/runs/60/artifacts") echo "HTTP 502" >&2; exit 1 ;; # the artifacts call fails for run 60
 "api repos/x/y/actions/runs/40/artifacts") echo 1 ;; # only run 40 left a stories-green artifact
 "api "*) echo 0 ;;
 "issue list") ;;
@@ -156,6 +157,7 @@ JSON
 : >"$fx/calls"
 out=$(RUNS=runs2.json STORIES_RED=1 GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $green" "stories-red: the baseline is the newest nightly with the stories-green artifact"
+check "$out" "cannot list the artifacts of run 60" "stories-red: an artifacts API error warns and the search moves to an older run"
 check "$(cat "$fx/calls")" "-f stories=true" "stories-red: the candidates are dispatched with stories=true"
 : >"$fx/calls"
 out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)

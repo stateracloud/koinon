@@ -68,7 +68,11 @@ if [[ $dry == 0 ]]; then
     # success, so the baseline is the newest schedule run that left the artifact `stories-green` (run.sh writes
     # the marker when the stories passed; the workflow uploads it).
     for id in $(jq -r '[.[] | select(.event == "schedule" and .conclusion == "success")][].databaseId' <<<"$runs"); do
-      n=$("$GH" api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '[.artifacts[] | select(.name == "stories-green" and (.expired | not))] | length')
+      # An API error counts as "no stories-green artifact": the search moves to an older run, it does not abort.
+      n=$("$GH" api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '[.artifacts[] | select(.name == "stories-green" and (.expired | not))] | length') || {
+        echo "e2e-bisect: warning: cannot list the artifacts of run $id; no stories-green artifact for this run" >&2
+        n=0
+      }
       if [[ $n -gt 0 ]]; then
         green=$(jq -r ".[] | select(.databaseId == $id) | .headSha" <<<"$runs")
         break

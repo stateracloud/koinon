@@ -280,7 +280,7 @@ go)
   # driver <label filter> <junit file> <json file> <log file> <go test timeout>: one pass of the Ginkgo driver.
   # Worst cases (the job limit in e2e-kind.yml is 75 minutes on the schedule and on stories=true): set-up and image
   # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 1, tear-down 5:
-  # 69 minutes. Keep the sum below that limit when you change one of them.
+  # 69 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \

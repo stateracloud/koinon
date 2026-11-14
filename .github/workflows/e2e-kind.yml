@@ -167,9 +167,8 @@ jobs:
       packages: read # the harness image CI's harnesses job pushed to GHCR
     runs-on: ubuntu-24.04
     # The job takes about 14 minutes (#572). The nightly adds the backup and restore (20 seconds) and the story suite (issue 992):
-    # two agents with a sandbox each, and waits of up to 8 minutes (the MCP prober, a question, a resume), up to about 25 minutes
-    # when the fake model is slow. That cost is an estimate, not yet measured on a runner (replace it with the first nightly's
-    # number from the Timings summary). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
+    # two agents with a sandbox each, and waits of up to 8 minutes (the MCP prober, a question, a resume). Measured on kind: the six stories take about 4 minutes
+    # (S4, the slow run, about 100 seconds); the stories pass has a 15 minute timeout (about 3 times that). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
     # worst case on the schedule and on a dispatch with stories=true; other runs keep 35. The worst case is about 69 minutes
     # (test/e2e/run.sh: set-up 10, quickstart pass 30, stories pass 15, escape 8, backup 1, tear-down 5), so the limit is 75.
     timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories) && 75 || 35 }}
