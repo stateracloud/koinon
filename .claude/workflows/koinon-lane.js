@@ -42,7 +42,7 @@ if (!ISSUE) {
 }
 const ISSUE_BLOCK = ISSUE
   ? `The issue text (title, body, comments) as of the lane start; do NOT run \`gh issue view\` again:\n<issue>\n${ISSUE}\n</issue>`
-  : `The issue text could not be pre-read: run \`gh issue view ${N} --json title,body,comments\` once.`
+  : `The issue text could not be pre-read: run \`gh issue view ${N} -R ${REPO} --json title,body,comments\` once.`
 
 const BASE = `You work on Koinon issue #${N} in the worktree ${WT} (branch ${BR}). Work ONLY in that worktree; cd into it for every shell command.
 ${ISSUE_BLOCK}
@@ -121,6 +121,7 @@ Check:
 - Spec: does the diff do everything the issue's "done when" asks, and nothing outside its scope?
 - Ripple: other code, tests, docs, Playwright specs, chart-check assertions or CI job lists that reference what changed and were NOT updated (grep for old names, paths, strings, flags). This is the most common miss.
 - Repo rules from AGENTS.md: SPDX headers on new files, no hard-coded module path, chart determinism, metric labels, no secrets in fixtures, migrations forward-only, Conventional Commit + sign-off.
+- Prior art: the implementer's summary starts with a "Prior art:" paragraph; check that it is present and that its links are real (or marked from memory). "exempt: plain bug fix" is allowed only for a plain bug fix in our own code.
 - Correctness: edge cases, error paths, portability (macOS vs Linux CI: GNU vs BSD tools, locale, bash version).
 Report only real problems with a concrete fix. verdict is "pass" when nothing blocker or major remains.`
 
@@ -155,7 +156,7 @@ for (let round = 0; ; round++) {
   if (failed.length === 0 && open.length === 0) { log(`round ${round}: nothing to fix (no failing gate, no blocker/major finding); not run gates: ${gates.not_run.length}, review ${review ? 'present' : 'missing'}`); break }
   const fx = await agent(`${BASE}
 
-Your job: fix round ${round + 1}. Address every item below, then commit (separate commit, signed off). Do not widen the scope.
+Your job: fix round ${round + 1}. First run \`git -C ${WT} rev-parse HEAD\`: that head SHA is the commit under review; the findings below refer to it. Address every item below, then commit (separate commit, signed off). Do not widen the scope.
 Failing gates:
 ${failed.map(g => `- \`${g.cmd}\` rc=${g.rc}\n${g.tail}`).join('\n') || '- none'}
 Review findings (blocker/major):

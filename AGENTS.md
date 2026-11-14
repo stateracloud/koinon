@@ -16,7 +16,8 @@ of it.
   A new suite joins the parallel list in that script once it shares
   no database, fixed port or fixed path between processes. `test/harnesses`: `make test-harnesses`.
   Details: `docs/dev/ci.md#go-test-suites`.
-- Web only: `pnpm --dir web lint`, `pnpm --dir web typecheck`, `pnpm --dir web test` (one command per call; no `cd web &&`, no pipe: a sandbox excludes `pnpm` and matches the plain command)
+- Web only: `pnpm --dir web lint`, `pnpm --dir web typecheck`, `pnpm --dir web test` (one command per call, no
+  `cd web &&` and no pipe, so sandbox allow rules match)
 - Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at
   <https://koinon.stateracloud.com>. The quickstart and backup commands live in `test/e2e/commands/*.e1`;
   `test/e2e` runs them and `make e2e-commands-check` checks them. Edit the file; the docs repository's CI

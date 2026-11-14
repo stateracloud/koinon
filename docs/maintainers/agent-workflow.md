@@ -89,11 +89,13 @@ ADR and migration numbers; conflict classes; when to stop and ask) are in
 [AGENTS.md, Branches and pull requests](../../AGENTS.md#branches-and-pull-requests). Before you
 start, after `take`:
 
-- **Overlap check.** It also applies to a PR you fix or merge, even one your human names (`hack/claim.sh show <N>` first). `gh pr list --state open --json number,author,headRefName,files` and the claim
-  refs (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`; one claim: `hack/claim.sh show
-  <N>`). If an open PR or another human's claim touches the same files with the same behaviour, run
-  `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared list or adds a
-  sibling file (a new ADR, test, migration, chart assertion), proceed and say so in the PR.
+- **Overlap check.** It also applies to a PR you fix or merge, even one your human names
+  (`hack/claim.sh show <N>` first). `gh pr list --state open --json number,author,headRefName,files`
+  and the claim refs (`gh api repos/{owner}/{repo}/git/matching-refs/heads/claim/`; one claim:
+  `hack/claim.sh show <N>`). If an open PR or another human's claim touches the same files with the
+  same behaviour, run `hack/claim.sh block <N> <M>` or ask your human. If it only appends to a shared
+  list or adds a sibling file (a new ADR, test, migration, chart assertion), proceed and say so in
+  the PR.
 - **Conflict classes** (mechanical, append-site, semantic) are in AGENTS.md. Semantic (the same
   function or behaviour) with the other human's open or last-7-days work: stop, comment on both PRs,
   ask your human.
