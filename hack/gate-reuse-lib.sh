@@ -6,7 +6,8 @@
 # fingerprint reports it from the store instead of running it again. Sourced by hack/preflight.sh
 # and hack/lane-gates.sh (after hack/paths-lib.sh; run inside the repository root).
 #
-# The inputs of a gate are what its rule in hack/paths.rules says can affect it (the CI job rule
+# A job or gate that runs Go code (and the `tree` kind) uses the tree kind: git's own snapshot of the
+# whole working tree. The inputs of any other gate are what its rule in hack/paths.rules says can affect it (the CI job rule
 # for the gates that are CI jobs, the `gate` rule for the others), read from the working tree, so
 # an uncommitted edit changes the fingerprint exactly like a commit does. Added to that: the merge
 # base with the base ref, and the gate scripts of this directory. A fingerprint never stands for
@@ -35,30 +36,24 @@ gate_reuse_enabled() {
 	[[ -z ${CI:-} && ${KOINON_GATE_REUSE:-1} != 0 ]]
 }
 
-# gate_manifest: every file of the working tree (tracked or not ignored) as `path TAB mode blob-id`.
-# Tracked files that match the index take mode and blob id from `git ls-files -s`; only files that
-# differ from the index and untracked files are hashed from disk (mode: `test -x`, portable on macOS
-# and Linux), so a run on an unchanged tree reads no file content. A tracked file deleted from disk
-# but still in the index gets a tombstone (`path TAB deleted`), not its stale index blob.
-gate_manifest() {
-	local dirty f gone="" live=""
-	dirty=$({ git -c core.quotepath=off diff --name-only; git -c core.quotepath=off ls-files --others --exclude-standard; } | sort -u)
-	while IFS= read -r f; do
-		[[ -n $f ]] || continue
-		if [[ -f $f ]]; then live+="$f"$'\n'; else gone+="$f"$'\n'; fi
-	done <<<"$dirty"
-	{
-		git -c core.quotepath=off ls-files -s | awk -F'\t' 'NR==FNR{d[$0]=1;next} !($2 in d){split($1,a," ");print $2 "\t" a[1] " " a[2]}' <(printf '%s%s' "$live" "$gone") -
-		if [[ -n $live ]]; then
-			paste <(while IFS= read -r f; do [[ -n $f ]] && { if [[ -x $f ]]; then printf '%s\t100755\n' "$f"; else printf '%s\t100644\n' "$f"; fi; }; done <<<"$live") \
-				<(printf '%s' "$live" | git hash-object --stdin-paths) | awk -F'\t' '{print $1 "\t" $2 " " $3}'
-		fi
-		while IFS= read -r f; do [[ -n $f ]] && printf '%s\tdeleted\n' "$f"; done <<<"$gone"
-	} | sort -u
+# gate_tree: print the id of a git tree that is a snapshot of the working tree (tracked files as on
+# disk, untracked files that are not ignored, deletions, modes, symlink targets, renames). Git builds
+# it in a COPY of the index (the copy keeps the stat cache, so an unchanged file is not read again),
+# so the real index and the working tree are never touched. Nothing here guesses what changed.
+gate_tree() {
+	local idx tree
+	idx=$(mktemp "${TMPDIR:-/tmp}/gate-index.XXXXXX") || return 1
+	cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || : >"$idx"
+	if GIT_INDEX_FILE=$idx git add -A -- . >/dev/null 2>&1; then
+		tree=$(GIT_INDEX_FILE=$idx git write-tree)
+	fi
+	rm -f "$idx"
+	[[ -n ${tree:-} ]] || return 1
+	printf '%s\n' "$tree"
 }
 
 gate_fingerprint() { # <job|gate|tree> <name> <merge-base>
-	local kind=$1 name=$2 f blob sel="" mfile
+	local kind=$1 name=$2 f blob sel="" mfile="" tree
 	# RULE (#990, three review rounds of false greens): a job or gate that compiles or runs Go code
 	# (go, chartsmoke, harnesses, escape, fuzz, tidy, generate, and any other make job that runs
 	# `go test` or `go build`) fingerprints the WHOLE tree. A narrow per-job path list only guesses
@@ -68,16 +63,20 @@ gate_fingerprint() { # <job|gate|tree> <name> <merge-base>
 	if [[ $kind == job ]]; then
 		case $name in go | chartsmoke | harnesses | escape | fuzz | tidy | generate) kind=tree ;; esac
 	fi
-	mfile=$(gate_manifest)
-	while IFS=$'\t' read -r f blob; do
+	tree=$(gate_tree) || { echo "gate_fingerprint: cannot snapshot the tree" >&2; return 1; }
+	if [[ $kind == tree ]]; then
+		sel="tree $tree"$'\n'
+	else
+		mfile=$(git -c core.quotepath=off ls-tree -r "$tree")
+	fi
+	while IFS=$'\t' read -r blob f; do
 		[[ -n $f ]] || continue
 		case $kind in
 		job) paths_job_triggers "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
-		tree) ;; # a gate whose rule only selects it, not lists what it reads: the whole tree is its input
 		*) paths_match gate "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
 		esac
 		sel+="$f"$'\t'"$blob"$'\n'
-	done <<<"$mfile"
+	done <<<"$mfile" # empty for the tree kind: the tree id stands for every file
 	{
 		echo "$kind $name mb=$3"
 		# The scripts job also checks the commits (subject, identity): a new commit is a new input.

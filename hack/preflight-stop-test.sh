@@ -190,6 +190,60 @@ chmod +x "$tmp/a/hack/modeprobe.sh"
 [[ $mo3 != "$(fp_in tree migrate)" ]] && ok "chmod on a dirty file moves the fingerprint" || bad "dirty-file mode ignored"
 git -C "$tmp/a" checkout -q -- hack/modeprobe.sh
 
+# tree fingerprint, property style (#990): every kind of change moves it, on a clean tree and on a dirty one;
+# fingerprinting touches neither the real index nor `git status`
+prop_fixture() { # <name> <dirty yes|no>: tracked files, a file symlink and a directory symlink
+	local r=$tmp/$1
+	mkdir -p "$r/hack" "$r/d1" "$r/d2" "$r/src"
+	cp "$here/paths-lib.sh" "$here/gate-reuse-lib.sh" "$here/paths.rules" "$r/hack/"
+	echo "package a" >"$r/src/a.go"
+	echo "package b" >"$r/src/b.go"
+	printf '#!/bin/sh\n' >"$r/src/run.sh"
+	chmod +x "$r/src/run.sh"
+	echo one >"$r/d1/f"
+	echo two >"$r/d2/f"
+	ln -s src/a.go "$r/link-file"
+	ln -s d1 "$r/link-dir"
+	git -C "$r" init -q
+	git -C "$r" add -A
+	git -C "$r" -c commit.gpgsign=false commit -q -m "feat: base"
+	if [[ $2 == yes ]]; then
+		echo "package c" >"$r/src/untracked.go"
+		echo "// staged" >>"$r/src/b.go"
+		git -C "$r" add src/b.go
+		echo "// unstaged" >>"$r/src/b.go"
+	fi
+}
+prop_fp() { (cd "$1" && . ./hack/paths-lib.sh && paths_load && . ./hack/gate-reuse-lib.sh && gate_fingerprint tree migrate base); }
+for dirty in no yes; do
+	prop_fixture "p$dirty" "$dirty"
+	pr=$tmp/p$dirty
+	f0=$(prop_fp "$pr")
+	eq "[$dirty] an unchanged rerun gives the same fingerprint" "$(prop_fp "$pr")" "$f0"
+	idx0=$(git -C "$pr" ls-files -s | shasum -a 256)
+	st0=$(git -C "$pr" status --porcelain=v1 -uall)
+	snap=$tmp/snap-$dirty
+	cp -R "$pr" "$snap"
+	mut() { # <label> <command...>: run the mutation in the fixture, the fingerprint must move, then restore
+		local label=$1
+		shift
+		(cd "$pr" && "$@")
+		[[ $(prop_fp "$pr") != "$f0" ]] && ok "[$dirty] $label moves the tree fingerprint" || bad "[$dirty] $label did not move the tree fingerprint"
+		rm -rf "$pr" && cp -R "$snap" "$pr"
+	}
+	mut "editing a committed file" sh -c 'echo "// e" >>src/a.go'
+	mut "deleting a tracked file" rm src/a.go
+	mut "chmod -x" chmod -x src/run.sh
+	mut "retargeting a file symlink" sh -c 'rm link-file && ln -s src/b.go link-file'
+	mut "retargeting a directory symlink" sh -c 'rm link-dir && ln -s d2 link-dir'
+	mut "git mv" git mv src/a.go src/a2.go
+	mut "adding an untracked file" sh -c 'echo new >src/new.go'
+	mut "staging an edit" sh -c 'echo "// s" >>src/a.go && git add src/a.go'
+	mut "committing an edit" sh -c 'echo "// c" >>src/a.go && git add src/a.go && git -c commit.gpgsign=false commit -q -m "feat: c"'
+	eq "[$dirty] fingerprinting leaves the index alone" "$(git -C "$pr" ls-files -s | shasum -a 256)" "$idx0"
+	eq "[$dirty] fingerprinting leaves git status alone" "$(git -C "$pr" status --porcelain=v1 -uall)" "$st0"
+done
+
 # a stale pid file (a run that died) is taken over; the takeover lock is gone afterwards
 sleep 0 & dead=$!
 wait "$dead"
