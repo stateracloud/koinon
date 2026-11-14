@@ -42,6 +42,9 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0104).
 - No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
 - Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
+- Web: `pnpm --dir <worktree>/web <cmd>`, one command per call, not `cd web && pnpm` and no pipe.
+- A sandboxed `gh` or `git` call that reaches GitHub needs `allowed_domains` `api.github.com` and `github.com`; parents say so in the brief.
+- A main checkout can be far behind `origin/main`: `git fetch`, then count (`git rev-list --count HEAD..origin/main`) before a reader, reviewer or research agent uses it.
 - Call hack scripts by absolute path (`<worktree>/hack/x.sh`), never `cd X && hack/x.sh`.
 - Wait with `hack/pr-wait.sh` (for a pull request) or with a command that you start with
   `run_in_background`; end the turn and the task notifies you. A pause under another name is a sleep
@@ -66,6 +69,16 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - Commit with `git commit -s` using the repository's git identity, in Conventional Commits. Do not
   push or open pull requests unless the prompt says so; the parent ships with `hack/ship.sh`.
 - Fake secrets in tests are obviously fake from the first commit (`koinon_test_not-a-real-token`).
+
+## Prior art first
+- For a feature, a mechanism or a process (not a plain bug fix), look at how well-known projects
+  solve it before you design, and put a "Prior art" section in the PR. Quick or full, the format
+  and the limits are in [lane.md](../maintainers/lane.md#prior-art-first).
+
+## Security work (auth, rate limits, keys)
+- Write a short threat model and do prior art before code. The PR has a "Threat model" section: who
+  attacks, what they can reach, what stops them, what is left.
+- Stop after fix round 2 when a major finding remains, and ask the maintainer.
 
 ## Review threads from bots
 - The ruleset requires every review thread resolved; DeepSource and CodeRabbit leave inline comments that

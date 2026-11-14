@@ -16,7 +16,8 @@ of it.
   A new suite joins the parallel list in that script once it shares
   no database, fixed port or fixed path between processes. `test/harnesses`: `make test-harnesses`.
   Details: `docs/dev/ci.md#go-test-suites`.
-- Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
+- Web only: `pnpm --dir web lint`, `pnpm --dir web typecheck`, `pnpm --dir web test` (one command per call, no
+  `cd web &&` and no pipe, so sandbox allow rules match)
 - Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at
   <https://koinon.stateracloud.com>. The quickstart and backup commands live in `test/e2e/commands/*.e1`;
   `test/e2e` runs them and `make e2e-commands-check` checks them. Edit the file; the docs repository's CI
@@ -64,7 +65,14 @@ of it.
 - Work on an issue your human names, or a Ready issue labelled `agent-ok`; never start any other.
   Only humans move issues to Ready.
 - Outside contributors do not claim: say on the issue that you are working on it. Maintainers' agents
-  claim first: [claims and lanes](docs/maintainers/agent-workflow.md#picking-up-work).
+  claim first: [claims and lanes](docs/maintainers/agent-workflow.md#picking-up-work); a lane agent
+  follows [the lane procedure](docs/maintainers/lane.md).
+- `hack/claim.sh next` shows the current milestone only; set `KOINON_CLAIM_MILESTONE=<title>` to see
+  another one before you say that nothing is Ready. The overlap check (`hack/claim.sh show <N>`)
+  also applies to a PR you fix or merge, even one your human names.
+- A sandboxed `gh` or `git` call that reaches GitHub needs `allowed_domains` `api.github.com` and
+  `github.com`. A checkout can be far behind: `git fetch` and count the commits behind `origin/main`
+  before you let a reader or reviewer use it.
 - A pull request names the issue it closes with `Closes #N`. New work you discover becomes a new
   issue; do not start it.
 
@@ -94,6 +102,9 @@ of it.
 
 - Decisions live in `docs/adr/` (ADRs are canonical; `docs/design.md` is the overview). Read the
   relevant ADR before changing architecture; write a new one for new decisions.
+- Public text (pull request and issue text, review comments, docs) follows Simplified Technical English
+  (ASD-STE100): short sentences, one topic each, active voice, no idioms. Code and commit subjects are
+  exempt: [ADR 0117](docs/adr/0117-simplified-technical-english.md).
 - Commits: Conventional Commits, always signed off (`git commit -s`) by a human. AI use is disclosed in
   the PR template's "AI use" field (a `--pr-body` file carries it too); an `Assisted-by:` trailer is optional (CONTRIBUTING.md).
 - The module path (`github.com/stateracloud/koinon`) and API domain (`koinon.dev`) are defined once in
