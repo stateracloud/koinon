@@ -100,10 +100,15 @@ if [[ $sel -ge 1 ]]; then ok; else bad "no script-check line is selected by a ch
 
 # --- 3c. One harness timeout (#990, #980): the Makefile target and ci.yml run the same go test flags.
 mk_t=$(sed -n '/^harness-suite:/,/^$/p' Makefile | grep -oE -- '-timeout [0-9]+[smh]' | head -1 || true)
-ci_t=$(sed -n '/^  harnesses:/,/^  [a-z][a-z-]*:$/p' .github/workflows/ci.yml | grep -oE -- '-timeout [0-9]+[smh]' | head -1 || true)
 ci_make=$(sed -n '/^  harnesses:/,/^  [a-z][a-z-]*:$/p' .github/workflows/ci.yml | grep -cE 'make (harness-suite|test-harnesses)' || true)
-if [[ -z $mk_t ]]; then bad "Makefile harness-suite has no -timeout (Go's default is 10m; #980)"; else ok; fi
-if [[ $ci_make -ge 1 || $ci_t == "$mk_t" ]]; then ok; else bad "ci.yml harnesses job runs go test with [${ci_t:-no -timeout}], the Makefile with [$mk_t]: call make test-harnesses or use the same flags"; fi
+if [[ $mk_t == "-timeout 30m" ]]; then ok; else bad "Makefile harness-suite has [${mk_t:-no -timeout}], want -timeout 30m (Go's default is 10m; #980)"; fi
+# Two forms pass: ci.yml calls the Makefile target (the end state), or still runs the old direct
+# `go test ./test/harnesses/...` (main's form until the follow-up PR B, branch ci/990-harness-suite-timeout,
+# switches it to `make harness-suite`; a .github change cannot ride with harness inputs).
+# Exit condition: when PR B has merged, drop the old-form branch (`|| ci_old`) and keep only ci_make.
+ci_old=0
+sed -n '/^  harnesses:/,/^  [a-z][a-z-]*:$/p' .github/workflows/ci.yml | grep -qE 'go test .*\./test/harnesses/\.\.\.' && ci_old=1
+if [[ $ci_make -ge 1 || $ci_old -eq 1 ]]; then ok; else bad "ci.yml harnesses job neither calls make harness-suite nor runs go test ./test/harnesses/..."; fi
 
 # --- 4. Example change sets through the consumers. ---------------------------------------------------------
 dirs=$(bash hack/ci-changes.sh --harnesses-dirs)
