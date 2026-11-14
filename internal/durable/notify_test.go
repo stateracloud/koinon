@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("Notifier", func() {
@@ -58,7 +59,7 @@ var _ = Describe("Notifier", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(delivered.Load, 30*time.Second, 100*time.Millisecond).Should(Equal(int32(1)))
+		Eventually(delivered.Load, racescale.D(30*time.Second), 100*time.Millisecond).Should(Equal(int32(1)))
 		Expect(sawCommitted.Load()).To(BeTrue())
 
 		// The same effect sent again (a replayed delivery, a retried request) is the same workflow.

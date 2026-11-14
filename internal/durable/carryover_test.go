@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("CarryOver (ADR 0085, decision 11)", func() {
@@ -51,7 +52,7 @@ var _ = Describe("CarryOver (ADR 0085, decision 11)", func() {
 		Expect(next.Launch(ctx)).To(Succeed())
 		DeferCleanup(func() { _ = next.Shutdown(5 * time.Second) })
 
-		Eventually(runs, 30*time.Second).Should(Receive(Equal("x")))
+		Eventually(runs, racescale.D(30*time.Second)).Should(Receive(Equal("x")))
 		fork, err := dbos.RetrieveWorkflow[string](next.Context(), "wf-1~vnew")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fork.GetResult()).To(Equal("done x"))
@@ -147,7 +148,7 @@ var _ = Describe("CarryOver (ADR 0085, decision 11)", func() {
 		// Version 2 carries it over (wf~v2), starts it, and goes away with it still pending.
 		v2 := newRuntime("2")
 		Expect(v2.Launch(ctx)).To(Succeed())
-		Eventually(entered, 30*time.Second).Should(Receive())
+		Eventually(entered, racescale.D(30*time.Second)).Should(Receive())
 		_ = v2.Shutdown(time.Second)
 		stuck = false
 
