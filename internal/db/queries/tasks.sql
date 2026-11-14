@@ -24,6 +24,13 @@ SELECT * FROM tasks
 WHERE org_id = @org_id AND id = @id
 FOR UPDATE;
 
+-- name: TaskLockHeld :one
+-- Whether the caller is in a transaction that holds a row lock (a locked row gives the
+-- transaction an id; outside a transaction the lock ended with the statement). The scheduler
+-- asserts it after GetTaskForUpdate. Org-scoped through the task it names.
+SELECT EXISTS (SELECT 1 FROM tasks WHERE org_id = @org_id AND id = @id)
+       AND pg_current_xact_id_if_assigned() IS NOT NULL;
+
 -- name: ListTasks :many
 SELECT * FROM tasks
 WHERE org_id = @org_id
