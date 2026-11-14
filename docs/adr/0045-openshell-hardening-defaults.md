@@ -151,3 +151,7 @@ sandbox namespaces, **on by default** (`sandboxNetworkPolicy.enabled`). No CNI-s
   workload probe pod that opens sockets outside the supervisor and asserts the path stays blocked.
 - Turning `sandboxNetworkPolicy.enabled` off renders none of the chart objects and applies nothing;
   sandbox namespaces then rely on OpenShell's policies alone.
+- Amendment (2026-11-14): the reconciler writes the default-deny NetworkPolicy in the same pass as
+  the first sandbox of a workspace namespace. It counts each write failure in
+  `koinon_reconciler_sandbox_network_policy_errors_total`, and the chart alerts on it
+  (`KoinonSandboxNetworkPolicyErrors`, group `koinon-sandbox`). No OpenShell default changes.
