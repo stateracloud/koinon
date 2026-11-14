@@ -150,25 +150,23 @@ RETURNING *;
 -- One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
 -- queued already (a message arrived while this run was starting, and queued a run that will see
 -- every message), this run does not wait a second time: it is canceled as superseded, which is an
--- end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
--- so that no enqueue slips in between the check and the write; the index is the backstop.
+-- end state for it and not an error. The caller decides once (HasQueuedRunForTask, under the task
+-- row lock, so that no enqueue slips in between the check and the write) and passes the result as
+-- @superseded; the index is the backstop.
 UPDATE runs
-SET state = CASE WHEN d.superseded THEN 'canceled'::run_state ELSE 'queued'::run_state END,
+SET state = CASE WHEN @superseded::boolean THEN 'canceled'::run_state ELSE 'queued'::run_state END,
     parked_seconds = parked_seconds + CASE
         WHEN claimed_at IS NULL THEN 0
         ELSE greatest(0, floor(extract(epoch FROM now() - claimed_at)))::bigint END,
     claimed_at = NULL,
-    ready_at = CASE WHEN d.superseded THEN NULL ELSE now() END,
-    outcome_reason = CASE WHEN d.superseded THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
-    finished_at = CASE WHEN d.superseded THEN now() ELSE finished_at END,
+    ready_at = CASE WHEN @superseded::boolean THEN NULL ELSE now() END,
+    outcome_reason = CASE WHEN @superseded::boolean THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
+    finished_at = CASE WHEN @superseded::boolean THEN now() ELSE finished_at END,
     owner_id = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-FROM (SELECT EXISTS (SELECT 1 FROM runs o
-                     WHERE o.org_id = cur.org_id AND o.task_id = cur.task_id AND o.state = 'queued') AS superseded
-      FROM runs cur WHERE cur.org_id = @org_id AND cur.id = @id) d
-WHERE runs.org_id = @org_id AND runs.id = @id AND runs.epoch = @epoch AND runs.state = 'starting'
-RETURNING runs.*;
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'starting'
+RETURNING *;
 
 -- name: MarkRunSandboxWait :one
 -- Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
@@ -189,9 +187,16 @@ WHERE org_id = @org_id AND task_id = @task_id AND id <> @id AND state = 'queued'
 -- name: ClearSandboxWaitForAgent :execrows
 -- The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 -- run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
--- runs_sandbox_waiting.
+-- runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = @org_id AND r.agent_id = @agent_id AND r.sandbox_wait_started_at IS NOT NULL
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs SET sandbox_wait_started_at = NULL
-WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_wait_started_at IS NOT NULL;
+FROM locked
+WHERE runs.org_id = @org_id AND runs.id = locked.id;
 
 -- name: MarkRunWrapUpNotice :execrows
 -- Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
@@ -276,7 +281,16 @@ SELECT EXISTS (
     WHERE org_id = @org_id AND task_id = @task_id AND state = 'queued');
 
 -- name: CancelOpenRunsForAgent :many
--- Archiving an agent cancels every run it has not finished.
+-- Archiving an agent cancels every run it has not finished. It locks the runs in id order (the
+-- rule for every statement that locks more than one run row, see scheduler.LockTask), so it
+-- cannot wait for a run in a cycle with Owner.Requeue, which holds a run and wants the queued one.
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = @org_id AND r.agent_id = @agent_id
+      AND r.state IN ('queued', 'starting', 'running', 'parked')
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = @outcome_reason::text,
@@ -284,14 +298,23 @@ SET state = 'canceled',
     ready_at = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = @org_id AND agent_id = @agent_id
-  AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING *;
+FROM locked
+WHERE runs.org_id = @org_id AND runs.id = locked.id
+RETURNING runs.*;
 
 -- name: CancelRunsOverWallClock :many
 -- Cancels owned runs that have been owned longer than their wall-clock cap
 -- (plan item A4). Parked time is excluded through parked_seconds. Safe to run
--- from every API replica: a run canceled by one sweep no longer matches.
+-- from every API replica: a run canceled by one sweep no longer matches. Locks the runs in id
+-- order (see CancelOpenRunsForAgent).
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = @org_id
+      AND r.state IN ('starting', 'running')
+      AND r.started_at + make_interval(secs => r.max_wall_clock_seconds + r.parked_seconds) < now()
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = @outcome_reason::text,
@@ -299,10 +322,9 @@ SET state = 'canceled',
     ready_at = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = @org_id
-  AND state IN ('starting', 'running')
-  AND started_at + make_interval(secs => max_wall_clock_seconds + parked_seconds) < now()
-RETURNING *;
+FROM locked
+WHERE runs.org_id = @org_id AND runs.id = locked.id
+RETURNING runs.*;
 
 -- name: AddRunTokens :one
 -- Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
@@ -338,6 +360,16 @@ RETURNING *;
 SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
 FROM runs
 WHERE org_id = @org_id AND task_id = @task_id AND id <> @run_id;
+
+-- name: LockRunsForRequeue :many
+-- Locks the run and the queued run of its task, in id order (the rule for every statement that
+-- locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
+-- the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
+-- Returns the ids it locked and their states.
+SELECT id, state FROM runs
+WHERE org_id = @org_id AND (id = @id OR (task_id = @task_id AND state = 'queued'))
+ORDER BY id
+FOR UPDATE;
 
 -- name: LockRun :one
 -- Serialises a park decision (agentd) with the resolution of the run's

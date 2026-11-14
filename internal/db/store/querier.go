@@ -65,7 +65,9 @@ type Querier interface {
 	BumpTaskContinuation(ctx context.Context, arg BumpTaskContinuationParams) (Task, error)
 	// asked | open -> canceled, for a run that ended without them being answered.
 	CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQuestionsForRunParams) ([]Question, error)
-	// Archiving an agent cancels every run it has not finished.
+	// Archiving an agent cancels every run it has not finished. It locks the runs in id order (the
+	// rule for every statement that locks more than one run row, see scheduler.LockTask), so it
+	// cannot wait for a run in a cycle with Owner.Requeue, which holds a run and wants the queued one.
 	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// pending -> canceled, for a run that finished without them (for example a
 	// user canceled the parked run).
@@ -78,7 +80,8 @@ type Querier interface {
 	CancelRun(ctx context.Context, arg CancelRunParams) (Run, error)
 	// Cancels owned runs that have been owned longer than their wall-clock cap
 	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
-	// from every API replica: a run canceled by one sweep no longer matches.
+	// from every API replica: a run canceled by one sweep no longer matches. Locks the runs in id
+	// order (see CancelOpenRunsForAgent).
 	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
 	// A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
 	// run of the task, which takes over its place in the queue. The earlier start wins, so the total
@@ -162,7 +165,7 @@ type Querier interface {
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
-	// runs_sandbox_waiting.
+	// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
 	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
 	// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
 	// LOCKED lets two results of one tool close two calls.
@@ -1202,6 +1205,11 @@ type Querier interface {
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	// Locks the run and the queued run of its task, in id order (the rule for every statement that
+	// locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
+	// the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
+	// Returns the ids it locked and their states.
+	LockRunsForRequeue(ctx context.Context, arg LockRunsForRequeueParams) ([]LockRunsForRequeueRow, error)
 	// The fingerprints of @fps the session holds.
 	LookupLeakGuardFingerprints(ctx context.Context, arg LookupLeakGuardFingerprintsParams) ([]int64, error)
 	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
@@ -1401,8 +1409,9 @@ type Querier interface {
 	// One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
 	// queued already (a message arrived while this run was starting, and queued a run that will see
 	// every message), this run does not wait a second time: it is canceled as superseded, which is an
-	// end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
-	// so that no enqueue slips in between the check and the write; the index is the backstop.
+	// end state for it and not an error. The caller decides once (HasQueuedRunForTask, under the task
+	// row lock, so that no enqueue slips in between the check and the write) and passes the result as
+	// @superseded; the index is the backstop.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
 	// The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
 	// whose declaration was not the default already, with what they had, so the caller can audit each.

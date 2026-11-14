@@ -15,6 +15,11 @@
 -- Expand only (ADR 0085): one new index.
 -- +goose Up
 
+-- An old binary (the rollout runs both) can still queue a run while this migration runs. The lock
+-- keeps its insert and its UPDATE to queued out from the repair until the index exists, so the
+-- index build cannot meet a second queued run. Reads are not blocked. It lasts to the commit.
+LOCK TABLE runs IN SHARE ROW EXCLUSIVE MODE;
+
 -- +goose StatementBegin
 DO $$
 DECLARE
@@ -22,12 +27,10 @@ DECLARE
     run_seq bigint;
     run_epoch bigint;
     task_seq bigint;
-    payload jsonb := jsonb_build_object(
-        'reason', 'superseded',
-        'message', 'superseded by an older queued run of the task');
+    payload jsonb;
 BEGIN
     FOR dup IN
-        SELECT r.org_id, r.id, r.task_id FROM runs r
+        SELECT r.org_id, r.id, r.task_id, r.failure_class FROM runs r
         WHERE r.state = 'queued'
           AND EXISTS (SELECT 1 FROM runs o
                       WHERE o.org_id = r.org_id AND o.task_id = r.task_id AND o.state = 'queued'
@@ -36,12 +39,19 @@ BEGIN
     LOOP
         UPDATE runs
         SET state = 'canceled',
-            outcome_reason = 'superseded by an older queued run of the task',
+            outcome_reason = 'superseded by a queued run of the task',
             finished_at = now(),
             ready_at = NULL,
             last_event_seq = last_event_seq + 1
         WHERE org_id = dup.org_id AND id = dup.id
         RETURNING last_event_seq, epoch INTO run_seq, run_epoch;
+        -- The text and the keys of the Go path (Owner.Requeue, recordCanceled).
+        payload := jsonb_build_object(
+            'reason', 'requeue_superseded',
+            'message', 'superseded by a queued run of the task');
+        IF dup.failure_class IS NOT NULL THEN
+            payload := payload || jsonb_build_object('failureClass', dup.failure_class::text);
+        END IF;
         INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload)
         VALUES (dup.org_id, dup.id, run_seq, run_epoch, 'run.canceled', payload);
         UPDATE tasks SET last_event_seq = last_event_seq + 1

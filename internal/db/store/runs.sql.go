@@ -73,6 +73,13 @@ func (q *Queries) AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run
 }
 
 const cancelOpenRunsForAgent = `-- name: CancelOpenRunsForAgent :many
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = $2 AND r.agent_id = $3
+      AND r.state IN ('queued', 'starting', 'running', 'parked')
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = $1::text,
@@ -80,9 +87,9 @@ SET state = 'canceled',
     ready_at = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = $2 AND agent_id = $3
-  AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at
+FROM locked
+WHERE runs.org_id = $2 AND runs.id = locked.id
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd, runs.traced, runs.last_turn_seq, runs.content_purged_at
 `
 
 type CancelOpenRunsForAgentParams struct {
@@ -91,7 +98,9 @@ type CancelOpenRunsForAgentParams struct {
 	AgentID       pgtype.UUID
 }
 
-// Archiving an agent cancels every run it has not finished.
+// Archiving an agent cancels every run it has not finished. It locks the runs in id order (the
+// rule for every statement that locks more than one run row, see scheduler.LockTask), so it
+// cannot wait for a run in a cycle with Owner.Requeue, which holds a run and wants the queued one.
 func (q *Queries) CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error) {
 	rows, err := q.db.Query(ctx, cancelOpenRunsForAgent, arg.OutcomeReason, arg.OrgID, arg.AgentID)
 	if err != nil {
@@ -300,6 +309,14 @@ func (q *Queries) CancelRun(ctx context.Context, arg CancelRunParams) (Run, erro
 }
 
 const cancelRunsOverWallClock = `-- name: CancelRunsOverWallClock :many
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = $2
+      AND r.state IN ('starting', 'running')
+      AND r.started_at + make_interval(secs => r.max_wall_clock_seconds + r.parked_seconds) < now()
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = $1::text,
@@ -307,10 +324,9 @@ SET state = 'canceled',
     ready_at = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = $2
-  AND state IN ('starting', 'running')
-  AND started_at + make_interval(secs => max_wall_clock_seconds + parked_seconds) < now()
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at
+FROM locked
+WHERE runs.org_id = $2 AND runs.id = locked.id
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd, runs.traced, runs.last_turn_seq, runs.content_purged_at
 `
 
 type CancelRunsOverWallClockParams struct {
@@ -320,7 +336,8 @@ type CancelRunsOverWallClockParams struct {
 
 // Cancels owned runs that have been owned longer than their wall-clock cap
 // (plan item A4). Parked time is excluded through parked_seconds. Safe to run
-// from every API replica: a run canceled by one sweep no longer matches.
+// from every API replica: a run canceled by one sweep no longer matches. Locks the runs in id
+// order (see CancelOpenRunsForAgent).
 func (q *Queries) CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error) {
 	rows, err := q.db.Query(ctx, cancelRunsOverWallClock, arg.OutcomeReason, arg.OrgID)
 	if err != nil {
@@ -524,8 +541,15 @@ func (q *Queries) ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run
 }
 
 const clearSandboxWaitForAgent = `-- name: ClearSandboxWaitForAgent :execrows
+WITH locked AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = $1 AND r.agent_id = $2 AND r.sandbox_wait_started_at IS NOT NULL
+    ORDER BY r.id
+    FOR UPDATE
+)
 UPDATE runs SET sandbox_wait_started_at = NULL
-WHERE org_id = $1 AND agent_id = $2 AND sandbox_wait_started_at IS NOT NULL
+FROM locked
+WHERE runs.org_id = $1 AND runs.id = locked.id
 `
 
 type ClearSandboxWaitForAgentParams struct {
@@ -535,7 +559,7 @@ type ClearSandboxWaitForAgentParams struct {
 
 // The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 // run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
-// runs_sandbox_waiting.
+// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
 func (q *Queries) ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, clearSandboxWaitForAgent, arg.OrgID, arg.AgentID)
 	if err != nil {
@@ -1064,6 +1088,48 @@ func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (Run, error) {
 	return i, err
 }
 
+const lockRunsForRequeue = `-- name: LockRunsForRequeue :many
+SELECT id, state FROM runs
+WHERE org_id = $1 AND (id = $2 OR (task_id = $3 AND state = 'queued'))
+ORDER BY id
+FOR UPDATE
+`
+
+type LockRunsForRequeueParams struct {
+	OrgID  pgtype.UUID
+	ID     pgtype.UUID
+	TaskID pgtype.UUID
+}
+
+type LockRunsForRequeueRow struct {
+	ID    pgtype.UUID
+	State RunState
+}
+
+// Locks the run and the queued run of its task, in id order (the rule for every statement that
+// locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
+// the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
+// Returns the ids it locked and their states.
+func (q *Queries) LockRunsForRequeue(ctx context.Context, arg LockRunsForRequeueParams) ([]LockRunsForRequeueRow, error) {
+	rows, err := q.db.Query(ctx, lockRunsForRequeue, arg.OrgID, arg.ID, arg.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockRunsForRequeueRow
+	for rows.Next() {
+		var i LockRunsForRequeueRow
+		if err := rows.Scan(&i.ID, &i.State); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markRunRunning = `-- name: MarkRunRunning :one
 UPDATE runs
 SET state = 'running'
@@ -1309,28 +1375,26 @@ func (q *Queries) ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams
 
 const requeueRun = `-- name: RequeueRun :one
 UPDATE runs
-SET state = CASE WHEN d.superseded THEN 'canceled'::run_state ELSE 'queued'::run_state END,
+SET state = CASE WHEN $1::boolean THEN 'canceled'::run_state ELSE 'queued'::run_state END,
     parked_seconds = parked_seconds + CASE
         WHEN claimed_at IS NULL THEN 0
         ELSE greatest(0, floor(extract(epoch FROM now() - claimed_at)))::bigint END,
     claimed_at = NULL,
-    ready_at = CASE WHEN d.superseded THEN NULL ELSE now() END,
-    outcome_reason = CASE WHEN d.superseded THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
-    finished_at = CASE WHEN d.superseded THEN now() ELSE finished_at END,
+    ready_at = CASE WHEN $1::boolean THEN NULL ELSE now() END,
+    outcome_reason = CASE WHEN $1::boolean THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
+    finished_at = CASE WHEN $1::boolean THEN now() ELSE finished_at END,
     owner_id = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-FROM (SELECT EXISTS (SELECT 1 FROM runs o
-                     WHERE o.org_id = cur.org_id AND o.task_id = cur.task_id AND o.state = 'queued') AS superseded
-      FROM runs cur WHERE cur.org_id = $1 AND cur.id = $2) d
-WHERE runs.org_id = $1 AND runs.id = $2 AND runs.epoch = $3 AND runs.state = 'starting'
-RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd, runs.traced, runs.last_turn_seq, runs.content_purged_at
+WHERE org_id = $2 AND id = $3 AND epoch = $4 AND state = 'starting'
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at
 `
 
 type RequeueRunParams struct {
-	OrgID pgtype.UUID
-	ID    pgtype.UUID
-	Epoch int64
+	Superseded bool
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	Epoch      int64
 }
 
 // starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
@@ -1344,10 +1408,16 @@ type RequeueRunParams struct {
 // One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
 // queued already (a message arrived while this run was starting, and queued a run that will see
 // every message), this run does not wait a second time: it is canceled as superseded, which is an
-// end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
-// so that no enqueue slips in between the check and the write; the index is the backstop.
+// end state for it and not an error. The caller decides once (HasQueuedRunForTask, under the task
+// row lock, so that no enqueue slips in between the check and the write) and passes the result as
+// @superseded; the index is the backstop.
 func (q *Queries) RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error) {
-	row := q.db.QueryRow(ctx, requeueRun, arg.OrgID, arg.ID, arg.Epoch)
+	row := q.db.QueryRow(ctx, requeueRun,
+		arg.Superseded,
+		arg.OrgID,
+		arg.ID,
+		arg.Epoch,
+	)
 	var i Run
 	err := row.Scan(
 		&i.OrgID,

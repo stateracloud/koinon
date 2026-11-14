@@ -48,6 +48,8 @@ var _ = Describe("the one queued run per task migration (#678)", func() {
 		for range 3 {
 			runs = append(runs, scan(`INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at, max_tokens) VALUES ($1, $2, $3, $4, now(), 1000) RETURNING id`, org, agent, version1, task))
 		}
+		_, err = db.ExecContext(ctx, `UPDATE runs SET failure_class = 'sandbox_unavailable' WHERE id = $1`, runs[2])
+		Expect(err).NotTo(HaveOccurred())
 
 		_, err = provider.Up(ctx)
 		Expect(err).NotTo(HaveOccurred())
@@ -63,6 +65,13 @@ var _ = Describe("the one queued run per task migration (#678)", func() {
 		Expect(count(`SELECT count(*) FROM runs WHERE task_id = $1 AND state = 'canceled' AND finished_at IS NOT NULL`, task)).To(Equal(2))
 		Expect(count(`SELECT count(*) FROM run_events WHERE kind = 'run.canceled' AND run_id = ANY($1)`, []string{runs[1], runs[2]})).To(Equal(2))
 		Expect(count(`SELECT count(*) FROM task_events WHERE kind = 'run.canceled' AND task_id = $1`, task)).To(Equal(2))
+		for _, id := range runs[1:] {
+			Expect(scan(`SELECT outcome_reason FROM runs WHERE id = $1`, id)).To(Equal("superseded by a queued run of the task"))
+			Expect(scan(`SELECT payload->>'reason' || '|' || (payload->>'message') FROM run_events WHERE run_id = $1 AND kind = 'run.canceled'`, id)).
+				To(Equal("requeue_superseded|superseded by a queued run of the task"))
+		}
+		Expect(scan(`SELECT payload->>'failureClass' FROM run_events WHERE run_id = $1 AND kind = 'run.canceled'`, runs[2])).To(Equal("sandbox_unavailable"))
+		Expect(count(`SELECT count(*) FROM run_events WHERE run_id = $1 AND kind = 'run.canceled' AND NOT payload ? 'failureClass'`, runs[1])).To(Equal(1))
 		Expect(count(`SELECT count(DISTINCT seq) FROM task_events WHERE task_id = $1`, task)).To(Equal(2))
 
 		By("the index now refuses a second queued run")

@@ -18,10 +18,14 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/runlock"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
+
+// ago is a pointer to a duration, for the table of wait cases.
+func ago(d time.Duration) *time.Duration { return &d }
 
 var (
 	pool *pgxpool.Pool
@@ -111,12 +115,12 @@ var _ = Describe("one queued run per task", func() {
 	It("takes the task lock in a transaction and refuses to run outside one", func(ctx SpecContext) {
 		w := newWorld(ctx)
 		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			locked, err := scheduler.LockTask(ctx, q.WithTx(tx), w.org, w.task.ID)
+			locked, err := runlock.LockTask(ctx, q.WithTx(tx), w.org, w.task.ID)
 			Expect(locked.ID).To(Equal(w.task.ID))
 			return err
 		})).To(Succeed())
 
-		_, err := scheduler.LockTask(ctx, q, w.org, w.task.ID)
+		_, err := runlock.LockTask(ctx, q, w.org, w.task.ID)
 		Expect(err).To(MatchError(ContainSubstring("outside a transaction")))
 	})
 
@@ -220,7 +224,7 @@ var _ = Describe("one queued run per task", func() {
 		for _, e := range taskEvents {
 			if e.Kind == runoutcome.KindRunCanceled && e.RunID == first.ID {
 				found = true
-				Expect(string(e.Payload)).To(ContainSubstring(string(runoutcome.ReasonSuperseded)))
+				Expect(string(e.Payload)).To(ContainSubstring(string(runoutcome.ReasonRequeueSuperseded)))
 			}
 		}
 		Expect(found).To(BeTrue(), "a task event says why the run was canceled")
@@ -259,6 +263,97 @@ var _ = Describe("one queued run per task", func() {
 			if err := <-requeueErr; err != nil {
 				Expect(err).To(MatchError(runoutcome.ErrFenced))
 			}
+		}
+	})
+
+	// The run that ends hands its sandbox wait start to the queued run: the earlier start wins.
+	waitCases := []struct {
+		name          string
+		first, queued *time.Duration // how long ago the wait of R and of Q started; nil: no start
+	}{
+		{"keeps the queued run's earlier start", ago(5 * time.Minute), ago(20 * time.Minute)},
+		{"gives the queued run the earlier start of the ended run", ago(20 * time.Minute), ago(5 * time.Minute)},
+		{"gives the start of the ended run to a queued run that has none", ago(10 * time.Minute), nil},
+		{"leaves the queued run alone when the ended run has no start", nil, ago(5 * time.Minute)},
+		{"leaves the queued run without a start when neither has one", nil, nil},
+	}
+	for _, c := range waitCases {
+		It("on a supersede "+c.name, func(ctx SpecContext) {
+			w := newWorld(ctx)
+			first, _, err := w.enqueue(ctx, w.task)
+			Expect(err).NotTo(HaveOccurred())
+			claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
+			Expect(err).NotTo(HaveOccurred())
+			at := func(d *time.Duration) pgtype.Timestamptz {
+				if d == nil {
+					return pgtype.Timestamptz{}
+				}
+				return pgtype.Timestamptz{Time: time.Now().Add(-*d).Truncate(time.Microsecond), Valid: true}
+			}
+			firstAt, queuedAt := at(c.first), at(c.queued)
+			if firstAt.Valid {
+				_, err = q.MarkRunSandboxWait(ctx, store.MarkRunSandboxWaitParams{Started: firstAt, OrgID: w.org, ID: first.ID, Epoch: claimed.Epoch})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			second, queued, err := w.enqueue(ctx, w.task)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(queued).To(BeTrue())
+			if queuedAt.Valid {
+				_, err = pool.Exec(ctx, `UPDATE runs SET sandbox_wait_started_at = $3 WHERE org_id = $1 AND id = $2`, w.org, second.ID, queuedAt)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			wantAt := queuedAt
+			if firstAt.Valid && (!queuedAt.Valid || firstAt.Time.Before(queuedAt.Time)) {
+				wantAt = firstAt
+			}
+
+			own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
+			Expect(own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")).To(Succeed())
+			other, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: second.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(other.SandboxWaitStartedAt.Valid).To(Equal(wantAt.Valid))
+			if wantAt.Valid {
+				Expect(other.SandboxWaitStartedAt.Time).To(BeTemporally("==", wantAt.Time))
+			}
+		})
+	}
+
+	It("does not deadlock when an agent is archived while a starting run is requeued", func(ctx SpecContext) {
+		for range 10 {
+			w := newWorld(ctx)
+			first, _, err := w.enqueue(ctx, w.task)
+			Expect(err).NotTo(HaveOccurred())
+			claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(claimed.ID).To(Equal(first.ID))
+			_, queued, err := w.enqueue(ctx, w.task)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(queued).To(BeTrue())
+			own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
+			start := make(chan struct{})
+			archiveErr := make(chan error, 1)
+			requeueErr := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				<-start
+				archiveErr <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+					_, err := runoutcome.CancelForAgent(ctx, q.WithTx(tx), w.org, w.agent, runoutcome.System)
+					return err
+				})
+			}()
+			go func() {
+				defer GinkgoRecover()
+				<-start
+				requeueErr <- own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")
+			}()
+			close(start)
+			// The archive always succeeds; a lost requeue is a fence. A deadlock (40P01) is any
+			// other error.
+			Expect(<-archiveErr).To(Succeed())
+			if err := <-requeueErr; err != nil {
+				Expect(err).To(MatchError(runoutcome.ErrFenced))
+			}
+			Expect(w.queuedRuns(ctx, w.task)).To(Equal(0))
 		}
 	})
 

@@ -9,7 +9,7 @@
 //     agent's override): a wall-clock limit enforced by Sweeper, and a model-request limit and a
 //     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
 //     0081). Tokens are reported by RecordUsage, not enforced.
-//   - One queued run per task: the enqueue paths take the task's row lock first, through LockTask,
+//   - One queued run per task: the enqueue paths take the task's row lock first, through runlock.LockTask,
 //     and the unique index runs_one_queued_per_task refuses what the lock was meant to prevent.
 //   - Every cancel writes a run event and a task event saying why.
 //
@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/runlimits"
+	"github.com/stateracloud/koinon/internal/runlock"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
@@ -54,39 +55,10 @@ var ErrQueuedRunExists = errors.New("the task has a queued run already")
 // queuedRunIndex is the unique index that allows one queued run per task.
 const queuedRunIndex = "runs_one_queued_per_task"
 
-// LockTask takes the task's row lock and returns the task as it is now. It is the first step of
-// every path that queues a run of the task. The lock lasts to the end of the transaction, so the
-// caller must be in one: LockTask checks that, and returns an error when the lock did not outlast
-// the statement. It does not check the lock order, and it cannot: nothing here knows which other
-// locks the transaction holds.
-//
-// Lock order, kept by hand. An enqueue path locks the task row and no run row (it inserts a new
-// one). A path that ends a run locks the run row first, then the task row (it appends a task
-// event): runoutcome.Owner.Requeue does it explicitly, and CancelForAgent, the limit checks and the
-// sweep do it through their UPDATE of runs followed by the task event. Requeue cannot call LockTask
-// (runoutcome cannot import scheduler, which imports it), so its copy of the order is a comment
-// there. The enqueue order (task) and the end order (run, task) take no two locks in opposite
-// orders, so they cannot wait on each other in a cycle. Locking a row the transaction holds
-// already costs nothing.
-func LockTask(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Task, error) {
-	task, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: org, ID: id})
-	if err != nil {
-		return store.Task{}, fmt.Errorf("lock task: %w", err)
-	}
-	held, err := q.TaskLockHeld(ctx, store.TaskLockHeldParams{OrgID: org, ID: id})
-	if err != nil {
-		return store.Task{}, fmt.Errorf("check the task lock: %w", err)
-	}
-	if !held.Bool {
-		return store.Task{}, errors.New("scheduler: the task lock is held outside a transaction; queue runs inside one")
-	}
-	return task, nil
-}
-
 // Enqueue queues a run of the task's agent for the task, with the caps of
 // the agent's active version. It queues nothing, and returns false, when the
 // task has no agent or already has a queued run (that run will see every
-// message appended before it starts). It takes the task's row lock with LockTask, so concurrent
+// message appended before it starts). It takes the task's row lock with runlock.LockTask, so concurrent
 // calls for one task queue at most one run; the caller must be in a transaction.
 func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run, bool, error) {
 	return EnqueueOrigin(ctx, q, task, store.RunOriginInteractive)
@@ -95,7 +67,7 @@ func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run,
 // EnqueueOrigin is Enqueue for a run of the given origin. Interactive runs are claimed before
 // scheduled ones (LT1, ADR 0066); triggers and schedules (TR1) pass RunOriginScheduled.
 func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origin store.RunOrigin) (store.Run, bool, error) {
-	task, err := LockTask(ctx, q, task.OrgID, task.ID)
+	task, err := runlock.LockTask(ctx, q, task.OrgID, task.ID)
 	if err != nil {
 		return store.Run{}, false, err
 	}

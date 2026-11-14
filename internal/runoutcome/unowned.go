@@ -47,9 +47,10 @@ const (
 	// ReasonApprovalExpired: the run was parked on an approval nobody decided in time
 	// (ADR 0049: 7 days).
 	ReasonApprovalExpired CancelReason = "approval_expired"
-	// ReasonSuperseded: the run went back to the queue (Owner.Requeue) while another run of the
-	// task was queued already; that run sees every message, so this one ends.
-	ReasonSuperseded CancelReason = "superseded"
+	// ReasonRequeueSuperseded: the run went back to the queue (Owner.Requeue) while another run of
+	// the task was queued already; that run sees every message, so this one ends. It is not the
+	// "superseded" end of Owner.Supersede, which ends a run as succeeded.
+	ReasonRequeueSuperseded CancelReason = "requeue_superseded"
 )
 
 // Actor is who caused a cancel, for the task event.
