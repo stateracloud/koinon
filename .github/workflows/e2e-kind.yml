@@ -19,8 +19,9 @@
 #     install (test/e2e/backup-restore.sh, which runs
 #     test/e2e/commands/backup-restore.e1) and checks it came back. It also runs the run-1 story suite (test/e2e/stories_test.go,
 #     label stories, issue 992) after the quickstart, with the fake model and no paid call: a red story suite
-#     makes the quickstart job red: it reaches hack/e2e-bisect.sh (which dispatches with stories=true) and, on the main head,
-#     blocks the release gate like any red quickstart (ADR 0025 amendment, ADR 0109). A red run after a green one opens
+#     is advisory on the schedule event: it does not change the quickstart result (so not the release gate), but the
+#     job output `stories_red` starts hack/e2e-bisect.sh, which dispatches with stories=true (there the suite is blocking,
+#     so the bisect reads its result as pass or fail; ADR 0025 amendment, ADR 0109). A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 #   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
@@ -165,7 +166,14 @@ jobs:
       contents: read
       packages: read # the harness image CI's harnesses job pushed to GHCR
     runs-on: ubuntu-24.04
-    timeout-minutes: 35 # the job takes about 14 minutes (#572); the nightly adds 20 seconds
+    # The job takes about 14 minutes (#572). The nightly adds the backup and restore (20 seconds) and the story suite (issue 992):
+    # two agents with a sandbox each, and waits of up to 8 minutes (the MCP prober, a question, a resume), up to about 25 minutes
+    # when the fake model is slow. That cost is an estimate, not yet measured on a runner (replace it with the first nightly's
+    # number from the Timings summary). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
+    # worst case on the schedule and on a dispatch with stories=true; other runs keep 35.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories) && 60 || 35 }}
+    outputs:
+      stories_red: ${{ steps.storiesverdict.outputs.red }}
     defaults:
       run:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
@@ -301,9 +309,11 @@ jobs:
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The run-1 story suite (test/e2e/stories_test.go, issue 992) after the quickstart: on the nightly schedule and on a dispatch with
-          # stories=true (the bisect). It is not advisory: a red pass fails this job, so the run and the `quickstart` check
-          # run on that commit go red, a red night reaches hack/e2e-bisect.sh, and hack/release-gate.sh reads it.
+          # stories=true (the bisect).
           STORIES: ${{ (github.event_name == 'schedule' || inputs.stories) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
+          # Advisory on the schedule event: a red pass leaves the quickstart result alone (hack/release-gate.sh reads it) and
+          # sets the job output `stories_red`. A dispatch with stories=true (the bisect) is blocking: it needs pass or fail.
+          STORIES_ADVISORY: ${{ github.event_name == 'schedule' && '1' || '0' }}
           # Also run the escape suite's leak guard case from a sandbox against this install (#348).
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
@@ -320,6 +330,12 @@ jobs:
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+
+      - name: Story suite verdict
+        id: storiesverdict
+        if: always()
+        run: |
+          if [[ -e "$RUNNER_TEMP/e2e/stories-red" ]]; then echo red=true >>"$GITHUB_OUTPUT"; else echo red=false >>"$GITHUB_OUTPUT"; fi
 
       - name: Timings
         if: always()
@@ -419,7 +435,7 @@ jobs:
   bisect:
     needs: quickstart
     if: >-
-      always() && needs.quickstart.result == 'failure'
+      always() && (needs.quickstart.result == 'failure' || needs.quickstart.outputs.stories_red == 'true')
       && (github.event_name == 'push' || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 120

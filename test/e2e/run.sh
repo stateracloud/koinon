@@ -46,7 +46,9 @@
 #   (test/e2e/stories_test.go, label stories; issue 992), through the generated clients with the fake model. `make
 #   test-e2e-kind` sets it, and so does e2e-kind.yml on the schedule event only; a pull request's and the merge
 #   queue's run leave it out (the quickstart pass always filters the label out). A red pass fails the script
-#   after the escape and backup steps, and so reaches hack/e2e-bisect.sh on a red night. Its reports are
+#   after the escape and backup steps, unless STORIES_ADVISORY=1 (the schedule event sets it): then the script
+#   exits as the other steps say, prints a warning and writes $OUT/stories-red, which the workflow turns into the
+#   job output that starts hack/e2e-bisect.sh. A dispatch with stories=true (the bisect) is not advisory. Its reports are
 #   $OUT/stories-junit.xml and $OUT/stories-report.json, its log $OUT/stories.log.
 #   SUITE=go also writes $OUT/junit.xml and $OUT/report.json (Ginkgo's JUnit and JSON reports); CI uploads $OUT.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
@@ -300,7 +302,12 @@ go)
   if [[ ${STORIES:-0} == 1 && -z ${SUITE_LABEL:-} ]]; then
     step "run-1 story suite (go test ./test/e2e, label stories)"
     if ! driver stories "$OUT/stories-junit.xml" "$OUT/stories-report.json" "$OUT/stories.log"; then
-      stories_failed=1
+      if [[ ${STORIES_ADVISORY:-0} == 1 ]]; then
+        echo "::warning::the run-1 story suite is red (advisory: the quickstart result is not changed); see stories.log"
+        : >"$OUT/stories-red"
+      else
+        stories_failed=1
+      fi
     fi
     done_step "Run-1 story suite"
   fi

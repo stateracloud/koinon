@@ -305,9 +305,11 @@ the run-1 story suite, `test/e2e/stories_test.go` (label `stories`, issue #992),
 same install: user stories through the generated Connect clients with the fake model (an agent from a template by UUID,
 an MCP tool in tier `ask`, a question to the task's creator, `CancelRun` mid-turn and the resume, trace settings, org
 settings), each server rule a step that fails when the rule goes. A pull request and the merge queue never run it
-(the quickstart pass filters the label out). It is not advisory: it runs inside the `quickstart` job, so a red pass makes that job and the nightly run
-red. `hack/e2e-bisect.sh` then finds the merge that did it (it dispatches with `stories: true`), and a red night on
-the main head blocks the release gate like any red quickstart. It calls no paid model (ADR 0025, amended 2026-11-14).
+(the quickstart pass filters the label out). It is advisory on the schedule event: a red pass prints a warning and sets the `quickstart` job output
+`stories_red`, but leaves the job result, and so `e2e result` and `hack/release-gate.sh`, as the other steps made it.
+`stories_red` starts the `bisect` job, and `hack/e2e-bisect.sh` finds the merge that did it (it dispatches with
+`stories: true`, where the suite is blocking so the candidate run reads pass or fail). The job limit is 60 minutes on
+the schedule and on that dispatch (estimate, not yet measured; 35 otherwise). It calls no paid model (ADR 0025, amended 2026-11-14).
 
 Guide examples that need no cluster live in `test/docs-examples/*.e1`. `hack/docs-examples.sh` (CI job
 `docs examples`, advisory until it has run stable, ci-rules S3) builds `koinon-api` from the checkout and runs every
