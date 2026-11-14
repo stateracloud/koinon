@@ -29,7 +29,7 @@ import (
 // the ticket's vocabulary: "task.created" is "ticket.created" and "status.changed" names columns.
 
 // ticketColumn maps a task state to its board column.
-var ticketColumn = map[store.TaskState]ticketv1alpha1.TicketStatus{
+var ticketColumn = enumTable[store.TaskState, ticketv1alpha1.TicketStatus]{
 	store.TaskStateSubmitted:     ticketv1alpha1.TicketStatus_TICKET_STATUS_TODO,
 	store.TaskStateWorking:       ticketv1alpha1.TicketStatus_TICKET_STATUS_IN_PROGRESS,
 	store.TaskStateInputRequired: ticketv1alpha1.TicketStatus_TICKET_STATUS_WAITING_ON_YOU,
@@ -39,7 +39,7 @@ var ticketColumn = map[store.TaskState]ticketv1alpha1.TicketStatus{
 }
 
 // ticketColumnName is the column as the timeline's status.changed payload names it.
-var ticketColumnName = map[store.TaskState]string{
+var ticketColumnName = enumTable[store.TaskState, string]{
 	store.TaskStateSubmitted:     "todo",
 	store.TaskStateWorking:       "in_progress",
 	store.TaskStateInputRequired: "waiting_on_you",
@@ -86,7 +86,7 @@ func ticketProto(t store.Task) *ticketv1alpha1.Ticket {
 	}
 }
 
-var ticketActorKind = map[store.TaskActorKind]ticketv1alpha1.ActorKind{
+var ticketActorKind = enumTable[store.TaskActorKind, ticketv1alpha1.ActorKind]{
 	store.TaskActorKindUser:   ticketv1alpha1.ActorKind_ACTOR_KIND_USER,
 	store.TaskActorKindAgent:  ticketv1alpha1.ActorKind_ACTOR_KIND_AGENT,
 	store.TaskActorKindSystem: ticketv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,

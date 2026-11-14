@@ -41,7 +41,7 @@ var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{
 	connectors.TierForbidden:              connectionv1alpha1.Tier_TIER_FORBIDDEN,
 }
 
-var connectionStatusToProto = map[store.ConnectionStatus]connectionv1alpha1.ConnectionStatus{
+var connectionStatusToProto = enumTable[store.ConnectionStatus, connectionv1alpha1.ConnectionStatus]{
 	store.ConnectionStatusUntested: connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_UNTESTED,
 	store.ConnectionStatusOk:       connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_OK,
 	store.ConnectionStatusFailing:  connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_FAILING,

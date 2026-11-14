@@ -22,7 +22,7 @@ import (
 
 var _ questionv1alpha1connect.QuestionServiceHandler = (*Server)(nil)
 
-var questionStateToProto = map[store.QuestionState]questionv1alpha1.QuestionState{
+var questionStateToProto = enumTable[store.QuestionState, questionv1alpha1.QuestionState]{
 	store.QuestionStateAsked:     questionv1alpha1.QuestionState_QUESTION_STATE_ASKED,
 	store.QuestionStateOpen:      questionv1alpha1.QuestionState_QUESTION_STATE_OPEN,
 	store.QuestionStateAnswered:  questionv1alpha1.QuestionState_QUESTION_STATE_ANSWERED,
@@ -31,7 +31,7 @@ var questionStateToProto = map[store.QuestionState]questionv1alpha1.QuestionStat
 	store.QuestionStateCanceled:  questionv1alpha1.QuestionState_QUESTION_STATE_CANCELED,
 }
 
-var answerKindToProto = map[store.QuestionAnswerKind]questionv1alpha1.AnswerKind{
+var answerKindToProto = enumTable[store.QuestionAnswerKind, questionv1alpha1.AnswerKind]{
 	store.QuestionAnswerKindChoice:  questionv1alpha1.AnswerKind_ANSWER_KIND_CHOICE,
 	store.QuestionAnswerKindDraft:   questionv1alpha1.AnswerKind_ANSWER_KIND_DRAFT,
 	store.QuestionAnswerKindText:    questionv1alpha1.AnswerKind_ANSWER_KIND_TEXT,
