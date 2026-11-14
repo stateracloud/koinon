@@ -516,12 +516,19 @@ The amendment above leaves these points open; this is what the code does.
    tick due). A restart inside the week with the same models in use stores nothing and sends no
    endpoints request. A scheduled store checks Due again under its lock, so of two replicas that
    both found it due only one stores and asks the endpoints route. `koinon-api prices fetch` is an operator's own request and always stores.
-2. **Endpoints route.** After storing the list, the install asks
-   `GET /api/v1/models/{author}/{slug}/endpoints` once for each distinct model that an enabled
-   `openrouter` provider has enabled and the list carries, at most 100 per refresh, sequentially, with the same pinned
-   host, no redirects and 16 MiB cap as the list. The upstream list is display data and is stored
-   without any price (ADR 0098 decision 2.7). A failed request is logged as a count and does not fail
-   the price fetch.
+2. **Endpoints route.** Endpoints are due per model, from `endpoints_fetched_at` of its row: a
+   model is due when its endpoints were never fetched, or the last fetch is older than the interval
+   less 12 hours. Each successful OpenRouter fetch tick (not only a tick that stores the list) asks
+   `GET /api/v1/models/{author}/{slug}/endpoints` for the due models that an enabled `openrouter`
+   provider has enabled and the list carries: never-fetched models first, then the oldest, at most 100
+   (`MaxEndpointModels`) per round, sequentially, with the same pinned host, no redirects and 16 MiB
+   cap as the list. The models over the cap are logged as left for a later round. A model whose
+   request failed, or that the round did not reach, keeps its old `endpoints_fetched_at` and is asked
+   again on the next tick. The endpoints round takes no lock, so two replicas whose ticks overlap can
+   both ask the same due models. The upstream list is display data and is stored without any price
+   (ADR 0098 decision 2.7). A failed request is logged as a count and does not fail the price fetch.
+   _Amended 2026-11-14 (#667): the endpoints were asked once per store, as one batch; they are now
+   due per model, as described here._
 3. **Storage.** `openrouter_catalog` (the last store, `openrouter@<fetched_at>`),
    `openrouter_models` (display fields, the fetched limits, endpoints), `openrouter_limit_proposals`
    and `openrouter_limit_values` (migration 00075, install-wide, no org column). A model missing

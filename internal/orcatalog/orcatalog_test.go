@@ -434,6 +434,18 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 			Expect(batch).NotTo(ContainElement(names[0]), "never-fetched models go before a stale one")
 			Expect(batch[0]).To(Equal(names[1]))
 		})
+
+		It("sorts a never-fetched model before a stale one (current behaviour; see #1021)", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			stale, never := "fake/a-stale-1021", "fake/z-never-1021" // by name the stale one is first
+			_, err := s.Apply(ctx, snapshot(t0, meta(never, 1, 1), meta(stale, 1, 1)), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s.StoreEndpoints(ctx, pricefetch.ModelEndpoints{Model: stale, FetchedAt: t0})).To(Succeed())
+			all := []string{never, stale}
+			batch, _, err := s.EndpointsDue(ctx, t0.Add(30*24*time.Hour), all, all)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(batch).To(Equal([]string{never, stale}))
+		})
 	})
 
 	It("stores a catalog whose upstream strings carry a NUL or other control characters", func(ctx SpecContext) {

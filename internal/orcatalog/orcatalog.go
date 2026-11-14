@@ -135,6 +135,10 @@ func InUseListed(inUse, listed []string) []string {
 // catalog has not stored it) is not due: there is nothing to store its endpoints in. The result is
 // ordered never-fetched first, then oldest first, then by name, so successive rounds rotate through
 // every model in use.
+//
+// Interim (#1021): a model whose endpoints route always fails keeps endpoints_fetched_at NULL, so it
+// is asked first in every round. With MaxEndpointModels or more such models, the stale models are
+// not refreshed. Exit: an attempt time is recorded and failing models sort after stale ones.
 func (s *Store) EndpointsDue(ctx context.Context, now time.Time, inUse, listed []string) (batch []string, left int, err error) {
 	rows, err := store.New(s.pool).ListOpenRouterModels(ctx)
 	if err != nil {
