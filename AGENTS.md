@@ -16,7 +16,7 @@ of it.
   A new suite joins the parallel list in that script once it shares
   no database, fixed port or fixed path between processes. `test/harnesses`: `make test-harnesses`.
   Details: `docs/dev/ci.md#go-test-suites`.
-- Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
+- Web only: `pnpm --dir web lint`, `pnpm --dir web typecheck`, `pnpm --dir web test` (one command per call; no `cd web &&`, no pipe: a sandbox excludes `pnpm` and matches the plain command)
 - Docs site: not in this repository (ADR 0108); it is `stateracloud/koinon-docs`, live at
   <https://koinon.stateracloud.com>. The quickstart and backup commands live in `test/e2e/commands/*.e1`;
   `test/e2e` runs them and `make e2e-commands-check` checks them. Edit the file; the docs repository's CI
@@ -64,7 +64,14 @@ of it.
 - Work on an issue your human names, or a Ready issue labelled `agent-ok`; never start any other.
   Only humans move issues to Ready.
 - Outside contributors do not claim: say on the issue that you are working on it. Maintainers' agents
-  claim first: [claims and lanes](docs/maintainers/agent-workflow.md#picking-up-work).
+  claim first: [claims and lanes](docs/maintainers/agent-workflow.md#picking-up-work); a lane agent
+  follows [the lane procedure](docs/maintainers/lane.md).
+- `hack/claim.sh next` shows the current milestone only; set `KOINON_CLAIM_MILESTONE=<title>` to see
+  another one before you say that nothing is Ready. The overlap check (`hack/claim.sh show <N>`)
+  also applies to a PR you fix or merge, even one your human names.
+- A sandboxed `gh` or `git` call that reaches GitHub needs `allowed_domains` `api.github.com` and
+  `github.com`. A checkout can be far behind: `git fetch` and count the commits behind `origin/main`
+  before you let a reader or reviewer use it.
 - A pull request names the issue it closes with `Closes #N`. New work you discover becomes a new
   issue; do not start it.
 
