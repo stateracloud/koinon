@@ -38,3 +38,50 @@ lacks "the override replaces the default CPU" 'cpu: \{request: "250m"' "${sbx[@]
 has "a numeric CPU renders as a string" 'limit: "8"' --set sandbox.resources.default.cpu.limit=8 --show-only $cfg
 if render --set sandbox.resources.memoryRequestEqualsLimit=maybe >/dev/null 2>&1; then fail "a non-boolean memoryRequestEqualsLimit must not render"; fi
 if render --set sandbox.resources.default.gpu.limit=1 >/dev/null 2>&1; then fail "an unknown sandbox.resources.default key must not render"; fi
+
+# koinon.validate: the two cross-field rules of sandboxres.Policy.Validate (#664).
+# The defaults pass.
+render >/dev/null 2>&1 || fail "the default sandbox.resources values must render"
+
+# Memory limit maximum above the request maximum: refused with the rule on, accepted with it off.
+if sres_msg=$(render --set sandbox.resources.bounds.memory.limit.max=16Gi --set sandbox.resources.memoryRequestEqualsLimit=true 2>&1); then
+	fail "memory.limit.max=16Gi with memoryRequestEqualsLimit=true must fail the render"
+fi
+grep -Fq 'memoryRequestEqualsLimit=true limit.max "16Gi" is above request.max "8Gi"' <<<"$sres_msg" ||
+	fail "the memoryRequestEqualsLimit refusal does not name the values: $(head -c 300 <<<"$sres_msg")"
+render --set sandbox.resources.bounds.memory.limit.max=16Gi --set sandbox.resources.memoryRequestEqualsLimit=false >/dev/null 2>&1 ||
+	fail "memory.limit.max=16Gi with memoryRequestEqualsLimit=false must render"
+
+# A limit range that starts below the request minimum: refused for memory and for cpu.
+if sres_msg=$(render --set sandbox.resources.bounds.memory.limit.min=256Mi 2>&1); then
+	fail "memory.limit.min below memory.request.min must fail the render"
+fi
+grep -Fq 'limit.min "256Mi" is below request.min "512Mi"' <<<"$sres_msg" || fail "the memory limit.min refusal does not name the values"
+if sres_msg=$(render --set sandbox.resources.bounds.cpu.limit.min=50m 2>&1); then
+	fail "cpu.limit.min below cpu.request.min must fail the render"
+fi
+grep -Fq 'limit.min "50m" is below request.min "100m"' <<<"$sres_msg" || fail "the cpu limit.min refusal does not name the values"
+
+# Units compare as quantities, not as text: 8192Mi equals 8Gi, 1000m equals 1.
+render --set sandbox.resources.bounds.memory.limit.max=8192Mi >/dev/null 2>&1 || fail "memory.limit.max=8192Mi equals the 8Gi request maximum and must render"
+render --set sandbox.resources.bounds.cpu.limit.min=0.1 >/dev/null 2>&1 || fail "cpu.limit.min=0.1 equals 100m and must render"
+
+# A value that is no quantity fails the render too.
+if render --set sandbox.resources.bounds.memory.limit.max=lots >/dev/null 2>&1; then fail "a bound that is not a quantity must fail the render"; fi
+
+# The parser takes the grammar of k8s resource.ParseQuantity: a render never refuses a value the binaries accept (#664).
+# 1e3 equals 1k: request.max 1k with limit.max 1e3 passes, and 1e3 above 1k would not.
+render --set sandbox.resources.memoryRequestEqualsLimit=true --set-string sandbox.resources.bounds.memory.request.max=1k --set-string sandbox.resources.bounds.memory.limit.max=1e3 >/dev/null 2>&1 ||
+	fail "memory.limit.max=1e3 equals the 1k request maximum and must render"
+if render --set sandbox.resources.memoryRequestEqualsLimit=true --set-string sandbox.resources.bounds.memory.request.max=1k --set-string sandbox.resources.bounds.memory.limit.max=1001 >/dev/null 2>&1; then
+	fail "memory.limit.max=1001 is above the 1k request maximum and must fail the render"
+fi
+render --set-string sandbox.resources.bounds.cpu.limit.min=.5 --set-string sandbox.resources.bounds.cpu.request.min=.25 >/dev/null 2>&1 || fail "'.5' is a quantity and must render"
+render --set-string sandbox.resources.bounds.cpu.limit.min=1e-1 --set-string sandbox.resources.bounds.cpu.request.min=+100m >/dev/null 2>&1 || fail "'1e-1' and '+100m' are quantities and must render"
+if render --set-string sandbox.resources.bounds.cpu.limit.min=1x >/dev/null 2>&1; then fail "'1x' is not a quantity and must fail the render"; fi
+
+# An empty limit bound next to a set request bound says so.
+if sres_msg=$(render --set-string sandbox.resources.bounds.cpu.limit.min= 2>&1); then
+	fail "an empty cpu.limit.min next to a request.min must fail the render"
+fi
+grep -Fq 'limit.min is empty and must be set' <<<"$sres_msg" || fail "the empty limit.min refusal does not say it is empty: $(head -c 300 <<<"$sres_msg")"

@@ -40,7 +40,8 @@ image:
   registry: ghcr.io/stateracloud/koinon
   tag: ""
   pullPolicy: IfNotPresent
-# DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it.
+# DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it. Exit: remove this key
+# when the first minor line ships (v0.3, ADR 0099) and the chart's upgrade notes say so (#1024).
 imagePullSecrets: []
 
 api:
@@ -365,8 +366,9 @@ gateway:
 egress:
   allowedInternalHosts: []
 
-# DEPRECATED, removed after the next release: the old name of egress.allowedInternalHosts. Both are
-# joined.
+# DEPRECATED: the old name of egress.allowedInternalHosts. Both are joined. Exit: remove this key and
+# its join in the chart once the release after the one that introduced egress.allowedInternalHosts
+# has shipped (#1025).
 providers:
   allowedInternalHosts: []
 
@@ -847,8 +849,13 @@ sandboxLimitRange:
 # the bounds clamp every value, the template's included (the reconciler logs a warning when one is
 # clamped). The supervisor and init containers are sized by sandboxLimitRange (#76). Changing
 # a value recreates the sandboxes it applies to once, restoring their homes from the checkpoint.
-# Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set; the reconciler refuses to
-# start on a bad quantity, a minimum above its maximum, or a default request above its limit.
+# Kubernetes quantities: 250m, 2, 1Gi. A bound left empty is not set. koinon-api and the reconciler
+# both refuse to start (a crash loop) on any of these, and `helm template` and `helm upgrade` refuse
+# the two cross-field ones (koinon.validate), so you see them at render:
+#   - a quantity that does not parse, a minimum above its maximum, or a default request above its limit;
+#   - a limit range that starts below the request minimum (limit min < request min, for cpu and memory);
+#   - with memoryRequestEqualsLimit: true, a memory limit maximum above the memory request maximum
+#     (the limit is clamped, then the request is raised to it, so the request must be able to follow).
 #
 # Recommended values per isolation tier (ADR 0075):
 #   vm (Kata, the default): memory 512Mi-8Gi, cpu request 100m-2, cpu limit up to 4, and

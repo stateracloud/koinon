@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // itemLog records when items of each org start and finish, and how many of an org run at once.
@@ -126,7 +127,7 @@ var _ = Describe("per-org queue", func() {
 		Expect(time.Since(begin)).To(BeNumerically("<", 4*time.Second))
 		Expect(log.finished("org-a")).To(BeNumerically("<", 40), "org A is still working through its backlog")
 
-		Eventually(func() int { return log.finished("org-a") }, 60*time.Second, 200*time.Millisecond).Should(Equal(50))
+		Eventually(func() int { return log.finished("org-a") }, racescale.D(60*time.Second), 200*time.Millisecond).Should(Equal(50))
 		Expect(log.peakOf("org-a")).To(Equal(2))
 	}, SpecTimeout(3*time.Minute))
 
@@ -173,10 +174,10 @@ var _ = Describe("per-org queue", func() {
 		for range 6 {
 			enqueueItem(ctx, w, "org-r")
 		}
-		Eventually(func() int { return log.starts("org-r") }, 8*time.Second, 100*time.Millisecond).Should(Equal(3))
+		Eventually(func() int { return log.starts("org-r") }, racescale.D(8*time.Second), 100*time.Millisecond).Should(Equal(3))
 		// Let the three running items finish: DBOS puts in-flight workflows back to ENQUEUED on
 		// shutdown, and the second runtime would run them again.
-		Eventually(func() int { return log.finished("org-r") }, 8*time.Second, 50*time.Millisecond).Should(Equal(3))
+		Eventually(func() int { return log.finished("org-r") }, racescale.D(8*time.Second), 50*time.Millisecond).Should(Equal(3))
 
 		// Stop and restart against the same database, still inside the window.
 		Expect(first.Shutdown(5 * time.Second)).To(Succeed())
@@ -188,7 +189,7 @@ var _ = Describe("per-org queue", func() {
 		Expect(time.Since(window)).To(BeNumerically("<", 8*time.Second))
 		Consistently(func() int { return log.distinct("org-r") }, 2*time.Second, 100*time.Millisecond).Should(Equal(3))
 
-		Eventually(func() int { return log.distinct("org-r") }, 30*time.Second, 200*time.Millisecond).Should(Equal(6))
+		Eventually(func() int { return log.distinct("org-r") }, racescale.D(30*time.Second), 200*time.Millisecond).Should(Equal(6))
 		Expect(log.starts("org-r")).To(Equal(6), "no item ran twice")
 		Expect(time.Since(window)).To(BeNumerically(">=", 12*time.Second-time.Second), "the other three started only after the window moved on")
 	}, SpecTimeout(3*time.Minute))
