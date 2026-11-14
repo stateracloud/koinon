@@ -81,8 +81,9 @@ func (p *SandboxNetworkPolicy) Policy(namespace string) *networkingv1.NetworkPol
 // Ensure converges the default-deny NetworkPolicy in the workspace's namespace: it is created when
 // missing (also after someone deleted it) and its shape is repaired when it drifted. The
 // reconciler calls it once per pass for each active workspace, so it reads the object every time
-// (one GET when nothing changed) instead of caching that it was done. A namespace OpenShell has not
-// created yet, or a denied write, is retried after a backoff.
+// (one GET when nothing changed) instead of caching that it was done. A denied write is retried after
+// a backoff. A namespace OpenShell has not created yet is not backed off: the reconciler calls Ensure
+// again right after CreateSandbox.
 func (p *SandboxNetworkPolicy) Ensure(ctx context.Context, workspace string) error {
 	ns := p.namespace(workspace)
 	p.mu.Lock()

@@ -1224,7 +1224,8 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		_ = r.cfg.Observer.EnsureAccess(ctx, name)
 	}
 	if r.cfg.NetworkPolicy != nil && ws.Active {
-		// Defense in depth: a missing NetworkPolicy is counted and logged there, never fatal here.
+		// Defense in depth, never fatal here. A missing workspace namespace is expected before the
+		// first sandbox: the policy is written after CreateSandbox. The writer counts and logs other failures.
 		_ = r.cfg.NetworkPolicy.Ensure(ctx, name)
 	}
 	if r.cfg.LimitRange != nil && ws.Active {
