@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/runlock"
 	"github.com/stateracloud/koinon/internal/runreply"
 )
 
@@ -430,18 +431,69 @@ func (o *Owner) postReply(ctx context.Context, q *store.Queries) error {
 // owner's last write; the next claim gives the run a new epoch. A run that was taken over, canceled
 // or finished meanwhile is ErrFenced.
 func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
+	superseded := false
 	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
+		// Lock order (runlock.LockTask): the run row, then the task row. The task lock keeps every
+		// enqueue out until the end, so the check below and the write of RequeueRun see the same
+		// queue (runs_one_queued_per_task). The queued run is not locked before the task: the
+		// task-first paths (setState, cancel_task) lock the task, then that run.
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: o.run.OrgID, ID: o.run.ID})
+		if err != nil {
+			return err
+		}
+		if run.Epoch != o.run.Epoch || run.State != store.RunStateStarting {
+			return pgx.ErrNoRows
+		}
+		if _, err := runlock.LockTask(ctx, q, o.run.OrgID, o.run.TaskID); err != nil {
+			return err
+		}
+		// The one decision: is another run of the task queued? (The own run is starting.)
+		superseded, err = q.HasQueuedRunForTask(ctx, store.HasQueuedRunForTaskParams{OrgID: o.run.OrgID, TaskID: o.run.TaskID})
+		if err != nil {
+			return err
+		}
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]string{"reason": reason})
-		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-			Kind: "run.requeued", Payload: payload, SourceSeq: src,
-		}); err != nil {
+		if !superseded {
+			payload, _ := json.Marshal(map[string]string{"reason": reason})
+			if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+				OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+				Kind: "run.requeued", Payload: payload, SourceSeq: src,
+			}); err != nil {
+				return err
+			}
+		}
+		r, err := q.RequeueRun(ctx, store.RequeueRunParams{
+			OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch, Superseded: superseded,
+		})
+		if err != nil {
 			return err
 		}
-		_, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch})
+		// Another run of the task is queued: this one ended as canceled, and the run and task
+		// timelines say why, like every other cancel.
+		if superseded {
+			_, err = recordCanceled(ctx, q, r, Cancellation{
+				Reason: ReasonRequeueSuperseded, Message: "superseded by a queued run of the task",
+				Extra: map[string]any{"requeueReason": reason},
+			})
+			if err != nil {
+				return err
+			}
+			// The queued run takes this run's place, so it takes the start of the wait too:
+			// the sandbox wait cap counts the whole wait (ADR 0066, amendment 2026-10-28). The
+			// carry skips a queued run that another transaction holds (SKIP LOCKED): we hold
+			// the task lock, so that holder takes no task lock (the task-first paths wait on
+			// ours). It is a short lock of another path: a cancel, the claim scan,
+			// ClearSandboxWaitForAgent, or a FOR KEY SHARE lock from an insert that references
+			// the queued run. A missed carry only starts a new wait clock. That is rare and
+			// accepted; the cancel of this run above still stands.
+			if r.SandboxWaitStartedAt.Valid {
+				_, err = q.CarrySandboxWaitToQueued(ctx, store.CarrySandboxWaitToQueuedParams{
+					OrgID: o.run.OrgID, TaskID: o.run.TaskID, ID: o.run.ID, Started: r.SandboxWaitStartedAt,
+				})
+			}
+		}
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -453,6 +505,13 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 	}
 	if err != nil {
 		return o.failed(ctx, turn, "requeue the run", err)
+	}
+	if superseded {
+		if o.cfg.Metrics != nil {
+			o.cfg.Metrics.Finished(store.RunStateCanceled)
+		}
+		o.cfg.Log.Info("run superseded by a queued run of the task", "reason", reason)
+		return nil
 	}
 	if o.cfg.Metrics != nil {
 		o.cfg.Metrics.Requeued()

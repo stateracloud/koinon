@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -112,8 +113,10 @@ type Spec struct {
 	Model        Model  `json:"model"`
 	Instructions string `json:"instructions"`
 	// Tools names the tools the instructions expect the agent to call, by tool name (the names the
-	// MCP guard classifies, ADR 0091). Optional; the templates legs test reads it, so a tool the
-	// instructions only describe in prose is still classified.
+	// MCP guard classifies, ADR 0091). Optional. Parse refuses a tool the instructions name in
+	// backticks that this list lacks; CheckCatalog refuses a name no connector or declaration
+	// knows; the templates legs test reads it, so a tool the instructions only describe in prose is
+	// still classified.
 	Tools  []string `json:"tools,omitempty"`
 	Grants []Grant  `json:"grants"`
 	Limits Limits   `json:"limits"`
@@ -409,6 +412,32 @@ func canonicalJSON(doc any) ([]byte, error) {
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
+// toolCall matches a tool the instructions tell the agent to call, written in backticks.
+var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
+
+// BacktickedTools returns the tool names the text writes in backticks, in order of first use and
+// without repeats: the tools the instructions tell the agent to call.
+func BacktickedTools(text string) []string {
+	var names []string
+	for _, m := range toolCall.FindAllStringSubmatch(text, -1) {
+		if !slices.Contains(names, m[1]) {
+			names = append(names, m[1])
+		}
+	}
+	return names
+}
+
+// undeclaredTools are the backticked tool names in instructions that tools does not list.
+func undeclaredTools(instructions string, tools []string) []string {
+	var missing []string
+	for _, n := range BacktickedTools(instructions) {
+		if !slices.Contains(tools, n) {
+			missing = append(missing, n)
+		}
+	}
+	return missing
+}
+
 // check enforces the rules JSON Schema cannot express.
 func (t *Template) check() error {
 	if t.APIVersion != APIVersion || t.Kind != Kind {
@@ -433,6 +462,9 @@ func (t *Template) check() error {
 	}
 	if t.Spec.Limits.SpendUSD <= 0 {
 		return errors.New("limits.spendUSD must be greater than zero")
+	}
+	if missing := undeclaredTools(t.Spec.Instructions, t.Spec.Tools); len(missing) > 0 {
+		return fmt.Errorf("spec.tools: the instructions call %s in backticks; add it to spec.tools so the legs check sees it", strings.Join(missing, ", "))
 	}
 	if err := t.Spec.Questions.Validate(); err != nil {
 		return fmt.Errorf("spec.%w", err)
@@ -493,7 +525,21 @@ func Load(fsys fs.FS) ([]*Template, error) {
 	return out, nil
 }
 
-var all = sync.OnceValues(func() ([]*Template, error) { return Load(embedded) })
+// all loads the embedded templates and holds each to the bounds a shipped template sets
+// (CheckShipped), so All and Get fail on a missing bound. The catalog check (connector, scope and
+// tool names) needs the connectors package, which imports this one: see CheckEmbedded.
+var all = sync.OnceValues(func() ([]*Template, error) {
+	ts, err := Load(embedded)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range ts {
+		if err := t.CheckShipped(); err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Metadata.ID, err)
+		}
+	}
+	return ts, nil
+})
 
 // All returns the templates embedded in the binary, sorted by ID.
 func All() ([]*Template, error) { return all() }

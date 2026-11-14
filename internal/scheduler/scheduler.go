@@ -9,6 +9,8 @@
 //     agent's override): a wall-clock limit enforced by Sweeper, and a model-request limit and a
 //     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
 //     0081). Tokens are reported by RecordUsage, not enforced.
+//   - One queued run per task: the enqueue paths take the task's row lock first, through runlock.LockTask,
+//     and the unique index runs_one_queued_per_task refuses what the lock was meant to prevent.
 //   - Every cancel writes a run event and a task event saying why.
 //
 // Functions taking a *store.Queries run inside the caller's transaction.
@@ -23,12 +25,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/runlimits"
+	"github.com/stateracloud/koinon/internal/runlock"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 )
 
@@ -43,12 +47,19 @@ var ErrAgentNotActive = errors.New("agent is not active")
 // (ADR 0054). The error wraps the reason.
 var ErrAgentUnhealthy = errors.New("agent is unhealthy")
 
+// ErrQueuedRunExists means the database refused a second queued run of one task
+// (runs_one_queued_per_task). Enqueue holds the task lock and checks first, so it returns this only
+// when a caller broke the lock order; the transaction is aborted and the caller rolls it back.
+var ErrQueuedRunExists = errors.New("the task has a queued run already")
+
+// queuedRunIndex is the unique index that allows one queued run per task.
+const queuedRunIndex = "runs_one_queued_per_task"
+
 // Enqueue queues a run of the task's agent for the task, with the caps of
 // the agent's active version. It queues nothing, and returns false, when the
 // task has no agent or already has a queued run (that run will see every
-// message appended before it starts). The caller must hold the task's row
-// lock (for example by having appended a task event in the same
-// transaction), so concurrent calls for one task queue at most one run.
+// message appended before it starts). It takes the task's row lock with runlock.LockTask, so concurrent
+// calls for one task queue at most one run; the caller must be in a transaction.
 func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run, bool, error) {
 	return EnqueueOrigin(ctx, q, task, store.RunOriginInteractive)
 }
@@ -56,6 +67,10 @@ func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run,
 // EnqueueOrigin is Enqueue for a run of the given origin. Interactive runs are claimed before
 // scheduled ones (LT1, ADR 0066); triggers and schedules (TR1) pass RunOriginScheduled.
 func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origin store.RunOrigin) (store.Run, bool, error) {
+	task, err := runlock.LockTask(ctx, q, task.OrgID, task.ID)
+	if err != nil {
+		return store.Run{}, false, err
+	}
 	if !task.AgentID.Valid {
 		return store.Run{}, false, nil
 	}
@@ -98,6 +113,10 @@ func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origi
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Run{}, false, ErrAgentNotActive
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == queuedRunIndex {
+		return store.Run{}, false, ErrQueuedRunExists
 	}
 	if err != nil {
 		return store.Run{}, false, fmt.Errorf("create run: %w", err)

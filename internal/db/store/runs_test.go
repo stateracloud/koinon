@@ -339,7 +339,7 @@ var _ = Describe("runs", func() {
 		It("keeps one active run per agent", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 
 			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(first.ID))
 			_, err := claim(ctx, f.org, "agentd-b")
@@ -357,7 +357,7 @@ var _ = Describe("runs", func() {
 		It("enforces one active run per agent in the schema", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			other := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			other := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 			mustClaim(ctx, f.org, "agentd-a")
 			_, err := pool.Exec(ctx, `
 				UPDATE runs SET state = 'starting', owner_id = 'raw', lease_expires_at = now(), ready_at = NULL
@@ -390,9 +390,11 @@ var _ = Describe("runs", func() {
 		It("keeps a task's next run waiting while another of its runs is owned or parked", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
 			Expect(err).NotTo(HaveOccurred())
+			// Only one run of a task is queued at a time (runs_one_queued_per_task): the next one
+			// is queued after the first was claimed.
+			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			Expect(parked.ID).To(Equal(first.ID))
 			_, err = claim(ctx, f.org, "agentd-a")
 			Expect(err).To(MatchError(pgx.ErrNoRows), "one harness session per task")
@@ -413,8 +415,8 @@ var _ = Describe("runs", func() {
 		It("keeps a task's next run waiting while another of its runs is taken over", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			a := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			Expect(a.ID).To(Equal(first.ID))
 			Expect(a.Takeovers).To(BeZero())
 			_, err := q.SetRunPromptThrough(ctx, store.SetRunPromptThroughParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch, PromptThroughSeq: 3})
@@ -456,8 +458,8 @@ var _ = Describe("runs", func() {
 
 			a1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			b1 := enqueue(ctx, f.org, other.ID, otherTask.ID)
-			a2 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			a3 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			a2 := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
+			a3 := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 
 			Expect(mustClaim(ctx, f.org, "w").ID).To(Equal(a1.ID))
 			Expect(mustClaim(ctx, f.org, "w").ID).To(Equal(b1.ID))
@@ -480,7 +482,7 @@ var _ = Describe("runs", func() {
 			other, _ := newAgent(ctx, f.org, f.user)
 			otherTask := newTask(ctx, f.org, f.user, other.ID)
 			a1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 			b1 := enqueue(ctx, f.org, other.ID, otherTask.ID)
 
 			tx, err := pool.Begin(ctx)
@@ -544,7 +546,7 @@ var _ = Describe("runs", func() {
 			active := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			mustClaim(ctx, f.org, "w")
 			q1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
-			q2 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			elsewhere := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 
 			canceled, err := q.CancelQueuedRunsForTask(ctx, store.CancelQueuedRunsForTaskParams{
 				OrgID: f.org, TaskID: f.task.ID, OutcomeReason: "task moved to Done",
@@ -555,8 +557,9 @@ var _ = Describe("runs", func() {
 				Expect(r.State).To(Equal(store.RunStateCanceled))
 				ids = append(ids, r.ID)
 			}
-			Expect(ids).To(ConsistOf(q1.ID, q2.ID))
+			Expect(ids).To(ConsistOf(q1.ID))
 			Expect(getRun(ctx, active).State).To(Equal(store.RunStateStarting))
+			Expect(getRun(ctx, elsewhere).State).To(Equal(store.RunStateQueued))
 		})
 	})
 
