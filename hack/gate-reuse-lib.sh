@@ -35,25 +35,38 @@ gate_reuse_enabled() {
 	[[ -z ${CI:-} && ${KOINON_GATE_REUSE:-1} != 0 ]]
 }
 
-# gate_manifest: every file of the working tree (tracked or not ignored) as `path TAB blob-id`. Tracked
-# files that match the index take the blob id from `git ls-files -s`; only files that differ from the
-# index and untracked files are hashed from disk, so a run on an unchanged tree reads no file content.
+# gate_manifest: every file of the working tree (tracked or not ignored) as `path TAB mode blob-id`.
+# Tracked files that match the index take mode and blob id from `git ls-files -s`; only files that
+# differ from the index and untracked files are hashed from disk (mode: `test -x`, portable on macOS
+# and Linux), so a run on an unchanged tree reads no file content. A tracked file deleted from disk
+# but still in the index gets a tombstone (`path TAB deleted`), not its stale index blob.
 gate_manifest() {
-	local dirty
+	local dirty f gone="" live=""
 	dirty=$({ git -c core.quotepath=off diff --name-only; git -c core.quotepath=off ls-files --others --exclude-standard; } | sort -u)
-	dirty=$(while IFS= read -r f; do [[ -n $f && -f $f ]] && printf '%s\n' "$f"; done <<<"$dirty")
+	while IFS= read -r f; do
+		[[ -n $f ]] || continue
+		if [[ -f $f ]]; then live+="$f"$'\n'; else gone+="$f"$'\n'; fi
+	done <<<"$dirty"
 	{
-		git -c core.quotepath=off ls-files -s | awk -F'\t' 'NR==FNR{d[$0]=1;next} !($2 in d){split($1,a," ");print $2 "\t" a[2]}' <(printf '%s\n' "$dirty") -
-		[[ -n $dirty ]] && paste <(printf '%s\n' "$dirty") <(printf '%s\n' "$dirty" | git hash-object --stdin-paths)
+		git -c core.quotepath=off ls-files -s | awk -F'\t' 'NR==FNR{d[$0]=1;next} !($2 in d){split($1,a," ");print $2 "\t" a[1] " " a[2]}' <(printf '%s%s' "$live" "$gone") -
+		if [[ -n $live ]]; then
+			paste <(while IFS= read -r f; do [[ -n $f ]] && { if [[ -x $f ]]; then printf '%s\t100755\n' "$f"; else printf '%s\t100644\n' "$f"; fi; }; done <<<"$live") \
+				<(printf '%s' "$live" | git hash-object --stdin-paths) | awk -F'\t' '{print $1 "\t" $2 " " $3}'
+		fi
+		while IFS= read -r f; do [[ -n $f ]] && printf '%s\tdeleted\n' "$f"; done <<<"$gone"
 	} | sort -u
 }
 
 gate_fingerprint() { # <job|gate|tree> <name> <merge-base>
 	local kind=$1 name=$2 f blob sel="" mfile
-	# The jobs whose CI selection also reads a computed `go list` package graph (hack/ci-changes.sh
-	# suite_graph): the path rule alone misses an edit in a package they build, so the whole tree is the input.
+	# RULE (#990, three review rounds of false greens): a job or gate that compiles or runs Go code
+	# (go, chartsmoke, harnesses, escape, fuzz, tidy, generate, and any other make job that runs
+	# `go test` or `go build`) fingerprints the WHOLE tree. A narrow per-job path list only guesses
+	# what the Go build reads (imports, embeds, testdata, go.mod, the computed package graph of
+	# hack/ci-changes.sh). Only a non-Go script or lint gate whose inputs are declared in
+	# hack/paths.rules and tripwire-tested may keep a narrower fingerprint.
 	if [[ $kind == job ]]; then
-		case $name in chartsmoke | harnesses) kind=tree ;; esac
+		case $name in go | chartsmoke | harnesses | escape | fuzz | tidy | generate) kind=tree ;; esac
 	fi
 	mfile=$(gate_manifest)
 	while IFS=$'\t' read -r f blob; do

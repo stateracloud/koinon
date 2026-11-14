@@ -436,9 +436,13 @@ other, when the other gates are done. `hack/preflight.sh` keeps one pid file per
 2, `already in progress`, reported as `fail`), runs of different gates are not, and `--stop` stops every
 run of the worktree. A gate whose inputs are unchanged since its last green run is not run again
 (`hack/gate-reuse-lib.sh`): the inputs are read from the working tree (so an uncommitted edit counts),
-plus the merge base and the gate scripts. For `go`, `shell` and the gates that are CI jobs they are the files
-the CI job rule in `hack/paths.rules` names; the `gate` rule only selects the other gates and does not list
-what their checkers read, so those fingerprint the whole tree (a rerun on an unchanged tree still reuses).
+plus the merge base and the gate scripts. The fingerprint holds each file's path, mode and content, and a tombstone for a tracked file deleted from disk.
+Rule: every job or gate that compiles or runs Go code (`go`, `chartsmoke`, `harnesses`, `escape`, `fuzz`, `tidy`,
+`generate`, and any other make job that runs `go test` or `go build`) fingerprints the whole tree, because a
+narrow path list only guesses what the Go build reads. Only a non-Go script or lint gate whose inputs are declared in
+`hack/paths.rules` and tripwire-tested keeps a narrower fingerprint (`shell` and the other CI jobs: the CI job rule).
+The `gate` rule only selects the remaining gates and does not list what their checkers read, so those
+fingerprint the whole tree too (a rerun on an unchanged tree still reuses).
 The `scripts` gate also has `HEAD` in its fingerprint, because it checks commit subjects and identities. Preflight prints `go ok 0s (reused ...)`, lane-gates `verdict=pass reason="reused: ..."`.
 Only a pass is stored; `vuln`, `deps`, `fuzz`, `gitleaks` and `e2e` (time, network or history decide
 them) never reuse. `hack/preflight.sh --no-reuse` or `KOINON_GATE_REUSE=0` runs everything, and CI (`CI` is set)

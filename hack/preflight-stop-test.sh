@@ -161,6 +161,35 @@ g1=$(fp_in gate migrate)
 echo "# x" >>"$tmp/a/go.mod"
 [[ $g1 != "$(fp_in gate migrate)" ]] && ok "a go.mod change moves a gate fingerprint" || bad "gate fingerprint ignored go.mod"
 
+# deletion, escape and mode (#990, review round 3)
+echo "package y" >"$tmp/a/internal/x/y.go"
+git -C "$tmp/a" add internal/x/y.go
+git -C "$tmp/a" -c commit.gpgsign=false commit -q -m "feat: y"
+d1=$(fp_in tree migrate)
+dj1=$(fp_in job go)
+rm "$tmp/a/internal/x/y.go"
+[[ $d1 != "$(fp_in tree migrate)" ]] && ok "deleting a tracked file moves the tree fingerprint" || bad "tree fingerprint ignored a deleted file"
+[[ $dj1 != "$(fp_in job go)" ]] && ok "deleting a tracked file moves a job fingerprint" || bad "job fingerprint ignored a deleted file"
+dj2=$(fp_in job scripts)
+git -C "$tmp/a" checkout -q -- internal/x/y.go
+[[ $dj2 != "$(fp_in job scripts)" ]] && ok "restoring the deleted file moves the fingerprint back" || bad "restore not seen"
+e1=$(fp_in job escape)
+echo "package x // changed" >"$tmp/a/internal/x/x.go"
+[[ $e1 != "$(fp_in job escape)" ]] && ok "a non-test internal/ edit moves the escape fingerprint" || bad "escape fingerprint ignored internal/"
+printf '#!/usr/bin/env bash\n' >"$tmp/a/hack/modeprobe.sh"
+git -C "$tmp/a" add hack/modeprobe.sh
+git -C "$tmp/a" -c commit.gpgsign=false commit -q -m "feat: modeprobe"
+mo1=$(fp_in tree migrate)
+chmod +x "$tmp/a/hack/modeprobe.sh"
+mo2=$(fp_in tree migrate)
+[[ $mo1 != "$mo2" ]] && ok "chmod +x moves the fingerprint (committed file)" || bad "fingerprint ignored a mode change"
+chmod -x "$tmp/a/hack/modeprobe.sh"
+echo "# edit" >>"$tmp/a/hack/modeprobe.sh"
+mo3=$(fp_in tree migrate)
+chmod +x "$tmp/a/hack/modeprobe.sh"
+[[ $mo3 != "$(fp_in tree migrate)" ]] && ok "chmod on a dirty file moves the fingerprint" || bad "dirty-file mode ignored"
+git -C "$tmp/a" checkout -q -- hack/modeprobe.sh
+
 # a stale pid file (a run that died) is taken over; the takeover lock is gone afterwards
 sleep 0 & dead=$!
 wait "$dead"
