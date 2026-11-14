@@ -43,6 +43,8 @@ setid "Some Person" some.person@example.invalid
 out=$(git commit -q --allow-empty -m "feat: bad" 2>&1); rc=$?
 check "another identity is refused" 1 $rc "$out"
 [[ $out == *"not in the allowed list"* ]] || { echo "FAIL refusal message missing"; echo "$out"; fail=1; }
+[[ $out == *"GitHub noreply address"* && $out == *"users.noreply.github.com"* ]] || { echo "FAIL refusal does not tell a person to use the GitHub noreply address"; echo "$out"; fail=1; }
+[[ $out != *"git config user.name procoduck"* && $out != *"coder@procodus.dev"*"git config"* ]] || { echo "FAIL refusal suggests the project identity as the fix"; echo "$out"; fail=1; }
 
 setid procoduck coder@procodus.dev
 out=$(GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: bad committer" 2>&1)
@@ -91,6 +93,7 @@ out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: project
 GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: foreign author"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); rc=$?
 check "range: a foreign author fails" 1 $rc "$out"
+[[ $out == *"GitHub noreply address"* && $out == *"Only a maintainer adds lines"* ]] || { echo "FAIL range message lacks the noreply advice"; echo "$out"; fail=1; }
 [[ $out == *"Some Person"* ]] || { echo "FAIL range output does not name the identity"; echo "$out"; fail=1; }
 base=$(git rev-parse HEAD)
 
@@ -106,6 +109,11 @@ git commit -q --allow-empty -m "fix: main2"
 GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=some.person@example.invalid \
 	git merge -q --no-ff -m "Merge branch 'side2'" side2
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a merge commit under another identity fails" 1 $? "$out"
+base=$(git rev-parse HEAD)
+
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=12345+someone@users.noreply.github.com GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=12345+someone@users.noreply.github.com \
+	git commit -q --allow-empty -m "feat: noreply person"
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a GitHub noreply author passes" 0 $? "$out"
 base=$(git rev-parse HEAD)
 
 git commit -q --allow-empty -m "Bump x" --author="dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
