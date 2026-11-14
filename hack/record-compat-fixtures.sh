@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Record the persisted-state compatibility folder of a release (old issue 652): the stored agent configs,
 # the home_checkpoints rows with their schema version and a kopia home backup, all written by the
-# code of the checkout you run this in. internal/compat loads every folder under testdata/compat/
+# code of the checkout you run this in. internal/compat loads every folder under internal/compat/testdata/
 # with the code at head.
 #
 # Usage: hack/record-compat-fixtures.sh <release> [--out DIR]
 #   <release>  the tag the folder stands for, e.g. v0.1.0 (the release checklist in
 #              docs/dev/releasing.md runs this from the tagged commit)
-#   --out DIR  where to write (default testdata/compat/<release>); must be empty or absent
+#   --out DIR  where to write (default internal/compat/testdata/<release>); must be empty or absent
 # A recorded folder is never overwritten and never edited by hand (docs/dev/ci.md).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -29,6 +29,6 @@ while (($#)); do
 done
 [[ -n $release ]] || { echo "usage: hack/record-compat-fixtures.sh <release> [--out DIR]" >&2; exit 2; }
 [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "release name $release: letters, digits, . _ - only" >&2; exit 2; }
-out=${out:-testdata/compat/$release}
+out=${out:-internal/compat/testdata/$release}
 
 exec go run ./internal/compat/cmd/record -release "$release" -out "$out"

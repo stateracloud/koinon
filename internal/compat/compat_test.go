@@ -38,7 +38,7 @@ func checkFolder(dir string) {
 	}, SpecTimeout(5*time.Minute))
 }
 
-// The compatibility check itself: every release folder recorded under testdata/compat/.
+// The compatibility check itself: every release folder recorded under internal/compat/testdata/.
 var _ = Describe("recorded releases", func() {
 	root := filepath.Join(repoRoot(), compat.Root)
 	releases, err := compat.Releases(root)
