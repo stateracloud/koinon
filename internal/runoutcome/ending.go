@@ -474,8 +474,10 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 		// Another run of the task is queued already: this one ended as canceled, and the run and
 		// task timelines say why, like every other cancel.
 		if superseded {
-			_, err = recordCanceled(ctx, q, r, Cancellation{Reason: ReasonSuperseded, Message: "superseded by a queued run of the task",
-				Extra: map[string]any{"requeueReason": reason}})
+			_, err = recordCanceled(ctx, q, r, Cancellation{
+				Reason: ReasonSuperseded, Message: "superseded by a queued run of the task",
+				Extra: map[string]any{"requeueReason": reason},
+			})
 		}
 		return err
 	})
