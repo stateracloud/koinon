@@ -401,6 +401,18 @@ func resolve(ctx context.Context, q *store.Queries, b audit.Batch, org, id pgtyp
 	if run.State == store.RunStateSucceeded || run.State == store.RunStateFailed || run.State == store.RunStateCanceled {
 		return cur, ErrNotOpen
 	}
+	// Read the question again, without a lock, before the question's lock. Every resolve holds the
+	// run's lock, and this statement runs after we got it, so under READ COMMITTED it sees every
+	// answer committed before that moment. A question that is still open here cannot be a row that
+	// MarkQuestionsDelivered has locked (it only locks resolved rows), so LockQuestion below does
+	// not wait on a turn end that itself waits on the run's lock, which we hold (no 40P01).
+	cur, err = q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
+	if err != nil {
+		return store.Question{}, err
+	}
+	if cur.State != store.QuestionStateOpen {
+		return cur, ErrNotOpen
+	}
 	cur, err = q.LockQuestion(ctx, store.LockQuestionParams{OrgID: org, ID: id})
 	if err != nil {
 		return store.Question{}, err

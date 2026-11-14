@@ -48,7 +48,8 @@
 //	                            admission case and the NetworkPolicy bypass case (spike 8.15),
 //	                            with KOINON_ESCAPE_KUBECONFIG or KOINON_ESCAPE_KUBE_CONTEXT (one of
 //	                            them is required: the live cases never use the ambient current
-//	                            context and skip, or fail under KOINON_REQUIRE, without), KOINON_ESCAPE_POLICY
+//	                            context; without one the cases skip, or fail under
+//	                            KOINON_REQUIRE=cluster), KOINON_ESCAPE_POLICY
 //	                            (the chart's pods policy), KOINON_ESCAPE_NETPOL (the chart's
 //	                            default-deny NetworkPolicy name) and KOINON_ESCAPE_SERVICES
 //	                            (namespace/name:port list whose ClusterIPs must be unreachable).

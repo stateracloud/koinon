@@ -2003,7 +2003,7 @@ const ForeignReason = "OwnedByAnotherInstall"
 func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
 	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, ""); rerr != nil {
 		r.log.Warn("recording the foreign-owned sandbox failed; guardSandbox still refuses it",
-			"agent", w.agent.ID, "err", rerr)
+			append(w.logAttrs(), "err", rerr)...)
 	}
 }
 

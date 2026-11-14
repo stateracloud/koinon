@@ -170,9 +170,9 @@ func kubeConfig() *rest.Config {
 		return nil
 	}
 	// Never the ambient context: a kubeconfig or a context must be named, or the live cases skip
-	// (fail under KOINON_REQUIRE=escape-kube-context) before they create anything in a cluster.
+	// (fail under KOINON_REQUIRE=cluster) before they create anything in a cluster.
 	if os.Getenv("KOINON_ESCAPE_KUBECONFIG") == "" && os.Getenv("KOINON_ESCAPE_KUBE_CONTEXT") == "" {
-		testenv.Require(testenv.Vars("escape-kube-context", "KOINON_ESCAPE_KUBECONFIG"))
+		testenv.Require(testenv.Vars("cluster", "KOINON_ESCAPE_KUBECONFIG or KOINON_ESCAPE_KUBE_CONTEXT"))
 	}
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if f := os.Getenv("KOINON_ESCAPE_KUBECONFIG"); f != "" {
