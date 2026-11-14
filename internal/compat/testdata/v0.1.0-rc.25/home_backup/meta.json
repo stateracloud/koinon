@@ -1,0 +1,9 @@
+{
+  "prefix": "orgs/0198a000-0000-7000-8000-0000000000c1/homes/0198a000-0000-7000-8000-0000000000c2/",
+  "snapshotId": "3c5c22d6915d0930d9461e4f655bcf81",
+  "files": {
+    ".local/share/opencode/s1.json": "{\"session\":\"s1\"}\n",
+    "notes/a.md": "first note\n",
+    "notes/b.md": "second note\n"
+  }
+}

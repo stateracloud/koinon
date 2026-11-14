@@ -38,16 +38,21 @@ func checkFolder(dir string) {
 	}, SpecTimeout(5*time.Minute))
 }
 
-// The compatibility check itself: every release folder recorded under testdata/compat/.
+// recordedRoot is where the recorded release folders live: testdata/ in this package (issue #685).
+// compat.Root still names the old repository-level folder; moving it, the recorder's default and
+// the two docs that name it is outside the lane of #685 and follows separately.
+const recordedRoot = "internal/compat/testdata"
+
+// The compatibility check itself: every release folder recorded under internal/compat/testdata/.
 var _ = Describe("recorded releases", func() {
-	root := filepath.Join(repoRoot(), compat.Root)
+	root := filepath.Join(repoRoot(), recordedRoot)
 	releases, err := compat.Releases(root)
 	if err != nil {
 		It("lists the recorded releases", func() { Expect(err).NotTo(HaveOccurred()) })
 	}
 	if len(releases) == 0 {
 		It("has no recorded release yet", func() {
-			AddReportEntry("NO RECORDED RELEASE under "+compat.Root+": nothing was checked. The first folder is recorded at the v0.1.0 cut (docs/dev/releasing.md); until then this spec proves nothing about compatibility.", ReportEntryVisibilityAlways)
+			AddReportEntry("NO RECORDED RELEASE under "+recordedRoot+": nothing was checked. The first folder is recorded at the v0.1.0 cut (docs/dev/releasing.md); until then this spec proves nothing about compatibility.", ReportEntryVisibilityAlways)
 		})
 	}
 	for _, r := range releases {
