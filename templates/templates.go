@@ -513,7 +513,21 @@ func Load(fsys fs.FS) ([]*Template, error) {
 	return out, nil
 }
 
-var all = sync.OnceValues(func() ([]*Template, error) { return Load(embedded) })
+// all loads the embedded templates and holds each to the bounds a shipped template sets
+// (CheckShipped), so All and Get fail on a missing bound. The catalog check (connector, scope and
+// tool names) needs the connectors package, which imports this one: see CheckEmbedded.
+var all = sync.OnceValues(func() ([]*Template, error) {
+	ts, err := Load(embedded)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range ts {
+		if err := t.CheckShipped(); err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Metadata.ID, err)
+		}
+	}
+	return ts, nil
+})
 
 // All returns the templates embedded in the binary, sorted by ID.
 func All() ([]*Template, error) { return all() }

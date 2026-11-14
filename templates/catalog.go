@@ -63,8 +63,13 @@ func (t *Template) CheckShipped() error {
 	return nil
 }
 
-// CheckEmbedded runs the rules of Parse (already done by All), CheckShipped and CheckCatalog over
-// every embedded template and joins the errors, each naming its template.
+// CheckEmbedded runs the rules of Parse and CheckShipped (both already done by All) and CheckCatalog
+// over every embedded template and joins the errors, each naming its template.
+//
+// Only a test calls it today: a production Catalog needs the connectors package, outside the
+// templates/ lane of #686. Acceptance item 3 (the catalog part) stays open until a startup check or
+// a connectors test builds the Catalog and calls this; it is reported to the parent session for a
+// follow-up issue.
 func CheckEmbedded(c Catalog) error {
 	ts, err := All()
 	if err != nil {
