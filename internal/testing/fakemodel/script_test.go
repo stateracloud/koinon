@@ -179,6 +179,19 @@ turns:
 			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
 		})
 
+		It("calls Koinon's own ask_user behind the harness prefix and the koinon target (koinon_koinon_ask_user)", func(ctx SpecContext) {
+			scripts, err := fakemodel.LoadDir(exampleScripts)
+			Expect(err).NotTo(HaveOccurred())
+			_, ts := start(scripts...)
+			var c oaCompletion
+			decode(post(ctx, ts.URL+"/v1/chat/completions", map[string]any{
+				"model":    "stories-ask",
+				"messages": []map[string]any{{"role": "system", "content": "# Koinon\n\n# Web researcher\n"}, userMsg("stories ask: plan it")},
+				"tools":    []map[string]any{{"type": "function", "function": map[string]any{"name": "koinon_koinon_ask_user"}}},
+			}), &c)
+			Expect(c.Choices[0].Message.ToolCalls[0].Function.Name).To(Equal("koinon_koinon_ask_user"))
+		})
+
 		It("asks one question with ask_user, then proposes the pull request once the answer arrives (repo-helper-ask)", func(ctx SpecContext) {
 			scripts, err := fakemodel.LoadDir(exampleScripts)
 			Expect(err).NotTo(HaveOccurred())

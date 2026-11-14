@@ -274,7 +274,7 @@ password=$(e1 password)
 case "$SUITE" in
 go)
   # The new admin password is named here so the quickstart pass and the stories pass agree on it, in either order.
-  new_password="e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+  new_password="${KOINON_E2E_NEW_PASSWORD:-e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
   # driver <label filter> <junit file> <json file> <log file>: one pass of the Ginkgo driver.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \

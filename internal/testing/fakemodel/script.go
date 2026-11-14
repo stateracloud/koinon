@@ -225,7 +225,12 @@ type conversation struct {
 // harness names project.Name: OpenCode <server>_<tool>; the mcp__<server>__<tool> form is kept for other harnesses.
 // agentgateway puts the target in front of every tool (prefixMode always), and Koinon's own tools are
 // the "github" target.
-var mcpPrefixes = []string{project.Name + "_", "mcp__" + project.Name + "__", project.Name + "_github_", "mcp__" + project.Name + "__github_"}
+// Koinon's own agent tools (ask_user, cancel_task) are the "koinon" target: koinon_koinon_ask_user in OpenCode.
+var mcpPrefixes = []string{
+	project.Name + "_", "mcp__" + project.Name + "__",
+	project.Name + "_github_", "mcp__" + project.Name + "__github_",
+	project.Name + "_koinon_", "mcp__" + project.Name + "__koinon_",
+}
 
 // toolMatches reports whether a tool name is the scripted name, possibly behind a harness's
 // MCP prefix (koinon_create_pull_request, mcp__koinon__create_pull_request). Another tool that
