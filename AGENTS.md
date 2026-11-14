@@ -94,6 +94,9 @@ of it.
 
 - Decisions live in `docs/adr/` (ADRs are canonical; `docs/design.md` is the overview). Read the
   relevant ADR before changing architecture; write a new one for new decisions.
+- Public text (pull request and issue text, review comments, docs) follows Simplified Technical English
+  (ASD-STE100): short sentences, one topic each, active voice, no idioms. Code and commit subjects are
+  exempt: [ADR 0117](docs/adr/0117-simplified-technical-english.md).
 - Commits: Conventional Commits, always signed off (`git commit -s`) by a human. AI use is disclosed in
   the PR template's "AI use" field (a `--pr-body` file carries it too); an `Assisted-by:` trailer is optional (CONTRIBUTING.md).
 - The module path (`github.com/stateracloud/koinon`) and API domain (`koinon.dev`) are defined once in
