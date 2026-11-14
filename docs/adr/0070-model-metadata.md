@@ -513,9 +513,9 @@ The amendment above leaves these points open; this is what the code does.
    metadata only when the last store is a week old (less 12 hours, so the daily tick does not drift
    to eight days), when none exists, or when a listed model is enabled that was not in use at the
    last store (`openrouter_catalog.in_use_models`; a model OpenRouter does not list never makes a
-   tick due). A restart inside the week with the same models in use stores nothing and sends no
-   endpoints request. A scheduled store checks Due again under its lock, so of two replicas that
-   both found it due only one stores and asks the endpoints route. `koinon-api prices fetch` is an operator's own request and always stores.
+   tick due). A restart inside the week with the same models in use stores nothing. A scheduled
+   store checks Due again under its lock, so of two replicas that both found it due only one stores.
+   The endpoints round is separate: see point 2. `koinon-api prices fetch` is an operator's own request and always stores.
 2. **Endpoints route.** Endpoints are due per model, from `endpoints_fetched_at` of its row: a
    model is due when its endpoints were never fetched, or the last fetch is older than the interval
    less 12 hours. Each successful OpenRouter fetch tick (not only a tick that stores the list) asks
