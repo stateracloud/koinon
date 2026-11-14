@@ -3,6 +3,7 @@
 package reconciler_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 
@@ -25,15 +26,21 @@ import (
 	"github.com/stateracloud/koinon/pricing"
 )
 
+// fixedGatewayID is a GatewayIDSource that answers a fixed ID.
+type fixedGatewayID struct{ id string }
+
+func (f *fixedGatewayID) GatewayID(context.Context) (string, error) { return f.id, nil }
+
 var _ = Describe("Reconciler metrics", func() {
 	var (
-		osg  *fakegateway.Gateway
-		mg   *fakeModelGateway
-		reg  *prometheus.Registry
-		m    *reconciler.Metrics
-		r    *reconciler.Reconciler
-		org  pgtype.UUID
-		user pgtype.UUID
+		osg   *fakegateway.Gateway
+		mg    *fakeModelGateway
+		reg   *prometheus.Registry
+		m     *reconciler.Metrics
+		r     *reconciler.Reconciler
+		gwIDs *fixedGatewayID
+		org   pgtype.UUID
+		user  pgtype.UUID
 	)
 
 	BeforeEach(func(ctx SpecContext) {
@@ -45,6 +52,7 @@ var _ = Describe("Reconciler metrics", func() {
 		kube := fake.NewClientset()
 		reg = prometheus.NewRegistry()
 		m = reconciler.NewMetrics(reg)
+		gwIDs = &fixedGatewayID{id: "openshell"}
 		org, user = newOrg(ctx)
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		r, err = reconciler.New(pool, openshell.New(conn), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace},
@@ -61,6 +69,8 @@ var _ = Describe("Reconciler metrics", func() {
 				RuntimeClassName: "kata",
 				Logger:           slog.New(slog.DiscardHandler),
 				Metrics:          m,
+				GatewayID:        "openshell",
+				GatewayIDs:       gwIDs,
 			})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -105,6 +115,15 @@ var _ = Describe("Reconciler metrics", func() {
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		Expect(testutil.ToFloat64(m.GatewayConfigRejected)).To(Equal(0.0))
 		Expect(testutil.ToFloat64(m.PassErrors.WithLabelValues("gateway_config"))).To(Equal(1.0), "a counter does not go back")
+	})
+
+	It("raises the gateway ID mismatch gauge in a pass when the gateway runs with another ID", func(ctx SpecContext) {
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(testutil.ToFloat64(m.GatewayIDMismatch)).To(Equal(0.0), "matching IDs")
+
+		gwIDs.id = "prod"
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(testutil.ToFloat64(m.GatewayIDMismatch)).To(Equal(1.0), "the pass checks the gateway ID")
 	})
 
 	It("counts sandbox repairs and agents marked unhealthy", func(ctx SpecContext) {

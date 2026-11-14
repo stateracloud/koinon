@@ -240,6 +240,39 @@ var _ = Describe("Provider delivery", func() {
 		Expect(string(sec.Data[second.APIKeyFile[len("/secrets/providers/"):]])).To(Equal("sk-new"))
 	})
 
+	It("keeps the old key file while a provider error stops the pass from being complete", func(ctx SpecContext) {
+		org, user := newOrg(ctx)
+		p := addProvider(ctx, org, user, "openrouter", "sk-old", "m")
+		cleanup(ctx, org, p.ID)
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		slug := orgSlug(ctx, org)
+		first, _ := providerOf(mg.last(), slug)
+		oldFile := first.APIKeyFile[len("/secrets/providers/"):]
+
+		// A new key changes the file name, and a model with an unusable price in another org makes
+		// the pass report a provider error: the old file must stay until a pass has no error.
+		next := "sk-new"
+		_, err := svc.UpdateProvider(ctx, org, audit.User(user), p.ID, catalog.ProviderPatch{APIKey: &next})
+		Expect(err).NotTo(HaveOccurred())
+		orgB, userB := newOrg(ctx)
+		b := addProvider(ctx, orgB, userB, "up", "", "bad-rate-keep")
+		cleanup(ctx, orgB, b.ID)
+		_, err = pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openai","match":{"glob":"bad-rate-keep"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now(), 'test')`, orgB)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(r.ReconcileAll(ctx)).To(HaveOccurred(), "the bad model is reported")
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sec.Data).To(HaveKey(oldFile), "no prune while a provider error is open")
+
+		_, err = pool.Exec(ctx, `DELETE FROM price_overrides WHERE org_id = $1`, orgB)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		sec, err = kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sec.Data).NotTo(HaveKey(oldFile), "a clean pass prunes it")
+	})
+
 	It("renders every org's providers and models apart, with the same model name", func(ctx SpecContext) {
 		orgA, userA := newOrg(ctx)
 		orgB, userB := newOrg(ctx)
