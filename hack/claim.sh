@@ -58,9 +58,7 @@
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
 set -euo pipefail
-# Directive kept as source=/dev/null until #968 is fixed (the preflight shell gate runs shellcheck without -x, so
-# the old `source-path=SCRIPTDIR source=repo-lib.sh` fires SC1091); then go back to the old directive.
-# shellcheck source=/dev/null
+# shellcheck source-path=SCRIPTDIR source=repo-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 
 DEFAULT_LANE=main
