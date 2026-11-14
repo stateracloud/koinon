@@ -249,7 +249,7 @@ func TestContentLimitRandom(t *testing.T) {
 type shape struct{ text, needle string }
 
 // wordFrom derives an n-character word of [a-z0-9] from seed. It is deterministic: the same
-// seed gives the same word, so a plain test run checks the same inputs every run (ADR 0111 T1).
+// seed gives the same word, so a plain test run checks the same inputs every run (a failure is never retried, ADR 0111 T1, so it must reproduce).
 func wordFrom(seed string, n int) string {
 	const a = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 0, n)
@@ -375,6 +375,7 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 			}
 		}
 		// A seed like "aaaaaaaa" is a placeholder that several detectors rightly leave alone.
+		// The vendor shapes that are redacted whatever their entropy have their own test, TestFixedVendorShapesBelowTheFloor.
 		if b.Len() >= 8 && distinctBytes(b.String()) >= 10 {
 			w = b.String()
 		}
