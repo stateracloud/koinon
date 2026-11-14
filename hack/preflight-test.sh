@@ -44,6 +44,7 @@ stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake f
 stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
 stub gitleaks '[[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake"; exit "${FAKE_GITLEAKS_RC:-0}"'
+real_sc=$(command -v shellcheck || true) # the real one, for the #968 case, before the stubs hide it
 export PATH="$tmp/bin:$PATH"
 
 # The real path rules, but the `scripts` gate runs one stub (the real checks are the repository's own).
@@ -93,6 +94,7 @@ mkdir -p "$tmp/failbin"
 printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
+# shellcheck disable=SC2030 # local to the subshell, on purpose
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(fresh)) >/dev/null 2>&1 || mktemp_fail_rc=$?
 reset_state() { : >"$FAKE_LOG"; unset FAKE_TIDY_CHANGE FAKE_GO_TEST_RC FAKE_LINT_RC FAKE_GITLEAKS_RC FAKE_GEN_CHANGE FAKE_NEEDS_RC FAKE_GOFUMPT_OUT FAKE_MIGRATE_LINT_RC FAKE_CHART_CHECK_RC FAKE_DEP_AGE_CHECK_RC FAKE_BUF_RC FAKE_MKTEMP_LINT_RC FAKE_BASH5_LINT_RC FAKE_SCRIPT_CHECK_FAKE_RC FAKE_GOVULNCHECK_RC || true; rm -rf "$tmp/tmpdir"/*; }
 
@@ -481,6 +483,34 @@ check "a Markdown-only change does not select scripts (the job rule, #572)" hasn
 echo "package foo // y" >>internal/foo/a.go; commit_all
 pf "$tmp/s3b" --list >/dev/null
 check "a Go change selects scripts (the checks read Go sources, #572)" has '^scripts:' "$tmp/s3b"
+
+# 16. #968: the shell gate gives a changed script that sources hack/repo-lib.sh the result CI gives it. Runs the real
+# ShellCheck: with -x the `source=` directive is followed; without it SC1091 fails the gate.
+if [[ -z $real_sc ]]; then
+	if [[ ,${KOINON_REQUIRE:-}, == *,shellcheck,* ]]; then echo "FAIL: shellcheck is required (KOINON_REQUIRE) but not installed" >&2; fail=$((fail + 1))
+	else echo "skip: real shellcheck not installed; the #968 case did not run"; fi
+else
+	reset_state
+	w=$(fresh); cd "$w"
+	cp "$repo/hack/repo-lib.sh" hack/repo-lib.sh
+	printf '#!/usr/bin/env bash\n# SPDX-License-Identifier: Apache-2.0\nset -euo pipefail\n# shellcheck source-path=SCRIPTDIR source=repo-lib.sh\nsource "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"\n' >hack/uses-lib.sh
+	chmod +x hack/uses-lib.sh; git add -A && git commit -q -m base && git push -q origin HEAD:main # repo-lib.sh must be on the base, or it is a changed input itself and hides the bug
+	git checkout -q -b feat/sc
+	mkdir -p "$tmp/scbin" "$tmp/scbin-nox"
+	printf '#!/bin/sh\nexec "%s" "$@"\n' "$real_sc" >"$tmp/scbin/shellcheck"
+	# the old command line: the same shim with -x dropped
+	printf '#!/bin/sh\n[ "$1" = -x ] && shift\nexec "%s" "$@"\n' "$real_sc" >"$tmp/scbin-nox/shellcheck"
+	chmod +x "$tmp/scbin/shellcheck" "$tmp/scbin-nox/shellcheck"
+	echo "# touched" >>hack/uses-lib.sh; commit_all
+	# shellcheck disable=SC2031 # the PATH change is meant for this one call
+	rc=$(PATH="$tmp/scbin:$PATH" pf "$tmp/sc1" --only shell)
+	check "shell gate: a changed script that sources repo-lib.sh passes (real shellcheck): exit 0" eq "$rc" 0
+	check "shell gate: no SC1091" hasnt 'SC1091' "$tmp/sc1"
+	# shellcheck disable=SC2031 # the PATH change is meant for this one call
+	rc=$(PATH="$tmp/scbin-nox:$PATH" pf "$tmp/sc2" --only shell)
+	check "without -x the same change fails the gate (the case does bite)" eq "$rc" 1
+	check "without -x the failure is SC1091" has 'SC1091' "$tmp/sc2"
+fi
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))
