@@ -355,7 +355,7 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 		_, err = creator.Questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{
 			OrgId: org, QuestionId: q.GetId(), Answer: &questionv1alpha1.AnswerQuestionRequest_Choice{Choice: "maybe"},
 		})
-		Expect(err).To(HaveOccurred(), "a choice the question does not offer")
+		expectRefused(err, connect.CodeInvalidArgument, `"maybe" is not one of the choices`)
 
 		By("the creator answers; the run resumes with the answer and succeeds")
 		answered, err := creator.Questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{
@@ -378,7 +378,7 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 		_, err = creator.Questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{
 			OrgId: org, QuestionId: q.GetId(), Answer: &questionv1alpha1.AnswerQuestionRequest_Choice{Choice: "no"},
 		})
-		Expect(err).To(HaveOccurred())
+		expectRefused(err, connect.CodeAborted, "the question is no longer open")
 	})
 
 	It("S4. cancels a run mid-turn, leaves its task open, and resumes it with a message; CancelTask ends the task for good", func(ctx SpecContext) {
@@ -445,8 +445,18 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 	})
 
 	It("S5. refuses trace settings without platformCopyLevel, and a destination with a koinon. attribute", func(ctx SpecContext) {
+		before, err := c.Trace.GetSettings(ctx, &tracev1alpha1.GetSettingsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx context.Context) {
+			rate := before.GetSettings().GetSampleRate()
+			_, _ = c.Trace.UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+				OrgId: org, ContentLevel: before.GetSettings().GetContentLevel(),
+				PlatformCopyLevel: before.GetSettings().GetPlatformCopyLevel(), SampleRate: &rate,
+			})
+		})
+
 		By("rule: UpdateSettings needs both levels; leaving platformCopyLevel out is refused")
-		_, err := c.Trace.UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+		_, err = c.Trace.UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
 			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		expectRefused(err, connect.CodeInvalidArgument, "content_level and platform_copy_level are required")

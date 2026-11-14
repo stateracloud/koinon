@@ -44,8 +44,8 @@
 #   (about 4 to 8 minutes of wall clock).
 #   STORIES=1 (SUITE=go, no SUITE_LABEL) adds a second driver pass after the quickstart: the run-1 story suite
 #   (test/e2e/stories_test.go, label stories; issue 992), through the generated clients with the fake model. `make
-#   test-e2e-kind` sets it, and so does e2e-kind.yml on the schedule event only; a pull request's and the merge
-#   queue's run leave it out (the quickstart pass always filters the label out). A red pass fails the script
+#   test-e2e-kind` sets it, and so does e2e-kind.yml on the schedule event and on a dispatch with stories=true
+#   (the bisect); a pull request's, a push's and the merge queue's run leave it out (the quickstart pass always filters the label out). A red pass fails the script
 #   after the escape and backup steps, unless STORIES_ADVISORY=1 (the schedule event sets it): then the script
 #   exits as the other steps say, prints a warning and writes $OUT/stories-red, which the workflow turns into the
 #   job output that starts hack/e2e-bisect.sh. A dispatch with stories=true (the bisect) is not advisory. Its reports are
@@ -277,7 +277,10 @@ case "$SUITE" in
 go)
   # The new admin password is named here so the quickstart pass and the stories pass agree on it, in either order.
   new_password="${KOINON_E2E_NEW_PASSWORD:-e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
-  # driver <label filter> <junit file> <json file> <log file>: one pass of the Ginkgo driver.
+  # driver <label filter> <junit file> <json file> <log file> <go test timeout>: one pass of the Ginkgo driver.
+  # Worst cases (the job limit in e2e-kind.yml is 75 minutes on the schedule and on stories=true): set-up and image
+  # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 1, tear-down 5:
+  # 69 minutes. Keep the sum below that limit when you change one of them.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
@@ -290,24 +293,28 @@ go)
     CLUSTER="$CLUSTER" \
     KOINON_E2E_T0="$T0" \
     KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
-      bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" -ginkgo.label-filter="$3"' _ "$root" "$OUT/bin/e2e.test" "$1" "$2" "$3" 2>&1 | tee "$4"
+      bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout "$6" -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" -ginkgo.label-filter="$3"' _ "$root" "$OUT/bin/e2e.test" "$1" "$2" "$3" "$5" 2>&1 | tee "$4"
   }
   # The quickstart pass leaves out the stories (label stories): they are not part of the queue's or a pull
   # request's run. SUITE_LABEL, when set, is the whole filter (a developer's own choice).
   step "quickstart driver (go test ./test/e2e)"
-  driver "${SUITE_LABEL:-!stories}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log"
+  driver "${SUITE_LABEL:-!stories}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
   done_step "Quickstart driver"
   # The run-1 story suite (issue 992) is a second pass against the same install, before the escape and
   # backup steps change it. A red stories pass does not stop those steps; it fails the script at the end.
   if [[ ${STORIES:-0} == 1 && -z ${SUITE_LABEL:-} ]]; then
     step "run-1 story suite (go test ./test/e2e, label stories)"
-    if ! driver stories "$OUT/stories-junit.xml" "$OUT/stories-report.json" "$OUT/stories.log"; then
+    if ! driver stories "$OUT/stories-junit.xml" "$OUT/stories-report.json" "$OUT/stories.log" 15m; then
       if [[ ${STORIES_ADVISORY:-0} == 1 ]]; then
         echo "::warning::the run-1 story suite is red (advisory: the quickstart result is not changed); see stories.log"
         : >"$OUT/stories-red"
       else
         stories_failed=1
       fi
+    else
+      # The workflow uploads this marker as the artifact `stories-green`: hack/e2e-bisect.sh reads it to find
+      # the newest nightly whose stories passed.
+      : >"$OUT/stories-green"
     fi
     done_step "Run-1 story suite"
   fi
