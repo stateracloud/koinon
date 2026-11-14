@@ -283,8 +283,10 @@ g_shell() {
 	local files
 	files=$(existing '\.sh$' || true)
 	[[ -n $files ]] || { echo "no existing shell files"; return 0; }
+	# -x: CI runs the whole tree, where a sourced file (hack/repo-lib.sh) is itself an input, so SC1091 never fires
+	# there; on the changed files alone it would, unless shellcheck follows the `source=` directive (#968).
 	# shellcheck disable=SC2086
-	shellcheck $files
+	shellcheck -x $files
 }
 g_actionlint() { # the whole tree, as CI does: a workflow's lint can depend on its siblings
 	actionlint
