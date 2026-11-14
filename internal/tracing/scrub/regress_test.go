@@ -3,11 +3,10 @@
 package scrub_test
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	mrand "math/rand"
 	"strings"
 	"testing"
@@ -249,12 +248,19 @@ func TestContentLimitRandom(t *testing.T) {
 // shapes plants each always-tier credential. The needle is the part that must never survive.
 type shape struct{ text, needle string }
 
-func randomWord(n int) string {
+// wordFrom derives an n-character word of [a-z0-9] from seed. It is deterministic: the same
+// seed gives the same word, so a plain test run checks the same inputs every run (a failure is never retried, ADR 0111 T1, so it must reproduce).
+func wordFrom(seed string, n int) string {
 	const a = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	for i := range b {
-		k, _ := rand.Int(rand.Reader, big.NewInt(int64(len(a))))
-		b[i] = a[k.Int64()]
+	b := make([]byte, 0, n)
+	for ctr := 0; len(b) < n; ctr++ {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", ctr, seed)))
+		for _, c := range sum {
+			if len(b) == n {
+				break
+			}
+			b = append(b, a[int(c)%len(a)])
+		}
 	}
 	return string(b)
 }
@@ -354,27 +360,26 @@ func wrap(kind int, sep, text string) string {
 }
 
 func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
+	// The seed corpus is fixed: the plain run checks the same inputs every run. The fuzzer
+	// mutates the seed string, which shapes the secret's characters.
 	for i := 0; i < 10; i++ {
-		f.Add(uint8(i), uint8(i), uint8(i), randomWord(12))
+		f.Add(uint8(i), uint8(i), uint8(i), fmt.Sprintf("corpus-word-%d", i))
 	}
 	full := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	f.Fuzz(func(t *testing.T, shapeIdx, wrapIdx, sepIdx uint8, seed string) {
-		w := randomWord(12)
-		if len(seed) > 0 { // let the fuzzer shape the secret's characters too
-			var b strings.Builder
-			for _, c := range seed {
-				if ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') {
-					b.WriteRune(c)
-				}
-			}
-			// A seed like "aaaaaaaa" is a placeholder that several detectors rightly leave alone.
-			// The vendor shapes that are redacted whatever their entropy have their own test,
-			// TestFixedVendorShapesBelowTheFloor.
-			if b.Len() >= 8 && distinctBytes(b.String()) >= 10 {
-				w = b.String()
+		w := wordFrom(seed, 12)
+		var b strings.Builder
+		for _, c := range seed {
+			if ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') {
+				b.WriteRune(c)
 			}
 		}
-		shapes := alwaysShapes(w + randomWord(8))
+		// A seed like "aaaaaaaa" is a placeholder that several detectors rightly leave alone.
+		// The vendor shapes that are redacted whatever their entropy have their own test, TestFixedVendorShapesBelowTheFloor.
+		if b.Len() >= 8 && distinctBytes(b.String()) >= 10 {
+			w = b.String()
+		}
+		shapes := alwaysShapes(w + wordFrom(w, 8))
 		sh := shapes[int(shapeIdx)%len(shapes)]
 		sep := separators[int(sepIdx)%len(separators)]
 		in := wrap(int(wrapIdx), sep, sh.text)
