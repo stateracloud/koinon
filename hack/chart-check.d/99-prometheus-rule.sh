@@ -16,3 +16,7 @@ has "stranded alert with api.durable.enabled" 'alert: KoinonDurableWorkflowsStra
 has "stranded alert aggregates replicas with max, not sum" 'max by \(version\) \(koinon_durable_workflows_pending\) > 0$' "${pr[@]}" --set api.durable.enabled=true --show-only templates/prometheusrule.yaml
 has "stranded alert waits durableStrandedFor" 'for: "20m"$' "${pr[@]}" --set api.durable.enabled=true --set metrics.prometheusRule.durableStrandedFor=20m --show-only templates/prometheusrule.yaml
 lacks "no durable alert without api.durable.enabled" 'koinon_durable' "${pr[@]}" --set api.durable.enabled=false --show-only templates/prometheusrule.yaml
+
+# The sandbox default-deny NetworkPolicy error alert (#993): always rendered with the rules.
+has "network policy error alert" 'alert: KoinonSandboxNetworkPolicyErrors$' "${pr[@]}" --show-only templates/prometheusrule.yaml
+has "network policy error alert reads the writer's counter" 'koinon_reconciler_sandbox_network_policy_errors_total\[15m\]' "${pr[@]}" --show-only templates/prometheusrule.yaml

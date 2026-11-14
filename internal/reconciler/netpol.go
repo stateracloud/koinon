@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,8 @@ type SandboxNetworkPolicy struct {
 	// Name is the NetworkPolicy name in every workspace namespace (chart: koinon.sandboxDefaultDeny).
 	Name string
 	Log  *slog.Logger
+	// Errors counts failed Ensures by reason (forbidden, not_found or other); nil keeps them uncounted.
+	Errors *prometheus.CounterVec
 
 	Now func() time.Time
 
@@ -78,8 +81,9 @@ func (p *SandboxNetworkPolicy) Policy(namespace string) *networkingv1.NetworkPol
 // Ensure converges the default-deny NetworkPolicy in the workspace's namespace: it is created when
 // missing (also after someone deleted it) and its shape is repaired when it drifted. The
 // reconciler calls it once per pass for each active workspace, so it reads the object every time
-// (one GET when nothing changed) instead of caching that it was done. A namespace OpenShell has not
-// created yet, or a denied write, is retried after a backoff.
+// (one GET when nothing changed) instead of caching that it was done. A denied write is retried after
+// a backoff. A namespace OpenShell has not created yet is not backed off: the reconciler calls Ensure
+// again right after CreateSandbox.
 func (p *SandboxNetworkPolicy) Ensure(ctx context.Context, workspace string) error {
 	ns := p.namespace(workspace)
 	p.mu.Lock()
@@ -97,6 +101,12 @@ func (p *SandboxNetworkPolicy) Ensure(ctx context.Context, workspace string) err
 	case apierrors.IsNotFound(err):
 		_, err = nps.Create(ctx, want, metav1.CreateOptions{FieldManager: ManagedByValue})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
+			// OpenShell creates the workspace namespace with the first sandbox. Do not back off on a
+			// missing namespace: the reconciler calls Ensure again right after CreateSandbox, in the
+			// same pass, so the first sandbox does not wait a pass for the policy.
+			if limitRangeNamespaceMissing(err) {
+				return err
+			}
 			return p.fail(ns, d, err)
 		}
 		if err == nil {
@@ -149,8 +159,25 @@ func (p *SandboxNetworkPolicy) fail(ns string, d *denial, err error) error {
 	}
 	p.denied[ns] = &denial{failures: failures, until: p.now().Add(observerBackoff(failures)), err: err}
 	p.mu.Unlock()
+	p.CountError(err)
 	p.log().Warn("sandbox default-deny NetworkPolicy could not be applied", "namespace", ns, "err", err)
 	return err
+}
+
+// CountError counts one failed Ensure by reason. The reconciler also calls it for a missing
+// namespace right after CreateSandbox, where the namespace must exist and the miss is a real fault.
+func (p *SandboxNetworkPolicy) CountError(err error) {
+	if p.Errors == nil {
+		return
+	}
+	reason := observerOther
+	switch {
+	case apierrors.IsForbidden(err):
+		reason = observerForbidden
+	case apierrors.IsNotFound(err):
+		reason = observerNotFound
+	}
+	p.Errors.WithLabelValues(reason).Inc()
 }
 
 func (p *SandboxNetworkPolicy) log() *slog.Logger {
