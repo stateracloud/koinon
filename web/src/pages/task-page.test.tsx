@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { ActorKind, TaskEventSchema, TaskSchema, TaskService, TaskState, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { agent, orgId, renderApp, task, whoAmI } from '@/test-utils'
 
@@ -27,6 +28,33 @@ function chunk(seq: number, text: string) {
 function taskEvent(seq: number, kind: string, payload: Record<string, string>, actor = ActorKind.USER) {
   return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
 }
+
+describe('TaskPage member names', () => {
+  async function askableCalls(role: OrgRole) {
+    let calls = 0
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role }) })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(QuestionService, {
+        listAskableMembers: () => {
+          calls++
+          return { members: [] }
+        },
+      })
+      service(TaskService, { getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events: [], runs: [] }) })
+    })
+    renderApp(transport, '/tasks/t-1')
+    await screen.findByRole('button', { name: 'Cancel task Say hello' })
+    // Give a query that is enabled time to reach the transport.
+    await new Promise((r) => setTimeout(r, 200))
+    return calls
+  }
+
+  it('asks for member names only as an admin', async () => {
+    expect(await askableCalls(OrgRole.MEMBER)).toBe(0)
+    expect(await askableCalls(OrgRole.ADMIN)).toBeGreaterThan(0)
+  })
+})
 
 describe('TaskPage', () => {
   it('asks once before it cancels the task', async () => {
