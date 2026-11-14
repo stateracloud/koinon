@@ -15,8 +15,8 @@
 # The allowed list is hack/git-identities.allowed: one `Name <email>` glob per line (`#` comments).
 # KOINON_ALLOWED_IDENTITIES (newline separated, same syntax) replaces the file in commit mode (not in
 # range mode). In range mode the list is read from the base commit, so a pull request cannot widen its
-# own list; a new contributor adds their line in a pull request and it counts from the next one on (or
-# sets KOINON_ALLOWED_IDENTITIES locally for the hook). Exit 0 when every
+# own list; a person commits under their GitHub noreply address, which the list already allows; only a maintainer
+# adds a line, and it counts from the next pull request on (KOINON_ALLOWED_IDENTITIES sets a list locally for the hook). Exit 0 when every
 # identity is allowed, 1 when one is not, 2 on misuse or when the commits cannot be listed (fails closed).
 # KOINON_SKIP_IDENTITY_CHECK=1 turns the hook off for one command (CI and hack/ship.sh ignore it).
 # The hooks chain to a personal hook of the same name in the common .git/hooks (core.hooksPath replaces it).
@@ -132,8 +132,10 @@ if [[ $mode == commit ]]; then
 		fi
 	done
 	if [[ $fail -ne 0 ]]; then
-		echo "Set the project identity in this worktree: git config user.name procoduck; git config user.email coder@procodus.dev" >&2
-		echo "(or add your own identity to hack/git-identities.allowed, see CONTRIBUTING.md). Allowed:" >&2
+		echo "A person: set your GitHub noreply address in this repository (the ID and username are on https://github.com/settings/emails):" >&2
+		echo "  git config user.name \"<your name>\"; git config user.email \"<id>+<username>@users.noreply.github.com\"" >&2
+		echo "An agent: use the project identity, or the noreply address of the human it works for. Only a maintainer adds lines to" >&2
+		echo "hack/git-identities.allowed (see CONTRIBUTING.md, \"Commit identity\"). Allowed:" >&2
 		printf '  %s\n' "${pats//$'\n'/$'\n'  }" >&2
 	fi
 	exit $fail
@@ -156,6 +158,6 @@ done <<<"$commits"
 if [[ $fail -ne 0 ]]; then
 	echo "Allowed identities (hack/git-identities.allowed):"
 	printf '  %s\n' "${pats//$'\n'/$'\n'  }"
-	echo "Fix with: set user.name/user.email, then git commit --amend --reset-author for an unpushed last commit; a pushed commit needs a history rewrite and a force-push: ask your human. A new contributor adds their own line to hack/git-identities.allowed in the same pull request."
+	echo "Fix with: set user.name to your name and user.email to your GitHub noreply address (<id>+<username>@users.noreply.github.com), then git commit --amend --reset-author for an unpushed last commit; a pushed commit needs a history rewrite and a force-push: ask your human. Only a maintainer adds lines to hack/git-identities.allowed."
 fi
 exit $fail
