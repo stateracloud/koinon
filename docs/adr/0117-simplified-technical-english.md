@@ -21,9 +21,7 @@ Technical English), and that an ADR records the rule.
 1. **Scope.** The rule covers text that people other than the author read:
    - pull request titles and bodies, issue titles and bodies, and review and issue comments;
    - documentation: `docs/` (ADRs included), `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `GLOSSARY.md`,
-     chart and hack READMEs, and the docs site (`stateracloud/koinon-docs`, ADR 0108);
-   - user-facing messages that we write (error text, CLI help, UI strings), as far as the product
-     language allows.
+     chart and hack READMEs, and the docs site (`stateracloud/koinon-docs`, ADR 0108).
 2. **Out of scope.**
    - Code, identifiers, and code comments (comments should be short and clear, but are not checked).
    - Commit subjects: they follow Conventional Commits. A commit body should follow this rule, but it
@@ -37,15 +35,15 @@ Technical English), and that an ADR records the rule.
    - **One paragraph, one topic.** A paragraph has at most six sentences. Start with the main point.
    - **Active voice** and the simple tenses (present, past, future). Write "The API returns an error",
      not "An error is returned by the API". Name the actor.
-   - **Approved meanings.** Use a word in one meaning only, and use one word for one thing. Use the
+   - **Approved meanings.** Use a word in one meaning only. Use one word for one thing. Use the
      same noun every time (do not alternate "run", "job" and "execution" for one concept). Use the
      terms of `GLOSSARY.md`. Prefer the plain word ("use", not "utilize").
    - **No idioms, no phrasal verbs with figurative meaning, no slang.** Write "stop", not "kill off".
    - **Commands as imperatives.** Write "Run `make test`", not "You might want to run".
-   - **Do not drop articles** ("the", "a") and do not use contractions in docs.
-   - **Warnings first** and flagged as warnings. Put the safety or data-loss warning before the step.
-4. **How we apply it.** Authors write in this form. Reviewers may ask for a rewrite of unclear text
-   and cite this ADR. A word that STE100 does not approve is not an error when a technical name needs
+   - **Do not drop articles** ("the", "a"). Do not use contractions in docs.
+   - **Warnings first.** Flag each warning as a warning. Put the safety or data-loss warning before the step.
+4. **How we apply it.** Authors write in this form. Reviewers may ask for a rewrite of unclear text.
+   Reviewers cite this ADR. A word that STE100 does not approve is not an error when a technical name needs
    it (for example "sandbox", "pod", "backup"). Technical names follow the project, not the dictionary.
 5. **Checks.** No automatic check now. A linter for STE100 does not exist as an open tool that fits
    our CI (see Prior art). Sentence length and passive voice may get an advisory script later, in a new
@@ -86,6 +84,7 @@ Technical English), and that an ADR records the rule.
   one rule.
 - Negative: authors need to learn the rules, and some technical text reads less naturally.
 - Negative: no automatic check, so the rule depends on review.
+- Scope: user-facing product messages are out of scope for this ADR. A later decision can add them.
 - Follow-up: a short advisory check for sentence length and passive voice, if reviewers ask for it.
 
 ## Links
