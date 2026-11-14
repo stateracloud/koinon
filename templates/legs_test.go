@@ -4,7 +4,6 @@ package templates_test
 
 import (
 	"encoding/json"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -27,10 +26,6 @@ import (
 // spec.tools only, so a tool the instructions describe in prose ("the search and fetch tools") is
 // read too. Parse fails when the instructions name a tool in backticks that spec.tools does
 // not list.
-
-// toolCall matches a tool the instructions tell the agent to call, written in backticks. Parse
-// refuses one that spec.tools does not list; the legs come from spec.tools alone.
-var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
 // The org the classifier runs for: one code-host connection that lists one private repository, the
 // repository a code-host tool of a template acts on (ADR 0091 decision 3).
@@ -206,7 +201,7 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 	It("classifies a tool the instructions only describe in prose when spec.tools declares it", func() {
 		t, err := templates.Parse(readFile("testdata/legs/prose-tool.yaml"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(toolCall.FindAllString(t.Spec.Instructions, -1)).To(BeEmpty(), "no tool is backticked")
+		Expect(templates.BacktickedTools(t.Spec.Instructions)).To(BeEmpty(), "no tool is backticked")
 		Expect(t.Spec.Tools).To(Equal([]string{"web_url_read"}))
 		Expect(legsOf(t)).To(Equal(templateLegs{untrustedInput: true}))
 	})

@@ -415,12 +415,24 @@ func canonicalJSON(doc any) ([]byte, error) {
 // toolCall matches a tool the instructions tell the agent to call, written in backticks.
 var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
+// BacktickedTools returns the tool names the text writes in backticks, in order of first use and
+// without repeats: the tools the instructions tell the agent to call.
+func BacktickedTools(text string) []string {
+	var names []string
+	for _, m := range toolCall.FindAllStringSubmatch(text, -1) {
+		if !slices.Contains(names, m[1]) {
+			names = append(names, m[1])
+		}
+	}
+	return names
+}
+
 // undeclaredTools are the backticked tool names in instructions that tools does not list.
 func undeclaredTools(instructions string, tools []string) []string {
 	var missing []string
-	for _, m := range toolCall.FindAllStringSubmatch(instructions, -1) {
-		if !slices.Contains(tools, m[1]) && !slices.Contains(missing, m[1]) {
-			missing = append(missing, m[1])
+	for _, n := range BacktickedTools(instructions) {
+		if !slices.Contains(tools, n) {
+			missing = append(missing, n)
 		}
 	}
 	return missing

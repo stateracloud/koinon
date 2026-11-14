@@ -26,7 +26,7 @@ Agent templates: building blocks for the agent builder; the result is always a d
 ## Rules
 
 One table, `Rules` in `rules.go`, names every rule and where it is checked; the table below lists the
-same rows (a test fails when the two differ). Each rule has a failing fixture, named after its ID, with
+same rows (a test fails when a row is missing, extra or has a wrong stage or fixture path). Each rule has a failing fixture, named after its ID, with
 a `# want:` line that gives the error text. `rules_test.go` runs each fixture at its stage and fails
 when the fixture passes, so a rule that is removed fails its own fixture. The stages:
 

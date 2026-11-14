@@ -12,11 +12,12 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/templates"
 )
 
 // platformTools are the tools Koinon itself serves to every agent.
-var platformTools = []string{"ask_user"}
+var platformTools = []string{gateway.ToolAskUser}
 
 // testCatalog is the catalog the shipped templates are held to: the embedded connector types, their
 // scope tools (also under the connector's name, as the MCP server shows them), the platform tools
@@ -82,12 +83,38 @@ var _ = Describe("Rules", func() {
 		}
 	})
 
-	It("names every rule in the README", func() {
+	It("lists every rule in the README with its stage and fixture", func() {
 		readme, err := os.ReadFile("README.md")
 		Expect(err).NotTo(HaveOccurred())
-		for _, r := range templates.Rules {
-			Expect(string(readme)).To(ContainSubstring("`"+r.ID+"`"), r.ID)
+		stageText := map[templates.Stage]string{
+			templates.StageParse:   "`Parse` (YAML)",
+			templates.StageSchema:  "`schema/template.schema.json`",
+			templates.StageCheck:   "`Template.check`",
+			templates.StageBuilt:   "`Template.check`",
+			templates.StageLoad:    "`Load`",
+			templates.StageCatalog: "`Template.CheckCatalog`",
+			templates.StageShipped: "`Template.CheckShipped`",
 		}
+		type row struct{ stage, fixture string }
+		got := map[string]row{}
+		for _, line := range strings.Split(string(readme), "\n") {
+			cells := strings.Split(line, "|")
+			if len(cells) != 6 || !strings.HasPrefix(cells[1], " `") {
+				continue
+			}
+			id := strings.Trim(strings.TrimSpace(cells[1]), "`")
+			Expect(got).NotTo(HaveKey(id), "duplicate README row")
+			got[id] = row{strings.TrimSpace(cells[2]), strings.TrimSpace(cells[4])}
+		}
+		want := map[string]row{}
+		for _, r := range templates.Rules {
+			fixture := "built value in `check_internal_test.go`"
+			if dir, ok := r.Stage.FixtureDir(); ok {
+				fixture = "`testdata/" + dir + "/" + r.ID + ".yaml`"
+			}
+			want[r.ID] = row{stageText[r.Stage], fixture}
+		}
+		Expect(got).To(Equal(want))
 	})
 
 	It("proves the built-value rules in check_internal_test.go", func() {
