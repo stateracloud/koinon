@@ -200,6 +200,8 @@ prop_fixture() { # <name> <dirty yes|no>: tracked files, a file symlink and a di
 	echo "package b" >"$r/src/b.go"
 	printf '#!/bin/sh\n' >"$r/src/run.sh"
 	chmod +x "$r/src/run.sh"
+	echo au >"$r/src/au.go"
+	echo sw >"$r/src/sw.go"
 	echo one >"$r/d1/f"
 	echo two >"$r/d2/f"
 	ln -s src/a.go "$r/link-file"
@@ -207,6 +209,8 @@ prop_fixture() { # <name> <dirty yes|no>: tracked files, a file symlink and a di
 	git -C "$r" init -q
 	git -C "$r" add -A
 	git -C "$r" -c commit.gpgsign=false commit -q -m "feat: base"
+	git -C "$r" update-index --assume-unchanged src/au.go
+	git -C "$r" update-index --skip-worktree src/sw.go
 	if [[ $2 == yes ]]; then
 		echo "package c" >"$r/src/untracked.go"
 		echo "// staged" >>"$r/src/b.go"
@@ -236,11 +240,14 @@ for dirty in no yes; do
 	mut "chmod -x" chmod -x src/run.sh
 	mut "retargeting a file symlink" sh -c 'rm link-file && ln -s src/b.go link-file'
 	mut "retargeting a directory symlink" sh -c 'rm link-dir && ln -s d2 link-dir'
+	mut "editing an assume-unchanged file" sh -c 'echo "// e" >>src/au.go'
+	mut "editing a skip-worktree file" sh -c 'echo "// e" >>src/sw.go'
 	mut "git mv" git mv src/a.go src/a2.go
 	mut "adding an untracked file" sh -c 'echo new >src/new.go'
 	mut "staging an edit" sh -c 'echo "// s" >>src/a.go && git add src/a.go'
 	mut "committing an edit" sh -c 'echo "// c" >>src/a.go && git add src/a.go && git -c commit.gpgsign=false commit -q -m "feat: c"'
 	eq "[$dirty] fingerprinting leaves the index alone" "$(git -C "$pr" ls-files -s | shasum -a 256)" "$idx0"
+	eq "[$dirty] fingerprinting keeps the assume-unchanged and skip-worktree bits" "$(git -C "$pr" ls-files -v | grep -E ' src/(au|sw)\.go$' | tr '\n' ' ')" "h src/au.go S src/sw.go "
 	eq "[$dirty] fingerprinting leaves git status alone" "$(git -C "$pr" status --porcelain=v1 -uall)" "$st0"
 done
 

@@ -41,9 +41,19 @@ gate_reuse_enabled() {
 # it in a COPY of the index (the copy keeps the stat cache, so an unchanged file is not read again),
 # so the real index and the working tree are never touched. Nothing here guesses what changed.
 gate_tree() {
-	local idx tree
+	local idx tree bits flag
 	idx=$(mktemp "${TMPDIR:-/tmp}/gate-index.XXXXXX") || return 1
-	cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || : >"$idx"
+	# cp -p keeps the index mtime (a fresh one can hide a racily-clean entry). The copy loses the
+	# assume-unchanged and skip-worktree bits, or `git add -A` would skip edits to those files; the
+	# real index keeps them.
+	cp -p "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || : >"$idx"
+	# (update-index applies only one of the two flags per call, so it runs once for each.)
+	bits=$(GIT_INDEX_FILE=$idx git ls-files -v -z 2>/dev/null | perl -0ne 'print substr($_,2) if /^(?:[a-z]|S) /' | tr '\0' '\1')
+	if [[ -n $bits ]]; then
+		for flag in --no-assume-unchanged --no-skip-worktree; do
+			printf '%s' "$bits" | tr '\1' '\0' | GIT_INDEX_FILE=$idx xargs -0 git update-index "$flag" -- >/dev/null 2>&1 || true
+		done
+	fi
 	if GIT_INDEX_FILE=$idx git add -A -- . >/dev/null 2>&1; then
 		tree=$(GIT_INDEX_FILE=$idx git write-tree)
 	fi
@@ -67,16 +77,17 @@ gate_fingerprint() { # <job|gate|tree> <name> <merge-base>
 	if [[ $kind == tree ]]; then
 		sel="tree $tree"$'\n'
 	else
-		mfile=$(git -c core.quotepath=off ls-tree -r "$tree")
+		mfile=$tree
 	fi
-	while IFS=$'\t' read -r blob f; do
+	# NUL-separated records ("<mode> <type> <blob>\t<path>"), so a path with quotes or newlines matches the rules as is
+	while IFS=$'\t' read -r -d '' blob f; do
 		[[ -n $f ]] || continue
 		case $kind in
 		job) paths_job_triggers "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
 		*) paths_match gate "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
 		esac
 		sel+="$f"$'\t'"$blob"$'\n'
-	done <<<"$mfile" # empty for the tree kind: the tree id stands for every file
+	done < <([[ -n $mfile ]] && git ls-tree -r -z "$mfile") # nothing for the tree kind: the tree id stands for every file
 	{
 		echo "$kind $name mb=$3"
 		# The scripts job also checks the commits (subject, identity): a new commit is a new input.
