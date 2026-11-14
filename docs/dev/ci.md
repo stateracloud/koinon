@@ -180,7 +180,7 @@ verifies it) and dated by `hack/dep-age-check.sh` (ADR 0079).
 ## Persisted-state compatibility
 
 `internal/compat` (old issue 652) checks that what a shipped release wrote still loads at head. Each folder
-`testdata/compat/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
+`internal/compat/testdata/<release>/` is recorded by `hack/record-compat-fixtures.sh <release>` from that
 release's code and holds three formats:
 
 - `agent_configs/`: the stored `agent_versions.config` of every shipped template, plus `full` and
