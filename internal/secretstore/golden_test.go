@@ -81,7 +81,7 @@ func writeGolden(ctx context.Context) {
 	GinkgoHelper()
 	Expect(os.MkdirAll("testdata", 0o755)).To(Succeed())
 	put := func(name string, b []byte) {
-		Expect(os.WriteFile(goldenPath(name), b, 0o644)).To(Succeed()) //nolint:gosec // a test fixture, not secret
+		Expect(os.WriteFile(goldenPath(name), b, 0o644)).To(Succeed())
 	}
 
 	ring, err := secretstore.NewKeyring(map[string][]byte{goldenKEKID: goldenKEK}, goldenKEKID)
