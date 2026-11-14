@@ -318,43 +318,53 @@ var _ = Describe("one queued run per task", func() {
 		})
 	}
 
-	It("does not deadlock when an agent is archived while a starting run is requeued", func(ctx SpecContext) {
-		for range 10 {
-			w := newWorld(ctx)
-			first, _, err := w.enqueue(ctx, w.task)
-			Expect(err).NotTo(HaveOccurred())
-			claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(claimed.ID).To(Equal(first.ID))
-			_, queued, err := w.enqueue(ctx, w.task)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(queued).To(BeTrue())
-			own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
-			start := make(chan struct{})
-			archiveErr := make(chan error, 1)
-			requeueErr := make(chan error, 1)
-			go func() {
-				defer GinkgoRecover()
-				<-start
-				archiveErr <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-					_, err := runoutcome.CancelForAgent(ctx, q.WithTx(tx), w.org, w.agent, runoutcome.System)
-					return err
-				})
-			}()
-			go func() {
-				defer GinkgoRecover()
-				<-start
-				requeueErr <- own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")
-			}()
-			close(start)
-			// The archive always succeeds; a lost requeue is a fence. A deadlock (40P01) is any
-			// other error.
-			Expect(<-archiveErr).To(Succeed())
-			if err := <-requeueErr; err != nil {
-				Expect(err).To(MatchError(runoutcome.ErrFenced))
-			}
-			Expect(w.queuedRuns(ctx, w.task)).To(Equal(0))
-		}
+	It("waits for the task lock without holding the queued run, then ends as superseded", func(ctx SpecContext) {
+		w := newWorld(ctx)
+		first, _, err := w.enqueue(ctx, w.task)
+		Expect(err).NotTo(HaveOccurred())
+		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(claimed.ID).To(Equal(first.ID))
+		second, queued, err := w.enqueue(ctx, w.task)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(queued).To(BeTrue())
+
+		// A task-first path (setState) holds the task lock.
+		taskTx, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = taskTx.Rollback(ctx) }()
+		_, err = runlock.LockTask(ctx, q.WithTx(taskTx), w.org, w.task.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
+		done := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			done <- own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")
+		}()
+
+		// Requeue waits on the task lock...
+		Eventually(func(g Gomega) {
+			var n int
+			g.Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE wait_event_type = 'Lock' AND query ILIKE '%FROM tasks%FOR UPDATE%'`).Scan(&n)).To(Succeed())
+			g.Expect(n).To(BeNumerically(">=", 1))
+		}, 10*time.Second, 50*time.Millisecond).Should(Succeed())
+		Expect(done).NotTo(Receive())
+
+		// ...and does not hold the queued run: another connection takes its lock at once.
+		probe, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		var id pgtype.UUID
+		Expect(probe.QueryRow(ctx, `SELECT id FROM runs WHERE org_id = $1 AND id = $2 FOR UPDATE NOWAIT`, w.org, second.ID).Scan(&id)).To(Succeed())
+		Expect(probe.Rollback(ctx)).To(Succeed())
+
+		Expect(taskTx.Rollback(ctx)).To(Succeed())
+		Eventually(done, 10*time.Second).Should(Receive(BeNil()))
+		ended, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: first.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ended.State).To(Equal(store.RunStateCanceled))
+		Expect(w.queuedRuns(ctx, w.task)).To(Equal(1))
 	})
 
 	It("still requeues a run when no other run of the task is queued", func(ctx SpecContext) {

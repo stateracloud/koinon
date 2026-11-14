@@ -21,17 +21,21 @@ import (
 // asserts only the transaction. It does not check the lock order, and it cannot: nothing here knows
 // which other locks the transaction holds.
 //
-// Lock order, kept by every caller (there is no runtime check):
+// Lock order. The rule is run rows, then the task row, and not every path keeps it yet:
 //
-//  1. run rows, in id order. A statement that locks more than one run row sorts by id
-//     (LockRunsForRequeue, CancelOpenRunsForAgent, CancelRunsOverWallClock,
-//     ClearSandboxWaitForAgent).
-//  2. then the task row (LockTask, or the task event a cancel appends).
+//   - Enqueue (scheduler.Enqueue) locks the task row only; it inserts a new run row.
+//   - Owner.Requeue locks its own run (LockRun), then the task row, then the queued run of the task
+//     with SKIP LOCKED (CarrySandboxWaitToQueued). It never waits for the queued run after the
+//     task lock.
+//   - The task-first paths (setState, cancel_task, ContinueAfterTimeLimit) lock the task row, then
+//     touch only queued runs (CancelQueuedForTask).
+//   - A statement that locks more than one run row sorts by id (CancelOpenRunsForAgent,
+//     CancelRunsOverWallClock, ClearSandboxWaitForAgent).
 //
-// An enqueue path locks the task row and no existing run row (it inserts a new one). Owner.Requeue
-// locks its run and the queued run of the task (LockRunsForRequeue), then the task, so the update
-// of the queued run after the task lock waits for nothing. Because the run rows come first, in one
-// global order, and the task row last, no two paths wait on each other in a cycle.
+// Some older run-first cancel paths (archive, CancelUnowned on a queued run, CancelAtLimit) lock a
+// run row, which can be a queued run, and then the task row. They can still meet a task-first path
+// in a cycle (queued run, then task, against task, then queued run). That is not fixed here; it is
+// tracked in issue #1015. So there is no claim here that the order is free of cycles.
 func LockTask(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Task, error) {
 	task, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: org, ID: id})
 	if err != nil {

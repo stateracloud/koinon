@@ -86,6 +86,11 @@ type Querier interface {
 	// A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
 	// run of the task, which takes over its place in the queue. The earlier start wins, so the total
 	// wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+	// Skips a queued run that another transaction holds (SKIP LOCKED): the caller holds the task row
+	// lock, and whoever holds the queued run's lock holds no task lock (the task-first paths wait on
+	// ours), so it is a cancel or a claim of that run. A claim in that moment means the carry is
+	// skipped and the claimed run starts a new wait clock. That is rare and accepted: waiting for the
+	// lock here would put a queued-run lock after the task lock, the order that deadlocks (issue 1015).
 	CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error)
 	// One anchor's heads with the hash the org chain has at the anchored chain_seq (null when the row is
 	// gone): the verifier compares the two (ADR 0100 decision 4.1).
@@ -1205,11 +1210,6 @@ type Querier interface {
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
-	// Locks the run and the queued run of its task, in id order (the rule for every statement that
-	// locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
-	// the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
-	// Returns the ids it locked and their states.
-	LockRunsForRequeue(ctx context.Context, arg LockRunsForRequeueParams) ([]LockRunsForRequeueRow, error)
 	// The fingerprints of @fps the session holds.
 	LookupLeakGuardFingerprints(ctx context.Context, arg LookupLeakGuardFingerprintsParams) ([]int64, error)
 	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the

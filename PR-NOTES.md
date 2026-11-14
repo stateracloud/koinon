@@ -1,0 +1,1 @@
+- runlock.LockTask asserts only that the caller is in a transaction. It does not check the lock order. Order is kept by hand: run rows by id, then the task row (Owner.Requeue locks R and Q in one id-ordered statement before the task; archive, sweep and clear-wait statements sort by id). Reason: no runtime hook can know which locks a transaction holds.

@@ -427,98 +427,74 @@ func (o *Owner) postReply(ctx context.Context, q *store.Queries) error {
 	return err
 }
 
-// requeueAttempts bounds the retries of Requeue: each one needs a new enqueue in a window of a few
-// statements, so a second one in a row is already unlikely.
-const requeueAttempts = 3
-
-// errRequeueRetry: a run of the task was queued after Requeue took its run locks.
-var errRequeueRetry = errors.New("requeue: a run was queued meanwhile")
-
 // Requeue puts the run back in the queue: its sandbox was not ready in time. It is the run's
 // owner's last write; the next claim gives the run a new epoch. A run that was taken over, canceled
 // or finished meanwhile is ErrFenced.
 func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 	superseded := false
-	var err error
-	// A queued run can appear between the run locks and the task lock; then the transaction rolls
-	// back and starts again with that run in the first lock set.
-	for range requeueAttempts {
-		superseded = false
-		err = o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
-			// Lock order (runlock.LockTask): run rows in id order, then the task row. The run and
-			// the queued run of the task go first, in one statement that sorts by id; the task
-			// lock after them keeps every enqueue out until the end, so the check below and the
-			// write of RequeueRun see the same queue (runs_one_queued_per_task).
-			locked, err := q.LockRunsForRequeue(ctx, store.LockRunsForRequeueParams{
-				OrgID: o.run.OrgID, ID: o.run.ID, TaskID: o.run.TaskID,
-			})
-			if err != nil {
-				return err
-			}
-			lockedQueued, own := false, false
-			for _, l := range locked {
-				if l.ID == o.run.ID {
-					own = l.State == store.RunStateStarting
-				} else {
-					lockedQueued = true
-				}
-			}
-			if !own {
-				return pgx.ErrNoRows
-			}
-			if _, err := runlock.LockTask(ctx, q, o.run.OrgID, o.run.TaskID); err != nil {
-				return err
-			}
-			// The one decision: is another run of the task queued? (The own run is starting.)
-			superseded, err = q.HasQueuedRunForTask(ctx, store.HasQueuedRunForTaskParams{OrgID: o.run.OrgID, TaskID: o.run.TaskID})
-			if err != nil {
-				return err
-			}
-			if superseded && !lockedQueued {
-				return errRequeueRetry
-			}
-			if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
-				return err
-			}
-			if !superseded {
-				payload, _ := json.Marshal(map[string]string{"reason": reason})
-				if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-					OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
-					Kind: "run.requeued", Payload: payload, SourceSeq: src,
-				}); err != nil {
-					return err
-				}
-			}
-			r, err := q.RequeueRun(ctx, store.RequeueRunParams{
-				OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch, Superseded: superseded,
-			})
-			if err != nil {
-				return err
-			}
-			// Another run of the task is queued: this one ended as canceled, and the run and task
-			// timelines say why, like every other cancel.
-			if superseded {
-				_, err = recordCanceled(ctx, q, r, Cancellation{
-					Reason: ReasonRequeueSuperseded, Message: "superseded by a queued run of the task",
-					Extra: map[string]any{"requeueReason": reason},
-				})
-				if err != nil {
-					return err
-				}
-				// The queued run takes this run's place, so it takes the start of the wait too:
-				// the sandbox wait cap counts the whole wait (ADR 0066, amendment 2026-10-28).
-				if r.SandboxWaitStartedAt.Valid {
-					_, err = q.CarrySandboxWaitToQueued(ctx, store.CarrySandboxWaitToQueuedParams{
-						OrgID: o.run.OrgID, TaskID: o.run.TaskID, ID: o.run.ID, Started: r.SandboxWaitStartedAt,
-					})
-				}
-			}
+	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
+		// Lock order (runlock.LockTask): the run row, then the task row. The task lock keeps every
+		// enqueue out until the end, so the check below and the write of RequeueRun see the same
+		// queue (runs_one_queued_per_task). The queued run is not locked before the task: the
+		// task-first paths (setState, cancel_task) lock the task, then that run.
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: o.run.OrgID, ID: o.run.ID})
+		if err != nil {
 			return err
-		})
-		if !errors.Is(err, errRequeueRetry) {
-			break
 		}
-	}
+		if run.Epoch != o.run.Epoch || run.State != store.RunStateStarting {
+			return pgx.ErrNoRows
+		}
+		if _, err := runlock.LockTask(ctx, q, o.run.OrgID, o.run.TaskID); err != nil {
+			return err
+		}
+		// The one decision: is another run of the task queued? (The own run is starting.)
+		superseded, err = q.HasQueuedRunForTask(ctx, store.HasQueuedRunForTaskParams{OrgID: o.run.OrgID, TaskID: o.run.TaskID})
+		if err != nil {
+			return err
+		}
+		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
+			return err
+		}
+		if !superseded {
+			payload, _ := json.Marshal(map[string]string{"reason": reason})
+			if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+				OrgID: o.run.OrgID, RunID: o.run.ID, Epoch: o.run.Epoch,
+				Kind: "run.requeued", Payload: payload, SourceSeq: src,
+			}); err != nil {
+				return err
+			}
+		}
+		r, err := q.RequeueRun(ctx, store.RequeueRunParams{
+			OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch, Superseded: superseded,
+		})
+		if err != nil {
+			return err
+		}
+		// Another run of the task is queued: this one ended as canceled, and the run and task
+		// timelines say why, like every other cancel.
+		if superseded {
+			_, err = recordCanceled(ctx, q, r, Cancellation{
+				Reason: ReasonRequeueSuperseded, Message: "superseded by a queued run of the task",
+				Extra: map[string]any{"requeueReason": reason},
+			})
+			if err != nil {
+				return err
+			}
+			// The queued run takes this run's place, so it takes the start of the wait too:
+			// the sandbox wait cap counts the whole wait (ADR 0066, amendment 2026-10-28). The
+			// carry skips a queued run that another transaction holds (SKIP LOCKED): we hold
+			// the task lock, so that holder takes no task lock (the task-first paths wait on
+			// ours) and is a cancel or a claim of the queued run. If it is a claim, the carry
+			// is skipped and the claimed run starts a new wait clock. That is rare and
+			// accepted; the cancel of this run above still stands.
+			if r.SandboxWaitStartedAt.Valid {
+				_, err = q.CarrySandboxWaitToQueued(ctx, store.CarrySandboxWaitToQueuedParams{
+					OrgID: o.run.OrgID, TaskID: o.run.TaskID, ID: o.run.ID, Started: r.SandboxWaitStartedAt,
+				})
+			}
+		}
+		return err
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		o.FenceFromDB(ctx)
 		if k := o.FenceKind(); k != FenceLost && k != FenceAbandon {

@@ -180,9 +180,20 @@ RETURNING sandbox_wait_started_at;
 -- A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
 -- run of the task, which takes over its place in the queue. The earlier start wins, so the total
 -- wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+-- Skips a queued run that another transaction holds (SKIP LOCKED): the caller holds the task row
+-- lock, and whoever holds the queued run's lock holds no task lock (the task-first paths wait on
+-- ours), so it is a cancel or a claim of that run. A claim in that moment means the carry is
+-- skipped and the claimed run starts a new wait clock. That is rare and accepted: waiting for the
+-- lock here would put a queued-run lock after the task lock, the order that deadlocks (issue 1015).
+WITH queued AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = @org_id AND r.task_id = @task_id AND r.id <> @id AND r.state = 'queued'
+    FOR UPDATE OF r SKIP LOCKED
+)
 UPDATE runs
-SET sandbox_wait_started_at = least(coalesce(sandbox_wait_started_at, @started::timestamptz), @started::timestamptz)
-WHERE org_id = @org_id AND task_id = @task_id AND id <> @id AND state = 'queued';
+SET sandbox_wait_started_at = least(coalesce(runs.sandbox_wait_started_at, @started::timestamptz), @started::timestamptz)
+FROM queued
+WHERE runs.org_id = @org_id AND runs.id = queued.id;
 
 -- name: ClearSandboxWaitForAgent :execrows
 -- The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
@@ -360,16 +371,6 @@ RETURNING *;
 SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
 FROM runs
 WHERE org_id = @org_id AND task_id = @task_id AND id <> @run_id;
-
--- name: LockRunsForRequeue :many
--- Locks the run and the queued run of its task, in id order (the rule for every statement that
--- locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
--- the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
--- Returns the ids it locked and their states.
-SELECT id, state FROM runs
-WHERE org_id = @org_id AND (id = @id OR (task_id = @task_id AND state = 'queued'))
-ORDER BY id
-FOR UPDATE;
 
 -- name: LockRun :one
 -- Serialises a park decision (agentd) with the resolution of the run's

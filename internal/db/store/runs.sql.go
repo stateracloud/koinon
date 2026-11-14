@@ -397,9 +397,15 @@ func (q *Queries) CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOve
 }
 
 const carrySandboxWaitToQueued = `-- name: CarrySandboxWaitToQueued :execrows
+WITH queued AS (
+    SELECT r.id FROM runs r
+    WHERE r.org_id = $2 AND r.task_id = $3 AND r.id <> $4 AND r.state = 'queued'
+    FOR UPDATE OF r SKIP LOCKED
+)
 UPDATE runs
-SET sandbox_wait_started_at = least(coalesce(sandbox_wait_started_at, $1::timestamptz), $1::timestamptz)
-WHERE org_id = $2 AND task_id = $3 AND id <> $4 AND state = 'queued'
+SET sandbox_wait_started_at = least(coalesce(runs.sandbox_wait_started_at, $1::timestamptz), $1::timestamptz)
+FROM queued
+WHERE runs.org_id = $2 AND runs.id = queued.id
 `
 
 type CarrySandboxWaitToQueuedParams struct {
@@ -412,6 +418,11 @@ type CarrySandboxWaitToQueuedParams struct {
 // A run that ended as superseded (RequeueRun, issue 678) hands its sandbox wait start to the queued
 // run of the task, which takes over its place in the queue. The earlier start wins, so the total
 // wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
+// Skips a queued run that another transaction holds (SKIP LOCKED): the caller holds the task row
+// lock, and whoever holds the queued run's lock holds no task lock (the task-first paths wait on
+// ours), so it is a cancel or a claim of that run. A claim in that moment means the carry is
+// skipped and the claimed run starts a new wait clock. That is rare and accepted: waiting for the
+// lock here would put a queued-run lock after the task lock, the order that deadlocks (issue 1015).
 func (q *Queries) CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, carrySandboxWaitToQueued,
 		arg.Started,
@@ -1086,48 +1097,6 @@ func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (Run, error) {
 		&i.ContentPurgedAt,
 	)
 	return i, err
-}
-
-const lockRunsForRequeue = `-- name: LockRunsForRequeue :many
-SELECT id, state FROM runs
-WHERE org_id = $1 AND (id = $2 OR (task_id = $3 AND state = 'queued'))
-ORDER BY id
-FOR UPDATE
-`
-
-type LockRunsForRequeueParams struct {
-	OrgID  pgtype.UUID
-	ID     pgtype.UUID
-	TaskID pgtype.UUID
-}
-
-type LockRunsForRequeueRow struct {
-	ID    pgtype.UUID
-	State RunState
-}
-
-// Locks the run and the queued run of its task, in id order (the rule for every statement that
-// locks more than one run row, see CancelOpenRunsForAgent). Owner.Requeue takes these locks before
-// the task row lock, so the queued run that RequeueRun's caller updates afterwards is held already.
-// Returns the ids it locked and their states.
-func (q *Queries) LockRunsForRequeue(ctx context.Context, arg LockRunsForRequeueParams) ([]LockRunsForRequeueRow, error) {
-	rows, err := q.db.Query(ctx, lockRunsForRequeue, arg.OrgID, arg.ID, arg.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LockRunsForRequeueRow
-	for rows.Next() {
-		var i LockRunsForRequeueRow
-		if err := rows.Scan(&i.ID, &i.State); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const markRunRunning = `-- name: MarkRunRunning :one
