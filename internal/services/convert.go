@@ -99,7 +99,7 @@ func agentGrantsProto(cfg agentconfig.Config) []*templatev1alpha1.Grant {
 	return out
 }
 
-var taskStateToProto = map[store.TaskState]taskv1alpha1.TaskState{
+var taskStateToProto = enumTable[store.TaskState, taskv1alpha1.TaskState]{
 	store.TaskStateSubmitted:     taskv1alpha1.TaskState_TASK_STATE_SUBMITTED,
 	store.TaskStateWorking:       taskv1alpha1.TaskState_TASK_STATE_WORKING,
 	store.TaskStateInputRequired: taskv1alpha1.TaskState_TASK_STATE_INPUT_REQUIRED,
@@ -117,13 +117,13 @@ func taskStateFromProto(s taskv1alpha1.TaskState) (store.TaskState, bool) {
 	return "", false
 }
 
-var actorKindToProto = map[store.TaskActorKind]taskv1alpha1.ActorKind{
+var actorKindToProto = enumTable[store.TaskActorKind, taskv1alpha1.ActorKind]{
 	store.TaskActorKindUser:   taskv1alpha1.ActorKind_ACTOR_KIND_USER,
 	store.TaskActorKindAgent:  taskv1alpha1.ActorKind_ACTOR_KIND_AGENT,
 	store.TaskActorKindSystem: taskv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,
 }
 
-var creatorKindToProto = map[store.TaskCreatorKind]taskv1alpha1.CreatorKind{
+var creatorKindToProto = enumTable[store.TaskCreatorKind, taskv1alpha1.CreatorKind]{
 	store.TaskCreatorKindUser:    taskv1alpha1.CreatorKind_CREATOR_KIND_USER,
 	store.TaskCreatorKindTrigger: taskv1alpha1.CreatorKind_CREATOR_KIND_TRIGGER,
 	store.TaskCreatorKindAgent:   taskv1alpha1.CreatorKind_CREATOR_KIND_AGENT,
@@ -165,7 +165,7 @@ func taskEventProto(e store.TaskEvent) *taskv1alpha1.TaskEvent {
 	}
 }
 
-var runStateToProto = map[store.RunState]runv1alpha1.RunState{
+var runStateToProto = enumTable[store.RunState, runv1alpha1.RunState]{
 	store.RunStateQueued:    runv1alpha1.RunState_RUN_STATE_QUEUED,
 	store.RunStateStarting:  runv1alpha1.RunState_RUN_STATE_STARTING,
 	store.RunStateRunning:   runv1alpha1.RunState_RUN_STATE_RUNNING,
@@ -175,7 +175,7 @@ var runStateToProto = map[store.RunState]runv1alpha1.RunState{
 	store.RunStateCanceled:  runv1alpha1.RunState_RUN_STATE_CANCELED,
 }
 
-var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
+var failureClassToProto = enumTable[store.RunFailureClass, runv1alpha1.FailureClass]{
 	store.RunFailureClassTransient:          runv1alpha1.FailureClass_FAILURE_CLASS_TRANSIENT,
 	store.RunFailureClassThrottled:          runv1alpha1.FailureClass_FAILURE_CLASS_THROTTLED,
 	store.RunFailureClassContextOverflow:    runv1alpha1.FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW,
@@ -186,7 +186,7 @@ var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
 	store.RunFailureClassLoop:               runv1alpha1.FailureClass_FAILURE_CLASS_LOOP,
 }
 
-var parkReasonToProto = map[store.RunParkReason]runv1alpha1.ParkReason{
+var parkReasonToProto = enumTable[store.RunParkReason, runv1alpha1.ParkReason]{
 	store.RunParkReasonApproval:      runv1alpha1.ParkReason_PARK_REASON_APPROVAL,
 	store.RunParkReasonBudget:        runv1alpha1.ParkReason_PARK_REASON_BUDGET,
 	store.RunParkReasonA2a:           runv1alpha1.ParkReason_PARK_REASON_A2A,

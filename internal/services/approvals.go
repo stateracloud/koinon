@@ -24,7 +24,7 @@ import (
 // maxNoteBytes bounds an approver's note.
 const maxNoteBytes = 2000
 
-var approvalStatusToProto = map[store.ApprovalStatus]approvalv1alpha1.Status{
+var approvalStatusToProto = enumTable[store.ApprovalStatus, approvalv1alpha1.Status]{
 	store.ApprovalStatusPending:  approvalv1alpha1.Status_STATUS_PENDING,
 	store.ApprovalStatusApproved: approvalv1alpha1.Status_STATUS_APPROVED,
 	store.ApprovalStatusDenied:   approvalv1alpha1.Status_STATUS_DENIED,
@@ -34,7 +34,7 @@ var approvalStatusToProto = map[store.ApprovalStatus]approvalv1alpha1.Status{
 	store.ApprovalStatusCanceled: approvalv1alpha1.Status_STATUS_CANCELED,
 }
 
-var approvalDecisionToProto = map[store.ApprovalDecision]approvalv1alpha1.Decision{
+var approvalDecisionToProto = enumTable[store.ApprovalDecision, approvalv1alpha1.Decision]{
 	store.ApprovalDecisionAsk:   approvalv1alpha1.Decision_DECISION_ASK,
 	store.ApprovalDecisionAllow: approvalv1alpha1.Decision_DECISION_ALLOW,
 }
@@ -373,7 +373,7 @@ func (s *Server) Deny(ctx context.Context, req *approvalv1alpha1.DenyRequest) (*
 	return &approvalv1alpha1.DenyResponse{Approval: approvalProto(row, true, true)}, nil
 }
 
-var scopeKindToProto = map[store.ApprovalScopeKind]approvalv1alpha1.ScopeKind{
+var scopeKindToProto = enumTable[store.ApprovalScopeKind, approvalv1alpha1.ScopeKind]{
 	store.ApprovalScopeKindTask:  approvalv1alpha1.ScopeKind_SCOPE_KIND_TASK,
 	store.ApprovalScopeKindAgent: approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT,
 }

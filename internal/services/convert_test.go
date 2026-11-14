@@ -3,81 +3,54 @@
 package services
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"reflect"
-	"strconv"
+	"github.com/stateracloud/koinon/internal/db/store"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-// enumValues returns the values of the database enum the store package declares as the Go type
-// typeName. sqlc generates these constants from the migrations, so a new enum value shows up here
+// auditFn runs one table against the generated list of every value of its database enum. The
+// list comes from sqlc (emit_all_enum_values), so a new enum value in a migration shows up here
 // without anyone editing this test.
-func enumValues(typeName string) []string {
-	GinkgoHelper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "../db/store/models.go", nil, 0)
-	Expect(err).NotTo(HaveOccurred())
-	var out []string
-	for _, d := range file.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST {
-			continue
-		}
-		for _, sp := range gd.Specs {
-			vs := sp.(*ast.ValueSpec)
-			id, ok := vs.Type.(*ast.Ident)
-			if !ok || id.Name != typeName || len(vs.Values) != 1 {
-				continue
-			}
-			lit, ok := vs.Values[0].(*ast.BasicLit)
-			Expect(ok).To(BeTrue(), "%s: constant %s is not a literal", typeName, vs.Names[0].Name)
-			v, err := strconv.Unquote(lit.Value)
-			Expect(err).NotTo(HaveOccurred())
-			out = append(out, v)
-		}
-	}
-	Expect(out).NotTo(BeEmpty(), "no constants of type %s in the store package", typeName)
-	return out
+type auditFn func() (missing, zero, extra []string)
+
+func audited[S ~string, P comparable](t enumTable[S, P], all []S) auditFn {
+	return func() ([]string, []string, []string) { return t.audit(all) }
 }
 
-// Every database enum value maps to a proto value that is not the zero (UNSPECIFIED) value, and the
+// Every database enum value maps to a value that is not the zero (UNSPECIFIED) value, and the
 // table maps nothing else. A new value in a migration fails here until its table has a row.
 var _ = Describe("the database enum to proto enum tables", func() {
 	DescribeTable("map every value",
-		func(typeName string, table any) {
-			t := reflect.ValueOf(table)
-			want := enumValues(typeName)
-			got := map[string]reflect.Value{}
-			for _, k := range t.MapKeys() {
-				got[k.String()] = t.MapIndex(k)
-			}
-			for _, v := range want {
-				m, ok := got[v]
-				Expect(ok).To(BeTrue(), "%s value %q has no row", typeName, v)
-				Expect(m.IsZero()).To(BeFalse(), "%s value %q maps to the zero value (%v)", typeName, v, m.Interface())
-				delete(got, v)
-			}
-			Expect(got).To(BeEmpty(), "%s table has rows for values the database does not have", typeName)
+		func(run auditFn) {
+			missing, zero, extra := run()
+			Expect(missing).To(BeEmpty(), "values with no row")
+			Expect(zero).To(BeEmpty(), "values that map to the zero value")
+			Expect(extra).To(BeEmpty(), "rows for values the database does not have")
 		},
-		Entry("task state", "TaskState", taskStateToProto),
-		Entry("task actor kind", "TaskActorKind", actorKindToProto),
-		Entry("task creator kind", "TaskCreatorKind", creatorKindToProto),
-		Entry("run state", "RunState", runStateToProto),
-		Entry("run failure class", "RunFailureClass", failureClassToProto),
-		Entry("run park reason", "RunParkReason", parkReasonToProto),
-		Entry("approval status", "ApprovalStatus", approvalStatusToProto),
-		Entry("approval decision", "ApprovalDecision", approvalDecisionToProto),
-		Entry("approval scope kind", "ApprovalScopeKind", scopeKindToProto),
-		Entry("agent status", "AgentStatus", agentStatusToProto),
-		Entry("question state", "QuestionState", questionStateToProto),
-		Entry("question answer kind", "QuestionAnswerKind", answerKindToProto),
-		Entry("connection status", "ConnectionStatus", connectionStatusToProto),
-		Entry("ticket column", "TaskState", ticketColumn),
-		Entry("ticket column name", "TaskState", ticketColumnName),
-		Entry("ticket actor kind", "TaskActorKind", ticketActorKind),
+		Entry("task state", audited(taskStateToProto, store.AllTaskStateValues())),
+		Entry("task actor kind", audited(actorKindToProto, store.AllTaskActorKindValues())),
+		Entry("task creator kind", audited(creatorKindToProto, store.AllTaskCreatorKindValues())),
+		Entry("run state", audited(runStateToProto, store.AllRunStateValues())),
+		Entry("run failure class", audited(failureClassToProto, store.AllRunFailureClassValues())),
+		Entry("run park reason", audited(parkReasonToProto, store.AllRunParkReasonValues())),
+		Entry("approval status", audited(approvalStatusToProto, store.AllApprovalStatusValues())),
+		Entry("approval decision", audited(approvalDecisionToProto, store.AllApprovalDecisionValues())),
+		Entry("approval scope kind", audited(scopeKindToProto, store.AllApprovalScopeKindValues())),
+		Entry("agent status", audited(agentStatusToProto, store.AllAgentStatusValues())),
+		Entry("question state", audited(questionStateToProto, store.AllQuestionStateValues())),
+		Entry("question answer kind", audited(answerKindToProto, store.AllQuestionAnswerKindValues())),
+		Entry("connection status", audited(connectionStatusToProto, store.AllConnectionStatusValues())),
+		Entry("ticket column", audited(ticketColumn, store.AllTaskStateValues())),
+		Entry("ticket column name", audited(ticketColumnName, store.AllTaskStateValues())),
+		Entry("ticket actor kind", audited(ticketActorKind, store.AllTaskActorKindValues())),
 	)
+
+	It("reports a missing row, a zero row and an extra row", func() {
+		t := enumTable[store.TaskState, int]{store.TaskStateWorking: 0, "gone": 1}
+		missing, zero, extra := t.audit([]store.TaskState{store.TaskStateSubmitted, store.TaskStateWorking})
+		Expect(missing).To(Equal([]string{"submitted"}))
+		Expect(zero).To(Equal([]string{"working"}))
+		Expect(extra).To(Equal([]string{"gone"}))
+	})
 })

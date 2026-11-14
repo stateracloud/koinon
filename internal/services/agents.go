@@ -29,7 +29,7 @@ import (
 	"github.com/stateracloud/koinon/templates"
 )
 
-var agentStatusToProto = map[store.AgentStatus]agentv1alpha1.AgentStatus{
+var agentStatusToProto = enumTable[store.AgentStatus, agentv1alpha1.AgentStatus]{
 	store.AgentStatusDraft:    agentv1alpha1.AgentStatus_AGENT_STATUS_DRAFT,
 	store.AgentStatusActive:   agentv1alpha1.AgentStatus_AGENT_STATUS_ACTIVE,
 	store.AgentStatusArchived: agentv1alpha1.AgentStatus_AGENT_STATUS_ARCHIVED,

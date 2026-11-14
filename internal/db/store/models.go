@@ -54,6 +54,14 @@ func (ns NullAgentStatus) Value() (driver.Value, error) {
 	return string(ns.AgentStatus), nil
 }
 
+func AllAgentStatusValues() []AgentStatus {
+	return []AgentStatus{
+		AgentStatusDraft,
+		AgentStatusActive,
+		AgentStatusArchived,
+	}
+}
+
 type ApprovalDecision string
 
 const (
@@ -96,6 +104,13 @@ func (ns NullApprovalDecision) Value() (driver.Value, error) {
 	return string(ns.ApprovalDecision), nil
 }
 
+func AllApprovalDecisionValues() []ApprovalDecision {
+	return []ApprovalDecision{
+		ApprovalDecisionAsk,
+		ApprovalDecisionAllow,
+	}
+}
+
 type ApprovalScopeKind string
 
 const (
@@ -136,6 +151,13 @@ func (ns NullApprovalScopeKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ApprovalScopeKind), nil
+}
+
+func AllApprovalScopeKindValues() []ApprovalScopeKind {
+	return []ApprovalScopeKind{
+		ApprovalScopeKindTask,
+		ApprovalScopeKindAgent,
+	}
 }
 
 type ApprovalStatus string
@@ -185,6 +207,18 @@ func (ns NullApprovalStatus) Value() (driver.Value, error) {
 	return string(ns.ApprovalStatus), nil
 }
 
+func AllApprovalStatusValues() []ApprovalStatus {
+	return []ApprovalStatus{
+		ApprovalStatusPending,
+		ApprovalStatusApproved,
+		ApprovalStatusDenied,
+		ApprovalStatusExecuted,
+		ApprovalStatusFailed,
+		ApprovalStatusExpired,
+		ApprovalStatusCanceled,
+	}
+}
+
 type AuthMethod string
 
 const (
@@ -225,6 +259,13 @@ func (ns NullAuthMethod) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.AuthMethod), nil
+}
+
+func AllAuthMethodValues() []AuthMethod {
+	return []AuthMethod{
+		AuthMethodPassword,
+		AuthMethodOidc,
+	}
 }
 
 type CheckpointReason string
@@ -268,6 +309,14 @@ func (ns NullCheckpointReason) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CheckpointReason), nil
+}
+
+func AllCheckpointReasonValues() []CheckpointReason {
+	return []CheckpointReason{
+		CheckpointReasonHourly,
+		CheckpointReasonStop,
+		CheckpointReasonRecreate,
+	}
 }
 
 type CheckpointStatus string
@@ -314,6 +363,15 @@ func (ns NullCheckpointStatus) Value() (driver.Value, error) {
 	return string(ns.CheckpointStatus), nil
 }
 
+func AllCheckpointStatusValues() []CheckpointStatus {
+	return []CheckpointStatus{
+		CheckpointStatusRequested,
+		CheckpointStatusRunning,
+		CheckpointStatusComplete,
+		CheckpointStatusFailed,
+	}
+}
+
 type CodeHostRepoVisibility string
 
 const (
@@ -358,6 +416,15 @@ func (ns NullCodeHostRepoVisibility) Value() (driver.Value, error) {
 	return string(ns.CodeHostRepoVisibility), nil
 }
 
+func AllCodeHostRepoVisibilityValues() []CodeHostRepoVisibility {
+	return []CodeHostRepoVisibility{
+		CodeHostRepoVisibilityPrivate,
+		CodeHostRepoVisibilityInternal,
+		CodeHostRepoVisibilityPublic,
+		CodeHostRepoVisibilityUnknown,
+	}
+}
+
 type ConfigSource string
 
 const (
@@ -398,6 +465,13 @@ func (ns NullConfigSource) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ConfigSource), nil
+}
+
+func AllConfigSourceValues() []ConfigSource {
+	return []ConfigSource{
+		ConfigSourceUi,
+		ConfigSourceSecret,
+	}
 }
 
 type ConnectionStatus string
@@ -443,6 +517,14 @@ func (ns NullConnectionStatus) Value() (driver.Value, error) {
 	return string(ns.ConnectionStatus), nil
 }
 
+func AllConnectionStatusValues() []ConnectionStatus {
+	return []ConnectionStatus{
+		ConnectionStatusUntested,
+		ConnectionStatusOk,
+		ConnectionStatusFailing,
+	}
+}
+
 type IdentityMode string
 
 const (
@@ -484,6 +566,14 @@ func (ns NullIdentityMode) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.IdentityMode), nil
+}
+
+func AllIdentityModeValues() []IdentityMode {
+	return []IdentityMode{
+		IdentityModePlatform,
+		IdentityModeIdp,
+		IdentityModeHybrid,
+	}
 }
 
 type McpHealth string
@@ -529,6 +619,14 @@ func (ns NullMcpHealth) Value() (driver.Value, error) {
 	return string(ns.McpHealth), nil
 }
 
+func AllMcpHealthValues() []McpHealth {
+	return []McpHealth{
+		McpHealthUnknown,
+		McpHealthHealthy,
+		McpHealthUnhealthy,
+	}
+}
+
 type McpServerKind string
 
 const (
@@ -570,6 +668,14 @@ func (ns NullMcpServerKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.McpServerKind), nil
+}
+
+func AllMcpServerKindValues() []McpServerKind {
+	return []McpServerKind{
+		McpServerKindFetch,
+		McpServerKindSearch,
+		McpServerKindOther,
+	}
 }
 
 type McpSinkClass string
@@ -616,6 +722,15 @@ func (ns NullMcpSinkClass) Value() (driver.Value, error) {
 	return string(ns.McpSinkClass), nil
 }
 
+func AllMcpSinkClassValues() []McpSinkClass {
+	return []McpSinkClass{
+		McpSinkClassNone,
+		McpSinkClassInternal,
+		McpSinkClassExternalLow,
+		McpSinkClassExternalHigh,
+	}
+}
+
 type McpSinkDerivation string
 
 const (
@@ -657,6 +772,14 @@ func (ns NullMcpSinkDerivation) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.McpSinkDerivation), nil
+}
+
+func AllMcpSinkDerivationValues() []McpSinkDerivation {
+	return []McpSinkDerivation{
+		McpSinkDerivationFixed,
+		McpSinkDerivationCodeHost,
+		McpSinkDerivationFetch,
+	}
 }
 
 type McpTier string
@@ -702,6 +825,14 @@ func (ns NullMcpTier) Value() (driver.Value, error) {
 	return string(ns.McpTier), nil
 }
 
+func AllMcpTierValues() []McpTier {
+	return []McpTier{
+		McpTierAsk,
+		McpTierAuto,
+		McpTierNever,
+	}
+}
+
 type McpTransport string
 
 const (
@@ -744,6 +875,13 @@ func (ns NullMcpTransport) Value() (driver.Value, error) {
 	return string(ns.McpTransport), nil
 }
 
+func AllMcpTransportValues() []McpTransport {
+	return []McpTransport{
+		McpTransportStreamableHttp,
+		McpTransportSse,
+	}
+}
+
 type MembershipSource string
 
 const (
@@ -784,6 +922,13 @@ func (ns NullMembershipSource) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MembershipSource), nil
+}
+
+func AllMembershipSourceValues() []MembershipSource {
+	return []MembershipSource{
+		MembershipSourceManual,
+		MembershipSourceIdpGroup,
+	}
 }
 
 type NotifyTargetKind string
@@ -829,6 +974,14 @@ func (ns NullNotifyTargetKind) Value() (driver.Value, error) {
 	return string(ns.NotifyTargetKind), nil
 }
 
+func AllNotifyTargetKindValues() []NotifyTargetKind {
+	return []NotifyTargetKind{
+		NotifyTargetKindUser,
+		NotifyTargetKindRole,
+		NotifyTargetKindChannel,
+	}
+}
+
 type OrgKind string
 
 const (
@@ -869,6 +1022,13 @@ func (ns NullOrgKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.OrgKind), nil
+}
+
+func AllOrgKindValues() []OrgKind {
+	return []OrgKind{
+		OrgKindPersonal,
+		OrgKindTeam,
+	}
 }
 
 type OrgRole string
@@ -915,6 +1075,15 @@ func (ns NullOrgRole) Value() (driver.Value, error) {
 	return string(ns.OrgRole), nil
 }
 
+func AllOrgRoleValues() []OrgRole {
+	return []OrgRole{
+		OrgRoleViewer,
+		OrgRoleMember,
+		OrgRoleAdmin,
+		OrgRoleOwner,
+	}
+}
+
 type PlatformAdminSource string
 
 const (
@@ -955,6 +1124,13 @@ func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.PlatformAdminSource), nil
+}
+
+func AllPlatformAdminSourceValues() []PlatformAdminSource {
+	return []PlatformAdminSource{
+		PlatformAdminSourceBootstrap,
+		PlatformAdminSourceOidcGroup,
+	}
 }
 
 type QuestionAnswerKind string
@@ -1001,6 +1177,15 @@ func (ns NullQuestionAnswerKind) Value() (driver.Value, error) {
 	return string(ns.QuestionAnswerKind), nil
 }
 
+func AllQuestionAnswerKindValues() []QuestionAnswerKind {
+	return []QuestionAnswerKind{
+		QuestionAnswerKindChoice,
+		QuestionAnswerKindDraft,
+		QuestionAnswerKindText,
+		QuestionAnswerKindDefault,
+	}
+}
+
 type QuestionState string
 
 const (
@@ -1045,6 +1230,17 @@ func (ns NullQuestionState) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.QuestionState), nil
+}
+
+func AllQuestionStateValues() []QuestionState {
+	return []QuestionState{
+		QuestionStateAsked,
+		QuestionStateOpen,
+		QuestionStateAnswered,
+		QuestionStateDismissed,
+		QuestionStateExpired,
+		QuestionStateCanceled,
+	}
 }
 
 type RunFailureClass string
@@ -1095,6 +1291,19 @@ func (ns NullRunFailureClass) Value() (driver.Value, error) {
 	return string(ns.RunFailureClass), nil
 }
 
+func AllRunFailureClassValues() []RunFailureClass {
+	return []RunFailureClass{
+		RunFailureClassTransient,
+		RunFailureClassThrottled,
+		RunFailureClassContextOverflow,
+		RunFailureClassBudget,
+		RunFailureClassPolicy,
+		RunFailureClassFatal,
+		RunFailureClassSandboxUnavailable,
+		RunFailureClassLoop,
+	}
+}
+
 type RunOrigin string
 
 const (
@@ -1135,6 +1344,13 @@ func (ns NullRunOrigin) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RunOrigin), nil
+}
+
+func AllRunOriginValues() []RunOrigin {
+	return []RunOrigin{
+		RunOriginInteractive,
+		RunOriginScheduled,
+	}
 }
 
 type RunParkReason string
@@ -1179,6 +1395,15 @@ func (ns NullRunParkReason) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RunParkReason), nil
+}
+
+func AllRunParkReasonValues() []RunParkReason {
+	return []RunParkReason{
+		RunParkReasonApproval,
+		RunParkReasonBudget,
+		RunParkReasonA2a,
+		RunParkReasonInputRequired,
+	}
 }
 
 type RunState string
@@ -1226,6 +1451,18 @@ func (ns NullRunState) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RunState), nil
+}
+
+func AllRunStateValues() []RunState {
+	return []RunState{
+		RunStateQueued,
+		RunStateStarting,
+		RunStateRunning,
+		RunStateParked,
+		RunStateSucceeded,
+		RunStateFailed,
+		RunStateCanceled,
+	}
 }
 
 type SandboxState string
@@ -1277,6 +1514,20 @@ func (ns NullSandboxState) Value() (driver.Value, error) {
 	return string(ns.SandboxState), nil
 }
 
+func AllSandboxStateValues() []SandboxState {
+	return []SandboxState{
+		SandboxStatePending,
+		SandboxStateStarting,
+		SandboxStateReady,
+		SandboxStateStopping,
+		SandboxStateStopped,
+		SandboxStateError,
+		SandboxStateDeleting,
+		SandboxStateDeleted,
+		SandboxStateRetained,
+	}
+}
+
 type TaskActorKind string
 
 const (
@@ -1320,6 +1571,14 @@ func (ns NullTaskActorKind) Value() (driver.Value, error) {
 	return string(ns.TaskActorKind), nil
 }
 
+func AllTaskActorKindValues() []TaskActorKind {
+	return []TaskActorKind{
+		TaskActorKindUser,
+		TaskActorKindAgent,
+		TaskActorKindSystem,
+	}
+}
+
 type TaskCreatorKind string
 
 const (
@@ -1361,6 +1620,14 @@ func (ns NullTaskCreatorKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.TaskCreatorKind), nil
+}
+
+func AllTaskCreatorKindValues() []TaskCreatorKind {
+	return []TaskCreatorKind{
+		TaskCreatorKindUser,
+		TaskCreatorKindTrigger,
+		TaskCreatorKindAgent,
+	}
 }
 
 type TaskState string
@@ -1409,6 +1676,17 @@ func (ns NullTaskState) Value() (driver.Value, error) {
 	return string(ns.TaskState), nil
 }
 
+func AllTaskStateValues() []TaskState {
+	return []TaskState{
+		TaskStateSubmitted,
+		TaskStateWorking,
+		TaskStateInputRequired,
+		TaskStateCompleted,
+		TaskStateCanceled,
+		TaskStateFailed,
+	}
+}
+
 type TraceBackend string
 
 const (
@@ -1454,6 +1732,16 @@ func (ns NullTraceBackend) Value() (driver.Value, error) {
 	return string(ns.TraceBackend), nil
 }
 
+func AllTraceBackendValues() []TraceBackend {
+	return []TraceBackend{
+		TraceBackendLangfuse,
+		TraceBackendDatadog,
+		TraceBackendLangsmith,
+		TraceBackendOpik,
+		TraceBackendGeneric,
+	}
+}
+
 type TraceContentLevel string
 
 const (
@@ -1495,6 +1783,14 @@ func (ns NullTraceContentLevel) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.TraceContentLevel), nil
+}
+
+func AllTraceContentLevelValues() []TraceContentLevel {
+	return []TraceContentLevel{
+		TraceContentLevelNone,
+		TraceContentLevelRedacted,
+		TraceContentLevelFull,
+	}
 }
 
 type Agent struct {
