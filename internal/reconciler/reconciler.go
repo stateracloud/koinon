@@ -1370,40 +1370,46 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
+		var npErr error
 		if r.cfg.NetworkPolicy != nil {
 			// OpenShell creates the workspace namespace with the first sandbox, so the pass-start Ensure
 			// could not write the policy there. Write it now, in this pass (#993). A NetworkPolicy
 			// selects pods live, so the sandbox just created is covered without a recreate.
+			// A failure must not skip the LimitRange handling or the record below: it is returned
+			// after them.
 			if err := r.cfg.NetworkPolicy.Ensure(ctx, ws); err != nil {
 				if limitRangeNamespaceMissing(err) {
 					r.cfg.NetworkPolicy.CountError(err)
 				}
-				return fmt.Errorf("reconciler: sandbox NetworkPolicy after create: %w", err)
+				npErr = fmt.Errorf("reconciler: sandbox NetworkPolicy after create: %w", err)
 			}
 		}
-		if r.cfg.LimitRange != nil {
-			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
-			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
-			// admits them sized (#76). Delete even when Ensure fails: otherwise the sandbox stays
-			// BestEffort forever on the sandbox-exists branch, and a missing-namespace Ensure
-			// error on this path would never be counted.
-			ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
-			if !lrReady {
-				if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the LimitRange was applied after the create"); err != nil {
-					return err
+		afterCreate := func() error {
+			if r.cfg.LimitRange != nil {
+				// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
+				// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass
+				// admits them sized (#76). Delete even when Ensure fails: otherwise the sandbox stays
+				// BestEffort forever on the sandbox-exists branch, and a missing-namespace Ensure
+				// error on this path would never be counted.
+				ensureErr := r.cfg.LimitRange.Ensure(ctx, ws)
+				if !lrReady {
+					if err := r.deleteSandbox(ctx, w, ws, names.Sandbox, "the LimitRange was applied after the create"); err != nil {
+						return err
+					}
+					if ensureErr != nil {
+						return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
+					}
+					r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
+					sb.Phase = execution.PhaseDeleting
+					return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
 				}
 				if ensureErr != nil {
 					return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
 				}
-				r.log.Info("recreating sandbox after the LimitRange was applied", w.logAttrs()...)
-				sb.Phase = execution.PhaseDeleting
-				return r.record(ctx, w, sb, hash, "recreating sandbox after the LimitRange was applied")
 			}
-			if ensureErr != nil {
-				return fmt.Errorf("reconciler: sandbox LimitRange after create: %w", ensureErr)
-			}
+			return r.record(ctx, w, sb, hash, "")
 		}
-		return r.record(ctx, w, sb, hash, "")
+		return errors.Join(npErr, afterCreate())
 	}
 	if err != nil {
 		return err

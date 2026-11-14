@@ -76,6 +76,10 @@ var _ = Describe("names", func() {
 	})
 })
 
+// testGatewayID is the OpenShell gateway ID every wiring in this suite shares, so the namespaces the
+// specs compute and the ones the writers use cannot drift apart.
+const testGatewayID = "openshell"
+
 var _ = Describe("Reconciler", func() {
 	var (
 		osg     *fakegateway.Gateway
@@ -578,7 +582,7 @@ var _ = Describe("Reconciler", func() {
 			}
 			BeforeEach(func() {
 				names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				ns = execution.WorkspaceNamespace(testGatewayID, row.Workspace)
 				scheme := runtime.NewScheme()
 				dyn = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
 					{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}: "SandboxList",
@@ -586,7 +590,7 @@ var _ = Describe("Reconciler", func() {
 				metrics = reconciler.NewMetrics(nil)
 				cfg.Metrics = metrics
 				cfg.Observer = &reconciler.SandboxObserver{
-					Kube: kube, Dynamic: dyn, GatewayID: "openshell", ClusterRole: "koinon-koinon-sandbox-observer",
+					Kube: kube, Dynamic: dyn, GatewayID: testGatewayID, ClusterRole: "koinon-koinon-sandbox-observer",
 					ServiceAccount: "koinon-reconciler", ServiceAccountNamespace: namespace,
 					Now: func() time.Time { return *obsNow.Load() },
 				}
@@ -747,10 +751,10 @@ var _ = Describe("Reconciler", func() {
 			)
 			const npName = "koinon-koinon-sandbox-default-deny"
 			BeforeEach(func() {
-				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				ns = execution.WorkspaceNamespace(testGatewayID, row.Workspace)
 				metrics = reconciler.NewMetrics(nil)
 				cfg.Metrics = metrics
-				cfg.NetworkPolicy = &reconciler.SandboxNetworkPolicy{Kube: kube, GatewayID: "openshell", Name: npName}
+				cfg.NetworkPolicy = &reconciler.SandboxNetworkPolicy{Kube: kube, GatewayID: testGatewayID, Name: npName}
 				r = newReconciler()
 			})
 			// The namespace is OpenShell's, made with the first sandbox: writes into it fail until then.
@@ -780,6 +784,35 @@ var _ = Describe("Reconciler", func() {
 				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox NetworkPolicy after create")))
 				Expect(testutil.ToFloat64(metrics.NetworkPolicyErrors.WithLabelValues("not_found"))).To(BeNumerically(">=", 1))
 			})
+
+			It("still handles the LimitRange and records the sandbox when the policy write is forbidden", func(ctx SpecContext) {
+				lrName := "koinon-koinon-sandbox-limitrange"
+				cfg.LimitRange = &reconciler.SandboxLimitRange{
+					Kube: kube, GatewayID: testGatewayID, Name: lrName,
+				}
+				cfg.Metrics = metrics
+				r = newReconciler()
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
+				deletes := osg.Calls("DeleteSandbox")
+				var lrCreates atomic.Int32
+				kube.PrependReactor("create", "limitranges", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if lrCreates.Add(1) == 1 {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return false, nil, nil
+				})
+				kube.PrependReactor("create", "networkpolicies", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "networkpolicies"}, npName, errors.New("rbac"))
+				})
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox NetworkPolicy after create")))
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(deletes+1), "the BestEffort sandbox is still deleted once")
+				Expect(sandboxRow(ctx, agent.ID).Phase).To(Equal(string(execution.PhaseDeleting)), "the pass records the sandbox")
+				Expect(testutil.ToFloat64(metrics.NetworkPolicyErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				list, err := kube.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list.Items).To(HaveLen(1), "the LimitRange is written although the policy write failed")
+			})
 		})
 
 		Describe("the sandbox LimitRange (#76)", func() {
@@ -790,11 +823,11 @@ var _ = Describe("Reconciler", func() {
 			)
 			const lrName = "koinon-koinon-sandbox-limitrange"
 			BeforeEach(func() {
-				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				ns = execution.WorkspaceNamespace(testGatewayID, row.Workspace)
 				metrics = reconciler.NewMetrics(nil)
 				cfg.Metrics = metrics
 				cfg.LimitRange = &reconciler.SandboxLimitRange{
-					Kube: kube, GatewayID: "openshell", Name: lrName,
+					Kube: kube, GatewayID: testGatewayID, Name: lrName,
 					Now: func() time.Time { return *lrNow.Load() },
 				}
 				t0 := time.Now()
