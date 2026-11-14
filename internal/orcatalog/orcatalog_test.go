@@ -4,6 +4,7 @@ package orcatalog_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -383,6 +384,75 @@ var _ = Describe("the per-install OpenRouter catalog", func() {
 		Expect(got.Endpoints).To(HaveLen(1))
 		Expect(got.Endpoints[0].Provider).To(Equal("Fake Up"))
 		Expect(got.EndpointsSource).To(Equal("openrouter@2026-11-11T08:01:00Z"))
+	})
+	Describe("endpoints due", func() {
+		It("decides per model from endpoints_fetched_at: never fetched and stale are due, fresh and rowless are not", func(ctx SpecContext) {
+			s := orcatalog.New(db)
+			never, fresh, stale, edge, rowless := uniq(), uniq(), uniq(), uniq(), uniq()
+			all := []string{never, fresh, stale, edge, rowless}
+			_, err := s.Apply(ctx, snapshot(t0, meta(never, 1, 1), meta(fresh, 1, 1), meta(stale, 1, 1), meta(edge, 1, 1)), nil)
+			Expect(err).NotTo(HaveOccurred())
+			now := t0.Add(10 * 24 * time.Hour)
+			store := func(m string, at time.Time) {
+				Expect(s.StoreEndpoints(ctx, pricefetch.ModelEndpoints{Model: m, FetchedAt: at})).To(Succeed())
+			}
+			store(fresh, now.Add(-time.Hour))
+			store(stale, now.Add(-orcatalog.Interval-time.Hour))
+			store(edge, now.Add(-(orcatalog.Interval - 12*time.Hour)))
+
+			batch, left, err := s.EndpointsDue(ctx, now, all, all)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(left).To(BeZero())
+			Expect(batch).To(Equal([]string{never, stale, edge}), "never fetched first, then oldest first")
+
+			batch, _, err = s.EndpointsDue(ctx, now, []string{fresh}, all)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(batch).To(BeEmpty())
+			batch, _, err = s.EndpointsDue(ctx, now, []string{never}, []string{fresh})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(batch).To(BeEmpty(), "a model the fetch does not list is not asked")
+		})
+
+		It("caps a round at MaxEndpointModels, oldest first, and reports how many were left", func(ctx SpecContext) {
+			s := orcatalog.New(freshDB(ctx))
+			var names []string
+			var metas []pricefetch.ModelMeta
+			for i := range orcatalog.MaxEndpointModels + 3 {
+				m := fmt.Sprintf("fake/cap-%03d", i)
+				names = append(names, m)
+				metas = append(metas, meta(m, 1, 1))
+			}
+			_, err := s.Apply(ctx, snapshot(t0, metas...), nil)
+			Expect(err).NotTo(HaveOccurred())
+			// The first model was fetched long ago, the rest never: the stale one is not the oldest never-fetched.
+			Expect(s.StoreEndpoints(ctx, pricefetch.ModelEndpoints{Model: names[0], FetchedAt: t0})).To(Succeed())
+			now := t0.Add(30 * 24 * time.Hour)
+			batch, left, err := s.EndpointsDue(ctx, now, names, names)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(batch).To(HaveLen(orcatalog.MaxEndpointModels))
+			Expect(left).To(Equal(3))
+			Expect(batch).NotTo(ContainElement(names[0]), "never-fetched models go before a stale one")
+			Expect(batch[0]).To(Equal(names[1]))
+		})
+	})
+
+	It("stores a catalog whose upstream strings carry a NUL or other control characters", func(ctx SpecContext) {
+		s := orcatalog.New(freshDB(ctx))
+		body := `{"data":[{"id":"fake/nul-model","name":"Fake\u0000 Model","description":"line\u0000 one\nline\u0007 two",
+			"architecture":{"tokenizer":"Cl\u0000aude","input_modalities":["te\u0000xt"]},"supported_parameters":["to\u0000ols"],
+			"context_length":1000,"pricing":{"prompt":"0.000001","completion":"0.000002"}}]}`
+		snap, err := pricefetch.ParseOpenRouter([]byte(body), t0)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = s.Apply(ctx, snap, []string{"fake/nul-model"})
+		Expect(err).NotTo(HaveOccurred(), "one NUL must not fail the store")
+		got, ok, err := s.Effective(ctx, "fake/nul-model")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+		Expect(got.Name).To(Equal("Fake Model"))
+		Expect(got.Description).To(Equal("line one line two"))
+		Expect(got.Tokenizer).To(Equal("Claude"))
+		Expect(got.InputModalities).To(Equal([]string{"text"}))
+		Expect(got.SupportedParameters).To(Equal([]string{"tools"}))
 	})
 })
 

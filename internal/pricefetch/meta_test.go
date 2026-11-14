@@ -136,3 +136,23 @@ func TestOpenRouterFetchEndpoints(t *testing.T) {
 		t.Errorf("the request must be an unauthenticated GET of the endpoints route, got %q", paths[0])
 	}
 }
+
+func TestClipStripsControlCharacters(t *testing.T) {
+	for name, c := range map[string]struct {
+		in   string
+		n    int
+		want string
+	}{
+		"nul":                  {"a\x00b", 10, "ab"},
+		"other controls":       {"a\x07b\x1bc\x7fd\u0085e", 10, "abcde"},
+		"line breaks and tabs": {"one\ntwo\r\nthree\tfour", 40, "one two  three four"},
+		"only controls":        {"\x00\x01", 10, ""},
+		"bad utf-8":            {"a\xffb", 10, "ab"},
+		"a cut inside a rune":  {"ab\u00e9", 3, "ab"},
+		"trim after removal":   {"\x00  x  \x00", 10, "x"},
+	} {
+		if got := clip(c.in, c.n); got != c.want {
+			t.Errorf("%s: clip(%q, %d) = %q, want %q", name, c.in, c.n, got, c.want)
+		}
+	}
+}
