@@ -136,3 +136,4 @@ are in [0046](0046-adr-conventions.md).
 | [0113](0113-agent-package-access.md) | Agent package access: straight to allow-listed registries, in four levels | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release |
 | [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
 | [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |
+| [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
