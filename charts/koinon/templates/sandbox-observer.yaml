@@ -19,7 +19,7 @@ Three pieces, all cluster-scoped, all prefixed <namespace>-<fullname> like the s
   sandbox-policy.yaml, cluster admins included. failurePolicy Fail; the denials answer 403.
 
 sandboxObserver.enabled=false renders none of it and the reconciler reads nothing: a pull error then
-stays "unknown" in the wait cause. Interim (#TBD-1): remove all of this once OpenShell surfaces pod failures itself.
+stays "unknown" in the wait cause. Interim (#1023): remove all of this once OpenShell surfaces pod failures itself.
 */ -}}
 {{- if .Values.sandboxObserver.enabled }}
 {{- $role := include "koinon.observerRole" . }}

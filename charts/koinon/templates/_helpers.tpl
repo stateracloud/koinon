@@ -811,20 +811,25 @@ creates one of this name in each workspace namespace.
 {{- end }}
 
 {{/*
-koinon.quantity turns a Kubernetes quantity (250m, 2, 1.5Gi, 512M) into a float64 in base units, so
+koinon.quantity turns a Kubernetes quantity (250m, 2, 1.5Gi, 512M, 1e3) into a float64 in base units, so
 koinon.validate can compare two of them. An empty string gives -1 (a bound that is not set); text that
-is not a quantity fails the render with the same view as koinon-api would give at start.
+is not a quantity fails the render with the same view as koinon-api would give at start. The grammar is
+that of k8s resource.ParseQuantity: a render must never refuse a value the binaries accept.
 */}}
 {{- define "koinon.quantity" -}}
 {{- $q := toString .q -}}
 {{- if eq $q "" -}}-1
 {{- else -}}
-{{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?(m|Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$" $q) }}{{- fail (printf "%s %q is not a Kubernetes quantity (examples: 250m, 2, 1Gi)" .what $q) }}{{- end -}}
-{{- $num := regexFind "^[0-9.]+" $q -}}
+{{- if not (regexMatch "^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(m|n|u|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei|[eE][+-]?[0-9]+)?$" $q) }}{{- fail (printf "%s %q is not a Kubernetes quantity (examples: 250m, 2, 1Gi)" .what $q) }}{{- end -}}
+{{- $num := regexFind "^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)" $q -}}
 {{- $unit := trimPrefix $num $q -}}
 {{- $n := float64 $num -}}
-{{- $f := dict "" 1.0 "m" 0.001 "k" 1e3 "M" 1e6 "G" 1e9 "T" 1e12 "P" 1e15 "E" 1e18 "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0 "Ti" 1099511627776.0 "Pi" 1125899906842624.0 "Ei" 1152921504606846976.0 -}}
+{{- if regexMatch "^[eE][+-]?[0-9]+$" $unit -}}
+{{- float64 $q -}}
+{{- else -}}
+{{- $f := dict "" 1.0 "n" 1e-9 "u" 1e-6 "m" 0.001 "k" 1e3 "M" 1e6 "G" 1e9 "T" 1e12 "P" 1e15 "E" 1e18 "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0 "Ti" 1099511627776.0 "Pi" 1125899906842624.0 "Ei" 1152921504606846976.0 -}}
 {{- mulf $n (index $f $unit) -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
@@ -837,7 +842,10 @@ is not a quantity fails the render with the same view as koinon-api would give a
 {{- $lm := $r.b.limit.min | toString }}
 {{- $rv := include "koinon.quantity" (dict "q" $rm "what" (printf "sandbox.resources.bounds.%s.request.min" $r.name)) | float64 }}
 {{- $lv := include "koinon.quantity" (dict "q" $lm "what" (printf "sandbox.resources.bounds.%s.limit.min" $r.name)) | float64 }}
-{{- if or (not $lm) (lt $lv $rv) }}
+{{- if not $lm }}
+{{- fail (printf "sandbox.resources.bounds.%s: request.min is %q but limit.min is empty and must be set: a limit range must not start below the request minimum, or koinon-api and the reconciler refuse to start. Set limit.min to at least request.min" $r.name $rm) }}
+{{- end }}
+{{- if lt $lv $rv }}
 {{- fail (printf "sandbox.resources.bounds.%s: limit.min %q is below request.min %q: a limit range must not start below the request minimum, or koinon-api and the reconciler refuse to start. Raise limit.min or lower request.min" $r.name $lm $rm) }}
 {{- end }}
 {{- end }}
@@ -846,7 +854,10 @@ is not a quantity fails the render with the same view as koinon-api would give a
 {{- $lx := $r.b.limit.max | toString }}
 {{- $rv := include "koinon.quantity" (dict "q" $rx "what" (printf "sandbox.resources.bounds.%s.request.max" $r.name)) | float64 }}
 {{- $lv := include "koinon.quantity" (dict "q" $lx "what" (printf "sandbox.resources.bounds.%s.limit.max" $r.name)) | float64 }}
-{{- if or (not $lx) (gt $lv $rv) }}
+{{- if not $lx }}
+{{- fail (printf "sandbox.resources.bounds.%s: with sandbox.resources.memoryRequestEqualsLimit=true request.max is %q but limit.max is empty and must be set: an empty limit range has no end, or koinon-api and the reconciler refuse to start. Set limit.max to at most request.max, or set memoryRequestEqualsLimit=false" $r.name $rx) }}
+{{- end }}
+{{- if gt $lv $rv }}
 {{- fail (printf "sandbox.resources.bounds.%s: with sandbox.resources.memoryRequestEqualsLimit=true limit.max %q is above request.max %q, or koinon-api and the reconciler refuse to start. Lower limit.max, raise request.max, or set memoryRequestEqualsLimit=false" $r.name $lx $rx) }}
 {{- end }}
 {{- end }}

@@ -68,3 +68,20 @@ render --set sandbox.resources.bounds.cpu.limit.min=0.1 >/dev/null 2>&1 || fail 
 
 # A value that is no quantity fails the render too.
 if render --set sandbox.resources.bounds.memory.limit.max=lots >/dev/null 2>&1; then fail "a bound that is not a quantity must fail the render"; fi
+
+# The parser takes the grammar of k8s resource.ParseQuantity: a render never refuses a value the binaries accept (#664).
+# 1e3 equals 1k: request.max 1k with limit.max 1e3 passes, and 1e3 above 1k would not.
+render --set sandbox.resources.memoryRequestEqualsLimit=true --set-string sandbox.resources.bounds.memory.request.max=1k --set-string sandbox.resources.bounds.memory.limit.max=1e3 >/dev/null 2>&1 ||
+	fail "memory.limit.max=1e3 equals the 1k request maximum and must render"
+if render --set sandbox.resources.memoryRequestEqualsLimit=true --set-string sandbox.resources.bounds.memory.request.max=1k --set-string sandbox.resources.bounds.memory.limit.max=1001 >/dev/null 2>&1; then
+	fail "memory.limit.max=1001 is above the 1k request maximum and must fail the render"
+fi
+render --set-string sandbox.resources.bounds.cpu.limit.min=.5 --set-string sandbox.resources.bounds.cpu.request.min=.25 >/dev/null 2>&1 || fail "'.5' is a quantity and must render"
+render --set-string sandbox.resources.bounds.cpu.limit.min=1e-1 --set-string sandbox.resources.bounds.cpu.request.min=+100m >/dev/null 2>&1 || fail "'1e-1' and '+100m' are quantities and must render"
+if render --set-string sandbox.resources.bounds.cpu.limit.min=1x >/dev/null 2>&1; then fail "'1x' is not a quantity and must fail the render"; fi
+
+# An empty limit bound next to a set request bound says so.
+if sres_msg=$(render --set-string sandbox.resources.bounds.cpu.limit.min= 2>&1); then
+	fail "an empty cpu.limit.min next to a request.min must fail the render"
+fi
+grep -Fq 'limit.min is empty and must be set' <<<"$sres_msg" || fail "the empty limit.min refusal does not say it is empty: $(head -c 300 <<<"$sres_msg")"

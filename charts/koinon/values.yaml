@@ -41,7 +41,7 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 # DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it. Exit: remove this key
-# when the first minor line ships (v0.3, ADR 0099) and the chart's upgrade notes say so (#TBD-2).
+# when the first minor line ships (v0.3, ADR 0099) and the chart's upgrade notes say so (#1024).
 imagePullSecrets: []
 
 api:
@@ -368,7 +368,7 @@ egress:
 
 # DEPRECATED: the old name of egress.allowedInternalHosts. Both are joined. Exit: remove this key and
 # its join in the chart once the release after the one that introduced egress.allowedInternalHosts
-# has shipped (#TBD-3).
+# has shipped (#1025).
 providers:
   allowedInternalHosts: []
 
