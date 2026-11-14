@@ -53,7 +53,8 @@ for j in $(paths_jobs); do
 done
 
 # --- 3. preflight's `scripts` gate covers the script steps of ci.yml. ---------------------------------
-listed=$( { paths_raw script-check -; paths_raw script-skip -; } | awk '{print $1}' | sort -u)
+checks=$(paths_script_checks | cut -f2)
+listed=$( { echo "$checks"; paths_raw script-skip -; } | awk '{print $1}' | sort -u)
 steps=$( { sed -n '/^  quick-checks:/,/^  web-lint:/p' .github/workflows/ci.yml; sed -n '/^  scripts:/,/^  warm-caches:/p' .github/workflows/ci.yml; } |
 	sed -n -E -e 's/^ +(- )?run: (hack\/[A-Za-z0-9_.\/-]+)( [^$"]*)?$/\2/p' -e 's/^ {10,}(hack\/[A-Za-z0-9_.\/-]+\.sh)( .*)?$/\1/p' | sort -u) # also the lines of a `run: |` block
 [[ $(grep -c . <<<"$steps") -ge 30 ]] || bad "parsed only $(grep -c . <<<"$steps") script steps from ci.yml (the parser is stale)"
@@ -64,12 +65,50 @@ done <<<"$steps"
 while IFS= read -r c; do
 	[[ -n $c ]] || continue
 	if [[ -x ${c%% *} ]]; then ok; else bad "script-check/script-skip names ${c%% *}, which is not an executable file"; fi
-done < <( { paths_raw script-check -; paths_raw script-skip -; } | awk '{print $1}' | sort -u)
-dups=$( { paths_raw script-check -; paths_raw script-skip -; } | awk '{print $1}' | sort | uniq -d | while read -r d; do
+done < <( { echo "$checks"; paths_raw script-skip -; } | awk '{print $1}' | sort -u)
+dups=$( { echo "$checks"; paths_raw script-skip -; } | awk '{print $1}' | sort | uniq -d | while read -r d; do
 	# the same script with different arguments is fine in script-check; in both lists it is not
-	if paths_raw script-check - | awk '{print $1}' | grep -qxF "$d" && paths_raw script-skip - | awk '{print $1}' | grep -qxF "$d"; then echo "$d"; fi
+	if echo "$checks" | awk '{print $1}' | grep -qxF "$d" && paths_raw script-skip - | awk '{print $1}' | grep -qxF "$d"; then echo "$d"; fi
 done)
 if [[ -z $dups ]]; then ok; else bad "in both script-check and script-skip: $dups"; fi
+
+# --- 3b. Every script-check line names its inputs (#990): the local gate runs a line only when one of them
+# changed (a `guard` line always runs), so a missing or wrong annotation is a check that silently never runs.
+while IFS=$'\t' read -r inp cmd; do
+	[[ -n $cmd ]] || continue
+	sc=${cmd%% *}
+	if [[ $inp == - || -z $inp ]]; then bad "script-check line has no inputs= annotation: $cmd"; continue; fi
+	ok
+	[[ $inp == guard ]] && continue
+	for i in ${inp//,/ }; do
+		if [[ -e $i ]]; then ok; else bad "script-check $sc: input $i does not exist"; fi
+	done
+	if paths_inputs_hit "$inp" "$sc"; then ok; else bad "script-check $sc: its own script is not among its inputs"; fi
+	# Tripwire: a repository path the script names (a file it sources or reads) must be an input, or a change
+	# to it would not select the check. Names built from variables are invisible here: add them by hand.
+	while IFS= read -r r; do
+		[[ -n $r ]] || continue
+		if paths_inputs_hit "$inp" "$r"; then ok; else bad "script-check $sc names $r, which is not in its inputs (add it, or mark the line inputs=guard)"; fi
+	done < <(paths_script_refs "$sc")
+done < <(paths_script_checks)
+# A change that selects nothing is a green gate with no check behind it: the example below must pick lines.
+sel=0
+while IFS=$'\t' read -r inp cmd; do
+	paths_inputs_hit "$inp" hack/preflight.sh && sel=$((sel + 1))
+done < <(paths_script_checks)
+if [[ $sel -ge 1 ]]; then ok; else bad "no script-check line is selected by a change to hack/preflight.sh (the guard lines should be)"; fi
+
+# --- 3c. One harness timeout (#990, #980): the Makefile target and ci.yml run the same go test flags.
+mk_t=$(sed -n '/^harness-suite:/,/^$/p' Makefile | grep -oE -- '-timeout [0-9]+[smh]' | head -1 || true)
+ci_make=$(sed -n '/^  harnesses:/,/^  [a-z][a-z-]*:$/p' .github/workflows/ci.yml | grep -cE 'make (harness-suite|test-harnesses)' || true)
+if [[ $mk_t == "-timeout 30m" ]]; then ok; else bad "Makefile harness-suite has [${mk_t:-no -timeout}], want -timeout 30m (Go's default is 10m; #980)"; fi
+# Two forms pass: ci.yml calls the Makefile target (the end state), or still runs the old direct
+# `go test ./test/harnesses/...` (main's form until the follow-up PR B, branch ci/990-harness-suite-timeout,
+# switches it to `make harness-suite`; a .github change cannot ride with harness inputs).
+# Exit condition: when PR B has merged, drop the old-form branch (`|| ci_old`) and keep only ci_make.
+ci_old=0
+sed -n '/^  harnesses:/,/^  [a-z][a-z-]*:$/p' .github/workflows/ci.yml | grep -qE 'go test .*\./test/harnesses/\.\.\.' && ci_old=1
+if [[ $ci_make -ge 1 || $ci_old -eq 1 ]]; then ok; else bad "ci.yml harnesses job neither calls make harness-suite nor runs go test ./test/harnesses/..."; fi
 
 # --- 4. Example change sets through the consumers. ---------------------------------------------------------
 dirs=$(bash hack/ci-changes.sh --harnesses-dirs)

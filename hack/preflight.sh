@@ -4,7 +4,7 @@
 # Runs the repo gates that your change can affect, before you push. The gates are the ones CI and
 # AGENTS.md name; this picks them from the changed files so nobody runs them by hand one by one.
 #
-#   hack/preflight.sh [--base origin/main] [--only g1,g2] [--list] [-v]
+#   hack/preflight.sh [--base origin/main] [--only g1,g2] [--list] [--no-reuse] [-v]
 #   hack/preflight.sh --stop
 #
 #   --base REF    compare against REF (default origin/main); the changed files are
@@ -12,12 +12,18 @@
 #   --only LIST   run exactly these gates (comma list), whether or not the change triggers them
 #   --list        print which gates would run and why, then exit
 #   -v            print each gate's full output
-#   --stop        stop this worktree's running preflight (pid file in its log directory) and exit;
-#                 never touches another worktree's run. Do not pkill/pgrep by script name instead.
+#   --no-reuse    run every selected gate even when a green verdict for the same inputs is stored
+#                 (hack/gate-reuse-lib.sh; CI=true or KOINON_GATE_REUSE=0 do the same)
+#   --stop        stop every run of this worktree (one pid file per gate in its log directory) and
+#                 exit; never touches another worktree's run. Do not pkill/pgrep by script name instead.
+# One pid file per gate (`preflight.<gate>.pid`): two runs of different gates in one worktree do not
+# block each other (hack/lane-gates.sh runs its gates in parallel); two runs of one gate do.
 #
 # Gates: go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint dockerfile mktemp pinned bash5 audit versions scripts e2e gitleaks.
 # Which paths turn a gate on: hack/paths.rules (the same file CI reads). The `scripts` gate runs the
-# seconds-long static checks and script tests of the CI jobs quick checks, lint-shell and scripts.
+# static checks and script tests of the CI jobs quick checks, lint-shell and scripts: only the lines
+# whose `inputs=` a changed file hits (and the `guard` lines), four at a time (KOINON_SCRIPTS_JOBS).
+# A gate whose inputs are unchanged since its last green run is reported `ok 0s (reused)`.
 # One line per gate: `go ok 12s`, `go FAIL 3s log=<path>` followed by at most 5 lines of the
 # error, or `go INCOMPLETE 3s (skipped: docker) log=<path>` when hack/go-test.sh exited 3 (an
 # expected requirement was missing, so some suites or specs skipped; old issue 507). Full logs are under
@@ -34,19 +40,22 @@ set -uo pipefail
 
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
+# shellcheck source=/dev/null
+. "$(dirname "$0")/gate-reuse-lib.sh" || exit 2
 paths_load || exit 2 # the path rules (hack/paths.rules) are shared with CI; no private copy here
 ALL="go tidy vuln fuzz deps generate proto migrate adr chart web shell actionlint zizmor runnerlint dockerfile mktemp pinned bash5 audit versions scripts e2e gitleaks"
 # shellcheck source=/dev/null
 . "$(dirname "$0")/versions.env" # GOFUMPT_VERSION, dated by hack/dep-age-check.sh (ADR 0079)
-base=origin/main only="" list=0 verbose=0 stop=0
+base=origin/main only="" list=0 verbose=0 stop=0 noreuse=0
 while [[ $# -gt 0 ]]; do
 	case $1 in
 	--base) [[ $# -ge 2 ]] || { echo "preflight: --base needs a ref" >&2; exit 2; }; base=$2; shift 2 ;;
 	--only) [[ $# -ge 2 ]] || { echo "preflight: --only needs a list" >&2; exit 2; }; only=$2; shift 2 ;;
 	--list) list=1; shift ;;
 	-v) verbose=1; shift ;;
+	--no-reuse) noreuse=1; shift ;;
 	--stop) stop=1; shift ;;
-	-h | --help) sed -n 4,26p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help) sed -n 4,32p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "preflight: unknown argument $1 (see --help)" >&2; exit 2 ;;
 	esac
 done
@@ -54,9 +63,8 @@ done
 cd "$(git rev-parse --show-toplevel)" || exit 2
 # One log directory and pid file per worktree: a hash of the repo root keys it.
 root=$(pwd -P)
-rootkey=$(printf '%s' "$root" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-12)
-logdir=${TMPDIR:-/tmp}/koinon-preflight/$rootkey
-pidfile=$logdir/preflight.pid
+logdir=$(gate_logdir)
+[[ $noreuse == 1 ]] && export KOINON_GATE_REUSE=0
 
 kill_tree() { # <pid>: SIGTERM the process and its descendants (found by parent pid, never by name)
 	local c
@@ -65,13 +73,19 @@ kill_tree() { # <pid>: SIGTERM the process and its descendants (found by parent 
 }
 
 if [[ $stop == 1 ]]; then
-	pid=$(cat "$pidfile" 2>/dev/null || true)
-	if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
-		kill_tree "$pid"
-		rm -f "$pidfile"
-		echo "preflight: stopped run $pid of $root"
+	stopped="" pf="" pid=""
+	for pf in "$logdir"/preflight.*.pid "$logdir/preflight.pid"; do # the last name: the pid file of an older preflight
+		[[ -f $pf ]] || continue
+		pid=$(cat "$pf" 2>/dev/null || true)
+		if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+			case " $stopped " in *" $pid "*) ;; *) kill_tree "$pid"; stopped="$stopped${stopped:+ }$pid" ;; esac
+		fi
+		rm -f "$pf"
+	done
+	rmdir "$logdir"/preflight.*.pid.lock 2>/dev/null || true # a takeover lock a killed run left
+	if [[ -n $stopped ]]; then
+		echo "preflight: stopped run $stopped of $root"
 	else
-		rm -f "$pidfile"
 		echo "preflight: no run in progress for $root"
 	fi
 	exit 0
@@ -329,39 +343,156 @@ g_versions() { # hack/versions.env against its literal copies (old issue 544)
 	hack/versions-check-test.sh
 	hack/versions-check.sh
 }
-g_scripts() { # the seconds-long checks of the quick checks, lint-shell and scripts CI jobs (hack/paths.rules)
-	local line cmd mb failed=0 name
+# scripts_one <index> <command>: one script-check line, run by xargs -P (see g_scripts). Output goes to the
+# results directory, never to the shared log, so parallel lines do not interleave.
+scripts_one() {
+	local i=$1 cmd=$2 rc=0
+	# shellcheck disable=SC2086 # the rule's words are the command and its arguments
+	$cmd >"$SCRIPTS_RES/$i.out" 2>&1 || rc=$?
+	echo "$rc" >"$SCRIPTS_RES/$i.rc"
+	return 0
+}
+export -f scripts_one
+
+# script_line_fp <inputs> <resolved command>: the fingerprint of one script-check line (hack/gate-reuse-lib.sh):
+# its command, its inputs' content, and HEAD for a line that reads the commit range. A guard line has the
+# fingerprint of the whole `scripts` job, so it reruns when anything the job reads changed.
+script_line_fp() {
+	local inp=$1 cmd=$2 f names=""
+	if [[ $inp == guard || $inp == - ]]; then
+		echo "guard $SCRIPTS_FP"
+		return
+	fi
+	while IFS= read -r f; do
+		[[ -f $f ]] && names+="$f"$'\n'
+	done < <(for f in ${inp//,/ }; do if [[ $f == */ ]]; then git ls-files --cached --others --exclude-standard -- "$f"; else echo "$f"; fi; done | sort -u)
+	{
+		echo "cmd=$cmd inputs=$inp"
+		[[ $cmd == *"$mb"* ]] && git rev-parse HEAD
+		printf '%s' "$names"
+		printf '%s' "$names" | git hash-object --stdin-paths
+	} | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1
+}
+
+g_scripts() { # the CI script checks of hack/paths.rules, selected by their `inputs=` and run KOINON_SCRIPTS_JOBS (4) at a time
+	local inp line cmd mb failed=0 name i=0 n=0 skipped=0 reused=0 fp key hit f
+	local -a run=() run_fp=() run_key=()
 	mb=$(git merge-base "$base" HEAD) || return 1
-	while IFS= read -r line; do
+	SCRIPTS_FP=$(gate_fingerprint job scripts "$mb")
+	SCRIPTS_RES=$(mktemp -d "${TMPDIR:-/tmp}/preflight-scripts.XXXXXX") || return 1
+	export SCRIPTS_RES
+	while IFS=$'\t' read -r inp line; do
 		[[ -n $line ]] || continue
+		n=$((n + 1))
 		cmd=${line//@BASE@/$mb}
 		cmd=${cmd//@HEAD@/HEAD}
-		name=${cmd%% *}
-		# shellcheck disable=SC2086 # the rule's words are the command and its arguments
-		if ! $cmd >"$logdir/scripts.$$.out" 2>&1; then
-			echo "FAIL $cmd"
-			tail -n 5 "$logdir/scripts.$$.out" | sed 's/^/  | /'
-			failed=1
+		# Selected when a changed file is one of the line's inputs; a guard line (and, failing closed, a line
+		# with no annotation, which hack/paths-test.sh rejects) always runs.
+		hit=0
+		if [[ $inp == guard || $inp == - || -z $inp ]]; then
+			hit=1
 		else
-			echo "ok   $name"
+			while IFS= read -r f; do
+				[[ -n $f ]] && paths_inputs_hit "$inp" "$f" && { hit=1; break; }
+			done <<<"$FILES"
 		fi
-	done < <(paths_raw script-check -)
-	rm -f "$logdir/scripts.$$.out"
+		if [[ $hit == 0 ]]; then skipped=$((skipped + 1)); continue; fi
+		fp=$(script_line_fp "$inp" "$cmd")
+		key=scripts.$(printf '%s' "$cmd" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16)
+		if gate_reusable "$key" "$fp"; then
+			echo "ok   ${cmd%% *} (reused)"
+			reused=$((reused + 1))
+			continue
+		fi
+		run+=("$cmd") run_fp+=("$fp") run_key+=("$key")
+	done < <(paths_script_checks)
+	if [[ ${#run[@]} -gt 0 ]]; then
+		# shellcheck disable=SC2016 # the script is for the child shell
+		for cmd in "${run[@]}"; do
+			printf '%s\0%s\0' "$i" "$cmd"
+			i=$((i + 1))
+		done | xargs -0 -n2 -P "${KOINON_SCRIPTS_JOBS:-4}" bash -c 'scripts_one "$1" "$2"' _
+		for ((i = 0; i < ${#run[@]}; i++)); do
+			cmd=${run[$i]}
+			name=${cmd%% *}
+			if [[ $(cat "$SCRIPTS_RES/$i.rc" 2>/dev/null || echo 1) != 0 ]]; then
+				echo "FAIL $cmd"
+				tail -n 5 "$SCRIPTS_RES/$i.out" 2>/dev/null | sed 's/^/  | /'
+				failed=1
+			else
+				echo "ok   $name"
+				gate_record "${run_key[$i]}" "${run_fp[$i]}"
+			fi
+		done
+	fi
+	echo "scripts: ${#run[@]} run, $reused reused, $skipped of $n not selected (inputs unchanged)"
+	rm -rf "$SCRIPTS_RES"
 	return "$failed"
 }
 g_gitleaks() { gitleaks git --redact --no-banner --log-opts="$base..HEAD" .; }
 
 mkdir -p "$logdir"
-oldpid=$(cat "$pidfile" 2>/dev/null || true)
-if [[ -n $oldpid ]] && kill -0 "$oldpid" 2>/dev/null; then
-	# lane-gates calls preflight once per gate and shares this worktree's pid file, so a parallel
-	# preflight (or a stuck one) turns every gate into fail with this message (#349).
-	echo "preflight: a run ($oldpid) is already in progress for $root; stop it with hack/preflight.sh --stop (lane-gates and preflight share this worktree's pid file, so a parallel run fails every gate)" >&2
-	exit 2
-fi
-echo $$ >"$pidfile"
-trap 'rm -f "$pidfile"' EXIT
+# One pid file per gate (#990): the gates this run will run, each claimed up front, so a parallel
+# preflight of other gates (hack/lane-gates.sh runs one per gate) does not block it and --stop finds
+# every run. A live holder of the same gate is the only conflict. The file is created with noclobber:
+# of two runs that start at once, one wins.
+plan=""
+for g in $ALL; do
+	[[ -n $(selected "$g") ]] && plan="$plan $g"
+done
+claimed=""
+release_gates() {
+	local g
+	for g in $claimed; do
+		[[ $(cat "$logdir/preflight.$g.pid" 2>/dev/null) == "$$" ]] && rm -f "$logdir/preflight.$g.pid"
+	done
+	return 0
+}
+trap release_gates EXIT
+claim_gate() { # <gate>: success when this run now holds the gate's pid file; prints the holder's pid when it does not
+	local pf=$logdir/preflight.$1.pid old
+	( set -C; echo $$ >"$pf" ) 2>/dev/null && return 0
+	old=$(cat "$pf" 2>/dev/null || true)
+	if [[ -n $old && $old != "$$" ]] && kill -0 "$old" 2>/dev/null; then
+		echo "$old"
+		return 1
+	fi
+	# A stale file of a run that died: one run takes it over, under a mkdir lock (atomic). A run that
+	# loses the lock reports a conflict (fail closed) instead of deleting a file the winner just wrote.
+	mkdir "$pf.lock" 2>/dev/null || return 1
+	local rc=0
+	old=$(cat "$pf" 2>/dev/null || true)
+	if [[ -n $old && $old != "$$" ]] && kill -0 "$old" 2>/dev/null; then
+		echo "$old"
+		rc=1
+	else
+		rm -f "$pf"
+		( set -C; echo $$ >"$pf" ) 2>/dev/null || rc=1
+	fi
+	rmdir "$pf.lock" 2>/dev/null || true
+	return $rc
+}
+for g in $plan; do
+	if holder=$(claim_gate "$g"); then
+		claimed="$claimed $g"
+	else
+		echo "preflight: the $g gate is already in progress for $root (run ${holder:-unknown}); stop it with hack/preflight.sh --stop (one pid file per gate: runs of other gates do not conflict)" >&2
+		exit 2
+	fi
+done
 failed="" incomplete="" ran=0
+mb_all=$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")
+# Gates whose verdict depends on more than the files (time, the network, commit history) never reuse one.
+reuse_fp() { # <gate>: prints the inputs fingerprint when the gate may reuse a verdict
+	case $1 in e2e | gitleaks | vuln | deps | fuzz) return 0 ;; esac
+	gate_reuse_enabled || return 0
+	case $1 in
+	generate | chart | web | tidy | scripts | go | shell) gate_fingerprint job "$1" "$mb_all" ;;
+	# The `gate` rule only selects these gates; their checker scripts, configs and fixtures are outside it.
+	# The whole tree is the input, so a rerun on an unchanged tree reuses and any change runs the gate.
+	*) gate_fingerprint tree "$1" "$mb_all" ;;
+	esac
+}
 
 # web_deps: web/node_modules, which `make generate` (buf runs web/node_modules/.bin/protoc-gen-es) and
 # the web gate both need. A worktree made before hack/wt.sh installed them, or one whose install failed,
@@ -375,7 +506,7 @@ web_deps() {
 }
 
 run_gate() { # <gate>
-	local g=$1 log=$logdir/$1.log start rc
+	local g=$1 log=$logdir/$1.log start rc fp
 	case $g in
 	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; }
 		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
@@ -391,6 +522,11 @@ run_gate() { # <gate>
 	esac
 	ran=$((ran + 1))
 	start=$SECONDS
+	fp=$(reuse_fp "$g")
+	if [[ -n $fp ]] && gate_reusable "$g" "$fp"; then
+		echo "$g ok 0s (reused: inputs unchanged since the last green run; --no-reuse to run it)"
+		return
+	fi
 	if [[ $g == e2e ]]; then
 		hack/needs-e2e.sh "$base" >"$log" 2>&1
 		rc=$?
@@ -405,6 +541,7 @@ run_gate() { # <gate>
 	rc=$?
 	if [[ $rc -eq 0 ]]; then
 		echo "$g ok $((SECONDS - start))s"
+		[[ -n $fp ]] && gate_record "$g" "$fp"
 		[[ $verbose == 1 ]] && sed 's/^/  | /' "$log"
 	elif [[ $rc -eq 3 ]]; then
 		# Exit 3 is the missing-requirement code (go-test, chart-check when helm cannot run, …).
@@ -423,8 +560,8 @@ run_gate() { # <gate>
 	fi
 }
 
-for g in $ALL; do
-	[[ -n $(selected "$g") ]] && run_gate "$g"
+for g in $plan; do
+	run_gate "$g"
 done
 
 if [[ -n $failed ]]; then

@@ -158,7 +158,14 @@ test-flavors: test-harnesses
 
 .PHONY: test-harnesses
 test-harnesses: harnesses ## Build the harness images and run the harness contract suite
-	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 ./test/harnesses/...
+	$(MAKE) harness-suite
+
+# The suite alone, against images that are already built (ci.yml builds them with its layer cache first).
+# One -timeout for local and CI runs: Go's default of 10 minutes made the compaction spec fail for time (#980, #990).
+# hack/paths-test.sh fails when the Makefile has no -timeout here or ci.yml stops calling this target.
+.PHONY: harness-suite
+harness-suite: ## Run the harness contract suite against built images
+	KOINON_REQUIRE=$${KOINON_REQUIRE:-docker} $(GO) test -count=1 -timeout 30m ./test/harnesses/...
 
 .PHONY: test-opencode-plugin
 test-opencode-plugin: ## Type-check and unit-test Koinon's OpenCode plugins (ADR 0093; needs pnpm, no Docker)

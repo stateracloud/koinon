@@ -18,9 +18,13 @@
 #   lane <job> <needs> <command...>   how hack/lane-gates.sh runs the local gate of a CI job:
 #                        <needs> is a comma list of tools (docker,helm,go) or `-`; <command> is
 #                        `preflight` (the preflight gate of the same name) or a make target line
-#   script-check - <cmd> a static check or script test of the quick checks, lint-shell and scripts
-#                        CI jobs that takes seconds: the preflight gate `scripts` runs it. @BASE@
-#                        is the merge base with the preflight base, @HEAD@ is HEAD
+#   script-check - inputs=<a>,<b>/ <cmd>   a static check or script test of the quick checks,
+#                        lint-shell and scripts CI jobs: the preflight gate `scripts` runs it when a
+#                        changed file is one of its inputs (repo paths, a trailing `/` is a
+#                        directory), or always for `inputs=guard`. @BASE@ is the merge base with the
+#                        preflight base, @HEAD@ is HEAD. hack/paths-test.sh fails on a line with no
+#                        `inputs=`, and on a path the script names that is not among its inputs.
+#                        CI runs all of them, whatever changed.
 #   script-skip -  <cmd> a script step of those jobs that preflight does not run (slow, covered by
 #                        another gate, or not runnable on a Mac); hack/paths-test.sh fails when a
 #                        step of ci.yml is in neither list
@@ -219,69 +223,69 @@ gate versions ^(hack/versions|hack/e2e-toolchain/|CONTRIBUTING\.md$|\.github/wor
 # --- script checks: what `preflight` runs of the `quick checks`, `lint-shell` and `scripts` jobs -------
 # Checks that take seconds (measured 2026-11-09 on a Mac: at most 15 s each). The gates adr,
 # migrate, mktemp, pinned, bash5, audit, versions, shell, actionlint and zizmor run their own.
-script-check - hack/migrate-lint-test.sh
-script-check - hack/migrate-renumber-test.sh
-script-check - hack/commit-subject-check-test.sh
-script-check - hack/commit-subject-check.sh @BASE@ HEAD
-script-check - hack/git-identity-check-test.sh
-script-check - hack/git-identity-check.sh range @BASE@ HEAD
-script-check - hack/koinon-fetch-test.sh
-script-check - hack/release-harness-test.sh
-script-check - hack/fetch-pinned-test.sh
-script-check - hack/e2e-parts-test.sh
-script-check - hack/apt-retries-test.sh --self-test
-script-check - hack/apt-retries-test.sh
-script-check - hack/e2e-remote-test.sh
-script-check - hack/ci-fail-test.sh
-script-check - hack/ci-timing-test.sh
-script-check - hack/ci-go-gate-test.sh
-script-check - hack/ci-web-gate-test.sh
-script-check - hack/govulncheck-test.sh
-script-check - hack/ci-required-test.sh
-script-check - hack/repo-contract-test.sh
-script-check - hack/tmp-safety-test.sh
-script-check - hack/notes-expiry-test.sh
-script-check - hack/old-issue-refs-lint-test.sh
-script-check - hack/old-issue-refs-lint.sh
-script-check - hack/agentgateway-pin-test.sh
-script-check - hack/agentgateway-pin.sh --check
-script-check - hack/golangci-lint-test.sh
-script-check - hack/preflight-stop-test.sh
-script-check - hack/e2e-decide-test.sh
-script-check - hack/kind-registry-test.sh
-script-check - hack/drill-issue-test.sh
-script-check - hack/drill-sweep-test.sh
-script-check - hack/hooks/agent-spawn-check_test.sh
-script-check - hack/hooks/read-hooks_test.sh
-script-check - hack/hooks/sleep-chain-check_test.sh
-script-check - hack/hooks/codegraph-prompt-check_test.sh
-script-check - hack/hooks/context-cap-check_test.sh
-script-check - hack/hooks/grilling-question-check_test.sh
-script-check - hack/hooks/prose-question-stop-check_test.sh
-script-check - hack/hooks/question-checklist-check_test.sh
-script-check - hack/agent-state-test.sh
-script-check - hack/dep-age-check-test.sh
-script-check - hack/ubuntu-snapshot-bump_test.sh
-script-check - hack/buf-breaking-against-test.sh
-script-check - hack/lane-gates-test.sh
-script-check - hack/board-test.sh
-script-check - hack/generate-test.sh
-script-check - hack/ci-supersede-test.sh
-script-check - hack/ci-concurrency-test.sh
-script-check - hack/ci-merge-group-test.sh
-script-check - hack/secrets-skip-test.sh
-script-check - hack/route-guard-test.sh
-script-check - hack/contributor-gate-test.sh
-script-check - hack/ci-cache-test.sh
-script-check - hack/ci-rules-check-test.sh
-script-check - hack/ci-rules-check.sh
-script-check - hack/e2e-commands-check.sh
-script-check - hack/chart-check-test.sh
-script-check - hack/paths-test.sh
-script-check - hack/runner-lint-test.sh
-script-check - hack/runner-lint.sh
-script-check - hack/go-test-host-test.sh
-script-check - hack/ci-playwright-image-test.sh
+script-check - inputs=hack/migrate-lint-test.sh,hack/migrate-lint.sh,hack/migrate-patch-line,internal/db/migrations/ hack/migrate-lint-test.sh
+script-check - inputs=hack/migrate-renumber-test.sh,hack/migrate-renumber.sh,internal/db/migrations/ hack/migrate-renumber-test.sh
+script-check - inputs=hack/commit-subject-check-test.sh,hack/commit-subject-check.sh hack/commit-subject-check-test.sh
+script-check - inputs=guard hack/commit-subject-check.sh @BASE@ HEAD
+script-check - inputs=hack/git-identities.allowed,hack/git-identity-check-test.sh,hack/git-identity-check.sh,hack/githooks/ hack/git-identity-check-test.sh
+script-check - inputs=guard hack/git-identity-check.sh range @BASE@ HEAD
+script-check - inputs=hack/koinon-fetch-test.sh,harnesses/common/koinon-fetch hack/koinon-fetch-test.sh
+script-check - inputs=hack/release-harness-test.sh,hack/release-harness.sh hack/release-harness-test.sh
+script-check - inputs=hack/fetch-pinned-test.sh,hack/fetch-pinned.sh hack/fetch-pinned-test.sh
+script-check - inputs=hack/e2e-parts-test.sh,test/e2e/kind/parts.sh hack/e2e-parts-test.sh
+script-check - inputs=hack/apt-retries-test.sh hack/apt-retries-test.sh --self-test
+script-check - inputs=guard hack/apt-retries-test.sh
+script-check - inputs=hack/e2e-remote-test.sh,hack/e2e-remote.sh,hack/e2e-status.sh,hack/versions.env,web/package.json,.github/workflows/ci.yml,hack/versions-check.sh hack/e2e-remote-test.sh
+script-check - inputs=hack/ci-fail-test.sh,hack/ci-fail.sh,hack/testdata/ci-fail/ hack/ci-fail-test.sh
+script-check - inputs=hack/ci-timing-test.sh,hack/ci-timing.sh,hack/testdata/ci-timing/gh/,hack/testdata/ci-timing/records.json hack/ci-timing-test.sh
+script-check - inputs=.github/,hack/ci-go-gate-test.sh,hack/ci-required.txt,hack/govulncheck.sh hack/ci-go-gate-test.sh
+script-check - inputs=.github/,hack/ci-required.txt,hack/ci-web-gate-test.sh hack/ci-web-gate-test.sh
+script-check - inputs=cmd/,hack/ci-fail.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/versions.env hack/govulncheck-test.sh
+script-check - inputs=.github/,.github/workflows/,hack/ci-go-gate-test.sh,hack/ci-required-test.sh,hack/ci-required.txt,hack/ci-web-gate-test.sh hack/ci-required-test.sh
+script-check - inputs=guard hack/repo-contract-test.sh
+script-check - inputs=guard hack/tmp-safety-test.sh
+script-check - inputs=hack/notes-expiry-test.sh,hack/notes-expiry.sh hack/notes-expiry-test.sh
+script-check - inputs=hack/old-issue-refs-lint-test.sh,hack/old-issue-refs-lint.sh hack/old-issue-refs-lint-test.sh
+script-check - inputs=guard hack/old-issue-refs-lint.sh
+script-check - inputs=hack/agentgateway-pin-test.sh,hack/agentgateway-pin.sh hack/agentgateway-pin-test.sh
+script-check - inputs=guard hack/agentgateway-pin.sh --check
+script-check - inputs=guard hack/golangci-lint-test.sh
+script-check - inputs=hack/adr-lint.sh,hack/gate-reuse-lib.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight-stop-test.sh,hack/preflight.sh,hack/versions.env hack/preflight-stop-test.sh
+script-check - inputs=hack/e2e-decide-test.sh,hack/e2e-decide.sh hack/e2e-decide-test.sh
+script-check - inputs=hack/kind-registry-test.sh,test/drill/run.sh,test/e2e/escape-openshell.sh,test/e2e/kind/images.sh,test/e2e/kind/registry.sh,test/e2e/run.sh hack/kind-registry-test.sh
+script-check - inputs=hack/drill-issue-test.sh,hack/drill-issue.sh hack/drill-issue-test.sh
+script-check - inputs=hack/drill-sweep-test.sh,test/drill/sweep.sh hack/drill-sweep-test.sh
+script-check - inputs=docs/agents/subagent-brief.md,hack/hooks/agent-spawn-check_test.sh,hack/hooks/agent-spawn-check.sh,hack/hooks/subagent-brief-digest.txt hack/hooks/agent-spawn-check_test.sh
+script-check - inputs=charts/koinon/values.yaml,docs/design.md,hack/hooks/bash-read-check.sh,hack/hooks/read-hooks_test.sh,hack/hooks/read-result-check.sh,hack/preflight.sh,internal/api/handler.go hack/hooks/read-hooks_test.sh
+script-check - inputs=hack/hooks/sleep-chain-check_test.sh,hack/hooks/sleep-chain-check.sh,hack/pr-wait.sh hack/hooks/sleep-chain-check_test.sh
+script-check - inputs=hack/hooks/codegraph-prompt-check_test.sh,hack/hooks/codegraph-prompt-check.sh hack/hooks/codegraph-prompt-check_test.sh
+script-check - inputs=hack/hooks/context-cap-check_test.sh,hack/hooks/context-cap-check.sh hack/hooks/context-cap-check_test.sh
+script-check - inputs=hack/hooks/grilling-question-check_test.sh,hack/hooks/grilling-question-check.sh hack/hooks/grilling-question-check_test.sh
+script-check - inputs=hack/hooks/prose-question-stop-check_test.sh,hack/hooks/prose-question-stop-check.sh hack/hooks/prose-question-stop-check_test.sh
+script-check - inputs=hack/hooks/question-checklist-check_test.sh,hack/hooks/question-checklist-check.sh hack/hooks/question-checklist-check_test.sh
+script-check - inputs=hack/agent-state-test.sh,hack/agent-state.sh hack/agent-state-test.sh
+script-check - inputs=hack/dep-age-check-test.sh,hack/dep-age-check.sh,hack/e2e-toolchain/Dockerfile,hack/e2e-toolchain/web.Dockerfile hack/dep-age-check-test.sh
+script-check - inputs=hack/testdata/ubuntu-snapshot/,hack/ubuntu-snapshot-bump_test.sh,hack/ubuntu-snapshot-bump.sh hack/ubuntu-snapshot-bump_test.sh
+script-check - inputs=hack/buf-breaking-against-test.sh,hack/buf-breaking-against.sh hack/buf-breaking-against-test.sh
+script-check - inputs=hack/ci-changes.sh,hack/gate-reuse-lib.sh,hack/lane-gates-test.sh,hack/lane-gates.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight.sh hack/lane-gates-test.sh
+script-check - inputs=hack/board-test.sh,hack/board.sh hack/board-test.sh
+script-check - inputs=api/,docs/reference/proto/,docs/reference/proto/proto-api.md,hack/generate-test.sh,hack/generate.sh,internal/gen/,Makefile,web/src/gen/,web/src/gen/google/rpc/,web/src/gen/google/rpc/error_details_pb.ts hack/generate-test.sh
+script-check - inputs=hack/ci-supersede-test.sh,hack/ci-supersede.sh hack/ci-supersede-test.sh
+script-check - inputs=.github/,hack/ci-concurrency-test.sh,hack/ci-required.txt,hack/ci-supersede-test.sh,hack/ci-supersede.sh hack/ci-concurrency-test.sh
+script-check - inputs=.github/,.github/workflows/,docs/maintainers/contributor-gate.md,hack/ci-merge-group-test.sh,hack/ci-required-test.sh,hack/ci-required.txt hack/ci-merge-group-test.sh
+script-check - inputs=.github/,hack/ci-required.txt,hack/secrets-skip-test.sh,hack/secrets-skip.sh hack/secrets-skip-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,hack/ci-required.txt,hack/route-guard-test.sh,hack/route-guard.sh hack/route-guard-test.sh
+script-check - inputs=.github/,.github/workflows/contributor-gate.yml,docs/maintainers/contributor-gate.md,hack/ci-merge-group-test.sh,hack/ci-required-test.sh,hack/ci-required.txt,hack/contributor-gate-test.sh,hack/contributor-gate.sh hack/contributor-gate-test.sh
+script-check - inputs=.github/,.github/actions/setup-go-cache/,docs/dev/ci.md,hack/ci-cache-test.sh,hack/ci-required.txt,hack/ci-stamp-mtime.sh,hack/go-test-cacheable.sh,hack/go-test.sh,harnesses/opencode/plugins/pnpm-lock.yaml,web/pnpm-lock.yaml hack/ci-cache-test.sh
+script-check - inputs=.github/,docs/,hack/ci-required.txt,hack/ci-rules-check-test.sh,hack/ci-rules-check.sh,hack/runner-lint.sh,web/src/ hack/ci-rules-check-test.sh
+script-check - inputs=guard hack/ci-rules-check.sh
+script-check - inputs=guard hack/e2e-commands-check.sh
+script-check - inputs=hack/chart-check-test.sh,hack/chart-check.d/,hack/chart-check.sh,hack/chart-check.d/ hack/chart-check-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
+script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
+script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh
+script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,web/package.json,.github/workflows/ci.yml hack/ci-playwright-image-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh

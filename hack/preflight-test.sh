@@ -15,6 +15,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-test.XXXXXX") || exit 1 # explicit template: macOS mktemp -d ignores TMPDIR (old issue 466)
 trap '[[ -n ${KEEP_TMP:-} ]] || rm -rf "$tmp"' EXIT
+export KOINON_GATE_REUSE=0 # these cases flip fake tools between runs on an unchanged tree; hack/preflight-stop-test.sh tests reuse
 export FAKE_LOG="$tmp/calls.log" TMPDIR="$tmp/tmpdir" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 mkdir -p "$tmp/bin" "$tmp/tmpdir" "$tmp/limited"
 

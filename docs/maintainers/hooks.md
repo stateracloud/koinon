@@ -101,7 +101,7 @@ A new hook comes, in the same pull request, with:
 - its offline test `hack/hooks/<name>-check_test.sh`, which covers the off case, listed in the
   `Makefile` (`adr-lint`) and in `.github/workflows/ci.yml`;
 - its entry in `.claude/settings.json` and in the hook list of `hack/bash5-lint.sh`;
-- a `script-check -` line for its test in `hack/paths.rules`;
+- a `script-check inputs=<paths> <cmd>` line for its test in `hack/paths.rules` (the paths the test reads; `inputs=guard` if it must always run);
 - nothing personal and nothing from the private lab: no secrets, no host or cluster names, no
   absolute home paths (use `$HOME`, `${TMPDIR:-/tmp}` or repo-relative paths), no person's name (say
   "the maintainer");

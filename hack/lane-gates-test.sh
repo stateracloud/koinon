@@ -209,17 +209,42 @@ chmod +x "$tmp/make-bufnet"
 out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-bufnet" STUB_GATES="" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "buf remote unavailable is network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
 
-# A parallel preflight holding the worktree pid file: fail with a reason that says why (#349).
+# A second run of the same gate holding that gate's pid file: fail with a reason that says why (#349, #990).
 cat >"$tmp/preflight-busy" <<'EOF2'
 #!/usr/bin/env bash
 case $1 in --base) shift 2 ;; esac
 if [[ $1 == --list ]]; then echo "gitleaks: always"; echo "e2e: informational, always"; exit 0; fi
-echo "preflight: a run (12345) is already in progress for /tmp/x; stop it with hack/preflight.sh --stop (lane-gates and preflight share this worktree's pid file, so a parallel run fails every gate)" >&2
+echo "preflight: the gitleaks gate is already in progress for /tmp/x (run 12345); stop it with hack/preflight.sh --stop (one pid file per gate: runs of other gates do not conflict)" >&2
 exit 2
 EOF2
 chmod +x "$tmp/preflight-busy"
 out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight-busy" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_JOBS="" bash "$script" "$nonempty_base" 2>&1); rc=$?
-expect "parallel preflight is named" 1 '^gate=gitleaks rc=2 .*verdict=fail reason="preflight already running in this worktree"'
+expect "parallel preflight is named" 1 '^gate=gitleaks rc=2 .*verdict=fail reason="preflight already running this gate in this worktree"'
+
+# The gates run in parallel (#990): two slow gates take about one gate's time, no gate reports `already
+# in progress`, and the lines come out in plan order whatever the finishing order.
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go web" STUB_JOBS="" STUB_SLEEP=4 bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "two gates run at once" 0 '^gate=go .*verdict=pass' '^gate=web .*verdict=pass' '^lane-gates ok'
+if grep -q 'already in progress' <<<"$out"; then echo "FAIL: two parallel gates: a gate reported already in progress"; fails=$((fails + 1)); fi
+total=$((total + 1))
+t0=$SECONDS
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go web chart" STUB_JOBS="" STUB_SLEEP=3 bash "$script" "$nonempty_base" 2>&1); rc=$?
+wall=$((SECONDS - t0))
+total=$((total + 1))
+if [[ $wall -ge 9 ]]; then echo "FAIL: four 3 s gates took ${wall}s, they did not run in parallel"; fails=$((fails + 1)); fi
+order=$(sed -n 's/^gate=\([a-z]*\) .*/\1/p' <<<"$out" | tr '\n' ' ')
+total=$((total + 1))
+if [[ $order != "go web chart gitleaks " ]]; then echo "FAIL: gate lines are out of plan order: $order"; fails=$((fails + 1)); fi
+# LANE_GATES_JOBS=1 is the old behaviour: one at a time.
+t0=$SECONDS
+out=$(cd "$repo" && env LANE_GATES_JOBS=1 LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go web" STUB_JOBS="" STUB_SLEEP=2 bash "$script" "$nonempty_base" 2>&1); rc=$?
+total=$((total + 1))
+if [[ $((SECONDS - t0)) -lt 6 ]]; then echo "FAIL: LANE_GATES_JOBS=1 ran three 2 s gates in under 6 s"; fails=$((fails + 1)); fi
+# The two gates that rewrite the tree (tidy, generate) run after the others, alone.
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="tidy go generate" STUB_JOBS="" bash "$script" "$nonempty_base" 2>&1); rc=$?
+order=$(sed -n 's/^gate=\([a-z]*\) .*/\1/p' <<<"$out" | tr '\n' ' ')
+total=$((total + 1))
+if [[ $order != "go gitleaks tidy generate " ]]; then echo "FAIL: tidy and generate do not run last, in order: $order"; fails=$((fails + 1)); fi
 
 # ci-changes failing: the command fails loudly, never passes.
 cat >"$tmp/changes-bad" <<'EOF2'
@@ -302,7 +327,7 @@ expect "start unknown base" 2 'unknown base'
 
 # --start by a relative path from a subdirectory: the run must find the script (the first cut did not).
 mkdir -p "$repo/hack" "$repo/sub"
-cp hack/lane-gates.sh hack/paths-lib.sh hack/paths.rules "$repo/hack/"
+cp hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/paths.rules "$repo/hack/"
 vfile=$(cd "$repo/sub" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash ../hack/lane-gates.sh --start "$nonempty_base" 2>/dev/null)
 waitrun "$vfile" --max 30
 expect "start by a relative path from a subdirectory" 0 '^gate=go .*verdict=pass' '^lane-gates ok'
