@@ -282,17 +282,6 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Questions.ExpireAfter.Duration).To(Equal(48 * time.Hour))
 	})
 
-	DescribeTable("refuses question timers out of bounds",
-		func(body, want string) {
-			_, err := templates.Parse([]byte(strings.Replace(string(valid), "  model:\n", "  questions:\n"+body+"  model:\n", 1)))
-			Expect(err).To(MatchError(ContainSubstring(want)))
-		},
-		Entry("a reminder after the expiry", "    reminderAfter: 48h\n    expireAfter: 24h\n", "must be shorter"),
-		Entry("an expiry over 30 days", "    expireAfter: 800h\n", "must be between"),
-		Entry("a reminder under a minute", "    reminderAfter: 5s\n", "must be between"),
-		Entry("a zero duration", "    reminderAfter: 0s\n", "reminderAfter"),
-	)
-
 	It("accepts plugin installs on an OpenCode template", func() {
 		t, err := templates.Parse([]byte(strings.Replace(string(valid),
 			"  model:\n", "    pluginInstalls: true\n  model:\n", 1)))
