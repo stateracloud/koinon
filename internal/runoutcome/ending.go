@@ -430,7 +430,14 @@ func (o *Owner) postReply(ctx context.Context, q *store.Queries) error {
 // owner's last write; the next claim gives the run a new epoch. A run that was taken over, canceled
 // or finished meanwhile is ErrFenced.
 func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
+	superseded := false
 	err := o.begin(ctx, func(q *store.Queries, b audit.Batch, src int64) error {
+		// Lock order of scheduler.LockTask: the task row before any run row. A message that
+		// queues a run of the task holds this lock, so no queued run appears between the check
+		// in RequeueRun and its write (runs_one_queued_per_task).
+		if _, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: o.run.OrgID, ID: o.run.TaskID}); err != nil {
+			return err
+		}
 		if err := o.endRow(ctx, q, turn, turn.Reason); err != nil {
 			return err
 		}
@@ -441,7 +448,9 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 		}); err != nil {
 			return err
 		}
-		_, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch})
+		r, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: o.run.OrgID, ID: o.run.ID, Epoch: o.run.Epoch})
+		// Another run of the task is queued already: this one ended as superseded instead.
+		superseded = r.State == store.RunStateCanceled
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -453,6 +462,13 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 	}
 	if err != nil {
 		return o.failed(ctx, turn, "requeue the run", err)
+	}
+	if superseded {
+		if o.cfg.Metrics != nil {
+			o.cfg.Metrics.Finished(store.RunStateCanceled)
+		}
+		o.cfg.Log.Info("run superseded by a queued run of the task", "reason", reason)
+		return nil
 	}
 	if o.cfg.Metrics != nil {
 		o.cfg.Metrics.Requeued()

@@ -1280,17 +1280,22 @@ func (q *Queries) ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams
 
 const requeueRun = `-- name: RequeueRun :one
 UPDATE runs
-SET state = 'queued',
+SET state = CASE WHEN d.superseded THEN 'canceled'::run_state ELSE 'queued'::run_state END,
     parked_seconds = parked_seconds + CASE
         WHEN claimed_at IS NULL THEN 0
         ELSE greatest(0, floor(extract(epoch FROM now() - claimed_at)))::bigint END,
     claimed_at = NULL,
-    ready_at = now(),
+    ready_at = CASE WHEN d.superseded THEN NULL ELSE now() END,
+    outcome_reason = CASE WHEN d.superseded THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
+    finished_at = CASE WHEN d.superseded THEN now() ELSE finished_at END,
     owner_id = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state = 'starting'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at
+FROM (SELECT EXISTS (SELECT 1 FROM runs o
+                     WHERE o.org_id = cur.org_id AND o.task_id = cur.task_id AND o.state = 'queued') AS superseded
+      FROM runs cur WHERE cur.org_id = $1 AND cur.id = $2) d
+WHERE runs.org_id = $1 AND runs.id = $2 AND runs.epoch = $3 AND runs.state = 'starting'
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd, runs.traced, runs.last_turn_seq, runs.content_purged_at
 `
 
 type RequeueRunParams struct {
@@ -1306,6 +1311,12 @@ type RequeueRunParams struct {
 // 2026-10-28). The time since the
 // claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 // against the wall-clock cap.
+//
+// One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
+// queued already (a message arrived while this run was starting, and queued a run that will see
+// every message), this run does not wait a second time: it is canceled as superseded, which is an
+// end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
+// so that no enqueue slips in between the check and the write; the index is the backstop.
 func (q *Queries) RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error) {
 	row := q.db.QueryRow(ctx, requeueRun, arg.OrgID, arg.ID, arg.Epoch)
 	var i Run

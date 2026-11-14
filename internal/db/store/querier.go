@@ -1393,6 +1393,12 @@ type Querier interface {
 	// 2026-10-28). The time since the
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
+	//
+	// One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
+	// queued already (a message arrived while this run was starting, and queued a run that will see
+	// every message), this run does not wait a second time: it is canceled as superseded, which is an
+	// end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
+	// so that no enqueue slips in between the check and the write; the index is the backstop.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
 	// The server's URL changed: every tool of it goes back to the default declaration. Returns the tools
 	// whose declaration was not the default already, with what they had, so the caller can audit each.
@@ -1620,6 +1626,10 @@ type Querier interface {
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
+	// Whether the caller is in a transaction that holds a row lock (a locked row gives the
+	// transaction an id; outside a transaction the lock ended with the statement). The scheduler
+	// asserts it after GetTaskForUpdate. Org-scoped through the task it names.
+	TaskLockHeld(ctx context.Context, arg TaskLockHeldParams) (pgtype.Bool, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	// The sanitised content is unchanged; the report columns still follow what the server published, so a

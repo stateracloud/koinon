@@ -146,18 +146,29 @@ RETURNING *;
 -- 2026-10-28). The time since the
 -- claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 -- against the wall-clock cap.
+--
+-- One queued run per task (runs_one_queued_per_task, issue 678). When another run of the task is
+-- queued already (a message arrived while this run was starting, and queued a run that will see
+-- every message), this run does not wait a second time: it is canceled as superseded, which is an
+-- end state for it and not an error. The caller must hold the task row lock (GetTaskForUpdate),
+-- so that no enqueue slips in between the check and the write; the index is the backstop.
 UPDATE runs
-SET state = 'queued',
+SET state = CASE WHEN d.superseded THEN 'canceled'::run_state ELSE 'queued'::run_state END,
     parked_seconds = parked_seconds + CASE
         WHEN claimed_at IS NULL THEN 0
         ELSE greatest(0, floor(extract(epoch FROM now() - claimed_at)))::bigint END,
     claimed_at = NULL,
-    ready_at = now(),
+    ready_at = CASE WHEN d.superseded THEN NULL ELSE now() END,
+    outcome_reason = CASE WHEN d.superseded THEN 'superseded by a queued run of the task' ELSE outcome_reason END,
+    finished_at = CASE WHEN d.superseded THEN now() ELSE finished_at END,
     owner_id = NULL,
     lease_expires_at = NULL,
     heartbeat_at = NULL
-WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'starting'
-RETURNING *;
+FROM (SELECT EXISTS (SELECT 1 FROM runs o
+                     WHERE o.org_id = cur.org_id AND o.task_id = cur.task_id AND o.state = 'queued') AS superseded
+      FROM runs cur WHERE cur.org_id = @org_id AND cur.id = @id) d
+WHERE runs.org_id = @org_id AND runs.id = @id AND runs.epoch = @epoch AND runs.state = 'starting'
+RETURNING runs.*;
 
 -- name: MarkRunSandboxWait :one
 -- Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
