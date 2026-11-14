@@ -97,7 +97,10 @@ openshell.clientTLSSecret instead.
 Secret store: provider API keys and connection secrets are encrypted in Postgres with the key-encryption
 keys in Secret {{ include "koinon.kekSecretName" . }}{{ if not .Values.secrets.kek.existingSecret }}, which koinon-api creates on its first start{{ end }}. Back it up once it exists; without it they cannot be read:
 
-  kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.kekSecretName" . }} -o yaml > koinon-kek-backup.yaml
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "koinon.componentName" (list . "api") }} -- koinon-api keys export > koinon-kek-backup.yaml
+
+Keep the file outside the cluster and apart from the database backup. The backup and restore guide
+(https://koinon.stateracloud.com/docs/operate/backup-restore/) shows how to restore it.
 
 Rotation and the compromise procedure: https://koinon.stateracloud.com/docs/operate/secret-keys/.
 
