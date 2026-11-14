@@ -5,7 +5,8 @@
 # `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
-# nvcr.io or apt at run time, old issue 357) and loaded into the node. PROBE_PULL_REPO=<repo> pulls
+# nvcr.io or apt at run time, old issue 357) and pushed to the cluster's path on the local registry
+# (test/e2e/kind/registry.sh, #45, #601); the node pulls it, nothing is `kind load`ed. PROBE_PULL_REPO=<repo> pulls
 # <repo>:<hack/probe-tag.sh tag> (the image ci.yml's harness-publish pushes on main) when
 # KOINON_OPENSHELL_IMAGE is unset, so the e2e needs no apt mirror (#482); a miss falls back to the build; the gateway is reached through a
 # port-forward with the client certificate it generated.
@@ -82,6 +83,8 @@ fi
 
 kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || { echo "no kind cluster $CLUSTER: run 'make dev-kind-up' first" >&2; exit 1; }
 K=(kubectl --context "$CTX")
+# Every image this script runs in the cluster goes to <registry>/<cluster> (#601), never `kind load`.
+REPO=$("$root/test/e2e/kind/clusterrepo.sh" "$CLUSTER")
 "${K[@]}" -n openshell get secret openshell-client-tls >/dev/null ||
   { echo "the OpenShell gateway is not installed in $CTX (make dev-kind-up installs it)" >&2; exit 1; }
 
@@ -164,16 +167,11 @@ if [[ -z ${KOINON_OPENSHELL_IMAGE:-} && -n ${PROBE_PULL_REPO:-} ]]; then
   fi
 fi
 if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]] && docker pull -q "$IMAGE" >"$tmp/pull.log" 2>&1; then
-  # kind loads by name: a digest-only reference gets a local tag the sandboxes then use.
-  if [[ $IMAGE == *@* ]]; then
-    docker tag "$IMAGE" koinon/spike-probe:pulled
-    IMAGE=koinon/spike-probe:pulled
-  fi
   echo "== probe image $IMAGE (pulled $KOINON_OPENSHELL_IMAGE)"
 else
   if [[ -n ${KOINON_OPENSHELL_IMAGE:-} ]]; then
     echo "== could not pull $KOINON_OPENSHELL_IMAGE ($(tail -1 "$tmp/pull.log")); building it instead"
-    [[ $IMAGE != *@* ]] || IMAGE=koinon/spike-probe:1
+    IMAGE=koinon/spike-probe:1
   fi
   echo "== probe image $IMAGE (built from hack/spike/probe)"
   # KOINON_PROBE_BASE=<image> builds on an image already on this machine. With PROBE_PULL_REPO set the image
@@ -186,7 +184,16 @@ else
   probe_args=(--build-arg "BASE=$probe_base")
   docker build -q "${probe_args[@]}" -t "$IMAGE" "$root/hack/spike/probe" >/dev/null
 fi
-kind load docker-image --name "$CLUSTER" "$IMAGE"
+# The sandboxes pull the probe from the registry; only the layers it lacks are sent. The tag is reused (`1`
+# for a local build), and a node that pulled an old `1` would keep it, so the reference carries the pushed
+# digest: a rebuilt probe is a new name.
+probe_ref="$REPO/probe:${IMAGE##*:}"
+[[ $IMAGE != *@* ]] || probe_ref="$REPO/probe:pulled"
+docker tag "$IMAGE" "$probe_ref"
+probe_digest=$(docker push "$probe_ref" 2>"$tmp/push.log" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p') ||
+  { cat "$tmp/push.log" >&2; exit 1; }
+[[ -n $probe_digest ]] || { echo "docker push $probe_ref gave no digest" >&2; cat "$tmp/push.log" >&2; exit 1; }
+IMAGE="$probe_ref@$probe_digest"
 
 need_gateway=0 need_gitea=0
 [[ -z ${KOINON_ESCAPE_GATEWAY_HOST:-} && ${KOINON_ESCAPE_STANDIN:-1} != 0 ]] && need_gateway=1
@@ -194,19 +201,12 @@ need_gateway=0 need_gitea=0
 
 if (( need_gateway || need_gitea )); then
   echo "== stand-in image (koinon-fakemodel) for koinon-fixtures"
-  # A cluster with the local registry (test/e2e/kind/registry.sh, #45; its KEP-1755 ConfigMap) gets the
-  # stand-in pushed to the cluster's path there, not kind-loaded. The kubelet has then pulled the same
-  # digest itself (the e2e's fakemodel, the same reproducible ko build), and with
-  # KubeletEnsureSecretPulledImages (beta, on since Kubernetes 1.35) a pulled image counts as verified
-  # only for the names it was pulled under: a kind-loaded kind.local name for that image is pulled
-  # again, which cannot work (ImagePullBackOff). Without the registry, nothing is pulled and kind.local
-  # stays as before.
-  stand_repo=kind.local/rt1-fakemodel
-  reg_host=$("${K[@]}" -n kube-public get configmap local-registry-hosting \
-    -o jsonpath='{.data.localRegistryHosting\.v1}' 2>/dev/null | sed -n 's/^host: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' || true)
-  [[ -z $reg_host ]] ||
-    stand_repo="$(KIND_REGISTRY="$reg_host" CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")/rt1-fakemodel"
-  img=$(cd "$root" && KO_DOCKER_REPO="$stand_repo" KIND_CLUSTER_NAME="$CLUSTER" \
+  # The stand-in is pushed to the cluster's path on the local registry (test/e2e/kind/registry.sh, #45).
+  # The kubelet has then pulled the same digest itself (the e2e's fakemodel, the same reproducible ko build),
+  # and with KubeletEnsureSecretPulledImages (beta, on since Kubernetes 1.35) a pulled image counts as
+  # verified only for the names it was pulled under, so one name per image is needed.
+  stand_repo="$REPO/rt1-fakemodel"
+  img=$(cd "$root" && KO_DOCKER_REPO="$stand_repo" \
     ko build --bare --platform "linux/$(go env GOARCH)" --tags escape ./cmd/koinon-fakemodel 2>"$tmp/ko.log") ||
     { cat "$tmp/ko.log" >&2; exit 1; }
   "${K[@]}" create namespace koinon-fixtures --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
@@ -248,7 +248,7 @@ if (( need_gitea )); then
   # value, and the upgrade (--wait) rolls the gateway. The same upgrade resets supervisor.image.* to the
   # chart's 0.1.7 defaults (values.yaml: registry "" = global registry, repository openshell/supervisor,
   # tag "" = appVersion, pullPolicy null = global): --reuse-values would otherwise keep the derived
-  # kind.local/koinon/escape-supervisor image that an older kind.sh set on a dev cluster.
+  # derived koinon/escape-supervisor image that an older kind.sh set on a dev cluster.
   # The chart ref is the one test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")

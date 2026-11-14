@@ -210,7 +210,7 @@ real policy.
 
 ## Manifests (`manifests/`)
 
-`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and loaded into kind, fake Secrets), `overlays/remote` (your registry; see below). Together they create namespace `koinon-fixtures`, five
+`manifests/` is the base: image names are bare (`rt1-motherduck:dev`) and an overlay says where the images come from. Apply an overlay, not the base: `overlays/kind` (`hack/rt1-fixtures-kind.sh`: images built locally and pushed to the kind cluster's local registry, fake Secrets), `overlays/remote` (your registry; see below). Together they create namespace `koinon-fixtures`, five
 Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp, and
 the escape-gateway-standin), and these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
 namespace `koinon`; ingress to the stand-in's port 4000 only from OpenShell sandbox namespaces; egress DNS only, except the two web-research pods (public internet, private ranges
@@ -219,7 +219,7 @@ names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon`
 `app.kubernetes.io/component=gateway`; in kubernetes mode any pod in `koinon` with the label
 `gateway.networking.k8s.io/gateway-name` matches. Change `networkpolicies.yaml` if yours differ.
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
-mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `kind.local/rt1-<name>:dev` and the upstream images
+mounts a service account token. The overlays rewrite the image names: `overlays/kind` uses `localhost:5001/rt1-<name>:dev` (the script rewrites it to the cluster's path, `localhost:5001/<cluster>/rt1-<name>:dev`) and the upstream images
 by digest; `overlays/remote` uses `registry.example.test/koinon/rt1-<name>` with the tag `dev` (nodes cache it: pin digests or use a new tag after a rebuild), a placeholder you replace when
 you render (`kustomize build overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g"`).
 

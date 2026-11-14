@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # RT1 fixtures on a local kind cluster. The five images this repository builds are built locally and
-# loaded into the node (hack/rt1-fixtures-kind.sh does all of it); the three upstream images are pulled
+# pushed to the local registry (#45, #601), which the node pulls from. The names here are the registry's
+# static host; hack/rt1-fixtures-kind.sh rewrites them to the cluster's path (localhost:5001/<cluster>) and
+# does all of it; the three upstream images are pulled
 # anonymously by digest. The Secrets are the fake ones in secrets.example.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -11,15 +13,15 @@ resources:
   - secrets.example.yaml
 images:
   - name: rt1-motherduck
-    newName: kind.local/rt1-motherduck
+    newName: localhost:5001/rt1-motherduck
   - name: rt1-fakecicost
-    newName: kind.local/rt1-fakecicost
+    newName: localhost:5001/rt1-fakecicost
   - name: rt1-promgen
-    newName: kind.local/rt1-promgen
+    newName: localhost:5001/rt1-promgen
   - name: rt1-fakemodel
-    newName: kind.local/rt1-fakemodel
+    newName: localhost:5001/rt1-fakemodel
   - name: rt1-prometheus-mcp
-    newName: kind.local/rt1-prometheus-mcp
+    newName: localhost:5001/rt1-prometheus-mcp
   - name: rt1-prometheus
     newName: docker.io/prom/prometheus
     newTag: v3.7.3
