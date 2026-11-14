@@ -7,6 +7,10 @@ documents, for installs that do not write their own.
 Restore hold (ADR 0107, issue #462): koinon_restore_hold is 1 on a component that runs in restore-hold
 mode; the group renders always, whatever api.durable.enabled says.
 
+Sandbox network policy (ADR 0045, issue #993): the koinon-sandbox group holds
+KoinonSandboxNetworkPolicyErrors, which fires when the reconciler fails to write the default-deny
+NetworkPolicy of a sandbox namespace (koinon_reconciler_sandbox_network_policy_errors_total).
+
 Durable workflows (ADR 0085, decision 11): koinon_durable_workflows_pending is read from the
 database, so every koinon-api replica reports the same value; the rule aggregates with max by
 (version), never sum. A workflow waits for a process of its own version. Older versions are carried
@@ -56,6 +60,19 @@ spec:
           annotations:
             summary: koinon-api cannot read the durable workflow counts, so the stranded-workflow alert is blind
     {{- end }}
+    - name: koinon-sandbox
+      rules:
+        - alert: KoinonSandboxNetworkPolicyErrors
+          expr: sum(increase(koinon_reconciler_sandbox_network_policy_errors_total[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: The reconciler cannot write Koinon's default-deny NetworkPolicy into sandbox namespaces
+            description: >-
+              The reconciler failed to apply the default-deny NetworkPolicy in a sandbox namespace. OpenShell's
+              own policies and the platform's still apply, but Koinon's second layer is missing there. Check
+              the reconciler's RBAC for networkpolicies and its log ("sandbox default-deny NetworkPolicy could not be applied").
     - name: koinon-restore
       rules:
         - alert: KoinonRestoreHoldOn

@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Identities allowed on commits (author and committer), checked by hack/git-identity-check.sh in the
-# lane worktrees' hooks and in CI. One `Name <email>` shell glob per line. A contributor adds their own
-# line in the pull request that brings their first commit.
+# lane worktrees' hooks and in CI. One `Name <email>` shell glob per line.
+#
+# Who may add lines: only a maintainer. A person does not need one: they commit under their GitHub
+# noreply address (`<id>+<username>@users.noreply.github.com`), which the last line allows.
+# CI reads this list from the pull request's base, so a pull request cannot widen its own list.
+#
+# Agent identities: the project identity below (agents and lanes work under it), or the noreply
+# address of the human the agent works for.
 
 # The project identity (agents and lanes).
 procoduck <coder@procodus.dev>
