@@ -171,11 +171,11 @@ folder (old issue 652) from the tagged commit, so later changes are checked agai
 git switch --detach vX.Y.0
 hack/record-compat-fixtures.sh vX.Y.0 --out "${TMPDIR:-/tmp}/compat-vX.Y.0"
 git switch -c test/compat-vX.Y.0 origin/main
-mkdir -p testdata/compat && cp -R "${TMPDIR:-/tmp}/compat-vX.Y.0" testdata/compat/vX.Y.0
+mkdir -p internal/compat/testdata && cp -R "${TMPDIR:-/tmp}/compat-vX.Y.0" internal/compat/testdata/vX.Y.0
 ```
 
 Commit the folder on a branch from `main` and merge it by pull request. `internal/compat` loads every
-folder under `testdata/compat/` and, until the first one exists, reports "NO RECORDED RELEASE". Do
+folder under `internal/compat/testdata/` and, until the first one exists, reports "NO RECORDED RELEASE". Do
 not record a release candidate. Refreshing and what to do when a folder stops loading:
 [docs/dev/ci.md](ci.md#persisted-state-compatibility).
 
