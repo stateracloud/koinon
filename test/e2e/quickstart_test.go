@@ -219,10 +219,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changeRequired).To(BeTrue(), "the one-time password must be changed first")
 
-		buf := make([]byte, 16)
-		_, _ = rand.Read(buf)
+		// run.sh names the new password so the stories pass (stories_test.go) can sign in after this one.
+		newPassword := os.Getenv("KOINON_E2E_NEW_PASSWORD")
+		if newPassword == "" {
+			buf := make([]byte, 16)
+			_, _ = rand.Read(buf)
+			newPassword = "e2e-" + hex.EncodeToString(buf)
+		}
 		_, err = c.Auth.ChangePassword(ctx, &authv1alpha1.ChangePasswordRequest{
-			CurrentPassword: password, NewPassword: "e2e-" + hex.EncodeToString(buf),
+			CurrentPassword: password, NewPassword: newPassword,
 		})
 		Expect(err).NotTo(HaveOccurred())
 

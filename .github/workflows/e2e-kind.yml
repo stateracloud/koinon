@@ -17,7 +17,9 @@
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
 #     install (test/e2e/backup-restore.sh, which runs
-#     test/e2e/commands/backup-restore.e1) and checks it came back. A red run after a green one opens
+#     test/e2e/commands/backup-restore.e1) and checks it came back. It also runs the run-1 story suite (test/e2e/stories_test.go,
+#     label stories, issue 992) after the quickstart, with the fake model and no paid call: a red story suite
+#     makes the run red and so reaches hack/e2e-bisect.sh, and no check requires it (ADR 0025 amendment, ADR 0109). A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 #   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
@@ -293,6 +295,9 @@ jobs:
           # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
+          # The run-1 story suite (test/e2e/stories_test.go, issue 992) after the quickstart: on the nightly schedule only,
+          # and advisory (a red night reaches hack/e2e-bisect.sh through this run's conclusion; no check requires it).
+          STORIES: ${{ github.event_name == 'schedule' && (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # Also run the escape suite's leak guard case from a sandbox against this install (#348).
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.

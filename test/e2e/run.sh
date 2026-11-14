@@ -42,6 +42,12 @@
 #   Go driver (test/e2e/escape-openshell.sh; #109): the chart's sandbox admission policy is live, so the
 #   real supervisor and workload pods are admitted by it and the escape cases are refused. 0 leaves it out
 #   (about 4 to 8 minutes of wall clock).
+#   STORIES=1 (SUITE=go, no SUITE_LABEL) adds a second driver pass after the quickstart: the run-1 story suite
+#   (test/e2e/stories_test.go, label stories; issue 992), through the generated clients with the fake model. `make
+#   test-e2e-kind` sets it, and so does e2e-kind.yml on the schedule event only; a pull request's and the merge
+#   queue's run leave it out (the quickstart pass always filters the label out). A red pass fails the script
+#   after the escape and backup steps, and so reaches hack/e2e-bisect.sh on a red night. Its reports are
+#   $OUT/stories-junit.xml and $OUT/stories-report.json, its log $OUT/stories.log.
 #   SUITE=go also writes $OUT/junit.xml and $OUT/report.json (Ginkgo's JUnit and JSON reports); CI uploads $OUT.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
@@ -267,19 +273,37 @@ done
 password=$(e1 password)
 case "$SUITE" in
 go)
+  # The new admin password is named here so the quickstart pass and the stories pass agree on it, in either order.
+  new_password="e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+  # driver <label filter> <junit file> <json file> <log file>: one pass of the Ginkgo driver.
+  driver() {
+    KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
+    KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+    KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
+    KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
+    KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="$new_password" \
+    KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 ]] && echo "$here/escape-mcp.sh" || true)" \
+    CLUSTER="$CLUSTER" \
+    KOINON_E2E_T0="$T0" \
+    KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
+      bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" -ginkgo.label-filter="$3"' _ "$root" "$OUT/bin/e2e.test" "$1" "$2" "$3" 2>&1 | tee "$4"
+  }
+  # The quickstart pass leaves out the stories (label stories): they are not part of the queue's or a pull
+  # request's run. SUITE_LABEL, when set, is the whole filter (a developer's own choice).
   step "quickstart driver (go test ./test/e2e)"
-  KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
-  KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
-  KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
-  KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
-  KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
-  KOINON_E2E_PASSWORD="$password" \
-  KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 ]] && echo "$here/escape-mcp.sh" || true)" \
-  CLUSTER="$CLUSTER" \
-  KOINON_E2E_T0="$T0" \
-  KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
-    bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout 30m -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" ${3:+-ginkgo.label-filter="$3"}' _ "$root" "$OUT/bin/e2e.test" "${SUITE_LABEL:-}" "$OUT/junit.xml" "$OUT/report.json" 2>&1 | tee "$OUT/driver.log"
+  driver "${SUITE_LABEL:-!stories}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log"
   done_step "Quickstart driver"
+  # The run-1 story suite (issue 992) is a second pass against the same install, before the escape and
+  # backup steps change it. A red stories pass does not stop those steps; it fails the script at the end.
+  if [[ ${STORIES:-0} == 1 && -z ${SUITE_LABEL:-} ]]; then
+    step "run-1 story suite (go test ./test/e2e, label stories)"
+    if ! driver stories "$OUT/stories-junit.xml" "$OUT/stories-report.json" "$OUT/stories.log"; then
+      stories_failed=1
+    fi
+    done_step "Run-1 story suite"
+  fi
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
@@ -308,7 +332,7 @@ if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"
 fi
 
-status=0
+status=${stories_failed:-0}
 echo
 echo "| Phase | Wall clock |"
 echo "| --- | --- |"

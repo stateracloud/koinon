@@ -300,6 +300,14 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+The nightly run (`STORIES=1`, set by `e2e-kind.yml` on the `schedule` event only, and by `make test-e2e-kind`) also runs
+the run-1 story suite, `test/e2e/stories_test.go` (label `stories`, issue #992), as a second driver pass against the
+same install: user stories through the generated Connect clients with the fake model (an agent from a template by UUID,
+an MCP tool in tier `ask`, a question to the task's creator, `CancelRun` mid-turn and the resume, trace settings, org
+settings), each server rule a step that fails when the rule goes. A pull request and the merge queue never run it
+(the quickstart pass filters the label out). It is advisory: no check requires it, but a red pass makes the nightly run
+red, so `hack/e2e-bisect.sh` finds the merge that did it. It calls no paid model (ADR 0025, amended 2026-11-14).
+
 Guide examples that need no cluster live in `test/docs-examples/*.e1`. `hack/docs-examples.sh` (CI job
 `docs examples`, advisory until it has run stable, ci-rules S3) builds `koinon-api` from the checkout and runs every
 block of every file with `docs-e1.sh run`, in an empty directory, with `KUBECONFIG=/dev/null`; a failing block or

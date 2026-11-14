@@ -171,8 +171,8 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 	hack/e2e-commands-check.sh
 
 .PHONY: test-e2e-kind
-test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
-	test/e2e/run.sh
+test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
+	STORIES=1 test/e2e/run.sh
 
 .PHONY: test-e2e-web
 test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install on kind koinon-e1 (KEEP=1 keeps the cluster)

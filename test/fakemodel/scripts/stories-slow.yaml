@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The interrupt story of the run-1 suite (test/e2e/stories_test.go, issue 992): every request waits 40 seconds
+# before it is answered, so a test can cancel the run while its turn is in progress (CancelRun), then resume
+# the task with a message and see the new run finish. The agent is made from the web-researcher template,
+# whose instructions open with "# Web researcher".
+model: stories-slow
+faults:
+  delay: 40s
+turns:
+  - when:
+      systemContains: "# Web researcher"
+      userContains: "Your turn is over"
+    text: "Notes: the slow task is done."
+    usage:
+      inputTokens: 1600
+      cachedInputTokens: 1400
+      outputTokens: 10
+  - when:
+      systemContains: "# Web researcher"
+    text: "The slow task is done."
+    usage:
+      inputTokens: 1200
+      outputTokens: 10
