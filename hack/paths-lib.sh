@@ -145,6 +145,8 @@ paths_script_refs() { # <file>: existing repo paths the script names (a director
 	grep -oE '[A-Za-z0-9_.@+/-]+' "$f" | sort -u | while IFS= read -r t; do
 		t=${t#./}
 		[[ -n $t && $t != /* && $t != *..* && $t != */ ]] || continue
+		# git's own directory (.git/hooks/) and untracked paths can never be an input: skip them
+		[[ $t != .git && $t != .git/* ]] || continue
 		if [[ $t == */* ]]; then
 			if [[ -e $t ]]; then [[ -d $t ]] && echo "$t/" || echo "$t"
 			elif [[ -e $d/$t ]]; then [[ -d $d/$t ]] && echo "$d/$t/" || echo "$d/$t"; fi
