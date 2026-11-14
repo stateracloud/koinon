@@ -99,8 +99,9 @@ type CancelOpenRunsForAgentParams struct {
 }
 
 // Archiving an agent cancels every run it has not finished. It locks the runs in id order (the
-// rule for every statement that locks more than one run row, see scheduler.LockTask), so it
-// cannot wait for a run in a cycle with Owner.Requeue, which holds a run and wants the queued one.
+// rule for every statement that locks more than one run row, see runlock.LockTask), so it
+// cannot wait for a run in a cycle with Owner.Requeue, which locks in the order run R, then task T,
+// then the queued run Q (with SKIP LOCKED, so it never waits for Q).
 func (q *Queries) CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error) {
 	rows, err := q.db.Query(ctx, cancelOpenRunsForAgent, arg.OutcomeReason, arg.OrgID, arg.AgentID)
 	if err != nil {
@@ -420,8 +421,9 @@ type CarrySandboxWaitToQueuedParams struct {
 // wait stays capped (ADR 0066 amendment 2026-10-28: kept across requeues).
 // Skips a queued run that another transaction holds (SKIP LOCKED): the caller holds the task row
 // lock, and whoever holds the queued run's lock holds no task lock (the task-first paths wait on
-// ours), so it is a cancel or a claim of that run. A claim in that moment means the carry is
-// skipped and the claimed run starts a new wait clock. That is rare and accepted: waiting for the
+// ours). The holder is a short lock of another path: a cancel, the claim scan,
+// ClearSandboxWaitForAgent, or a FOR KEY SHARE lock from an insert that references the queued run.
+// A missed carry only starts a new wait clock. That is rare and accepted: waiting for the
 // lock here would put a queued-run lock after the task lock, the order that deadlocks (issue 1015).
 func (q *Queries) CarrySandboxWaitToQueued(ctx context.Context, arg CarrySandboxWaitToQueuedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, carrySandboxWaitToQueued,

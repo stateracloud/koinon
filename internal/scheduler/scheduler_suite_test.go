@@ -336,19 +336,28 @@ var _ = Describe("one queued run per task", func() {
 		_, err = runlock.LockTask(ctx, q.WithTx(taskTx), w.org, w.task.ID)
 		Expect(err).NotTo(HaveOccurred())
 
-		own := runoutcome.New(runoutcome.Config{DB: pool, Queries: q, Run: claimed})
+		var taskPID int32
+		Expect(taskTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&taskPID)).To(Succeed())
+
+		// Requeue runs on its own connection, so we know its backend pid.
+		reqConn, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer reqConn.Release()
+		var reqPID int32
+		Expect(reqConn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&reqPID)).To(Succeed())
+
+		own := runoutcome.New(runoutcome.Config{DB: reqConn, Queries: q, Run: claimed})
 		done := make(chan error, 1)
 		go func() {
 			defer GinkgoRecover()
 			done <- own.Requeue(ctx, runoutcome.Turn{}, "the sandbox is not ready")
 		}()
 
-		// Requeue waits on the task lock...
+		// Requeue waits on the task lock: its backend is blocked by the task transaction's backend.
 		Eventually(func(g Gomega) {
-			var n int
-			g.Expect(pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-				WHERE wait_event_type = 'Lock' AND query ILIKE '%FROM tasks%FOR UPDATE%'`).Scan(&n)).To(Succeed())
-			g.Expect(n).To(BeNumerically(">=", 1))
+			var blocked bool
+			g.Expect(pool.QueryRow(ctx, `SELECT $1 = ANY(pg_blocking_pids($2))`, taskPID, reqPID).Scan(&blocked)).To(Succeed())
+			g.Expect(blocked).To(BeTrue())
 		}, 10*time.Second, 50*time.Millisecond).Should(Succeed())
 		Expect(done).NotTo(Receive())
 
@@ -364,6 +373,9 @@ var _ = Describe("one queued run per task", func() {
 		ended, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: first.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ended.State).To(Equal(store.RunStateCanceled))
+		var reason string
+		Expect(pool.QueryRow(ctx, `SELECT payload->>'reason' FROM run_events WHERE org_id = $1 AND run_id = $2 AND kind = 'run.canceled'`, w.org, first.ID).Scan(&reason)).To(Succeed())
+		Expect(reason).To(Equal("requeue_superseded"))
 		Expect(w.queuedRuns(ctx, w.task)).To(Equal(1))
 	})
 

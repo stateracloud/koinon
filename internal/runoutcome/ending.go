@@ -484,8 +484,9 @@ func (o *Owner) Requeue(ctx context.Context, turn Turn, reason string) error {
 			// the sandbox wait cap counts the whole wait (ADR 0066, amendment 2026-10-28). The
 			// carry skips a queued run that another transaction holds (SKIP LOCKED): we hold
 			// the task lock, so that holder takes no task lock (the task-first paths wait on
-			// ours) and is a cancel or a claim of the queued run. If it is a claim, the carry
-			// is skipped and the claimed run starts a new wait clock. That is rare and
+			// ours). It is a short lock of another path: a cancel, the claim scan,
+			// ClearSandboxWaitForAgent, or a FOR KEY SHARE lock from an insert that references
+			// the queued run. A missed carry only starts a new wait clock. That is rare and
 			// accepted; the cancel of this run above still stands.
 			if r.SandboxWaitStartedAt.Valid {
 				_, err = q.CarrySandboxWaitToQueued(ctx, store.CarrySandboxWaitToQueuedParams{
