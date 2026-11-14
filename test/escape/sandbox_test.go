@@ -386,7 +386,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
 		// The Services are looked up with the cluster client (see admission_live_test.go);
 		// KOINON_ESCAPE_SERVICES is a comma-separated namespace/name:port list.
-		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE")) // and KOINON_ESCAPE_KUBECONFIG, to look up Service IPs
+		testenv.Require(testenv.Var("cluster", "KOINON_ESCAPE_NAMESPACE")) // and a kubeconfig or context, to look up Service IPs
 		cs := kubeClient()
 		var ts []target
 		// A Service the run lists itself must exist: a typo or a missing component would

@@ -891,7 +891,7 @@ var _ = Describe("org isolation", func() {
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
-		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String(), a.provider, a.model, a.trustedHost}
+		foreign := foreignIDs(a)
 		before := snapshot(ctx, e, a)
 
 		// The strongest caller in B: its owner, and a B admin.
@@ -924,6 +924,16 @@ var _ = Describe("org isolation", func() {
 		Expect(snapshot(ctx, e, a)).To(Equal(before), "org A's data changed")
 	})
 })
+
+// foreignIDs is every ID and unique name the fixture creates: a response to another org must carry
+// none of them. A new object in newIsolationFixture goes here too.
+func foreignIDs(f orgFixture) []string {
+	return []string{
+		f.org, f.agent.GetId(), f.draft.GetId(), f.ticket.GetId(), f.run.GetId(), f.connection,
+		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
+		f.mcpServer, f.traceDest, f.trustedHost,
+	}
+}
 
 // newIsolationFixture is an org fixture plus a draft agent, for ActivateAgent,
 // and a connection.

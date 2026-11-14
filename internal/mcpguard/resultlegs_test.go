@@ -3,10 +3,6 @@
 package mcpguard
 
 import (
-	"encoding/json"
-	"os"
-	"slices"
-
 	g "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -14,64 +10,44 @@ import (
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
-// The tool declarations the template legs test reads (templates/legs_test.go). The guard must give
-// each of them the same result legs as before resultLegs called sinkclass.Declaration.ResultLegs (#129).
-const templateToolDeclarations = "../../templates/testdata/legs/tool-declarations.json"
-
-// resultLegsBefore is resultLegs as it was before #129, kept here as the reference the refactor is
-// compared with: the server's legs, each one replaced by the tool's own declaration where it has one.
-func resultLegsBefore(srv store.McpServer, d sinkclass.Declaration) Legs {
-	l := Legs{UntrustedInput: srv.ExposesUntrustedInput, PrivateData: srv.ExposesPrivateData}
-	if d.ResultUntrustedInput != nil {
-		l.UntrustedInput = *d.ResultUntrustedInput
-	}
-	if d.ResultPrivateData != nil {
-		l.PrivateData = *d.ResultPrivateData
-	}
-	return l
-}
-
 var _ = g.Describe("resultLegs (ADR 0091 decision 4)", func() {
-	servers := []store.McpServer{
-		{},
-		{ExposesUntrustedInput: true},
-		{ExposesPrivateData: true},
-		{ExposesUntrustedInput: true, ExposesPrivateData: true},
-	}
+	t, f := true, false
 
-	// declarations are every tool of templateToolDeclarations, an unknown tool (the guard gives it
-	// sinkclass.Default, guard.go) and every combination of unset, true and false result legs.
-	declarations := func() map[string]sinkclass.Declaration {
-		raw, err := os.ReadFile(templateToolDeclarations)
-		Expect(err).NotTo(HaveOccurred())
-		var decls map[string]sinkclass.Declaration
-		Expect(json.Unmarshal(raw, &decls)).To(Succeed())
-		Expect(decls).NotTo(BeEmpty())
-		decls["unknown tool"] = sinkclass.Default()
-		t, f := true, false
-		for i, u := range []*bool{nil, &t, &f} {
-			for j, p := range []*bool{nil, &t, &f} {
-				d := sinkclass.Default()
-				d.ResultUntrustedInput, d.ResultPrivateData = u, p
-				decls["combination "+string(rune('0'+i))+string(rune('0'+j))] = d
-			}
-		}
-		return decls
-	}
+	// The worked table: a tool that declares a result leg replaces the server's leg; a tool that
+	// leaves it unset keeps the server's. Each leg is decided alone.
+	g.DescribeTable("untrusted-input leg",
+		func(server bool, tool *bool, want bool) {
+			d := sinkclass.Default()
+			d.ResultUntrustedInput = tool
+			Expect(resultLegs(store.McpServer{ExposesUntrustedInput: server}, d).UntrustedInput).To(Equal(want))
+		},
+		g.Entry("unset on a server without the leg", false, nil, false),
+		g.Entry("unset on a server with the leg", true, nil, true),
+		g.Entry("true on a server without the leg", false, &t, true),
+		g.Entry("true on a server with the leg", true, &t, true),
+		g.Entry("false on a server without the leg", false, &f, false),
+		g.Entry("false on a server with the leg", true, &f, false),
+	)
 
-	g.It("gives every declared tool and an unknown one the same legs as before, for every server", func() {
-		decls := declarations()
-		names := make([]string, 0, len(decls))
-		for name := range decls {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			for _, srv := range servers {
-				Expect(resultLegs(srv, decls[name])).To(Equal(resultLegsBefore(srv, decls[name])),
-					"tool %q, server legs untrusted=%t private=%t", name, srv.ExposesUntrustedInput, srv.ExposesPrivateData)
-			}
-		}
+	g.DescribeTable("private-data leg",
+		func(server bool, tool *bool, want bool) {
+			d := sinkclass.Default()
+			d.ResultPrivateData = tool
+			Expect(resultLegs(store.McpServer{ExposesPrivateData: server}, d).PrivateData).To(Equal(want))
+		},
+		g.Entry("unset on a server without the leg", false, nil, false),
+		g.Entry("unset on a server with the leg", true, nil, true),
+		g.Entry("true on a server without the leg", false, &t, true),
+		g.Entry("true on a server with the leg", true, &t, true),
+		g.Entry("false on a server without the leg", false, &f, false),
+		g.Entry("false on a server with the leg", true, &f, false),
+	)
+
+	g.It("keeps the legs apart: one leg declared does not change the other", func() {
+		d := sinkclass.Default()
+		d.ResultUntrustedInput = &f
+		srv := store.McpServer{ExposesUntrustedInput: true, ExposesPrivateData: true}
+		Expect(resultLegs(srv, d)).To(Equal(Legs{UntrustedInput: false, PrivateData: true}))
 	})
 
 	g.It("gives an unknown tool on a server nobody classified both legs (fail closed)", func() {

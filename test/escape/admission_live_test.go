@@ -31,8 +31,9 @@ import (
 // dev profile does not install the chart's policies, and the spec skips there.
 //
 //	KOINON_ESCAPE_NAMESPACE     the namespace of the OpenShell workspace under test (required)
-//	KOINON_ESCAPE_KUBECONFIG    kubeconfig (default $KUBECONFIG, then the default loading rules)
-//	KOINON_ESCAPE_KUBE_CONTEXT  context in it (default the current one)
+//	KOINON_ESCAPE_KUBECONFIG    kubeconfig; this or KOINON_ESCAPE_KUBE_CONTEXT is required, the live
+//	                            cases skip without both and never use the ambient current context
+//	KOINON_ESCAPE_KUBE_CONTEXT  context to use (with no kubeconfig named: in the default kubeconfig)
 //	KOINON_ESCAPE_POLICY        the chart's pods policy (default koinon-koinon-sandbox-pods, that
 //	                            is <release namespace>-<fullname>-sandbox-pods); it must also
 //	                            carry the chart's app.kubernetes.io/part-of=koinon label
@@ -160,11 +161,18 @@ var _ = Describe("Sandbox admission policy on the cluster", Label("escape", "ope
 })
 
 // kubeConfig is the cluster client configuration for the live cases, or nil without
-// KOINON_ESCAPE_NAMESPACE.
+// KOINON_ESCAPE_NAMESPACE. It needs KOINON_ESCAPE_KUBECONFIG or KOINON_ESCAPE_KUBE_CONTEXT (the
+// skip message names the first); it never falls back to the current context of the ambient
+// kubeconfig, which may point at a real cluster.
 func kubeConfig() *rest.Config {
 	GinkgoHelper()
 	if os.Getenv("KOINON_ESCAPE_NAMESPACE") == "" {
 		return nil
+	}
+	// Never the ambient context: a kubeconfig or a context must be named, or the live cases skip
+	// (fail under KOINON_REQUIRE=cluster) before they create anything in a cluster.
+	if os.Getenv("KOINON_ESCAPE_KUBECONFIG") == "" && os.Getenv("KOINON_ESCAPE_KUBE_CONTEXT") == "" {
+		testenv.Require(testenv.Vars("cluster", "KOINON_ESCAPE_KUBECONFIG or KOINON_ESCAPE_KUBE_CONTEXT"))
 	}
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if f := os.Getenv("KOINON_ESCAPE_KUBECONFIG"); f != "" {

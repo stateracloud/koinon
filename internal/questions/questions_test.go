@@ -208,6 +208,96 @@ var _ = Describe("a question", func() {
 		Expect(undelivered).To(HaveLen(2))
 	})
 
+	It("answers an already answered question with ErrNotOpen while a turn end holds the run's lock", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		open(ctx)
+		park(ctx)
+		answer := func(ctx context.Context) error {
+			return tx(ctx, func(q *store.Queries, b audit.Batch) error {
+				_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+				return err
+			})
+		}
+		Expect(answer(ctx)).To(Succeed())
+
+		By("a turn end in progress: the run is locked and the answered question is marked delivered")
+		turn, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = turn.Rollback(context.WithoutCancel(ctx)) }()
+		tq := store.New(turn)
+		_, err = tq.MarkQuestionsDelivered(ctx, store.MarkQuestionsDeliveredParams{OrgID: w.org, Ids: []pgtype.UUID{row.ID}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tq.LockRun(ctx, store.LockRunParams{OrgID: w.org, ID: w.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("the second answer is refused at once, without waiting for the turn end")
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		Expect(answer(waitCtx)).To(MatchError(questions.ErrNotOpen))
+		Expect(turn.Commit(ctx)).To(Succeed())
+	})
+
+	It("is refused, not deadlocked, when an answer commits after the pre-check and a turn end has locked the answered row", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		open(ctx)
+		park(ctx)
+
+		By("a holder keeps the run's lock")
+		holder, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+		_, err = store.New(holder).LockRun(ctx, store.LockRunParams{OrgID: w.org, ID: w.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+		var holderPID int32
+		Expect(holder.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holderPID)).To(Succeed())
+		// Sessions that wait for a lock held by the holder, or queued behind such a waiter.
+		waiting := func() int {
+			var n int
+			Expect(pool.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid)) > 0 AND pid <> $1", holderPID).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		By("answer B passes the pre-check (the question is open) and waits for the run's lock")
+		second := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			second <- tx(ctx, func(q *store.Queries, b audit.Batch) error {
+				_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+				return err
+			})
+		}()
+		Eventually(waiting).WithTimeout(10 * time.Second).Should(Equal(1))
+
+		By("answer A is committed, and a turn end locks the answered row, then waits for the run's lock")
+		_, err = pool.Exec(ctx, `UPDATE questions SET state = 'answered', answer = 'post', answer_kind = 'choice', resolved_at = now()
+			WHERE org_id = $1 AND id = $2`, w.org, row.ID)
+		Expect(err).NotTo(HaveOccurred())
+		turnDone := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			turn, err := pool.Begin(ctx)
+			if err != nil {
+				turnDone <- err
+				return
+			}
+			defer func() { _ = turn.Rollback(context.WithoutCancel(ctx)) }()
+			tq := store.New(turn)
+			if _, err = tq.MarkQuestionsDelivered(ctx, store.MarkQuestionsDeliveredParams{OrgID: w.org, Ids: []pgtype.UUID{row.ID}}); err == nil {
+				_, err = tq.LockRun(ctx, store.LockRunParams{OrgID: w.org, ID: w.run.ID})
+			}
+			if err == nil {
+				err = turn.Commit(ctx)
+			}
+			turnDone <- err
+		}()
+		Eventually(waiting).WithTimeout(10 * time.Second).Should(Equal(2))
+
+		By("when the holder ends, B re-reads the question under the run's lock and is refused")
+		Expect(holder.Commit(ctx)).To(Succeed())
+		Eventually(second).WithTimeout(10 * time.Second).Should(Receive(MatchError(questions.ErrNotOpen)))
+		Eventually(turnDone).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+	})
+
 	It("cannot be addressed to a viewer, who cannot answer", func(ctx SpecContext) {
 		viewer := w.member(ctx)
 		_, err := pool.Exec(ctx, `UPDATE org_memberships SET role = 'viewer' WHERE org_id = $1 AND user_id = $2`, w.org, viewer)
