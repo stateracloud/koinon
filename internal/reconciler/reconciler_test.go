@@ -740,6 +740,48 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
+		Describe("the sandbox default-deny NetworkPolicy (#993)", func() {
+			var (
+				metrics *reconciler.Metrics
+				ns      string
+			)
+			const npName = "koinon-koinon-sandbox-default-deny"
+			BeforeEach(func() {
+				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				metrics = reconciler.NewMetrics(nil)
+				cfg.Metrics = metrics
+				cfg.NetworkPolicy = &reconciler.SandboxNetworkPolicy{Kube: kube, GatewayID: "openshell", Name: npName}
+				r = newReconciler()
+			})
+			// The namespace is OpenShell's, made with the first sandbox: writes into it fail until then.
+			namespaceAfterCreate := func(ctx context.Context, failAfter bool) {
+				names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				Expect(deleteErr(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox))).To(Succeed())
+				created := osg.Calls("CreateSandbox")
+				kube.PrependReactor("create", "networkpolicies", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if osg.Calls("CreateSandbox") == created || failAfter {
+						return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, ns)
+					}
+					return false, nil, nil
+				})
+			}
+
+			It("writes the policy in the same pass as the first CreateSandbox", func(ctx SpecContext) {
+				namespaceAfterCreate(ctx, false)
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Phase).NotTo(BeEmpty())
+				np, err := kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, npName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred(), "the policy exists after the pass that created the sandbox")
+				Expect(np.Labels).To(HaveKeyWithValue(reconciler.NetPolLabel, "true"))
+			})
+
+			It("counts a missing namespace after CreateSandbox and fails the pass", func(ctx SpecContext) {
+				namespaceAfterCreate(ctx, true)
+				Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sandbox NetworkPolicy after create")))
+				Expect(testutil.ToFloat64(metrics.NetworkPolicyErrors.WithLabelValues("not_found"))).To(BeNumerically(">=", 1))
+			})
+		})
+
 		Describe("the sandbox LimitRange (#76)", func() {
 			var (
 				metrics *reconciler.Metrics

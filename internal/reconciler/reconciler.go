@@ -343,6 +343,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		if err := cfg.NetworkPolicy.validate(); err != nil {
 			return nil, err
 		}
+		cfg.NetworkPolicy.Errors = cfg.Metrics.NetworkPolicyErrors
 		if cfg.NetworkPolicy.Log == nil {
 			cfg.NetworkPolicy.Log = cfg.Logger
 		}
@@ -1369,6 +1370,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			return err
 		}
 		r.log.Info("created sandbox", w.logAttrs()...)
+		if r.cfg.NetworkPolicy != nil {
+			// OpenShell creates the workspace namespace with the first sandbox, so the pass-start Ensure
+			// could not write the policy there. Write it now, in this pass (#993). A NetworkPolicy
+			// selects pods live, so the sandbox just created is covered without a recreate.
+			if err := r.cfg.NetworkPolicy.Ensure(ctx, ws); err != nil {
+				if limitRangeNamespaceMissing(err) {
+					r.cfg.NetworkPolicy.CountError(err)
+				}
+				return fmt.Errorf("reconciler: sandbox NetworkPolicy after create: %w", err)
+			}
+		}
 		if r.cfg.LimitRange != nil {
 			// The namespace exists with the sandbox: apply the LimitRange now. If it was not ready
 			// before CreateSandbox, supervisors may be BestEffort; delete once so the next pass

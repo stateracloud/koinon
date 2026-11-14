@@ -56,6 +56,19 @@ spec:
           annotations:
             summary: koinon-api cannot read the durable workflow counts, so the stranded-workflow alert is blind
     {{- end }}
+    - name: koinon-sandbox
+      rules:
+        - alert: KoinonSandboxNetworkPolicyErrors
+          expr: sum(increase(koinon_reconciler_sandbox_network_policy_errors_total[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: The reconciler cannot write Koinon's default-deny NetworkPolicy into sandbox namespaces
+            description: >-
+              The reconciler failed to apply the default-deny NetworkPolicy in a sandbox namespace. OpenShell's
+              own policies and the platform's still apply, but Koinon's second layer is missing there. Check
+              the reconciler's RBAC for networkpolicies and its log ("sandbox default-deny NetworkPolicy could not be applied").
     - name: koinon-restore
       rules:
         - alert: KoinonRestoreHoldOn
