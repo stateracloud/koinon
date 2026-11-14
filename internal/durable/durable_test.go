@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // newDatabase creates an empty database next to the suite's and returns its DSN, so each spec
@@ -138,7 +139,7 @@ var _ = Describe("Runtime", func() {
 			Schedule:     "* * * * * *",
 		})).To(Succeed())
 
-		Eventually(ticks.Load, 30*time.Second, 200*time.Millisecond).Should(BeNumerically(">=", 3))
+		Eventually(ticks.Load, racescale.D(30*time.Second), 200*time.Millisecond).Should(BeNumerically(">=", 3))
 	}, SpecTimeout(2*time.Minute))
 
 	It("finishes a durable sleep once, across a restart of the runtime", func(ctx SpecContext) {

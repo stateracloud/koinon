@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("Executors (ADR 0085, decision 11)", func() {
@@ -65,7 +66,7 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 			return t
 		}
 		first := last()
-		Eventually(last, 10*time.Second, 100*time.Millisecond).Should(BeTemporally(">", first))
+		Eventually(last, racescale.D(10*time.Second), 100*time.Millisecond).Should(BeTemporally(">", first))
 	})
 
 	It("recovers the pending workflows of an executor whose heartbeat went stale, on a live one", func(ctx SpecContext) {
@@ -87,7 +88,7 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 		// Not recovered while the dead executor's last beat is fresh (the window is well inside the
 		// 4 s threshold); recovered once it is stale.
 		Consistently(e.runs, time.Second).ShouldNot(Receive())
-		Eventually(e.runs, 30*time.Second).Should(Receive(Equal("koinon-api-live")))
+		Eventually(e.runs, racescale.D(30*time.Second)).Should(Receive(Equal("koinon-api-live")))
 		h, err := dbos.RetrieveWorkflow[string](live.Context(), "wf-dead")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(h.GetResult()).To(Equal("done x"))
@@ -143,7 +144,7 @@ var _ = Describe("Executors (ADR 0085, decision 11)", func() {
 		Expect(live.Launch(ctx)).To(Succeed())
 		DeferCleanup(func() { _ = live.Shutdown(5 * time.Second) })
 
-		Eventually(e.runs, 30*time.Second).Should(Receive(Equal("koinon-api-live")))
+		Eventually(e.runs, racescale.D(30*time.Second)).Should(Receive(Equal("koinon-api-live")))
 		h, err := dbos.RetrieveWorkflow[string](live.Context(), "wf-local")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(h.GetResult()).To(Equal("done x"))
