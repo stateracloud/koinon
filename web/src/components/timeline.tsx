@@ -5,10 +5,10 @@ import { ActorKind } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { isMine, type TimelineItem } from '@/lib/timeline'
 import { cn } from '@/lib/utils'
 
-function actorLabel(a: ActorKind, mine: boolean): string {
+function actorLabel(a: ActorKind, mine: boolean, name?: string): string {
   switch (a) {
     case ActorKind.USER:
-      return mine ? 'You' : 'Another member'
+      return mine ? 'You' : (name ?? 'Another member')
     case ActorKind.AGENT:
       return 'Agent'
     default:
@@ -26,30 +26,32 @@ export type TimelineProps = {
   renderApproval?: (approvalId: string) => ReactNode
   /** The WhoAmI user: only this person's messages read "You" and sit on the right. */
   meUserId?: string
+  /** Member names by user id, to name the other people who wrote a message. */
+  memberNames?: ReadonlyMap<string, string>
 }
 
 /** Timeline renders a task's conversation and run activity in one list. */
-export function Timeline({ items, renderApproval, meUserId }: TimelineProps) {
+export function Timeline({ items, renderApproval, meUserId, memberNames }: TimelineProps) {
   if (items.length === 0) return <p className="text-muted-foreground text-sm">No activity yet.</p>
   return (
     <ol aria-label="Timeline" className="grid gap-3">
       {items.map((it) => (
         <li key={it.key} data-testid="timeline-item" data-kind={it.type}>
-          <TimelineEntry item={it} renderApproval={renderApproval} meUserId={meUserId} />
+          <TimelineEntry item={it} renderApproval={renderApproval} meUserId={meUserId} memberNames={memberNames} />
         </li>
       ))}
     </ol>
   )
 }
 
-function TimelineEntry({ item, renderApproval, meUserId }: { item: TimelineItem; renderApproval?: (approvalId: string) => ReactNode; meUserId?: string }) {
+function TimelineEntry({ item, renderApproval, meUserId, memberNames }: { item: TimelineItem; renderApproval?: (approvalId: string) => ReactNode; meUserId?: string; memberNames?: ReadonlyMap<string, string> }) {
   switch (item.type) {
     case 'message': {
       const mine = isMine(item, meUserId)
       return (
         <article className={cn('max-w-prose rounded-lg border p-3', mine ? 'bg-secondary ml-auto' : 'bg-card')}>
           <header className="text-muted-foreground mb-1 flex gap-2 text-xs">
-            <span className="text-foreground font-medium">{actorLabel(item.actor, mine)}</span>
+            <span className="text-foreground font-medium">{actorLabel(item.actor, mine, memberNames?.get(item.actorUserId))}</span>
             <time dateTime={new Date(item.at).toISOString()}>{time(item.at)}</time>
           </header>
           <p className="whitespace-pre-wrap">{item.text}</p>

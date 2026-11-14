@@ -95,8 +95,8 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
   await expect(nav.getByTestId('inbox-badge')).toHaveText('2')
 
   // Chat with an agent next to it.
-  await page.getByRole('list', { name: 'Conversations' }).getByRole('button', { name: /Write release notes/ }).click()
-  const chat = page.getByRole('region', { name: 'Conversation: Write release notes' })
+  await page.getByRole('list', { name: 'Threads' }).getByRole('button', { name: /Write release notes/ }).click()
+  const chat = page.getByRole('region', { name: 'Thread: Write release notes' })
   await expect(chat.getByText('Summarise this week into release notes.')).toBeVisible()
   await chat.getByRole('textbox', { name: 'Message' }).fill('Include the migration notes.')
   await chat.getByRole('button', { name: 'Send' }).click()

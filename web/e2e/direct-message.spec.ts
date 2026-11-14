@@ -74,7 +74,7 @@ test('direct messages: start a thread, reply in it, reopen a completed one, and 
   })
 
   await page.goto('/')
-  const chat = page.getByRole('region', { name: 'Conversation: What changed in the repos today?' })
+  const chat = page.getByRole('region', { name: 'Thread: What changed in the repos today?' })
   await expect(chat.getByText('What changed in the repos today?', { exact: true }).first()).toBeVisible()
   await expect(chat.getByText('Answer briefly.')).toHaveCount(0)
   await expect(chat.getByText('Working')).toBeVisible()
@@ -90,13 +90,13 @@ test('direct messages: start a thread, reply in it, reopen a completed one, and 
   const form = page.getByRole('region', { name: 'New thread' })
   await form.getByRole('textbox', { name: 'Message to agent' }).fill('Is the release branch green?')
   await form.getByRole('button', { name: 'Start thread' }).click()
-  await expect(page.getByRole('region', { name: 'Conversation: Is the release branch green?' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Thread: Is the release branch green?' })).toBeVisible()
   expect(sends.at(-1)).toMatchObject({ agentId: 'a-1', text: 'Is the release branch green?' })
   expect(sends.at(-1)?.taskId ?? '').toBe('')
 
   // A completed thread reopens with a reply.
-  await page.getByRole('list', { name: 'Conversations' }).getByRole('button', { name: /Summarise last night/ }).click()
-  const done = page.getByRole('region', { name: /Conversation: Summarise last night/ })
+  await page.getByRole('list', { name: 'Threads' }).getByRole('button', { name: /Summarise last night/ }).click()
+  const done = page.getByRole('region', { name: /Thread: Summarise last night/ })
   await expect(done.getByText('A reply reopens it as a follow-up.')).toBeVisible()
   if (shots) await page.screenshot({ path: `${shots}/chat-completed-thread.png` })
   await done.getByRole('textbox', { name: 'Message' }).fill('Was anyone paged?')

@@ -20,6 +20,14 @@ describe('Timeline message authors', () => {
     expect(agent).toHaveTextContent('Agent')
   })
 
+  it('names other members from the member map, and falls back when the id is unknown', () => {
+    const names = new Map([['u-2', 'Sam Example']])
+    render(<Timeline meUserId="u-1" memberNames={names} items={[msg('b', 'u-2'), msg('c', 'u-3')]} />)
+    const [sam, unknown] = screen.getAllByRole('article')
+    expect(sam).toHaveTextContent('Sam Example')
+    expect(unknown).toHaveTextContent('Another member')
+  })
+
   it('does not say You before the viewer is known', () => {
     render(<Timeline items={[msg('a', 'u-1')]} />)
     expect(screen.getByRole('article')).not.toHaveTextContent('You')

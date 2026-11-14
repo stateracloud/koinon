@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from '@tanstack/react-router'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -59,6 +59,14 @@ export function Inbox({ items, ...actions }: InboxProps) {
   const [frozen, setFrozen] = useState<string[] | null>(null)
   const [pointer, setPointer] = useState(false)
   const [focus, setFocus] = useState(false)
+  const listRef = useRef<HTMLUListElement>(null)
+  // A focused row that is removed (Approve, Deny, Dismiss) fires no blur: when the focus is no longer
+  // inside the list after a change, end the focus freeze here.
+  useEffect(() => {
+    if (!focus || listRef.current?.contains(document.activeElement)) return
+    setFocus(false)
+    if (!pointer) setFrozen(null)
+  }, [items, focus, pointer])
   const freeze = () => setFrozen((cur) => cur ?? items.map((i) => i.key))
   const release = (p: boolean, f: boolean) => {
     if (!p && !f) setFrozen(null)
@@ -69,6 +77,7 @@ export function Inbox({ items, ...actions }: InboxProps) {
   const rows = frozen ? stableOrder(items, frozen) : items
   return (
     <ul
+      ref={listRef}
       aria-label="Waiting on you"
       className="grid gap-3"
       onPointerDown={() => {

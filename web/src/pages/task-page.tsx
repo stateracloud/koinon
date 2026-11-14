@@ -17,6 +17,7 @@ import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import type { Cost, Run, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { useMemberNames } from '@/hooks/use-member-names'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
 import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
 import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
@@ -35,6 +36,7 @@ export function TaskPage() {
   const { task: taskQuery, watches, items, refresh: refreshTask } = useTaskConversation(orgId, taskId)
   const agents = useQuery(AgentService.method.listAgents, { orgId })
   const who = useQuery(AuthService.method.whoAmI, {})
+  const memberNames = useMemberNames(orgId)
 
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refreshTask })
   const cancel = useMutation(TaskService.method.cancelTask, {
@@ -120,7 +122,7 @@ export function TaskPage() {
 
       <AgentNotes summary={t?.agentSummary ?? ''} at={t?.agentSummaryAt} />
 
-      <Timeline items={items} meUserId={who.data?.user?.id} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
+      <Timeline items={items} meUserId={who.data?.user?.id} memberNames={memberNames} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
 
       {canEdit && (
         <Composer

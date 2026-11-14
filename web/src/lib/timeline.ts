@@ -162,7 +162,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
       // agentd parks a run whose turn ended with approvals outstanding (old issue 34):
       // {reason: "approval", approvals: [ids]}.
       const n = Array.isArray(p.approvals) ? p.approvals.length : 0
-      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} paused for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
+      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} parked for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
     }
     case 'run.session_reset':
       // agentd starts a new harness session when the sandbox's home volume was

@@ -137,7 +137,7 @@ describe('buildTimeline', () => {
     )
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
       'Approval requested: create_pull_request on Acme/Widgets',
-      'Run r-123456 paused for 1 approval',
+      'Run r-123456 parked for 1 approval',
       'Moved from Working to Input required',
       'Approved create_pull_request on Acme/Widgets: ship it',
       'Done: create_pull_request on Acme/Widgets',

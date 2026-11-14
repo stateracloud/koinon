@@ -53,10 +53,19 @@ describe('Inbox', () => {
   it('freezes the order while focus is inside the list', async () => {
     await mount([row('a'), row('b')])
     const link = screen.getAllByRole('link')[0]
-    fireEvent.focus(link)
+    act(() => link.focus())
     act(() => feed.set([row('b'), row('a')]))
     expect(titles()).toEqual(['Task a', 'Task b'])
-    fireEvent.blur(link, { relatedTarget: document.body })
+    act(() => link.blur())
     expect(titles()).toEqual(['Task b', 'Task a'])
+  })
+
+  it('follows the data again when the focused row is removed (no blur fires)', async () => {
+    await mount([row('a'), row('b')])
+    act(() => screen.getAllByRole('link')[0].focus())
+    act(() => feed.set([row('b')]))
+    // The focused row is gone; the browser fires no blur. A new urgent item must now come first.
+    act(() => feed.set([row('n'), row('b')]))
+    expect(titles()).toEqual(['Task n', 'Task b'])
   })
 })
