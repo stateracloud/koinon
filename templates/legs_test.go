@@ -25,11 +25,11 @@ import (
 // testdata/legs/tool-declarations.json (ADR 0084 decision 8, ADR 0091 decision 4), and fails when
 // one template holds all three legs of the lethal trifecta (ADR 0084 decision 9). The legs come from
 // spec.tools only, so a tool the instructions describe in prose ("the search and fetch tools") is
-// read too. A drift check fails when the instructions name a tool in backticks that spec.tools does
+// read too. Parse fails when the instructions name a tool in backticks that spec.tools does
 // not list.
 
-// toolCall matches a tool the instructions tell the agent to call, written in backticks. It is a
-// drift check only: every name found must be in spec.tools. The legs come from spec.tools alone.
+// toolCall matches a tool the instructions tell the agent to call, written in backticks. Parse
+// refuses one that spec.tools does not list; the legs come from spec.tools alone.
 var toolCall = regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
 
 // The org the classifier runs for: one code-host connection that lists one private repository, the
@@ -124,18 +124,6 @@ func toolsOf(t *templates.Template) []string {
 	return slices.Compact(names)
 }
 
-// undeclaredCalls are the backticked tool names in a template's instructions that spec.tools does
-// not list.
-func undeclaredCalls(t *templates.Template) []string {
-	var missing []string
-	for _, m := range toolCall.FindAllStringSubmatch(t.Spec.Instructions, -1) {
-		if !slices.Contains(t.Spec.Tools, m[1]) && !slices.Contains(missing, m[1]) {
-			missing = append(missing, m[1])
-		}
-	}
-	return missing
-}
-
 type templateLegs struct {
 	untrustedInput bool
 	privateData    bool
@@ -199,14 +187,6 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		}
 	})
 
-	It("lists in spec.tools every tool the instructions call in backticks", func() {
-		all, err := templates.All()
-		Expect(err).NotTo(HaveOccurred())
-		for _, t := range all {
-			Expect(undeclaredCalls(t)).To(BeEmpty(), t.Metadata.ID+": add the tool to spec.tools")
-		}
-	})
-
 	It("reports a template that holds all three legs (negative fixture)", func() {
 		t, err := templates.Parse(readFile("testdata/legs/all-three.yaml"))
 		Expect(err).NotTo(HaveOccurred())
@@ -252,13 +232,12 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		raw := strings.Replace(string(readFile("researcher.yaml")),
 			"Read long files in parts, not whole.", "Read pages with `web_url_read`.", 1)
 		Expect(raw).NotTo(Equal(string(readFile("researcher.yaml"))))
+		_, err := templates.Parse([]byte(raw))
+		Expect(err).To(MatchError(ContainSubstring("add it to spec.tools")), "Parse refuses the undeclared tool")
+		raw = strings.Replace(raw, "  tools: [ask_user]\n", "  tools: [ask_user, web_url_read]\n", 1)
 		changed, err := templates.Parse([]byte(raw))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(changed.Metadata.ID).To(Equal(r.Metadata.ID))
-		Expect(undeclaredCalls(changed)).To(Equal([]string{"web_url_read"}), "the drift check fails")
-		Expect(legsOf(changed).bothInputLegs()).To(BeFalse(), "spec.tools alone decides the legs")
-		changed.Spec.Tools = append(changed.Spec.Tools, "web_url_read")
-		Expect(undeclaredCalls(changed)).To(BeEmpty())
 		Expect(legsOf(changed).bothInputLegs()).To(BeTrue())
 	})
 

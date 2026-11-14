@@ -16,13 +16,13 @@ var _ = Describe("check harness rules", func() {
 		}}
 	}
 
-	It("rejects a default harness that is not allowed", func() {
+	It("rule default-harness-not-allowed: rejects a default harness that is not allowed", func() {
 		t := base()
 		t.Spec.Harness.Default = "other"
 		Expect(t.check()).To(MatchError(ContainSubstring(`default harness "other" is not in the allowed harnesses`)))
 	})
 
-	It("rejects pluginInstalls when no allowed harness supports it", func() {
+	It("rule plugin-installs-unsupported: rejects pluginInstalls when no allowed harness supports it", func() {
 		t := base()
 		t.Spec.Harness = Harness{Allowed: []HarnessName{"other"}, Default: "other"}
 		t.Spec.Harness.PluginInstalls = true

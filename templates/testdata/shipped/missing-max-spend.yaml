@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# want: maxSpendUSD is missing
+apiVersion: templates.koinon.dev/v1alpha1
+kind: Template
+metadata:
+  id: fixture
+  version: 0.1.0
+  displayName: Fixture
+  description: A near-valid template with one mistake.
+spec:
+  harness:
+    allowed: [opencode]
+    default: opencode
+  model:
+    name: default
+  grants:
+    - connector: github
+      scopes: [repo.read, pull_request.create]
+      preset: standard
+      targets: {min: 1, max: 1}
+  limits:
+    run:
+      maxDuration: 30m
+      maxModelRequests: 150
+      maxTokens: 2000000 # deprecated, still accepted (ADR 0081)
+    spendUSD: "10.00"
+  instructions: |
+    Do the thing.
