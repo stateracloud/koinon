@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ModelMeta is what OpenRouter's model list says about one model apart from its price (ADR 0070,
@@ -68,8 +69,22 @@ func metaOf(m orModel) ModelMeta {
 	return out
 }
 
+// clip makes an upstream string fit for the catalog: valid UTF-8, no control characters, trimmed,
+// at most n bytes. U+0000 must go: Postgres refuses it in jsonb, so one NUL in an upstream string
+// would make every catalog store fail. Line breaks and tabs become one space (a description keeps
+// its words apart); every other control character is dropped.
 func clip(s string, n int) string {
-	s = strings.ToValidUTF8(strings.TrimSpace(s), "")
+	s = strings.ToValidUTF8(s, "")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(s)
 	if len(s) <= n {
 		return s
 	}

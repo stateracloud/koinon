@@ -4,6 +4,8 @@ package prices_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +28,10 @@ import (
 type catalogAdapter struct {
 	url    string
 	models []string
+	// failEndpoints makes the endpoints route answer like a rate limit (a fake 429) while it is set.
+	failEndpoints *atomic.Bool
+	// asked records the models the endpoints route was asked about, in order.
+	asked *[]string
 }
 
 func (c *catalogAdapter) Name() string { return pricefetch.SourceOpenRouter }
@@ -55,6 +61,12 @@ func (c *catalogAdapter) Fetch(ctx context.Context, now time.Time) (pricefetch.S
 }
 
 func (c *catalogAdapter) FetchEndpoints(ctx context.Context, model string, now time.Time) (pricefetch.ModelEndpoints, error) {
+	if c.asked != nil {
+		*c.asked = append(*c.asked, model)
+	}
+	if c.failEndpoints != nil && c.failEndpoints.Load() {
+		return pricefetch.ModelEndpoints{}, errors.New("fake openrouter: 429 Too Many Requests")
+	}
 	if err := c.get(ctx, c.url+"/models/"+model+"/endpoints"); err != nil {
 		return pricefetch.ModelEndpoints{}, err
 	}
@@ -71,10 +83,19 @@ var _ = Describe("the OpenRouter catalog fetch (ADR 0070 amendment of 2026-11-11
 		srv  *httptest.Server
 		now  time.Time
 	)
+	var (
+		failEndpoints atomic.Bool
+		asked         []string
+		listedModels  []string
+	)
 	run := func(ctx context.Context, mode prices.RefreshMode) {
 		GinkgoHelper()
-		r, err := prices.NewRefresher(prices.New(pool, slog.Default(), defaultList("2000-01-01.1", model)), prices.RefreshConfig{
-			Adapters: []pricefetch.Adapter{&catalogAdapter{url: srv.URL, models: []string{model}}},
+		models := listedModels
+		if models == nil {
+			models = []string{model}
+		}
+		r, err := prices.NewRefresher(prices.New(pool, slog.Default(), defaultList("2000-01-01.1", models...)), prices.RefreshConfig{
+			Adapters: []pricefetch.Adapter{&catalogAdapter{url: srv.URL, models: models, failEndpoints: &failEndpoints, asked: &asked}},
 			Metrics:  prices.NewMetrics(nil), Now: func() time.Time { return now }, Catalog: orcatalog.New(pool),
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -85,6 +106,8 @@ var _ = Describe("the OpenRouter catalog fetch (ADR 0070 amendment of 2026-11-11
 		pool = freshDB(ctx)
 		srv, hits = countingServer()
 		now = time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
+		failEndpoints.Store(false)
+		asked, listedModels = nil, nil
 	})
 
 	It("stores the catalog per install while an openrouter provider exists, with the endpoints of the models in use", func(ctx SpecContext) {
@@ -150,5 +173,67 @@ var _ = Describe("the OpenRouter catalog fetch (ADR 0070 amendment of 2026-11-11
 		now = now.Add(7 * 24 * time.Hour)
 		run(ctx, prices.RefreshAuto)
 		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog WHERE source = 'openrouter@2026-11-19T09:00:00Z'`)).To(Equal(1))
+	})
+
+	It("asks the endpoints route again on the next tick after a round that failed, though the catalog is not due", func(ctx SpecContext) {
+		addProvider(ctx, pool, "openrouter", model)
+		failEndpoints.Store(true)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(Equal([]string{model}))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models WHERE endpoints_fetched_at IS NOT NULL`)).To(BeZero(), "a failed round stores nothing")
+
+		now = now.Add(25 * time.Hour) // the catalog is stored: not due
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(Equal([]string{model, model}), "the next tick retries")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_catalog WHERE source = 'openrouter@2026-11-11T08:00:00Z'`)).To(Equal(1), "the catalog was not stored again")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models WHERE endpoints_fetched_at IS NOT NULL`)).To(BeZero(), "still failing")
+
+		failEndpoints.Store(false)
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(HaveLen(3))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models WHERE endpoints_fetched_at IS NOT NULL`)).To(Equal(1))
+
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(HaveLen(3), "fetched endpoints are not asked for again inside the week")
+	})
+
+	It("retries only the models a half-done round did not store", func(ctx SpecContext) {
+		a, b := "fake/model-a", "fake/model-b"
+		listedModels = []string{a, b}
+		addProvider(ctx, pool, "openrouter", a, b)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(Equal([]string{a, b}))
+		// Model b lost its endpoints (a round that stopped after a): only b is due.
+		_, err := pool.Exec(ctx, `UPDATE openrouter_models SET endpoints_fetched_at = NULL WHERE model = $1`, b)
+		Expect(err).NotTo(HaveOccurred())
+		asked = nil
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(Equal([]string{b}))
+	})
+
+	It("covers more than the cap of models in use over successive rounds, and says how many were left", func(ctx SpecContext) {
+		n := orcatalog.MaxEndpointModels + 5
+		for i := range n {
+			listedModels = append(listedModels, fmt.Sprintf("fake/m-%03d", i))
+		}
+		addProvider(ctx, pool, "openrouter", listedModels...)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(HaveLen(orcatalog.MaxEndpointModels), "the first round stops at the cap")
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models WHERE endpoints_fetched_at IS NOT NULL`)).To(Equal(orcatalog.MaxEndpointModels))
+
+		asked = nil
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(HaveLen(5), "the next round asks only the models the first one left")
+		Expect(asked).To(ContainElements("fake/m-100", "fake/m-104"))
+		Expect(countRows(ctx, pool, `SELECT count(*) FROM openrouter_models WHERE endpoints_fetched_at IS NOT NULL`)).To(Equal(n))
+
+		asked = nil
+		now = now.Add(25 * time.Hour)
+		run(ctx, prices.RefreshAuto)
+		Expect(asked).To(BeEmpty(), "every model is fresh")
 	})
 })

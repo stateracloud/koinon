@@ -31,8 +31,8 @@ import (
 //
 //	KOINON_ESCAPE_NAMESPACE     the workspace namespace (required)
 //	KOINON_ESCAPE_CHART_NAMESPACE  the Koinon release namespace (required; chart e2e only)
-//	KOINON_ESCAPE_KUBECONFIG    kubeconfig (default $KUBECONFIG)
-//	KOINON_ESCAPE_KUBE_CONTEXT  context (default current)
+//	KOINON_ESCAPE_KUBECONFIG    kubeconfig (this or the context is required; never the ambient context)
+//	KOINON_ESCAPE_KUBE_CONTEXT  context
 //	KOINON_ESCAPE_NETPOL        NetworkPolicy name (default <chart ns>-koinon-sandbox-default-deny
 //	                            when KOINON_ESCAPE_CHART_NAMESPACE is set, else
 //	                            koinon-sandbox-default-deny)
