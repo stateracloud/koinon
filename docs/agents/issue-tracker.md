@@ -8,6 +8,7 @@ assigns your human; the assignee is only a mirror of the claim ref.
 
 ## Conventions
 
+- **Before you file**: search open and closed issues first. Fold similar findings into one issue; do not file micro issues.
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line
   bodies. Then add it to the board: `gh project item-add 1 --owner stateracloud --url <issue url>`.
   A new issue goes to Backlog; only a human moves it to Ready.
