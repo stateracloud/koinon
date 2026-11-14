@@ -48,8 +48,11 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
   (`/bin/sleep`, `read -t`, perl `select`, python `time.sleep`, a read from a FIFO): never run one in
   the foreground. The hook `hack/hooks/sleep-chain-check.sh` enforces this. Never `pgrep`/`pkill`
   another lane's processes. Never `pkill`/`pgrep` by script name (`pkill -f hack/preflight.sh` kills
-  every lane's run): stop your own preflight with `hack/preflight.sh --stop`, which uses the pid file
-  of your worktree's log directory.
+  every lane's run): stop your own preflight with `hack/preflight.sh --stop`. A worktree has one pid file
+  per gate (`preflight.<gate>.pid`) in its log directory; gates of one run go in parallel, a second run of the
+  same gate is refused, and `--stop` stops all gates of the worktree. A gate whose inputs did not change since
+  its last green run prints `(reused ...)` (lane-gates: `reason="reused ..."`); `--no-reuse` or
+  `KOINON_GATE_REUSE=0` runs it anyway (CI always does).
 - Remove worktrees only through `hack/wt.sh rm <name>` (or `hack/wt.sh gc`), never `git worktree remove` or `rm -rf`: it refuses a worktree that has a live claim, a process in it, uncommitted changes or unpushed commits, because another session may be using it. `--force` is for your own worktree only.
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 

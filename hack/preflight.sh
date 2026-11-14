@@ -82,6 +82,7 @@ if [[ $stop == 1 ]]; then
 		fi
 		rm -f "$pf"
 	done
+	rmdir "$logdir"/preflight.*.pid.lock 2>/dev/null || true # a takeover lock a killed run left
 	if [[ -n $stopped ]]; then
 		echo "preflight: stopped run $stopped of $root"
 	else
@@ -456,8 +457,20 @@ claim_gate() { # <gate>: success when this run now holds the gate's pid file; pr
 		echo "$old"
 		return 1
 	fi
-	rm -f "$pf" # a stale file of a run that died
-	( set -C; echo $$ >"$pf" ) 2>/dev/null
+	# A stale file of a run that died: one run takes it over, under a mkdir lock (atomic). A run that
+	# loses the lock reports a conflict (fail closed) instead of deleting a file the winner just wrote.
+	mkdir "$pf.lock" 2>/dev/null || return 1
+	local rc=0
+	old=$(cat "$pf" 2>/dev/null || true)
+	if [[ -n $old && $old != "$$" ]] && kill -0 "$old" 2>/dev/null; then
+		echo "$old"
+		rc=1
+	else
+		rm -f "$pf"
+		( set -C; echo $$ >"$pf" ) 2>/dev/null || rc=1
+	fi
+	rmdir "$pf.lock" 2>/dev/null || true
+	return $rc
 }
 for g in $plan; do
 	if holder=$(claim_gate "$g"); then

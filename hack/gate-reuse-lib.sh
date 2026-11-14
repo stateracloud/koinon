@@ -35,24 +35,42 @@ gate_reuse_enabled() {
 	[[ -z ${CI:-} && ${KOINON_GATE_REUSE:-1} != 0 ]]
 }
 
-gate_fingerprint() { # <job|gate> <name> <merge-base>
-	local kind=$1 name=$2 f names=""
-	while IFS= read -r f; do
-		[[ -f $f ]] || continue
+# gate_manifest: every file of the working tree (tracked or not ignored) as `path TAB blob-id`. Tracked
+# files that match the index take the blob id from `git ls-files -s`; only files that differ from the
+# index and untracked files are hashed from disk, so a run on an unchanged tree reads no file content.
+gate_manifest() {
+	local dirty
+	dirty=$({ git -c core.quotepath=off diff --name-only; git -c core.quotepath=off ls-files --others --exclude-standard; } | sort -u)
+	dirty=$(while IFS= read -r f; do [[ -n $f && -f $f ]] && printf '%s\n' "$f"; done <<<"$dirty")
+	{
+		git -c core.quotepath=off ls-files -s | awk -F'\t' 'NR==FNR{d[$0]=1;next} !($2 in d){split($1,a," ");print $2 "\t" a[2]}' <(printf '%s\n' "$dirty") -
+		[[ -n $dirty ]] && paste <(printf '%s\n' "$dirty") <(printf '%s\n' "$dirty" | git hash-object --stdin-paths)
+	} | sort -u
+}
+
+gate_fingerprint() { # <job|gate|tree> <name> <merge-base>
+	local kind=$1 name=$2 f blob sel="" mfile
+	# The jobs whose CI selection also reads a computed `go list` package graph (hack/ci-changes.sh
+	# suite_graph): the path rule alone misses an edit in a package they build, so the whole tree is the input.
+	if [[ $kind == job ]]; then
+		case $name in chartsmoke | harnesses) kind=tree ;; esac
+	fi
+	mfile=$(gate_manifest)
+	while IFS=$'\t' read -r f blob; do
+		[[ -n $f ]] || continue
 		case $kind in
-		job) paths_job_triggers "$name" "$f" || continue ;;
+		job) paths_job_triggers "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
 		tree) ;; # a gate whose rule only selects it, not lists what it reads: the whole tree is its input
-		*) paths_match gate "$name" "$f" || continue ;;
+		*) paths_match gate "$name" "$f" || paths_match everything - "$f" || paths_match everything ci "$f" || continue ;;
 		esac
-		names+="$f"$'\n'
-	done < <(git ls-files --cached --others --exclude-standard | sort -u)
+		sel+="$f"$'\t'"$blob"$'\n'
+	done <<<"$mfile"
 	{
 		echo "$kind $name mb=$3"
 		# The scripts job also checks the commits (subject, identity): a new commit is a new input.
-		[[ $kind == job && $name == scripts ]] && git rev-parse HEAD
-		git hash-object hack/preflight.sh hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/paths.rules hack/versions.env 2>/dev/null
-		printf '%s' "$names"
-		printf '%s' "$names" | git hash-object --stdin-paths
+		[[ $2 == scripts ]] && git rev-parse HEAD
+		git hash-object hack/preflight.sh hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/paths.rules hack/versions.env hack/ci-changes.sh 2>/dev/null
+		printf '%s' "$sel"
 	} | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1
 }
 

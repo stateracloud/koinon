@@ -131,6 +131,7 @@ eq "a failure is not reused" "$rc" "1"
 
 # reuse fingerprints (#990, review): a gate's fingerprint covers what it reads, not only what selects it
 fp_in() { # <kind> <name>: the fingerprint in the fixture repo `a` (the real libs and rules)
+	# shellcheck disable=SC1091 # sourced by a path computed at run time
 	(cd "$tmp/a" && . "$here/paths-lib.sh" && paths_load && . "$here/gate-reuse-lib.sh" && gate_fingerprint "$1" "$2" base)
 }
 mkdir -p "$tmp/a/internal/db/migrations"
@@ -144,6 +145,33 @@ echo "x: 1" >"$tmp/a/.golangci.yml"
 s1=$(fp_in job scripts)
 git -C "$tmp/a" -c commit.gpgsign=false commit -q --allow-empty -m "feat: a new commit"
 [[ $s1 != "$(fp_in job scripts)" ]] && ok "a new commit moves the scripts fingerprint (commit checks rerun)" || bad "scripts fingerprint ignored HEAD"
+
+c1=$(fp_in job chartsmoke)
+mkdir -p "$tmp/a/cmd/koinon-api"
+echo "package main" >"$tmp/a/cmd/koinon-api/main.go"
+[[ $c1 != "$(fp_in job chartsmoke)" ]] && ok "a cmd/ edit moves the chartsmoke fingerprint (computed package graph)" || bad "chartsmoke fingerprint ignored a cmd/ file"
+h1=$(fp_in job harnesses)
+mkdir -p "$tmp/a/internal/x"
+echo "package x" >"$tmp/a/internal/x/x.go"
+[[ $h1 != "$(fp_in job harnesses)" ]] && ok "an internal/ edit moves the harnesses fingerprint" || bad "harnesses fingerprint ignored an internal/ file"
+w1=$(fp_in job web)
+echo "all:" >"$tmp/a/Makefile"
+[[ $w1 != "$(fp_in job web)" ]] && ok "a Makefile change moves a job fingerprint (the everything inputs)" || bad "web fingerprint ignored the Makefile"
+g1=$(fp_in gate migrate)
+echo "# x" >>"$tmp/a/go.mod"
+[[ $g1 != "$(fp_in gate migrate)" ]] && ok "a go.mod change moves a gate fingerprint" || bad "gate fingerprint ignored go.mod"
+
+# a stale pid file (a run that died) is taken over; the takeover lock is gone afterwards
+sleep 0 & dead=$!
+wait "$dead"
+mkdir -p "$TMPDIR/koinon-preflight"
+# shellcheck disable=SC1091 # sourced by a path computed at run time
+key=$(cd "$tmp/a" && . "$here/gate-reuse-lib.sh" && basename "$(gate_logdir)")
+mkdir -p "$TMPDIR/koinon-preflight/$key"
+echo "$dead" >"$TMPDIR/koinon-preflight/$key/preflight.adr.pid"
+(cd "$tmp/a" && "$pre" --only adr --no-reuse >"$tmp/r8.out" 2>&1) || true # the adr-lint stub fails by now; only the claim matters
+grep -q 'already in progress' "$tmp/r8.out" && bad "a stale pid file refused the run" || ok "a stale pid file is taken over"
+eq "no takeover lock is left" "$(find "$TMPDIR/koinon-preflight" -name "*.lock" | wc -l | tr -d ' ')" "0"
 
 [[ $fail -eq 0 ]] && echo "all ok"
 exit "$fail"

@@ -8,5 +8,5 @@
 7. Explicit cluster: KUBECONFIG=/dev/null (or the file you were given) on every kubectl/helm/tilt/kind/test command.
 8. Work in your worktree: absolute paths or git -C <worktree>. Do not push or open PRs unless told.
 9. Commit with `git commit -s` as an identity listed in hack/git-identities.allowed (author, committer and sign-off), Conventional Commits. Fake secrets look fake (koinon_test_not-a-real-token).
-10. Run hack/preflight.sh before hand-back. Hand back in at most 40 lines; if a tool call is refused, stop and say which.
+10. Run hack/preflight.sh before hand-back (one pid file per gate, gates run in parallel, `--stop` stops all; `(reused ...)` / reason="reused ..." means unchanged inputs since a green run; `--no-reuse` or KOINON_GATE_REUSE=0 forces a run). Hand back in at most 40 lines; if a tool call is refused, stop and say which.
 11. Which model (brief section): haiku = mechanical runs, never fixes code, stops and reports evidence; sonnet = settled implementation; opus = design, review, hard bugs. Also for cloud and SendMessage briefs.
