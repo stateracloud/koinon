@@ -43,39 +43,53 @@ done
 
 "$here/adr-index.sh" --check "$dir" >/dev/null || { "$here/adr-index.sh" --check "$dir" || true; fail=1; }
 
-# items <file>: the `- Status:` and `- Relates to:` items, with their indented continuation lines.
-items() {
-  awk '/^- (Status|Relates to):/ { on = 1; print; next } on && /^  / { print; next } { on = 0 }' "$1"
-}
-
-# Status and links (old issue 525). The template (0000) lists the values; it is not checked.
+# Status and links (old issue 525), in ONE awk pass over README.md and every ADR (#990: a process per file
+# made the lint slow, the fork cost dominates on a Mac). The template (0000) lists the values; it is not
+# checked. awk prints `E<TAB>message` for a failure and `P<TAB>NNNN` for an ADR still Proposed.
 proposed=()
-for f in "${files[@]}"; do
-  n=${f:0:4}
-  [[ $n != 0000 ]] || continue
-  status=$(sed -n 's/^- Status: *//p' "$dir/$f" | head -1)
-  if ! grep -qE '^(Proposed|Accepted|Deprecated|Superseded by|Rejected)([^A-Za-z]|$)' <<<"$status"; then
-    err "$f: Status must start with Proposed, Accepted, Deprecated, Superseded by or Rejected (got '${status:-nothing}')"
-  fi
-  [[ $status != Proposed* ]] || proposed+=("$n")
-  # Every [NNNN](file) link in Status and Relates to names an ADR file that exists, with its number.
-  while IFS= read -r link; do
-    [[ -n $link ]] || continue
-    num=${link:1:4} target=${link#*](} target=${target%)} target=${target%%#*}
-    if [[ ! -e $dir/$target ]]; then
-      err "$f: link $link: $target does not exist"
-    elif [[ ${target:0:4} != "$num" ]]; then
-      err "$f: link $link: the text says $num, the file is ${target:0:4}"
-    fi
-  done < <(items "$dir/$f" | grep -oE '\[[0-9]{4}\]\([^)]*\)' || true)
-  if [[ $status == "Superseded by"* ]]; then
-    grep -qE '\[[0-9]{4}\]\([^)]+\)' <<<"$status" || err "$f: Superseded by names no ADR link ([NNNN](NNNN-title.md))"
-    # The README index shows it as superseded.
-    row=$(grep -F "| [$n]($f) |" "$dir/README.md" | head -1 || true)
-    [[ $row == *" | Superseded by"* ]] ||
-      err "$f is superseded, but the README index does not say so; run hack/adr-index.sh"
-  fi
-done
+while IFS=$'\t' read -r kind msg; do
+  case $kind in
+    E) err "$msg" ;;
+    P) proposed+=("$msg") ;;
+  esac
+done < <(cd "$dir" && ADR_FILES="$(printf '%s\n' "${files[@]}")" awk '
+  BEGIN { nf = split(ENVIRON["ADR_FILES"], names, "\n"); for (i = 1; i <= nf; i++) have[names[i]] = 1 }
+  function bad(m) { printf "E\t%s\n", m }
+  # links(text): every [NNNN](target) of one Status or Relates to item must name an ADR file that exists.
+  function links(f, text,    t, link, num, target) {
+    t = text
+    while (match(t, /\[[0-9][0-9][0-9][0-9]\]\([^)]*\)/)) {
+      link = substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH)
+      num = substr(link, 2, 4); target = substr(link, 8, length(link) - 8)
+      sub(/#.*/, "", target)
+      if (!(target in have)) bad(f ": link " link ": " target " does not exist")
+      else if (substr(target, 1, 4) != num) bad(f ": link " link ": the text says " num ", the file is " substr(target, 1, 4))
+    }
+  }
+  function finish(   st, row) {
+    if (cur == "" || substr(cur, 1, 4) == "0000") return
+    st = status
+    if (st !~ /^(Proposed|Accepted|Deprecated|Superseded by|Rejected)([^A-Za-z]|$)/)
+      bad(cur ": Status must start with Proposed, Accepted, Deprecated, Superseded by or Rejected (got \x27" (st == "" ? "nothing" : st) "\x27)")
+    if (st ~ /^Proposed/) printf "P\t%s\n", substr(cur, 1, 4)
+    links(cur, items)
+    if (st ~ /^Superseded by/) {
+      if (st !~ /\[[0-9][0-9][0-9][0-9]\]\([^)]+\)/) bad(cur ": Superseded by names no ADR link ([NNNN](NNNN-title.md))")
+      row = readme["| [" substr(cur, 1, 4) "](" cur ") |"]
+      if (row !~ / \| Superseded by/) bad(cur " is superseded, but the README index does not say so; run hack/adr-index.sh")
+    }
+  }
+  FILENAME == "README.md" {
+    # the first README line holding "| [NNNN](file) |" is the ADR row
+    if (match($0, /\| \[[0-9][0-9][0-9][0-9]\]\([^)]*\) \|/)) { k = substr($0, RSTART, RLENGTH); if (!(k in readme)) readme[k] = $0 }
+    next
+  }
+  FNR == 1 { finish(); cur = FILENAME; status = ""; items = ""; on = 0; seen = 0 }
+  /^- Status:/ { if (!seen) { seen = 1; status = $0; sub(/^- Status: */, "", status) } }
+  /^- (Status|Relates to):/ { on = 1; items = items "\n" $0; next }
+  on && /^  / { items = items "\n" $0; next }
+  { on = 0 }
+  END { finish() }' README.md "${files[@]}")
 for n in ${proposed[@]+"${proposed[@]}"}; do
   echo "adr-lint: warning: ADR $n is still Proposed; accept or reject it" >&2
 done

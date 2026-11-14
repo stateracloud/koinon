@@ -474,8 +474,10 @@ reuse_fp() { # <gate>: prints the inputs fingerprint when the gate may reuse a v
 	case $1 in e2e | gitleaks | vuln | deps | fuzz) return 0 ;; esac
 	gate_reuse_enabled || return 0
 	case $1 in
-	generate | chart | web | tidy | scripts) gate_fingerprint job "$1" "$mb_all" ;;
-	*) gate_fingerprint gate "$1" "$mb_all" ;;
+	generate | chart | web | tidy | scripts | go | shell) gate_fingerprint job "$1" "$mb_all" ;;
+	# The `gate` rule only selects these gates; their checker scripts, configs and fixtures are outside it.
+	# The whole tree is the input, so a rerun on an unchanged tree reuses and any change runs the gate.
+	*) gate_fingerprint tree "$1" "$mb_all" ;;
 	esac
 }
 

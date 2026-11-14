@@ -17,7 +17,7 @@
 #
 #   gate_logdir                      the per-worktree log directory (hack/preflight.sh's)
 #   gate_reuse_enabled               success when reuse is on
-#   gate_fingerprint <job|gate> <name> <merge-base>   print the fingerprint of the inputs
+#   gate_fingerprint <job|gate|tree> <name> <merge-base>   print the fingerprint of the inputs
 #   gate_reusable <key> <fingerprint>                 success when a green run with it is stored
 #   gate_record <key> <fingerprint>                   store a green run
 
@@ -39,11 +39,17 @@ gate_fingerprint() { # <job|gate> <name> <merge-base>
 	local kind=$1 name=$2 f names=""
 	while IFS= read -r f; do
 		[[ -f $f ]] || continue
-		if [[ $kind == job ]]; then paths_job_triggers "$name" "$f" || continue; else paths_match gate "$name" "$f" || continue; fi
+		case $kind in
+		job) paths_job_triggers "$name" "$f" || continue ;;
+		tree) ;; # a gate whose rule only selects it, not lists what it reads: the whole tree is its input
+		*) paths_match gate "$name" "$f" || continue ;;
+		esac
 		names+="$f"$'\n'
 	done < <(git ls-files --cached --others --exclude-standard | sort -u)
 	{
 		echo "$kind $name mb=$3"
+		# The scripts job also checks the commits (subject, identity): a new commit is a new input.
+		[[ $kind == job && $name == scripts ]] && git rev-parse HEAD
 		git hash-object hack/preflight.sh hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/paths.rules hack/versions.env 2>/dev/null
 		printf '%s' "$names"
 		printf '%s' "$names" | git hash-object --stdin-paths

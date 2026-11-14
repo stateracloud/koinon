@@ -435,13 +435,23 @@ other, when the other gates are done. `hack/preflight.sh` keeps one pid file per
 (`<log directory>/preflight.<gate>.pid`): a second run of the same gate in a worktree is refused (exit
 2, `already in progress`, reported as `fail`), runs of different gates are not, and `--stop` stops every
 run of the worktree. A gate whose inputs are unchanged since its last green run is not run again
-(`hack/gate-reuse-lib.sh`): the inputs are the files the gate's rule in `hack/paths.rules` says can
-affect it, read from the working tree (so an uncommitted edit counts), plus the merge base and the gate
-scripts. Preflight prints `go ok 0s (reused ...)`, lane-gates `verdict=pass reason="reused: ..."`.
+(`hack/gate-reuse-lib.sh`): the inputs are read from the working tree (so an uncommitted edit counts),
+plus the merge base and the gate scripts. For `go`, `shell` and the gates that are CI jobs they are the files
+the CI job rule in `hack/paths.rules` names; the `gate` rule only selects the other gates and does not list
+what their checkers read, so those fingerprint the whole tree (a rerun on an unchanged tree still reuses).
+The `scripts` gate also has `HEAD` in its fingerprint, because it checks commit subjects and identities. Preflight prints `go ok 0s (reused ...)`, lane-gates `verdict=pass reason="reused: ..."`.
 Only a pass is stored; `vuln`, `deps`, `fuzz`, `gitleaks` and `e2e` (time, network or history decide
 them) never reuse. `hack/preflight.sh --no-reuse` or `KOINON_GATE_REUSE=0` runs everything, and CI (`CI` is set)
 always does. A stubbed lane-gates run (a test hook is set) neither reuses nor records. The `scripts`
 gate also reuses per line: after a fix, only the lines whose inputs changed run again.
+
+The `adr` gate (measured on the Mac, #990): the four scripts took adr-lint-test 228 s, adr-lint 56 s,
+doc-meta-lint-test 48 s and doc-meta-lint 108 s (about 7.4 minutes in series; CI forks faster, about 1
+minute). The time was the process per ADR or document (`sed`, `grep`, `awk` and `head` per file), not the
+checks. `adr-lint.sh` now checks status, links and README rows in one awk pass, and `doc-meta-lint.sh` reads
+each header's fields in one awk pass: adr-lint 15 s (14 s of it is `adr-index.sh --check`, not changed here),
+adr-lint-test 42 s, doc-meta-lint 13 s, doc-meta-lint-test 21 s, with the same output on the real tree.
+Verdict reuse does not help a first run, these two changes do.
 
 The harness suite has one timeout, `-timeout 30m`, in `make harness-suite`; `make test-harnesses`
 (images, then the suite) and the `harnesses` job of `ci.yml` both call it, and `hack/paths-test.sh`

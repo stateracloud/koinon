@@ -33,22 +33,36 @@ while IFS= read -r t; do
   tags[$t]=1
 done < <(vocab "$docs/metadata/tags.txt")
 
-# header <file>: the lines before the first `## ` heading.
-header() { awk '/^## / { exit } { print }' "$1"; }
-# field <file> <key>: the values of `- Key:` in the header, one per line.
-field() { header "$1" | sed -n "s/^- $2: *//p"; }
+# meta <file>: one awk pass over the lines before the first `## ` heading (a process per field made the
+# lint slow, #990). Sets META_COUNT[key] (how many `- Key:` lines) and META_FIRST[key] (the first one's
+# value) for Area, Tags, Status and Date; the template check uses META_COUNT alone.
+declare -A META_COUNT META_FIRST
+meta() {
+  META_COUNT=() META_FIRST=()
+  local k c v
+  while IFS=$'\t' read -r k c v; do META_COUNT[$k]=$c META_FIRST[$k]=$v; done < <(awk '
+    /^## / { exit }
+    /^- (Area|Tags|Status|Date):/ {
+      k = $0; sub(/^- /, "", k); sub(/:.*/, "", k)
+      v = $0; sub(/^- [A-Za-z]+: */, "", v)
+      if (!(k in n)) first[k] = v
+      n[k]++
+    }
+    END { for (k in n) printf "%s\t%d\t%s\n", k, n[k], first[k] }' "$1")
+}
 
 check_common() { # check_common <file> <name>
   local f=$1 name=$2 area tagline n t
   declare -A seen=()
-  n=$(field "$f" Area | wc -l)
+  meta "$f"
+  n=${META_COUNT[Area]:-0}
   if ((n != 1)); then err "$name: needs exactly one '- Area:' line above the first ## heading (found $n)"; else
-    area=$(field "$f" Area)
+    area=${META_FIRST[Area]}
     [[ -n ${areas[$area]:-} ]] || err "$name: Area '$area' is not in docs/metadata/areas.txt"
   fi
-  n=$(field "$f" Tags | wc -l)
+  n=${META_COUNT[Tags]:-0}
   if ((n != 1)); then err "$name: needs exactly one '- Tags:' line above the first ## heading (found $n)"; return; fi
-  tagline=$(field "$f" Tags)
+  tagline=${META_FIRST[Tags]}
   local count=0
   IFS=',' read -ra list <<<"$tagline"
   for t in "${list[@]}"; do
@@ -67,8 +81,9 @@ for f in "$docs"/adr/[0-9][0-9][0-9][0-9]-*.md; do
   [[ -e $f ]] || continue
   name=adr/$(basename "$f")
   if [[ $(basename "$f") == 0000-* ]]; then
-    header "$f" | grep -q '^- Area:' || err "$name: the template must name the '- Area:' field"
-    header "$f" | grep -q '^- Tags:' || err "$name: the template must name the '- Tags:' field"
+    meta "$f"
+    [[ -n ${META_COUNT[Area]:-} ]] || err "$name: the template must name the '- Area:' field"
+    [[ -n ${META_COUNT[Tags]:-} ]] || err "$name: the template must name the '- Tags:' field"
     continue
   fi
   check_common "$f" "$name"
@@ -79,10 +94,11 @@ for f in "$docs"/research/*.md "$docs"/spikes/*.md; do
   [[ -e $f ]] || continue
   [[ $(basename "$f") != README.md ]] || continue
   name=${f#"$docs"/}
-  status=$(field "$f" Status | head -1)
+  meta "$f"
+  status=${META_FIRST[Status]:-}
   grep -qE '^(Draft|Complete|Abandoned|Superseded by)([^A-Za-z]|$)' <<<"$status" ||
     err "$name: '- Status:' must start with Draft, Complete, Abandoned or Superseded by (got '${status:-nothing}')"
-  date=$(field "$f" Date | head -1)
+  date=${META_FIRST[Date]:-}
   [[ $date =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}([^0-9]|$) ]] || err "$name: '- Date:' must be YYYY-MM-DD (got '${date:-nothing}')"
   check_common "$f" "$name"
   checked=$((checked + 1))

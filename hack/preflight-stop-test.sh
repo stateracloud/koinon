@@ -128,5 +128,21 @@ rc=0
 (cd "$tmp/a" && "$pre" --only adr >"$tmp/r7.out") || rc=$?
 eq "a failure is not reused" "$rc" "1"
 
+# reuse fingerprints (#990, review): a gate's fingerprint covers what it reads, not only what selects it
+fp_in() { # <kind> <name>: the fingerprint in the fixture repo `a` (the real libs and rules)
+	(cd "$tmp/a" && . "$here/paths-lib.sh" && paths_load && . "$here/gate-reuse-lib.sh" && gate_fingerprint "$1" "$2" base)
+}
+mkdir -p "$tmp/a/internal/db/migrations"
+echo "select 1;" >"$tmp/a/internal/db/migrations/00001_x.sql"
+f1=$(fp_in job go)
+echo "select 2;" >"$tmp/a/internal/db/migrations/00001_x.sql"
+[[ $f1 != "$(fp_in job go)" ]] && ok "a non-.go change moves the go fingerprint (no stale reuse)" || bad "go fingerprint ignored a .sql change"
+t1=$(fp_in tree migrate)
+echo "x: 1" >"$tmp/a/.golangci.yml"
+[[ $t1 != "$(fp_in tree migrate)" ]] && ok "a gate-only gate fingerprints the whole tree" || bad "tree fingerprint ignored a config file"
+s1=$(fp_in job scripts)
+git -C "$tmp/a" -c commit.gpgsign=false commit -q --allow-empty -m "feat: a new commit"
+[[ $s1 != "$(fp_in job scripts)" ]] && ok "a new commit moves the scripts fingerprint (commit checks rerun)" || bad "scripts fingerprint ignored HEAD"
+
 [[ $fail -eq 0 ]] && echo "all ok"
 exit "$fail"
