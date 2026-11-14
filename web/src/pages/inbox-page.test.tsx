@@ -123,19 +123,19 @@ describe('Inbox home', () => {
   it('chats with an agent next to the inbox', async () => {
     const messages: AppendMessageRequest[] = []
     renderApp(transport({ messages }), '/')
-    const conversations = await screen.findByRole('list', { name: 'Conversations' })
+    const conversations = await screen.findByRole('list', { name: 'Threads' })
     // Open tasks only, never the ended ones.
     expect(within(conversations).getAllByRole('button')).toHaveLength(4)
     expect(within(conversations).queryByText(/Rename the repo/)).not.toBeInTheDocument()
     await userEvent.click(within(conversations).getByRole('button', { name: /Write release notes/ }))
-    expect(await screen.findByRole('region', { name: 'Conversation: Write release notes' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Thread: Write release notes' })).toBeInTheDocument()
     await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Please add a changelog')
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(messages).toHaveLength(1))
     expect(messages[0]).toMatchObject({ orgId: 'org-1', taskId: 't-2', text: 'Please add a changelog' })
   })
 
-  it('creates a task with an active agent and opens its conversation', async () => {
+  it('creates a task with an active agent and opens its thread', async () => {
     const creates: CreateTaskRequest[] = []
     renderApp(transport({ creates }), '/')
     await userEvent.click(await screen.findByRole('combobox', { name: 'Agent' }))
@@ -143,13 +143,13 @@ describe('Inbox home', () => {
     await userEvent.keyboard('{Escape}')
     await userEvent.type(screen.getByLabelText('Title'), 'Say hello')
     await userEvent.click(screen.getByRole('button', { name: 'Create task' }))
-    expect(await screen.findByRole('region', { name: 'Conversation: Say hello' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Thread: Say hello' })).toBeInTheDocument()
     expect(creates[0]).toMatchObject({ orgId: 'org-1', agentId: 'a-1', title: 'Say hello' })
   })
 
   it('hides editing for viewers', async () => {
     renderApp(transport({ role: OrgRole.VIEWER }), '/')
-    await screen.findByRole('list', { name: 'Conversations' })
+    await screen.findByRole('list', { name: 'Threads' })
     expect(screen.queryByRole('form', { name: 'New task' })).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Message' })).not.toBeInTheDocument()
   })

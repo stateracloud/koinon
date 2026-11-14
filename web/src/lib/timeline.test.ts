@@ -14,8 +14,8 @@ const run = 'r-1234567890'
 const runEvent = (seq: number, kind: string, payload: JsonObject) =>
   create(RunEventSchema, { runId: run, seq: BigInt(seq), kind, payload, createdAt: timestampFromMs(1000 + seq * 10) })
 
-const taskEvent = (seq: number, at: number, kind: string, payload: JsonObject, actorKind = ActorKind.SYSTEM) =>
-  create(TaskEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, payload, createdAt: timestampFromMs(at) })
+const taskEvent = (seq: number, at: number, kind: string, payload: JsonObject, actorKind = ActorKind.SYSTEM, actorUserId = '') =>
+  create(TaskEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, actorUserId, payload, createdAt: timestampFromMs(at) })
 
 const text = (t: string) => ({ type: 'text', text: t })
 
@@ -137,7 +137,7 @@ describe('buildTimeline', () => {
     )
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
       'Approval requested: create_pull_request on Acme/Widgets',
-      'Run r-123456 paused for 1 approval',
+      'Run r-123456 parked for 1 approval',
       'Moved from Working to Input required',
       'Approved create_pull_request on Acme/Widgets: ship it',
       'Done: create_pull_request on Acme/Widgets',
@@ -402,5 +402,10 @@ describe('buildTimeline with purged content', () => {
   it('says only "content expired" when the retention is not known', () => {
     const items = buildTimeline([], { [run]: [purged(1, 'acp.agent_thought_chunk')] })
     expect(items.map((i) => ('text' in i ? i.text : i.type))).toEqual(['Run r-123456: content expired'])
+  })
+
+  it('carries the author of a message', () => {
+    const items = buildTimeline([taskEvent(1, 1000, 'message', { text: 'Hi' }, ActorKind.USER, 'u-2')], {})
+    expect(items[0]).toMatchObject({ type: 'message', actor: ActorKind.USER, actorUserId: 'u-2' })
   })
 })

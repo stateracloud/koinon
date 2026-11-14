@@ -8,15 +8,16 @@ import { useEffect, useState } from 'react'
 import { AgentNotes } from '@/components/agent-notes'
 import { ApprovalView } from '@/components/approval-view'
 import { Composer } from '@/components/composer'
+import { ConfirmAction } from '@/components/confirm-action'
 import { RunStatus } from '@/components/run-status'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import type { Cost, Run, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { useMemberNames } from '@/hooks/use-member-names'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
 import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
 import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
@@ -34,6 +35,8 @@ export function TaskPage() {
 
   const { task: taskQuery, watches, items, refresh: refreshTask } = useTaskConversation(orgId, taskId)
   const agents = useQuery(AgentService.method.listAgents, { orgId })
+  const who = useQuery(AuthService.method.whoAmI, {})
+  const memberNames = useMemberNames(orgId)
 
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refreshTask })
   const cancel = useMutation(TaskService.method.cancelTask, {
@@ -87,9 +90,15 @@ export function TaskPage() {
           <RunCosts runs={runCosts} />
         </div>
         {canEdit && t && !isEnded(t.state) && (
-          <Button variant="outline" size="sm" className="ml-auto" disabled={cancel.isPending} onClick={() => cancel.mutate({ orgId, taskId })}>
-            Cancel task
-          </Button>
+          <div className="ml-auto">
+            <ConfirmAction
+              label="Cancel task"
+              subject={t.title}
+              consequence="Cancel this task? Its runs stop and it cannot be reopened."
+              confirmLabel="Cancel task"
+              onConfirm={() => cancel.mutateAsync({ orgId, taskId })}
+            />
+          </div>
         )}
       </div>
 
@@ -113,7 +122,7 @@ export function TaskPage() {
 
       <AgentNotes summary={t?.agentSummary ?? ''} at={t?.agentSummaryAt} />
 
-      <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
+      <Timeline items={items} meUserId={who.data?.user?.id} memberNames={memberNames} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
 
       {canEdit && (
         <Composer

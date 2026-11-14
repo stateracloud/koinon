@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from '@tanstack/react-router'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { approveLabel } from '@/lib/approvals'
 import type { AgentHealthItem, ApprovalItem, InboxItem, QuestionItem, TaskInputItem } from '@/lib/inbox'
+import { stableOrder } from '@/lib/inbox'
 import { age } from '@/lib/time'
 
 /** What the inbox does with an approval item; the page wires these to the API. */
@@ -49,14 +50,62 @@ function render<K extends InboxItem['kind']>(item: Extract<InboxItem, { kind: K 
   return (renderers[item.kind] as (i: typeof item, a: InboxActions) => ReactNode)(item, actions)
 }
 
-/** Inbox lists what needs the person, with the actions inline. */
+/**
+ * Inbox lists what needs the person, with the actions inline. While the pointer is down in the list or
+ * focus is inside it, the order is frozen (new rows are appended); it follows the data again after.
+ */
 export function Inbox({ items, ...actions }: InboxProps) {
+  // The keys in the order the rows had when the freeze began; null while the order follows the data.
+  const [frozen, setFrozen] = useState<string[] | null>(null)
+  const [pointer, setPointer] = useState(false)
+  const [focus, setFocus] = useState(false)
+  const listRef = useRef<HTMLUListElement>(null)
+  // A focused row that is removed (Approve, Deny, Dismiss) fires no blur: when the focus is no longer
+  // inside the list after a change, end the focus freeze here.
+  useEffect(() => {
+    if (!focus || listRef.current?.contains(document.activeElement)) return
+    setFocus(false)
+    if (!pointer) setFrozen(null)
+  }, [items, focus, pointer])
+  const freeze = () => setFrozen((cur) => cur ?? items.map((i) => i.key))
+  const release = (p: boolean, f: boolean) => {
+    if (!p && !f) setFrozen(null)
+  }
   if (items.length === 0) {
     return <p className="text-muted-foreground text-sm">Nothing is waiting on you.</p>
   }
+  const rows = frozen ? stableOrder(items, frozen) : items
   return (
-    <ul aria-label="Waiting on you" className="grid gap-3">
-      {items.map((item) => (
+    <ul
+      ref={listRef}
+      aria-label="Waiting on you"
+      className="grid gap-3"
+      onPointerDown={() => {
+        freeze()
+        setPointer(true)
+      }}
+      // The click comes after pointer-up in the same task: release after it, not before.
+      onPointerUp={() =>
+        setTimeout(() => {
+          setPointer(false)
+          release(false, focus)
+        }, 0)
+      }
+      onPointerCancel={() => {
+        setPointer(false)
+        release(false, focus)
+      }}
+      onFocus={() => {
+        freeze()
+        setFocus(true)
+      }}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+        setFocus(false)
+        release(pointer, false)
+      }}
+    >
+      {rows.map((item) => (
         <li key={item.key} data-testid="inbox-item" data-kind={item.kind} className="bg-card rounded-md border border-amber-500/60 p-3 shadow-xs">
           {render(item, actions)}
         </li>

@@ -135,11 +135,11 @@ describe('AgentTriggers', () => {
       expect(screen.getByRole('option', { name: 'A chat channel (from v0.2)' })).toBeDisabled()
     })
 
-    it('says a direct message asks the person in the chat', async () => {
+    it('says a direct message asks the person in the inbox', async () => {
       setup(OrgRole.ADMIN)
       await userEvent.click(await screen.findByRole('button', { name: 'Edit triggers' }))
       await userEvent.click(screen.getByRole('button', { name: 'Add direct message' }))
-      expect(screen.getByText('Asks the person in the chat.')).toBeInTheDocument()
+      expect(screen.getByText('Asks the person in the inbox.')).toBeInTheDocument()
       expect(document.getElementById('trigger-notify-1')).toBeNull()
     })
   })

@@ -12,7 +12,7 @@ import { arr, obj, str } from '@/lib/json'
 import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
-  | { key: string; at: number; type: 'message'; actor: ActorKind; text: string; runId?: string }
+  | { key: string; at: number; type: 'message'; actor: ActorKind; actorUserId: string; text: string; runId?: string }
   | { key: string; at: number; type: 'agent-text'; runId: string; text: string; thought: boolean }
   | { key: string; at: number; type: 'tool'; runId: string; toolCallId: string; title: string; status: string }
   | {
@@ -146,7 +146,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
   switch (ev.kind) {
     case 'message':
       // A direct message's text carries the trigger's instruction; "display" is what the person wrote.
-      return { key, at, type: 'message', actor: ev.actorKind, text: str(p.display) ?? str(p.text) ?? '', runId }
+      return { key, at, type: 'message', actor: ev.actorKind, actorUserId: ev.actorUserId, text: str(p.display) ?? str(p.text) ?? '', runId }
     case 'task.created':
     case 'ticket.created':
       return { key, at, type: 'note', text: `Task created: ${str(p.title) ?? ''}`.trim() }
@@ -162,7 +162,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
       // agentd parks a run whose turn ended with approvals outstanding (old issue 34):
       // {reason: "approval", approvals: [ids]}.
       const n = Array.isArray(p.approvals) ? p.approvals.length : 0
-      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} paused for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
+      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} parked for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
     }
     case 'run.session_reset':
       // agentd starts a new harness session when the sandbox's home volume was
@@ -426,4 +426,9 @@ function dropPersistedReplies(items: TimelineItem[]): TimelineItem[] {
     }
   })
   return drop.size ? items.filter((_, i) => !drop.has(i)) : items
+}
+
+/** isMine says whether a message was written by the viewer: a user actor whose id is the WhoAmI user. */
+export function isMine(item: { actor: ActorKind; actorUserId: string }, meUserId: string | undefined): boolean {
+  return item.actor === ActorKind.USER && !!meUserId && item.actorUserId === meUserId
 }

@@ -101,7 +101,7 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
   await page.getByRole('button', { name: 'Create task' }).click()
 
   // The new conversation opens next to the inbox and streams the run, across the dropped connection.
-  const chat = page.getByRole('region', { name: 'Conversation: Say hello' })
+  const chat = page.getByRole('region', { name: 'Thread: Say hello' })
   await expect(chat).toBeVisible()
   const chatTimeline = chat.getByRole('list', { name: 'Timeline' })
   await expect(chatTimeline.getByText('Please say hello')).toBeVisible()
@@ -125,6 +125,7 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
   await expect(working.getByRole('link', { name: 'Say hello' })).toBeVisible()
   await working.getByRole('link', { name: 'Say hello' }).click()
   await page.getByRole('button', { name: 'Cancel task' }).click()
+  await page.getByRole('button', { name: 'Cancel task', exact: true }).last().click()
   await expect(page.getByText('Canceled', { exact: true })).toBeVisible()
   expect(state).toBe('TASK_STATE_CANCELED')
 })

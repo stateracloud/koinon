@@ -65,7 +65,7 @@ describe('Inbox chat direct messages', () => {
     const form = await screen.findByRole('region', { name: 'New thread' })
     await userEvent.type(within(form).getByRole('textbox', { name: 'Message to agent' }), 'What is on fire?')
     await userEvent.click(within(form).getByRole('button', { name: 'Start thread' }))
-    expect(await screen.findByRole('region', { name: 'Conversation: What is on fire?' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Thread: What is on fire?' })).toBeInTheDocument()
     expect(sends).toEqual([expect.objectContaining({ orgId: 'org-1', agentId: 'a-1', taskId: '', text: 'What is on fire?' })])
     expect(sends[0].messageId).toMatch(/^[0-9a-f-]{36}$/)
   })
@@ -83,7 +83,7 @@ describe('Inbox chat direct messages', () => {
     const sends: SendDirectMessageRequest[] = []
     const appends: AppendMessageRequest[] = []
     renderApp(transport({ sends, appends }), '/')
-    const chat = await screen.findByRole('region', { name: 'Conversation: What changed today?' })
+    const chat = await screen.findByRole('region', { name: 'Thread: What changed today?' })
     expect(within(chat).getByText('Working')).toBeInTheDocument()
     await userEvent.type(within(chat).getByRole('textbox', { name: 'Message' }), 'And yesterday?')
     await userEvent.click(within(chat).getByRole('button', { name: 'Send' }))
@@ -95,9 +95,9 @@ describe('Inbox chat direct messages', () => {
   it('reopens a completed thread with a reply, and tells the person so', async () => {
     const sends: SendDirectMessageRequest[] = []
     renderApp(transport({ sends }), '/')
-    const list = await screen.findByRole('list', { name: 'Conversations' })
+    const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Summarise the incident/ }))
-    const chat = await screen.findByRole('region', { name: 'Conversation: Summarise the incident' })
+    const chat = await screen.findByRole('region', { name: 'Thread: Summarise the incident' })
     expect(within(chat).getByText(/A reply reopens it as a follow-up/)).toBeInTheDocument()
     await userEvent.type(within(chat).getByRole('textbox', { name: 'Message' }), 'One more question')
     await userEvent.click(within(chat).getByRole('button', { name: 'Send' }))
@@ -109,10 +109,10 @@ describe('Inbox chat direct messages', () => {
     const sends: SendDirectMessageRequest[] = []
     const appends: AppendMessageRequest[] = []
     renderApp(transport({ sends, appends }), '/')
-    const list = await screen.findByRole('list', { name: 'Conversations' })
+    const list = await screen.findByRole('list', { name: 'Threads' })
     expect(within(list).queryByText(/Dropped thread/)).not.toBeInTheDocument()
     await userEvent.click(within(list).getByRole('button', { name: /Plain task of the chat agent/ }))
-    const chat = await screen.findByRole('region', { name: 'Conversation: Plain task of the chat agent' })
+    const chat = await screen.findByRole('region', { name: 'Thread: Plain task of the chat agent' })
     await userEvent.type(within(chat).getByRole('textbox', { name: 'Message' }), 'hello')
     await userEvent.click(within(chat).getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(appends).toHaveLength(1))
@@ -121,18 +121,18 @@ describe('Inbox chat direct messages', () => {
 
   it('shows that the agent no longer takes messages in its thread', async () => {
     renderApp(transport(), '/')
-    const list = await screen.findByRole('list', { name: 'Conversations' })
+    const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Thread of an agent that stopped/ }))
-    const chat = await screen.findByRole('region', { name: /Conversation: Thread of an agent/ })
+    const chat = await screen.findByRole('region', { name: /Thread: Thread of an agent/ })
     expect(within(chat).getByText(/Quiet bot does not take direct messages/)).toBeInTheDocument()
     expect(within(chat).queryByRole('textbox')).not.toBeInTheDocument()
   })
 
   it('asks for the pending decision instead of offering a reply while the task is parked', async () => {
     renderApp(transport(), '/')
-    const list = await screen.findByRole('list', { name: 'Conversations' })
+    const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Waiting for your pick/ }))
-    const chat = await screen.findByRole('region', { name: 'Conversation: Waiting for your pick' })
+    const chat = await screen.findByRole('region', { name: 'Thread: Waiting for your pick' })
     expect(within(chat).getByText(/Waiting on an approval/)).toBeInTheDocument()
     expect(within(chat).queryByRole('textbox')).not.toBeInTheDocument()
   })

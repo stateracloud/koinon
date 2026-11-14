@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { ActorKind, TaskEventSchema, TaskSchema, TaskService, TaskState, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { agent, orgId, renderApp, task, whoAmI } from '@/test-utils'
 
@@ -28,7 +29,64 @@ function taskEvent(seq: number, kind: string, payload: Record<string, string>, a
   return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
 }
 
+describe('TaskPage member names', () => {
+  async function askableCalls(role: OrgRole) {
+    let calls = 0
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role }) })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(QuestionService, {
+        listAskableMembers: () => {
+          calls++
+          return { members: [] }
+        },
+      })
+      service(TaskService, { getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events: [], runs: [] }) })
+    })
+    renderApp(transport, '/tasks/t-1')
+    await screen.findByRole('button', { name: 'Cancel task Say hello' })
+    return { calls: () => calls }
+  }
+
+  it('does not ask for member names as a member', async () => {
+    const { calls } = await askableCalls(OrgRole.MEMBER)
+    // The page has rendered the task; give a wrongly enabled query the chance to fire, then check it did not.
+    await screen.findByRole('heading', { name: 'Say hello' })
+    await Promise.resolve()
+    expect(calls()).toBe(0)
+  })
+
+  it('asks for member names as an admin', async () => {
+    const { calls } = await askableCalls(OrgRole.ADMIN)
+    await waitFor(() => expect(calls()).toBeGreaterThan(0))
+  })
+})
+
 describe('TaskPage', () => {
+  it('asks once before it cancels the task', async () => {
+    const canceled: string[] = []
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, {
+        getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events: [], runs: [] }),
+        cancelTask: (req) => {
+          canceled.push(req.taskId)
+          return {}
+        },
+      })
+    })
+    renderApp(transport, '/tasks/t-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel task Say hello' }))
+    expect(canceled).toEqual([])
+    // Keeping it closes the question and cancels nothing.
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it' }))
+    expect(canceled).toEqual([])
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel task Say hello' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel task' }))
+    await waitFor(() => expect(canceled).toEqual(['t-1']))
+  })
+
   it('streams run events into the timeline and resumes after a drop without duplicates', async () => {
     const watchCalls: WatchRunRequest[] = []
     const run = (state: RunState) => create(RunSchema, { id: 'r-1', orgId, ticketId: 't-1', state })

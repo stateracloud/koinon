@@ -35,7 +35,7 @@ function triggerProblem(t: Trigger): string | undefined {
   if (t.instruction.trim() === '') return 'The instruction is required.'
   if (t.type === TriggerType.SCHEDULE) {
     if (t.cron.trim().split(/\s+/).length !== 5) return 'The schedule needs five cron fields.'
-    if (t.timezone.trim() === '') return 'The schedule needs a timezone.'
+    if (t.timezone.trim() === '') return 'The schedule needs a time zone.'
   }
   if (t.notify?.kind === NotifyTargetKind.USER && t.notify.userId === '') return 'Pick the person who is asked.'
   return undefined
@@ -54,7 +54,7 @@ function notifyLabel(t: Trigger, members: readonly AskableMember[] | undefined):
 
 function describe(t: Trigger, members: readonly AskableMember[] | undefined): string {
   if (t.type === TriggerType.SCHEDULE) return `${t.cron} (${t.timezone}) · asks ${notifyLabel(t, members)}`
-  return 'a message to the agent in the inbox chat'
+  return 'a message to the agent in the inbox'
 }
 
 /** The value of the "Who is asked" select for a trigger's notify target. */
@@ -205,14 +205,14 @@ function Editor({
             <>
               <Label htmlFor={`trigger-cron-${i}`}>Cron (minute hour day-of-month month day-of-week)</Label>
               <Input id={`trigger-cron-${i}`} value={t.cron} placeholder="0 9 * * 1-5" onChange={(e) => change(i, { cron: e.target.value })} />
-              <Label htmlFor={`trigger-tz-${i}`}>Timezone (IANA name)</Label>
+              <Label htmlFor={`trigger-tz-${i}`}>Time zone (IANA name)</Label>
               <Input id={`trigger-tz-${i}`} value={t.timezone} placeholder="Europe/Tallinn" onChange={(e) => change(i, { timezone: e.target.value })} />
             </>
           )}
           <Label htmlFor={`trigger-instruction-${i}`}>Instruction</Label>
           <Textarea id={`trigger-instruction-${i}`} value={t.instruction} onChange={(e) => change(i, { instruction: e.target.value })} />
           {t.type === TriggerType.DIRECT_MESSAGE ? (
-            <p className="text-muted-foreground">Asks the person in the chat.</p>
+            <p className="text-muted-foreground">Asks the person in the inbox.</p>
           ) : (
             <>
               <Label htmlFor={`trigger-notify-${i}`}>Who is asked</Label>

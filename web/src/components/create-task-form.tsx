@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +13,8 @@ export type NewTask = { agentId: string; title: string; message: string }
 
 export type CreateTaskFormProps = {
   agents: readonly Agent[]
-  onCreate: (t: NewTask) => void
+  /** Resolves when the task exists: the form then clears. A rejection keeps the text for another try. */
+  onCreate: (t: NewTask) => Promise<unknown> | void
   pending?: boolean
   error?: string
 }
@@ -26,10 +27,22 @@ export function CreateTaskForm({ agents, onCreate, pending, error }: CreateTaskF
   const [message, setMessage] = useState('')
   const chosen = active.some((a) => a.id === agentId) ? agentId : (active[0]?.id ?? '')
 
-  function onSubmit(e: FormEvent) {
+  // True from submit until the call settles, so a second Enter or click makes no second task.
+  const sending = useRef(false)
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!chosen || !title.trim()) return
-    onCreate({ agentId: chosen, title: title.trim(), message: message.trim() })
+    if (sending.current || !chosen || !title.trim()) return
+    sending.current = true
+    try {
+      await onCreate({ agentId: chosen, title: title.trim(), message: message.trim() })
+      setTitle('')
+      setMessage('')
+    } catch {
+      // The caller shows the error; the text stays for another try.
+    } finally {
+      sending.current = false
+    }
   }
 
   if (active.length === 0) {

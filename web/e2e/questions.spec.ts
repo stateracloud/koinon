@@ -14,6 +14,9 @@ test('an agent asks a question: answer it from the inbox with a choice, an edite
   if (shots) mkdirSync(shots, { recursive: true })
 
   const now = () => new Date().toISOString()
+  // Fixed once: the inbox sorts newest first, so per-poll timestamps made the row order depend on the clock.
+  const base = Date.now()
+  const openedAt = (minutesAgo: number) => new Date(base - minutesAgo * 60_000).toISOString()
   const answers: Record<string, unknown>[] = []
   const dismissals: Record<string, unknown>[] = []
   const open = new Set(['q-1', 'q-2', 'q-3'])
@@ -24,7 +27,7 @@ test('an agent asks a question: answer it from the inbox with a choice, an edite
       { id: 'q-3', taskId: 't-3', agentId: 'a-2', question: 'What should the release title be?', choices: [], defaultAnswer: 'Keep the current title' },
     ]
       .filter((q) => open.has(q.id))
-      .map((q) => ({ orgId: org, runId: 'r-1', askedTo: 'u-1', state: 'QUESTION_STATE_OPEN', canAnswer: true, openedAt: now(), ...q }))
+      .map((q) => ({ orgId: org, runId: 'r-1', askedTo: 'u-1', state: 'QUESTION_STATE_OPEN', canAnswer: true, openedAt: openedAt(Number(q.id.slice(2))), ...q }))
   const tasks = [
     { id: 't-1', orgId: org, title: 'Deploy the app', state: 'TASK_STATE_INPUT_REQUIRED', agentId: 'a-1', createdBy: { userId: 'u-1' }, updatedAt: now() },
     { id: 't-2', orgId: org, title: 'Answer the support thread', state: 'TASK_STATE_INPUT_REQUIRED', agentId: 'a-2', createdBy: { userId: 'u-1' }, updatedAt: now() },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConnectError } from '@connectrpc/connect'
-import { useMutation } from '@connectrpc/connect-query'
+import { useMutation, useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { Composer } from '@/components/composer'
 import { RunStatus } from '@/components/run-status'
@@ -9,8 +9,10 @@ import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { ApprovalView } from '@/components/approval-view'
+import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TaskService, TaskState, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
 import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { useMemberNames } from '@/hooks/use-member-names'
 import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
 import { isReplyThread, noDirectMessagesText, takesDirectMessages } from '@/lib/direct-message'
@@ -30,7 +32,7 @@ export type ChatPanelProps = {
 
 const maxChats = 8
 
-/** ChatPanel lists the open conversations with agents and shows one, next to the inbox. */
+/** ChatPanel lists the open threads with agents and shows one, next to the inbox. */
 export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, selectedId, onSelect }: ChatPanelProps) {
   // Open tasks, and completed threads of direct messages, which a reply reopens.
   const open = tasks
@@ -38,10 +40,10 @@ export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, sele
     .sort((a, b) => Number(b.updatedAt?.seconds ?? 0n) - Number(a.updatedAt?.seconds ?? 0n))
     .slice(0, maxChats)
   const current = open.find((t) => t.id === selectedId) ?? open[0]
-  if (!current) return <p className="text-muted-foreground text-sm">{canEdit ? 'No open conversations. Start one below.' : 'No open conversations.'}</p>
+  if (!current) return <p className="text-muted-foreground text-sm">{canEdit ? 'No open threads. Start one below.' : 'No open threads.'}</p>
   return (
     <div className="grid gap-4">
-      <ul aria-label="Conversations" className="flex flex-wrap gap-2">
+      <ul aria-label="Threads" className="flex flex-wrap gap-2">
         {open.map((t) => (
           <li key={t.id}>
             <button
@@ -56,7 +58,7 @@ export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, sele
           </li>
         ))}
       </ul>
-      {/* Remount per task so no conversation shows another's events. */}
+      {/* Remount per task so no thread shows another's events. */}
       <Conversation key={current.id} orgId={orgId} task={current} agentName={agentNames.get(current.agentId)} agent={agents.find((a) => a.id === current.agentId)} canEdit={canEdit} />
     </div>
   )
@@ -64,6 +66,8 @@ export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, sele
 
 function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: string; task: Task; agentName?: string; agent?: Agent; canEdit: boolean }) {
   const { task: query, watches, items, refresh } = useTaskConversation(orgId, task.id)
+  const who = useQuery(AuthService.method.whoAmI, {})
+  const memberNames = useMemberNames(orgId)
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refresh })
   const direct = useDirectMessage(orgId, () => void refresh())
   const state = query.data?.task?.state ?? task.state
@@ -79,7 +83,7 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
   const runs = (query.data?.runs ?? []).map((r) => watches[r.id]?.run ?? r)
   const active = runs.filter((r) => !runFinished(r.state))
   return (
-    <section aria-label={`Conversation: ${task.title}`} className="grid gap-4">
+    <section aria-label={`Thread: ${task.title}`} className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">{task.title}</h3>
         <Badge variant="secondary">{stateLabel(state)}</Badge>
@@ -93,11 +97,11 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
           <AlertDescription>{ConnectError.from(query.error).rawMessage}</AlertDescription>
         </Alert>
       ) : query.isPending ? (
-        <p role="status">Loading conversation…</p>
+        <p role="status">Loading the thread…</p>
       ) : (
         <>
           <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
-          <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
+          <Timeline items={items} meUserId={who.data?.user?.id} memberNames={memberNames} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
         </>
       )}
       {canEdit && thread && takes === false && (

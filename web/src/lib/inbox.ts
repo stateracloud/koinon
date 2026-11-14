@@ -133,3 +133,15 @@ export function buildInbox({ tasks, approvals, questions = [], agents = [], isAd
   }
   return items.sort((a, b) => b.at - a.at)
 }
+
+/**
+ * stableOrder keeps the rows in the order they were first shown: rows that stay keep their place, rows
+ * that are gone drop out, new rows go last. The inbox sorts by urgency, and a re-sort under the pointer
+ * moves a button between pointer-down and click, so Approve would hit another row.
+ */
+export function stableOrder(items: readonly InboxItem[], shown: readonly string[]): InboxItem[] {
+  const byKey = new Map(items.map((i) => [i.key, i]))
+  const kept = shown.flatMap((k) => byKey.get(k) ?? [])
+  const known = new Set(shown)
+  return [...kept, ...items.filter((i) => !known.has(i.key))]
+}

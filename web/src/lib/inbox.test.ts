@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { buildInbox } from '@/lib/inbox'
+import { buildInbox, stableOrder } from '@/lib/inbox'
 import { QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { agent, approval, question, task } from '@/test-utils'
@@ -112,5 +112,14 @@ describe('buildInbox', () => {
       const archived = agent('a-2', 'Old', AgentStatus.ARCHIVED, { atMs: 1, reason: 'x' })
       expect(buildInbox({ tasks: [], approvals: [], agents: [archived], isAdmin: true, agentNames: names, userId: 'u-1' })).toEqual([])
     })
+  })
+})
+
+describe('stableOrder', () => {
+  const row = (key: string, at: number) => ({ kind: 'task-input' as const, key, taskId: key, taskTitle: `title ${at}`, agentName: undefined, at })
+  it('keeps the frozen order but shows the current row content, drops gone rows, appends new ones', () => {
+    const out = stableOrder([row('c', 3), row('a', 9), row('d', 5)], ['a', 'b', 'c'])
+    expect(out.map((i) => i.key)).toEqual(['a', 'c', 'd'])
+    expect(out[0]).toMatchObject({ taskTitle: 'title 9' })
   })
 })

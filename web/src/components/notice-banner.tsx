@@ -51,7 +51,7 @@ export function NoticeBanner({ orgId, platformAdmin }: { orgId: string; platform
         <p className="text-sm">
           {all.length - shown.length} more.{' '}
           <Link to="/settings/budgets" className="underline">
-            See all notices
+            See all notifications
           </Link>
         </p>
       )}
