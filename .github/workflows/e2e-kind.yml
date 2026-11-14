@@ -17,7 +17,11 @@
 #     since the last green run. Nightly: always, once a day, to catch drift nothing in the tree
 #     explains (upstream images, the runner image, downloads). The nightly run also backs up and restores the
 #     install (test/e2e/backup-restore.sh, which runs
-#     test/e2e/commands/backup-restore.e1) and checks it came back. A red run after a green one opens
+#     test/e2e/commands/backup-restore.e1) and checks it came back. It also runs the run-1 story suite (test/e2e/stories_test.go,
+#     label stories, issue 992) after the quickstart, with the fake model and no paid call: a red story suite
+#     is advisory on the schedule event: it does not change the quickstart result (so not the release gate), but the
+#     job output `stories_red` starts hack/e2e-bisect.sh, which dispatches with stories=true (there the suite is blocking,
+#     so the bisect reads its result as pass or fail; ADR 0025 amendment, ADR 0109). A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
 #   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
@@ -60,6 +64,10 @@ on:
         default: go
       backup_restore:
         description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does.'
+        type: boolean
+        default: false
+      stories:
+        description: 'Also run the run-1 story suite (test/e2e/stories_test.go, go suite only). The nightly run always does; the bisect passes it.'
         type: boolean
         default: false
       commit:
@@ -158,7 +166,14 @@ jobs:
       contents: read
       packages: read # the harness image CI's harnesses job pushed to GHCR
     runs-on: ubuntu-24.04
-    timeout-minutes: 35 # the job takes about 14 minutes (#572); the nightly adds 20 seconds
+    # The job takes about 14 minutes (#572). The nightly adds the backup and restore (20 seconds) and the story suite (issue 992):
+    # two agents with a sandbox each, and waits of up to 8 minutes (the MCP prober, a question, a resume). Measured on kind: the six stories take about 4 minutes
+    # (S4, the slow run, about 100 seconds); the stories pass has a 15 minute timeout (about 3 times that). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
+    # worst case on the schedule and on a dispatch with stories=true; other runs keep 35. The worst case is about 69 minutes
+    # (test/e2e/run.sh: set-up 10, quickstart pass 30, stories pass 15, escape 8, backup 1, tear-down 5), so the limit is 75.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories) && 75 || 35 }}
+    outputs:
+      stories_red: ${{ steps.storiesverdict.outputs.red }}
     defaults:
       run:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
@@ -293,6 +308,12 @@ jobs:
           # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
+          # The run-1 story suite (test/e2e/stories_test.go, issue 992) after the quickstart: on the nightly schedule and on a dispatch with
+          # stories=true (the bisect).
+          STORIES: ${{ (github.event_name == 'schedule' || inputs.stories) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
+          # Advisory on the schedule event: a red pass leaves the quickstart result alone (hack/release-gate.sh reads it) and
+          # sets the job output `stories_red`. A dispatch with stories=true (the bisect) is blocking: it needs pass or fail.
+          STORIES_ADVISORY: ${{ github.event_name == 'schedule' && '1' || '0' }}
           # Also run the escape suite's leak guard case from a sandbox against this install (#348).
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
@@ -309,6 +330,22 @@ jobs:
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
         run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+
+      - name: Story suite verdict
+        id: storiesverdict
+        if: always()
+        run: |
+          if [[ -e "$RUNNER_TEMP/e2e/stories-red" ]]; then echo red=true >>"$GITHUB_OUTPUT"; else echo red=false >>"$GITHUB_OUTPUT"; fi
+
+      # A passed story suite leaves a marker; the bisect reads this artifact to find the newest nightly whose stories
+      # passed (hack/e2e-bisect.sh with STORIES_RED=1).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stories-green
+          path: ${{ runner.temp }}/e2e/stories-green
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Timings
         if: always()
@@ -408,7 +445,7 @@ jobs:
   bisect:
     needs: quickstart
     if: >-
-      always() && needs.quickstart.result == 'failure'
+      always() && (needs.quickstart.result == 'failure' || needs.quickstart.outputs.stories_red == 'true')
       && (github.event_name == 'push' || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -430,6 +467,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: hack/e2e-bisect.sh
+        env:
+          # The stories were red while the quickstart passed: the baseline is the newest nightly whose stories passed.
+          STORIES_RED: ${{ needs.quickstart.outputs.stories_red == 'true' && needs.quickstart.result != 'failure' && '1' || '0' }}
 
   # The automated restore drill (ADR 0109, #514), advisory. It lives in this file because GitHub starts a
   # dispatch or a schedule only from a workflow file on the default branch, and this one already has them.
