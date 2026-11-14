@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The escape suite's OpenShell cases (ADR 0025) against the OpenShell gateway that
-# `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). No registry, no home lab:
+# `make dev-kind-up` installs on kind-koinon-dev (or DEV_KIND_CLUSTER). It needs the local registry that
+# `make dev-kind-up` attaches to the cluster; no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
 # nvcr.io or apt at run time, old issue 357) and pushed to the cluster's path on the local registry
@@ -187,7 +188,12 @@ fi
 # The sandboxes pull the probe from the registry; only the layers it lacks are sent. The tag is reused (`1`
 # for a local build), and a node that pulled an old `1` would keep it, so the reference carries the pushed
 # digest: a rebuilt probe is a new name.
-probe_ref="$REPO/probe:${IMAGE##*:}"
+# The tag is the part after a colon in the last path segment (a registry port is not a tag); an image with
+# no tag, or with a digest, gets a fixed tag.
+probe_name=${IMAGE%%@*}; probe_last=${probe_name##*/}
+probe_tag_part=dev
+[[ $probe_last != *:* ]] || probe_tag_part=${probe_last##*:}
+probe_ref="$REPO/probe:$probe_tag_part"
 [[ $IMAGE != *@* ]] || probe_ref="$REPO/probe:pulled"
 docker tag "$IMAGE" "$probe_ref"
 probe_digest=$(docker push "$probe_ref" 2>"$tmp/push.log" | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p') ||
@@ -247,8 +253,9 @@ if (( need_gitea )); then
   # ConfigMap, so the name carries a digest of the CA: every run makes a new CA, a new name changes the helm
   # value, and the upgrade (--wait) rolls the gateway. The same upgrade resets supervisor.image.* to the
   # chart's 0.1.7 defaults (values.yaml: registry "" = global registry, repository openshell/supervisor,
-  # tag "" = appVersion, pullPolicy null = global): --reuse-values would otherwise keep the derived
-  # derived koinon/escape-supervisor image that an older kind.sh set on a dev cluster.
+  # tag "" = appVersion, pullPolicy null = global): --reuse-values would otherwise keep the image that an
+  # older kind.sh loaded into a dev cluster (kind.local/koinon/escape-supervisor). The reset makes the gateway
+  # use the chart's supervisor image again, so that old image is ignored; it is no longer used.
   # The chart ref is the one test/e2e/kind/up.sh installs.
   os_version=$(sed -n 's/^OS_VERSION=//p' "$root/test/e2e/kind/up.sh")
   os_digest=$(sed -n 's/^OS_DIGEST=//p' "$root/test/e2e/kind/up.sh")

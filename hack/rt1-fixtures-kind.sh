@@ -42,18 +42,30 @@ for img in rt1-motherduck:test/fixtures/rt1/motherduck/Dockerfile:test/fixtures/
   run docker push -q "$REPO/$name:dev"
 done
 
+# The awk pass adds imagePullPolicy: Always after a registry image line, unless the same container already
+# sets a policy (it looks at the keys before and after the image line, up to the container's edge).
+rewrite() {
+  awk -v repo="$REPO" '
+    function ind(l) { match(l, /^ */); return RLENGTH }
+    { sub(/localhost:5001\//, repo "/"); L[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        print L[i]
+        if (!match(L[i], /image: /) || index(substr(L[i], RSTART + 7), repo "/") != 1) continue
+        n = RSTART - 1; has = 0
+        # "image:" may follow a list dash ("- image: ..."): the keys of the container line up with it.
+        for (j = i + 1; j <= NR; j++) { if (ind(L[j]) < n || (ind(L[j]) == n - 2 && L[j] ~ /^ *- /)) break; if (ind(L[j]) == n && L[j] ~ /^ *imagePullPolicy:/) has = 1 }
+        for (j = i - 1; j >= 1 && !has; j--) { if (ind(L[j]) < n - 2) break; if (ind(L[j]) == n - 2 && L[j] ~ /^ *- /) { if (L[j] ~ /imagePullPolicy:/) has = 1; break } ; if (ind(L[j]) == n && L[j] ~ /^ *imagePullPolicy:/) has = 1 }
+        if (!has) printf "%*simagePullPolicy: Always\n", n, ""
+      }
+    }'
+}
+
 # The overlay names the images under localhost:5001; this cluster's are under $REPO. The tag `dev` is reused
 # and a pushed image is not reloaded into the node as `kind load` did, so the Pods pull it on every start.
 # The Secrets in the overlay are fake placeholders (secrets.example.yaml).
-if [ "${DRY_RUN:-}" = 1 ]; then
-  echo "+ kubectl --context $CTX kustomize test/fixtures/rt1/overlays/kind | rewrite localhost:5001 to $REPO | kubectl apply -f -" >&2
-  exit 0
+echo "+ kubectl --context $CTX kustomize test/fixtures/rt1/overlays/kind | rewrite localhost:5001 to $REPO | kubectl apply -f -" >&2
+if [ "${DRY_RUN:-}" != 1 ]; then
+  kubectl --context "$CTX" kustomize test/fixtures/rt1/overlays/kind | rewrite | kubectl --context "$CTX" apply -f -
 fi
-kubectl --context "$CTX" kustomize test/fixtures/rt1/overlays/kind |
-  awk -v repo="$REPO" '
-    { sub(/localhost:5001\//, repo "/") }
-    { print }
-    # "image:" may follow a list dash ("- image: ..."): the new key lines up with it.
-    match($0, /image: /) && index(substr($0, RSTART + 7), repo "/") == 1 { printf "%*simagePullPolicy: Always\n", RSTART - 1, "" }' |
-  kubectl --context "$CTX" apply -f -
 run kubectl --context "$CTX" -n koinon-fixtures rollout status deploy --timeout=300s
