@@ -103,8 +103,9 @@ type RefreshConfig struct {
 	Metrics *Metrics
 	Log     *slog.Logger
 	// Catalog, when set, stores the model metadata of an OpenRouter fetch (ADR 0070 amendment of
-	// 2026-11-11): weekly, from the same list the price fetch reads, so it adds no request to the
-	// list, and only the endpoints route of the models in use. Nil stores nothing.
+	// 2026-11-11): the metadata is stored weekly, from the same list the price fetch reads, so it
+	// adds no request to the list. The endpoints route is asked only for the models in use, each
+	// when that model is due. Nil stores nothing.
 	Catalog *orcatalog.Store
 	// Now is the clock (tests); nil means time.Now.
 	Now func() time.Time

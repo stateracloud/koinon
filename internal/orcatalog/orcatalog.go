@@ -42,7 +42,9 @@ import (
 // metadata is stored and the endpoints route is asked.
 const Interval = 7 * 24 * time.Hour
 
-// MaxEndpointModels caps how many models get an endpoints request in one refresh.
+// MaxEndpointModels caps how many models get an endpoints request in one round. A round asks the
+// models whose endpoints are the oldest (or were never fetched) first, so with more models in use
+// than this the next rounds cover the rest.
 const MaxEndpointModels = 100
 
 // The behaviour-changing fields.
@@ -123,6 +125,46 @@ func InUseListed(inUse, listed []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// EndpointsDue says which models the endpoints route should be asked about now, and how many more
+// are due but left for a later round by MaxEndpointModels. It is decided per model from the
+// endpoints_fetched_at of its row: a model is due when it never had its endpoints fetched or the
+// last fetch is (about) a week old. A round that failed or stopped half-way stored nothing for the
+// models it did not reach, so they stay due and the next tick asks again. A model without a row (the
+// catalog has not stored it) is not due: there is nothing to store its endpoints in. The result is
+// ordered never-fetched first, then oldest first, then by name, so successive rounds rotate through
+// every model in use.
+//
+// Interim (#1021): a model whose endpoints route always fails keeps endpoints_fetched_at NULL, so it
+// is asked first in every round. With MaxEndpointModels or more such models, the stale models are
+// not refreshed. Exit: an attempt time is recorded and failing models sort after stale ones.
+func (s *Store) EndpointsDue(ctx context.Context, now time.Time, inUse, listed []string) (batch []string, left int, err error) {
+	rows, err := store.New(s.pool).ListOpenRouterModels(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	at := make(map[string]time.Time, len(rows)) // zero for a model never fetched
+	for _, r := range rows {
+		if r.EndpointsFetchedAt.Valid {
+			at[r.Model] = r.EndpointsFetchedAt.Time
+		} else {
+			at[r.Model] = time.Time{}
+		}
+	}
+	var due []string
+	for _, m := range InUseListed(inUse, listed) {
+		t, ok := at[m]
+		if ok && (t.IsZero() || now.Sub(t) >= Interval-dueSlack) {
+			due = append(due, m)
+		}
+	}
+	slices.SortStableFunc(due, func(a, b string) int { return at[a].Compare(at[b]) }) // InUseListed sorted by name
+	if len(due) > MaxEndpointModels {
+		left = len(due) - MaxEndpointModels
+		due = due[:MaxEndpointModels]
+	}
+	return due, left, nil
 }
 
 // Result says what one Apply stored.
