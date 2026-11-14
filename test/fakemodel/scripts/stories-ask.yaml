@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The question story of the run-1 suite (test/e2e/stories_test.go, issue 992): the agent asks one person one
+# question with ask_user, with choices, and once the answer arrives it reports it. The run parks on the
+# question (input_required) and resumes with the answer. The agent is made from the web-researcher template,
+# whose instructions open with "# Web researcher". Selection is stateless: the first turn whose `when` holds
+# answers the request (see repo-helper.yaml); the resumed run's prompt carries "the person answered: ...".
+model: stories-ask
+turns:
+  - when:
+      systemContains: "# Web researcher"
+      userContains: "Your turn is over"
+    text: "Notes: asked one question and reported the answer."
+    usage:
+      inputTokens: 1600
+      cachedInputTokens: 1400
+      outputTokens: 12
+  - when:
+      systemContains: "# Web researcher"
+      userContains: "the person answered"
+    text: "The answer was received, thank you."
+    usage:
+      inputTokens: 1500
+      cachedInputTokens: 1350
+      outputTokens: 12
+  - when:
+      systemContains: "# Web researcher"
+      toolResult: ask_user
+    text: I asked the question. I will go on once it is answered.
+    usage:
+      inputTokens: 1250
+      cachedInputTokens: 1100
+      outputTokens: 16
+  - when:
+      systemContains: "# Web researcher"
+      userContains: "stories ask"
+    toolCalls:
+      - name: ask_user
+        arguments:
+          question: Shall I go ahead with the plan?
+          choices: ["yes", "no"]
+          default: "no"
+    usage:
+      inputTokens: 1200
+      outputTokens: 40

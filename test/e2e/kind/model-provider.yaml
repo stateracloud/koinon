@@ -19,3 +19,6 @@ stringData:
   apiKey: e2e-dummy-key
   models: |
     - name: repo-helper
+    # The run-1 story suite (test/e2e/stories_test.go): scripts test/fakemodel/scripts/stories-*.yaml.
+    - name: stories-ask
+    - name: stories-slow

@@ -17,7 +17,7 @@
 # 2. Candidates: those whose changed files hack/needs-e2e.sh --stdin says need the e2e. At most
 #    MAX_CANDIDATES (5), the newest; older ones are listed as untested.
 # 3. Opens the issue first, listing the candidates, so a timeout still leaves a record.
-# 4. Dispatches the e2e-kind workflow on every candidate (inputs `commit` and `bisect_id`, this
+# 4. Dispatches the e2e-kind workflow on every candidate (inputs `commit`, `bisect_id`, `backup_restore`, and `stories` only when STORIES_RED=1; this
 #    run's id, which the dispatched run's name carries), in parallel, and polls each once a minute
 #    (never `gh run watch`: its polling spends the 1000 requests/hour token budget). An outcome is
 #    pass, fail, or unknown (cancelled, timed out, not found).
@@ -35,6 +35,9 @@ set -euo pipefail
 MAX_CANDIDATES=${MAX_CANDIDATES:-5}
 POLL_SECONDS=${POLL_SECONDS:-60}
 CANDIDATE_TIMEOUT=${CANDIDATE_TIMEOUT:-5100} # 85 min
+# STORIES_RED=1 (the bisect job sets it when the story suite was red and the quickstart passed): the baseline is
+# the newest nightly whose stories passed, and the candidates run with stories=true.
+STORIES_RED=${STORIES_RED:-0}
 dry=0 green="" head=HEAD results="" prev="" open_issue=""
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -58,7 +61,26 @@ if [[ $dry == 0 ]]; then
   runs=$("$GH" run list --workflow e2e-kind.yml --branch main --limit 50 --json databaseId,headSha,event,conclusion \
     --jq "[.[] | select((.event == \"push\" or .event == \"schedule\") and (.conclusion == \"success\" or .conclusion == \"failure\") and .databaseId != $RUN_ID)]")
   [[ -n $prev ]] || prev=$(jq -r '.[0].conclusion // ""' <<<"$runs")
-  [[ -n $green ]] || green=$(jq -r '[.[] | select(.conclusion == "success")][0].headSha // ""' <<<"$runs")
+  if [[ -n $green ]]; then
+    :
+  elif [[ ${STORIES_RED:-0} == 1 ]]; then
+    # Only a nightly runs the stories (a push never does) and an advisory red stories pass still concludes
+    # success, so the baseline is the newest schedule run that left the artifact `stories-green` (run.sh writes
+    # the marker when the stories passed; the workflow uploads it).
+    for id in $(jq -r '[.[] | select(.event == "schedule" and .conclusion == "success")][].databaseId' <<<"$runs"); do
+      # An API error counts as "no stories-green artifact": the search moves to an older run, it does not abort.
+      n=$("$GH" api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '[.artifacts[] | select(.name == "stories-green" and (.expired | not))] | length') || {
+        echo "e2e-bisect: warning: cannot list the artifacts of run $id; no stories-green artifact for this run" >&2
+        n=0
+      }
+      if [[ $n -gt 0 ]]; then
+        green=$(jq -r ".[] | select(.databaseId == $id) | .headSha" <<<"$runs")
+        break
+      fi
+    done
+  else
+    green=$(jq -r '[.[] | select(.conclusion == "success")][0].headSha // ""' <<<"$runs")
+  fi
   [[ -n $open_issue ]] || open_issue=$("$GH" issue list --label e2e-regression --state open --limit 1 --json number --jq '.[0].number // empty')
 fi
 
@@ -181,13 +203,15 @@ if ((${#candidates[@]} == 0)); then
   status="No merge since the last green run changed anything the e2e depends on: suspect a flake or the environment (runner, an upstream image or a download). Re-run the e2e on main."
 else
   wd=$(mktemp -d "${TMPDIR:-/tmp}/e2e-bisect.XXXXXX")
+  stories_args=()
+  [[ $STORIES_RED != 1 ]] || stories_args=(-f stories=true)
   for c in "${candidates[@]}"; do
     if [[ $dry == 1 ]]; then
-      echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID -f backup_restore=true"
+      echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID -f backup_restore=true${stories_args[*]:+ ${stories_args[*]}}"
     else
       # The bisect runs only for push and schedule, so the backup-restore step (#90) is always in
       # scope: without it a nightly that went red there could never reproduce on a candidate.
-      "$GH" workflow run e2e-kind.yml --ref main -f "commit=$c" -f "bisect_id=$RUN_ID" -f backup_restore=true
+      "$GH" workflow run e2e-kind.yml --ref main -f "commit=$c" -f "bisect_id=$RUN_ID" -f backup_restore=true "${stories_args[@]}"
     fi
   done
   for c in "${candidates[@]}"; do (outcome "$c" >"$wd/$c") & done

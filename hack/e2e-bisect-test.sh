@@ -128,8 +128,11 @@ echo "gh $*" >>"$FX/calls"
 jqexpr="" ; args=("$@")
 for i in "${!args[@]}"; do [[ ${args[$i]} == --jq ]] && jqexpr=${args[$((i + 1))]}; done
 case "$1 $2" in
-"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched.json; else f=runs.json; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
+"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
 "run view") jq -r "${jqexpr:-.}" "$FX/view-$3.json" ;;
+"api repos/x/y/actions/runs/60/artifacts") echo "HTTP 502" >&2; exit 1 ;; # the artifacts call fails for run 60
+"api repos/x/y/actions/runs/40/artifacts") echo 1 ;; # only run 40 left a stories-green artifact
+"api "*) echo 0 ;;
 "issue list") ;;
 "issue create") echo "https://example.invalid/issues/1" ;;
 esac
@@ -142,6 +145,24 @@ nocheck "$out" "candidate .*: pass" "the run of another bisect is ignored"
 check "$(cat "$fx/calls")" "issue edit https://example.invalid/issues/1" "the issue is updated"
 check "$(cat "$fx/calls")" "bisect_id=999" "the dispatch carries the bisect id"
 nocheck "$(cat "$fx/calls")" "run watch" "never gh run watch"
+nocheck "$(cat "$fx/calls")" "stories=true" "a quickstart-failure bisect does not ask for the stories"
+
+# A stories-red bisect: the baseline is the newest nightly whose stories passed (run 40), not the newer
+# push (50) or the newer nightly that was green without the stories (60).
+cat >"$fx/runs2.json" <<JSON
+[{"databaseId":60,"headSha":"$head","event":"schedule","conclusion":"success"},
+ {"databaseId":50,"headSha":"$head","event":"push","conclusion":"success"},
+ {"databaseId":40,"headSha":"$green","event":"schedule","conclusion":"success"}]
+JSON
+: >"$fx/calls"
+out=$(RUNS=runs2.json STORIES_RED=1 GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
+check "$out" "baseline $green" "stories-red: the baseline is the newest nightly with the stories-green artifact"
+check "$out" "cannot list the artifacts of run 60" "stories-red: an artifacts API error warns and the search moves to an older run"
+check "$(cat "$fx/calls")" "-f stories=true" "stories-red: the candidates are dispatched with stories=true"
+: >"$fx/calls"
+out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
+check "$out" "baseline $head" "quickstart failure: the baseline is the newest green run"
+nocheck "$(cat "$fx/calls")" "stories=true" "quickstart failure: no stories input"
 
 [[ $fail -eq 0 ]] && echo "e2e-bisect tests passed"
 exit "$fail"

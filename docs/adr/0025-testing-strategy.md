@@ -186,4 +186,6 @@ and the paid-key bullet under Decision.
   pull requests that change their paths. Its OpenShell cases need a gateway, so they run on kind:
   `make dev-kind-up`, then `make test-escape-kind`, and in the kind e2e against the chart install.
 - The open question on the eval budget and the eval set for nightly runs is closed: there are no
-  nightly runs.
+  nightly real-model runs. (Wording of 2026-11-14, issue #992: the nightly schedule exists and runs the
+  kind e2e on the fake model, the restore drill ([0109](0109-automated-restore-drill.md)) and the run-1 story suite,
+  none of which calls a paid model; only a real-model run is excluded.)

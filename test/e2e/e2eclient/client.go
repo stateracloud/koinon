@@ -22,10 +22,14 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 )
 
 // sessionTransport keeps the session cookie the way a browser would. The cookie is Secure, and
@@ -89,6 +93,10 @@ type Client struct {
 	Runs        runv1alpha1connect.RunServiceClient
 	Approvals   approvalv1alpha1connect.ApprovalServiceClient
 	Tokens      tokenv1alpha1connect.TokenServiceClient
+	Questions   questionv1alpha1connect.QuestionServiceClient
+	McpServers  mcpserverv1alpha1connect.McpServerServiceClient
+	Trace       tracev1alpha1connect.TraceDestinationServiceClient
+	OrgSettings orgsettingsv1alpha1connect.OrgSettingsServiceClient
 }
 
 // New returns a client for the API at base (for example http://127.0.0.1:8080), not logged in.
@@ -106,6 +114,10 @@ func New(base string) *Client {
 		Runs:        runv1alpha1connect.NewRunServiceClient(c),
 		Approvals:   approvalv1alpha1connect.NewApprovalServiceClient(c),
 		Tokens:      tokenv1alpha1connect.NewTokenServiceClient(c),
+		Questions:   questionv1alpha1connect.NewQuestionServiceClient(c),
+		McpServers:  mcpserverv1alpha1connect.NewMcpServerServiceClient(c),
+		Trace:       tracev1alpha1connect.NewTraceDestinationServiceClient(c),
+		OrgSettings: orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(c),
 	}
 }
 
