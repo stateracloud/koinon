@@ -810,7 +810,47 @@ creates one of this name in each workspace namespace.
 {{- printf "%s-%s-sandbox-limitrange" .Release.Namespace (include "koinon.fullname" .) -}}
 {{- end }}
 
+{{/*
+koinon.quantity turns a Kubernetes quantity (250m, 2, 1.5Gi, 512M) into a float64 in base units, so
+koinon.validate can compare two of them. An empty string gives -1 (a bound that is not set); text that
+is not a quantity fails the render with the same view as koinon-api would give at start.
+*/}}
+{{- define "koinon.quantity" -}}
+{{- $q := toString .q -}}
+{{- if eq $q "" -}}-1
+{{- else -}}
+{{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?(m|Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$" $q) }}{{- fail (printf "%s %q is not a Kubernetes quantity (examples: 250m, 2, 1Gi)" .what $q) }}{{- end -}}
+{{- $num := regexFind "^[0-9.]+" $q -}}
+{{- $unit := trimPrefix $num $q -}}
+{{- $n := float64 $num -}}
+{{- $f := dict "" 1.0 "m" 0.001 "k" 1e3 "M" 1e6 "G" 1e9 "T" 1e12 "P" 1e15 "E" 1e18 "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0 "Ti" 1099511627776.0 "Pi" 1125899906842624.0 "Ei" 1152921504606846976.0 -}}
+{{- mulf $n (index $f $unit) -}}
+{{- end -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
+{{- /* sandboxres.Policy.Validate (koinon-api and the reconciler refuse to start on these two cross-field rules): a limit is clamped into its range and the request is then lowered to it, so the limit range must not start below the request minimum; with memoryRequestEqualsLimit it must not end above the request maximum. */ -}}
+{{- $sb := .Values.sandbox.resources }}
+{{- range $r := list (dict "name" "cpu" "b" $sb.bounds.cpu "equal" false) (dict "name" "memory" "b" $sb.bounds.memory "equal" $sb.memoryRequestEqualsLimit) }}
+{{- $rm := $r.b.request.min | toString }}
+{{- if $rm }}
+{{- $lm := $r.b.limit.min | toString }}
+{{- $rv := include "koinon.quantity" (dict "q" $rm "what" (printf "sandbox.resources.bounds.%s.request.min" $r.name)) | float64 }}
+{{- $lv := include "koinon.quantity" (dict "q" $lm "what" (printf "sandbox.resources.bounds.%s.limit.min" $r.name)) | float64 }}
+{{- if or (not $lm) (lt $lv $rv) }}
+{{- fail (printf "sandbox.resources.bounds.%s: limit.min %q is below request.min %q: a limit range must not start below the request minimum, or koinon-api and the reconciler refuse to start. Raise limit.min or lower request.min" $r.name $lm $rm) }}
+{{- end }}
+{{- end }}
+{{- $rx := $r.b.request.max | toString }}
+{{- if and $r.equal $rx }}
+{{- $lx := $r.b.limit.max | toString }}
+{{- $rv := include "koinon.quantity" (dict "q" $rx "what" (printf "sandbox.resources.bounds.%s.request.max" $r.name)) | float64 }}
+{{- $lv := include "koinon.quantity" (dict "q" $lx "what" (printf "sandbox.resources.bounds.%s.limit.max" $r.name)) | float64 }}
+{{- if or (not $lx) (gt $lv $rv) }}
+{{- fail (printf "sandbox.resources.bounds.%s: with sandbox.resources.memoryRequestEqualsLimit=true limit.max %q is above request.max %q, or koinon-api and the reconciler refuse to start. Lower limit.max, raise request.max, or set memoryRequestEqualsLimit=false" $r.name $lx $rx) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if eq (include "koinon.kms" .) "openbao" }}
 {{- $o := .Values.secrets.kek.kms.openbao }}
 {{- if not $o.address }}
