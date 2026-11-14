@@ -3,7 +3,7 @@
 # RT1 fixtures, the base: remote MCP servers and the escape suite's gateway stand-in in namespace
 # koinon-fixtures. See ../README.md. Image names here are bare (rt1-motherduck:dev); an overlay
 # says where they come from, so apply one of the overlays, not this directory:
-#   overlays/kind     images built locally and loaded into kind, fake secrets  (hack/rt1-fixtures-kind.sh)
+#   overlays/kind     images pushed to the local registry, fake secrets  (hack/rt1-fixtures-kind.sh)
 #   overlays/remote   images in your registry (hack/rt1-fixtures-build.sh REGISTRY)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
