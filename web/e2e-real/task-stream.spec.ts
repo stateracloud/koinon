@@ -129,8 +129,8 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('First message (optional)').fill(`Please add a hello.md to ${repository} that says hello from koinon.`)
   await page.getByRole('button', { name: 'Create task' }).click()
-  // The new task opens in place as a conversation next to the inbox; open its page.
-  await expect(page.getByRole('region', { name: `Conversation: ${title}` })).toBeVisible()
+  // The new task opens in place as a thread next to the inbox; open its page.
+  await expect(page.getByRole('region', { name: `Thread: ${title}` })).toBeVisible()
   await page.getByRole('link', { name: 'Open task' }).click()
   await expect(page).toHaveURL(/\/tasks\/[^/]+$/)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()

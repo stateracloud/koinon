@@ -11,7 +11,9 @@ import { useOrg } from '@/lib/org-context'
  * ListAskableMembers is an admin-only RPC (internal/services/questions.go), so the query runs only
  * for admins; members and viewers get an empty map and the Timeline shows "Another member".
  * Exit condition: a member-readable source of author names (an actor display name on the task
- * event, or a members RPC the member role may call); tracked by a follow-up issue, see the PR.
+ * event, or a members RPC the member role may call); tracked in
+ * https://github.com/stateracloud/koinon/issues/1031: remove the admin-only path when #1031 gives
+ * members a readable author name.
  */
 export function useMemberNames(orgId: string): ReadonlyMap<string, string> {
   const { org } = useOrg()

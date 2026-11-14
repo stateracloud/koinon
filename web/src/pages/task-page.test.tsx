@@ -45,14 +45,20 @@ describe('TaskPage member names', () => {
     })
     renderApp(transport, '/tasks/t-1')
     await screen.findByRole('button', { name: 'Cancel task Say hello' })
-    // Give a query that is enabled time to reach the transport.
-    await new Promise((r) => setTimeout(r, 200))
-    return calls
+    return { calls: () => calls }
   }
 
-  it('asks for member names only as an admin', async () => {
-    expect(await askableCalls(OrgRole.MEMBER)).toBe(0)
-    expect(await askableCalls(OrgRole.ADMIN)).toBeGreaterThan(0)
+  it('does not ask for member names as a member', async () => {
+    const { calls } = await askableCalls(OrgRole.MEMBER)
+    // The page has rendered the task; give a wrongly enabled query the chance to fire, then check it did not.
+    await screen.findByRole('heading', { name: 'Say hello' })
+    await Promise.resolve()
+    expect(calls()).toBe(0)
+  })
+
+  it('asks for member names as an admin', async () => {
+    const { calls } = await askableCalls(OrgRole.ADMIN)
+    await waitFor(() => expect(calls()).toBeGreaterThan(0))
   })
 })
 
