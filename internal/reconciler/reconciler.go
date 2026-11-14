@@ -1997,8 +1997,14 @@ const ForeignReason = "OwnedByAnotherInstall"
 // another install. A database restored next to the live install still holds the live install's
 // "ready" rows; koinon-agentd trusts a ready row, so without this it would run in the other
 // install's sandbox. In error, agentd fails the run with sandbox-unavailable and does not exec.
+// This row is a courtesy to the operator and to agentd's early failure; the real guard is
+// guardSandbox in the OpenShell backend, which refuses every call on a sandbox another install owns.
+// So a failed write is logged and the pass goes on.
 func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
-	_ = r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "")
+	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, ""); rerr != nil {
+		r.log.Warn("recording the foreign-owned sandbox failed; guardSandbox still refuses it",
+			append(w.logAttrs(), "err", rerr)...)
+	}
 }
 
 // recordMessage stores a reconcile error on the row for operators, keeping the state.
