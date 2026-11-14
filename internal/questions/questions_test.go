@@ -208,6 +208,35 @@ var _ = Describe("a question", func() {
 		Expect(undelivered).To(HaveLen(2))
 	})
 
+	It("answers an already answered question with ErrNotOpen while a turn end holds the run's lock", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		open(ctx)
+		park(ctx)
+		answer := func(ctx context.Context) error {
+			return tx(ctx, func(q *store.Queries, b audit.Batch) error {
+				_, err := questions.Respond(ctx, q, b, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+				return err
+			})
+		}
+		Expect(answer(ctx)).To(Succeed())
+
+		By("a turn end in progress: the run is locked and the answered question is marked delivered")
+		turn, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = turn.Rollback(context.WithoutCancel(ctx)) }()
+		tq := store.New(turn)
+		_, err = tq.MarkQuestionsDelivered(ctx, store.MarkQuestionsDeliveredParams{OrgID: w.org, Ids: []pgtype.UUID{row.ID}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tq.LockRun(ctx, store.LockRunParams{OrgID: w.org, ID: w.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("the second answer is refused at once, without waiting for the turn end")
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		Expect(answer(waitCtx)).To(MatchError(questions.ErrNotOpen))
+		Expect(turn.Commit(ctx)).To(Succeed())
+	})
+
 	It("cannot be addressed to a viewer, who cannot answer", func(ctx SpecContext) {
 		viewer := w.member(ctx)
 		_, err := pool.Exec(ctx, `UPDATE org_memberships SET role = 'viewer' WHERE org_id = $1 AND user_id = $2`, w.org, viewer)

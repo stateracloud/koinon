@@ -374,14 +374,23 @@ func (a Answer) check(row store.Question) (Answer, error) {
 }
 
 // resolve moves the open question to its end state, with the task event, the audit event and the
-// run's park, in the caller's transaction. The caller has not locked anything: it locks the run
-// first, then the question, in the same order as agentd's endTurn.
+// run's park, in the caller's transaction. The caller has not locked anything. A question that is
+// already resolved returns ErrNotOpen before any lock. Otherwise resolve locks the run first and
+// then the question. The turn end (runoutcome Owner.EndTurn) takes the run's lock before it reads
+// or changes anything else of the run; the one question write it makes earlier,
+// MarkQuestionsDelivered, only touches questions that are already resolved, and resolve never
+// writes those, so the two cannot wait on each other.
 func resolve(ctx context.Context, q *store.Queries, b audit.Batch, org, id pgtype.UUID, by pgtype.UUID, state store.QuestionState,
 	check func(store.Question) (Answer, error),
 ) (store.Question, error) {
 	cur, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
 	if err != nil {
 		return store.Question{}, err
+	}
+	// An answer to a question that is already resolved changes nothing: say so without waiting for
+	// the run's lock, which a turn end may hold. The check is repeated under the lock below.
+	if cur.State != store.QuestionStateOpen {
+		return cur, ErrNotOpen
 	}
 	// The run's lock orders this against agentd's turn end and against approval decisions.
 	run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: cur.RunID})
