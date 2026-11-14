@@ -232,11 +232,14 @@ func TestFixedVendorShapesBelowTheFloor(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	for name, key := range map[string]string{
 		"aws key id, two letters": "AKIA" + strings.Repeat("QZ", 8),
-		"aws key id, one letter":  "AKIA" + strings.Repeat("Q", 16),
-		"github pat":              "ghp_" + strings.Repeat("ab", 18),
-		"github app":              "ghs_" + strings.Repeat("z", 36),
-		"gitlab pat":              "glpat-" + strings.Repeat("x", 20),
-		"npm":                     "npm_" + strings.Repeat("a", 36),
+		// Issue 677: a plain test run once drew this ID, with many repeats, and it survived.
+		// Decision: the scrubber keeps no entropy floor for the AWS key ID shape.
+		"aws key id, issue 677":  "AKIAUAAA22VFXVVVRV2J",
+		"aws key id, one letter": "AKIA" + strings.Repeat("Q", 16),
+		"github pat":             "ghp_" + strings.Repeat("ab", 18),
+		"github app":             "ghs_" + strings.Repeat("z", 36),
+		"gitlab pat":             "glpat-" + strings.Repeat("x", 20),
+		"npm":                    "npm_" + strings.Repeat("a", 36),
 	} {
 		for _, in := range []string{key, "id " + key + " ok", `{"k":"` + key + `"}`, "x/" + key} {
 			if out := s.Text(in); strings.Contains(out, key) {
