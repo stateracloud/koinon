@@ -58,14 +58,6 @@ const (
 	storiesSlowModel = "stories-slow"
 )
 
-// codeOf is the Connect code of err, or a text that says there was none (for a Gomega message).
-func codeOf(err error) string {
-	if err == nil {
-		return "no error"
-	}
-	return connect.CodeOf(err).String()
-}
-
 // expectRefused fails unless err is a Connect error with this code and a message that contains want.
 func expectRefused(err error, code connect.Code, want string) {
 	GinkgoHelper()

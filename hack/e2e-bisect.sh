@@ -17,7 +17,7 @@
 # 2. Candidates: those whose changed files hack/needs-e2e.sh --stdin says need the e2e. At most
 #    MAX_CANDIDATES (5), the newest; older ones are listed as untested.
 # 3. Opens the issue first, listing the candidates, so a timeout still leaves a record.
-# 4. Dispatches the e2e-kind workflow on every candidate (inputs `commit` and `bisect_id`, this
+# 4. Dispatches the e2e-kind workflow on every candidate (inputs `commit`, `bisect_id`, `backup_restore` and `stories`; this
 #    run's id, which the dispatched run's name carries), in parallel, and polls each once a minute
 #    (never `gh run watch`: its polling spends the 1000 requests/hour token budget). An outcome is
 #    pass, fail, or unknown (cancelled, timed out, not found).
@@ -183,11 +183,11 @@ else
   wd=$(mktemp -d "${TMPDIR:-/tmp}/e2e-bisect.XXXXXX")
   for c in "${candidates[@]}"; do
     if [[ $dry == 1 ]]; then
-      echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID -f backup_restore=true"
+      echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID -f backup_restore=true -f stories=true"
     else
       # The bisect runs only for push and schedule, so the backup-restore step (#90) is always in
       # scope: without it a nightly that went red there could never reproduce on a candidate.
-      "$GH" workflow run e2e-kind.yml --ref main -f "commit=$c" -f "bisect_id=$RUN_ID" -f backup_restore=true
+      "$GH" workflow run e2e-kind.yml --ref main -f "commit=$c" -f "bisect_id=$RUN_ID" -f backup_restore=true -f stories=true
     fi
   done
   for c in "${candidates[@]}"; do (outcome "$c" >"$wd/$c") & done
