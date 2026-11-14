@@ -42,7 +42,7 @@ and anything that surprised you. Report problems as issues with the run's ID.
 On kind:
 
 ```sh
-hack/rt1-fixtures-kind.sh        # builds the five images, loads them into kind-koinon-dev, applies overlays/kind
+hack/rt1-fixtures-kind.sh        # builds the five images, pushes them to kind-koinon-dev's local registry path, applies overlays/kind
 ```
 
 On another cluster, push the images to a registry the cluster can pull from, then apply the remote
