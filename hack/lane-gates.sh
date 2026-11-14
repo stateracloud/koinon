@@ -15,7 +15,10 @@
 # Which gates: the lint, test and consistency gates of hack/preflight.sh (`--list` picks them from
 # the diff) plus the heavy CI jobs hack/ci-changes.sh turns on: chartsmoke (make test-chart-smoke),
 # harnesses (make test-harnesses) and escape (make test-admission). Neither list is repeated here.
-# Gates run one after the other; the e2e gate of preflight is informational and is left out.
+# Gates run in parallel, LANE_GATES_JOBS at a time (default 4); tidy and generate, which rewrite files of
+# the tree, run alone at the end. A gate whose inputs are unchanged since its last green run is reported
+# pass with reason="reused ..." (KOINON_GATE_REUSE=0 runs everything; CI never reuses). The e2e gate of
+# preflight is informational and is left out.
 #
 # One line per gate on stdout:
 #   gate=<name> rc=<n> seconds=<n> verdict=pass|fail|notrun [reason=<why>] log=<path>
@@ -124,13 +127,18 @@ git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "lane-gates
 
 # shellcheck source=/dev/null
 . "$(dirname "$0")/paths-lib.sh" || exit 2
+# shellcheck source=/dev/null
+. "$(dirname "$0")/gate-reuse-lib.sh" || exit 2
 paths_load || exit 2 # the `lane` lines of hack/paths.rules say which local gate stands for a CI job
 preflight=${LANE_GATES_PREFLIGHT:-hack/preflight.sh}
 changes=${LANE_GATES_CHANGES:-hack/ci-changes.sh}
 make_cmd=${LANE_GATES_MAKE:-make}
 export KUBECONFIG=/dev/null
 for v in LANE_GATES_PREFLIGHT LANE_GATES_CHANGES LANE_GATES_MAKE LANE_GATES_MISSING_TOOLS; do
-	[[ -z ${!v:-} ]] || echo "lane-gates: warning: test hook $v is set; this run is not a real verdict" >&2
+	if [[ -n ${!v:-} ]]; then
+		echo "lane-gates: warning: test hook $v is set; this run is not a real verdict" >&2
+		export KOINON_GATE_REUSE=0 # a stubbed run proves nothing: it neither reuses nor records a verdict
+	fi
 done
 
 logdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates.XXXXXX") || exit 2
@@ -174,12 +182,22 @@ have_tool() {
 	if [[ $1 == docker ]]; then docker info >/dev/null 2>&1; else command -v "$1" >/dev/null 2>&1; fi
 }
 
+count_verdict() { # <verdict>
+	ran=$((ran + 1))
+	case $1 in fail) failed=1 ;; notrun) notrun=1 ;; esac
+}
+
+# A gate worker (the gates run in parallel, #990) sets REPORT_TO: its line goes to that file and the
+# main shell prints and counts it in plan order. Anything else prints at once.
 report() { # <gate> <rc> <seconds> <verdict> <reason> <log>
 	local line="gate=$1 rc=$2 seconds=$3 verdict=$4"
 	[[ -n $5 ]] && line="$line reason=\"$5\""
+	if [[ -n ${REPORT_TO:-} ]]; then
+		echo "$line log=$6" >"$REPORT_TO"
+		return
+	fi
 	echo "$line log=$6"
-	ran=$((ran + 1))
-	case $4 in fail) failed=1 ;; notrun) notrun=1 ;; esac
+	count_verdict "$4"
 }
 
 # run_cmd <gate> <needs> <command...>: <needs> is a space-separated tool list (docker helm go) or "-".
@@ -197,10 +215,19 @@ run_cmd() {
 			return
 		fi
 	done
+	local fp=""
+	if gate_reuse_enabled; then
+		fp=$(gate_fingerprint job "$g" "$(git merge-base "$base" HEAD)")
+		if gate_reusable "lane.$g" "$fp"; then
+			report "$g" 0 0 pass "reused: inputs unchanged since the last green run" "$log"
+			return
+		fi
+	fi
 	start=$SECONDS
 	"$@" >"$log" 2>&1
 	rc=$?
 	if [[ $rc -eq 0 ]]; then
+		[[ -n $fp ]] && gate_record "lane.$g" "$fp"
 		report "$g" 0 $((SECONDS - start)) pass "" "$log"
 		return
 	fi
@@ -249,7 +276,8 @@ if [[ -z $pre_gates ]]; then
 	exit 1
 fi
 gates=$( { echo "$pre_gates"; for j in $jobgates; do echo "$j"; done; } | awk '!seen[$0]++')
-for g in $gates; do
+run_pre_gate() { # <gate>: one preflight call, one line
+	local g=$1 log start rc secs reason inner
 	log=$logdir/$g.log
 	start=$SECONDS
 	"$preflight" --base "$base" --only "$g" >"$log" 2>&1
@@ -261,15 +289,21 @@ for g in $gates; do
 	inner=$(awk -v g="$g" '$1 == g && ($2 == "FAIL" || $2 == "INCOMPLETE") { for (i = 3; i <= NF; i++) if ($i ~ /^log=/) { print substr($i, 5); exit } }' "$log")
 	[[ -n $inner && -r $inner ]] && log=$inner
 	case $rc in
-	0) if [[ -n $reason ]]; then report "$g" 0 "$secs" notrun "$reason" "$log"; else report "$g" 0 "$secs" pass "" "$log"; fi ;;
+	0) if [[ -n $reason ]]; then
+			report "$g" 0 "$secs" notrun "$reason" "$log"
+		elif grep -q "^$g ok .*(reused" "$log"; then
+			report "$g" 0 "$secs" pass "reused: inputs unchanged since the last green run" "$log"
+		else
+			report "$g" 0 "$secs" pass "" "$log"
+		fi ;;
 	3) # exit 3 is the missing-requirement code of go-test.sh and preflight: notrun by exit code
 		reason=$(env_problem "$log" ignore)
 		report "$g" 3 "$secs" notrun "${reason:-missing requirement}" "$log" ;;
 	2)
-		# preflight exits 2 when this worktree's pid file is held (a parallel preflight, or a stuck
-		# one). Say so on the gate line: every per-gate call shares that pid file (#349).
+		# preflight exits 2 when the pid file of this gate is held (a second run of the same gate, or a
+		# stuck one). Say so on the gate line.
 		if grep -q 'already in progress' "$log"; then
-			report "$g" 2 "$secs" fail "preflight already running in this worktree" "$log"
+			report "$g" 2 "$secs" fail "preflight already running this gate in this worktree" "$log"
 		else
 			reason=$(env_problem "$log")
 			if [[ -n $reason ]]; then report "$g" "$rc" "$secs" notrun "$reason" "$log"; else report "$g" "$rc" "$secs" fail "" "$log"; fi
@@ -280,20 +314,78 @@ for g in $gates; do
 		if [[ -n $reason ]]; then report "$g" "$rc" "$secs" notrun "$reason" "$log"; else report "$g" "$rc" "$secs" fail "" "$log"; fi
 		;;
 	esac
-done
+}
 
-# 2. The heavy CI jobs the preflight does not run, picked by ci-changes.sh.
-for j in $jobs; do
+run_job() { # <job>: the heavy CI job's local gate, from its `lane` line
+	local j=$1 lane needs target
 	lane=$(paths_raw lane "$j")
 	case $lane in
-	"- preflight") ;; # a preflight gate, run above
 	"") report "$j" 0 0 notrun "no local gate for CI job $j" "$logdir/$j.log" ;;
 	*)
 		needs=${lane%% *} target=${lane#* }
 		run_cmd "$j" "${needs//,/ }" "$make_cmd" "$target"
 		;;
 	esac
+}
+
+# 2. Run them in parallel (#990): LANE_GATES_JOBS at a time (default 4), each in its own subshell,
+#    its line printed in plan order as soon as it and every earlier one has finished. Two gates change
+#    the tree while they run (tidy rewrites go.mod and go.sum and puts them back, generate rewrites the
+#    generated code): they run alone, one after the other, when the others are done. Every other gate
+#    reads the tree. One preflight call per gate, and preflight keeps one pid file per gate, so the
+#    calls do not block each other.
+exclusive=" tidy generate "
+plan=() # the pool gates and heavy jobs first, the long ones leading; then the exclusive ones
+for j in $jobs; do
+	[[ $(paths_raw lane "$j") == "- preflight" ]] || plan+=("job:$j")
 done
+for g in $gates; do
+	case "$exclusive" in *" $g "*) ;; *) plan+=("gate:$g") ;; esac
+done
+excl=()
+for g in $gates; do
+	case "$exclusive" in *" $g "*) excl+=("gate:$g") ;; esac
+done
+jobs_max=${LANE_GATES_JOBS:-4}
+[[ $jobs_max =~ ^[1-9][0-9]*$ ]] || { echo "lane-gates: LANE_GATES_JOBS must be a positive number" >&2; exit 2; }
+printed=0
+all=("${plan[@]}" "${excl[@]}")
+flush_lines() { # print, in plan order, the lines of the finished gates
+	local item name
+	while ((printed < ${#all[@]})); do
+		item=${all[$printed]}
+		name=${item#*:}
+		[[ -f $logdir/line.$name ]] || break
+		cat "$logdir/line.$name"
+		count_verdict "$(sed -n 's/.* verdict=\([a-z]*\).*/\1/p' "$logdir/line.$name")"
+		printed=$((printed + 1))
+	done
+}
+run_item() { # <kind:name>: runs in a subshell; always leaves line.<name>
+	local item=$1 name=${1#*:}
+	REPORT_TO=$logdir/line.$name.tmp
+	if [[ ${item%%:*} == job ]]; then run_job "$name"; else run_pre_gate "$name"; fi
+	[[ -f $REPORT_TO ]] || echo "gate=$name rc=1 seconds=0 verdict=fail reason=\"the gate worker left no verdict\" log=$logdir/$name.log" >"$REPORT_TO"
+	mv "$REPORT_TO" "$logdir/line.$name"
+}
+wait_slot() { # wait until fewer than $1 workers run
+	while (($(jobs -rp | wc -l) >= $1)); do
+		wait -n 2>/dev/null || true
+		flush_lines
+	done
+}
+for item in "${plan[@]}"; do
+	wait_slot "$jobs_max"
+	run_item "$item" &
+done
+wait_slot 1
+wait
+flush_lines
+for item in "${excl[@]}"; do
+	(run_item "$item")
+	flush_lines
+done
+flush_lines
 
 if [[ $ran == 0 ]]; then
 	echo "lane-gates FAIL: no gate ran; nothing was verified" >&2

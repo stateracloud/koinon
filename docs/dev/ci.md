@@ -427,6 +427,27 @@ crash of `preflight --list` or `ci-changes.sh`, or an empty gate list, exits 1, 
 local gate is `notrun`. Agents run this one command instead of polling logs. `hack/lane-gates-test.sh` is
 its offline self-test (stubbed gates, run by the `scripts` job; escape cases put stub helm/go on PATH so it runs without the host tools).
 
+**Parallel gates, one lock per gate, verdict reuse (#990).** `lane-gates.sh` runs its gates in
+parallel, `LANE_GATES_JOBS` at a time (default 4; `1` is the old one-after-the-other). Its lines come out in plan order
+whatever the finishing order. `tidy` and `generate` rewrite files of the tree while they run (`tidy` puts
+`go.mod` and `go.sum` back, `generate` rewrites the generated code), so they run alone, one after the
+other, when the other gates are done. `hack/preflight.sh` keeps one pid file per gate
+(`<log directory>/preflight.<gate>.pid`): a second run of the same gate in a worktree is refused (exit
+2, `already in progress`, reported as `fail`), runs of different gates are not, and `--stop` stops every
+run of the worktree. A gate whose inputs are unchanged since its last green run is not run again
+(`hack/gate-reuse-lib.sh`): the inputs are the files the gate's rule in `hack/paths.rules` says can
+affect it, read from the working tree (so an uncommitted edit counts), plus the merge base and the gate
+scripts. Preflight prints `go ok 0s (reused ...)`, lane-gates `verdict=pass reason="reused: ..."`.
+Only a pass is stored; `vuln`, `deps`, `fuzz`, `gitleaks` and `e2e` (time, network or history decide
+them) never reuse. `hack/preflight.sh --no-reuse` or `KOINON_GATE_REUSE=0` runs everything, and CI (`CI` is set)
+always does. A stubbed lane-gates run (a test hook is set) neither reuses nor records. The `scripts`
+gate also reuses per line: after a fix, only the lines whose inputs changed run again.
+
+The harness suite has one timeout, `-timeout 30m`, in `make harness-suite`; `make test-harnesses`
+(images, then the suite) and the `harnesses` job of `ci.yml` both call it, and `hack/paths-test.sh`
+fails when the target loses the flag or the job stops calling it (Go's default of 10 minutes
+failed the compaction spec for time, #980).
+
 **Getting the verdict without blocking (#654).** A lane that must hand back cannot wait on a run, and a
 background task dies with its turn. `hack/lane-gates.sh --start [<base>]` runs the same command in its own
 session and prints a verdict file path at once (next to it: `pid`, and `rc` when the run ends).
@@ -556,7 +577,14 @@ that file and nowhere else.
   `api/proto/` (output under `internal/gen`; `generate` fails on a stale one) never reach a binary.
 - **Preflight equals CI.** The gates `generate`, `chart`, `web`, `tidy`, `vuln` and `scripts` use the CI job's rule. The
   `scripts` gate runs the `script-check` lines: the static checks and script tests of the `quick
-  checks`, `lint-shell` and `scripts` jobs that take seconds, `hack/tmp-safety-test.sh` included. A
+  checks`, `lint-shell` and `scripts` jobs, `hack/tmp-safety-test.sh` included. Each line starts with
+  `inputs=<path>,<path>/,...` (its script, what it sources or reads; a trailing `/` is a directory) or
+  `inputs=guard` (a check of the whole tree or of the commit range: it always runs). The gate runs a
+  line only when a changed file is one of its inputs, four at a time. `hack/paths-test.sh` fails on a
+  line without `inputs=`, on an input that does not exist, and on a repository path the script names
+  that is not among its inputs (a tripwire for a script that gains a `source`; a path built from a
+  variable is invisible to it, so add such an input by hand). CI runs every step of the jobs whatever
+  changed. A
   step that preflight skips (slow, covered by another gate, fails on a Mac) is a `script-skip` line;
   `hack/paths-test.sh` fails when a `run: hack/...` step of `ci.yml` is in neither list.
 - **Tests.** `hack/paths-test.sh` (reader, jobs against `ci.yml`, example change sets through
