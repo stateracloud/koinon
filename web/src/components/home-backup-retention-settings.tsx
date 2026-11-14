@@ -27,12 +27,12 @@ export function HomeBackupRetentionSettings({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the home backup retention: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the home checkpoint retention: {ConnectError.from(query.error).rawMessage}</AlertDescription>
       </Alert>
     )
   }
   const r = query.data?.retention
-  if (!r) return <p role="status">Loading the home backup retention…</p>
+  if (!r) return <p role="status">Loading the home checkpoint retention…</p>
   const text = days ?? String(r.days)
   const n = Number(text)
   const valid = Number.isInteger(n) && n >= r.minDays && n <= r.maxDays
@@ -46,10 +46,10 @@ export function HomeBackupRetentionSettings({ orgId }: { orgId: string }) {
   return (
     <section aria-labelledby="home-backup-retention" className="bg-card grid gap-4 rounded-lg border p-4 text-sm">
       <h2 id="home-backup-retention" className="font-semibold">
-        Old home backups
+        Old home checkpoints
       </h2>
-      <form onSubmit={submit} className="grid gap-1.5" aria-label="Home backup retention">
-        <Label htmlFor="home-backup-retention-days">Keep old home backups for (days)</Label>
+      <form onSubmit={submit} className="grid gap-1.5" aria-label="Home checkpoint retention">
+        <Label htmlFor="home-backup-retention-days">Keep old home checkpoints for (days)</Label>
         <div className="flex flex-wrap items-center gap-2">
           <Input
             id="home-backup-retention-days"

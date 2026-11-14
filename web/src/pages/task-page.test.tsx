@@ -29,6 +29,30 @@ function taskEvent(seq: number, kind: string, payload: Record<string, string>, a
 }
 
 describe('TaskPage', () => {
+  it('asks once before it cancels the task', async () => {
+    const canceled: string[] = []
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, {
+        getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events: [], runs: [] }),
+        cancelTask: (req) => {
+          canceled.push(req.taskId)
+          return {}
+        },
+      })
+    })
+    renderApp(transport, '/tasks/t-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel task Say hello' }))
+    expect(canceled).toEqual([])
+    // Keeping it closes the question and cancels nothing.
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it' }))
+    expect(canceled).toEqual([])
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel task Say hello' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel task' }))
+    await waitFor(() => expect(canceled).toEqual(['t-1']))
+  })
+
   it('streams run events into the timeline and resumes after a drop without duplicates', async () => {
     const watchCalls: WatchRunRequest[] = []
     const run = (state: RunState) => create(RunSchema, { id: 'r-1', orgId, ticketId: 't-1', state })

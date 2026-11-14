@@ -149,7 +149,7 @@ export function InboxPage() {
                 agents={agents.data.agents}
                 pending={createTask.isPending}
                 error={createTask.error ? ConnectError.from(createTask.error).rawMessage : undefined}
-                onCreate={(t) => createTask.mutate({ orgId, agentId: t.agentId, title: t.title, message: t.message })}
+                onCreate={(t) => createTask.mutateAsync({ orgId, agentId: t.agentId, title: t.title, message: t.message })}
               />
             </section>
           )}

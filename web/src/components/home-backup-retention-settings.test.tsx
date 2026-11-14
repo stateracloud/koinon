@@ -33,14 +33,14 @@ function setup() {
 describe('HomeBackupRetentionSettings', () => {
   it('starts at the default with nothing to save', async () => {
     setup()
-    expect(await screen.findByLabelText('Keep old home backups for (days)')).toHaveValue(7)
+    expect(await screen.findByLabelText('Keep old home checkpoints for (days)')).toHaveValue(7)
     expect(screen.getByRole('button', { name: 'Save backup retention' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Use the default (7)' })).toBeDisabled()
   })
 
   it('saves a retention and returns to the default', async () => {
     const sets = setup()
-    const input = await screen.findByLabelText('Keep old home backups for (days)')
+    const input = await screen.findByLabelText('Keep old home checkpoints for (days)')
     await userEvent.clear(input)
     await userEvent.type(input, '30')
     await userEvent.click(screen.getByRole('button', { name: 'Save backup retention' }))
@@ -51,10 +51,10 @@ describe('HomeBackupRetentionSettings', () => {
 
   it('refuses a retention outside 1 to 90 days before sending it', async () => {
     const sets = setup()
-    const input = await screen.findByLabelText('Keep old home backups for (days)')
+    const input = await screen.findByLabelText('Keep old home checkpoints for (days)')
     await userEvent.clear(input)
     await userEvent.type(input, '91')
-    const form = screen.getByRole('form', { name: 'Home backup retention' })
+    const form = screen.getByRole('form', { name: 'Home checkpoint retention' })
     expect(within(form).getByRole('alert')).toHaveTextContent('from 1 to 90')
     expect(screen.getByRole('button', { name: 'Save backup retention' })).toBeDisabled()
     expect(sets).toEqual([])
