@@ -26,6 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 export KUBECONFIG=/dev/null TMPDIR=$tmp/tmp GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+unset CI KOINON_GATE_REUSE # reuse is off in CI; the cases below set CI themselves
 mkdir -p "$TMPDIR"
 
 mkrepo() { # <name> <adr-lint body>
