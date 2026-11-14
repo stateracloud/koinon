@@ -1150,7 +1150,13 @@ var _ = Describe("Reconciler", func() {
 			pass(ctx, r)
 
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+			// Issue 705: the provider record goes although the retained sandbox attached it. That is
+			// intended. An archived agent cannot be unarchived (ArchiveAgent is one way), so nothing
+			// starts the retained sandbox again, and its credential is the gateway key, which the
+			// archive revokes and whose Secret it deletes. A kept record would hold a dead credential.
 			Expect(osg.Provider(row.Workspace, names.Provider)).To(BeNil())
+			_, err = kube.CoreV1().Secrets(namespace).Get(ctx, row.KeySecretName, metav1.GetOptions{})
+			Expect(err).To(HaveOccurred(), "the key Secret goes with the provider")
 			Expect(agentKeys(mg.last())).To(BeEmpty())
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateRetained))
 		})
