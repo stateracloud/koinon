@@ -12,7 +12,8 @@
 #        digest  every base image (FROM) is pinned by digest. The image may come from an ARG: its
 #                default must hold @sha256:<64 hex> (an ARG without a default is supplied by the
 #                caller and is not checked). A previous stage and `scratch` need no digest. A stage
-#                name with a variable in it (fetch-${TARGETARCH}) must match the stage name in full.
+#                name with a variable in it (fetch-${TARGETARCH}) must match the stage name in full:
+#                the variable stands for one name segment.
 #        secret  no ENV or ARG is named like a secret (TOKEN, SECRET, PASSWORD, API_KEY, PAT, AUTH, ...): the value
 #                lands in the image history. Use a BuildKit secret mount (see hack/e2e-toolchain/Dockerfile).
 #                Names ending _FILE or _PATH (a path, not the value) are fine. Values are gitleaks' job.
@@ -72,12 +73,30 @@ check() {
 			sub(/[^0-9a-f].*$/, "", h)
 			return length(h) == 64
 		}
+		# the pattern of a stage name that has a variable in it: the literal text of the reference in
+		# lower case, each ${X} as one name segment. A segment holds letters, digits and underscores
+		# (x86_64), but no dash: the dash separates the segments of a stage name, so the reference
+		# decides where they are. BuildKit looks a stage up without regard to case.
+		function stage_pattern(ref,   out, i, n, c, j) {
+			out = ""; n = length(ref); i = 1
+			while (i <= n) {
+				c = substr(ref, i, 1)
+				if (c == "$" && substr(ref, i + 1, 1) == "{") {
+					j = index(substr(ref, i + 2), "}")
+					if (j > 0) { out = out "[^.-]+"; i = i + 2 + j; continue }
+				}
+				if (index(".^$*+?()[]{}|\\", c) > 0) out = out "\\" c
+				else out = out tolower(c)
+				i++
+			}
+			return "^" out "$"
+		}
 		function allowed(rule) { return (allow ~ ("(^| )" rule "( |$)")) }
 		function secret_check(k) {
 			if (toupper(k) ~ /(TOKEN|SECRET|PASSW(OR)?D|(^|_)(PAT|AUTH)(_|$)|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL)/ && toupper(k) !~ /_(FILE|PATH)$/ && !allowed("secret"))
 				printf "%s:%d: secret: %s is named like a secret; its value would be in the image history (use a BuildKit secret mount, or # dockerfile-lint: allow=secret <reason>)\n", FILENAME, start, k
 		}
-		function digest_check(img,   ref, d) {
+		function digest_check(img,   ref, d, pat, k) {
 			if (tolower(img) == "scratch" || (tolower(img) in stages)) return
 			ref = img
 			# an image held in an ARG: judge the ARG default; no default means the caller supplies it
@@ -86,17 +105,14 @@ check() {
 				if (!(d in argdef) || argdef[d] == "\001") return
 				ref = argdef[d]
 			}
-			# a stage name with a variable in it (fetch-${TARGETARCH}): the variable stands for one
-			# name segment, so the stage name must match the reference in full
+			# a stage name with a variable in it (fetch-${TARGETARCH}): the stage name must match the
+			# reference in full, so the reference decides where the name segments are. A reference that
+			# starts with the variable is left to the ARG rule above.
 			if (ref ~ /\$\{/) {
 				d = ref; sub(/\$\{.*$/, "", d)
-				tail = ""
-				if (match(ref, /\}[^}]*$/)) tail = substr(ref, RSTART + 1)
-				for (k in stages) {
-					if (d == "" || index(k, d) != 1) continue
-					if (tail != "" && substr(k, length(k) - length(tail) + 1) != tail) continue
-					mid = substr(k, length(d) + 1, length(k) - length(d) - length(tail))
-					if (mid != "" && mid !~ /[-_]/) return
+				if (d != "") {
+					pat = stage_pattern(ref)
+					for (k in stages) if (k ~ pat) return
 				}
 			}
 			if (is_digest(ref)) return

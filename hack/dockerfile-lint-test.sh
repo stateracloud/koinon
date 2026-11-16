@@ -59,6 +59,7 @@ run "a stage chosen by ARG passes" 0 "" "$(df stagearg "FROM alpine@sha256:$d64 
 run "a stage name with a variable in the middle passes" 0 "" "$(df stagetail "FROM alpine@sha256:$d64 AS fetch-amd64-final\nARG TARGETARCH\nFROM fetch-\${TARGETARCH}-final\n")"
 run "a stage name that does not match in full fails" 1 "digest:" "$(df stagenofull "FROM alpine@sha256:$d64 AS fetch-amd64\nARG TARGETARCH\nFROM fetch-\${TARGETARCH}-final\n")"
 run "a stage name that only starts with the reference fails" 1 "digest:" "$(df stageprefix "ARG V\nFROM alpine@sha256:$d64 AS node-build\nFROM node\${V}\n")"
+run "a stage name with a variable that holds an underscore passes" 0 "" "$(df stageunder "FROM alpine@sha256:$d64 AS fetch-x86_64\nARG A\nFROM fetch-\${A}\n")"
 run "--platform is skipped" 0 "" "$(df plat "FROM --platform=linux/amd64 alpine@sha256:$d64\n")"
 run "a line continuation in FROM's neighbours does not hide it" 1 "digest:" "$(df cont 'RUN echo a \\\n  b\nFROM alpine:3\n')"
 run "a tab after FROM does not hide an unpinned base" 1 "digest:" "$(df tabfrom 'FROM\talpine:3\n')"
