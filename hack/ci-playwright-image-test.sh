@@ -36,6 +36,15 @@ check "image is pinned by digest" digest_pinned
 # shellcheck disable=SC2016
 check "web-e2e installs no browser or OS packages" bash -c '! grep -Eq "playwright install|install-deps|--with-deps|apt-get" <<<"$1"' _ "$body"
 
+# The restore drill job (e2e-kind.yml) needs kind on the host, so only its browser spec runs in the image
+# (hack/drill-web-run.sh): the job must carry the same image as web-e2e, by digest.
+if [ -e "$wfdir/e2e-kind.yml" ]; then
+  drill_image=$(sed -n 's/^ *KOINON_DRILL_PLAYWRIGHT_IMAGE: *\(.*\)$/\1/p' "$wfdir/e2e-kind.yml")
+  # shellcheck disable=SC2329
+  drill_same() { [[ -n $drill_image && $drill_image == "$image" ]]; }
+  check "the drill job's Playwright image is the web-e2e image (same tag and digest)" drill_same
+fi
+
 # Every other place: a workflow step that installs OS packages from a live mirror. Options may take
 # a separate value (`apt-get -o Acquire::Retries=5 install`); comment lines are not hits.
 scan() {

@@ -19,8 +19,10 @@
 package drill_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -138,4 +140,15 @@ func chartVersion() string {
 		return string(m[1])
 	}
 	return ""
+}
+
+// webSpecCmd builds the command that runs one web/e2e-drill spec. With KOINON_DRILL_WEB_RUNNER set (the CI drill
+// job: hack/drill-web-run.sh runs the spec in the pinned Playwright image, so no browser or OS package comes from
+// a live mirror) the runner is called with the spec name; without it, pnpm runs the spec on this machine, which
+// then needs its own Chromium.
+func webSpecCmd(ctx context.Context, spec string) *exec.Cmd {
+	if runner := os.Getenv("KOINON_DRILL_WEB_RUNNER"); runner != "" {
+		return exec.CommandContext(ctx, runner, spec)
+	}
+	return exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", spec)
 }

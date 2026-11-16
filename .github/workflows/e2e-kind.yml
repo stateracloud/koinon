@@ -500,6 +500,9 @@ jobs:
     # The measured run takes 26 to 28 minutes (#1039); the limits below grow from it: suite 45, step 55, job 60.
     # hack/release-drill-wait.sh waits 75 and the release gate job has 90.
     timeout-minutes: 60
+    env:
+      # The image of web-e2e in ci.yml (the same tag and digest; hack/ci-playwright-image-test.sh checks both).
+      KOINON_DRILL_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
     defaults:
       run:
         shell: bash
@@ -518,7 +521,10 @@ jobs:
           cache: false
 
       # The browser-signin check (topology browserSignin, test/drill/topology/kind.yaml) drives web/e2e-drill with
-      # Playwright: Node, pnpm and Chromium, the pins of the web suite job above.
+      # Playwright. Node and pnpm install the web dependencies here; the spec itself runs in the pinned Playwright
+      # image (hack/drill-web-run.sh, set below as KOINON_DRILL_WEB_RUNNER), so no browser or OS package comes from
+      # a live mirror (#569, hack/ci-playwright-image-test.sh). The job needs kind on the host, so only the spec
+      # runs in the image. The image tag must carry the @playwright/test version of web/package.json.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -531,10 +537,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Install web dependencies and Chromium (browser sign-in)
-        run: |
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web exec playwright install --with-deps chromium
+      - name: Install web dependencies (browser sign-in)
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Pull the Playwright image (browser sign-in)
+        run: docker pull "$KOINON_DRILL_PLAYWRIGHT_IMAGE"
 
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -602,6 +609,7 @@ jobs:
           HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
+          KOINON_DRILL_WEB_RUNNER: ${{ github.workspace }}/hack/drill-web-run.sh
         run: test/drill/run.sh 2>&1 | tee "$RUNNER_TEMP/drill.log"
 
       - name: Summary
