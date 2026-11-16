@@ -62,6 +62,9 @@ run "a tab after FROM does not hide an unpinned base" 1 "digest:" "$(df tabfrom 
 run "a tab after ARG does not hide a secret name" 1 "secret: GITHUB_TOKEN" "$(df tabarg "FROM alpine@sha256:$d64\nARG\tGITHUB_TOKEN\n")"
 run "a heredoc body is not parsed as instructions" 0 "" "$(df heredoc "FROM alpine@sha256:$d64\nRUN <<EOF\nFROM nowhere\nENV API_KEY=x\nEOF\nENV A=1\n")"
 run "an instruction after a heredoc is still checked" 1 "digest:" "$(df afterhd "FROM alpine@sha256:$d64\nRUN <<-EOF\n\tx\n\tEOF\nFROM alpine:3\n")"
+run "a quoted << in a RUN is not a heredoc" 1 "digest:" "$(df quotedhd "FROM alpine@sha256:$d64\nRUN echo \"x <<END y\"\nFROM alpine:3\n")"
+run "a quoted heredoc delimiter works" 0 "" "$(df quoteddelim "FROM alpine@sha256:$d64\nRUN <<\"EOF\"\nFROM nowhere\nEOF\nENV A=1\n")"
+run "a heredoc delimiter with a single quote works" 0 "" "$(df squoteddelim "FROM alpine@sha256:$d64\nRUN <<'EOF'\nFROM nowhere\nEOF\nENV A=1\n")"
 
 # --- the secret rule
 run "ENV TOKEN fails" 1 "secret: TOKEN" "$(df envtoken "FROM alpine@sha256:$d64\nENV TOKEN=koinon_test_not-a-real-token\n")"

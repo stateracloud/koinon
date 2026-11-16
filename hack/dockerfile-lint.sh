@@ -98,6 +98,40 @@ check() {
 			if (!allowed("digest"))
 				printf "%s:%d: digest: base image %s is not pinned by @sha256:<digest> (or # dockerfile-lint: allow=digest <reason>)\n", FILENAME, start, img
 		}
+		# the delimiter of a heredoc (RUN <<EOF ... EOF): BuildKit reads a word that starts with <<,
+		# so a << inside a quoted string is not a heredoc
+		function heredoc_delim(s,   i, n, c, q, esc, wordstart, rest, dq) {
+			n = length(s); i = 1; q = ""; esc = 0; wordstart = 1
+			while (i <= n) {
+				c = substr(s, i, 1)
+				if (esc) { esc = 0; wordstart = 0; i++; continue }
+				if (c == "\\" && q != "\047") { esc = 1; i++; continue }
+				if (q != "") { if (c == q) q = ""; wordstart = 0; i++; continue }
+				if (c == "\"" || c == "\047") { q = c; wordstart = 0; i++; continue }
+				if (c == " " || c == "\t") { wordstart = 1; i++; continue }
+				if (wordstart && c == "<" && substr(s, i + 1, 1) == "<") {
+					wordstart = 0
+					i += 2
+					if (substr(s, i, 1) == "-") i++
+					while (substr(s, i, 1) == " " || substr(s, i, 1) == "\t") i++
+					if (substr(s, i, 1) == "\"" || substr(s, i, 1) == "\047") {
+						dq = substr(s, i, 1); i++
+						rest = ""
+						while (i <= n && substr(s, i, 1) != dq) { rest = rest substr(s, i, 1); i++ }
+						i++
+					} else {
+						rest = ""
+						while (i <= n && substr(s, i, 1) != " " && substr(s, i, 1) != "\t" && substr(s, i, 1) != "<") { rest = rest substr(s, i, 1); i++ }
+					}
+					if (rest == "") continue
+					if (substr(s, i, 1) == "<") continue
+					return rest
+				}
+				wordstart = 0
+				i++
+			}
+			return ""
+		}
 		# a heredoc body (RUN <<EOF ... EOF) is shell or data, not instructions: skip to its terminator
 		hd != "" { t = $0; sub(/^\t+/, "", t); if (t == hd) hd = ""; next }
 		/^[ \t]*#/ {
@@ -117,9 +151,7 @@ check() {
 			sub(/\\[ \t]*$/, "", line)
 			sub(/^[ \t]+/, "", line)
 			instr = (instr == "" ? "" : instr " ") line
-			if (match(line, /(^|[ \t])<<-?["\047]?[A-Za-z_][A-Za-z0-9_]*/)) {
-				newhd = substr(line, RSTART, RLENGTH); sub(/^[ \t]*<<-?["\047]?/, "", newhd)
-			}
+			newhd = heredoc_delim(line)
 			if (!cont) { flush(); hd = newhd; newhd = "" }
 		}
 		END { flush() }
