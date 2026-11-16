@@ -449,7 +449,7 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
 - **GPL.** poppler-utils is GPL-licensed and shipped unmodified from Ubuntu, with git, bash and
   coreutils: the same obligation. The source of the exact package versions is on
   `snapshot.ubuntu.com` under the snapshot ID below (`apt source` against that snapshot).
-- **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
+- **Snapshot freshness.** The snapshot is `20261113T000000Z` (`UBUNTU_SNAPSHOT` in the
   Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
   when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).
   The bump is automated (issue 33): the `ubuntu-snapshot` workflow runs weekly (Monday, and by hand
