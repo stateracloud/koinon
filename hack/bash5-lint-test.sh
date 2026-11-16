@@ -43,6 +43,10 @@ printf '# SPDX-License-Identifier: Apache-2.0\nx=1\n' >"$ok/hack/lib.sh"
 printf 'echo golden\n' >"$ok/hack/q.golden.sh"
 check "a guarded tree passes" "$(run "$ok")" 0
 
+# A root that is missing or not a directory is a usage error (exit 2), not an empty tree.
+check "a missing root exits 2" "$(run "$tmp/no-such-dir")" 2
+check "a file as root exits 2" "$(run "$ok/hack/a.sh")" 2
+
 # A script without the guard fails and is named.
 bad=$tmp/bad
 cp -R "$ok" "$bad"

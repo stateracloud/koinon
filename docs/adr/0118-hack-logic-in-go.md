@@ -14,10 +14,11 @@ Dockerfiles. Parsing bugs in these scripts come back: see #954 and the Dockerfil
 A shell script has no real parser, no typed data and no unit test framework. We have 78 shell tests,
 and 33 of them need PATH shims or fakes.
 
-The maintainer asked whether a task runner such as mage fixes this. The research of 2026-11-16
-(`~/.config/koinon/research/2026-11-16-mage-and-go-tooling.md`, prior art) compared mage, plain Go
-programs, `go tool`, Task, just and the status quo. Its result: the gain comes from the language, not
-from a task runner. Make is already the task runner and the front door.
+The maintainer asked whether a task runner such as mage fixes this. A comparison of mage, plain Go
+programs, `go tool`, Task and just (sources: the mage releases and its issue #247 and draft PR #561;
+the Go 1.24 release notes; the `cmd/go` source; the Task and just documentation; the projects named
+under Alternatives considered) gives one result: the gain comes from the language, not from a task
+runner. Make is already the task runner and the front door.
 
 Facts that decide this (checked 2026-11-16):
 

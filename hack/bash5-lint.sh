@@ -7,7 +7,6 @@
 # file keeps the old path and command line, so Make, preflight and CI do not change.
 #
 # Usage: hack/bash5-lint.sh [root]    (default: the repository root)
-# shellcheck disable=SC2016 # the guard text holds a literal ${BASH_VERSINFO...}
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -15,7 +14,9 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-root=$(cd "${1:-$repo}" && pwd)
+root=${1:-$repo}
+[ -d "$root" ] || { echo "bash5-lint: ROOT '$root' does not exist or is not a directory" >&2; exit 2; }
+root=$(cd "$root" && pwd)
 # `go tool` finds the tool through the module of the working directory.
 cd "$repo"
 exec go tool bash5lint "$root"

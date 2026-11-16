@@ -26,7 +26,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -157,6 +156,9 @@ func commands(lines []string) (first, second string) {
 // they come from git (tracked and untracked, minus ignored); elsewhere from a walk that skips
 // .git and node_modules.
 func listScripts(root string) ([]string, error) {
+	if info, err := os.Stat(root); err != nil || !info.IsDir() { //nolint:gosec // ROOT is the operator argument
+		return nil, fmt.Errorf("ROOT %q does not exist or is not a directory", root)
+	}
 	var files []string
 	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil { //nolint:gosec // ROOT is the operator argument
 		cmd := exec.CommandContext(context.Background(), "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.sh") //nolint:gosec // fixed git arguments; ROOT is the operator argument
@@ -183,7 +185,7 @@ func listScripts(root string) ([]string, error) {
 			}
 			return nil
 		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err != nil {
 			return nil, err
 		}
 	}

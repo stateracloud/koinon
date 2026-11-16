@@ -11,6 +11,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 func TestBash5lint(t *testing.T) {
@@ -126,9 +128,7 @@ var _ = Describe("run", func() {
 		Expect(code).To(Equal(0))
 	})
 	It("takes the files from git in a checkout, untracked ones included, ignored ones not", func() {
-		if _, err := exec.LookPath("git"); err != nil {
-			Skip("git is not installed")
-		}
+		testenv.Require(testenv.Binary("git"))
 		root := GinkgoT().TempDir()
 		Expect(exec.Command("git", "-C", root, "init", "-q").Run()).To(Succeed())
 		write(root, ".gitignore", "ignored/\n")
@@ -138,5 +138,14 @@ var _ = Describe("run", func() {
 		Expect(code).To(Equal(1))
 		Expect(errOut).To(ContainSubstring("bash5-lint: g.sh:"))
 		Expect(errOut).NotTo(ContainSubstring("ignored"))
+	})
+	It("rejects a root that does not exist or is not a directory", func() {
+		dir := GinkgoT().TempDir()
+		write(dir, "f.sh", "#!/bin/bash\n")
+		for _, root := range []string{filepath.Join(dir, "missing"), filepath.Join(dir, "f.sh")} {
+			var o, e bytes.Buffer
+			_, err := run(root, &o, &e)
+			Expect(err).To(MatchError(ContainSubstring("not a directory")))
+		}
 	})
 })

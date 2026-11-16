@@ -92,7 +92,7 @@ it, point your user `statusLine` command at the script, with `KOINON_MAINTAINER_
 A new hook comes, in the same pull request, with:
 
 - the file `hack/hooks/<name>-check.sh`, whose first command is the opt-in line and whose second is
-  the fail-open bash 5 guard (`hack/bash5-lint.sh` checks both, from its list of registered hooks):
+  the fail-open bash 5 guard (`hack/cmd/bash5lint` checks both, from its list of registered hooks, `registeredHooks` in `hack/cmd/bash5lint/main.go`):
 
   ```bash
   [ "${KOINON_MAINTAINER_HOOKS:-}" = 1 ] || { cat >/dev/null; exit 0; }
@@ -100,7 +100,7 @@ A new hook comes, in the same pull request, with:
 
 - its offline test `hack/hooks/<name>-check_test.sh`, which covers the off case, listed in the
   `Makefile` (`adr-lint`) and in `.github/workflows/ci.yml`;
-- its entry in `.claude/settings.json` and in the hook list of `hack/bash5-lint.sh`;
+- its entry in `.claude/settings.json` and in `registeredHooks` of `hack/cmd/bash5lint/main.go`;
 - a `script-check inputs=<paths> <cmd>` line for its test in `hack/paths.rules` (the paths the test reads; `inputs=guard` if it must always run);
 - nothing personal and nothing from the private lab: no secrets, no host or cluster names, no
   absolute home paths (use `$HOME`, `${TMPDIR:-/tmp}` or repo-relative paths), no person's name (say
