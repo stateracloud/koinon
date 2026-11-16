@@ -20,11 +20,11 @@ of it.
 Read the file of the folder you edit; it adds to this one. How these files are made:
 [docs/agents/agents-md.md](docs/agents/agents-md.md).
 
-- Editing under `internal/db/`: read `internal/db/AGENTS.md` (migrations, keys, the patch-line rule).
-- Editing under `charts/`: read `charts/AGENTS.md` (render rules, chart check, chart smoke, admission tests).
-- Editing under `.github/`: read `.github/AGENTS.md` (CI and e2e rules, required checks, CI rules).
-- Editing under `docs/adr/`: read `docs/adr/AGENTS.md` (ADR lint and index).
-- Editing under `api/proto/`: read `api/proto/AGENTS.md` (add-only fields, `make breaking`).
+- Editing under `internal/db/`: read `internal/db/AGENTS.md`.
+- Editing under `charts/`: read `charts/AGENTS.md`.
+- Editing under `.github/`: read `.github/AGENTS.md`.
+- Editing under `docs/adr/`: read `docs/adr/AGENTS.md`.
+- Editing under `api/proto/`: read `api/proto/AGENTS.md`.
 
 ## Commands
 
@@ -66,8 +66,7 @@ Read the file of the folder you edit; it adds to this one. How these files are m
 - Maintainers' agents: `hack/claim.sh next` shows the current milestone only, and the overlap check also applies to a PR
   you fix or merge ([picking up work](docs/maintainers/agent-workflow.md#picking-up-work)).
 - A sandboxed `gh` or `git` call that reaches GitHub needs `allowed_domains` `api.github.com` and `github.com`. A
-  checkout can be far behind: `git fetch` and count the commits behind `origin/main` before you let a reader or reviewer
-  use it.
+  checkout can be far behind: `git fetch` and count commits behind `origin/main` before a reader or reviewer uses it.
 - A pull request names the issue it closes with `Closes #N`. New work you discover becomes a new issue; do not start it.
 
 ## Branches and pull requests
@@ -77,6 +76,9 @@ Read the file of the folder you edit; it adds to this one. How these files are m
 - **Conflicts.** Mechanical (generated code, the ADR index, golden files, a migration number): regenerate or renumber.
   Append-site (both sides add lines to one list): keep both and run the check for that area. Semantic (the same function
   or behaviour as someone else's work): stop and ask your human.
+- **Stop and ask your human** when you would need to rebase or force-push, a test only you changed starts failing
+  elsewhere, you would change a public API or data model another open PR also changes, or the issue turns out bigger
+  than it looked ([details](docs/maintainers/agent-workflow.md#working-alongside-another-human)).
 - **No unrelated dependency bumps** in a feature PR. **Golden files:** regenerate, do not hand-edit.
 - **Chart assertions** go in the owning file of `hack/chart-check.d/`; a new feature adds a new file.
 
