@@ -104,6 +104,7 @@ func oidcSource(ctx context.Context, s *side) {
 			continue
 		}
 		id := oidcSourceRecords[u.Username].UserID
+		// The product has no API to disable a user; this goes away with #1047 ("api: disable and enable a user").
 		out := sql(ctx, s, fmt.Sprintf("UPDATE users SET deleted_at = now() WHERE id = '%s' AND oidc_issuer = '%s' RETURNING id", id, drill.FakeIdPIssuer(top.FakesNamespace)))
 		Expect(out).To(Equal(id), "disable %s in Koinon", u.Username)
 		res := oidcSignIn(ctx, l, u)

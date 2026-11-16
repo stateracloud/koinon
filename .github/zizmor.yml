@@ -7,7 +7,7 @@
 # Every entry has a reason. An ignore that is a deferred fix names its exit condition. A composite
 # action cannot be ignored here; it carries an inline `# zizmor: ignore[...]` comment instead.
 rules:
-  # e2e-kind.yml: three inline ignores for the tag trigger (`tags: ['v*-rc.*']`); the jobs publish nothing.
+  # e2e-kind.yml: four inline ignores: three for the tag triggers (`v[0-9]+.[0-9]+.[0-9]+` and its `-rc.N` form), one for the drill artifact; the jobs publish nothing.
   dependabot-cooldown:
     config:
       # ADR 0079: a dependency is at least 3 days old before it enters the tree. zizmor's default is 7.

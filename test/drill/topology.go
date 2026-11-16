@@ -139,7 +139,7 @@ func (t *Topology) Summary() TopologySummary {
 }
 
 // Path resolves a file named in the topology: relative to the repository root, or as it is when absolute (a
-// lab values file kept outside the repository).
+// values file kept outside the repository, as the cluster profile does).
 func (t *Topology) Path(repoRoot, p string) string {
 	if filepath.IsAbs(p) {
 		return p

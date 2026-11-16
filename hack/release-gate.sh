@@ -386,7 +386,7 @@ kind_drill() {
 	done
 	rm -rf "$dir"
 	if ((seen == 0)); then
-		echo "FAIL: restore drill on kind: no drill-logs artifact for $SHA among the newest $DRILL_ARTIFACT_LIMIT; run the e2e-kind workflow with suite=drill on the ref $TAG (the drill of a tag push takes about half an hour, so run it before tagging, or re-run the release gate job once it is green; a dispatch on a branch or with -f commit is not found)" >&2
+		echo "FAIL: restore drill on kind: no drill-logs artifact for $SHA among the newest $DRILL_ARTIFACT_LIMIT; run the e2e-kind workflow with suite=drill on the ref $TAG (the drill of a tag push takes about half an hour: re-run the release gate job once it is green, or dispatch the drill on the tag ref; a dispatch on a branch or with -f commit is not found)" >&2
 	else
 		echo "FAIL: restore drill on kind: no green result for $SHA (last: $why)" >&2
 	fi

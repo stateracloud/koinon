@@ -146,7 +146,7 @@ _Superseded where it names a lab profile, a `drill-result-lab.json` asset or a f
 - **Two profiles.** A topology file names its `profile`, `kind` or `lab`, and `drill-result.json` carries it
   (`topology.profile`). The release gate tells the results apart by that field, not by a file name. The lab's own
   topology file (hosts, contexts, registries, storage classes) stays outside the repository; the repository holds the
-  schema and a made-up example (`test/drill/topology/lab.example.yaml`) that a test keeps loadable. Paths in a topology
+  schema and a made-up example (`test/drill/topology/cluster.example.yaml`) that a test keeps loadable. Paths in a topology
   may be absolute, so the lab's values file can live outside the tree.
 - **The browser check.** The lab profile has `browserSignin: true`, which adds the check `browser-signin`: a
   Playwright spec (`web/e2e-drill`) signs in through the shipped web UI of the restored API. The spec is in the tree
@@ -241,7 +241,7 @@ _Superseded where it names a lab profile, a `drill-result-lab.json` asset or a f
   remain, both in the test code and both named here so that they are known: `oidc_drill_test.go` disables the
   `drill-disabled` user with an `UPDATE users SET deleted_at` (the product has no API to disable a user), and
   `drill_test.go` holds the sandbox row with `SELECT ... FOR UPDATE` in a session of its own to keep a notification
-  step waiting during the hold. The first goes away with a disable-user API (issue to follow: "api: disable and enable a
+  step waiting during the hold. The first goes away with a disable-user API (issue #1047, "api: disable and enable a
   user"); the second is a lock, not a data write, and stays.
 - **The Kata `vm` tier** gets no drill check and no gate. It is not a restore property (the restore does not depend on
   the isolation tier); a run on a real cluster with the Kata runtime class may inform.

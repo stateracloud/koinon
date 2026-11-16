@@ -87,8 +87,8 @@ contexts:
 - name: other-ctx
 - name: drill-ctx
 KC
-# The example lab topology with its context replaced (quoted, with a comment: the loader must cope).
-sed 's/^context: .*/context: "drill-ctx"   # the topology'"'"'s context/' "$root/test/drill/topology/lab.example.yaml" >"$tmp/topology.yaml"
+# The example cluster topology with its context replaced (quoted, with a comment: the loader must cope).
+sed 's/^context: .*/context: "drill-ctx"   # the topology'"'"'s context/' "$root/test/drill/topology/cluster.example.yaml" >"$tmp/topology.yaml"
 jq -n '{runId: "abc123", verdict: "pass", timings: {rtoSeconds: 1, rpoSeconds: 1}, knownGaps: [], checks: [{name: "a", verdict: "pass"}]}' >"$tmp/result-green.json"
 
 fails=0
@@ -105,7 +105,7 @@ reset() {
 	unset FAKE_STUCK FAKE_GO_FAILS
 	export FAKE_RESULT=$tmp/result-green.json
 }
-run() { # [ENV=VAL...]: run.sh against the fake lab topology (an external cluster)
+run() { # [ENV=VAL...]: run.sh against the fake cluster topology (an external cluster)
 	env DRILL_TOPOLOGY="$tmp/topology.yaml" DRILL_RUN=abc123 OUT="$tmp/out" "$@" bash "$root/test/drill/run.sh" >"$tmp/run.log" 2>&1
 }
 run_kind() { # [ENV=VAL...]: run.sh on kind (it copies the kind topology and makes no cluster here)
@@ -150,7 +150,7 @@ run KEEP=1; rc=$?
 
 # A topology that does not load (no context) is refused before anything runs.
 reset
-grep -v '^context:' "$root/test/drill/topology/lab.example.yaml" >"$tmp/nocontext.yaml"
+grep -v '^context:' "$root/test/drill/topology/cluster.example.yaml" >"$tmp/nocontext.yaml"
 DRILL_TOPOLOGY="$tmp/nocontext.yaml" DRILL_RUN=abc123 OUT="$tmp/out2" bash "$root/test/drill/run.sh" >"$tmp/run.log" 2>&1; rc=$?
 ((rc == 2)); check "a topology with no context is refused (exit 2)" $?
 [[ ! -s $tmp/calls ]]; check "...and touches no cluster" $?
