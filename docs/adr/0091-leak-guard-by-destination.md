@@ -485,10 +485,13 @@ cluster, Anthropic Sonnet 5.5 and Haiku 5.5, direct and through OpenRouter, the 
 with its search and fetch tools declared `external-low`. This amendment records the values and
 decides nothing new.
 
-- **The byte cap: keep 2048 per run.** The full task made 8 `external-low` calls of 24 to 109 bytes
-  each, about 440 bytes per run (about 21% of 2048). A narrowed run sent about 305 bytes. No run hit
-  the cap. The cap has 4.6 times headroom over the largest run seen; two runs of one template are not
-  a reason to lower it.
+- **The byte cap: keep 2048 per run for now; measure again.** The first reading was wrong. The
+  narrowed run sent about 305 bytes. One full lcm-upgrader run made 30 calls and sent about 2180 bytes. It went over 2048 and
+  the guard refused 2 calls with the reason `byte_cap`. The cap is per run and never resets, so the
+  run could not send more. The value stays 2048 until it is measured again on 3 or more full
+  lcm-upgrader runs. This amendment does not change it.
+- **Open: does a cap refusal stop the run?** The guard refuses the call and the agent may go on with
+  other calls. No rule says that a cap refusal ends the run. A later ADR decides this.
 - **Both legs: held in 4 of 5 runs that made external calls**, from decision 2 to 9 of the run. Every
   run with external calls reached the approval branch, mostly because the template's tools had no
   declared sink class and so defaulted to `external-high`. That is a gap in the template, not in the
