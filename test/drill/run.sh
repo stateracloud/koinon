@@ -8,7 +8,7 @@
 # Exit codes: 0 every check passed or failed only on a declared known gap (label known-gap, the
 # message "known gap: #N"); 1 a check failed that is not a known gap, or the suite did not finish.
 #
-#   KEEP=1                   leave the cluster and the namespaces (inspect, then test/drill/sweep.sh)
+#   KEEP=1                   leave the cluster and the namespaces (inspect, then test/drill/sweep.sh <run-id> --context <ctx>)
 #   SKIP_UP=1 SKIP_BUILD=1   the cluster and the images are there already
 #   CLUSTER=koinon-e1        the kind cluster (kind topology only)
 #   DRILL_TOPOLOGY=<file>    another topology (the home lab: the file lives outside the repository).
@@ -17,8 +17,12 @@
 #   DRILL_RUN=<id>           the run ID (default: random); every object carries koinon.dev/drill-run=<id>
 #   OUT=<dir>                logs, junit.xml, report.json and drill-result.json
 #
-# Only the kube context named by the topology is used. KUBECONFIG is exported explicitly, never read
-# from the ambient shell on kind: run.sh writes the kind cluster's own kubeconfig into $OUT.
+# Only the kube context named by the topology (`context:`, read by the suite's Go loader through
+# test/drill/topctx) is used: every kubectl, helm and sweep call passes it, never the kubeconfig's current
+# context. On kind the copied topology's context is kind-$CLUSTER. KUBECONFIG is exported explicitly, never
+# read from the ambient shell on kind: run.sh writes the kind cluster's own kubeconfig into $OUT.
+# On exit the run's objects are swept by label. A failed sweep prints one line and exits non-zero (on a
+# cluster run.sh did not make; on kind the cluster is deleted anyway); drill-result.json is never changed.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -46,7 +50,8 @@ else
   # fake model image and, as `imageRegistry`, for the chart (drill_test.go passes it as image.registry).
   image_repo=$(CLUSTER="$CLUSTER" "$root/test/e2e/kind/imagerepo.sh")
   topology=$OUT/topology.yaml
-  sed "s#localhost:5001#$image_repo#g" "$here/topology/kind.yaml" >"$topology"
+  # The kind context follows CLUSTER (kind names it kind-<cluster>), so CLUSTER=other works.
+  sed -e "s#localhost:5001#$image_repo#g" -e "s#^context: .*#context: kind-$CLUSTER#" "$here/topology/kind.yaml" >"$topology"
   echo "imageRegistry: $image_repo" >>"$topology"
   SKIP_UP=${SKIP_UP:-0}
   SKIP_BUILD=${SKIP_BUILD:-0}
@@ -54,17 +59,31 @@ else
   created_cluster=1
 fi
 
+# The kube context the topology names, read by the suite's own loader (test/drill/topctx). Nothing here
+# may act on the kubeconfig's current context.
+ctx=$(cd "$root" && go run ./test/drill/topctx "$topology") && [[ -n $ctx ]] || { echo "cannot read the kube context of the topology $topology" >&2; exit 2; }
+
 cleanup() {
   local rc=$?
-  # Diagnostics first: the sweep deletes the objects they describe.
-  if [[ -s $kubeconfig && $status -ne 0 ]]; then
-    {
-      kubectl --kubeconfig "$kubeconfig" get pods -A -o wide
-      kubectl --kubeconfig "$kubeconfig" get events -A --sort-by=.lastTimestamp
-    } >"$OUT/cluster-state.txt" 2>&1 || true
-  fi
-  if [[ -s $kubeconfig && $KEEP != 1 ]]; then
-    KUBECONFIG=$kubeconfig "$here/sweep.sh" "$RUN" 2>&1 | tee "$OUT/sweep.log" || true
+  if [[ -s $kubeconfig ]]; then
+    # Diagnostics first: the sweep deletes the objects they describe.
+    if [[ $status -ne 0 ]]; then
+      {
+        kubectl --kubeconfig "$kubeconfig" --context "$ctx" get pods -A -o wide
+        kubectl --kubeconfig "$kubeconfig" --context "$ctx" get events -A --sort-by=.lastTimestamp
+      } >"$OUT/cluster-state.txt" 2>&1 || true
+    fi
+    if [[ $KEEP != 1 ]]; then
+      local sweep_rc=0
+      KUBECONFIG=$kubeconfig "$here/sweep.sh" "$RUN" --context "$ctx" >"$OUT/sweep.log" 2>&1 || sweep_rc=$?
+      cat "$OUT/sweep.log"
+      # A failed sweep is its own non-zero exit and one line; drill-result.json is not touched. On kind the
+      # cluster is deleted below anyway, so the sweep stays outside the red signal there.
+      if ((sweep_rc != 0)); then
+        echo "FAIL: the sweep of run $RUN on context $ctx exited $sweep_rc (see $OUT/sweep.log); objects may be left" >&2
+        if [[ $created_cluster != 1 ]]; then ((rc != 0)) || rc=1; fi
+      fi
+    fi
   fi
   if [[ $created_cluster == 1 && $KEEP != 1 && ${DRILL_KEEP_CLUSTER:-0} != 1 ]]; then CLUSTER="$CLUSTER" "$root/test/e2e/kind/down.sh" || true; fi
   echo "logs, reports and drill-result.json in $OUT"

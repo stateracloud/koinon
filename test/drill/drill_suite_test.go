@@ -10,7 +10,7 @@
 //	KOINON_DRILL_REPO        the repository root (the chart, the guide's command file, the fake model script)
 //	KOINON_DRILL_OUT         the directory for drill-result.json and the work files
 //	KOINON_DRILL_RUN         optional: the run ID (3 to 12 lowercase letters and digits); default random
-//	KOINON_DRILL_KEEP        optional: 1 leaves the namespaces for a look; run sweep.sh afterwards
+//	KOINON_DRILL_KEEP        optional: 1 leaves the namespaces for a look; run sweep.sh <run-id> --context <ctx> afterwards
 //	KOINON_DRILL_COMMIT      optional: the commit under test, for drill-result.json
 //
 // Without KOINON_DRILL_KUBECONFIG the suite fails when KOINON_REQUIRE names "drill" (CI does) and

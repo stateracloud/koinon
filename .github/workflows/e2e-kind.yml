@@ -359,7 +359,7 @@ jobs:
       - name: Resource use
         if: always()
         run: |
-          kubectl --context kind-koinon-e1 get pods -A -o wide || true
+          kubectl --context "kind-${CLUSTER:-koinon-e1}" get pods -A -o wide || true
           docker stats --no-stream || true
           free -m
           # Old issue 159: what the runner's kernel offers the OpenShell sandbox supervisor.
@@ -593,7 +593,7 @@ jobs:
       - name: Resource use
         if: always()
         run: |
-          kubectl --context kind-koinon-e1 get pods -A -o wide || true
+          kubectl --context "kind-${CLUSTER:-koinon-e1}" get pods -A -o wide || true
           docker stats --no-stream || true
           free -m
 
