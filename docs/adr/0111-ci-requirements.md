@@ -58,7 +58,7 @@ v0.3" means the proof is planned and tracked in #580, not built; the rule is not
 | R2 | The product works end to end, from the guide's own commands | The kind install with the fake model and the fake code host (`quickstart`), in the merge queue | now |
 | R3 | The sandbox holds | Admission policy tests on a real API server (envtest), the escape suite, the leak guard cases | now (VM tier: see "Limits of CI") |
 | R4 | Tenants and the audit chain stay separate and intact | Go tests of org scoping and of the audit chain (`internal/audit`, ADR 0100) | now |
-| R5 | Data survives | Migration lint, stored-state fixtures (`internal/compat`), the restore drill (advisory, scheduled) | migration lint and fixtures now; drill and upgrade test from v0.3 |
+| R5 | Data survives | Migration lint, stored-state fixtures (`internal/compat`), the restore drill (a release check on kind for every tag, and nightly) | migration lint and fixtures now; drill and upgrade test from v0.3 |
 | R6 | Nothing public breaks | `buf breaking`, generated-code diff, chart checks, chart smoke (every binary starts with the chart's real inputs) | now for proto, generated code and chart; the admin API and chart values contract from v0.3 |
 | R7 | The supply chain is clean | 3-day age (ADR 0079), pinned actions and images, gitleaks on every commit, nightly `govulncheck`, workflow lint | now; the SPDX header check, the dependency licence check and the image scan from v0.3 |
 | R8 | A release comes only from a proven commit, and what is published can be installed | `hack/release-gate.sh` (the quickstart succeeded for the commit) | the gate now; "pull, verify and install what was published" from v0.3 |

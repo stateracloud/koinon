@@ -1,6 +1,6 @@
 # 0109. Automated restore drill
 
-- Status: Accepted
+- Status: Accepted (amended 2026-11-13: phase 3 and the OIDC provider; amended 2026-11-16: every tag is gated by its own kind drill, #1039)
 - Date: 2026-11-10
 - Area: install-operations
 - Tags: backup-restore, testing, e2e
@@ -30,7 +30,7 @@ production.
 1. **The drill is an automated test suite with seeded test data** (procoduck, 2026-11-10). It replaces
    the hand drill as the evidence for decision 15. A live-data copy may come later as a separate
    "shadow restore" smoke; it is never the gate, because it has no fixtures and shares live credentials.
-2. **It runs at each release gate: "rc: kind; final: lab"** (procoduck, 2026-11-10). A release candidate
+2. **It runs at each release gate: "rc: kind; final: lab"** (procoduck, 2026-11-10; corrected by the amendment of 2026-11-16: every tag runs its own kind drill, no lab). A release candidate
    tag needs a green drill on kind for its commit. A final tag needs a green drill on the home lab for
    the rc commit it promotes. The same suite runs in both places; a topology file says where.
 3. **Suite and product fixes are built in parallel** (procoduck, 2026-11-10). A check the product cannot
@@ -76,7 +76,7 @@ production.
    (ADR 0106). CI deletes the kind cluster in an `always()` step.
 7. **Report files.** The suite runs with `--junit-report` and `--json-report`; `test/e2e/run.sh` gets the
    same flags for the quickstart, and the workflows upload them.
-8. **Gate wiring.** A `drill` job in `e2e-kind.yml` with `continue-on-error: true` (a red advisory drill must not turn
+8. **Gate wiring** (corrected by the amendment of 2026-11-16: not advisory for a tag; a release check). A `drill` job in `e2e-kind.yml` with `continue-on-error: true` (a red advisory drill must not turn
    that run red: `hack/e2e-bisect.sh` reads its conclusion; GitHub starts a dispatch or schedule only from a
    workflow file on the default branch, so a new workflow file could not be proven before merge), runs on the
    nightly schedule, on rc tags and on a dispatch with `suite=drill`. On a tag push and on that dispatch the
@@ -141,6 +141,8 @@ edited.
 
 ## Amendment 2026-11-13 (phase 3, #518)
 
+_Superseded where it names a lab profile, a `drill-result-lab.json` asset or a final-tag rule: see the amendment of 2026-11-16._
+
 - **Two profiles.** A topology file names its `profile`, `kind` or `lab`, and `drill-result.json` carries it
   (`topology.profile`). The release gate tells the results apart by that field, not by a file name. The lab's own
   topology file (hosts, contexts, registries, storage classes) stays outside the repository; the repository holds the
@@ -198,6 +200,53 @@ edited.
 - **Not covered.** The restore hold's 503 at the callback (the copy refuses OIDC logins until the release step) is not
   checked: the check runs after the release. Whether Koinon works with a given product (Pocket ID, Keycloak) is a
   compatibility question, not a restore one; it belongs in a separate smoke, not in this gate.
+
+## Amendment 2026-11-16 (every tag is gated by its own kind drill, #1039)
+
+- **Goal.** The drill answers one question for two readers: an operator who restores an install after a disaster
+  (does the documented backup and restore path bring back a working install: sign-in, keys, schedules, the pending work,
+  an archived agent's home?) and a release manager who tags a release (is that claim true for exactly this commit?).
+  The evidence must be something both can re-run and read: project CI on kind, a public log, a result file with a commit
+  in it. A result from one maintainer's private cluster is neither.
+- **Why.** Decision 2 ("rc: kind; final: lab") made one private lab cluster a release gate. No CNCF project does that:
+  Kubernetes sig-release requires release-blocking jobs to run on clusters built with open-source tools on
+  project-owned accounts ([release-blocking jobs](https://github.com/kubernetes/sig-release/blob/master/release-blocking-jobs.md)),
+  and CloudNativePG ([e2e on kind](https://github.com/cloudnative-pg/cloudnative-pg/blob/main/docs/src/e2e.md)), Flux
+  ([e2e on kind](https://github.com/fluxcd/flux2/blob/main/.github/workflows/e2e.yaml)) and Argo CD
+  ([e2e in CI](https://github.com/argoproj/argo-cd/blob/master/.github/workflows/ci-build.yaml)) gate on kind in their
+  own CI; runs on real clusters inform and never gate. A final tag also started no drill at all (`e2e-kind.yml` ran only
+  on rc tags), so removing the lab rule alone would have left final tags without evidence.
+- **Decision 2, corrected.** Every tag, rc and final, needs a green drill on kind in project CI, run for that tag
+  (push of the tag, or a dispatch on the tag ref). A final tag needs no rc and no upload. Runs on any real cluster are
+  informing and never required; the profile for them is `cluster` (the old `lab` profile is gone, with its rule that a
+  lab result must carry the browser sign-in).
+- **Decision 8, corrected.** The `drill` job runs on the nightly schedule, on a dispatch with `suite=drill` and on the tag
+  patterns of `release.yml` (rc and final). It is not a merge check: ADR 0105 keeps the quickstart as the one merge
+  proof. It is a release check: `hack/release-gate.sh` judges the `drill-logs` artifact of that tag's own run and
+  nothing else (never a release asset or a result someone uploaded). It is still `continue-on-error`, because
+  `hack/e2e-bisect.sh` reads the run's conclusion.
+- **What the gate demands.** Commit equal to the tagged commit; profile `kind`; verdict `pass`; no check that is
+  neither `pass` nor `known-gap`; a fixed list of checks, each `pass` exactly once, so that a removed or renamed spec
+  cannot pass silently: `signin`, `provider-key`, `schedule`, `workflow-dead-executor`, `archive` (the set of ADR 0085
+  decision 15) and `browser-signin`; and `topology.browserSignin: true`. A final tag allows **no known gap**; an rc
+  prints them. The kind topology therefore sets `browserSignin: true`, and the `drill` job installs Node, pnpm, the web
+  dependencies and Playwright Chromium.
+- **A shareable result.** `drill-result.json` is attached to every release, so its `topology` is a summary (`name`,
+  `profile`, `browserSignin`: the paths the gate reads). The full topology (context, registries, images) is written to
+  `topology.json` in the local output directory. The `drill-logs` artifact leaves out `bin/` (the compiled suite) and the
+  kubeconfig.
+- **Timeouts** follow the measured run (26 to 28 minutes): 45 minutes for the suite, 55 for its step, 60 for the job, a
+  75-minute wait in the release gate and 90 for the gate job (they were 85, 110, 120, 150 and 170).
+- **SQL writes.** Decision 4 lets the drill write only through the product's own commands and API. Two exceptions
+  remain, both in the test code and both named here so that they are known: `oidc_drill_test.go` disables the
+  `drill-disabled` user with an `UPDATE users SET deleted_at` (the product has no API to disable a user), and
+  `drill_test.go` holds the sandbox row with `SELECT ... FOR UPDATE` in a session of its own to keep a notification
+  step waiting during the hold. The first goes away with a disable-user API (issue to follow: "api: disable and enable a
+  user"); the second is a lock, not a data write, and stays.
+- **The Kata `vm` tier** gets no drill check and no gate. It is not a restore property (the restore does not depend on
+  the isolation tier); a run on a real cluster with the Kata runtime class may inform.
+- **Prior art.** See "Why": gates on kind in project CI; real-cluster runs inform.
+- **Closes** #275 (the v0.1.0 restore drill is the kind drill of the tag).
 
 ## Alternatives considered
 

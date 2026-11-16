@@ -1145,7 +1145,7 @@ spec:
 			Expect(reason).To(ContainSubstring("nonce"))
 		})
 
-		// The lab profile only (topology browserSignin, #518): the spec exists in the tree only then, because a
+		// Only when the topology asks for it (browserSignin; kind does, #1039): the spec exists in the tree only then, because a
 		// drill spec never skips (ADR 0109 decision 3) and a notrun check would turn the result red.
 		if browserProfile() {
 			It("signs in through the browser", Label("browser-signin"), func(ctx SpecContext) {
@@ -1174,7 +1174,7 @@ spec:
 		}
 
 		// The drill's own OIDC provider (#983), on every profile. The Go flow goes through the install's real
-		// /auth/oidc/start and /auth/oidc/callback; the lab adds one browser sign-in through Dex's login form.
+		// /auth/oidc/start and /auth/oidc/callback; a topology with browserSignin (kind) adds one browser sign-in through Dex's login form.
 		It("signs in through the OIDC provider, and each user keeps the ID and the role", Label("oidc-signin"), func(ctx SpecContext) {
 			needs("release", "seed", "oidc-source")
 			oidcTarget(ctx, &dst)

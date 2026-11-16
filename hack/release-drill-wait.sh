@@ -3,16 +3,16 @@
 #
 # Maintainer script (hack/README.md): runs in the upstream release workflow, before hack/release-gate.sh.
 #
-# Waits for the restore drill that the push of an rc tag starts (the `drill` job of e2e-kind.yml, ADR 0109,
-# #518; it takes up to two hours), so the release `gate` job does not fail only because the drill is still
+# Waits for the restore drill that the push of a tag starts, rc or final (the `drill` job of e2e-kind.yml, ADR 0109,
+# #1039; it takes about half an hour), so the release `gate` job does not fail only because the drill is still
 # running. It only waits: it never reads a result and never makes anything pass. hack/release-gate.sh stays
 # the single judge and fails closed on a missing, red or unreadable drill result, so a timeout here, a run
-# that never appears, or an API error all end in the gate's own failure and never in a release. A final tag
-# (no -rc.) needs no wait: its evidence is the lab result attached to the rc release.
+# that never appears, or an API error all end in the gate's own failure and never in a release. Every tag has
+# its own drill, so every tag waits.
 #
 # Environment: TAG, SHA, GITHUB_REPOSITORY, GH_TOKEN (actions:read). Optional, in seconds:
 #   DRILL_WAIT_APPEAR (600)  how long to wait for the tag's e2e-kind run to exist at all
-#   DRILL_WAIT_MAX (9000)    how long to wait for that run to finish (the job's own limit is 120 minutes)
+#   DRILL_WAIT_MAX (4500)    how long to wait for that run to finish (75 minutes; the job's own limit is 60)
 #   DRILL_WAIT_POLL (60)     seconds between two looks
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -22,16 +22,11 @@ set -euo pipefail
 
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
 appear=${DRILL_WAIT_APPEAR:-600}
-max=${DRILL_WAIT_MAX:-9000}
+max=${DRILL_WAIT_MAX:-4500}
 poll=${DRILL_WAIT_POLL:-60}
 for v in "$appear" "$max" "$poll"; do
 	[[ $v =~ ^[0-9]+$ ]] || { echo "release drill wait: '$v' is not a number of seconds" >&2; exit 1; }
 done
-
-if [[ $TAG != *-rc.* ]]; then
-	echo "release drill wait: $TAG is not an rc tag; nothing to wait for"
-	exit 0
-fi
 
 # The newest e2e-kind run that this tag push started, as "<id> <status>"; empty when there is none.
 run_of_tag() {

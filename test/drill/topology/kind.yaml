@@ -11,6 +11,9 @@
 # descriptive and changes nothing.
 name: kind
 profile: kind
+# The release gate demands the browser-signin check on every tag (#1039): web/e2e-drill signs in through the web UI of
+# the restored copy. The drill job installs Node, pnpm and Chromium for it.
+browserSignin: true
 context: kind-koinon-e1
 source:
   namespace: koinon-drill-src-{run}

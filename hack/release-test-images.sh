@@ -4,7 +4,7 @@
 # Maintainer script (hack/README.md): runs in the upstream release workflow (job `test-images`).
 #
 # Publishes the TEST images of a release candidate to <registry> (ghcr.io/<owner>/<repo>), built from the
-# tagged commit, for the lab drills (#928). The lab cannot build images; it mirrors these by digest:
+# tagged commit, for the drills (#928). A cluster that cannot build images mirrors these by digest:
 #   <registry>/koinon-fakemodel   the fake model server (cmd/koinon-fakemodel; test/drill's fakeModelImage)
 #   <registry>/koinon-fakemcp     the fake MCP server (cmd/koinon-fakemcp; test/drill's fakeMcpImage)
 #   <registry>/rt1-*              the RT1 fixture images (hack/rt1-fixtures-build.sh, test/fixtures/rt1)

@@ -18,8 +18,8 @@ func TestTheShippedTopologiesLoad(t *testing.T) {
 		profile string
 		browser bool
 	}{
-		"topology/kind.yaml":        {drill.ProfileKind, false},
-		"topology/lab.example.yaml": {drill.ProfileLab, true},
+		"topology/kind.yaml":            {drill.ProfileKind, true}, // the release gate demands the browser sign-in (#1039)
+		"topology/cluster.example.yaml": {drill.ProfileCluster, false},
 	} {
 		top, err := drill.LoadTopology(file, "abc123")
 		if err != nil {
@@ -31,9 +31,9 @@ func TestTheShippedTopologiesLoad(t *testing.T) {
 	}
 }
 
-// The example is public and the lab's real topology is not: the example names nothing real.
-func TestTheLabExampleNamesNothingReal(t *testing.T) {
-	b, err := os.ReadFile("topology/lab.example.yaml")
+// The example is public and a real cluster's topology is not: the example names nothing real.
+func TestTheClusterExampleNamesNothingReal(t *testing.T) {
+	b, err := os.ReadFile("topology/cluster.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,23 +43,22 @@ func TestTheLabExampleNamesNothingReal(t *testing.T) {
 		}
 		for _, bad := range []string{"192.168.", "10.0.", "172.16.", ".lan", ".local", "procodus"} {
 			if strings.Contains(line, bad) {
-				t.Errorf("lab.example.yaml: %q looks like a real address or host (%s)", line, bad)
+				t.Errorf("cluster.example.yaml: %q looks like a real address or host (%s)", line, bad)
 			}
 		}
 	}
 }
 
-func TestAProfileIsRequiredAndTheLabNeedsTheBrowser(t *testing.T) {
-	b, err := os.ReadFile("topology/lab.example.yaml")
+func TestAProfileIsRequired(t *testing.T) {
+	b, err := os.ReadFile("topology/cluster.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	for name, mod := range map[string]func(string) string{
-		"no profile":      func(s string) string { return strings.Replace(s, "profile: lab\n", "", 1) },
-		"unknown profile": func(s string) string { return strings.Replace(s, "profile: lab", "profile: staging", 1) },
-		"lab, no browser": func(s string) string { return strings.Replace(s, "browserSignin: true", "browserSignin: false", 1) },
-		"lab, not in repo": func(s string) string {
+		"no profile":      func(s string) string { return strings.Replace(s, "profile: cluster\n", "", 1) },
+		"unknown profile": func(s string) string { return strings.Replace(s, "profile: cluster", "profile: staging", 1) },
+		"cluster, not in repo": func(s string) string {
 			return strings.Replace(s, "namespace: koinon-drill-src-", "namespace: prod-", 1)
 		},
 	} {
@@ -100,16 +99,16 @@ func TestTheNamespaceManifestCarriesTheRunLabelAndTheOperatorsLabels(t *testing.
 }
 
 func TestTheHookInputsAreChecked(t *testing.T) {
-	b, err := os.ReadFile("topology/lab.example.yaml")
+	b, err := os.ReadFile("topology/cluster.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	top, err := drill.LoadTopology("topology/lab.example.yaml", "abc123")
+	top, err := drill.LoadTopology("topology/cluster.example.yaml", "abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if top.NamespaceHook == "" || top.NamespaceLabels["example.invalid/secret-store"] != "true" {
-		t.Errorf("the lab example should show the hook and the label: %+v", top)
+		t.Errorf("the cluster example should show the hook and the label: %+v", top)
 	}
 	if got := drill.OIDCRedirect(drill.OIDCSourcePort); got != "http://127.0.0.1:18181/auth/oidc/callback" {
 		t.Errorf("source redirect: %q", got)

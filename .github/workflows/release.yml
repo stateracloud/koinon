@@ -4,12 +4,12 @@
 # publishes the three Go images, the OpenCode harness image (ADR 0059) and the OCI Helm chart to
 # ghcr.io/<owner>/<repo> (ghcr.io/stateracloud/koinon) and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
 # retested for the gate: it only checks that the tagged commit is on main and that the required CI
-# checks succeeded on it. For an rc tag that includes the restore drill (ADR 0109, #518): the push of the tag
-# starts the drill (e2e-kind.yml, up to two hours), the gate first waits for that run to finish
+# checks succeeded on it. For every tag, rc or final, that includes the restore drill (ADR 0109, #1039): the push of the tag
+# starts the drill (e2e-kind.yml, about half an hour), the gate first waits for that run to finish
 # (hack/release-drill-wait.sh, which only waits and never judges) and then judges the drill-result.json it left;
 # the gate stays the one judge and fails closed. The result it judged is attached to the draft release as
 # drill-result.json (#928). The `test-images` job also publishes the fake model and fake MCP servers and the RT1
-# fixture images at the tagged commit; they are test images for the lab drills, not product images.
+# fixture images at the tagged commit; they are test images for the drill (kind in CI, or your own cluster), not product images.
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
@@ -39,9 +39,9 @@ jobs:
   gate:
     name: gate
     runs-on: ubuntu-latest
-    # The wait for the tag-push drill (up to 150 minutes, hack/release-drill-wait.sh) plus the checks. A wait that
+    # The wait for the tag-push drill (up to 75 minutes, hack/release-drill-wait.sh) plus the checks. A wait that
     # runs out ends in the gate's own failure ("no green result"), never in a release.
-    timeout-minutes: 170
+    timeout-minutes: 90
     permissions:
       contents: read
       checks: read
@@ -52,9 +52,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false # hack/release-gate.sh fetches main anonymously (public repository)
-      # An rc tag push starts the drill in e2e-kind.yml at the same moment as this job. Wait for it; a final tag
-      # (whose evidence is the lab result on the rc release) does not wait.
-      - name: wait for the restore drill of this tag push (rc only)
+      # A tag push, rc or final, starts the drill in e2e-kind.yml at the same moment as this job. Wait for it.
+      - name: wait for the restore drill of this tag push
         env:
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
@@ -65,13 +64,12 @@ jobs:
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
-          DRILL_RESULT_OUT: ${{ runner.temp }}/drill-result/drill-result.json # an rc: the green kind result the gate judged
+          DRILL_RESULT_OUT: ${{ runner.temp }}/drill-result/drill-result.json # the green kind result the gate judged
         run: |
           mkdir -p "$RUNNER_TEMP/drill-result"
           hack/release-gate.sh
-      # The gate passed, so for an rc this file exists and is green; the release job attaches it to the release.
+      # The gate passed, so this file exists and is green; the release job attaches it to the release.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: contains(github.ref_name, '-rc.')
         with:
           name: drill-result
           path: ${{ runner.temp }}/drill-result/drill-result.json
@@ -127,16 +125,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      # An rc release carries the drill result the gate judged (#928). The release is a draft, which the
+      # Every release carries the drill result the gate judged (#928, #1039). The release is a draft, which the
       # tags endpoint does not return, so it is found by its tag in the list of releases. A missing artifact
-      # or release fails the job (the gate job uploads the artifact for every rc).
+      # or release fails the job (the gate job uploads the artifact for every tag).
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: contains(github.ref_name, '-rc.')
         with:
           name: drill-result
           path: drill-result
-      - name: attach drill-result.json to the draft release (rc only)
-        if: contains(github.ref_name, '-rc.')
+      - name: attach drill-result.json to the draft release
         env:
           TAG: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}

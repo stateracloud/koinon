@@ -322,16 +322,16 @@ shows a guide's blocks is in `koinon-docs`; its CI compares the page with the fi
 seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
 kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id> --context <ctx>` deletes by the label
-`koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
-`e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 110` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
+`koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the `drill` job of
+`e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 55` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
-branch): nightly, on rc tags (`v*-rc.*`) and on `gh workflow run e2e-kind.yml -f suite=drill`, which runs only the
+branch): nightly, on every release tag (rc and final) and on `gh workflow run e2e-kind.yml -f suite=drill --ref <tag>`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
-merge queue check, so it is listed in `hack/ci-required.txt` as advisory. A check the product cannot pass yet
+merge queue check: it is not a merge check, it is a release check (`hack/release-gate.sh` demands it for every tag; listed in `hack/ci-required.txt` in that sense). A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
 any other red check does. The job uploads `drill-logs` (`junit.xml`, `report.json`, `drill-result.json` with
 commit, chart, topology, RTO, RPO, a verdict per check and the known gaps). A red drill opens one issue
-with the label `drill-red`, or comments on the open one (the `drill issue` job, `hack/drill-issue.sh`; it runs only for the nightly schedule and rc tag pushes, never for a
+with the label `drill-red`, or comments on the open one (the `drill issue` job, `hack/drill-issue.sh`; it runs only for the nightly schedule and tag pushes, never for a
 dispatch on a branch, names the commit the drill tested, and is `continue-on-error`; only that job
 has `issues: write`; close the issue when a nightly run is green). `test/e2e/run.sh` writes
 `junit.xml` and `report.json` for the quickstart too. `test/e2e/backup-restore.sh` stays as the in-place scenario.
@@ -340,19 +340,27 @@ SeaweedFS object store and `checkpoints.enabled`) and `workflow-dead-executor` (
 source's executor is recovered by the target; the report has its own `dbosRecovery` sub-time). The archive seed
 waits about 5 minutes for the source to archive an idle agent (`reconciler.idleTimeout: 2m`, `archiveAfter: 1m`).
 
-Phase 3 (#518) is the lab profile and the release gate. A topology file has a `profile` (`kind` or `lab`), and
-`drill-result.json` carries it. The lab profile (`test/drill/topology/lab.example.yaml` is a made-up example; the real
-file stays outside git) adds the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
+Phase 3 (#518, reshaped by #1039) is the profile and the release gate. A topology file has a `profile` (`kind` for
+project CI, or `cluster` for a real cluster of your own), and `drill-result.json` carries a summary of the topology:
+its name, profile and `browserSignin`, nothing else (the result is uploaded and attached to the release; the full
+topology stays in the output directory as `topology.json`). The kind topology turns `browserSignin` on, which adds
+the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
 that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
-environment of that process). Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
+environment of that process). The `drill` job installs Node, pnpm (`pnpm --dir web install --frozen-lockfile`) and Playwright
+Chromium for it, as the web suite job does. Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
 (or `no_proxy`) for the drill: `web/playwright.drill.config.ts` maps them to Playwright's `use.proxy` (Playwright
 ignores them itself). The server goes in without credentials; a user name and password in the URL are split out and
 URL-decoded. The bypass list is the `NO_PROXY` entries plus `127.0.0.1` and `localhost`, which the port-forward needs.
 Without them nothing changes. The drill keeps trace, video and JSON report off and uses the list reporter, so the
 credentials reach no artifact; a malformed value fails without printing it
 (`web/src/lib/playwright-proxy.ts`). The spec exists only when the topology says `browserSignin: true`, because a drill spec never
-skips. `hack/release-gate.sh` reads the kind result from the `drill-logs` artifact (rc tags) and the lab result from the
-rc release's asset `drill-result-lab.json` (final tags): [releasing](releasing.md#cut-a-final-release).
+skips. Every tag, rc and final, starts its own drill on kind (`e2e-kind.yml` runs the `drill` job on the tag patterns of
+`release.yml`). `hack/release-gate.sh` reads only the `drill-logs` artifact of that tag's run: profile `kind`, verdict
+`pass`, and the checks `signin`, `provider-key`, `schedule`, `workflow-dead-executor`, `archive` and `browser-signin`
+each passing once; a final tag allows no known gap. [releasing](releasing.md). The job's limits follow the measured run
+(about 26 to 28 minutes): 45 minutes for the suite, 55 for its step, 60 for the job, a 75-minute wait in the release
+gate (`hack/release-drill-wait.sh`) and 90 for the gate job. The `drill-logs` artifact leaves out `bin/` (the compiled suite)
+and the kind kubeconfig.
 
 Phase 4 (#927) seeds users and an approval and checks the sign-ins on the restored copy. The seed adds an org admin
 (`drill-admin`) and a member (`drill-member`) with `koinon-api users create` (the supported path for a second local
@@ -363,25 +371,25 @@ ask-tier write tool and an agent whose task makes the fake model call it. The ch
 reset-password request on the restore target, sealed to an age key made when the suite starts, opened and used to sign
 in; the same nonce again is refused) and `oidc-signin`
 (ADR 0109, amendment 2026-11-13, #983). The drill runs its own OIDC provider, Dex, in the fakes namespace (topology
-`fakeIdpImage`, the upstream image pinned by digest; kind pulls it from ghcr.io, a lab mirrors that digest; the release
+`fakeIdpImage`, the upstream image pinned by digest; kind pulls it from ghcr.io, another cluster mirrors that digest; the release
 builds nothing for it). It has three static users, `drill-admin`, `drill-member` and `drill-disabled`, with a fake
 password whose bcrypt hash is made at run time. The step `oidc-source` signs the three in on the source with a Go HTTP
-flow through Koinon's real `/auth/oidc/start` and `/auth/oidc/callback` (kind and lab alike), records user IDs and roles,
+flow through Koinon's real `/auth/oidc/start` and `/auth/oidc/callback` (every profile), records user IDs and roles,
 and disables `drill-disabled` in Koinon before the backup. The check `oidc-signin` first reads the restored rows (same
 user IDs, same roles, same disabled state) before any sign-in on the copy, then runs the flow again: admin and member keep
-ID and roles and no user is made, and the disabled user gets 403 at the callback. The lab profile adds one Playwright
+ID and roles and no user is made, and the disabled user gets 403 at the callback. A topology with `browserSignin: true` (kind) adds one Playwright
 sign-in of the admin through the Dex login form (`web/e2e-drill/oidc.spec.ts`), which waits for the first of "back at
 Koinon" or a known Dex page and fails with a named error, never with a 60 s heading wait. The drill host reaches Dex
 through a port-forward (fixed local port 18556); the browser maps its cluster name with `--host-resolver-rules` and
 bypasses the proxy for it. The install's API is on `127.0.0.1:18181` (source) and `127.0.0.1:18182` (target), the two
 redirect URLs of Dex's one client. No secret, no external provider and no state across runs are involved. The topology's `namespaceHook` is a manifest the drill applies in each namespace it creates,
-and `namespaceLabels` are labels it adds to them (the lab uses both for its secret store). `hack/approve-pr.sh` is a
+and `namespaceLabels` are labels it adds to them (a cluster of your own may use both, for example for a secret store). `hack/approve-pr.sh` is a
 scripted approver for any install, GitHub and Gitea targets (sign in at `/auth/login`, `GetApproval`, `Approve` with `args_sha256`);
 `hack/answer-question.sh` answers one pending `ask_user` question by run and question ID.
 
 The check `enforcement` (#955) runs `koinon-api run-evidence export` (#926) in the target's api pod for every run of the restored
 copy and reads the sandbox enforcement mode it prints. It passes only with at least one run and `enforce` on every run; `unknown`, `audit`,
-`none` and zero runs fail. It runs on every profile (kind and lab); `hack/release-gate.sh` reads checks generically and needs no change.
+`none` and zero runs fail. It runs on every profile.
 
 The step `pipe` (#910) runs the guide's `pipe-db` and `pipe-keys` blocks (`pg_dump | pg_restore`, `keys export | keys import`)
 from the live source into the released target, after the checks above, and compares install ID, tasks and runs.
@@ -395,6 +403,22 @@ queue's `quickstart` on the queue commit (main plus the PR) is the only e2e proo
 green one is not merge evidence. The `e2e` label is also for a change the rule thinks irrelevant but you want
 tested: the queue reads it when it builds the entry. `hack/e2e-remote.sh` (lab or `--local`) is a dev and debug tool only: it is not
 merge evidence. `SUITE_LABEL=smoke` runs steps 1-6 only.
+
+### Run the drill on your own cluster
+
+A drill on a real cluster of your own (your storage class, network policy, registry mirror, a different Kubernetes
+version) is informing: the release gate never reads it, and no release needs it. It is the same suite with another
+topology file.
+
+1. Copy `test/drill/topology/cluster.example.yaml` outside the repository and replace its made-up values (context,
+   storage class, registry, images). Keep `profile: cluster`.
+2. Mirror the images the topology names to a registry your cluster can read (the release's test images are
+   [published by digest](releasing.md#test-images); the Dex image is the upstream one).
+3. Run `KUBECONFIG=<your kubeconfig> DRILL_TOPOLOGY=<your file> test/drill/run.sh` from a checkout of the commit you
+   want to test. It makes no cluster and loads no images; it creates namespaces that start with `koinon-drill-` and
+   deletes them, by label, at the end. With `browserSignin: true` the machine needs pnpm and Chromium for Playwright.
+4. Read `drill-result.json` in the output directory. A red check is a finding for you or an issue for the project; it
+   blocks nothing.
 
 ### The `e2e result` gate
 

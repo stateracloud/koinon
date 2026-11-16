@@ -24,7 +24,9 @@
 #     so the bisect reads its result as pass or fail; ADR 0025 amendment, ADR 0109). A red run after a green one opens
 #     an issue naming the culprit merge (hack/e2e-bisect.sh): fix forward within 2 hours, else revert.
 #   - manual dispatch, optionally on one commit (the bisect uses it).
-#   - the advisory `drill` job (ADR 0109, #514): nightly, on rc tags and on a dispatch with suite=drill. On a tag push
+#   - the `drill` job (ADR 0109, #514, #1039): nightly, on every release tag (rc and final) and on a dispatch with
+#     suite=drill. Not a merge check; a release check: hack/release-gate.sh judges the `drill-logs` artifact of the
+#     tag's own run. On a tag push
 #     and on that dispatch `decide`, `quickstart` and `result` are skipped; `continue-on-error` keeps the run's
 #     conclusion (which hack/e2e-bisect.sh reads) as the quickstart's. The `drill issue` job (#572) opens the issue
 #     for a red drill and is `continue-on-error` for the same reason.
@@ -52,13 +54,17 @@ on:
     types: [checks_requested]
   push:
     branches: [main]
-    tags: ['v*-rc.*'] # only the `drill` job runs on a tag (ADR 0109)
+    # Only the `drill` job runs on a tag (ADR 0109). The patterns of release.yml: an rc tag and a final tag each
+    # run their own drill, and hack/release-gate.sh judges the artifact of that run (#1039).
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       suite:
-        description: 'go: API-driven quickstart (test/e2e). web: the browser, Playwright against the real API (web/e2e-real, old issue 50). Each needs its own install, so one per run. drill: only the advisory restore drill (ADR 0109), not the quickstart.'
+        description: 'go: API-driven quickstart (test/e2e). web: the browser, Playwright against the real API (web/e2e-real, old issue 50). Each needs its own install, so one per run. drill: only the restore drill (ADR 0109). Dispatch it on a tag ref to give the release gate of that tag its evidence; not the quickstart.'
         type: choice
         options: [go, web, drill]
         default: go
@@ -471,11 +477,11 @@ jobs:
           # The stories were red while the quickstart passed: the baseline is the newest nightly whose stories passed.
           STORIES_RED: ${{ needs.quickstart.outputs.stories_red == 'true' && needs.quickstart.result != 'failure' && '1' || '0' }}
 
-  # The automated restore drill (ADR 0109, #514), advisory. It lives in this file because GitHub starts a
+  # The automated restore drill (ADR 0109, #514, #1039). It gates no merge but every tag. It lives in this file because GitHub starts a
   # dispatch or a schedule only from a workflow file on the default branch, and this one already has them.
   # `continue-on-error` keeps a red drill from turning the run red: hack/e2e-bisect.sh reads the conclusion of
-  # this workflow's push and schedule runs to find the last green main. Runs on the nightly schedule, on rc tags
-  # (v*-rc.*) and on a dispatch with suite=drill (the only job that dispatch runs). Never a pull request or queue
+  # this workflow's push and schedule runs to find the last green main. Runs on the nightly schedule, on release tags
+  # (rc and final) and on a dispatch with suite=drill (the only job that dispatch runs). Never a pull request or queue
   # check, so it can never be required (hack/ci-required.txt). A red check that is not a declared known gap
   # (label known-gap, message "known gap: #N") turns the job's steps red; read drill-result.json and the summary.
   drill:
@@ -491,7 +497,9 @@ jobs:
     outputs:
       red: ${{ steps.verdict.outputs.red }} # `needs.drill.result` is "success" under continue-on-error, so the job says it itself
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # The measured run takes 26 to 28 minutes (#1039); the limits below grow from it: suite 45, step 55, job 60.
+    # hack/release-drill-wait.sh waits 75 and the release gate job has 90.
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -508,6 +516,25 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      # The browser-signin check (topology browserSignin, test/drill/topology/kind.yaml) drives web/e2e-drill with
+      # Playwright: Node, pnpm and Chromium, the pins of the web suite job above.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: web/package.json
+
+      - name: Node and pnpm (browser sign-in)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # zizmor: ignore[cache-poisoning] the drill job publishes nothing; the artifact is read by the release gate only as data
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies and Chromium (browser sign-in)
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web exec playwright install --with-deps chromium
 
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -564,9 +591,9 @@ jobs:
           key: kind-proxy-${{ runner.os }}-${{ hashFiles('test/e2e/kind/up.sh', 'test/e2e/kind/registry.sh', 'charts/koinon/values.yaml', 'hack/versions.env') }}
 
       - name: Restore drill (test/drill/run.sh)
-        # A little below the job's 120: a hung drill is then a failed step, so the verdict step below sees it. A job
+        # A little below the job's 60: a hung drill is then a failed step, so the verdict step below sees it. A job
         # timeout would end as `cancelled`, which `red` must not count: a person or the concurrency group cancels too.
-        timeout-minutes: 110
+        timeout-minutes: 55
         env:
           OUT: ${{ runner.temp }}/drill
           KEEP: "0"
@@ -601,9 +628,13 @@ jobs:
         if: always()
         with:
           name: drill-logs
+          # Not the compiled suite (`bin/`) and not the kind kubeconfig: the artifact is public and the gate downloads it.
           path: |
             ${{ runner.temp }}/drill.log
             ${{ runner.temp }}/drill/
+            !${{ runner.temp }}/drill/bin
+            !${{ runner.temp }}/drill/bin/**
+            !${{ runner.temp }}/drill/kubeconfig
           retention-days: 14
 
       - name: Delete cluster
@@ -622,7 +653,7 @@ jobs:
   drill-issue:
     name: drill issue
     needs: drill
-    # Only a red drill of the nightly schedule or of an rc tag push; never a dispatch on a branch (the commit may be
+    # Only a red drill of the nightly schedule or of a tag push; never a dispatch on a branch (the commit may be
     # a work in progress, and the issue would be noise).
     if: >-
       always() && needs.drill.outputs.red == 'true'

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tests hack/release-drill-wait.sh with a stubbed gh: it waits for the tag push's e2e-kind run to finish,
-# gives up (exit 0, the gate decides) when no run appears or the run outlasts the limit, and does nothing
-# for a final tag.
+# gives up (exit 0, the gate decides) when no run appears or the run outlasts the limit, and waits for a
+# final tag the same way (every tag has its own drill).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -96,8 +96,10 @@ check "a run seen once, then missing from a look, is still waited for (appear < 
 check "...until it finished" "$(cat "$tmp/calls")" 5
 
 reset
-check "a final tag waits for nothing" "$(TAG=v1.2.3 wait_rc)" 0
-check "...and makes no API call" "$(cat "$tmp/calls" 2>/dev/null || echo 0)" 0
+run_json completed v1.2.3 >"$tmp/runs.json"
+check "a final tag waits for its own run" "$(TAG=v1.2.3 wait_rc)" 0
+check "...and looks at the API" "$([[ $(cat "$tmp/calls" 2>/dev/null || echo 0) -ge 1 ]] && echo yes || echo no)" yes
+check "...and says it found the run" "$(grep -c 'drill run of v1.2.3 is' "$tmp/out")" 1
 
 reset
 check "a limit that is not a number is refused" "$(DRILL_WAIT_MAX=soon wait_rc)" 1

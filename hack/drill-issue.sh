@@ -4,8 +4,8 @@
 # Maintainer script (hack/README.md): runs in the upstream CI (opens an issue with the workflow's token).
 #
 # The nightly restore drill (the `drill` job of e2e-kind.yml, ADR 0109) was red. Record it in ONE issue:
-# when an open `drill-red` issue exists, comment on it; otherwise open one. The drill is advisory
-# (continue-on-error, never a merge check), so without this a red night is visible only in the Actions tab (#572).
+# when an open `drill-red` issue exists, comment on it; otherwise open one. The drill is not a merge check
+# (continue-on-error, a release check), so without this a red night is visible only in the Actions tab (#572).
 #
 #   hack/drill-issue.sh [--dry-run]
 #
@@ -37,7 +37,7 @@ body="The restore drill was red on \`${ref}\` (${sha:0:9}, event \`${event}\`).
 
 Run: ${run_url}
 
-Read the \`drill-logs\` artifact of that run: \`drill-result.json\` has one verdict per check, and the job summary lists them. A check that fails only on a declared known gap (label \`known-gap\`, message \`known gap: #N\`) does not make the drill red. The drill is advisory: it does not block merges, but a restore that no longer works is a release blocker (ADR 0109).
+Read the \`drill-logs\` artifact of that run: \`drill-result.json\` has one verdict per check, and the job summary lists them. A check that fails only on a declared known gap (label \`known-gap\`, message \`known gap: #N\`) does not make the drill red. The drill is not a merge check, but it is a release check: a red drill blocks the tag (ADR 0109).
 
 This issue stays open while the drill is red. Close it when a nightly run is green; a later red run comments here."
 

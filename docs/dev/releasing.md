@@ -86,22 +86,27 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    the gate fails closed.
    The gate also requires the `quickstart` job of the kind e2e to have succeeded on the commit. It
    reruns no tests. `hack/release-gate-test.sh` tests it against a stubbed `gh`.
-   It also asks for the restore drill (ADR 0109 decision 2, #518; "rc: kind, final: lab"): an rc tag needs a
-   `drill-logs` artifact for the commit whose `drill-result.json` says that commit, profile `kind` and
-   verdict `pass`; the `drill` job of `e2e-kind.yml` makes it nightly or on
-   `gh workflow run e2e-kind.yml -f suite=drill --ref <branch at the commit>` (not with `-f commit=`: the gate
-   matches the run's own commit). The push of an rc tag starts that drill itself and it takes up to two hours, so the
-   release `gate` job first runs `hack/release-drill-wait.sh`: it waits (150 minutes at most) for the tag push's
+   It also asks for the restore drill (ADR 0109 decision 2, #1039): every tag, rc or final, needs its own green
+   drill on kind in project CI. The push of the tag starts the `drill` job of `e2e-kind.yml`; it uploads the
+   `drill-logs` artifact, and the gate reads the `drill-result.json` in it. That result must say the tagged commit,
+   profile `kind`, verdict `pass`, the checks `signin`, `provider-key`, `schedule`, `workflow-dead-executor`,
+   `archive` and `browser-signin` each passing once (ADR 0085 decision 15 plus the browser sign-in; a removed or
+   renamed spec cannot pass silently) and the browser sign-in on in its topology summary. Only the artifact of
+   the tag's own run counts (its ref is the tag): never a release asset, never a result someone uploaded, never
+   the nightly run. To make one without a new tag push, dispatch on the tag:
+   `gh workflow run e2e-kind.yml -f suite=drill --ref vX.Y.Z-rc.N` (not with `-f commit=`, and not on a
+   branch: the gate matches the run's own commit and ref). The drill takes about half an hour, so the
+   release `gate` job first runs `hack/release-drill-wait.sh`: it waits (75 minutes at most) for the tag push's
    `e2e-kind` run to finish, and only waits. It never reads a result and cannot make anything pass; the gate
    then judges the `drill-logs` artifact as above. A run that never appears, a wait that runs out or an API
    error end in the gate's own failure ("no green result"), which fails closed; no person has to re-run
    anything while the drill is running. After a red or missing drill, fix it and re-run the `gate` job (or the
-   workflow) once a green drill artifact for the commit exists. The gate copies the green result it judged
-   (`DRILL_RESULT_OUT`), and the `release` job attaches it to the draft release as `drill-result.json` (the
-   kind result; the lab result of a final tag is the separate `drill-result-lab.json` below). Artifacts keep 14 days. A
-   final tag needs the lab result of the rc it promotes (below). A check that is neither `pass` nor
-   `known-gap` makes a result red whatever its `verdict` field says. Known gaps do not block; the gate prints
-   them. It fails closed on anything it cannot read.
+   workflow) once a green drill artifact for the tag exists. The gate copies the green result it judged
+   (`DRILL_RESULT_OUT`), and the `release` job attaches it to the draft release as `drill-result.json` for every
+   tag. Artifacts keep 14 days. A check that is neither `pass` nor `known-gap` makes a result red whatever its
+   `verdict` field says. Known gaps do not block an rc tag; the gate prints them. A final tag allows none:
+   the gate refuses a result with a known gap. It fails closed on anything it cannot read. A run on your
+   own cluster is informing and never read by the gate: [run the drill on your own cluster](ci.md#run-the-drill-on-your-own-cluster).
    No checkout in the workflow keeps git credentials (`persist-credentials: false`), and no job
    restores an Actions cache (#579). The gate's `git fetch origin main` is anonymous, so it relies on
    the repository being public. If the repository becomes private, the fetch fails and the gate
@@ -130,28 +135,15 @@ with a new digest) and the chart tag is overwritten. Do not move a tag that was 
 Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final release also moves the
 `latest` image tag and is not marked as a prerelease.
 
-The final tag must be on the tree of an rc (`vX.Y.Z-rc.N`; the gate takes the highest N on that tree), and
-that rc's GitHub release must carry the asset `drill-result-lab.json`, a drill result of the **lab** profile
-for the rc's commit. Make it before the final tag:
-
-1. Write your lab topology file outside the repository. Start from `test/drill/topology/lab.example.yaml`
-   (every value in it is made up; the real hosts, contexts, registries and storage classes stay out of git).
-2. On a machine that reaches the lab cluster, with pnpm and `pnpm --dir web exec playwright install chromium`
-   done, check out the rc commit and run
-   `KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your file> test/drill/run.sh`. It makes no cluster and loads
-   no images. The check `browser-signin` signs in through the web UI on the restored copy; it uses the
-   seeded fake password. If you want it to use another (for example one made by a break-glass password
-   reset, #512), set `KOINON_DRILL_WEB_PASSWORD`.
-3. When the verdict is `pass`, upload the result under the gate's name:
-   `cp $OUT/drill-result.json /tmp/drill-result-lab.json && gh release upload vX.Y.Z-rc.N /tmp/drill-result-lab.json`.
-   The run fails (exit 1) when a check fails that is not a known gap; do not upload a red result.
+A final tag runs its own kind drill like an rc tag (above); it needs no rc and no upload. A known gap that
+an rc carried must be fixed first: the gate refuses it in a final tag.
 
 Checklist for the v0.1.0 gate (ADR 0085 decision 1 and implementation item 22, ADR 0099). It is
 tracked in #313 ("release: v0.1.0 tag-time gate checklist"), separate from the docs change that
 added it. Tick it on the tag commit, not before:
 
-- [ ] The restore drill passed on the home lab (ADR 0085 decision 15), with RTO and RPO recorded
-      (#275); `drill-result-lab.json` is on the rc release (`hack/release-gate.sh` checks it).
+- [ ] The restore drill passed in project CI for the tag, with no known gap (ADR 0085 decision 15, ADR 0109), RTO
+      and RPO recorded in the release's `drill-result.json` (#275); `hack/release-gate.sh` checks it.
 - [ ] The ADR 0085 implementation issues still in the v0.1.0 gate (decisions 2-4 and 13-16, ADR 0099
       decision 2) are closed.
 - [ ] `hack/release-gate.sh` is green for the commit.
@@ -233,13 +225,13 @@ Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again w
 
 ## Test images
 
-The workflow's `test-images` job publishes the images that the lab drills need, built at the tagged
+The workflow's `test-images` job publishes the images that the drill needs, built at the tagged
 commit, under the release images' repository path: `ghcr.io/<owner>/<repo>/koinon-fakemodel` (the fake model
 server of `test/drill`, `cmd/koinon-fakemodel`), `ghcr.io/<owner>/<repo>/koinon-fakemcp` (the fake MCP server,
 `cmd/koinon-fakemcp`) and `ghcr.io/<owner>/<repo>/rt1-*` (the eight RT1 fixture
 images of `hack/rt1-fixtures-build.sh`; `rt1-prometheus`, `rt1-searxng` and `rt1-searxng-mcp` are copies of
 pinned upstream images, unmodified). Tags are the release version without the `v` (the upstream copies also
-keep their upstream tag). The lab cannot build images, so it mirrors them by digest; the job's artifact
+keep their upstream tag). A cluster that cannot build images mirrors them by digest; the job's artifact
 `test-image-refs` lists each image as a digest reference. When `RELEASE_SIGNING` is `true`, the
 `sign-test-images` job signs each one keyless, like the release images (a failed test image never blocks the
 signing of the release images). These are **test images, not product images**: the chart does not reference

@@ -21,7 +21,7 @@ import (
 
 // The OIDC checks of the drill (ADR 0109, amendment 2026-11-13, #983). The drill runs its own Dex (fakeidp.go) with
 // three users. Most of the check is a Go HTTP flow through the install's real /auth/oidc/start and
-// /auth/oidc/callback, so it runs on kind as well as on the lab; the lab adds one browser sign-in.
+// /auth/oidc/callback, so it runs on every profile; a topology with browserSignin (kind) adds one browser sign-in.
 
 // oidcSourceRecords is what the source knew of each OIDC user before the backup, by username.
 var oidcSourceRecords = map[string]drill.OIDCIdentity{}
@@ -160,7 +160,7 @@ func oidcTarget(ctx context.Context, s *side) {
 	Expect(oidcUserCount(ctx, s)).To(Equal(len(drill.IdPUsers())), "no sign-in on the copy made a user")
 
 	if top.BrowserSignin {
-		By("one browser sign-in through Dex's login form (lab)")
+		By("one browser sign-in through Dex's login form")
 		oidcBrowser(ctx, oidcSourceRecords[drill.UserAdmin], l)
 	}
 }

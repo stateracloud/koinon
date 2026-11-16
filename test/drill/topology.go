@@ -21,10 +21,11 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 )
 
-// The two drill profiles (ADR 0109 decision 2).
+// The two drill profiles (ADR 0109 decision 2, amended 2026-11-16): kind is the gate of every tag in project CI;
+// cluster is a run on any real cluster of your own, informing only and never read by the release gate.
 const (
-	ProfileKind = "kind"
-	ProfileLab  = "lab"
+	ProfileKind    = "kind"
+	ProfileCluster = "cluster"
 )
 
 // NamespacePrefix starts every namespace the drill creates or touches. The sweep and the topology
@@ -60,17 +61,27 @@ func OIDCRedirect(port int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/auth/oidc/callback", port)
 }
 
-// Topology says where a drill runs: kind in CI, the home lab before a final tag (a lab file stays
-// outside the repository, only this schema is in it).
+// TopologySummary is what drill-result.json says about the topology: a name, the profile and whether the browser
+// sign-in ran, at the JSON paths hack/release-gate.sh reads (topology.profile, topology.browserSignin). The result
+// is uploaded and attached to the release, so it carries no context, registry, namespace hook or label of the
+// topology; the full topology stays in the local output directory (topology.json).
+type TopologySummary struct {
+	Name          string `json:"name"`
+	Profile       string `json:"profile"`
+	BrowserSignin bool   `json:"browserSignin"`
+}
+
+// Topology says where a drill runs: kind in CI (the gate of every tag), or a cluster of your own (informing; the
+// file stays outside the repository, only this schema and a made-up example are in it).
 type Topology struct {
 	Name string `yaml:"name" json:"name"`
-	// Profile is "kind" (CI, the gate of an rc tag) or "lab" (the home lab, the gate of a final tag). The
-	// release gate (hack/release-gate.sh) reads it from drill-result.json, so a kind result cannot stand in
-	// for a lab one whatever the file is called.
+	// Profile is "kind" (project CI, the gate of every tag) or "cluster" (a real cluster of your own, informing).
+	// The release gate (hack/release-gate.sh) reads it from drill-result.json and accepts only "kind", so a
+	// result from another cluster cannot stand in for the CI run whatever the file is called.
 	Profile string `yaml:"profile" json:"profile"`
 	// BrowserSignin adds the `browser-signin` check: a Playwright spec signs in through the web UI on the
 	// restored copy (web/e2e-drill). Needs pnpm and a Chromium for Playwright on the machine that runs the
-	// drill. The lab profile turns it on; kind does not (ADR 0109: a browser for every check is too slow).
+	// drill. The kind topology turns it on (the release gate demands the check); a cluster of your own may.
 	BrowserSignin bool `yaml:"browserSignin,omitempty" json:"browserSignin,omitempty"`
 	// Context is the kube context. The kubeconfig is never read from here: the run takes KUBECONFIG
 	// from its environment (run.sh refuses an empty one).
@@ -122,6 +133,11 @@ type Topology struct {
 	ReleasedWait time.Duration `yaml:"releasedWait" json:"releasedWait"`
 }
 
+// Summary is the part of the topology that goes into drill-result.json.
+func (t *Topology) Summary() TopologySummary {
+	return TopologySummary{Name: t.Name, Profile: t.Profile, BrowserSignin: t.BrowserSignin}
+}
+
 // Path resolves a file named in the topology: relative to the repository root, or as it is when absolute (a
 // lab values file kept outside the repository).
 func (t *Topology) Path(repoRoot, p string) string {
@@ -166,11 +182,8 @@ func (t *Topology) Validate() error {
 	if t.Context == "" {
 		return fmt.Errorf("context is empty: a drill always names its kube context")
 	}
-	if t.Profile != ProfileKind && t.Profile != ProfileLab {
-		return fmt.Errorf("profile %q is neither %q nor %q: the release gate tells the two results apart by it", t.Profile, ProfileKind, ProfileLab)
-	}
-	if t.Profile == ProfileLab && !t.BrowserSignin {
-		return fmt.Errorf("the lab profile needs browserSignin: true (#518: the lab gate includes the browser sign-in)")
+	if t.Profile != ProfileKind && t.Profile != ProfileCluster {
+		return fmt.Errorf("profile %q is neither %q nor %q: the release gate tells the two results apart by it", t.Profile, ProfileKind, ProfileCluster)
 	}
 	for name, ns := range map[string]string{
 		"source.namespace": t.Source.Namespace, "source.gatewayNamespace": t.Source.GatewayNamespace,
