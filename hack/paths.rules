@@ -255,6 +255,7 @@ script-check - inputs=hack/e2e-decide-test.sh,hack/e2e-decide.sh hack/e2e-decide
 script-check - inputs=hack/kind-registry-test.sh,test/drill/run.sh,test/e2e/escape-openshell.sh,test/e2e/kind/images.sh,test/e2e/kind/registry.sh,test/e2e/run.sh hack/kind-registry-test.sh
 script-check - inputs=hack/drill-issue-test.sh,hack/drill-issue.sh hack/drill-issue-test.sh
 script-check - inputs=hack/drill-sweep-test.sh,test/drill/sweep.sh hack/drill-sweep-test.sh
+script-check - inputs=go.mod,hack/drill-run-test.sh,test/drill/run.sh,test/drill/sweep.sh,test/drill/topctx/,test/drill/topology/,test/e2e/kind/imagerepo.sh,test/e2e/kind/down.sh,test/drill/topology.go hack/drill-run-test.sh
 script-check - inputs=docs/agents/subagent-brief.md,hack/hooks/agent-spawn-check_test.sh,hack/hooks/agent-spawn-check.sh,hack/hooks/subagent-brief-digest.txt hack/hooks/agent-spawn-check_test.sh
 script-check - inputs=charts/koinon/values.yaml,docs/design.md,hack/hooks/bash-read-check.sh,hack/hooks/read-hooks_test.sh,hack/hooks/read-result-check.sh,hack/preflight.sh,internal/api/handler.go hack/hooks/read-hooks_test.sh
 script-check - inputs=hack/hooks/sleep-chain-check_test.sh,hack/hooks/sleep-chain-check.sh,hack/pr-wait.sh hack/hooks/sleep-chain-check_test.sh

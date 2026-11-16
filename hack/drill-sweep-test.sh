@@ -42,7 +42,12 @@ case $args in
 esac
 exit 0
 FAKE
-printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/bin/helm"
+cat >"$tmp/bin/helm" <<'FAKE'
+#!/usr/bin/env bash
+echo "helm $*" >>"$FAKE_DIR/calls"
+[[ " $* " == *" list "* ]] && echo rel1
+exit 0
+FAKE
 chmod +x "$tmp/bin/kubectl" "$tmp/bin/helm"
 export PATH="$tmp/bin:$PATH" FAKE_DIR="$tmp" KUBECONFIG="$tmp/kubeconfig" SWEEP_POLL=1
 : >"$KUBECONFIG"
@@ -55,45 +60,61 @@ reset() { printf '%s\n' "$@" >"$tmp/ns-run"; rm -f "$tmp/gone-after" "$tmp/calls
 
 # --list shows a Terminating namespace with its phase, and deletes nothing.
 reset "koinon-drill-abc1 Active" "koinon-drill-abc1-b Terminating"
-out=$("$script" --list abc1 2>&1)
+out=$("$script" --list abc1 --context c1 2>&1)
 grep -q 'koinon-drill-abc1-b Terminating' <<<"$out"; check "--list shows the Terminating namespace with its phase" $?
 grep -q 'koinon-drill-abc1 Active' <<<"$out"; check "--list shows the Active namespace with its phase" $?
 if grep -q delete "$tmp/calls"; then check "--list deletes nothing" 1; else check "--list deletes nothing" 0; fi
 
 # --list with nothing prints none.
 reset
-out=$("$script" --list abc1 2>&1)
+out=$("$script" --list abc1 --context c1 2>&1)
 grep -q 'none' <<<"$out"; check "--list prints none when nothing is labelled" $?
 
 # The sweep succeeds once the namespace is gone.
 reset "koinon-drill-abc1 Active"
-SWEEP_TIMEOUT=10 "$script" abc1 >"$tmp/out" 2>&1; check "sweep succeeds when the namespaces go" $?
+SWEEP_TIMEOUT=10 "$script" abc1 --context c1 >"$tmp/out" 2>&1; check "sweep succeeds when the namespaces go" $?
 
 # A namespace that stays Terminating makes the sweep wait, then exit 1 naming it.
 reset "koinon-drill-abc1 Active"
-rc=0; FAKE_STUCK=1 SWEEP_TIMEOUT=2 "$script" abc1 >"$tmp/out" 2>&1 || rc=$?
+rc=0; FAKE_STUCK=1 SWEEP_TIMEOUT=2 "$script" abc1 --context c1 >"$tmp/out" 2>&1 || rc=$?
 ((rc == 1)); check "sweep exits 1 when a namespace stays Terminating" $?
 grep -q 'koinon-drill-abc1 Terminating' "$tmp/out"; check "the failure names the stuck namespace and phase" $?
 
 # A namespace that goes after a few polls is waited for.
 reset "koinon-drill-abc1 Active"
-FAKE_GONE_AFTER=2 SWEEP_TIMEOUT=20 "$script" abc1 >"$tmp/out" 2>&1; check "sweep waits for a Terminating namespace that goes" $?
+FAKE_GONE_AFTER=2 SWEEP_TIMEOUT=20 "$script" abc1 --context c1 >"$tmp/out" 2>&1; check "sweep waits for a Terminating namespace that goes" $?
 # One discovery poll plus at least two wait polls of the label selector (the OpenShell lookups do not count).
 (($(grep -c 'get namespace -l koinon.dev/drill-run=' "$tmp/calls") > 2)); check "the sweep polled the label more than once" $?
 
 # One failed poll is "not gone yet": the sweep goes on and exits 0 once a later poll shows nothing.
 for on in koinon.dev/drill-run= openshell.ai/gateway-id=; do
 	reset "koinon-drill-abc1 Active"
-	rc=0; FAKE_FAIL_POLLS=1 FAKE_FAIL_ON=$on SWEEP_TIMEOUT=20 "$script" abc1 >"$tmp/out" 2>&1 || rc=$?
+	rc=0; FAKE_FAIL_POLLS=1 FAKE_FAIL_ON=$on SWEEP_TIMEOUT=20 "$script" abc1 --context c1 >"$tmp/out" 2>&1 || rc=$?
 	((rc == 0)); check "sweep survives one failed poll ($on)" $?
 	[[ $(cat "$tmp/failed") == 1 ]]; check "the poll really failed once ($on)" $?
 done
 
 # Polls that keep failing end at the timeout with exit 1 and the error, not a silent abort.
 reset "koinon-drill-abc1 Active"
-rc=0; FAKE_FAIL_POLLS=100 SWEEP_TIMEOUT=2 "$script" abc1 >"$tmp/out" 2>&1 || rc=$?
+rc=0; FAKE_FAIL_POLLS=100 SWEEP_TIMEOUT=2 "$script" abc1 --context c1 >"$tmp/out" 2>&1 || rc=$?
 ((rc == 1)); check "sweep exits 1 at the timeout when every poll fails" $?
 grep -q 'connection refused' "$tmp/out"; check "the timeout report carries the poll error" $?
+
+# --context is required: no cluster call without it, exit 2 without it and on an unknown argument.
+for args in "abc1" "--list abc1" "abc1 --context" "abc1 --bogus x --context c1" "abc1 other --context c1"; do
+	reset "koinon-drill-abc1 Active"
+	rc=0; # shellcheck disable=SC2086
+	"$script" $args >"$tmp/out" 2>&1 || rc=$?
+	((rc == 2)) && [[ ! -s $tmp/calls ]]; check "sweep.sh $args: exit 2 and no cluster call" $?
+done
+
+# Every kubectl call carries --context and every helm call --kube-context.
+reset "koinon-drill-abc1 Active"
+SWEEP_TIMEOUT=10 "$script" abc1 --context c1 >"$tmp/out" 2>&1
+grep -c '^kubectl' "$tmp/calls" | grep -qv '^0$'; check "the sweep made kubectl calls" $?
+! grep '^kubectl' "$tmp/calls" | grep -qv -- '^kubectl --context c1 '; check "every kubectl call is 'kubectl --context c1 ...'" $?
+grep -q '^helm --kube-context c1 uninstall rel1' "$tmp/calls"; check "helm uninstall carries --kube-context" $?
+! grep '^helm' "$tmp/calls" | grep -qv -- '^helm --kube-context c1 '; check "every helm call carries --kube-context c1" $?
 
 ((fails == 0)) || exit 1
 echo "all drill-sweep tests passed"
