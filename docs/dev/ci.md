@@ -19,7 +19,7 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 (docker, git, helm) was missing. A plain `func TestX` that passes in a Ginkgo package counts as a run
 test, so the suite reads "partly run" when only that test ran. A plain test that calls `testenv.RequireT`
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
-`go tool ginkgo -p ./internal/x`. `test/harnesses` needs the harness images: `make test-harnesses`.
+`GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the `testing` tag gives kopia an instant test key derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it). `test/harnesses` needs the harness images: `make test-harnesses`.
 
 ### Test result reuse (#43)
 

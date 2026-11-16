@@ -123,7 +123,8 @@ job shell ^hack/versions(-env\.sh|\.env)$
 # CONTRIBUTING.md (versions-check), docs/dev/ci.md (ci-cache-test) and docs/adr (adr-lint tests), measured
 # 2026-11-11 by deleting each directory and running the job's steps. So the job fails closed like
 # `job go`: it runs for every path except the ones below. The one check that reads every file of the
-# tree, hack/old-issue-refs-lint.sh, is a step of `quick checks`, which always runs.
+# tree, hack/old-issue-refs-lint.sh, is a step of `quick checks`, which always runs; so is
+# hack/agentsmd-lint.sh, which follows the links of every AGENTS.md into docs/ (issue 1045).
 job scripts .
 # Markdown and docs the script checks do not read; web/src is TypeScript only (its Go stubs and
 # package.json stay triggers).
@@ -284,7 +285,7 @@ script-check - inputs=.github/,docs/,hack/ci-required.txt,hack/ci-rules-check-te
 script-check - inputs=guard hack/ci-rules-check.sh
 script-check - inputs=guard hack/e2e-commands-check.sh
 script-check - inputs=hack/chart-check-test.sh,hack/chart-check.d/,hack/chart-check.sh,hack/chart-check.d/ hack/chart-check-test.sh
-script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh

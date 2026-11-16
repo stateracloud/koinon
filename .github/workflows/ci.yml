@@ -451,6 +451,9 @@ jobs:
           persist-credentials: false
       - name: load tool versions
         run: hack/versions-env.sh >> "$GITHUB_ENV"
+      # The Go toolchain for the agentsmd lint below (hack/cmd/agentsmdlint, ADR 0118).
+      - id: go
+        uses: ./.github/actions/setup-go-cache
       - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
         with:
           setup_only: true
@@ -501,6 +504,11 @@ jobs:
       - name: doc metadata
         if: ${{ !cancelled() }}
         run: hack/doc-meta-lint.sh
+      # Reads every AGENTS.md and the docs and Markdown they link to, so a docs-only change can break it: it cannot sit
+      # in the path-gated `scripts` job, which skips docs (issue 1045).
+      - name: agent instruction files
+        if: ${{ !cancelled() }}
+        run: hack/agentsmd-lint.sh
       # Scans every tracked file, Markdown included, so it cannot sit in the path-gated `scripts` job (#572).
       - name: old-issue references
         if: ${{ !cancelled() }}
@@ -902,8 +910,6 @@ jobs:
       - run: hack/audit-batch-lint.sh
       - run: hack/bash5-lint-test.sh
       - run: hack/bash5-lint.sh
-      # The agent instruction files: no CLAUDE.md, the index, budgets, references (issue 1045).
-      - run: hack/agentsmd-lint.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
       - run: hack/agentgateway-pin-test.sh

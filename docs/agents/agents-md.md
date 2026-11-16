@@ -55,7 +55,7 @@ A file above its target prints a note. A file above its ceiling fails the lint.
 ## The lint
 
 `hack/agentsmd-lint.sh` runs `hack/cmd/agentsmdlint` (a Go program, ADR 0118: logic in `hack/` is Go).
-It runs in `hack/preflight.sh` (gate `scripts`) and in the `scripts` job of CI. It fails when:
+It runs in `hack/preflight.sh` (gate `scripts`, always) and in the `quick checks` job of CI, which always runs: the lint follows links into `docs/` and Markdown, which the path-gated `scripts` job skips. It fails when:
 
 - a `CLAUDE.md` is in the tree;
 - the root index and the set of nested files differ;
