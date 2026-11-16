@@ -4,8 +4,12 @@
 # The drill's teardown (ADR 0109): deletes what one drill run made, by the label
 # koinon.dev/drill-run=<id>, and refuses anything without it.
 #
-#   KUBECONFIG=<file> test/drill/sweep.sh <run-id> [--context <ctx>]
-#   KUBECONFIG=<file> test/drill/sweep.sh --list <run-id>      what it would delete, nothing deleted
+#   KUBECONFIG=<file> test/drill/sweep.sh <run-id> --context <ctx>
+#   KUBECONFIG=<file> test/drill/sweep.sh --list <run-id> --context <ctx>   what it would delete, nothing deleted
+#
+# --context is required (exit 2 without it, and on any unknown argument): the sweep never acts on the
+# kubeconfig's current context (AGENTS.md "Explicit cluster, always"). It goes to every kubectl call and,
+# as --kube-context, to every helm call.
 #
 # --list shows every labelled namespace with its phase, a Terminating one too (it is still there and
 # may hold a finalizer). The sweep then waits until the labelled and workspace namespaces are gone, up
@@ -25,19 +29,22 @@
 
 set -euo pipefail
 
-list_only=0
-if [[ ${1:-} == --list ]]; then list_only=1; shift; fi
-run=${1:-}
-shift || true
-ctx=""
-if [[ ${1:-} == --context ]]; then ctx=${2:?--context needs a value}; fi
-[[ $run =~ ^[a-z0-9]{3,12}$ ]] || { echo "usage: sweep.sh [--list] <run-id> [--context <ctx>]  (run ID: 3 to 12 lowercase letters and digits)" >&2; exit 2; }
+usage="usage: sweep.sh [--list] <run-id> --context <ctx>  (run ID: 3 to 12 lowercase letters and digits)"
+list_only=0 run="" ctx=""
+while (($#)); do
+  case $1 in
+    --list) list_only=1; shift ;;
+    --context) [[ -n ${2:-} ]] || { echo "sweep.sh: --context needs a value; $usage" >&2; exit 2; }; ctx=$2; shift 2 ;;
+    -*) echo "sweep.sh: unknown argument $1; $usage" >&2; exit 2 ;;
+    *) [[ -z $run ]] || { echo "sweep.sh: unexpected argument $1; $usage" >&2; exit 2; }; run=$1; shift ;;
+  esac
+done
+[[ $run =~ ^[a-z0-9]{3,12}$ && -n $ctx ]] || { echo "$usage" >&2; exit 2; }
 [[ -n ${KUBECONFIG:-} && $KUBECONFIG != /dev/null ]] || { echo "sweep.sh needs an explicit KUBECONFIG" >&2; exit 2; }
 
 label="koinon.dev/drill-run=$run"
-k=(kubectl)
-h=(helm)
-if [[ -n $ctx ]]; then k+=(--context "$ctx"); h+=(--kube-context "$ctx"); fi
+k=(kubectl --context "$ctx")
+h=(helm --kube-context "$ctx")
 
 # ns_phases SELECTOR: "<name> <phase>" per line, every namespace the selector matches (Terminating too).
 ns_phases() { "${k[@]}" get namespace -l "$1" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}'; }
