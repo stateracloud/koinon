@@ -216,6 +216,7 @@ gate mktemp ^Makefile$
 gate mktemp ^\.github/workflows/[^/]*\.yml$
 gate mktemp ^internal/.*\.go$
 gate bash5 \.sh$
+gate bash5 ^hack/cmd/bash5lint/
 gate audit \.go$
 gate audit ^internal/db/queries/.*\.sql$
 gate audit ^hack/audit-batch-lint
