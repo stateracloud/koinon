@@ -111,6 +111,12 @@ var _ = Describe("run", func() {
 		Expect(code).To(Equal(0), errOut)
 		Expect(out).To(Equal("bash5-lint: 1 scripts, every one starts with the bash 5 guard\n"))
 	})
+	It("knows the registered hooks when the root has a trailing slash", func() {
+		root := GinkgoT().TempDir()
+		write(root, "hack/hooks/bash-read-check.sh", "#!/usr/bin/env bash\n"+hookGate+"\n\n"+hookGuard+"\n")
+		code, _, errOut := lint(root + "/")
+		Expect(code).To(Equal(0), errOut)
+	})
 	It("fails, names the bad script only, and prints the guard", func() {
 		root := GinkgoT().TempDir()
 		write(root, "hack/a.sh", "#!/usr/bin/env bash\n"+guard+"\n")

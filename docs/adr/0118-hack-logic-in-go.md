@@ -42,7 +42,9 @@ Facts that decide this (checked 2026-11-16):
    ([ADR 0090](0090-scripts-require-bash-5.md)). Make stays the front door. We add no task runner.
 4. **A ported script keeps its path as a thin wrapper.** The wrapper has the shebang, the bash 5
    guard, and a line that runs `go tool <name>` with the same arguments (it goes to the repository
-   root first, because `go tool` finds the tool through the module of the working directory).
+   root first, because `go tool` finds the tool through the module of the working directory). The
+   wrapper resolves every path argument against the caller's directory before it changes
+   directory, so a relative argument keeps its meaning.
    So Make, `hack/paths.rules`, preflight and `ci.yml` do not change. The only change in
    `hack/paths.rules` is that the Go sources join the inputs of the gate.
 5. **The old test stays.** The `*-test.sh` of a ported script keeps running against the wrapper and
@@ -60,7 +62,8 @@ Facts that decide this (checked 2026-11-16):
    Glue scripts are not candidates: scripts that only call other programs in order, wait, or set
    up the environment stay in bash.
 8. **Dependencies follow [ADR 0079](0079-dependency-cooldown.md).** A port may import a library
-   only when the release is at least 3 days old. `hack/dep-age-check.sh` already reads `go.mod`.
+   only when the release is at least 3 days old, or under the fast path and the waiver process of
+   that ADR. `hack/dep-age-check.sh` already reads `go.mod`.
    Prefer the standard library, and prefer parsers that the upstream tool itself uses (for example
    the Dockerfile parser of BuildKit).
 9. **Existing programs stay where they are.** `hack/testverdict`, `hack/chartlint` and

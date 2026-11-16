@@ -87,7 +87,11 @@ func run(root string, stdout, stderr io.Writer) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		rel := filepath.ToSlash(strings.TrimPrefix(f, root+string(filepath.Separator)))
+		rel, err := filepath.Rel(root, f)
+		if err != nil {
+			return 0, err
+		}
+		rel = filepath.ToSlash(rel)
 		msg, counted := checkScript(rel, string(data))
 		if counted {
 			n++
