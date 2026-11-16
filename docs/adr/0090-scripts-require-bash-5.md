@@ -59,7 +59,7 @@ it. That closes the gap at the source for the price of one prerequisite.
    PATH, and exit 2 there blocks the tool call, so on an old bash the exit-2 guard would block every
    Bash, Read and Agent call. These three files use a variant instead: it prints
    `{"systemMessage":"Koinon hooks skipped: they need bash 5 or newer; on macOS: brew install bash"}`
-   and exits 0, so the call goes on and the user sees the hint. `hack/bash5-lint.sh` accepts the variant
+   and exits 0, so the call goes on and the user sees the hint. `hack/bash5-lint.sh` (its logic is `hack/cmd/bash5lint`, ADR 0118) accepts the variant
    only in `hack/hooks/*-check.sh`; the hooks' `*_test.sh` files keep the exit-2 guard.
 7. **Scripts may use bash 5 syntax freely.** Existing 3.2 workarounds are removed where they hurt
    readability; no mass rewrite.

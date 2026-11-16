@@ -43,6 +43,10 @@ printf '# SPDX-License-Identifier: Apache-2.0\nx=1\n' >"$ok/hack/lib.sh"
 printf 'echo golden\n' >"$ok/hack/q.golden.sh"
 check "a guarded tree passes" "$(run "$ok")" 0
 
+# A root that is missing or not a directory is a usage error (exit 2), not an empty tree.
+check "a missing root exits 2" "$(run "$tmp/no-such-dir")" 2
+check "a file as root exits 2" "$(run "$ok/hack/a.sh")" 2
+
 # A script without the guard fails and is named.
 bad=$tmp/bad
 cp -R "$ok" "$bad"
@@ -65,8 +69,10 @@ check "a drifted guard fails" "$(run "$drift")" 1
 
 # The fail-open hook variant: accepted in hack/hooks/*-check.sh, rejected elsewhere.
 # A hook starts with the KOINON_MAINTAINER_HOOKS opt-in line (issue 843), then the hook guard.
-hookg=$(sed -n "s/^hook_guard='\(.*\)'\$/\1/p" "$lint" | sed "s/'\"'\"'/'/g")
-gate=$(sed -n "s/^hook_gate='\(.*\)'\$/\1/p" "$lint")
+# The hook texts are constants of the Go program (hack/cmd/bash5lint, ADR 0118).
+src=$here/cmd/bash5lint/main.go
+hookg=$(sed -n 's/^[[:space:]]*hookGuard = `\(.*\)`$/\1/p' "$src")
+gate=$(sed -n 's/^[[:space:]]*hookGate = `\(.*\)`$/\1/p' "$src")
 hk=$tmp/hk
 mkdir -p "$hk/hack/hooks"
 printf '#!/usr/bin/env bash\n%s\n' "$hookg" >"$hk/hack/hooks/bash-read-check.sh"

@@ -321,7 +321,7 @@ shows a guide's blocks is in `koinon-docs`; its CI compares the page with the fi
 **The restore drill** (ADR 0109, #514; `test/drill`) is the evidence for ADR 0085 decision 15: a Ginkgo suite
 seeds a source install, backs it up with the guide's commands, declares it lost, restores into a fresh namespace
 with its own OpenShell gateway, holds it (ADR 0107), checks it, releases it and checks it again. One command on
-kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id>` deletes by the label
+kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <run-id> --context <ctx>` deletes by the label
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the advisory `drill` job of
 `e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 110` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
