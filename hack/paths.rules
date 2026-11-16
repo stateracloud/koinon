@@ -130,7 +130,9 @@ job scripts .
 except scripts \.md$
 except scripts ^docs/
 except scripts ^web/src/
-keep scripts ^(AGENTS|CONTRIBUTING)\.md$
+keep scripts ^CONTRIBUTING\.md$
+keep scripts (^|/)(AGENTS|CLAUDE)\.md$
+keep scripts ^docs/agents/agents-md\.md$
 keep scripts ^docs/(adr/|metadata/|dev/ci\.md$)
 keep scripts \.go$
 
@@ -247,6 +249,7 @@ script-check - inputs=guard hack/tmp-safety-test.sh
 script-check - inputs=hack/notes-expiry-test.sh,hack/notes-expiry.sh hack/notes-expiry-test.sh
 script-check - inputs=hack/old-issue-refs-lint-test.sh,hack/old-issue-refs-lint.sh hack/old-issue-refs-lint-test.sh
 script-check - inputs=guard hack/old-issue-refs-lint.sh
+script-check - inputs=guard hack/agentsmd-lint.sh
 script-check - inputs=hack/agentgateway-pin-test.sh,hack/agentgateway-pin.sh hack/agentgateway-pin-test.sh
 script-check - inputs=guard hack/agentgateway-pin.sh --check
 script-check - inputs=guard hack/golangci-lint-test.sh

@@ -902,6 +902,8 @@ jobs:
       - run: hack/audit-batch-lint.sh
       - run: hack/bash5-lint-test.sh
       - run: hack/bash5-lint.sh
+      # The agent instruction files: no CLAUDE.md, the index, budgets, references (issue 1045).
+      - run: hack/agentsmd-lint.sh
       - run: hack/ship-test.sh
       - run: hack/preflight-test.sh
       - run: hack/agentgateway-pin-test.sh
