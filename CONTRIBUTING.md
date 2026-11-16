@@ -138,6 +138,12 @@ snapshot apt with retries, a licences stage and a non-root user.
   published.
 - Migrations are forward-only: add a new `NNNNN_name.sql` file; never edit a merged one.
 - Decisions that change architecture get an ADR (copy `docs/adr/0000-template.md`).
+- Scripts in `hack/` that parse data or hold a lot of logic can move to Go
+  ([ADR 0118](docs/adr/0118-hack-logic-in-go.md)). To propose a port, open an issue. Name the script,
+  list the bugs it has had (issue and pull request numbers, or `git log --oneline -- <script>`), and
+  say which part is parsing. Do not start the port before a maintainer agrees. One script per pull
+  request: the Go program is in `hack/cmd/<name>`, the script stays as a thin wrapper, and its test
+  stays.
 
 ## Dependency updates
 
