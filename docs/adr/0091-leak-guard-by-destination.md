@@ -504,7 +504,7 @@ decides nothing new.
   asserts the URL-rule refusal or the taint approval. The end-to-end escape case
   `test/escape/exfil_test.go` ("refuses or parks an external-high call...") sends a canary only on
   `external-high` tools. **Follow-up:** no fake-model test sends a canary on an `external-low` call
-  through the gateway and checks the taint ask; one is needed.
+  through the gateway and checks the taint ask; one is needed (#1051).
 - **The cap's scope: per run stays.** No run in the data shared a home generation, so the
   per-generation scope was not measured. The question reopens only if recordings show agents spreading
   work across runs of one generation.
