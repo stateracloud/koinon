@@ -68,6 +68,8 @@ run "an instruction after a heredoc is still checked" 1 "digest:" "$(df afterhd 
 run "a quoted << in a RUN is not a heredoc" 1 "digest:" "$(df quotedhd "FROM alpine@sha256:$d64\nRUN echo \"x <<END y\"\nFROM alpine:3\n")"
 run "a quoted heredoc delimiter works" 0 "" "$(df quoteddelim "FROM alpine@sha256:$d64\nRUN <<\"EOF\"\nFROM nowhere\nEOF\nENV A=1\n")"
 run "a heredoc delimiter with a single quote works" 0 "" "$(df squoteddelim "FROM alpine@sha256:$d64\nRUN <<'EOF'\nFROM nowhere\nEOF\nENV A=1\n")"
+run "a << without a name is not a heredoc" 1 "digest: base image alpine:3" "$(df hdnoname "FROM alpine@sha256:$d64\nRUN cat << EOF\nFROM alpine:3\nEOF\n")"
+run "a heredoc on a continued line is still a heredoc" 0 "" "$(df hdcont "FROM alpine@sha256:$d64\n"'COPY <<EOF \\\n  /dest\nFROM nowhere\nEOF\nENV A=1\n')"
 
 # --- the secret rule
 run "ENV TOKEN fails" 1 "secret: TOKEN" "$(df envtoken "FROM alpine@sha256:$d64\nENV TOKEN=koinon_test_not-a-real-token\n")"

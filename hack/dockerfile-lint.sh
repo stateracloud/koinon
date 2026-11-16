@@ -107,8 +107,9 @@ check() {
 			if (!allowed("digest"))
 				printf "%s:%d: digest: base image %s is not pinned by @sha256:<digest> (or # dockerfile-lint: allow=digest <reason>)\n", FILENAME, start, img
 		}
-		# the delimiter of a heredoc (RUN <<EOF ... EOF): BuildKit reads a word that starts with <<,
-		# so a << inside a quoted string is not a heredoc
+		# the delimiter of a heredoc (RUN <<EOF ... EOF): BuildKit splits the line into words and reads
+		# a word that starts with <<, so a << inside a quoted string is not a heredoc, and a word that
+		# holds only << is not one either: it has no name
 		function heredoc_delim(s,   i, n, c, q, esc, wordstart, rest, dq) {
 			n = length(s); i = 1; q = ""; esc = 0; wordstart = 1
 			while (i <= n) {
@@ -122,7 +123,6 @@ check() {
 					wordstart = 0
 					i += 2
 					if (substr(s, i, 1) == "-") i++
-					while (substr(s, i, 1) == " " || substr(s, i, 1) == "\t") i++
 					if (substr(s, i, 1) == "\"" || substr(s, i, 1) == "\047") {
 						dq = substr(s, i, 1); i++
 						rest = ""
@@ -160,7 +160,9 @@ check() {
 			sub(/\\[ \t]*$/, "", line)
 			sub(/^[ \t]+/, "", line)
 			instr = (instr == "" ? "" : instr " ") line
-			newhd = heredoc_delim(line)
+			# a delimiter found on a continued line stands until the instruction ends
+			dl = heredoc_delim(line)
+			if (dl != "") newhd = dl
 			if (!cont) { flush(); hd = newhd; newhd = "" }
 		}
 		END { flush() }
