@@ -83,7 +83,7 @@ func run(root string, stdout, stderr io.Writer) (int, error) {
 	failed := false
 	n := 0
 	for _, f := range files {
-		data, err := os.ReadFile(f)
+		data, err := os.ReadFile(f) //nolint:gosec // the script list comes from git or a walk of ROOT
 		if err != nil {
 			return 0, err
 		}
@@ -93,16 +93,16 @@ func run(root string, stdout, stderr io.Writer) (int, error) {
 			n++
 		}
 		if msg != "" {
-			fmt.Fprintf(stderr, "bash5-lint: %s: %s\n", rel, msg)
+			_, _ = fmt.Fprintf(stderr, "bash5-lint: %s: %s\n", rel, msg)
 			failed = true
 		}
 	}
 	if failed {
-		fmt.Fprintln(stderr, "bash5-lint: put this line before the first command of each script listed (ADR 0090):")
-		fmt.Fprintln(stderr, guard)
+		_, _ = fmt.Fprintln(stderr, "bash5-lint: put this line before the first command of each script listed (ADR 0090):")
+		_, _ = fmt.Fprintln(stderr, guard)
 		return 1, nil
 	}
-	fmt.Fprintf(stdout, "bash5-lint: %d scripts, every one starts with the bash 5 guard\n", n)
+	_, _ = fmt.Fprintf(stdout, "bash5-lint: %d scripts, every one starts with the bash 5 guard\n", n)
 	return 0, nil
 }
 
@@ -157,8 +157,8 @@ func commands(lines []string) (first, second string) {
 // .git and node_modules.
 func listScripts(root string) ([]string, error) {
 	var files []string
-	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
-		cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.sh")
+	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil { //nolint:gosec // ROOT is the operator argument
+		cmd := exec.CommandContext(context.Background(), "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.sh") //nolint:gosec // fixed git arguments; ROOT is the operator argument
 		var out, errb bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		if err := cmd.Run(); err != nil {
@@ -170,7 +170,7 @@ func listScripts(root string) ([]string, error) {
 			}
 		}
 	} else {
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error { //nolint:gosec // ROOT is the operator argument
 			if err != nil {
 				return err
 			}
