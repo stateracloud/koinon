@@ -11,7 +11,8 @@
 #   2. A small awk pass for the two Koinon rules hadolint has no rule for:
 #        digest  every base image (FROM) is pinned by digest. The image may come from an ARG: its
 #                default must hold @sha256:<64 hex> (an ARG without a default is supplied by the
-#                caller and is not checked). A previous stage and `scratch` need no digest.
+#                caller and is not checked). A previous stage and `scratch` need no digest. A stage
+#                name with a variable in it (fetch-${TARGETARCH}) must match the stage name in full.
 #        secret  no ENV or ARG is named like a secret (TOKEN, SECRET, PASSWORD, API_KEY, PAT, AUTH, ...): the value
 #                lands in the image history. Use a BuildKit secret mount (see hack/e2e-toolchain/Dockerfile).
 #                Names ending _FILE or _PATH (a path, not the value) are fine. Values are gitleaks' job.
@@ -85,10 +86,18 @@ check() {
 				if (!(d in argdef) || argdef[d] == "\001") return
 				ref = argdef[d]
 			}
-			# a stage chosen by ARG (fetch-${TARGETARCH}) is a stage name with a variable suffix
+			# a stage name with a variable in it (fetch-${TARGETARCH}): the variable stands for one
+			# name segment, so the stage name must match the reference in full
 			if (ref ~ /\$\{/) {
 				d = ref; sub(/\$\{.*$/, "", d)
-				for (k in stages) if (d != "" && index(k, d) == 1) return
+				tail = ""
+				if (match(ref, /\}[^}]*$/)) tail = substr(ref, RSTART + 1)
+				for (k in stages) {
+					if (d == "" || index(k, d) != 1) continue
+					if (tail != "" && substr(k, length(k) - length(tail) + 1) != tail) continue
+					mid = substr(k, length(d) + 1, length(k) - length(d) - length(tail))
+					if (mid != "" && mid !~ /[-_]/) return
+				}
 			}
 			if (is_digest(ref)) return
 			if (ref ~ /@\$\{[A-Za-z_][A-Za-z0-9_]*\}/) {
