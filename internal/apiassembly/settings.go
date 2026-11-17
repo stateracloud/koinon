@@ -27,6 +27,11 @@ type Settings struct {
 	GitHubAPIURL string
 	// WatchPoll is the backstop poll interval of WatchRun.
 	WatchPoll time.Duration
+	// WatchHeartbeat is how often an idle WatchRun stream sends a heartbeat; 0 keeps the default.
+	WatchHeartbeat time.Duration
+	// WatchCancelGrace is how long WatchRun waits for late events of a canceled run; 0 keeps the
+	// default, a negative value turns the grace off.
+	WatchCancelGrace time.Duration
 	// TrustedOrigins are extra origins that may make state-changing requests.
 	TrustedOrigins []string
 	// RestoreHold starts the install held (issue #462): nothing acts until the operator releases it.

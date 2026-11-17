@@ -7,15 +7,20 @@ package apiassembly
 
 import (
 	"context"
+	"io/fs"
+	"log/slog"
 	"net/http"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/installbinding"
+	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
@@ -33,6 +38,26 @@ type Outside struct {
 	BindingOwner string
 	// Ready answers /readyz.
 	Ready http.HandlerFunc
+
+	// The fields below are optional replacements for what Assemble builds from Settings. koinon-api
+	// leaves them empty; the API suite sets them to bring a fake in the same place.
+
+	// GitHub is the GitHub client, shared by connection checks and approved calls. Nil builds one
+	// from Settings.GitHubAPIURL behind the egress policy.
+	GitHub *github.Client
+	// ModelChat is what the provider echo check sends its request through. Nil builds the gateway
+	// chat from Settings.GatewayURL, or none when there is no gateway or no Kubernetes access.
+	ModelChat modelcheck.Chat
+	// UI is the web UI to serve. Nil serves web.Dist(); NoUI serves none.
+	UI   fs.FS
+	NoUI bool
+	// NoScopeSync leaves the code-host scope reading off: nothing asks GitHub in the background, and
+	// Assembly.Scope is nil.
+	NoScopeSync bool
+	// Logger is where the services log. Nil uses slog.Default().
+	Logger *slog.Logger
+	// Services register more Connect services next to the platform's own.
+	Services []func(*connect.Server)
 }
 
 // Prebuilt is what koinon-api's serve still builds itself and passes in. Interim: ticket 5 of
@@ -51,6 +76,9 @@ type Prebuilt struct {
 func Assemble(_ context.Context, out Outside, set Settings, pre Prebuilt) (*Assembly, error) {
 	if err := set.Validate(); err != nil {
 		return nil, err
+	}
+	if out.Logger == nil {
+		out.Logger = slog.Default()
 	}
 	dom, err := buildDomain(out, set)
 	if err != nil {
