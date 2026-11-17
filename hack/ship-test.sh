@@ -44,6 +44,7 @@ case "$1 $2" in
 		[[ -n ${FAKE_CR_JSON:-} ]] || exit 1
 		jq -r "$q" <<<"$FAKE_CR_JSON"
 	elif [[ " $* " == *" headRefOid "* ]]; then
+		[[ -z ${FAKE_HEAD_FAIL:-} ]] || { echo "gh: HTTP 401: Bad credentials" >&2; exit 1; }
 		echo "${FAKE_HEAD:-$(git rev-parse HEAD)}"
 	else
 		echo "${FAKE_PR_DRAFT:-true}"
@@ -120,7 +121,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_HEAD FAKE_GH_FAIL FAKE_PRMERGE_RC FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_HEAD FAKE_HEAD_FAIL FAKE_GH_FAIL FAKE_PRMERGE_RC FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -431,6 +432,19 @@ rc=$(SHIP_HEAD_WAIT=0 run "$tmp/o11e" -m "feat: e4" --pr-title "t" --pr-body "$t
 check "stale head on GitHub: exit 1" eq "$rc" 1
 check "stale head: names the problem" has 'GitHub still shows another head' "$tmp/o11e"
 check "stale head: pr-merge.sh not called" hasnt '^pr-merge' "$FAKE_LOG"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_HEAD_FAIL=1
+echo e5 >e5.txt
+rc=$(SHIP_HEAD_WAIT=0 run "$tmp/o11f" -m "feat: e5" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
+check "failed head read: exit 1" eq "$rc" 1
+check "failed head read: names gh, not a stale head" hasnt 'GitHub still shows another head' "$tmp/o11f"
+check "failed head read: pr-merge.sh not called" hasnt '^pr-merge' "$FAKE_LOG"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123
+echo e6 >e6.txt
+rc=$(run "$tmp/o11g" -m "feat: e6" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge --admin)
+check "--admin with --auto-merge: exit 0" eq "$rc" 0
+check "--admin passes to pr-merge.sh" has '^pr-merge 123 --admin$' "$FAKE_LOG"
 rc=$(run "$tmp/o11d" -m "x" --pr-title t --pr-body "$tmp/body.md" --draft --auto-merge)
 check "--draft with --auto-merge is a usage error" eq "$rc" 2
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x

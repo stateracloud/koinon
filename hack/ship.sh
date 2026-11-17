@@ -347,14 +347,15 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			# The push moves the head on GitHub a few seconds later; pr-merge.sh pins the head it reads, so wait for it.
 			want_head=$(git rev-parse HEAD)
 			for ((hw = 0; hw <= ${SHIP_HEAD_WAIT:-120}; hw += 5)); do
-				[[ $(gh_ask "the head of $pr_url" pr view "$pr_url" --json headRefOid --jq .headRefOid) != "$want_head" ]] || break
+				cur_head=$(gh_ask "the head of $pr_url" pr view "$pr_url" --json headRefOid --jq .headRefOid)
+				[[ $cur_head != "$want_head" ]] || break
 				[[ $hw -lt ${SHIP_HEAD_WAIT:-120} ]] || fail "GitHub still shows another head than ${want_head:0:7} on $pr_url after ${SHIP_HEAD_WAIT:-120}s; run hack/pr-merge.sh ${pr_url##*/} later"
 				sleep 5
 			done
 			# pr-merge.sh reads the head and every required check, then enqueues (ADR 0105: the merge queue runs the kind
 			# e2e on the queue commit when the change needs it). SHIP_PR_MERGE is a test hook.
 			pm_rc=0
-			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pr_url##*/}" || pm_rc=$?
+			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pr_url##*/}" $([[ $admin == 1 ]] && echo --admin) || pm_rc=$?
 			[[ $pm_rc == 0 ]] || fail "hack/pr-merge.sh ${pr_url##*/} exited $pm_rc (the pull request stays open; fix that, then run it again)"
 			say "auto-merge handed to pr-merge.sh"
 		fi
