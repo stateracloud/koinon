@@ -30,5 +30,4 @@ fi
 # `go tool` finds the tool through the module of the working directory.
 cd "$repo"
 export ADR_ROOT=$repo
-if [ -n "${ADR_BIN:-}" ]; then exec "$ADR_BIN" lint ${dir:+"$dir"}; fi
 exec go tool adr lint ${dir:+"$dir"}

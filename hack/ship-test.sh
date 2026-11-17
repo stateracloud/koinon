@@ -76,10 +76,10 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/docs/adr"
-# The real ADR scripts run in the fixture: hack/adr-index.sh runs a built hack/cmd/adr (ADR_BIN), because the
+# The real ADR scripts run in the fixture: hack/adr-index.sh runs a built hack/cmd/adr (KOINON_TEST_ADR_BIN), because the
 # fixture has no Go module. The fixture ADRs carry front matter and the repository's own areas, tags and template.
-(cd "$repo" && go build -o "$tmp/adr-bin" ./hack/cmd/adr)
-export ADR_BIN=$tmp/adr-bin
+(cd "$repo" && go build -buildvcs=false -o "$tmp/adr-bin" ./hack/cmd/adr)
+export KOINON_TEST_ADR_BIN=$tmp/adr-bin
 cp "$repo/hack/adr-index.sh" "$seed/hack/"
 mkdir -p "$seed/docs/metadata"
 cp "$repo/docs/metadata/areas.txt" "$repo/docs/metadata/tags.txt" "$seed/docs/metadata/"

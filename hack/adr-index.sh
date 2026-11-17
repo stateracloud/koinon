@@ -31,6 +31,6 @@ fi
 # `go tool` finds the tool through the module of the working directory.
 cd "$repo"
 export ADR_ROOT=$repo
-# ADR_BIN names a built hack/cmd/adr binary (hack/ship-test.sh runs the real tool in a repository without this module).
-if [ -n "${ADR_BIN:-}" ]; then exec "$ADR_BIN" index ${check[@]+"${check[@]}"} ${dir:+"$dir"}; fi
+# KOINON_TEST_ADR_BIN names a built hack/cmd/adr binary (hack/ship-test.sh runs the real tool in a repository without this module).
+if [ -n "${KOINON_TEST_ADR_BIN:-}" ]; then exec "$KOINON_TEST_ADR_BIN" index ${check[@]+"${check[@]}"} ${dir:+"$dir"}; fi
 exec go tool adr index ${check[@]+"${check[@]}"} ${dir:+"$dir"}
