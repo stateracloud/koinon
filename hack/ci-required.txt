@@ -51,6 +51,8 @@ advisory warm-caches
 advisory fuzz
 advisory warm-caches-web
 advisory warm-caches-opencode-plugins
+# Opens an issue when a push run on main is red (#662); runs only on a push to main.
+advisory ci-red
 
 # The `harness-repro` job of .github/workflows/harness-repro.yml (#176) is advisory, and is not a pull request or
 # merge queue check at all: it runs on a push to main, nightly and on dispatch, so it can never be required.

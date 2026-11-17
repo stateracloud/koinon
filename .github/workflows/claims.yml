@@ -51,6 +51,7 @@ jobs:
     if: github.event_name == 'push'
     name: release claims
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # GITHUB_TOKEN: claim refs (contents), unassign (issues), the pull request (pull-requests). A missing
     # permission makes a call fail and the job red; nothing here skips silently.
     permissions:
@@ -79,6 +80,7 @@ jobs:
     if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
     name: claim
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: read

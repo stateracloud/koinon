@@ -64,6 +64,7 @@ jobs:
         run: hack/g2-kind.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true # a failed log upload must not fail a job whose tests passed (#662)
         if: always()
         with:
           name: g2-kind-logs

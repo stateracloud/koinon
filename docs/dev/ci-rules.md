@@ -218,8 +218,8 @@ Source: Koinon decision. Scope: Koinon only. In force: now.
 
 **T7. MUST** set `timeout-minutes` on every job.
 Why: the default is 360 minutes (#572 review); a hung job holds a runner and a queue slot for six hours.
-Check: `hack/runner-lint.sh` fails a `ci.yml` or `release.yml` job without one. `hack/ci-rules-check.sh` (rule T7)
-defers to it and gives `pass` while that script has the rule.
+Check: `hack/runner-lint.sh` fails a job of any workflow file without one. `hack/ci-rules-check.sh` (rule T7)
+runs it and reports its real result: `fail` when it lists a job without a timeout, else `pass`.
 Source: Koinon decision (#572). Scope: general pattern. In force: now.
 
 **T8. MUST** pin the node image of a cluster job, and export and upload the logs with `if: always()`.
@@ -248,7 +248,7 @@ Source: GitHub security hardening (as W1); Scorecard check Pinned-Dependencies. 
 
 **W3. MUST NOT** use `pull_request_target`, and no self-hosted runner in this public repository. `workflow_run`
 MUST NOT run pull request code.
-Check: `hack/runner-lint.sh` (the first two); review (`workflow_run`; no workflow uses it today).
+Check: `hack/runner-lint.sh` (the first two); review (`workflow_run`; no workflow uses it, and zizmor `dangerous-triggers` flags one).
 Source: GitHub security hardening; Scorecard check Dangerous-Workflow. Scope: general pattern. In force: now.
 
 **W4. MUST** pass untrusted values (titles, branch names, bodies) to `run:` only through an `env:` variable.

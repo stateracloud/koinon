@@ -77,12 +77,12 @@ for f in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml "$root
 	fi
 done
 
-# The timeout rule (issue 572): every job of ci.yml and release.yml sets timeout-minutes. The default is
+# The timeout rule (issues 572, 662): every job of every workflow file sets timeout-minutes. The default is
 # 360 minutes, so a hung job holds a runner (and the merge queue) for six hours. A reusable-workflow job
-# (`uses:` at job level) cannot set it and is exempt. Other workflows are not checked here.
-for name in ci.yml release.yml; do
-	f=$root/.github/workflows/$name
+# (`uses:` at job level) cannot set it and is exempt.
+for f in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml; do
 	[[ -f $f ]] || continue
+	name=${f##*/}
 	hits=$(awk -v file=".github/workflows/$name" '
 		function flush() { if (job != "" && !tm && !reusable) printf "%s:%d: job %s has no timeout-minutes\n", file, jobline, job; job = ""; tm = 0; reusable = 0 }
 		/^[ \t]*#/ { next }
@@ -103,4 +103,4 @@ if [[ $fail -ne 0 ]]; then
 	echo "runner-lint: Koinon CI uses GitHub-hosted runners only and no pull_request_target (ADR 0047, ADR 0082, docs/dev/ci.md#workflow-security-review)" >&2
 	exit 1
 fi
-echo "runner-lint: $n files, no self-hosted or Blacksmith runner, no pull_request_target, a timeout on every ci.yml and release.yml job"
+echo "runner-lint: $n files, no self-hosted or Blacksmith runner, no pull_request_target, a timeout on every workflow job"
