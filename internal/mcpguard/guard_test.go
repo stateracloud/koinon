@@ -951,6 +951,24 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				}
 			})
 
+			It("keeps the older open call when a result closes one: its mark counts more", func(ctx SpecContext) {
+				Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
+				// Its error reply reached the model: the harness finished the call.
+				Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 1)).To(Succeed())
+				// A new turn: a second read opens with the new mark (the first read still counts, so this
+				// call is decided with both legs; a person approves it by hand).
+				_, err := pool.Exec(ctx, `INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, mark_run, mark_epoch, mark_read)
+					SELECT org_id, agent_id, generation, target, tool, mark_run, mark_epoch, 1 FROM leak_guard_open_calls WHERE org_id = $1`, org)
+				Expect(err).NotTo(HaveOccurred())
+				// The second read's result closes one call: the newer, so the unseen first read stays.
+				Expect(result(ctx, "wiki", "read_page", "the page is empty").GetPass()).NotTo(BeNil())
+				var n int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_open_calls WHERE org_id = $1 AND mark_read = 0`, org).Scan(&n)).To(Succeed())
+				Expect(n).To(Equal(1))
+				r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+				Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			})
+
 			It("counts a call that was opened with no feed", func(ctx SpecContext) {
 				Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
 				_, err := pool.Exec(ctx, `UPDATE leak_guard_open_calls SET mark_run = NULL, mark_read = NULL WHERE org_id = $1`, org)

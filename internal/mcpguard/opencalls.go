@@ -41,13 +41,19 @@ import (
 // makes the second call, so the reply of the first cannot be in the second call's arguments, and
 // the guard must not count it as unseen. The mark of an open call is the live run and its feed_read
 // (agentd's count of tool calls the harness finished, failed ones too) and its worker epoch when the
-// call opened. agentd raises the count in memory before the harness hands a reply to the model, and
-// a writer copies it to the database. So a decision that reads the same count, in the same run and
-// epoch, is in the same turn: no reply of the open call reached the model.
+// call opened. A decision that reads the same count, in the same run and epoch, is taken as the same
+// turn: no reply of the open call reached the model.
 //
-// Residual: the writer can lag behind the harness. A reply can then reach the model, and its next
-// call can read the old count (ADR 0091 amendment 2026-11-03 names the same lag for the feed legs).
-// The guard cannot close it from the database alone. Once the count is higher, a reply may have reached the model
+// Residual: this holds only while the count follows the harness. agentd reads each finished tool call
+// off the harness's stream and a writer copies the count to the database, and the harness is only
+// assumed to write the update before it makes its next call (ADR 0091 amendment 2026-11-03). Lag in
+// the pipe, the reader or the writer, or a harness that gives a reply to the model without a
+// finished update (a cut call left in progress), keeps an unseen reply from counting until it ends.
+// The loss is both legs of that reply, not the legs of one tool. The guard cannot close this from the
+// database alone.
+//
+// A result closes the newest open call of its tool and target: its mark is the highest, so the older
+// calls, which count at least as much, stay. Once the count is higher, a reply may have reached the model
 // (an error reply and a cut call finish a tool call as well), and the open call counts as unseen
 // again: both legs. This errs the safe way: a tool call that finishes in the same turn also raises
 // the count. A call with no mark (no live run or feed) always counts, and an open call that is

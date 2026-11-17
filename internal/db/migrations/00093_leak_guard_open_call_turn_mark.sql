@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- A turn mark on the leak guard's open calls (#1057, ADR 0091). Expand-only: two nullable columns.
+-- A turn mark on the leak guard's open calls (#1057, ADR 0091). Expand-only: three nullable columns.
 --
 -- A call the guard passed stays open until the guard sees its reply. A call that the model makes in
 -- the same turn cannot hold that reply: the model has not received it. The mark is the run, the worker

@@ -89,7 +89,7 @@ WHERE d.org_id = $1 AND d.id = (
     SELECT o.id FROM leak_guard_open_calls o
     WHERE o.org_id = $1 AND o.agent_id = $2 AND o.generation = $3
       AND o.target = $4 AND o.tool = $5
-    ORDER BY o.opened_at, o.id
+    ORDER BY o.opened_at DESC, o.id DESC
     LIMIT 1
     FOR UPDATE SKIP LOCKED)
 `
@@ -102,8 +102,9 @@ type CloseLeakGuardCallParams struct {
 	Tool       string
 }
 
-// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
-// LOCKED lets two results of one tool close two calls.
+// The guard recorded a result of @target's @tool: the newest call of it still open is closed (#1057):
+// its turn mark is the highest, so it counts the least, and the older calls, which count at least as
+// much, stay. SKIP LOCKED lets two results of one tool close two calls.
 func (q *Queries) CloseLeakGuardCall(ctx context.Context, arg CloseLeakGuardCallParams) (int64, error) {
 	result, err := q.db.Exec(ctx, closeLeakGuardCall,
 		arg.OrgID,
@@ -502,7 +503,8 @@ type OpenLeakGuardCallParams struct {
 
 // A tools/call the guard passed whose result would set a leg (#254): open until the guard records
 // that result.
-// mark_run and mark_read are the turn mark (#1057): the live run and its feed_read, NULL without one.
+// mark_run, mark_epoch and mark_read are the turn mark (#1057): the live run, its worker epoch and its
+// feed_read, NULL without one.
 func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error {
 	_, err := q.db.Exec(ctx, openLeakGuardCall,
 		arg.OrgID,
