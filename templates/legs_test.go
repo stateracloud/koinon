@@ -119,6 +119,23 @@ func toolsOf(t *templates.Template) []string {
 	return slices.Compact(names)
 }
 
+// adminMCPTool is the declaration of a tool of an MCP server the admin allows for a template that
+// names no tools of its own (finops-analyst): the cost and metrics tools of the template's servers.
+// A template cannot name them. Declared is what the template asks the admin to set for a read-only
+// query tool (testdata/legs/mcp-readonly-tool.json: sink class none, results private data). Not
+// declared is what the guard uses for a tool nobody classified: sinkclass.Default() and the legs of
+// mcpservers.DefaultDeclaration() (ADR 0091 decisions 2 and 4).
+func adminMCPTool(declared bool) (sinkclass.Declaration, []string) {
+	if !declared {
+		return sinkclass.Default(), mcpservers.DefaultDeclaration().Legs
+	}
+	var d sinkclass.Declaration
+	Expect(json.Unmarshal(readFile("testdata/legs/mcp-readonly-tool.json"), &d)).To(Succeed())
+	d, err := d.Normalize()
+	Expect(err).NotTo(HaveOccurred())
+	return d, nil
+}
+
 type templateLegs struct {
 	untrustedInput bool
 	privateData    bool
@@ -131,8 +148,13 @@ func (l templateLegs) all() bool { return l.untrustedInput && l.privateData && l
 // bothInputLegs is untrusted input and private data: the pair that makes the byte cap apply.
 func (l templateLegs) bothInputLegs() bool { return l.untrustedInput && l.privateData }
 
-// legsOf reads the legs a template gives an agent made from it.
-func legsOf(t *templates.Template) templateLegs {
+// legsOf reads the legs a template gives an agent made from it, with the admin's MCP tools
+// declared as the template asks.
+func legsOf(t *templates.Template) templateLegs { return legsOfWith(t, true) }
+
+// legsOfWith is legsOf where mcpDeclared says whether the admin classified the MCP tools of a
+// template that points at admin servers.
+func legsOfWith(t *templates.Template, mcpDeclared bool) templateLegs {
 	var l templateLegs
 	// Every grant is on a connector to a system the org owns: repositories and what they hold.
 	if len(t.Spec.Grants) > 0 {
@@ -142,6 +164,14 @@ func legsOf(t *templates.Template) templateLegs {
 	// (billing, cost, metrics); no web tool is among them.
 	if strings.Contains(t.Spec.Instructions, "MCP") {
 		l.privateData = true
+		d, serverLegs := adminMCPTool(mcpDeclared)
+		untrusted, private := d.ResultLegs(slices.Contains(serverLegs, mcpservers.LegUntrustedInput), slices.Contains(serverLegs, mcpservers.LegPrivateData))
+		l.untrustedInput = l.untrustedInput || untrusted
+		l.privateData = l.privateData || private
+		// An admin tool has no address arguments to read: the call classifies as its declaration says.
+		if sinkclass.Classify(d, nil, testConnection, testScope(), nil, testNow) == sinkclass.ExternalHigh {
+			l.autoOutbound = true
+		}
 	}
 	for _, name := range toolsOf(t) {
 		legs := toolLegs(name)
@@ -180,6 +210,20 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 		for _, t := range all {
 			Expect(legsOf(t).all()).To(BeFalse(), t.Metadata.ID+" holds untrusted input, private data and an auto-tier outbound tool: split it")
 		}
+	})
+
+	It("names the shipped templates that reach the approval branch with undeclared MCP tools (ADR 0091 decision 5)", func() {
+		all, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		var reach []string
+		for _, t := range all {
+			if legsOfWith(t, false).all() {
+				reach = append(reach, t.Metadata.ID)
+			}
+		}
+		// finops-analyst names no tool: an admin allows the servers. Its tools reach the approval
+		// branch until the admin declares them (the template's instructions and README say how).
+		Expect(reach).To(Equal([]string{"finops-analyst"}))
 	})
 
 	It("reports a template that holds all three legs (negative fixture)", func() {

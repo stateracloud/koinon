@@ -240,10 +240,14 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   value is about 2 KB**, set from real traffic measurements (open questions). A call that would go
   over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
   shape rule keeps applying inside the cap.
-- **Shipped templates never reach the approval branch.** No shipped template combines a leg-setting
-  read of untrusted input, private data and an auto-tier `external-high` tool; the old issue 351 templates
-  test reads the sink classes and fails if one does. So normal use adds no click ("no agent
-  nannies", 2026-10-31).
+- **Shipped templates reach the approval branch only through undeclared tools.** No shipped template
+  combines a leg-setting read of untrusted input, private data and an auto-tier `external-high` tool
+  among the tools it names; the templates test reads the sink classes and fails if one does. A tool
+  nobody declared is `external-high` with the server's legs (both, by default), so the MCP tools of
+  an admin's server (the cost and metrics tools of `finops-analyst`, which the template cannot name)
+  reach this branch at once, whatever their tier, until the admin declares them. The test names the
+  templates that do so, and the template asks the admin to declare read-only query tools as sink
+  class `none`. Amendment 2026-11-17 (issue 1050); the first text said "never".
 
 ### 6. Text matching: a frozen secondary alarm
 

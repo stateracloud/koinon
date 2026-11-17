@@ -6,12 +6,14 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: finops-analyst
-  version: 0.1.1
+  version: 0.1.2
   displayName: FinOps analyst
   description: >-
     Reports each morning on yesterday's cloud and service costs and flags anomalies. It reads costs
     through the MCP servers you allow for the agent (billing, cost or metrics servers); allow them
-    on the agent's page after you create it.
+    on the agent's page after you create it. Then set each read-only query tool of those servers to
+    sink class none with private data results; a tool you leave undeclared needs a person's
+    decision when the run holds both data legs.
 spec:
   harness:
     allowed: [opencode]

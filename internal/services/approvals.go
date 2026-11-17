@@ -64,6 +64,9 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 			Scripts: risk.Scripts, Dependencies: risk.Dependencies, Binary: risk.Binary, Executable: risk.Executable,
 		}
 	}
+	if lg := leakGuardProto(a.Risk); lg != nil && a.Connector == "mcp" {
+		out.LeakGuard = lg
+	}
 	if !detail {
 		return out
 	}

@@ -488,6 +488,7 @@ Approval is one recorded ask-tier call.
 | ci_fold_case | 32 | `bool` | singular |  | ci_fold_case is whether the host's file system ignores case, so ci_paths match without regard to case. |
 | scope_id | 33 | `string` | singular |  | scope_id is the scope that let this call run without a decision; empty when a person (or the Trusted preset) decided it. scope_kind says which kind it was. |
 | scope_kind | 34 | `koinon.approval.v1alpha1.ScopeKind` | singular |  |  |
+| leak_guard | 35 | `koinon.approval.v1alpha1.LeakGuard` | singular |  | leak_guard is set when the leak guard (ADR 0091) put this call on a card: the reasons, the sink class and the legs. ListApprovals and GetApproval both set it, so a client that reads the list sees why the call waits. GetApproval also sets it in mcp.leak_guard. |
 
 ### Message ApprovalScope
 
