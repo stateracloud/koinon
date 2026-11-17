@@ -74,6 +74,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_api_mcp_guard_record_errors_total",
 			Help: "Decisions of the MCP leak guard that could not be written to the decision records.",
 		}),
+		OverThreshold: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_api_mcp_guard_byte_threshold_runs_total",
+			Help: "Runs whose bytes sent out of the org through external-low sinks, while the session held both legs, went over the byte threshold. One per run; no call is refused for it.",
+		}),
 	}
 	for _, a := range actions {
 		for _, r := range reasons {

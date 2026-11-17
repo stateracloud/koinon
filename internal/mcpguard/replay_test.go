@@ -102,7 +102,7 @@ var _ = g.Describe("Replay (#352, ADR 0091)", func() {
 					Expect(c.charge.After).To(Equal(sent[c.line.Run]), where(c))
 					if c.charge.Crossed {
 						crossed[c.line.Run]++
-						Expect(sent[c.line.Run]).To(BeNumerically(">", DefaultByteCap), where(c))
+						Expect(sent[c.line.Run]).To(BeNumerically(">", corpusByteCap), where(c))
 						counts["external-low over threshold"]++
 					} else {
 						counts["external-low counted"]++

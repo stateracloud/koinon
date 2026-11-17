@@ -4,6 +4,7 @@ package mcpguard
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -106,7 +107,7 @@ func readCorpus(path string) ([]corpusLine, error) {
 
 // replayOptions are what a replay varies.
 type replayOptions struct {
-	// ByteCap is the cap per run (DefaultByteCap when 0; math.MaxInt32 to measure what is sent).
+	// ByteCap is the cap per run (corpusByteCap when 0; math.MaxInt32 to measure what is sent).
 	ByteCap int
 	// Threshold overrides the org's threshold when > 0.
 	Threshold int
@@ -147,13 +148,18 @@ type replayed struct {
 	verdict Verdict
 }
 
+// corpusByteCap is the threshold the replay specs use: the 2 KiB the corpus was measured against
+// (ADR 0091 amendment 2026-11-16), so its long research run still goes over it. The product default is
+// larger (DefaultByteCap, amendment 2026-11-17).
+const corpusByteCap = 2048
+
 // replayNow is the replay's clock: the code-host scope is read as fresh at it.
 var replayNow = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
 // newReplay builds the org's guard from the corpus's org, server and tool lines.
 func newReplay(lines []corpusLine, o replayOptions) (*replay, error) {
 	r := &replay{
-		g:       New(nil, Options{ByteCap: o.ByteCap}),
+		g:       New(nil, Options{ByteCap: cmp.Or(o.ByteCap, corpusByteCap)}),
 		servers: map[string]store.McpServer{}, decls: map[string]sinkclass.Declaration{},
 		sessions: map[string]*replaySession{}, runs: map[string]*replayRun{}, now: replayNow,
 	}
@@ -381,7 +387,7 @@ type measurement struct {
 // measure replays lines without a byte cap (to see what runs send) and at each threshold of the
 // sweep, and returns the numbers of ADR 0091's open questions.
 func measure(ctx context.Context, lines []corpusLine) (measurement, error) {
-	m := measurement{Classes: map[sinkclass.Class]int{}, Matches: map[int]int{}, Cap: DefaultByteCap}
+	m := measurement{Classes: map[sinkclass.Class]int{}, Matches: map[int]int{}, Cap: corpusByteCap}
 	calls, err := replayAll(ctx, lines, replayOptions{ByteCap: math.MaxInt32})
 	if err != nil {
 		return m, err
