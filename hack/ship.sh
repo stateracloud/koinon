@@ -156,9 +156,16 @@ else
 		elif [[ -z $(grep -vxE 'docs/adr/(README\.md|adrs\.json|graph\.md)' <<<"$conflicts" || true) ]]; then
 			# the generated ADR files: take any side, then regenerate from the merged ADRs (issue 283)
 			mapfile -t gen <<<"$conflicts"
-			git checkout --ours -- "${gen[@]}" 2>/dev/null || true
-			hack/adr-index.sh >/dev/null
-			git add docs/adr/README.md docs/adr/adrs.json docs/adr/graph.md 2>/dev/null || git add docs/adr/README.md
+			for p in "${gen[@]}"; do git checkout --ours -- "$p" 2>/dev/null || git rm -q --cached -- "$p" 2>/dev/null || true; done
+			if ! hack/adr-index.sh >/dev/null; then
+				echo "ship: the merged ADRs do not pass hack/adr-index.sh; fix them, commit, and run ship again (merge in progress)" >&2
+				exit 4
+			fi
+			for p in docs/adr/README.md docs/adr/adrs.json docs/adr/graph.md; do [[ ! -e $p ]] || git add -- "$p"; done
+			if [[ -n $(git diff --name-only --diff-filter=U) ]] || grep -qE '^(<<<<<<<|>>>>>>>) ' "${gen[@]}" 2>/dev/null; then
+				echo "ship: the generated ADR files still have conflicts; resolve them, commit, and run ship again (merge in progress)" >&2
+				exit 4
+			fi
 			git commit -q --no-edit --signoff
 			say "merged origin/main (regenerated docs/adr/README.md)"
 		else
