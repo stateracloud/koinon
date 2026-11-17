@@ -83,7 +83,8 @@ user namespaces, SELinux where present, a dedicated tainted sandbox pool and enf
 or `dev` (kind and CI only).
 
 - Decision 5: `default_runtime_class_name` follows the tier. The Kata runtime class stays required
-  for the `vm` tier.
+  for the `vm` tier. (Changed 2026-11-17 by ADR 0075's amendment of that date: the `vm` tier requires a
+  microVM, not the Kata runtime class; `kata` stays the default.)
 - Decision 6: the VAP's allowed runtime classes are the tier's.
 - Decisions 1 to 4 and 7, and the 0048 additions (`stable_placeholder`, Landlock `hard_requirement`,
   telemetry off, requester-identity VAP rules, `io.katacontainers.*` denied), hold in every tier.
