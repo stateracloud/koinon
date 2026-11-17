@@ -809,6 +809,13 @@ metrics:
     # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
     # a sweep (a minute).
     durableStrandedFor: 15m
+  grafanaDashboard:
+    # Grafana dashboards as a ConfigMap for the Grafana dashboard sidecar (templates/grafana-dashboard.yaml;
+    # today one row, the leak guard). Needs no CRD. Every query uses only fixed label sets (ADR 0023).
+    enabled: false
+    # Labels the sidecar selects ConfigMaps on.
+    labels:
+      grafana_dashboard: "1"
 
 # The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
 # that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
