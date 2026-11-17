@@ -174,8 +174,9 @@ type Querier interface {
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
 	// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
 	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
-	// The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
-	// LOCKED lets two results of one tool close two calls.
+	// The guard recorded a result of @target's @tool: the newest call of it still open is closed (#1057):
+	// its turn mark is the highest, so it counts the least, and the older calls, which count at least as
+	// much, stay. SKIP LOCKED lets two results of one tool close two calls.
 	CloseLeakGuardCall(ctx context.Context, arg CloseLeakGuardCallParams) (int64, error)
 	// When one connection was last read with its current secret: -infinity when it was not.
 	CodeHostConnectionReadAt(ctx context.Context, arg CodeHostConnectionReadAtParams) (pgtype.Timestamptz, error)
@@ -209,6 +210,9 @@ type Querier interface {
 	// (that backup then releases the old repository, as a seed would have).
 	CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
+	// The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
+	// in the same model turn: the same live run and worker epoch and no tool call finished since the call opened (a reply
+	// cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
@@ -1291,6 +1295,8 @@ type Querier interface {
 	OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQuestionsForRunParams) ([]Question, error)
 	// A tools/call the guard passed whose result would set a leg (#254): open until the guard records
 	// that result.
+	// mark_run, mark_epoch and mark_read are the turn mark (#1057): the live run, its worker epoch and its
+	// feed_read, NULL without one.
 	OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.

@@ -96,7 +96,7 @@ SET feed_read = GREATEST(feed_read, @read::bigint), feed_done = GREATEST(feed_do
 WHERE org_id = @org_id AND run_id = @run_id AND feed_epoch = @epoch;
 
 -- name: GetLeakGuardFeed :one
-SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = @org_id AND run_id = @run_id;
+SELECT feed_epoch, feed_read, feed_done FROM leak_guard_runs WHERE org_id = @org_id AND run_id = @run_id;
 
 -- name: GetLiveRunForAgent :one
 -- The agent's running run, during its end-of-turn summary too: its harness runs until the run ends,
@@ -108,18 +108,21 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running';
 -- name: OpenLeakGuardCall :exec
 -- A tools/call the guard passed whose result would set a leg (#254): open until the guard records
 -- that result.
-INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at)
-VALUES (@org_id, @agent_id, @generation, @target, @tool, @opened_at);
+-- mark_run, mark_epoch and mark_read are the turn mark (#1057): the live run, its worker epoch and its
+-- feed_read, NULL without one.
+INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at, mark_run, mark_epoch, mark_read)
+VALUES (@org_id, @agent_id, @generation, @target, @tool, @opened_at, sqlc.narg('mark_run'), sqlc.narg('mark_epoch'), sqlc.narg('mark_read'));
 
 -- name: CloseLeakGuardCall :execrows
--- The guard recorded a result of @target's @tool: the oldest call of it still open is closed. SKIP
--- LOCKED lets two results of one tool close two calls.
+-- The guard recorded a result of @target's @tool: the newest call of it still open is closed (#1057):
+-- its turn mark is the highest, so it counts the least, and the older calls, which count at least as
+-- much, stay. SKIP LOCKED lets two results of one tool close two calls.
 DELETE FROM leak_guard_open_calls d
 WHERE d.org_id = @org_id AND d.id = (
     SELECT o.id FROM leak_guard_open_calls o
     WHERE o.org_id = @org_id AND o.agent_id = @agent_id AND o.generation = @generation
       AND o.target = @target AND o.tool = @tool
-    ORDER BY o.opened_at, o.id
+    ORDER BY o.opened_at DESC, o.id DESC
     LIMIT 1
     FOR UPDATE SKIP LOCKED);
 
@@ -130,5 +133,12 @@ DELETE FROM leak_guard_open_calls
 WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation AND opened_at < @before;
 
 -- name: CountLeakGuardOpenCalls :one
+-- The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
+-- in the same model turn: the same live run and worker epoch and no tool call finished since the call opened (a reply
+-- cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 SELECT count(*) FROM leak_guard_open_calls
-WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation;
+WHERE org_id = @org_id AND agent_id = @agent_id AND generation = @generation
+  AND (mark_run IS NULL OR mark_epoch IS NULL OR mark_read IS NULL
+       OR sqlc.narg('run_id')::uuid IS NULL OR sqlc.narg('feed_epoch')::bigint IS NULL OR sqlc.narg('feed_read')::bigint IS NULL
+       OR mark_run <> sqlc.narg('run_id')::uuid OR mark_epoch <> sqlc.narg('feed_epoch')::bigint
+       OR mark_read < sqlc.narg('feed_read')::bigint);
