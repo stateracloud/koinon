@@ -43,6 +43,8 @@ case "$1 $2" in
 		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
 		[[ -n ${FAKE_CR_JSON:-} ]] || exit 1
 		jq -r "$q" <<<"$FAKE_CR_JSON"
+	elif [[ " $* " == *" headRefOid "* ]]; then
+		echo "${FAKE_HEAD:-$(git rev-parse HEAD)}"
 	else
 		echo "${FAKE_PR_DRAFT:-true}"
 	fi
@@ -118,7 +120,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_GH_FAIL FAKE_PRMERGE_RC FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_HEAD FAKE_GH_FAIL FAKE_PRMERGE_RC FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -270,6 +272,21 @@ check "behind and clean: pushed" branch_on_origin feat/1-x
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 rm -rf "$adv"
 
+# 8b2. --admin: the branch is behind and clean, and ship merges origin/main all the same (D2: pr-merge.sh --admin skips the queue)
+reset_state
+w=$(newwork); cd "$w"
+git clone -q "$tmp/origin.git" "$adv"
+git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
+echo more3 >"$adv/d3.txt" && git -C "$adv" add -A && git -C "$adv" commit -q -m "main moves a third time" && git -C "$adv" push -q origin main
+echo mine3 >mine3.txt
+rc=$(run "$tmp/o8b2" -m "ci: mine3" --admin)
+check "--admin behind and clean: exit 0" eq "$rc" 0
+check "--admin behind and clean: merged" has '^merged origin/main$' "$tmp/o8b2"
+check "--admin behind and clean: merge commit exists" eq "$(git rev-list --merges --count origin/main..HEAD)" 1
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+rm -rf "$adv"
+git config --unset core.hooksPath || true
+
 # 8c. a re-run after a conflict does not commit the markers (issue 661)
 reset_state
 w=$(newwork); cd "$w"
@@ -407,6 +424,13 @@ echo e3 >e3.txt
 rc=$(run "$tmp/o11c" -m "feat: e3" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
 check "pr-merge.sh refuses: ship exits 1" eq "$rc" 1
 check "pr-merge.sh refuses: names the exit code" has 'pr-merge.sh 123 exited 5' "$tmp/o11c"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_HEAD=0000000
+echo e4 >e4.txt
+rc=$(SHIP_HEAD_WAIT=0 run "$tmp/o11e" -m "feat: e4" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
+check "stale head on GitHub: exit 1" eq "$rc" 1
+check "stale head: names the problem" has 'GitHub still shows another head' "$tmp/o11e"
+check "stale head: pr-merge.sh not called" hasnt '^pr-merge' "$FAKE_LOG"
 rc=$(run "$tmp/o11d" -m "x" --pr-title t --pr-body "$tmp/body.md" --draft --auto-merge)
 check "--draft with --auto-merge is a usage error" eq "$rc" 2
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x

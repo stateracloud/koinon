@@ -9,7 +9,7 @@
 # (a clone without an `upstream` remote, or KOINON_REPO=<fork>) the board step is skipped (no board).
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--admin] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
@@ -34,6 +34,8 @@
 # origin/main is merged into the branch only when it conflicts (git merge-tree, needs git 2.38; AGENTS.md: merge on a
 # conflict, never otherwise). A branch that is behind and merges clean is pushed as it is; the merge queue tests it on
 # main's tip. While a merge is in progress with unmerged paths, ship refuses to commit (it would commit the markers).
+# --admin is for a pull request that hack/pr-merge.sh --admin will merge (a `.github/**` change, ADR 0105): it skips the
+# merge queue, so nothing tests the branch on main's tip, and ship merges origin/main even when it merges clean (D2).
 # A failed `gh` read (network, auth) stops ship; "no pull request" is an empty answer and does not.
 # --auto-merge hands the pull request to hack/pr-merge.sh (it waits for the checks, then enqueues).
 #
@@ -51,7 +53,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo # KOINON_REPO picks the repository for every gh call below
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below: ship may be run by a relative path
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 admin=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -64,6 +67,7 @@ while [[ $# -gt 0 ]]; do
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
+	--admin) admin=1; shift ;;
 	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
@@ -184,7 +188,7 @@ else
 	else
 		git merge-tree --write-tree origin/main HEAD >/dev/null 2>&1 || mt_rc=$?
 		[[ $mt_rc == 0 || $mt_rc == 1 ]] || fail "git merge-tree could not check origin/main for conflicts (exit $mt_rc; it needs git 2.38 or newer)"
-		[[ $mt_rc == 1 ]] || say "behind origin/main, no conflict: not merged"
+		if [[ $mt_rc == 0 && $admin == 1 ]]; then mt_rc=1; else [[ $mt_rc == 1 ]] || say "behind origin/main, no conflict: not merged"; fi
 	fi
 	if [[ $mt_rc == 0 ]]; then
 		:
@@ -340,10 +344,17 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			fi
 		fi
 		if [[ $auto == 1 ]]; then
+			# The push moves the head on GitHub a few seconds later; pr-merge.sh pins the head it reads, so wait for it.
+			want_head=$(git rev-parse HEAD)
+			for ((hw = 0; hw <= ${SHIP_HEAD_WAIT:-120}; hw += 5)); do
+				[[ $(gh_ask "the head of $pr_url" pr view "$pr_url" --json headRefOid --jq .headRefOid) != "$want_head" ]] || break
+				[[ $hw -lt ${SHIP_HEAD_WAIT:-120} ]] || fail "GitHub still shows another head than ${want_head:0:7} on $pr_url after ${SHIP_HEAD_WAIT:-120}s; run hack/pr-merge.sh ${pr_url##*/} later"
+				sleep 5
+			done
 			# pr-merge.sh reads the head and every required check, then enqueues (ADR 0105: the merge queue runs the kind
 			# e2e on the queue commit when the change needs it). SHIP_PR_MERGE is a test hook.
 			pm_rc=0
-			"${SHIP_PR_MERGE:-$(dirname "${BASH_SOURCE[0]}")/pr-merge.sh}" "${pr_url##*/}" || pm_rc=$?
+			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pr_url##*/}" || pm_rc=$?
 			[[ $pm_rc == 0 ]] || fail "hack/pr-merge.sh ${pr_url##*/} exited $pm_rc (the pull request stays open; fix that, then run it again)"
 			say "auto-merge handed to pr-merge.sh"
 		fi

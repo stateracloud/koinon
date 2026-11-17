@@ -178,7 +178,7 @@ start=$SECONDS
 # A failing `gh pr view` is not "still pending" (issue 661): the first error is printed once, and a few failed reads in
 # a row end the wait with exit 2 instead of a silence until the timeout. A good read resets the count.
 gh_fails=0 gh_first_err="" gh_fail_max=${PR_WAIT_GH_FAILS:-3}
-view_err=$(mktemp "${TMPDIR:-/tmp}/pr-wait.XXXXXX")
+view_err=$(mktemp "${TMPDIR:-/tmp}/pr-wait.XXXXXX") || { echo "pr-wait: mktemp failed" >&2; exit 2; }
 trap 'rm -f "$view_err"' EXIT
 while :; do
   if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository 2>"$view_err") && [ -n "$json" ]; then

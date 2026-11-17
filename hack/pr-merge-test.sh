@@ -689,7 +689,7 @@ grep -q 'WARNING' <<<"$out" && { echo "FAIL: KOINON_LANE=lane2 is the own lane" 
 setup false "$green"
 run 7
 check "migrate-lint runs against the base, then it enqueues" 0 merge
-grep -q "^migrate-lint origin/main abc1234def$" "$FAKE_DIR/calls" || { echo "FAIL: migrate-lint gets the base and the head SHA: $(cat "$FAKE_DIR/calls")" >&2; fail=1; }
+grep -q "^migrate-lint origin/main$" "$FAKE_DIR/calls" || { echo "FAIL: migrate-lint gets the base: $(cat "$FAKE_DIR/calls")" >&2; fail=1; }
 setup false "$green"
 LINT_RC=1 run 7
 check "a migration the lint refuses is not enqueued" 1 nomerge

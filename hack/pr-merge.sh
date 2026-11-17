@@ -265,7 +265,7 @@ fi
 # fetched is a tool failure (exit 2); a migration the lint refuses is exit 1.
 if [ "${PR_MERGE_TEST:-}" = 1 ] && [ -n "${PR_MERGE_MIGRATE_LINT:-}" ]; then
   lint_rc=0
-  "$PR_MERGE_MIGRATE_LINT" "origin/$base" "$sha" >&2 || lint_rc=$?
+  "$PR_MERGE_MIGRATE_LINT" "origin/$base" >&2 || lint_rc=$?
 else
   git fetch -q --no-tags origin "$base" 2>/dev/null || { echo "pr-merge: git fetch origin $base failed; cannot run migrate-lint.sh; not merging" >&2; exit 2; }
   git fetch -q --no-tags origin "refs/pull/$pr/head" 2>/dev/null || { echo "pr-merge: cannot fetch the head of PR $pr; cannot run migrate-lint.sh; not merging" >&2; exit 2; }
