@@ -136,6 +136,11 @@ func adminMCPTool(declared bool) (sinkclass.Declaration, []string) {
 	return d, nil
 }
 
+// adminServedTools are the tools of spec.tools that an admin's MCP server serves, so Koinon ships no
+// declaration for them: the declarations in testdata/legs/tool-declarations.json are what an admin
+// sets by hand. Koinon's own tools (ask_user, the code-host tools) declare theirs in code.
+var adminServedTools = map[string]bool{"web_url_read": true, "searxng_web_search": true}
+
 type templateLegs struct {
 	untrustedInput bool
 	privateData    bool
@@ -174,6 +179,15 @@ func legsOfWith(t *templates.Template, mcpDeclared bool) templateLegs {
 		}
 	}
 	for _, name := range toolsOf(t) {
+		if !mcpDeclared && adminServedTools[name] {
+			// Nobody classified this tool: the guard uses the default and the server's legs.
+			d, serverLegs := adminMCPTool(false)
+			untrusted, private := d.ResultLegs(slices.Contains(serverLegs, mcpservers.LegUntrustedInput), slices.Contains(serverLegs, mcpservers.LegPrivateData))
+			l.untrustedInput = l.untrustedInput || untrusted
+			l.privateData = l.privateData || private
+			l.autoOutbound = true
+			continue
+		}
 		legs := toolLegs(name)
 		if slices.Contains(legs, mcpservers.LegUntrustedInput) {
 			l.untrustedInput = true
@@ -221,9 +235,9 @@ var _ = Describe("Template legs (ADR 0084 decision 9)", func() {
 				reach = append(reach, t.Metadata.ID)
 			}
 		}
-		// finops-analyst names no tool: an admin allows the servers. Its tools reach the approval
-		// branch until the admin declares them (the template's instructions and README say how).
-		Expect(reach).To(Equal([]string{"finops-analyst"}))
+		// These templates use tools of an admin's MCP servers. Those tools reach the approval branch
+		// until the admin declares them (the template's description and the README say how).
+		Expect(reach).To(Equal([]string{"finops-analyst", "lcm-upgrader", "web-researcher"}))
 	})
 
 	It("reports a template that holds all three legs (negative fixture)", func() {

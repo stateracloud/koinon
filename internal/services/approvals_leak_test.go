@@ -39,8 +39,13 @@ var _ = Describe("approvalProto leak guard", func() {
 		Expect(out.GetMcp()).To(BeNil())
 	})
 
-	It("leaves leak_guard empty for a card of another connector", func() {
+	It("carries the reason of a code-host card the guard stopped", func() {
 		out := approvalProto(store.ApprovalRequest{Connector: "github", Tool: "create_pull_request", Risk: card}, false, false)
+		Expect(out.GetLeakGuard().GetReasons()).To(Equal([]string{"both_legs"}))
+	})
+
+	It("leaves leak_guard empty for a card without a leak part", func() {
+		out := approvalProto(store.ApprovalRequest{Connector: "github", Tool: "create_pull_request", Risk: []byte(`{"files":1}`)}, false, false)
 		Expect(out.GetLeakGuard()).To(BeNil())
 	})
 })

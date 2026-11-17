@@ -244,10 +244,12 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   combines a leg-setting read of untrusted input, private data and an auto-tier `external-high` tool
   among the tools it names; the templates test reads the sink classes and fails if one does. A tool
   nobody declared is `external-high` with the server's legs (both, by default), so the MCP tools of
-  an admin's server (the cost and metrics tools of `finops-analyst`, which the template cannot name)
-  reach this branch at once, whatever their tier, until the admin declares them. The test names the
-  templates that do so, and the template asks the admin to declare read-only query tools as sink
-  class `none`. Amendment 2026-11-17 (issue 1050); the first text said "never".
+  an admin's server (the cost and metrics tools of `finops-analyst`, which the template cannot name,
+  and the search and fetch tools of `lcm-upgrader` and `web-researcher`) reach this branch at once,
+  whatever their tier, until the admin declares them. The test names the templates that do so, and
+  their descriptions ask the admin to declare read-only query tools as sink class `none` and search
+  and fetch tools as `external-low`. Koinon ships no declarations for an admin's servers: a catalog of
+  known servers needs its own issue. Amendment 2026-11-17 (issue 1050); the first text said "never".
 
 ### 6. Text matching: a frozen secondary alarm
 

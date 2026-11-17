@@ -577,7 +577,8 @@ export type Approval = Message<"koinon.approval.v1alpha1.Approval"> & {
   scopeKind: ScopeKind;
 
   /**
-   * leak_guard is set when the leak guard (ADR 0091) put this call on a card: the reasons, the sink
+   * leak_guard is set when the leak guard (ADR 0091) put this call on a card (an MCP call or a
+   * code-host tool call): the reasons, the sink
    * class and the legs. ListApprovals and GetApproval both set it, so a client that reads the list
    * sees why the call waits. GetApproval also sets it in mcp.leak_guard.
    *

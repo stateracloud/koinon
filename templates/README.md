@@ -18,7 +18,7 @@ Agent templates: building blocks for the agent builder; the result is always a d
   undeclared until the admin declares them, and an undeclared tool is `external-high` with both
   legs (ADR 0091 decisions 2 and 4), so a call can need a person's decision. `legs_test.go` reads
   the declaration the template asks for (`testdata/legs/mcp-readonly-tool.json`: sink class `none`,
-  results are private data) and names the templates that reach the approval branch without it.
+  results are private data; `lcm-upgrader` and `web-researcher` ask the same for their search and fetch tools) and names the templates that reach the approval branch without it.
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.

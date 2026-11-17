@@ -973,7 +973,8 @@ type Approval struct {
 	// Trusted preset) decided it. scope_kind says which kind it was.
 	ScopeId   string    `protobuf:"bytes,33,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
 	ScopeKind ScopeKind `protobuf:"varint,34,opt,name=scope_kind,json=scopeKind,proto3,enum=koinon.approval.v1alpha1.ScopeKind" json:"scope_kind,omitempty"`
-	// leak_guard is set when the leak guard (ADR 0091) put this call on a card: the reasons, the sink
+	// leak_guard is set when the leak guard (ADR 0091) put this call on a card (an MCP call or a
+	// code-host tool call): the reasons, the sink
 	// class and the legs. ListApprovals and GetApproval both set it, so a client that reads the list
 	// sees why the call waits. GetApproval also sets it in mcp.leak_guard.
 	LeakGuard     *LeakGuard `protobuf:"bytes,35,opt,name=leak_guard,json=leakGuard,proto3" json:"leak_guard,omitempty"`
