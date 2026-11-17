@@ -2242,6 +2242,10 @@ type LeakGuardDecision struct {
 	UntrustedInput pgtype.Bool
 	PrivateData    pgtype.Bool
 	CreatedAt      pgtype.Timestamptz
+	ChargedBytes   int32
+	CapUsedBefore  int32
+	DestHost       string
+	OverThreshold  bool
 }
 
 type LeakGuardFingerprint struct {
@@ -2266,14 +2270,16 @@ type LeakGuardOpenCall struct {
 }
 
 type LeakGuardRun struct {
-	OrgID       pgtype.UUID
-	RunID       pgtype.UUID
-	CappedBytes int32
-	UrlState    []byte
-	FeedEpoch   int64
-	FeedRead    int64
-	FeedDone    int64
-	UpdatedAt   pgtype.Timestamptz
+	OrgID              pgtype.UUID
+	RunID              pgtype.UUID
+	CappedBytes        int32
+	UrlState           []byte
+	FeedEpoch          int64
+	FeedRead           int64
+	FeedDone           int64
+	UpdatedAt          pgtype.Timestamptz
+	OverThresholdAt    pgtype.Timestamptz
+	OverThresholdBytes pgtype.Int4
 }
 
 type LeakGuardSession struct {

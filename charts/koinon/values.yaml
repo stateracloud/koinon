@@ -100,9 +100,9 @@ api:
   # every tools/call of an org's MCP server and after its result, and fail the call closed when it
   # cannot be reached. Its own listener and Service, reachable only from the gateway (NetworkPolicy).
   guardPort: 8083
-  # The byte cap per run for external-low calls once a session holds both legs (ADR 0091); over it
-  # the call is refused with text the agent reads.
-  leakGuardByteCap: 2048
+  # The byte threshold per run for external-low calls once a session holds both legs (ADR 0091,
+  # amendment 2026-11-17); over it the guard records one event for the run and refuses nothing.
+  leakGuardByteCap: 16384
   # The DBOS runtime inside koinon-api (ADR 0066, plan item DB1): schedules and durable timers. No
   # new Deployment. Its tables are created by the migration Job (ADR 0060), so the Job must run
   # this image first; off until a feature needs it.

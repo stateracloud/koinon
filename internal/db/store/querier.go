@@ -618,6 +618,9 @@ type Querier interface {
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+	// amendment 2026-11-17). No row when the guard never charged the run.
+	GetRunEvidenceGuardRun(ctx context.Context, arg GetRunEvidenceGuardRunParams) (GetRunEvidenceGuardRunRow, error)
 	GetRunEvidenceRun(ctx context.Context, arg GetRunEvidenceRunParams) (Run, error)
 	GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceSandboxParams) (AgentSandbox, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.

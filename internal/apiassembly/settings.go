@@ -37,7 +37,8 @@ type Settings struct {
 	// RestoreHold starts the install held (issue #462): nothing acts until the operator releases it.
 	RestoreHold bool
 
-	// GuardByteCap bounds what the MCP leak guard reads of one call (ADR 0091).
+	// GuardByteCap is the byte threshold per run of the MCP leak guard: over it the guard records one
+	// event and refuses nothing (ADR 0091, amendment 2026-11-17).
 	GuardByteCap int
 	// The restore status reads these three: where the install is configured to be reached, and
 	// whether the declarative removals a restore brought in are accepted (ADR 0110).

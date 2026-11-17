@@ -74,7 +74,12 @@ RETURNING *;
 
 -- name: SaveLeakGuardRun :exec
 UPDATE leak_guard_runs
-SET capped_bytes = @capped_bytes, url_state = @url_state, updated_at = now()
+SET capped_bytes = @capped_bytes, url_state = @url_state,
+    -- The one over-threshold event of the run (ADR 0091 amendment 2026-11-17): set when the call
+    -- takes the count past the threshold, and kept after.
+    over_threshold_at = CASE WHEN @crossed::boolean THEN now() ELSE over_threshold_at END,
+    over_threshold_bytes = CASE WHEN @crossed::boolean THEN @capped_bytes ELSE over_threshold_bytes END,
+    updated_at = now()
 WHERE org_id = @org_id AND run_id = @run_id;
 
 -- name: StartLeakGuardFeed :execrows

@@ -3,8 +3,6 @@
 package mcpguard
 
 import (
-	"fmt"
-
 	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
@@ -19,7 +17,7 @@ type Action string
 const (
 	// Pass lets the call through.
 	Pass Action = "pass"
-	// Refuse fails the call with a reason the agent can read (the byte cap, the URL rule, a check
+	// Refuse fails the call with a reason the agent can read (the URL rule, a check
 	// that could not finish).
 	Refuse Action = "refuse"
 	// NeedsDecision is the rules' third outcome: the call may carry private data out of the org, and
@@ -36,7 +34,6 @@ const (
 	ReasonClean     = "clean"             // external, nothing matched, within the limits
 	ReasonBothLegs  = "both_legs"         // external-high with both legs: approval
 	ReasonTaint     = "taint"             // the payload carries private text: approval
-	ReasonByteCap   = "byte_cap"          // external-low over the byte cap with both legs: refusal
 	ReasonURLRule   = "url_rule"          // the ADR 0084 URL shape rule or its budgets: refusal
 	ReasonCheck     = "check"             // the taint check ran out of a budget: refusal (fail closed)
 	ReasonAmbiguous = "ambiguous_address" // an address argument with more than one reading: refusal
@@ -65,10 +62,6 @@ type Facts struct {
 	// treated as not applicable when URLChecked is false).
 	URL        leakguard.Decision
 	URLChecked bool
-	// OverCap: external-low with both legs, and the call would take the run past the byte cap.
-	OverCap bool
-	// CapUsed and Cap are for the refusal text.
-	CapUsed, Cap, PayloadBytes int
 }
 
 // Verdict is the decision on one call.
@@ -109,12 +102,8 @@ func Decide(f Facts) Verdict {
 		if f.URLChecked && !f.URL.Allow {
 			return Verdict{Action: Refuse, Reason: ReasonURLRule, Detail: f.URL.Detail}
 		}
-		if f.BothLegs && f.OverCap {
-			return Verdict{Action: Refuse, Reason: ReasonByteCap, Detail: fmt.Sprintf(
-				"refused by the leak guard: this run has read untrusted input and private data, so it may send at most %d bytes "+
-					"to hosts outside the org; it has sent %d and this call would add %d. Do not retry or rephrase this call.",
-				f.Cap, f.CapUsed, f.PayloadBytes)}
-		}
+		// The byte cap never refuses (ADR 0091 amendment 2026-11-17): the guard counts the bytes and
+		// records one event when a run goes over the threshold (Guard.decideExternalLow).
 		if matched {
 			return Verdict{Action: NeedsDecision, Reason: ReasonTaint, Reasons: []string{ReasonTaint}, Match: f.Taint.Match}
 		}

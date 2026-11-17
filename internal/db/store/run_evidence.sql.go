@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRunEvidenceGuardRun = `-- name: GetRunEvidenceGuardRun :one
+SELECT capped_bytes, over_threshold_at, over_threshold_bytes
+FROM leak_guard_runs
+WHERE org_id = $1 AND run_id = $2
+`
+
+type GetRunEvidenceGuardRunParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+type GetRunEvidenceGuardRunRow struct {
+	CappedBytes        int32
+	OverThresholdAt    pgtype.Timestamptz
+	OverThresholdBytes pgtype.Int4
+}
+
+// The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+// amendment 2026-11-17). No row when the guard never charged the run.
+func (q *Queries) GetRunEvidenceGuardRun(ctx context.Context, arg GetRunEvidenceGuardRunParams) (GetRunEvidenceGuardRunRow, error) {
+	row := q.db.QueryRow(ctx, getRunEvidenceGuardRun, arg.OrgID, arg.RunID)
+	var i GetRunEvidenceGuardRunRow
+	err := row.Scan(&i.CappedBytes, &i.OverThresholdAt, &i.OverThresholdBytes)
+	return i, err
+}
+
 const getRunEvidenceRun = `-- name: GetRunEvidenceRun :one
 SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at FROM runs WHERE org_id = $1 AND id = $2
 `
@@ -114,9 +140,11 @@ func (q *Queries) GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceS
 const insertApprovedExecutionDecision = `-- name: InsertApprovedExecutionDecision :exec
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
-       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data
+       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
+       0, d.cap_used_before, d.dest_host, false
 FROM leak_guard_decisions d
 WHERE d.org_id = $1 AND d.agent_id = $2 AND d.run_id IS NOT DISTINCT FROM $3
   AND d.server = $4 AND d.tool = $5 AND (d.action = 'approve' OR d.reason = 'ask_target')
@@ -151,12 +179,14 @@ const insertLeakGuardDecision = `-- name: InsertLeakGuardDecision :exec
 
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 VALUES (
     $1, $2, $3,
     (SELECT r.id FROM runs r WHERE r.org_id = $1 AND r.agent_id = $2 AND r.state = 'running'),
     $4, $5, $6, $7, $8, $9::text[],
-    $10, $11, $12, $13, $14, $15)
+    $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19)
 `
 
 type InsertLeakGuardDecisionParams struct {
@@ -175,6 +205,10 @@ type InsertLeakGuardDecisionParams struct {
 	PayloadBytes   int32
 	UntrustedInput pgtype.Bool
 	PrivateData    pgtype.Bool
+	ChargedBytes   int32
+	CapUsedBefore  int32
+	DestHost       string
+	OverThreshold  bool
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -200,12 +234,16 @@ func (q *Queries) InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGua
 		arg.PayloadBytes,
 		arg.UntrustedInput,
 		arg.PrivateData,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.DestHost,
+		arg.OverThreshold,
 	)
 	return err
 }
 
 const listRunEvidenceDecisions = `-- name: ListRunEvidenceDecisions :many
-SELECT org_id, id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons, match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data, created_at FROM leak_guard_decisions
+SELECT org_id, id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons, match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data, created_at, charged_bytes, cap_used_before, dest_host, over_threshold FROM leak_guard_decisions
 WHERE org_id = $1 AND run_id = $2
 ORDER BY created_at, id
 `
@@ -243,6 +281,10 @@ func (q *Queries) ListRunEvidenceDecisions(ctx context.Context, arg ListRunEvide
 			&i.UntrustedInput,
 			&i.PrivateData,
 			&i.CreatedAt,
+			&i.ChargedBytes,
+			&i.CapUsedBefore,
+			&i.DestHost,
+			&i.OverThreshold,
 		); err != nil {
 			return nil, err
 		}

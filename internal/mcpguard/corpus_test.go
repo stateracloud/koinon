@@ -132,8 +132,9 @@ type replaySession struct {
 }
 
 type replayRun struct {
-	st   *leakguard.RunState
-	used int
+	st      *leakguard.RunState
+	used    int
+	flagged bool // the run's one over-threshold event happened
 }
 
 // replayed is the guard's decision on one call, with what it read.
@@ -142,6 +143,7 @@ type replayed struct {
 	class   sinkclass.Class
 	legs    Legs // before the call
 	bytes   int  // payload bytes as the byte cap counts them
+	charge  byteCharge
 	verdict Verdict
 }
 
@@ -289,7 +291,7 @@ func (r *replay) apply(ctx context.Context, l corpusLine) (*replayed, error) {
 		if err != nil {
 			return nil, err
 		}
-		f := Facts{Class: out.class, BothLegs: s.legs.Both(), Taint: taint, Cap: r.g.cap, PayloadBytes: out.bytes}
+		f := Facts{Class: out.class, BothLegs: s.legs.Both(), Taint: taint}
 		if out.class != sinkclass.ExternalLow {
 			out.verdict = Decide(f)
 		} else {
@@ -298,10 +300,11 @@ func (r *replay) apply(ctx context.Context, l corpusLine) (*replayed, error) {
 			if err != nil {
 				return nil, err
 			}
-			v, used := r.g.decideExternalLow(st, run.used, srv, decl, args, f)
-			out.verdict = v
+			v, c := r.g.decideExternalLow(st, run.used, run.flagged, srv, decl, args, f)
+			out.verdict, out.charge = v, c
 			if v.Action != Refuse {
-				run.st, run.used = st, used
+				run.st, run.used = st, c.After
+				run.flagged = run.flagged || c.Crossed
 			}
 		}
 	}

@@ -215,7 +215,7 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
 | Session state | `none`, `internal` | `external-low` | `external-high` |
 |---|---|---|---|
 | Not both legs | pass | today's limits | pass |
-| Both legs | pass | byte cap | ADR 0042 approval |
+| Both legs | pass | byte count (alert) | ADR 0042 approval |
 
 - **`none` and `internal` always pass.** They carry nothing out. The ADR 0057 tool tiers still
   govern writes, and integrity of what is written is not this guard's job.
@@ -237,9 +237,9 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   the payload bytes as sent (the URL's path, query and fragment, the search query), with no decoding,
   so it holds whatever the encoding. It counts from the first call after the run holds both legs,
   since no byte sent before that can carry private data under injected instructions. The **starting
-  value is about 2 KB**, set from real traffic measurements (open questions). A call that would go
-  over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
-  shape rule keeps applying inside the cap.
+  value is about 2 KB**, set from real traffic measurements (open questions). *Amended
+  2026-11-17 (#1058): the threshold is 16 KiB and a call over it is not refused: the guard records one
+  event for the run (see the amendment at the end).* The URL shape rule keeps applying.
 - **Shipped templates reach the approval branch only through undeclared tools.** No shipped template
   combines a leg-setting read of untrusted input, private data and an auto-tier `external-high` tool
   among the tools it names; the templates test reads the sink classes and fails if one does. A tool
@@ -581,3 +581,45 @@ the count to the database. If any step lags, or a harness gives a reply to the m
 finished update (a cut call left in progress), the next call of the model is taken as the same turn
 and an unseen reply does not count until the call ends or `UnseenAfter` passes. The loss is both
 legs of that reply. The guard cannot close this from the database alone.
+
+## Amendment (2026-11-17, #1058): the byte cap alerts and never refuses
+
+The maintainer decided that the byte cap of decision 5 no longer refuses a call. The cap detects
+bulk leaks. It does not stop them.
+
+**Why.** No AI gateway, AI security product or MCP gateway caps outbound data volume. The security
+products that count cumulative outbound volume per user only alert or score: Code42 and Mimecast
+Incydr ("File volume: Total size greater than", 15 minute window) and Microsoft Purview Insider Risk
+Management (cumulative exfiltration detection, 30 day baseline). The products that block on
+cumulative outbound bytes are network quotas, not leak guards: Sophos Firewall data transfer
+policies and MikroTik HotSpot `limit-bytes-out`. A refusal on a normal run is also nannying: agents
+work without approvals on routine calls (the measurement of 2026-11-16 showed a normal full run over
+the old value of 2048 bytes).
+
+**What changes.**
+
+- The guard keeps counting the **charged bytes** per run: the payload bytes of `external-low` calls
+  made while the session holds both legs, for calls that were not refused. An approved re-run is not
+  charged again. The count never refuses a call. The reason `byte_cap` is removed.
+- The **threshold** is 16 KiB per run (the setting `--leak-guard-byte-cap` and the chart value
+  `leakGuardByteCap` stay; the default was 2 KiB). When the count of a run goes over it, the guard
+  records **one event for that run**: `leak_guard_runs.over_threshold_at` and `over_threshold_bytes`
+  (exported in `run.jsonl`), the mark `over_threshold` on the one decision row that crossed it, and
+  the counter `koinon_api_mcp_guard_byte_threshold_runs_total`. The metric has no label (ADR 0023: no
+  org, agent, user, ticket or run IDs), so Grafana shows how many runs crossed the threshold and the
+  run evidence says which.
+- Each **decision row** records `charged_bytes` (what the call added to the run's count),
+  `cap_used_before` (the count before the call) and `dest_host` (the fetch host of an http or https
+  address argument; empty when there is none). The run evidence exports them, with the host as a
+  pseudonym, so the lab reads the count from the rows. The stored count equals the sum of the
+  charged bytes. The migration only adds columns (ADR 0085 patch-line rule).
+- The URL rule and the text match are unchanged.
+
+**What the cap does not do.** A secret under about 1 KB (a token, a key) is far below any threshold
+that normal runs allow. Small secrets rely on the no-secrets rule (no credentials in a sandbox),
+the text match on every external payload, and the two legs. The cap only shows bulk loss after it
+happened, through allowed low-risk calls.
+
+The table of decision 5 reads, for both legs and `external-low`: pass, with the bytes counted. The
+open question "does a cap refusal stop the run?" of the amendment of 2026-11-16 is closed: there is
+no cap refusal.

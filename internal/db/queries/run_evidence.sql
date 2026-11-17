@@ -8,12 +8,14 @@
 -- decision costs one round trip. No argument, payload or matched text is stored.
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 VALUES (
     @org_id, @agent_id, @generation,
     (SELECT r.id FROM runs r WHERE r.org_id = @org_id AND r.agent_id = @agent_id AND r.state = 'running'),
     @server, @tool, @sink_class, @action, @reason, @reasons::text[],
-    @match_count, @match_length, @match_encoding, @payload_bytes, @untrusted_input, @private_data);
+    @match_count, @match_length, @match_encoding, @payload_bytes, @untrusted_input, @private_data,
+    @charged_bytes, @cap_used_before, @dest_host, @over_threshold);
 
 -- name: InsertApprovedExecutionDecision :exec
 -- A call a person approved has run through the gateway (internal/approvals). The guard's own record
@@ -22,14 +24,23 @@ VALUES (
 -- are counted once, when they left. Nothing is inserted when no parked decision is found.
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
-       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data
+       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
+       0, d.cap_used_before, d.dest_host, false
 FROM leak_guard_decisions d
 WHERE d.org_id = @org_id AND d.agent_id = @agent_id AND d.run_id IS NOT DISTINCT FROM @run_id
   AND d.server = @server AND d.tool = @tool AND (d.action = 'approve' OR d.reason = 'ask_target')
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT 1;
+
+-- name: GetRunEvidenceGuardRun :one
+-- The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+-- amendment 2026-11-17). No row when the guard never charged the run.
+SELECT capped_bytes, over_threshold_at, over_threshold_bytes
+FROM leak_guard_runs
+WHERE org_id = @org_id AND run_id = @run_id;
 
 -- name: ListRunEvidenceDecisions :many
 SELECT * FROM leak_guard_decisions

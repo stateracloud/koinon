@@ -25,9 +25,10 @@ import (
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
-// DefaultByteCap is the byte cap per run of ADR 0091 decision 5: payload bytes a run that holds
+// DefaultByteCap is the byte threshold per run of ADR 0091 decision 5 (amended 2026-11-17: it alerts
+// and never refuses): payload bytes a run that holds
 // both legs may send through external-low sinks. "About 2 KB" until real traffic sets it.
-const DefaultByteCap = 2048
+const DefaultByteCap = 16 << 10
 
 // LookupBudget is the time the guard allows itself besides the taint check's own backstop: the
 // identity, declaration, session and run reads and writes.
@@ -335,6 +336,12 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	g.metrics.decided(out.Verdict, class, g.now().Sub(start))
 	g.logDecision(call, out, f)
 	g.recordDecision(ctx, call, out, f)
+	if f.charge.Crossed {
+		// The one over-threshold event of the run; the call itself passes (ADR 0091 amendment 2026-11-17).
+		g.metrics.overThreshold()
+		g.log.Warn("mcp guard: a run went over the byte threshold", "target", call.Target, "tool", call.Tool,
+			"threshold", g.cap, "bytes", f.charge.After)
+	}
 	return out
 }
 
@@ -358,6 +365,9 @@ type decisionFacts struct {
 	generation string
 	// payloadBytes is the size of the call's payload arguments.
 	payloadBytes int
+	// charge and destHost are the byte count and the fetch host of the call (the decision record).
+	charge   byteCharge
+	destHost string
 }
 
 // logDecision logs every refusal and every call sent to a person (an ask target or an approval),
@@ -417,6 +427,7 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	a, err := g.assess(ctx, c, decl, call.Arguments, true)
 	f.class, f.run, f.feedStalled, f.replyUnseen = a.class, a.run, a.feedStalled, a.replyUnseen
 	f.generation, f.payloadBytes = a.generation, a.args.PayloadBytes()
+	f.charge, f.destHost = a.charge, a.destHost
 	if a.legsRead {
 		l := a.legs
 		f.legs = &l
@@ -528,6 +539,23 @@ type assessment struct {
 	replyUnseen bool
 	// generation is the home generation of the agent's sandbox, once read (external calls).
 	generation string
+	// charge is what the call did to the run's byte count (external-low calls the guard charged).
+	charge byteCharge
+	// destHost is the fetch host of the call's address arguments, when it has one.
+	destHost string
+}
+
+// destHost returns the hosts of the call's http and https address arguments, sorted, joined by a
+// comma, or empty when it has none. A host only: never a path, a query or a payload.
+func destHost(a Args) string {
+	var hosts []string
+	for _, v := range a.Address {
+		if h, ok := sinkclass.FetchHost(v); ok && !slices.Contains(hosts, h) {
+			hosts = append(hosts, h)
+		}
+	}
+	slices.Sort(hosts)
+	return strings.Join(hosts, ",")
 }
 
 func (a assessment) risk() map[string]any {
@@ -630,7 +658,8 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		g.log.Warn("mcp guard: the session's taint store dropped fingerprints; a miss may be text it once held",
 			"org", c.org.Slug, "agent", c.agent.ID.String(), "generation", gen)
 	}
-	f := Facts{Class: a.class, BothLegs: a.legs.Both(), Taint: taint, Cap: g.cap, PayloadBytes: args.PayloadBytes()}
+	f := Facts{Class: a.class, BothLegs: a.legs.Both(), Taint: taint}
+	a.destHost = destHost(args)
 	if a.class != sinkclass.ExternalLow || !charge {
 		a.verdict = a.stallMarked(Decide(f))
 		return a, nil
@@ -657,9 +686,10 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 				return err
 			}
 		}
-		var capped int
-		a.verdict, capped = g.decideExternalLow(st, int(budget.CappedBytes), c.server, decl, args, f)
+		var charge byteCharge
+		a.verdict, charge = g.decideExternalLow(st, int(budget.CappedBytes), budget.OverThresholdAt.Valid, c.server, decl, args, f)
 		a.verdict = a.stallMarked(a.verdict)
+		a.charge = charge
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -667,7 +697,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		if err != nil {
 			return err
 		}
-		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(capped, 1<<30)), UrlState: state}) //nolint:gosec // bounded
+		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(charge.After, 1<<30)), UrlState: state, Crossed: charge.Crossed}) //nolint:gosec // bounded
 	})
 	return a, err
 }
@@ -677,14 +707,26 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 // the run has sent since it held them. It returns the verdict and the run's count after the call. A
 // call that is refused leaves the run as it was: the caller saves neither st nor the count. The
 // replay suite drives it without Postgres, so the cap it checks is this one.
-func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, int) {
+func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, byteCharge) {
 	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
-	f.CapUsed = used
-	if f.BothLegs {
-		f.OverCap = used+f.PayloadBytes > g.cap
-		used += f.PayloadBytes
+	v := Decide(f)
+	c := byteCharge{Before: used, After: used}
+	if f.BothLegs && v.Action != Refuse {
+		c.Charged = args.PayloadBytes()
+		c.After = used + c.Charged
+		// One event per run: the call that takes the count past the threshold, once.
+		c.Crossed = !flagged && c.After > g.cap
 	}
-	return Decide(f), used
+	return v, c
+}
+
+// byteCharge is what one external-low call did to its run's byte count (ADR 0091 decision 5): the
+// count before the call, the bytes charged (none unless the session holds both legs and the call
+// was not refused) and the count after. Crossed marks the one call that took the run past the
+// threshold. The count never refuses a call.
+type byteCharge struct {
+	Before, Charged, After int
+	Crossed                bool
 }
 
 // stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled, and
