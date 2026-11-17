@@ -7,12 +7,13 @@ apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
   id: web-researcher
-  version: 0.1.1
+  version: 0.1.2
   displayName: Web researcher
   description: >-
     Researches a question on the public web over several runs and answers with a cited Markdown
     report. It has no access to your repositories or other private data, and it needs a search or
-    fetch MCP server allowed for the agent. For research over your own repositories use Researcher.
+    fetch MCP server allowed for the agent. Declare its search tool external-low and its fetch tool
+    fetch-derived, or each call can need a decision. For research over your own repositories use Researcher.
 spec:
   harness:
     allowed: [opencode]

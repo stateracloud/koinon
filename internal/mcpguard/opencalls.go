@@ -4,6 +4,7 @@ package mcpguard
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,10 +37,62 @@ import (
 // exit condition is "the step 2 gateway refuses these itself"). A reply of a method the guard has no
 // reading for is not a gap of this kind: CheckUnseen takes both legs for it.
 
+// The turn mark (#1057). A model that calls two tools in one turn has the reply of neither when it
+// makes the second call, so the reply of the first cannot be in the second call's arguments, and
+// the guard must not count it as unseen. The mark of an open call is the live run and its feed_read
+// (agentd's count of tool calls the harness finished, failed ones too) and its worker epoch when the
+// call opened. A decision that reads the same count, in the same run and epoch, is taken as the same
+// turn: no reply of the open call reached the model.
+//
+// Residual: this holds only while the count follows the harness. agentd reads each finished tool call
+// off the harness's stream and a writer copies the count to the database, and the harness is only
+// assumed to write the update before it makes its next call (ADR 0091 amendment 2026-11-03). Lag in
+// the pipe, the reader or the writer, or a harness that gives a reply to the model without a
+// finished update (a cut call left in progress), keeps an unseen reply from counting until it ends.
+// The loss is both legs of that reply, not the legs of one tool. The guard cannot close this from the
+// database alone.
+//
+// A result closes the newest open call of its tool and target: its mark is the highest, so the older
+// calls, which count at least as much, stay. Once the count is higher, a reply may have reached the model
+// (an error reply and a cut call finish a tool call as well), and the open call counts as unseen
+// again: both legs. This errs the safe way: a tool call that finishes in the same turn also raises
+// the count. A call with no mark (no live run or feed) always counts, and an open call that is
+// older than UnseenAfter sets both legs for good, as before. It is a recorded count, not a time
+// window.
+
+// turnMark is the live run of an agent and the count of finished tool calls of its feed. It is
+// the zero value when the agent has no live run or no feed.
+type turnMark struct {
+	Run   pgtype.UUID
+	Epoch pgtype.Int8
+	Read  pgtype.Int8
+}
+
 // DefaultUnseenAfter is how long a passed call may wait for its guarded result before its reply
 // counts as unseen for good. Tool calls can take minutes; a call still open after this did not end
 // in a result the guard saw.
 const DefaultUnseenAfter = 10 * time.Minute
+
+// currentMark reads the turn mark now, without waiting for the feed. The mark may be above the count
+// of the call's own arrival, which is safe: the call's own finish is counted after it opens, so the
+// count always ends above the mark once its reply can reach the model.
+func (g *Guard) currentMark(ctx context.Context, c caller) (turnMark, error) {
+	run, err := g.q.GetLiveRunForAgent(ctx, store.GetLiveRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return turnMark{}, nil
+	}
+	if err != nil {
+		return turnMark{}, err
+	}
+	feed, err := g.q.GetLeakGuardFeed(ctx, store.GetLeakGuardFeedParams{OrgID: c.org.ID, RunID: run.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return turnMark{}, nil
+	}
+	if err != nil {
+		return turnMark{}, err
+	}
+	return turnMark{Run: run.ID, Epoch: pgtype.Int8{Int64: feed.FeedEpoch, Valid: true}, Read: pgtype.Int8{Int64: feed.FeedRead, Valid: true}}, nil
+}
 
 // openCall records that the guard passed tool on target for c's session. A caller without a sandbox
 // session opens nothing: the result of such a call is withheld anyway (record), and its external
@@ -50,6 +103,10 @@ func (g *Guard) openCall(ctx context.Context, c caller, target, tool string) err
 		return err
 	}
 	sess := Session{Org: c.org.ID, Agent: c.agent.ID, Generation: gen}
+	mark, err := g.currentMark(ctx, c)
+	if err != nil {
+		return err
+	}
 	return pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		if _, err := ensure(ctx, q, sess); err != nil {
@@ -58,6 +115,7 @@ func (g *Guard) openCall(ctx context.Context, c caller, target, tool string) err
 		return q.OpenLeakGuardCall(ctx, store.OpenLeakGuardCallParams{
 			OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation, Target: target, Tool: tool,
 			OpenedAt: pgtype.Timestamptz{Time: g.now(), Valid: true},
+			MarkRun:  mark.Run, MarkEpoch: mark.Epoch, MarkRead: mark.Read,
 		})
 	})
 }
@@ -74,9 +132,12 @@ func (g *Guard) closeCall(ctx context.Context, sess Session, target, tool string
 
 // unseenReplies is the session's calls whose replies the guard has not seen. With expire, the calls
 // older than UnseenAfter are closed and both legs recorded on the session (returned in legs); without,
-// nothing is written (mcpask's card). open is the number of calls still open.
-func (g *Guard) unseenReplies(ctx context.Context, sess Session, expire bool) (legs *Legs, open int64, err error) {
-	key := store.CountLeakGuardOpenCallsParams{OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation}
+// nothing is written (mcpask's card). open is the number of calls still open whose reply may have
+// reached the model before the decision under mark (see the turn mark above).
+func (g *Guard) unseenReplies(ctx context.Context, sess Session, mark turnMark, expire bool) (legs *Legs, open int64, err error) {
+	key := store.CountLeakGuardOpenCallsParams{
+		OrgID: sess.Org, AgentID: sess.Agent, Generation: sess.Generation, RunID: mark.Run, FeedEpoch: mark.Epoch, FeedRead: mark.Read,
+	}
 	if !expire {
 		open, err = g.q.CountLeakGuardOpenCalls(ctx, key)
 		return nil, open, err

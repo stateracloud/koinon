@@ -240,10 +240,16 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   value is about 2 KB**, set from real traffic measurements (open questions). A call that would go
   over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
   shape rule keeps applying inside the cap.
-- **Shipped templates never reach the approval branch.** No shipped template combines a leg-setting
-  read of untrusted input, private data and an auto-tier `external-high` tool; the old issue 351 templates
-  test reads the sink classes and fails if one does. So normal use adds no click ("no agent
-  nannies", 2026-10-31).
+- **Shipped templates reach the approval branch only through undeclared tools.** No shipped template
+  combines a leg-setting read of untrusted input, private data and an auto-tier `external-high` tool
+  among the tools it names; the templates test reads the sink classes and fails if one does. A tool
+  nobody declared is `external-high` with the server's legs (both, by default), so the MCP tools of
+  an admin's server (the cost and metrics tools of `finops-analyst`, which the template cannot name,
+  and the search and fetch tools of `lcm-upgrader` and `web-researcher`) reach this branch at once,
+  whatever their tier, until the admin declares them. The test names the templates that do so, and
+  their descriptions ask the admin to declare read-only query tools as sink class `none` and search
+  and fetch tools as `external-low`. Koinon ships no declarations for an admin's servers: a catalog of
+  known servers needs its own issue. Amendment 2026-11-17 (issue 1050); the first text said "never".
 
 ### 6. Text matching: a frozen secondary alarm
 
@@ -548,3 +554,30 @@ No upstream behaviour changes. The guard still runs behind agentgateway v1.6.0 E
 - The design review behind them is kept by the maintainers (not in the repository).
 - Issues #51, old issue 348, old issue 349, old issue 350, old issue 351, #70, old issue 609, #48; PRs old issue 582, old issue 621, old issue 623
 - ADRs [0084](0084-leak-guard.md), [0042](0042-ask-tier-park-and-execute.md), [0051](0051-session-home-generations.md), [0057](0057-mcp-servers.md), [0062](0062-code-host-connectors.md), [0080](0080-tool-set-matches-egress-and-escape-hosts.md), [0023](0023-observability-and-audit.md)
+
+## Amendment (2026-11-17, #1057): a call of the same model turn does not count a reply in flight
+
+The open-call ledger (#254) counted every open call as a reply that the guard did not see. When a
+model sends tool calls in parallel, the second call then took both legs, but the model has not
+received the first reply, so the first reply cannot be in the second call.
+
+Each open call now carries a turn mark: the live run, its worker epoch and its
+`leak_guard_runs.feed_read`, the count of tool calls that the harness finished (a failed call counts
+too).  A decision counts an open call as unseen when it has no mark,
+when the decision has no live run, or when the epoch differs, or when the count is higher than the mark. With an equal count, no
+reply reached the model since the call opened. This is a recorded mark, not a time window.
+
+An error reply and a cut call finish a tool call in the harness, so the count moves and a call in a
+later turn still takes both legs. A tool call that finishes inside the same turn also moves the count.
+The guard cannot tell it from a later turn, so it takes both legs then. This is the safe error. A call
+older than `UnseenAfter` sets both legs for good, as before.
+
+A result closes the newest open call of its tool and target, so the calls with lower marks, which
+count more, stay open.
+
+Residual: the count follows the harness only as far as the 2026-11-03 amendment assumes. The harness
+writes the finished update to its stream before its next call, agentd reads it, and a writer copies
+the count to the database. If any step lags, or a harness gives a reply to the model without a
+finished update (a cut call left in progress), the next call of the model is taken as the same turn
+and an unseen reply does not count until the call ends or `UnseenAfter` passes. The loss is both
+legs of that reply. The guard cannot close this from the database alone.

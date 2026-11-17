@@ -74,7 +74,7 @@ show)
   *:hack/needs-e2e.sh) printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n' ;;
   *:hack/ci-changes.sh) [ -n "${CICH_BODY:-}" ] && cat "$CICH_BODY" || exit 128 ;;
   *:hack/paths-lib.sh | *:hack/paths.rules) printf '# stub\n' ;;
-  *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n' ;;
+  *:.github/CODEOWNERS) printf '# Sensitive paths\n/AGENTS.md @procoduck\n/**/AGENTS.md @procoduck\n' ;;
   *) exit 128 ;;
   esac ;;
 *) exit 2 ;;
