@@ -80,7 +80,7 @@ done
 # The timeout rule (issues 572, 662): every job of every workflow file sets timeout-minutes. The default is
 # 360 minutes, so a hung job holds a runner (and the merge queue) for six hours. A reusable-workflow job
 # (`uses:` at job level) cannot set it and is exempt.
-for f in "$root"/.github/workflows/*.yml; do
+for f in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml; do
 	[[ -f $f ]] || continue
 	name=${f##*/}
 	hits=$(awk -v file=".github/workflows/$name" '

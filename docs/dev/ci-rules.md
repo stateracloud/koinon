@@ -248,7 +248,7 @@ Source: GitHub security hardening (as W1); Scorecard check Pinned-Dependencies. 
 
 **W3. MUST NOT** use `pull_request_target`, and no self-hosted runner in this public repository. `workflow_run`
 MUST NOT run pull request code.
-Check: `hack/runner-lint.sh` (the first two); review (`workflow_run`; no workflow uses it today).
+Check: `hack/runner-lint.sh` (the first two); review (`workflow_run`; no workflow uses it, and zizmor `dangerous-triggers` flags one).
 Source: GitHub security hardening; Scorecard check Dangerous-Workflow. Scope: general pattern. In force: now.
 
 **W4. MUST** pass untrusted values (titles, branch names, bodies) to `run:` only through an `env:` variable.

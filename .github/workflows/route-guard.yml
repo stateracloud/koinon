@@ -11,29 +11,20 @@
 # pushed commit's own script with a read-only token plus `issues: write`; no secret, and no pull request code.
 name: route-guard
 
-# The second job, `ci-red`, shares this file because it needs the same `issues: write` and nothing else: when the
-# `ci` push run on main ends red it opens or comments on one issue keyed by the sha (a red main run otherwise
-# opens nothing, #662). It runs on `workflow_run`, so it reads the finished run's result; it checks out nothing and
-# runs no code from the commit.
 on:
   push:
-    branches: [main]
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
     branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: route-guard-${{ github.event_name }}-${{ github.event.workflow_run.head_sha || github.sha }}
+  group: route-guard-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   guard:
     name: route guard
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20 # polls an in-progress queue build for up to 10 minutes
     permissions:
@@ -53,37 +44,3 @@ jobs:
           persist-credentials: false
       - name: Was this commit built by the merge queue?
         run: hack/route-guard.sh
-
-  # A red `ci` push run on main. The queue builds the same tree, so this is rare: it means a merge reached main
-  # without a green queue run, or a post-merge job (warm-caches, harness-publish) failed. One issue per sha.
-  ci-red:
-    name: red ci run on main
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'failure'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write # the issue
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      SHA: ${{ github.event.workflow_run.head_sha }}
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
-    steps:
-      - name: Open or comment on the issue for this sha
-        run: |
-          set -euo pipefail
-          short=${SHA:0:12}
-          key="ci red on main: $short"
-          existing=$(gh issue list --state open --search "\"$key\" in:title" --json number --jq '.[0].number // empty') || existing=""
-          if [[ -n $existing ]]; then
-            gh issue comment "$existing" --body "Red again for the same sha: $RUN_URL" >/dev/null
-            echo "commented on issue #$existing"
-            exit 0
-          fi
-          body="The \`ci\` push run on main failed for \`$SHA\`: $RUN_URL
-
-          Find the red job (\`hack/ci-fail.sh\` prints it), then fix main or revert the commit. Close this issue when main is green."
-          gh issue create --title "$key" --body "$body" --label area:ci >/dev/null ||
-            gh issue create --title "$key" --body "$body" >/dev/null
-          echo "opened the issue for $short"

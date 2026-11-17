@@ -1144,7 +1144,7 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
 - Route guard and bypass alarm: `route-guard.yml` (push to main) opens an issue when the pushed tree has no
   successful `merge_group` `ci` run; label `break-glass` (`docs/agents/triage-labels.md`); a queue merge is recognised by the required jobs passing on the tree's `merge_group` run (not the run's conclusion), and an `--admin` merge of a `.github/**` PR with green required checks opens none.
   The overnight report reads GitHub's rule-suites API, which records every bypass whatever tool made it.
-  The same file's `ci-red` job (trigger `workflow_run` of `ci`, main, push) opens or comments on one issue titled `ci red on main: <sha12>` when the `ci` push run on main ends red (#662).
+  The last job of `ci.yml`, `ci-red` (advisory; runs only on a push to main when a job it needs failed; `issues: write` only; no checkout), opens or comments on one issue titled `ci red on main: <sha12>` when the `ci` push run on main ends red (#662).
   Log uploads (`upload-artifact` of logs and SARIF) set `continue-on-error: true`, so a failed upload never fails a job whose tests passed; an upload that later jobs or the release gate read stays strict.
 - `--admin` (only for a PR that changes at least one `.github/` path): verified (ADR 0094, "Verification by probe", probe 5):
   `gh pr merge --admin --merge` merges directly and bypasses the queue and the review rule. It lands without the

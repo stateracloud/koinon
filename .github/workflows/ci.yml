@@ -1262,3 +1262,42 @@ jobs:
           fi
           base=$(sed -n 's/^ARG BASE=//p' harnesses/opencode/Dockerfile | head -n 1)
           docker buildx build --push --build-arg "BASE=$base" --tag "$image" hack/spike/probe
+
+  # A red push run on main opens one issue per sha (#662). The queue builds the same tree, so this is rare: a
+  # merge reached main without a green queue run, or a post-merge job (warm-caches, harness-publish) failed.
+  # It is the last job and needs every other job that can fail, so it sees their result. It checks out nothing
+  # and runs no code from the commit; `issues: write` is its only permission. It is advisory and runs only on
+  # a push to main, so it can never be a required check.
+  ci-red:
+    name: ci-red
+    needs: [changes, go-tidy, go-vuln, fuzz, go-lint, go-test, go-race-serial, go-race-parallel, go, quick-checks, web-lint, web-test, web-e2e, web, generate, chart, chart-smoke, escape-admission, lint-shell, scripts, warm-caches, warm-caches-web, warm-caches-opencode-plugins, opencode-plugin, harnesses, harness-publish]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # the issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or comment on the issue for this sha
+        run: |
+          set -euo pipefail
+          short=${SHA:0:12}
+          key="ci red on main: $short"
+          # A failed search fails the step (a swallowed failure would open a duplicate); retry once.
+          search() { gh issue list --state open --search "\"$key\" in:title" --json number --jq '.[0].number // empty'; }
+          existing=$(search || search)
+          if [[ -n $existing ]]; then
+            gh issue comment "$existing" --body "Red again for the same sha: $RUN_URL" >/dev/null
+            echo "commented on issue #$existing"
+            exit 0
+          fi
+          body="The \`ci\` push run on main failed for \`$SHA\`: $RUN_URL
+
+          Find the red job (\`hack/ci-fail.sh\` prints it), then fix main or revert the commit. Close this issue when main is green."
+          gh issue create --title "$key" --body "$body" --label area:ci >/dev/null ||
+            gh issue create --title "$key" --body "$body" >/dev/null
+          echo "opened the issue for $short"
