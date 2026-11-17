@@ -67,6 +67,10 @@ var _ = Opts{Name: "koinon_api_lat_seconds"}`)
 		Expect(code).To(Equal(1))
 		Expect(msg).To(ContainSubstring("org_id"))
 	})
+	It("fails on an ID label in a vector-matching clause", func() {
+		code, _ := check(`sum(koinon_api_thing_total) / on (run_id) group_left sum(koinon_api_lat_seconds_count)`)
+		Expect(code).To(Equal(1))
+	})
 	It("fails on a matcher label that is an ID", func() {
 		code, _ := check(`sum(koinon_api_thing_total{run=\"abc\"})`)
 		Expect(code).To(Equal(1))
@@ -81,5 +85,21 @@ var _ = Opts{Name: "koinon_api_lat_seconds"}`)
 	It("reports a usage error", func() {
 		_, err := run(nil, &bytes.Buffer{}, &bytes.Buffer{})
 		Expect(err).To(HaveOccurred())
+	})
+})
+
+// The chart's real dashboards against the real code: a renamed metric fails the go job, whatever
+// the chart job's path rules select (issue 1078).
+var _ = Describe("the chart's dashboards", func() {
+	It("name only metrics that the code registers", func() {
+		root, err := filepath.Abs("../../..")
+		Expect(err).NotTo(HaveOccurred())
+		files, err := filepath.Glob(filepath.Join(root, "charts", "koinon", "dashboards", "*.json"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).NotTo(BeEmpty())
+		var o, e bytes.Buffer
+		code, err := run(append([]string{root}, files...), &o, &e)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(code).To(Equal(0), e.String())
 	})
 })

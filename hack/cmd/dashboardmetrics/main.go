@@ -27,7 +27,7 @@ import (
 var (
 	metricRe   = regexp.MustCompile(`\bkoinon_[a-z0-9_]+`)
 	registerRe = regexp.MustCompile(`Name:\s*"(koinon_[a-z0-9_]+)"`)
-	groupingRe = regexp.MustCompile(`\b(?:by|without)\s*\(([^)]*)\)`)
+	groupingRe = regexp.MustCompile(`\b(?:by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)`)
 	matcherRe  = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*(?:=~|!~|!=|=)\s*"`)
 	suffixes   = []string{"_bucket", "_sum", "_count"}
 	// forbidden are the labels ADR 0023 keeps out of every metric.
