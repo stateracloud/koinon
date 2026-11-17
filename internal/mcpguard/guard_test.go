@@ -1370,7 +1370,9 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			hosts, err := runevidence.NewHostMasker()
 			Expect(err).NotTo(HaveOccurred())
 			e := runevidence.Exporter{Q: q, Scrubber: runevidence.NewScrubber(scrub.NewSecrets("koinon_test_not-a-real-token")), Hosts: hosts}
-			_, err = e.Export(ctx, org, runID(ctx), runevidence.DirSink(dir))
+			var rid pgtype.UUID
+			Expect(pool.QueryRow(ctx, `SELECT id FROM runs WHERE org_id = $1`, org).Scan(&rid)).To(Succeed())
+			_, err = e.Export(ctx, org, rid, runevidence.DirSink(dir))
 			Expect(err).NotTo(HaveOccurred())
 
 			read := func(name string) []map[string]any {
