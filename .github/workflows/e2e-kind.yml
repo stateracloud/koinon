@@ -531,11 +531,9 @@ jobs:
 
       - name: Node and pnpm (browser sign-in)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        # zizmor: ignore[cache-poisoning] the drill job publishes nothing; the artifact is read by the release gate only as data
+        # No pnpm cache here: this job can check out inputs.commit, and a cache saved from it would reach the scope of main.
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install web dependencies (browser sign-in)
         run: pnpm --dir web install --frozen-lockfile

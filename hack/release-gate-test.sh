@@ -762,6 +762,15 @@ check "a required check that is only a known gap fails, even on an rc" "$(gate_r
 new_case
 rm "$FX/drill-artifacts.json"
 kind_artifact 523 "$sha" "$sha" kind pass
+jq '.checks += [{"name": "archive", "verdict": "known-gap"}]' "$FX/art.523/drill/drill-result.json" >"$FX/x.json" && mv "$FX/x.json" "$FX/art.523/drill/drill-result.json"
+rm "$FX/artifact-523.zip"
+(cd "$FX/art.523" && zip -qr "$FX/artifact-523.zip" drill.log drill)
+check "a required check present twice, once pass and once known-gap, fails" "$(gate_rc)" 1
+check "...naming it" "$(grep -c 'required checks not passing exactly once: archive' "$tmp/err")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 523 "$sha" "$sha" kind pass
 jq '.topology.browserSignin = false' "$FX/art.523/drill/drill-result.json" >"$FX/x.json" && mv "$FX/x.json" "$FX/art.523/drill/drill-result.json"
 rm "$FX/artifact-523.zip"
 (cd "$FX/art.523" && zip -qr "$FX/artifact-523.zip" drill.log drill)

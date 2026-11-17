@@ -339,7 +339,7 @@ DRILL_ARTIFACT_LIMIT=${DRILL_ARTIFACT_LIMIT:-30}
 	fail "DRILL_ARTIFACT_LIMIT '$DRILL_ARTIFACT_LIMIT' is not an integer from 1 to 100"
 # The checks a result must carry as `pass`, by name (ADR 0085 decision 15: sign in, a provider key decrypts, a
 # schedule fires, a pending workflow recovers, an archived agent restores; ADR 0109: the browser sign-in), so that
-# a removed or renamed spec cannot pass silently. A check missing, repeated or not `pass` fails the gate.
+# a removed or renamed spec cannot pass silently. A check missing, repeated (whatever the verdicts of the copies) or not `pass` fails the gate.
 DRILL_REQUIRED_CHECKS='["signin","provider-key","schedule","workflow-dead-executor","archive","browser-signin"]'
 
 # drill_verdict <file> <commit> <final: 0|1>: prints why the result is not green (and returns 1), or prints
@@ -348,7 +348,7 @@ DRILL_REQUIRED_CHECKS='["signin","provider-key","schedule","workflow-dead-execut
 drill_verdict() {
 	jq -rs --arg c "$2" --argjson final "$3" --argjson req "$DRILL_REQUIRED_CHECKS" '
 		def gaps: [(.checks // [])[] | select(.verdict == "known-gap")];
-		def missing: . as $r | [$req[] | . as $n | select(([$r.checks[]? | select(.name == $n and .verdict == "pass")] | length) != 1)];
+		def missing: . as $r | [$req[] | . as $n | select(([$r.checks[]? | select(.name == $n)] | length) != 1 or ([$r.checks[]? | select(.name == $n and .verdict == "pass")] | length) != 1)];
 		def verdict: if type != "object" then "not a drill-result.json object"
 		elif .commit != $c then "it is for commit \(.commit // "none"), not \($c)"
 		elif .topology.profile != "kind" then "its profile is \(.topology.profile // "none"), not kind"
