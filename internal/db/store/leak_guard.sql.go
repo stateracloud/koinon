@@ -139,8 +139,10 @@ func (q *Queries) CountLeakGuardFingerprints(ctx context.Context, arg CountLeakG
 const countLeakGuardOpenCalls = `-- name: CountLeakGuardOpenCalls :one
 SELECT count(*) FROM leak_guard_open_calls
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
-  AND (mark_run IS NULL OR mark_read IS NULL OR $4::uuid IS NULL OR $5::bigint IS NULL
-       OR mark_run <> $4::uuid OR mark_read < $5::bigint)
+  AND (mark_run IS NULL OR mark_epoch IS NULL OR mark_read IS NULL
+       OR $4::uuid IS NULL OR $5::bigint IS NULL OR $6::bigint IS NULL
+       OR mark_run <> $4::uuid OR mark_epoch <> $5::bigint
+       OR mark_read < $6::bigint)
 `
 
 type CountLeakGuardOpenCallsParams struct {
@@ -148,11 +150,12 @@ type CountLeakGuardOpenCallsParams struct {
 	AgentID    pgtype.UUID
 	Generation string
 	RunID      pgtype.UUID
+	FeedEpoch  pgtype.Int8
 	FeedRead   pgtype.Int8
 }
 
 // The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
-// in the same model turn: the same live run and no tool call finished since the call opened (a reply
+// in the same model turn: the same live run and worker epoch and no tool call finished since the call opened (a reply
 // cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 func (q *Queries) CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countLeakGuardOpenCalls,
@@ -160,6 +163,7 @@ func (q *Queries) CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuar
 		arg.AgentID,
 		arg.Generation,
 		arg.RunID,
+		arg.FeedEpoch,
 		arg.FeedRead,
 	)
 	var count int64
@@ -286,7 +290,7 @@ func (q *Queries) ExpireLeakGuardCalls(ctx context.Context, arg ExpireLeakGuardC
 }
 
 const getLeakGuardFeed = `-- name: GetLeakGuardFeed :one
-SELECT feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2
+SELECT feed_epoch, feed_read, feed_done FROM leak_guard_runs WHERE org_id = $1 AND run_id = $2
 `
 
 type GetLeakGuardFeedParams struct {
@@ -295,14 +299,15 @@ type GetLeakGuardFeedParams struct {
 }
 
 type GetLeakGuardFeedRow struct {
-	FeedRead int64
-	FeedDone int64
+	FeedEpoch int64
+	FeedRead  int64
+	FeedDone  int64
 }
 
 func (q *Queries) GetLeakGuardFeed(ctx context.Context, arg GetLeakGuardFeedParams) (GetLeakGuardFeedRow, error) {
 	row := q.db.QueryRow(ctx, getLeakGuardFeed, arg.OrgID, arg.RunID)
 	var i GetLeakGuardFeedRow
-	err := row.Scan(&i.FeedRead, &i.FeedDone)
+	err := row.Scan(&i.FeedEpoch, &i.FeedRead, &i.FeedDone)
 	return i, err
 }
 
@@ -479,8 +484,8 @@ func (q *Queries) MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvi
 }
 
 const openLeakGuardCall = `-- name: OpenLeakGuardCall :exec
-INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at, mark_run, mark_read)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at, mark_run, mark_epoch, mark_read)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type OpenLeakGuardCallParams struct {
@@ -491,6 +496,7 @@ type OpenLeakGuardCallParams struct {
 	Tool       string
 	OpenedAt   pgtype.Timestamptz
 	MarkRun    pgtype.UUID
+	MarkEpoch  pgtype.Int8
 	MarkRead   pgtype.Int8
 }
 
@@ -506,6 +512,7 @@ func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallPa
 		arg.Tool,
 		arg.OpenedAt,
 		arg.MarkRun,
+		arg.MarkEpoch,
 		arg.MarkRead,
 	)
 	return err

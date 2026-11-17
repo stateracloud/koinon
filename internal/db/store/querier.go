@@ -210,7 +210,7 @@ type Querier interface {
 	CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
 	// The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
-	// in the same model turn: the same live run and no tool call finished since the call opened (a reply
+	// in the same model turn: the same live run and worker epoch and no tool call finished since the call opened (a reply
 	// cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).

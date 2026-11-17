@@ -729,7 +729,7 @@ func (g *Guard) awaitFeed(ctx context.Context, c caller) (stalled, live bool, ma
 		return false, true, turnMark{}, err
 	}
 	target := feed.FeedRead
-	mark = turnMark{Run: run.ID, Read: pgtype.Int8{Int64: target, Valid: true}}
+	mark = turnMark{Run: run.ID, Epoch: pgtype.Int8{Int64: feed.FeedEpoch, Valid: true}, Read: pgtype.Int8{Int64: target, Valid: true}}
 	if feed.FeedDone >= target {
 		return false, true, mark, nil
 	}

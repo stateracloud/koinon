@@ -2261,6 +2261,7 @@ type LeakGuardOpenCall struct {
 	Tool       string
 	OpenedAt   pgtype.Timestamptz
 	MarkRun    pgtype.UUID
+	MarkEpoch  pgtype.Int8
 	MarkRead   pgtype.Int8
 }
 

@@ -555,13 +555,18 @@ The open-call ledger (#254) counted every open call as a reply that the guard di
 model sends tool calls in parallel, the second call then took both legs, but the model has not
 received the first reply, so the first reply cannot be in the second call.
 
-Each open call now carries a turn mark: the live run and its `leak_guard_runs.feed_read`, the count of
-tool calls that the harness finished (agentd counts a call before the harness gives its reply to the
-model, and a failed call counts too). A decision counts an open call as unseen when it has no mark,
-when the decision has no live run, or when the count is higher than the mark. With an equal count, no
+Each open call now carries a turn mark: the live run, its worker epoch and its
+`leak_guard_runs.feed_read`, the count of tool calls that the harness finished (a failed call counts
+too). agentd raises the count in memory before the harness gives a reply to the model. A decision counts an open call as unseen when it has no mark,
+when the decision has no live run, or when the epoch differs, or when the count is higher than the mark. With an equal count, no
 reply reached the model since the call opened. This is a recorded mark, not a time window.
 
 An error reply and a cut call finish a tool call in the harness, so the count moves and a call in a
 later turn still takes both legs. A tool call that finishes inside the same turn also moves the count.
 The guard cannot tell it from a later turn, so it takes both legs then. This is the safe error. A call
 older than `UnseenAfter` sets both legs for good, as before.
+
+Residual: agentd writes the count to the database after it raises it in memory. If that write lags,
+a reply can reach the model while the guard still reads the old count, and the next call of the model
+is taken as the same turn. This is the lag that the 2026-11-03 amendment names for the feed legs. The
+guard cannot close it from the database alone.

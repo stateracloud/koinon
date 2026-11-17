@@ -930,6 +930,27 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				Expect(riskOf(ctx)).To(ContainSubstring(`"untrusted_input": true`))
 			})
 
+			It("counts a call that a tool call finished after, in the same turn or not", func(ctx SpecContext) {
+				Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
+				Expect(feed.Counts(ctx, org, run.ID, run.Epoch, 1, 1)).To(Succeed()) // a sibling finished: the safe error
+				r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+				Expect(reason(r)).To(HavePrefix("approval requested: id="))
+			})
+
+			It("counts a call marked by an earlier run or an earlier worker epoch", func(ctx SpecContext) {
+				for _, set := range []string{`mark_run = gen_random_uuid()`, `mark_epoch = mark_epoch + 1`} {
+					_, err := pool.Exec(ctx, `DELETE FROM approval_requests WHERE org_id = $1`, org)
+					Expect(err).NotTo(HaveOccurred())
+					_, err = pool.Exec(ctx, `DELETE FROM leak_guard_open_calls WHERE org_id = $1`, org)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
+					_, err = pool.Exec(ctx, `UPDATE leak_guard_open_calls SET `+set+` WHERE org_id = $1`, org)
+					Expect(err).NotTo(HaveOccurred())
+					r := call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"})
+					Expect(reason(r)).To(HavePrefix("approval requested: id="), set)
+				}
+			})
+
 			It("counts a call that was opened with no feed", func(ctx SpecContext) {
 				Expect(passed(call(ctx, "wiki", "read_page", map[string]any{"page": "a"}))).To(BeTrue())
 				_, err := pool.Exec(ctx, `UPDATE leak_guard_open_calls SET mark_run = NULL, mark_read = NULL WHERE org_id = $1`, org)
