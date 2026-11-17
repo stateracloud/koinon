@@ -33,6 +33,8 @@ Research on OpenShell `main` (2026-10-21) found defaults that weaken Koinon's mo
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): superseded by the execution hardening defaults ADR (#1084): default-deny egress and enforced L7 on every inspected or credentialed route in every tier; phase 1.)_
+
 The reconciler and Helm chart always set:
 
 1. `enforcement: enforce` on every rendered L7 endpoint.

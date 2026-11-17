@@ -35,6 +35,8 @@ cluster, rolling back a bad self-install, or exporting an agent all need a copy 
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): home is a Substrate durable volume, with Koinon tar checkpoints that carry a digest; restore goes over `FileSystemService`; snapshots follow D5; phase 2.)_
+
 - **Where the home lives:** a PVC managed through the Agent Sandbox `volumeClaimTemplates`.
 - **When it's checkpointed** to object storage under the org prefix
   ([0031](0031-artifacts-in-object-storage.md)):

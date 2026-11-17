@@ -56,6 +56,8 @@ What the upstream projects provide:
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): the pin is Substrate and an atespace label replaces the install mark; superseded at phase 5 when OpenShell is removed.)_
+
 ### Pins
 
 1. **Each Koinon release pins exact versions** of OpenShell (chart version and digest, gateway,

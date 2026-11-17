@@ -30,6 +30,8 @@ namespace on another cluster that shares the gateway, or a different namespace o
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an atespace label replaces the install mark; superseded at phase 5 when OpenShell is removed.)_
+
 1. **A random install mark.** The chart's ensure-secrets hook Job makes the Secret `koinon-install-mark`
    once, with a random `token` (`installMark.existingSecret` names a Secret the operator manages). The
    token is not in Postgres, so a restored database does not carry it. It survives `helm uninstall` and

@@ -35,6 +35,8 @@ answers 403.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): the actor identity is a short-lived token injected outside the guest (D1, D11); phase 2.)_
+
 - Each agent has its own Kubernetes ServiceAccount, used as its stable workload identity.
 - The sandbox gets **no usable token**. The ServiceAccount token is not mounted (Agent Sandbox
   templates default `automountServiceAccountToken` to false), and nothing else is mounted that

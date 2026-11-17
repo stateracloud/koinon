@@ -28,6 +28,8 @@ the network must be what the sandbox's proxy actually does.
 
 ## Decisions
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): egress hosts and registry rules are gateway routes; phase 2.)_
+
 1. **One predicate says whether an agent has web egress:** `agentconfig.Config.WebEgress()`. It is
    false for every version today: a connector grant opens its connection's host only, the npm
    registry follows `harness.pluginInstalls`, and web research is an MCP tool that runs in the

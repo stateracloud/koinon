@@ -61,6 +61,8 @@ product.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): snapshots follow D5 and uploads go over `FileSystemService`; phase 2.)_
+
 ### Boundary and words
 
 1. **An agent selects a harness. A harness definition is Koinon's record of how to obtain and run one.**

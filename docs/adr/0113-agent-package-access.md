@@ -58,6 +58,8 @@ Facts checked on 2026-11-11 (sources under "Upstream verification"):
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): registry rules are gateway routes; phase 2.)_
+
 1. **Agents install straight from allow-listed registries, read-only.** A sandbox may send read requests
    (GET and HEAD) to the registry hosts its level allows. A private registry's login is an OpenShell
    provider record, injected on the way out; it never enters the sandbox. The company's CA certificate is

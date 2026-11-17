@@ -30,6 +30,8 @@ that cannot be reclaimed.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): resources map to the actor template and worker pool sizes; phase 2.)_
+
 1. **A sandbox's agent container gets requests and limits for CPU and memory.** `SandboxSpec`
    carries `CPURequest`, `CPULimit`, `MemoryRequest` and `MemoryLimit`, and the OpenShell backend
    renders both maps (only non-empty values). They are part of the reconciler's spec hash, so a

@@ -47,6 +47,8 @@ network egress at all; the supervisor relays its traffic through a connection in
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): its execution, install and reconciler decisions go with #1084 and the Substrate driver; its gateway decisions stay with 0040 and 0097; phases 1 and 2.)_
+
 ### Execution layer
 
 1. OpenShell 0.1.5 on Agent Sandbox stays Koinon's execution backend (ADR 0016). The OpenSandbox

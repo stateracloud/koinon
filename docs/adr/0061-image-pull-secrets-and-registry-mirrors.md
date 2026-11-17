@@ -31,6 +31,8 @@ immutable copies owned by the Sandbox, and puts them in `imagePullSecrets` of bo
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): how the Substrate node agent pulls actor images and uses mirrors is open question Q4 of 0119; phase 2.)_
+
 1. **Sandbox pods get their pull secret from OpenShell's `server.sandboxImagePullSecrets`.** Koinon's chart
    does not copy Secrets and does not patch ServiceAccounts. The docs tell the operator to set it, and the
    preflight reads OpenShell's gateway ConfigMap and warns when pull secrets or a mirror are configured and

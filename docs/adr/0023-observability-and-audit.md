@@ -30,6 +30,8 @@ events for every policy decision.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): Substrate metrics are scraped with a label allowlist that drops actor IDs; phase 2.)_
+
 - Metrics: every Koinon component exposes `/metrics`; the Helm chart can optionally create
   ServiceMonitors. Nothing requires Prometheus.
 - Run traces go only to an OTLP endpoint that an org admin or platform admin supplies. Org-level

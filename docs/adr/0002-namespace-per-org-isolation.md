@@ -29,6 +29,8 @@ OpenShell's Kubernetes driver supports three workspace modes:
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an org is an atespace, and worker pools are shared or per org (D6); phase 2.)_
+
 - Each org gets one namespace, which maps to one OpenShell workspace, using
   `workspaceMode: managed`.
 - Orgs can optionally get dedicated NodePools (node pools or node selectors and taints) for

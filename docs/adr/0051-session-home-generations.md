@@ -32,6 +32,8 @@ home.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): home is a Substrate durable volume and snapshots follow D5; phase 2.)_
+
 1. **Home generation.** `agent_sandboxes.home_generation` identifies the sandbox's current home
    volume: the OpenShell ID of the sandbox, as the reconciler last observed it. Every created
    sandbox gets a new ID; stop and start keep the sandbox, its ID and its volume.

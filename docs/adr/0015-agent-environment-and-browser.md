@@ -23,6 +23,8 @@ secret model.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carry the guest server and launcher, not OpenShell base images; phase 2.)_
+
 - Flavor images are based on OpenShell sandbox images.
 - Agents self-install into `$HOME` (with mise/aqua, uv, npm) from allowlisted sources through a
   pull-through cache. _(Changed by [0113](0113-agent-package-access.md): Koinon runs no pull-through cache; see the amendment of 2026-11-11.)_

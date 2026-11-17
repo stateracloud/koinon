@@ -55,6 +55,8 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an actor-state observer replaces the pod observer; superseded at phase 5.)_
+
 1. **The reconciler reads the pod, with `get` only.** When a sandbox is in phase Provisioning and OpenShell's
    reason is one of `ConfigurationPending`, `DependenciesNotReady` or `SchedulingGated`, the reconciler gets
    the pod named like the sandbox in the workspace's namespace (in managed mode the pod and the Sandbox

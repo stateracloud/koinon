@@ -28,6 +28,8 @@ pi through an adapter.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carry the guest server and launcher, not OpenShell base images; phase 2.)_
+
 - The control plane talks to the OpenShell gateway (gRPC) through an **`ExecutionBackend`**
   interface. OpenSandbox is the alternative implementation.
 - A thin **`agentd`** inside the sandbox drives the harness over ACP

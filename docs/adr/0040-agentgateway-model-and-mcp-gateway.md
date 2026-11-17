@@ -42,6 +42,8 @@ similar with no enterprise gating of these features; Kubernetes-native; no CNI-s
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): forge and registry L7 routes join the gateway (D1, D11); phase 1.)_
+
 1. **agentgateway** (Linux Foundation, Apache-2.0) is Koinon's model gateway. LiteLLM is removed
    from the architecture. _(Changed by [0097](0097-koinon-owned-gateway.md): agentgateway is the first driver behind Koinon's own gateway, not the destination.)_
 2. agentgateway is also Koinon's **MCP gateway**: the per-agent progressive endpoint from decision

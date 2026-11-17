@@ -41,6 +41,8 @@ scope for its beta. The home volume is therefore the only state that survives
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): idempotency records live only in the gateway; phase 2.)_
+
 - **Resume from the last saved session turn.** When a run continues after a park, a suspend or a
   crash, `agentd` reconnects to the harness and continues from the last turn the harness saved:
   - ACP `session/load` (or `session/resume` where advertised)

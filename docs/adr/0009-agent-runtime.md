@@ -23,6 +23,8 @@ provide suspend and resume, keeping the volumes.
 
 ## Decision
 
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): `keep_warm` maps to resumed actors and worker pool sizing; phase 2.)_
+
 - **Persistent agent, ephemeral compute:**
   - Each agent has a durable home volume ([0032](0032-agent-home-checkpoints.md)).
   - Each agent has exactly one OpenShell sandbox, suspended between runs
