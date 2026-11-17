@@ -287,12 +287,14 @@ case_ "T2: a waiver without an issue fails" 1 'rule=T2 verdict=fail' \
 	'mkdir -p "$r/internal/x"; printf "// flaky-waiver: until 2999-01-01\n" >"$r/internal/x/x_test.go"'
 
 # T7
-case_ "T7: a job without timeout-minutes is reported, not failed" 0 'rule=T7 verdict=report' \
-	'sed -i.bak "/timeout-minutes: 5/{x;s/^/x/;/^x\{1\}$/{x;d;};x;}" "$r/.github/workflows/ci.yml"'
-case_ "T7: defers to runner-lint.sh when it has the rule" 0 'rule=T7 verdict=pass' \
-	'printf "grep -q timeout-minutes \"\$f\"\n" >"$r/hack/runner-lint.sh"; sed -i.bak "/timeout-minutes: 5/d" "$r/.github/workflows/ci.yml"'
-case_ "T7: the word only in a comment of runner-lint.sh does not defer" 0 'rule=T7 verdict=report' \
-	'printf "# timeout-minutes rule\n" >"$r/hack/runner-lint.sh"; sed -i.bak "/timeout-minutes: 5/d" "$r/.github/workflows/ci.yml"'
+case_ "T7: without runner-lint.sh a missing timeout is only reported" 0 'rule=T7 verdict=report' \
+	'rm -f "$r/hack/runner-lint.sh"; sed -i.bak "/timeout-minutes: 5/{x;s/^/x/;/^x\{1\}$/{x;d;};x;}" "$r/.github/workflows/ci.yml"'
+case_ "T7: the lint listing a job without timeout-minutes fails" 1 'rule=T7 verdict=fail' \
+	'printf "echo \"x.yml:3: job a has no timeout-minutes\"; exit 1\n" >"$r/hack/runner-lint.sh"'
+case_ "T7: a lint that fails for another reason does not fail T7" 0 'rule=T7 verdict=pass' \
+	'printf "echo \"x.yml:3: self-hosted\"; exit 1\n" >"$r/hack/runner-lint.sh"'
+case_ "T7: a lint with no timeout finding passes" 0 'rule=T7 verdict=pass' \
+	'printf "exit 0\n" >"$r/hack/runner-lint.sh"'
 
 # The real tree must not fail.
 out=$("$script" "$repo" 2>&1)

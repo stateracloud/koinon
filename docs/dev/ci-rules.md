@@ -218,8 +218,8 @@ Source: Koinon decision. Scope: Koinon only. In force: now.
 
 **T7. MUST** set `timeout-minutes` on every job.
 Why: the default is 360 minutes (#572 review); a hung job holds a runner and a queue slot for six hours.
-Check: `hack/runner-lint.sh` fails a `ci.yml` or `release.yml` job without one. `hack/ci-rules-check.sh` (rule T7)
-defers to it and gives `pass` while that script has the rule.
+Check: `hack/runner-lint.sh` fails a job of any workflow file without one. `hack/ci-rules-check.sh` (rule T7)
+runs it and reports its real result: `fail` when it lists a job without a timeout, else `pass`.
 Source: Koinon decision (#572). Scope: general pattern. In force: now.
 
 **T8. MUST** pin the node image of a cluster job, and export and upload the logs with `if: always()`.

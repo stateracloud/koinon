@@ -20,8 +20,8 @@
 #       Vitest `--retry N` on a command line, no Vitest `retry` above 0 (config or test file). A text scan: known limits
 #       are listed under rule T1 in docs/dev/ci-rules.md.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
-#   T7  every job of ci.yml sets `timeout-minutes`. hack/runner-lint.sh is the check and this line says so;
-#       while it has no timeout rule, this script counts the jobs and reports.
+#   T7  every job of every workflow sets `timeout-minutes`. hack/runner-lint.sh is the check; this rule runs it and
+#       reports its real result (a tree without the lint falls back to counting ci.yml jobs).
 #
 # Not here, because another script already decides it: W3 (hack/runner-lint.sh), Q2 and Q3
 # (hack/ci-required-test.sh, hack/ci-merge-group-test.sh), the 3-day age of dependencies and the
@@ -346,9 +346,18 @@ else
 fi
 
 # --- T7 -------------------------------------------------------------------------------------------
+# hack/runner-lint.sh decides it (every job of every workflow file); this rule reports its real result: a
+# "has no timeout-minutes" line fails, and no such line passes whatever else the lint says (W3 is its own rule).
+# A tree without the lint (a fixture) falls back to counting the ci.yml jobs and only reports.
 ci=$wfdir/ci.yml
-if [[ -f $root/hack/runner-lint.sh ]] && code_lines "$root/hack/runner-lint.sh" | grep -q 'timeout-minutes'; then
-	verdict T7 pass "hack/runner-lint.sh checks timeout-minutes on every ci.yml job"
+if [[ -f $root/hack/runner-lint.sh ]]; then
+	lint=$(bash "$root/hack/runner-lint.sh" "$root" 2>&1)
+	missing=$(grep -c 'has no timeout-minutes' <<<"$lint")
+	if ((missing == 0)); then
+		verdict T7 pass "hack/runner-lint.sh finds a timeout-minutes on every workflow job"
+	else
+		verdict T7 fail "$missing job(s) have no timeout-minutes (hack/runner-lint.sh lists them)"
+	fi
 elif [[ -f $ci ]]; then
 	counts=$(code_lines "$ci" | awk '
 		/^jobs:/ { injobs = 1; next }
@@ -360,9 +369,9 @@ elif [[ -f $ci ]]; then
 	jobs=${counts% *}
 	tm=${counts#* }
 	if ((jobs == tm)); then
-		verdict T7 pass "all $jobs ci.yml jobs set timeout-minutes; move the check into hack/runner-lint.sh"
+		verdict T7 pass "all $jobs ci.yml jobs set timeout-minutes (no hack/runner-lint.sh in this tree)"
 	else
-		verdict T7 report "$((jobs - tm)) of $jobs ci.yml jobs have no timeout-minutes (becomes failing at zero)"
+		verdict T7 report "$((jobs - tm)) of $jobs ci.yml jobs have no timeout-minutes (no hack/runner-lint.sh in this tree)"
 	fi
 else
 	verdict T7 report "no ci.yml"
