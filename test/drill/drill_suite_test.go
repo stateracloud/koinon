@@ -21,10 +21,14 @@ package drill_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,13 +146,32 @@ func chartVersion() string {
 	return ""
 }
 
-// webSpecCmd builds the command that runs one web/e2e-drill spec. With KOINON_DRILL_WEB_RUNNER set (the CI drill
-// job: hack/drill-web-run.sh runs the spec in the pinned Playwright image, so no browser or OS package comes from
-// a live mirror) the runner is called with the spec name; without it, pnpm runs the spec on this machine, which
-// then needs its own Chromium.
+// webSpecCmd builds the command that runs one web/e2e-drill spec. With KOINON_DRILL_PLAYWRIGHT_IMAGE set (the CI
+// drill job) hack/cmd/drillwebrun runs the spec in that pinned Playwright image, so no browser or OS package comes
+// from a live mirror (#1072); `go tool` finds it through the module of the working directory. Without it, pnpm
+// runs the spec on this machine, which then needs its own Chromium.
 func webSpecCmd(ctx context.Context, spec string) *exec.Cmd {
-	if runner := os.Getenv("KOINON_DRILL_WEB_RUNNER"); runner != "" {
-		return exec.CommandContext(ctx, runner, spec)
+	if os.Getenv("KOINON_DRILL_PLAYWRIGHT_IMAGE") != "" {
+		cmd := exec.CommandContext(ctx, "go", "tool", "drillwebrun", spec)
+		cmd.Dir = repoRoot
+		return cmd
 	}
 	return exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", spec)
+}
+
+// requireWebUI fails before a browser spec when the API at base serves no web UI: GET / must return the HTML page
+// with the SPA root element (web/index.html). The API image is built with -tags webui and web/dist
+// (test/e2e/kind/images.sh); without them it answers 404 and the browser spec fails minutes later with a timeout (#1072).
+func requireWebUI(ctx context.Context, base string) {
+	GinkgoHelper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/", nil)
+	must(err, "build the GET / request for the web UI check")
+	resp, err := http.DefaultClient.Do(req)
+	must(err, "GET / on the API for the web UI check")
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	must(err, "read GET / on the API")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `id="root"`) {
+		Fail(fmt.Sprintf("api image built without -tags webui (GET / returned %d %q)", resp.StatusCode, strings.TrimSpace(string(body[:min(len(body), 80)]))))
+	}
 }

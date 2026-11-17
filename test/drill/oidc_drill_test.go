@@ -173,6 +173,7 @@ func oidcBrowser(ctx context.Context, want drill.OIDCIdentity, l drill.OIDCLogin
 	logFile, err := os.Create(filepath.Join(outDir, "oidc-signin-browser.log"))
 	must(err, "create the OIDC browser log")
 	defer func() { _ = logFile.Close() }()
+	requireWebUI(ctx, l.Base)
 	cmd := webSpecCmd(ctx, "oidc.spec")
 	// The password is the drill's fake one; it goes in the child's environment only.
 	cmd.Env = append(os.Environ(),

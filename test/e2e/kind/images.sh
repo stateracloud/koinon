@@ -42,13 +42,24 @@ ts=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) $*"; ts=$(date +%s); }
 
 build_ko() {
-  local arch pair
+  local arch pair flags
   arch=$(go env GOARCH)
+  # The shipped koinon-api embeds the web UI (-tags webui over web/dist, as .goreleaser.yaml and `make build`
+  # do), so the e2e and the drill exercise the UI users get. Without it the API serves 404 at / (#1072).
+  # ko compiles with GOFLAGS, set for the api build only.
+  step "web UI (web/dist) for koinon-api"
+  if [[ ! -d web/node_modules ]]; then
+    pnpm --dir web install --frozen-lockfile
+  fi
+  pnpm --dir web build
+  [[ -f web/dist/index.html ]] || { echo "images.sh: web/dist/index.html is missing after the web build; koinon-api would have no UI (-tags webui)" >&2; exit 1; }
   step "Koinon images (ko, linux/$arch) pushed to $REPO"
   # The chart's images are <image.registry>/api, /reconciler and /agentd (#167), so each is built --bare
   # into its own repository; the fakes keep ko's import-path names.
   for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd; do
-    KO_DOCKER_REPO="$REPO/${pair%%:*}" "${KO:-ko}" build --bare --tags e2e \
+    flags=${GOFLAGS:-}
+    [[ ${pair%%:*} == api ]] && flags="${flags:+$flags }-tags=webui"
+    GOFLAGS=$flags KO_DOCKER_REPO="$REPO/${pair%%:*}" "${KO:-ko}" build --bare --tags e2e \
       --platform "linux/$arch" "${pair#*:}"
   done
   KO_DOCKER_REPO=$REPO "${KO:-ko}" build --base-import-paths --tags e2e \

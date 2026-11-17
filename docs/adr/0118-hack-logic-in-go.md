@@ -99,6 +99,15 @@ Facts that decide this (checked 2026-11-16):
   CI jobs that run a wrapper need Go installed (the `scripts` job has it); each port costs time.
 - Follow-ups: ports are separate issues. `CONTRIBUTING.md` says how to propose one.
 
+## Amendment (2026-11-17): a wrapper may be deleted
+
+Decision 4 keeps a wrapper so callers do not change. When every caller of a ported script is code in
+this repository that the same pull request updates, the pull request may delete the wrapper and
+have the callers run `go tool <name>` directly. Then the pull request also updates `hack/paths.rules`,
+the workflow and the docs that named the script. A script with a caller outside the repository, or
+a caller the pull request cannot change, keeps its wrapper. First use: `hack/drill-web-run.sh` becomes
+`hack/cmd/drillwebrun` (#1072); its only callers are in `test/drill`.
+
 ## Upstream verification
 
 - Go 1.24 release notes, tool directives: <https://go.dev/doc/go1.24>
