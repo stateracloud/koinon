@@ -534,6 +534,7 @@ jobs:
         # No pnpm cache here: this job can check out inputs.commit, and a cache saved from it would reach the scope of main.
         with:
           node-version: 24
+          package-manager-cache: false # no cache, and no automatic one either
 
       - name: Install web dependencies (browser sign-in)
         run: pnpm --dir web install --frozen-lockfile
