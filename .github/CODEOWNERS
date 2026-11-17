@@ -12,7 +12,6 @@
 # every `/path` line in it counts).
 /.github/ @procoduck @ovirandunu
 /AGENTS.md @procoduck @ovirandunu
-/**/AGENTS.md @procoduck @ovirandunu
 /docs/design.md @procoduck @ovirandunu
 /docs/dev/releasing.md @procoduck @ovirandunu
 /docs/adr/ @procoduck @ovirandunu
