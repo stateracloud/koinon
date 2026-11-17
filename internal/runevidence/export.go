@@ -171,7 +171,7 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 			"type": "decision", "run_id": uuidString(run.ID), "n": i + 1, "at": ts(d.CreatedAt), "generation": d.Generation,
 			"server": e.Hosts.Mask(d.Server), "tool": e.Hosts.Mask(d.Tool), "sink_class": d.SinkClass, "action": d.Action,
 			"reason": e.Hosts.Mask(d.Reason), "reasons": e.maskAll(d.Reasons), "match_count": d.MatchCount, "match_length": d.MatchLength, "match_encoding": d.MatchEncoding,
-			"payload_bytes": d.PayloadBytes, "charged_bytes": d.ChargedBytes, "cap_used_before": d.CapUsedBefore,
+			"payload_bytes": d.PayloadBytes, "charged_bytes": d.ChargedBytes, "cap_used_before": nullInt(d.CapUsedBefore),
 			"dest_host": e.hostNames(d.DestHost), "over_threshold": d.OverThreshold,
 		}
 		if d.UntrustedInput.Valid {
@@ -282,6 +282,14 @@ func ts(t pgtype.Timestamptz) any {
 		return nil
 	}
 	return t.Time.UTC().Format(time.RFC3339Nano)
+}
+
+// nullInt is the value of a column that is NULL when the guard did not read it.
+func nullInt(v pgtype.Int4) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Int32
 }
 
 func uuidString(u pgtype.UUID) string {

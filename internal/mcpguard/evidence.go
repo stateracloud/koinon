@@ -6,6 +6,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -38,8 +40,11 @@ func (g *Guard) recordDecision(ctx context.Context, call Call, out Outcome, f de
 		OrgID: f.who.org.ID, AgentID: f.who.agent.ID, Generation: f.generation,
 		Server: f.who.server.Name, Tool: call.Tool, SinkClass: class, Action: string(v.Action),
 		Reason: v.Reason, Reasons: append([]string{}, v.Reasons...), PayloadBytes: int32(min(f.payloadBytes, 1<<30)), //nolint:gosec // bounded
-		ChargedBytes: int32(min(f.charge.Charged, 1<<30)), CapUsedBefore: int32(min(f.charge.Before, 1<<30)), //nolint:gosec // bounded
-		DestHost: f.destHost, OverThreshold: f.charge.Crossed,
+		ChargedBytes: int32(min(f.charge.Charged, 1<<30)), //nolint:gosec // bounded
+		DestHost:     f.destHost, OverThreshold: f.charge.Crossed,
+	}
+	if f.charge.Known {
+		p.CapUsedBefore = pgtype.Int4{Int32: int32(min(f.charge.Before, 1<<30)), Valid: true} //nolint:gosec // bounded
 	}
 	if m := v.Match; m != nil {
 		p.MatchCount, p.MatchLength, p.MatchEncoding = 1, int32(min(m.Length, 1<<30)), m.Encoding //nolint:gosec // bounded

@@ -206,7 +206,7 @@ type InsertLeakGuardDecisionParams struct {
 	UntrustedInput pgtype.Bool
 	PrivateData    pgtype.Bool
 	ChargedBytes   int32
-	CapUsedBefore  int32
+	CapUsedBefore  pgtype.Int4
 	DestHost       string
 	OverThreshold  bool
 }

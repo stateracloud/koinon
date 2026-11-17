@@ -337,7 +337,9 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	g.logDecision(call, out, f)
 	g.recordDecision(ctx, call, out, f)
 	if f.charge.Crossed {
-		// The one over-threshold event of the run; the call itself passes (ADR 0091 amendment 2026-11-17).
+		// The one over-threshold event of the run, raised when the committed charge of this call took the
+		// run over the threshold. The count never refuses the call; a later check (an approval, a
+		// person's denial, a failed open) can still decide the call (ADR 0091 amendment 2026-11-17).
 		g.metrics.overThreshold()
 		g.log.Warn("mcp guard: a run went over the byte threshold", "target", call.Target, "tool", call.Tool,
 			"threshold", g.cap, "bytes", f.charge.After)
@@ -674,6 +676,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	if err != nil {
 		return a, err
 	}
+	var bc byteCharge
 	err = pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		budget, err := q.LockLeakGuardRun(ctx, store.LockLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID})
@@ -686,10 +689,8 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 				return err
 			}
 		}
-		var charge byteCharge
-		a.verdict, charge = g.decideExternalLow(st, int(budget.CappedBytes), budget.OverThresholdAt.Valid, c.server, decl, args, f)
+		a.verdict, bc = g.decideExternalLow(st, int(budget.CappedBytes), budget.OverThresholdAt.Valid, c.server, decl, args, f)
 		a.verdict = a.stallMarked(a.verdict)
-		a.charge = charge
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -697,8 +698,12 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		if err != nil {
 			return err
 		}
-		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(charge.After, 1<<30)), UrlState: state, Crossed: charge.Crossed}) //nolint:gosec // bounded
+		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(bc.After, 1<<30)), UrlState: state, Crossed: bc.Crossed}) //nolint:gosec // bounded
 	})
+	if err == nil {
+		// Only a charge that was committed is a fact of the run; a rolled-back one raises no event.
+		a.charge = bc
+	}
 	return a, err
 }
 
@@ -710,7 +715,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, byteCharge) {
 	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
 	v := Decide(f)
-	c := byteCharge{Before: used, After: used}
+	c := byteCharge{Known: true, Before: used, After: used}
 	if f.BothLegs && v.Action != Refuse {
 		c.Charged = args.PayloadBytes()
 		c.After = used + c.Charged
@@ -725,6 +730,8 @@ func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool
 // was not refused) and the count after. Crossed marks the one call that took the run past the
 // threshold. The count never refuses a call.
 type byteCharge struct {
+	// Known is set when the guard read the run's count; a call that is not external-low never does.
+	Known                  bool
 	Before, Charged, After int
 	Crossed                bool
 }

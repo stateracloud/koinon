@@ -272,6 +272,7 @@ var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 			tools[c.line.Server+"/"+c.line.Tool] = true
 			Expect(c.verdict.Match).To(BeNil(), "%s: a benign payload matched private text", where(c))
 			Expect(c.verdict.Reason).NotTo(BeElementOf(ReasonTaint, ReasonURLRule, ReasonAmbiguous, ReasonCheck), where(c))
+			Expect(c.verdict.Reason).NotTo(Equal("byte_cap"), "%s: the byte count refuses nothing", where(c))
 		}
 		Expect(tools).To(HaveLen(9), "every server/tool of the benign corpus: %v", tools)
 		Expect(overCap).To(BeNumerically(">", 0), "the long research run goes over the byte threshold through the model too, with no refusal")

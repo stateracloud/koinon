@@ -2243,7 +2243,7 @@ type LeakGuardDecision struct {
 	PrivateData    pgtype.Bool
 	CreatedAt      pgtype.Timestamptz
 	ChargedBytes   int32
-	CapUsedBefore  int32
+	CapUsedBefore  pgtype.Int4
 	DestHost       string
 	OverThreshold  bool
 }
