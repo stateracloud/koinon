@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,10 +95,10 @@ var _ = Describe("adr", func() {
 	It("rejects an unknown key and an unquoted number", func() {
 		dir := tree()
 		write(dir, "0003-third.md", adrFile("0003", "Third", "accepted", "extra: 1\n", ""))
-		write(dir, "0004-fourth.md", adrFile("0004", "Fourth", "accepted", "amends: [0001]\n", ""))
+		write(dir, "0004-fourth.md", adrFile("0004", "Fourth", "accepted", "amends: [0001]\n", "- Amends: [0001](0001-first.md)\n"))
 		_, e := lintCode(dir)
 		Expect(e).To(ContainSubstring("0003-third.md: front matter"))
-		Expect(e).To(ContainSubstring("0004-fourth.md: front matter"))
+		Expect(e).To(ContainSubstring("is not quoted"))
 	})
 
 	It("needs the older ADR to name the newer one, and derives amended by", func() {
@@ -146,5 +147,52 @@ var _ = Describe("adr", func() {
 		Expect(strings.Count(out, "\n")).To(Equal(2))
 		_, out, _ = runCmd(dir, "graph")
 		Expect(out).To(HavePrefix("flowchart LR"))
+	})
+	It("rejects a duplicate number, a missing link file and a link with the wrong number", func() {
+		dir := tree()
+		write(dir, "0002-other.md", adrFile("0002", "Other", "accepted", "", ""))
+		write(dir, "0003-third.md", adrFile("0003", "Third", "accepted", "relates: [\"0001\"]\n", "- Relates to: [0001](0001-gone.md)\n"))
+		write(dir, "0004-fourth.md", adrFile("0004", "Fourth", "accepted", "relates: [\"0001\"]\n", "- Relates to: [0001](0002-second.md)\n"))
+		_, e := lintCode(dir)
+		Expect(e).To(ContainSubstring("number 0002 is used by more than one file"))
+		Expect(e).To(ContainSubstring("0001-gone.md does not exist"))
+		Expect(e).To(ContainSubstring("the text says 0001, the file is 0002"))
+	})
+
+	It("ignores a number in a parenthetical and joins continuation lines", func() {
+		dir := tree()
+		hdr := "- Relates to: (see ADR 0002) [0001](0001-first.md),\n  [0002](0002-second.md)\n"
+		write(dir, "0003-third.md", adrFile("0003", "Third", "accepted", "relates: [\"0001\", \"0002\"]\n", hdr))
+		runCmd(dir, "index", dir)
+		code, e := lintCode(dir)
+		Expect(code).To(Equal(0), e)
+	})
+
+	It("warns about a Proposed ADR without failing", func() {
+		dir := tree()
+		write(dir, "0003-third.md", adrFile("0003", "Third", "proposed", "", ""))
+		runCmd(dir, "index", dir)
+		code, e := lintCode(dir)
+		Expect(code).To(Equal(0))
+		Expect(e).To(ContainSubstring("ADR 0003 is still Proposed"))
+	})
+
+	It("checks decides against the Decision line and refuses a Reduces line", func() {
+		dir := tree()
+		write(dir, "0003-third.md", adrFile("0003", "Third", "accepted", "decides: design.md#9\n", "- Decision: [design.md#2](../design.md)\n- Reduces: [0001](0001-first.md)\n"))
+		_, e := lintCode(dir)
+		Expect(e).To(ContainSubstring("decides 'design.md#9' does not match"))
+		Expect(e).To(ContainSubstring("'- Reduces:' line is not supported"))
+	})
+
+	It("matches fences by character and length, and reports file line numbers", func() {
+		dir := tree()
+		fenced := adrFile("0003", "Third", "accepted", "", "") + "\n~~~\n```\n~~~\n[[x]]\n\n````\n```\n[[y]]\n````\n"
+		write(dir, "0003-third.md", fenced)
+		_, e := lintCode(dir)
+		Expect(e).To(ContainSubstring("0003-third.md:"))
+		Expect(strings.Count(e, "wiki link")).To(Equal(1))
+		line := 1 + strings.Count(fenced[:strings.Index(fenced, "[[x]]")], "\n")
+		Expect(e).To(ContainSubstring(fmt.Sprintf("0003-third.md:%d:", line)))
 	})
 })

@@ -41,6 +41,7 @@ type ADR struct {
 	Keys    []string          `json:"-"` // bullet keys in file order
 	Body    string            `json:"-"` // everything after the front matter
 	MetaErr error             `json:"-"`
+	Offset  int               `json:"-"` // lines of front matter before Body
 }
 
 var (
@@ -80,9 +81,13 @@ func parseADR(dir, name string) (*ADR, error) {
 	a.HasMeta = has
 	a.Body = string(rest)
 	if has {
+		a.Offset = bytes.Count(src[:len(src)-len(rest)], []byte("\n"))
+		if err := checkQuoted(front); err != nil {
+			a.MetaErr = err
+		}
 		dec := yaml.NewDecoder(bytes.NewReader(front))
 		dec.KnownFields(true)
-		if err := dec.Decode(&a.Meta); err != nil {
+		if err := dec.Decode(&a.Meta); err != nil && a.MetaErr == nil {
 			a.MetaErr = err
 		}
 	}
@@ -233,3 +238,24 @@ func derive(adrs []*ADR) Derived {
 }
 
 func (a *ADR) String() string { return fmt.Sprintf("%s %s", a.Number, a.Title) }
+
+// checkQuoted rejects an unquoted ADR number in amends, supersedes or relates: YAML would read 0043 as a
+// number in some tools, so the files quote every number.
+func checkQuoted(front []byte) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(front, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil // the strict decode reports the real error
+	}
+	m := doc.Content[0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		switch m.Content[i].Value {
+		case "amends", "supersedes", "relates":
+			for _, it := range m.Content[i+1].Content {
+				if it.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) == 0 {
+					return fmt.Errorf("line %d: %s: ADR number %s is not quoted", it.Line, m.Content[i].Value, it.Value)
+				}
+			}
+		}
+	}
+	return nil
+}

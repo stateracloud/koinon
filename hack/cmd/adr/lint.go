@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+var linkRe2 = regexp.MustCompile(`\[(design\.md[^\]]*)\]`)
+
 var dateRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 
 // readList reads docs/metadata/areas.txt or tags.txt: the first word of each non-comment line.
@@ -168,6 +170,18 @@ func lintHeader(a *ADR, files map[string]bool, fail func(string, ...any)) {
 	if !slices.Equal(uniqSorted(lineTags), uniqSorted(m.Tags)) {
 		fail("%s: front matter tags %v do not match the Tags line (%v)", f, m.Tags, lineTags)
 	}
+	for _, k := range []string{"Reduces", "Reduced by"} {
+		if _, ok := a.Header[k]; ok {
+			fail("%s: the '- %s:' line is not supported; use amends or supersedes (ADR 0046)", f, k)
+		}
+	}
+	dec := ""
+	if l := linkRe2.FindStringSubmatch(a.Header["Decision"]); l != nil {
+		dec = l[1]
+	}
+	if dec != m.Decides {
+		fail("%s: front matter decides '%s' does not match the Decision line ('%s')", f, m.Decides, dec)
+	}
 	sup := headerNumbers(a.Header["Supersedes"] + " " + a.Header["Supersedes in part"])
 	for _, c := range []struct {
 		name string
@@ -234,27 +248,48 @@ func lintBackLinks(adrs []*ADR, have map[string]*ADR, fail func(string, ...any))
 // lintObsidian rejects editor-only syntax (issue 283): wiki links, callouts and Dataview blocks. Fenced
 // code and inline code spans are not read, so an ADR can still quote the syntax.
 func lintObsidian(a *ADR, fail func(string, ...any)) {
-	inFence := false
+	fence := "" // the opening run of the open fenced block, "" outside one
 	span := regexp.MustCompile("`[^`]*`")
 	for i, line := range strings.Split(a.Body, "\n") {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			info := strings.ToLower(strings.TrimLeft(trim, "`~ "))
-			if !inFence && (strings.HasPrefix(info, "dataview") || strings.HasPrefix(info, "dataviewjs")) {
-				fail("%s:%d: Dataview block; ADRs use plain Markdown only", a.File, i+1)
+		line1 := i + 1 + a.Offset
+		if run := fenceRun(trim); run != "" {
+			info := strings.ToLower(strings.TrimSpace(trim[len(run):]))
+			switch {
+			case fence == "":
+				fence = run
+				if strings.HasPrefix(info, "dataview") {
+					fail("%s:%d: Dataview block; ADRs use plain Markdown only", a.File, line1)
+				}
+			case run[0] == fence[0] && len(run) >= len(fence) && info == "":
+				fence = ""
 			}
-			inFence = !inFence
 			continue
 		}
-		if inFence {
+		if fence != "" {
 			continue
 		}
 		text := span.ReplaceAllString(line, "")
 		switch {
 		case strings.Contains(text, "[["):
-			fail("%s:%d: '[[' wiki link; use a relative Markdown link", a.File, i+1)
+			fail("%s:%d: '[[' wiki link; use a relative Markdown link", a.File, line1)
 		case regexp.MustCompile(`^\s*>\s*\[![A-Za-z-]+\]`).MatchString(text):
-			fail("%s:%d: callout (> [!type]); use a plain blockquote", a.File, i+1)
+			fail("%s:%d: callout (> [!type]); use a plain blockquote", a.File, line1)
 		}
 	}
+}
+
+// fenceRun returns the run of three or more backticks or tildes that opens a line, or "".
+func fenceRun(trim string) string {
+	if trim == "" || trim[0] != '`' && trim[0] != '~' {
+		return ""
+	}
+	n := 0
+	for n < len(trim) && trim[n] == trim[0] {
+		n++
+	}
+	if n < 3 {
+		return ""
+	}
+	return trim[:n]
 }

@@ -16,8 +16,14 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 check=()
-if [ "${1:-}" = --check ]; then check=(--check); shift; fi
-dir=${1:-}
+dir=
+for arg in "$@"; do
+  case $arg in
+    --check) check=(--check) ;;
+    -*) echo "adr-index: unknown option $arg" >&2; exit 2 ;;
+    *) [ -z "$dir" ] || { echo "adr-index: only one adr-dir is allowed" >&2; exit 2; }; dir=$arg ;;
+  esac
+done
 if [ -n "$dir" ]; then
   [ -d "$dir" ] || { echo "adr-index: '$dir' is not a directory" >&2; exit 2; }
   dir=$(cd "$dir" && pwd)

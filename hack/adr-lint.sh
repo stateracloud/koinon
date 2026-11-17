@@ -16,7 +16,13 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-dir=${1:-}
+dir=
+for arg in "$@"; do
+  case $arg in
+    -*) echo "adr-lint: unknown option $arg" >&2; exit 2 ;;
+    *) [ -z "$dir" ] || { echo "adr-lint: only one adr-dir is allowed" >&2; exit 2; }; dir=$arg ;;
+  esac
+done
 if [ -n "$dir" ]; then
   [ -d "$dir" ] || { echo "adr-lint: '$dir' is not a directory" >&2; exit 2; }
   dir=$(cd "$dir" && pwd)
