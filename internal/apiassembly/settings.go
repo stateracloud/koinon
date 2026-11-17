@@ -3,8 +3,6 @@
 package apiassembly
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/stateracloud/koinon/internal/catalog"
@@ -42,23 +40,21 @@ type Settings struct {
 	AcceptImporterDeletions                bool
 }
 
-// InputError is a Settings value that no start can use. It names the setting; a caller shows it
+// InputError is a Settings value that no start can use. Setting names it; a caller shows it
 // to the operator as a configuration error, not as a failure of the platform.
 type InputError struct {
 	Setting string
 	Err     error
 }
 
-func (e *InputError) Error() string { return fmt.Sprintf("%s: %v", e.Setting, e.Err) }
+// Error is the text of the wrapped error as it is, so the message an operator sees does not change.
+func (e *InputError) Error() string { return e.Err.Error() }
 func (e *InputError) Unwrap() error { return e.Err }
 
 // Validate reports the first setting that no start can use, as an *InputError.
 func (s Settings) Validate() error {
 	if err := catalog.ValidateAllowedHosts(s.EgressAllowedHosts); err != nil {
 		return &InputError{Setting: "egress allowed hosts", Err: err}
-	}
-	if s.GuardByteCap < 0 {
-		return &InputError{Setting: "guard byte cap", Err: errors.New("is negative")}
 	}
 	return nil
 }
