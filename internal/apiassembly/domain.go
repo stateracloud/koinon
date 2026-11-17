@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -71,7 +70,10 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	d.urlPolicy = catalog.URLPolicy{Namespace: set.Namespace, AllowedHosts: set.EgressAllowedHosts}
 	// One GitHub client, so connection checks and approved calls share its token cache. It and the
 	// Gitea provider dial Connection base URLs through the egress policy.
-	gh := github.NewClient(github.Options{BaseURL: set.GitHubAPIURL, DialContext: d.urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+	gh := out.GitHub
+	if gh == nil {
+		gh = github.NewClient(github.Options{BaseURL: set.GitHubAPIURL, DialContext: d.urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+	}
 	d.hosts = providers.New(gh)
 	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
 	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
@@ -82,9 +84,9 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 		ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
 		defer cancel()
 		if _, err := d.approvals.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
-			slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
+			out.Logger.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
 		} else if err != nil {
-			slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
+			out.Logger.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
 		}
 	}
 	d.ask = mcpask.New(pool, mcpask.Options{
@@ -94,13 +96,13 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 		},
 	})
 	d.guard = mcpguard.New(pool, mcpguard.Options{
-		Logger: slog.Default(), Metrics: d.guardMetrics, ByteCap: set.GuardByteCap,
+		Logger: out.Logger, Metrics: d.guardMetrics, ByteCap: set.GuardByteCap,
 		Approve:    d.ask.RequestApproval,
 		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
 	})
 	// One guard for every service that reaches outward (issue #462, ADR 0107).
 	d.hold = restorehold.NewGuard(set.RestoreHold)
-	approvalOpts := approvals.Options{RestoreHold: d.hold, Keys: d.opener, Hosts: d.hosts, GatewayMCPURL: set.GatewayMCPURL, Logger: slog.Default(), OnMCPResult: d.guard.RecordApproved, DialContext: d.urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}
+	approvalOpts := approvals.Options{RestoreHold: d.hold, Keys: d.opener, Hosts: d.hosts, GatewayMCPURL: set.GatewayMCPURL, Logger: out.Logger, OnMCPResult: d.guard.RecordApproved, DialContext: d.urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -109,13 +111,15 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	d.approvals = approvals.New(pool, approvalOpts)
 	d.tokens = tokens.New(pool, nil).WithBinding(out.Binding)
-	d.catalog = catalog.New(pool, d.catKeys, slog.Default()).WithURLPolicy(d.urlPolicy)
+	d.catalog = catalog.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
-	d.mcp = mcpservers.New(pool, d.catKeys, slog.Default()).WithURLPolicy(d.urlPolicy).WithPreflight(mcpservers.OAuthPreflight(d.urlPolicy)).WithRestoreHold(d.hold)
+	d.mcp = mcpservers.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy).WithPreflight(mcpservers.OAuthPreflight(d.urlPolicy)).WithRestoreHold(d.hold)
 	// The provider echo check sends one request through the gateway with the org's model-check key,
 	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
 	// access the check answers that it is not configured.
-	if set.GatewayURL != "" && kube != nil {
+	if out.ModelChat != nil {
+		d.echo = modelcheck.New(pool, out.ModelChat, prices.NewResolver(pricing.Embedded()))
+	} else if set.GatewayURL != "" && kube != nil {
 		d.echo = modelcheck.New(pool, modelcheck.GatewayChat{
 			URL: set.GatewayURL, Keys: mcpservers.KubeExecKeys{Client: kube, Namespace: set.Namespace, SecretName: mcpservers.ModelCheckSecretName},
 			HTTP: &http.Client{Timeout: 90 * time.Second},
@@ -125,7 +129,7 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	}
 	// Run-trace destinations (ADR 0074). The client dials only what the egress policy allows.
 	var err error
-	if d.traces, err = tracedest.New(pool, d.catKeys, d.urlPolicy, slog.Default()); err != nil {
+	if d.traces, err = tracedest.New(pool, d.catKeys, d.urlPolicy, out.Logger); err != nil {
 		return nil, err
 	}
 	d.traces.WithRestoreHold(d.hold)
@@ -133,6 +137,8 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
 	// visibility, read when a connection is created or tested and again every few minutes, so the
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
-	d.scope = scopesync.New(pool, d.hosts, d.opener, slog.Default()).WithRestoreHold(d.hold)
+	if !out.NoScopeSync {
+		d.scope = scopesync.New(pool, d.hosts, d.opener, out.Logger).WithRestoreHold(d.hold)
+	}
 	return d, nil
 }

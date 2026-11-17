@@ -4,7 +4,6 @@ package apiassembly
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 
 	connect "connectrpc.com/connect/v2"
@@ -62,12 +61,17 @@ type Assembly struct {
 
 // buildSurfaces mounts the domain: services.Server, admin REST and the API handler.
 func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembly, error) {
+	// A nil *Syncer in the interface would not read as nil, so it is set only when it exists.
+	var scopeSync services.ScopeSyncer
+	if d.scope != nil {
+		scopeSync = d.scope
+	}
 	svc := services.New(out.Pool, services.Options{
-		SandboxResources: &set.SandboxResources, ScopeSync: d.scope, ModelCheck: d.echo, Traces: d.traces, RestoreHold: d.hold,
-		Hub: pre.Hub, WatchPollInterval: set.WatchPoll, Keys: d.keys, Tokens: d.tokens, Hosts: d.hosts, Approvals: d.approvals, Catalog: d.catalog, MCP: d.mcp, Notifier: pre.Notifier, DirectMessages: pre.DirectMessages, RunNow: pre.RunNow, URLPolicy: d.urlPolicy, Prices: pricing.Embedded(),
+		SandboxResources: &set.SandboxResources, ScopeSync: scopeSync, ModelCheck: d.echo, Traces: d.traces, RestoreHold: d.hold,
+		Hub: pre.Hub, WatchPollInterval: set.WatchPoll, WatchHeartbeatInterval: set.WatchHeartbeat, WatchCancelGrace: set.WatchCancelGrace, Keys: d.keys, Tokens: d.tokens, Hosts: d.hosts, Approvals: d.approvals, Catalog: d.catalog, MCP: d.mcp, Notifier: pre.Notifier, DirectMessages: pre.DirectMessages, RunNow: pre.RunNow, URLPolicy: d.urlPolicy, Prices: pricing.Embedded(), Logger: out.Logger,
 	})
 	pool, kube := out.Pool, out.Kube
-	admin := adminapi.New(pool, d.catalog, d.tokens, slog.Default(), pricing.Embedded()).WithMCP(d.mcp).WithOutward(outward.New(pool).WithRestoreHold(d.hold)).WithTriggers(svc).WithModelCheck(d.echo).
+	admin := adminapi.New(pool, d.catalog, d.tokens, out.Logger, pricing.Embedded()).WithMCP(d.mcp).WithOutward(outward.New(pool).WithRestoreHold(d.hold)).WithTriggers(svc).WithModelCheck(d.echo).
 		WithRestoreStatus(func(ctx context.Context) (any, error) {
 			opt := restorestatus.Options{AcceptImporterDeletions: set.AcceptImporterDeletions, Configured: restorestatus.ConfiguredTargets{
 				PublicURL: installbinding.Origin(set.PublicURL), OIDCIssuer: set.OIDCIssuer, OIDCRedirectURL: installbinding.Origin(set.OIDCRedirectURL),
@@ -79,12 +83,16 @@ func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembl
 			}
 			return restorestatus.Build(ctx, pool, out.BindingOwner, opt)
 		})
+	ui := out.UI
+	if ui == nil && !out.NoUI {
+		ui = web.Dist()
+	}
 	handler, err := api.NewHandler(api.Options{
 		Auth:           pre.Auth,
 		Metrics:        pre.Metrics,
 		TrustedOrigins: set.TrustedOrigins,
-		Services:       []func(*connect.Server){svc.Register},
-		UI:             web.Dist(),
+		Services:       append(append([]func(*connect.Server){}, out.Services...), svc.Register),
+		UI:             ui,
 		Mounts:         []func(*http.ServeMux){admin.Mount},
 		Ready:          out.Ready,
 	})
