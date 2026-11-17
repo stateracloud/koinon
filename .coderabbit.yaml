@@ -233,3 +233,4 @@ knowledge_base:
     enabled: true
     filePatterns:
       - "AGENTS.md"
+      - "**/AGENTS.md"

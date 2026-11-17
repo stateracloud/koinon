@@ -56,6 +56,8 @@ its claims; the default lane is `main`.
 `claim.sh next` shows the current milestone only. For another milestone set `KOINON_CLAIM_MILESTONE=<title>`
 before you say that nothing is Ready.
 
+The overlap check (`hack/claim.sh show <N>`) also applies to a PR you fix or merge, even one your human names.
+
 Other rules:
 
 - A branch is merged with `origin/main` only when GitHub reports a conflict (`hack/pr-wait.sh` exit 4,
@@ -66,6 +68,16 @@ Other rules:
   procoduck's. Tags are immutable by ruleset: fix a bad tag with the next rc
   (`docs/dev/releasing.md`).
 - Copilot coding agent pull requests are opened or adopted by a human.
+
+## OpenShell upstream
+
+Rules for anything posted to NVIDIA/OpenShell (moved from AGENTS.md, issue 1045; unchanged):
+
+- Issues need a first-hand human user story, a repro that uses only an OpenShell deployment, and
+  OpenShell-only framing.
+- No AI attribution (no `Co-Authored-By`, no "generated with" footer) in anything posted upstream.
+- A pull request needs a maintainer's vouch first.
+- A human posts upstream, in their own words; an agent drafts.
 
 ## Several agents in one session (lanes)
 
@@ -84,9 +96,10 @@ checkout it is run from, so run it from the lane's worktree.
 ## Working alongside another human
 
 One human works on the repository today (ADR 0104); these rules hold when a second one joins. The
-rules that hold for every branch (merge `main`, never rebase; dependency bumps; proto; golden files;
-ADR and migration numbers; conflict classes; when to stop and ask) are in
-[AGENTS.md, Branches and pull requests](../../AGENTS.md#branches-and-pull-requests). Before you
+rules that hold for every branch (merge `main`, never rebase; dependency bumps; golden files;
+conflict classes; when to stop and ask) are in
+[AGENTS.md, Branches and pull requests](../../AGENTS.md#branches-and-pull-requests); proto, ADR and
+migration numbers are in the AGENTS.md of their folders (`api/proto/`, `docs/adr/`, `internal/db/`). Before you
 start, after `take`:
 
 - **Overlap check.** It also applies to a PR you fix or merge, even one your human names

@@ -583,7 +583,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	}
 	// The legs must include every tool result the harness finished before this call: agentd may not
 	// have recorded the last one yet (its updates and the call travel different ways).
-	stalled, live, err := g.awaitFeed(ctx, c)
+	stalled, live, mark, err := g.awaitFeed(ctx, c)
 	if err != nil {
 		return a, err
 	}
@@ -606,7 +606,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	// A reply the guard never saw counts as both legs (#254): for good once its call is older than
 	// unseenAfter (charged checks only; mcpask's card writes nothing), and for this decision while any
 	// call is still open.
-	persisted, open, err := g.unseenReplies(ctx, sess, charge)
+	persisted, open, err := g.unseenReplies(ctx, sess, mark, charge)
 	if err != nil {
 		return a, err
 	}
@@ -710,25 +710,28 @@ func (a assessment) stallMarked(v Verdict) Verdict {
 // as holding both legs), and live when the agent has a running run. Without a running run, or a feed
 // for it, there is nothing to wait for: no harness of the agent is running, and the legs it left
 // are recorded on the generation.
-func (g *Guard) awaitFeed(ctx context.Context, c caller) (stalled, live bool, err error) {
+//
+// mark is the turn mark of the moment the call arrived (see turnMark).
+func (g *Guard) awaitFeed(ctx context.Context, c caller) (stalled, live bool, mark turnMark, err error) {
 	run, err := g.q.GetLiveRunForAgent(ctx, store.GetLiveRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, false, nil
+		return false, false, turnMark{}, nil
 	}
 	if err != nil {
-		return false, false, err
+		return false, false, turnMark{}, err
 	}
 	key := store.GetLeakGuardFeedParams{OrgID: c.org.ID, RunID: run.ID}
 	feed, err := g.q.GetLeakGuardFeed(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, true, nil
+		return false, true, turnMark{}, nil
 	}
 	if err != nil {
-		return false, true, err
+		return false, true, turnMark{}, err
 	}
 	target := feed.FeedRead
+	mark = turnMark{Run: run.ID, Epoch: pgtype.Int8{Int64: feed.FeedEpoch, Valid: true}, Read: pgtype.Int8{Int64: target, Valid: true}}
 	if feed.FeedDone >= target {
-		return false, true, nil
+		return false, true, mark, nil
 	}
 	deadline := time.NewTimer(g.feedWait)
 	defer deadline.Stop()
@@ -740,17 +743,17 @@ func (g *Guard) awaitFeed(ctx context.Context, c caller) (stalled, live bool, er
 		}
 		select {
 		case <-ctx.Done():
-			return false, true, ctx.Err()
+			return false, true, mark, ctx.Err()
 		case <-deadline.C:
-			return true, true, nil
+			return true, true, mark, nil
 		case <-tick.C:
 		}
 		feed, err = g.q.GetLeakGuardFeed(ctx, key)
 		if err != nil {
-			return false, true, err
+			return false, true, mark, err
 		}
 		if feed.FeedDone >= target {
-			return false, true, nil
+			return false, true, mark, nil
 		}
 	}
 }

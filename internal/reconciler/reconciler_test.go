@@ -1774,7 +1774,10 @@ var _ = Describe("Reconciler", func() {
 			// the server frees the lock when the backend dies, and the old leader learns of the dead
 			// connection by its own read, so the follower can write first. That two-leader window is
 			// tracked in issue 635.
-			Expect(mg.appliedCount()).To(Equal(1), "only the new leader's pass finished")
+			// applyTimes records the start of an Apply and appliedCount its end, so the new leader's
+			// pass can have started and not yet finished here (#861): wait for the finish, and then
+			// hold the count (the old pass was cancelled and must never add to it).
+			Eventually(mg.appliedCount).Should(Equal(1), "only the new leader's pass finished")
 			Consistently(mg.appliedCount, "500ms", "50ms").Should(Equal(1))
 		})
 

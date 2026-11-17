@@ -32,7 +32,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,8 +41,6 @@ import (
 	"strings"
 	"time"
 
-	connect "connectrpc.com/connect/v2"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 	"github.com/pressly/goose/v3"
@@ -56,10 +53,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/api"
-	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/apiassembly"
 	"github.com/stateracloud/koinon/internal/askuser"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
@@ -67,7 +63,6 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/codehost/scopesync"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
@@ -76,7 +71,6 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/execution"
-	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
@@ -89,10 +83,8 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
-	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
-	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orcatalog"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/otlpauth"
@@ -101,7 +93,6 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
-	"github.com/stateracloud/koinon/internal/restorestatus"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -111,8 +102,6 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 	"github.com/stateracloud/koinon/internal/services"
-	"github.com/stateracloud/koinon/internal/tokens"
-	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/export"
 	tracerouter "github.com/stateracloud/koinon/internal/tracing/router"
 	"github.com/stateracloud/koinon/internal/triggers/poll"
@@ -712,99 +701,27 @@ func serve(ctx context.Context, cfg config) error {
 			slog.Info("moved connection secrets into the store", "count", n)
 		}
 	}
-	var opener connections.Opener
-	var keys services.Keys
-	if keyring != nil {
-		opener, keys = keyring, keyring
-	}
-	// One egress policy for everything an org points the gateway or Koinon at: model providers and
-	// remote MCP servers.
-	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
-	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
-		return err
-	}
-	// One GitHub client, so connection checks and approved calls share its token cache. It and the
-	// Gitea provider dial Connection base URLs through the egress policy.
-	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
-	hosts := providers.New(gh)
-	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its
-	// approvals through the proxy, and the proxy asks the guard for the risk on its one card.
-	guardMetrics := mcpguard.NewMetrics(nil)
-	var guard *mcpguard.Guard
-	// approvalSvc is created below, after the guard. executeAllowed runs a call recorded approved
-	// (a Trusted preset, an approval scope) at once instead of on the next sweep.
-	var approvalSvc *approvals.Service
-	executeAllowed := func(ctx context.Context, org, id pgtype.UUID) {
-		ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
-		defer cancel()
-		if _, err := approvalSvc.Execute(ctx, org, id); errors.Is(err, restorehold.ErrHeld) {
-			slog.Info("restore-hold: an allowed call waits for the release", "approval", id.String())
-		} else if err != nil {
-			slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
-		}
-	}
-	askSrv := mcpask.New(pool, mcpask.Options{
-		Execute: executeAllowed,
-		Assess: func(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool string, args json.RawMessage) (map[string]any, error) {
-			return guard.Assess(ctx, org, agent, srv, tool, args)
-		},
+	reg := metrics.NewRegistry()
+	apiMetrics := api.NewMetrics(reg)
+	asm, err := apiassembly.Assemble(ctx, apiassembly.Outside{
+		Pool: pool, Kube: kube, Keyring: keyring, Binding: binding, BindingOwner: bindingOwner, Ready: gate.ReadyHandler(),
+	}, apiassembly.Settings{
+		SandboxResources: cfg.sandboxResources, EgressAllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts),
+		Namespace: cfg.secretsNamespace, GatewayMCPURL: cfg.gatewayMCPURL, GatewayURL: cfg.gatewayURL, GitHubAPIURL: cfg.githubAPIURL,
+		WatchPoll: cfg.watchPoll, TrustedOrigins: splitList(cfg.trustedOrigins), RestoreHold: cfg.restoreHold,
+		GuardByteCap: cfg.guardByteCap, PublicURL: cfg.publicURL, OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: cfg.oidcRedirectURL,
+		AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions,
+	}, apiassembly.Prebuilt{
+		Auth: authSvc, Hub: hub, Metrics: apiMetrics, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow,
 	})
-	guard = mcpguard.New(pool, mcpguard.Options{
-		Logger: slog.Default(), Metrics: guardMetrics, ByteCap: cfg.guardByteCap,
-		Approve:    askSrv.RequestApproval,
-		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
-	})
-	// One guard for every service that reaches outward (issue #462, ADR 0107).
-	hold := restorehold.NewGuard(cfg.restoreHold)
-	approvalOpts := approvals.Options{RestoreHold: hold, Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default(), OnMCPResult: guard.RecordApproved, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}
-	if kube != nil {
-		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
-		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
-		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
-	}
-	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
-	approvalSvc = approvals.New(pool, approvalOpts)
-	if !cfg.restoreHold {
-		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
-	}
-	tokenSvc := tokens.New(pool, nil).WithBinding(binding)
-	var catalogKeys catalog.Keys
-	if keyring != nil {
-		catalogKeys = keyring
-	}
-	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
-	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
-	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy)).WithRestoreHold(hold)
-	// The provider echo check sends one request through the gateway with the org's model-check key,
-	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
-	// access the check answers that it is not configured.
-	var echo *modelcheck.Service
-	if cfg.gatewayURL != "" && kube != nil {
-		echo = modelcheck.New(pool, modelcheck.GatewayChat{
-			URL: cfg.gatewayURL, Keys: mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace, SecretName: mcpservers.ModelCheckSecretName},
-			HTTP: &http.Client{Timeout: 90 * time.Second},
-		}, prices.NewResolver(pricing.Embedded()))
-	} else {
-		echo = modelcheck.New(pool, nil, prices.NewResolver(pricing.Embedded()))
-	}
-	// Run-trace destinations (ADR 0074). The client dials only what the egress policy allows.
-	traceSvc, err := tracedest.New(pool, catalogKeys, urlPolicy, slog.Default())
 	if err != nil {
 		return err
 	}
-	traceSvc.WithRestoreHold(hold)
-	echo.WithRestoreHold(hold)
-	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
-	// visibility, read when a connection is created or tested and again every few minutes, so the
-	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
-	scopeSyncer := scopesync.New(pool, hosts, opener, slog.Default()).WithRestoreHold(hold)
-	svc := services.New(pool, services.Options{
-		SandboxResources: &cfg.sandboxResources, ScopeSync: scopeSyncer, ModelCheck: echo, Traces: traceSvc, RestoreHold: hold,
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
-	})
-	// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
+	svc := asm.Server
 	if !cfg.restoreHold {
-		safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { scopeSyncer.Run(ctx, scopesync.DefaultInterval) })
+		safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { asm.Approvals.Sweeper(ctx, cfg.sweepInterval) })
+		// The periodic refresh and the services' on-change readings share the scope module's queue (Syncer.Request); svc.Drain drains it at shutdown.
+		safego.GoOrStop(bgCtx, slog.Default(), "code-host-scope", stop, func(ctx context.Context) { asm.Scope.Run(ctx, scopesync.DefaultInterval) })
 		// The notification of an opened question (the park that opens it commits in koinon-agentd).
 		safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
 	}
@@ -822,7 +739,7 @@ func serve(ctx context.Context, cfg config) error {
 		}
 	}
 	if pollers != nil {
-		pollers.Bind(poll.ConnectionOpener{Hosts: hosts, Keys: opener}, poll.LogDeliverer{Logger: slog.Default()})
+		pollers.Bind(poll.ConnectionOpener{Hosts: asm.Hosts, Keys: asm.Opener}, poll.LogDeliverer{Logger: slog.Default()})
 		safego.GoOrStop(bgCtx, slog.Default(), "code-host-pollers", stop, func(ctx context.Context) { pollers.Run(ctx) })
 	}
 	if kube != nil {
@@ -830,25 +747,12 @@ func serve(ctx context.Context, cfg config) error {
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Outward: outward.New(pool).WithRestoreHold(hold), Held: hold, Release: binding, AcceptRemovals: cfg.restoreAcceptImporterDeletions, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: asm.Catalog, MCP: asm.MCP, Outward: outward.New(pool).WithRestoreHold(asm.Hold), Held: asm.Hold, Release: binding, AcceptRemovals: cfg.restoreAcceptImporterDeletions, URLPolicy: asm.URLPolicy, Sealer: sealer, Log: slog.Default()}
 		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithOutward(outward.New(pool).WithRestoreHold(hold)).WithTriggers(svc).WithModelCheck(echo).
-		WithRestoreStatus(func(ctx context.Context) (any, error) {
-			opt := restorestatus.Options{AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions, Configured: restorestatus.ConfiguredTargets{
-				PublicURL: installbinding.Origin(cfg.publicURL), OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: installbinding.Origin(cfg.oidcRedirectURL),
-			}}
-			if kube != nil {
-				opt.PlanRemovals = func(ctx context.Context) ([]installbinding.Removal, error) {
-					return declarative.PlanRemovals(ctx, pool, kube, cfg.secretsNamespace)
-				}
-			}
-			return restorestatus.Build(ctx, pool, bindingOwner, opt)
-		})
 
-	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
 	auth.RegisterMetrics(reg)
 	// koinon-api checks its own login against the install audit writer role, at startup and every
@@ -870,7 +774,7 @@ func serve(ctx context.Context, cfg config) error {
 		writerCheck.Run(ctx, installWriteRetry)
 	})
 	reg.MustRegister(kekMetrics.Collectors()...)
-	reg.MustRegister(guardMetrics.Collectors()...)
+	reg.MustRegister(asm.GuardMetrics.Collectors()...)
 	restorehold.Metric(reg, cfg.restoreHold)
 	binding.Metrics(reg)
 	binding.ReleasePendingMetric(reg)
@@ -950,12 +854,12 @@ func serve(ctx context.Context, cfg config) error {
 		}
 		otlpMetrics := otlpauth.NewMetrics(reg)
 		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
-		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
+		exportClient, err := export.NewClient(asm.URLPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
 		if err != nil {
 			return err
 		}
 		traceRouter, err := tracerouter.New(tracerouter.Config{
-			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener, slog.Default()),
+			Store: tracerouter.NewPGStore(pool), Routes: asm.Traces, Secrets: tracerouter.NewPGSecrets(pool, asm.Opener, slog.Default()),
 			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, MemoryLimit: memlimit.Limit(),
 			QueueBytes: cfg.traceQueueBytes, IntakeBytes: cfg.traceIntakeBytes, MaxHeldBytes: cfg.traceHeldBytes, RequestBytes: cfg.traceRequestBytes,
 			Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
@@ -987,19 +891,6 @@ func serve(ctx context.Context, cfg config) error {
 		})
 	}
 
-	apiMetrics := api.NewMetrics(reg)
-	handler, err := api.NewHandler(api.Options{
-		Auth:           authSvc,
-		Metrics:        apiMetrics,
-		TrustedOrigins: splitList(cfg.trustedOrigins),
-		Services:       []func(*connect.Server){svc.Register},
-		UI:             web.Dist(),
-		Mounts:         []func(*http.ServeMux){adminSvc.Mount},
-		Ready:          gate.ReadyHandler(),
-	})
-	if err != nil {
-		return err
-	}
 	proxies, err := ratelimit.ParseTrustedProxies(splitList(cfg.trustedProxies))
 	if err != nil {
 		return fmt.Errorf("--trusted-proxies: %w", err)
@@ -1007,18 +898,18 @@ func serve(ctx context.Context, cfg config) error {
 	if err := proxies.UseHeader(cfg.trustedProxyHeader); err != nil {
 		return fmt.Errorf("--trusted-proxy-header: %w", err)
 	}
-	srv := &http.Server{Addr: cfg.addr, Handler: proxies.Middleware(handler), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.addr, Handler: proxies.Middleware(asm.Handler), ReadHeaderTimeout: 10 * time.Second}
 	servers := []*http.Server{srv}
 	toolsErr := make(chan error, 1)
 	if cfg.toolsAddr != "" {
 		tools, err := githubtools.New(pool, githubtools.Options{
-			Hosts: hosts,
-			Keys:  opener,
+			Hosts: asm.Hosts,
+			Keys:  asm.Opener,
 			// Trusted-preset calls run at once instead of on the next sweep.
-			Execute: executeAllowed,
+			Execute: asm.ExecuteAllowed,
 			// A call no person decides (a Trusted preset, an approval scope) runs only when the
 			// leak guard finds it clean; otherwise it goes to a person (ADR 0091, #687).
-			LeakCheck: guard.CheckCodeHost,
+			LeakCheck: asm.Guard.CheckCodeHost,
 		})
 		if err != nil {
 			return err
@@ -1026,7 +917,7 @@ func serve(ctx context.Context, cfg config) error {
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", tools.Handler())
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
-		mux.Handle(mcpask.Path, askSrv.Handler())
+		mux.Handle(mcpask.Path, asm.Ask.Handler())
 		// ask_user (plan item TK3), the "koinon" target of the gateway.
 		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{Metrics: apiMetrics}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -1095,7 +986,7 @@ func serve(ctx context.Context, cfg config) error {
 			return fmt.Errorf("--guard-addr: %w", err)
 		}
 		guardSrv = grpc.NewServer()
-		extmcp.RegisterExtMcpServer(guardSrv, mcpguard.NewServer(guard))
+		extmcp.RegisterExtMcpServer(guardSrv, mcpguard.NewServer(asm.Guard))
 		safego.GoOrStop(ctx, slog.Default(), "mcp-guard", stop, func(context.Context) {
 			slog.Info("serving the MCP leak guard", "addr", cfg.guardAddr)
 			if err := guardSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
