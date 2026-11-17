@@ -210,8 +210,9 @@ The text of an older ADR is not rewritten: it stays as the record of its time.
 
 ## AGENTS.md text changes
 
-These rules are part of this decision. The text of AGENTS.md is changed in the issue that implements
-phase 1 of the plan (#1094, with the hardening ADR #1084), not in this change. When ADR 0119 is accepted:
+These rules are part of this decision. The phase 1 rows (No secrets, hardening, upstream) are applied to
+AGENTS.md in this change; this change merges only when 0119 is accepted. The hardening rule names the
+hardening ADR by issue (#1084) until that ADR has a number. The later rows land in their phases:
 
 | Rule today | New text | When |
 | --- | --- | --- |
@@ -258,7 +259,7 @@ phase 1 of the plan (#1094, with the hardening ADR #1084), not in this change. W
   release, tests against a real Substrate on kind in CI, suspends with volumes only across a Substrate
   upgrade (memory snapshot formats changed between release candidates) and reads every release note inside
   the dependency cooldown (ADR 0079).
-- Follow-ups: the hardening ADR (#1084); the AGENTS.md change; the issue breakdown of #1082 (seam reshape,
+- Follow-ups: the hardening ADR (#1084); the AGENTS.md rows of phases 3 and 5; the issue breakdown of #1082 (seam reshape,
   gateway jobs, guest launcher, driver, install and chart, homes and warm start, CI leg, escape suite,
   migration and flip, removal); ADR status updates at phase 5; `docs/design.md` prior art for Substrate.
 
