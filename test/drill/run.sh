@@ -11,7 +11,7 @@
 #   KEEP=1                   leave the cluster and the namespaces (inspect, then test/drill/sweep.sh <run-id> --context <ctx>)
 #   SKIP_UP=1 SKIP_BUILD=1   the cluster and the images are there already
 #   CLUSTER=koinon-e1        the kind cluster (kind topology only)
-#   DRILL_TOPOLOGY=<file>    another topology (the home lab: the file lives outside the repository).
+#   DRILL_TOPOLOGY=<file>    another topology (your own cluster, informing: the file lives outside the repository).
 #                            It needs an explicit KUBECONFIG, and run.sh makes no cluster and loads
 #                            no images then.
 #   DRILL_RUN=<id>           the run ID (default: random); every object carries koinon.dev/drill-run=<id>
@@ -121,7 +121,7 @@ set +e
   KOINON_DRILL_RUN="$RUN" \
   KOINON_DRILL_KEEP="$KEEP" \
   KOINON_DRILL_COMMIT="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)" \
-    "$OUT/bin/drill.test" -test.timeout 90m -ginkgo.v -ginkgo.timeout=85m \
+    "$OUT/bin/drill.test" -test.timeout 50m -ginkgo.v -ginkgo.timeout=45m \
       -ginkgo.junit-report="$OUT/junit.xml" -ginkgo.json-report="$OUT/report.json"
 ) 2>&1 | tee "$OUT/drill.log"
 suite_rc=${PIPESTATUS[0]}

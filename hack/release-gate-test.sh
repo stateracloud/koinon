@@ -170,10 +170,13 @@ ci_queue_run() { # <head sha of the queue commit> <tree id> [conclusion]: a merg
 	local i
 	for i in 900 910 920 930; do queue_wf_run "$i" "$1"; done
 }
-# The restore drill (#518). drill_result <file> <commit> <profile> <verdict> [check verdict]: a drill-result.json.
+# The restore drill (#1039). drill_result <file> <commit> <profile> <verdict> [check verdict]: a drill-result.json
+# with the six required checks, `hold` (the check the fourth argument sets) and a topology summary. NO_BROWSER=1
+# leaves browser-signin out, DROP_CHECK=<name> leaves any one check out.
 drill_result() {
-	jq -n --arg c "$2" --arg p "$3" --arg v "$4" --arg cv "${5:-pass}" --arg nb "${NO_BROWSER:-0}" \
-		'{runId: "abc123", commit: $c, topology: ({name: "t", profile: $p} + (if $p == "lab" then {browserSignin: true} else {} end)), checks: ([{name: "signin", verdict: "pass"}, {name: "hold", verdict: $cv}] + (if $p == "lab" and $nb != "1" then [{name: "browser-signin", verdict: "pass"}] else [] end)),
+	jq -n --arg c "$2" --arg p "$3" --arg v "$4" --arg cv "${5:-pass}" --arg nb "${NO_BROWSER:-0}" --arg drop "${DROP_CHECK:-}" \
+		'{runId: "abc123", commit: $c, topology: {name: "t", profile: $p, browserSignin: ($nb != "1")},
+		  checks: ([("signin", "provider-key", "schedule", "workflow-dead-executor", "archive", "browser-signin") | {name: ., verdict: "pass"}] + [({name: "hold", verdict: $cv} + (if $cv == "known-gap" then {issue: "#516"} else {} end))] | map(select(.name != $drop and (.name != "browser-signin" or $nb != "1")))),
 		  knownGaps: (if $cv == "known-gap" then [{name: "hold", issue: "#516", verdict: "known-gap"}] else [] end), verdict: $v}' >"$1"
 }
 kind_artifact() { # <artifact id> <head sha> <result commit> <profile> <verdict> [check verdict] [expired]: a drill-logs artifact
@@ -184,7 +187,7 @@ kind_artifact() { # <artifact id> <head sha> <result commit> <profile> <verdict>
 	(cd "$d" && zip -qr "$FX/artifact-$1.zip" drill.log drill)
 	local f=$FX/drill-artifacts.json
 	[[ -f $f ]] || echo '{"artifacts":[]}' >"$f"
-	jq --argjson i "$1" --arg h "$2" --argjson e "${7:-false}" '.artifacts += [{id: $i, name: "drill-logs", expired: $e, workflow_run: {head_sha: $h, head_repository_id: 1, repository_id: 1}}]' "$f" >"$f.new"
+	jq --argjson i "$1" --arg h "$2" --argjson e "${7:-false}" --arg b "${ART_BRANCH:-${TAG:-v1.2.3-rc.1}}" '.artifacts += [{id: $i, name: "drill-logs", expired: $e, workflow_run: {head_sha: $h, head_branch: $b, head_repository_id: 1, repository_id: 1}}]' "$f" >"$f.new"
 	mv "$f.new" "$f"
 }
 n=0
@@ -643,7 +646,7 @@ new_case
 check "a commit off main fails" "$(GIT_NOT_ANCESTOR=1 gate_rc)" 1
 check "a bad tag fails" "$(TAG=1.2.3 gate_rc)" 1
 
-# --- the restore drill (#518): rc needs a green kind drill, a final tag a green lab drill for its rc ---
+# --- the restore drill (#1039): every tag needs a green kind drill of its own run ---
 new_case
 check "an rc with a green kind drill passes" "$(gate_rc)" 0
 check "...and says so" "$(grep -c '^ok: kind restore drill (artifact 501; known gaps: none)' "$tmp/out")" 1
@@ -681,7 +684,8 @@ check "a result for another commit inside an artifact of this one fails" "$(gate
 new_case
 rm "$FX/drill-artifacts.json"
 kind_artifact 505 "$sha" "$sha" lab pass
-check "a lab result does not stand in for the kind drill" "$(gate_rc)" 1
+check "a result of another profile does not stand in for the kind drill" "$(gate_rc)" 1
+check "...with the profile" "$(grep -c 'its profile is lab, not kind' "$tmp/err")" 1
 
 new_case
 rm "$FX/drill-artifacts.json"
@@ -712,7 +716,7 @@ check "an artifact that cannot be downloaded fails closed" "$(gate_rc)" 1
 new_case
 rm "$FX/drill-artifacts.json"
 mkdir -p "$FX/empty" && echo log >"$FX/empty/drill.log" && (cd "$FX/empty" && zip -q "$FX/artifact-511.zip" drill.log)
-echo '{"artifacts":[{"id":511,"name":"drill-logs","expired":false,"workflow_run":{"head_sha":"'$sha'","head_repository_id":1,"repository_id":1}}]}' >"$FX/drill-artifacts.json"
+echo '{"artifacts":[{"id":511,"name":"drill-logs","expired":false,"workflow_run":{"head_sha":"'$sha'","head_branch":"v1.2.3-rc.1","head_repository_id":1,"repository_id":1}}]}' >"$FX/drill-artifacts.json"
 check "an artifact with no drill-result.json fails (the suite did not finish)" "$(gate_rc)" 1
 check "...and says so" "$(grep -c 'has no drill-result.json' "$tmp/err")" 1
 
@@ -727,73 +731,86 @@ rm -f "$FX/art.513/drill/"drill-result.json.* "$FX/artifact-513.zip"
 (cd "$FX/art.513" && zip -qr "$FX/artifact-513.zip" drill.log drill)
 check "a file with a red result followed by a green one is not green" "$(gate_rc)" 1
 
-# final tag: the lab drill for the rc it promotes
-rc_sha=rrrr444
-final_case() { # a final tag at $sha; rc.2 is on the same tree (commit rrrr444), rc.1 on another
+new_case
+rm "$FX/drill-artifacts.json"
+ART_BRANCH=main kind_artifact 514 "$sha" "$sha" kind pass
+check "an artifact of a run on another ref than the tag (the nightly) does not count" "$(gate_rc)" 1
+
+# required checks, by name
+for c in signin provider-key schedule workflow-dead-executor archive; do
 	new_case
 	rm "$FX/drill-artifacts.json"
-	export GIT_TAGS="v1.2.3-rc.1 v1.2.3-rc.2 v1.2.3-rc.10"
-	echo "$rc_sha" >"$FX/tag-v1.2.3-rc.2"
-	echo "$rc_sha" >"$FX/tag-v1.2.3-rc.10"
-	echo oldold5 >"$FX/tag-v1.2.3-rc.1"
-	echo "{\"sha\":\"$rc_sha\",\"tree\":{\"sha\":\"treeS\"}}" >"$FX/commit-$rc_sha.json"
-	echo '{"sha":"oldold5","tree":{"sha":"treeOLD"}}' >"$FX/commit-oldold5.json"
+	DROP_CHECK=$c kind_artifact 520 "$sha" "$sha" kind pass
+	check "a result without the $c check fails" "$(gate_rc)" 1
+	check "...naming it" "$(grep -c "required checks not passing exactly once: $c" "$tmp/err")" 1
+done
+
+new_case
+rm "$FX/drill-artifacts.json"
+NO_BROWSER=1 kind_artifact 521 "$sha" "$sha" kind pass
+check "a result without the browser-signin check fails" "$(gate_rc)" 1
+check "...naming it" "$(grep -c 'required checks not passing exactly once: browser-signin' "$tmp/err")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 522 "$sha" "$sha" kind pass
+jq '.checks |= map(if .name == "archive" then .verdict = "known-gap" else . end)' "$FX/art.522/drill/drill-result.json" >"$FX/x.json" && mv "$FX/x.json" "$FX/art.522/drill/drill-result.json"
+rm "$FX/artifact-522.zip"
+(cd "$FX/art.522" && zip -qr "$FX/artifact-522.zip" drill.log drill)
+check "a required check that is only a known gap fails, even on an rc" "$(gate_rc)" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 523 "$sha" "$sha" kind pass
+jq '.checks += [{"name": "archive", "verdict": "known-gap"}]' "$FX/art.523/drill/drill-result.json" >"$FX/x.json" && mv "$FX/x.json" "$FX/art.523/drill/drill-result.json"
+rm "$FX/artifact-523.zip"
+(cd "$FX/art.523" && zip -qr "$FX/artifact-523.zip" drill.log drill)
+check "a required check present twice, once pass and once known-gap, fails" "$(gate_rc)" 1
+check "...naming it" "$(grep -c 'required checks not passing exactly once: archive' "$tmp/err")" 1
+
+new_case
+rm "$FX/drill-artifacts.json"
+kind_artifact 523 "$sha" "$sha" kind pass
+jq '.topology.browserSignin = false' "$FX/art.523/drill/drill-result.json" >"$FX/x.json" && mv "$FX/x.json" "$FX/art.523/drill/drill-result.json"
+rm "$FX/artifact-523.zip"
+(cd "$FX/art.523" && zip -qr "$FX/artifact-523.zip" drill.log drill)
+check "a topology without browserSignin fails" "$(gate_rc)" 1
+
+# final tag: its own kind drill, no known gap, no lab and no rc lookup
+final_rc() { ART_BRANCH=v1.2.3 TAG=v1.2.3 gate_rc; }
+final_case() {
+	new_case
+	rm "$FX/drill-artifacts.json"
 }
-lab_asset() { # <rc tag> <asset id> <result commit> <profile> <verdict>
-	echo "{\"assets\":[{\"id\":$2,\"name\":\"drill-result-lab.json\"}]}" >"$FX/release-$1.json"
-	drill_result "$FX/asset-$2.json" "$3" "$4" "$5"
-}
-final_rc() { TAG=v1.2.3 GIT_TAGS="${GIT_TAGS:-}" gate_rc; }
+final_case
+ART_BRANCH=v1.2.3 kind_artifact 601 "$sha" "$sha" kind pass
+check "a final tag with a green kind drill of its own run passes" "$(final_rc)" 0
+check "...and says so" "$(grep -c '^ok: kind restore drill (artifact 601; known gaps: none)' "$tmp/out")" 1
 
 final_case
-lab_asset v1.2.3-rc.10 601 "$rc_sha" lab pass
-check "a final tag with a green lab drill of its rc passes" "$(final_rc)" 0
-check "...naming the rc (the highest N on the tree, rc.10 over rc.2)" "$(grep -c '^ok: lab restore drill (v1.2.3-rc.10 at rrrr444' "$tmp/out")" 1
-check "...and it asks for no kind drill" "$(grep -c 'kind restore drill' "$tmp/out")" 0
+check "a final tag with no drill artifact fails" "$(final_rc)" 1
+check "...and names the ref to dispatch on" "$(grep -c 'on the ref v1.2.3' "$tmp/err")" 1
 
 final_case
-echo '{"assets":[]}' >"$FX/release-v1.2.3-rc.10.json"
-check "a final tag whose rc release has no lab result fails" "$(final_rc)" 1
-check "...naming the asset" "$(grep -c 'has no drill-result-lab.json' "$tmp/err")" 1
+ART_BRANCH=v1.2.3-rc.2 kind_artifact 602 "$sha" "$sha" kind pass
+check "the drill of an rc tag on the same commit does not count for the final tag" "$(final_rc)" 1
 
 final_case
-echo '{"assets":[{"id":1,"name":"drill-result.json"}]}' >"$FX/release-v1.2.3-rc.10.json"
-check "the kind result on the rc release is not a lab result" "$(final_rc)" 1
+ART_BRANCH=v1.2.3 kind_artifact 603 "$sha" "$sha" kind pass known-gap
+check "a final tag refuses a known gap" "$(final_rc)" 1
+check "...naming the gap" "$(grep -c 'a final tag allows no known gap: #516 hold' "$tmp/err")" 1
 
 final_case
-lab_asset v1.2.3-rc.10 602 "$rc_sha" kind pass
-check "a kind result under the lab name fails" "$(final_rc)" 1
-check "...with the profile" "$(grep -c 'its profile is kind, not lab' "$tmp/err")" 1
+ART_BRANCH=v1.2.3 kind_artifact 604 "$sha" "$sha" kind fail
+check "a final tag with a red drill fails" "$(final_rc)" 1
 
 final_case
-NO_BROWSER=1 lab_asset v1.2.3-rc.10 607 "$rc_sha" lab pass
-check "a lab result without a passing browser-signin check fails" "$(final_rc)" 1
-check "...saying so" "$(grep -c 'no passing browser-signin check' "$tmp/err")" 1
+ART_BRANCH=v1.2.3 kind_artifact 605 "$sha" "$sha" lab pass
+check "a final tag with a lab result fails" "$(final_rc)" 1
 
 final_case
-lab_asset v1.2.3-rc.10 603 oldold5 lab pass
-check "a lab result for another commit than the rc fails" "$(final_rc)" 1
-
-final_case
-lab_asset v1.2.3-rc.10 604 "$rc_sha" lab fail
-check "a red lab drill fails" "$(final_rc)" 1
-
-final_case
-echo '{"sha":"'$sha'","tree":{"sha":"treeS"}}' >"$FX/commit-$sha.json"
-echo "{\"sha\":\"$rc_sha\",\"tree\":{\"sha\":\"treeOTHER\"}}" >"$FX/commit-$rc_sha.json"
-lab_asset v1.2.3-rc.10 605 "$rc_sha" lab pass
-check "a final tag on a tree no rc has fails" "$(final_rc)" 1
-check "...saying a final tag promotes an rc" "$(grep -c 'a final tag promotes an rc' "$tmp/err")" 1
-
-final_case
-export GIT_TAGS=
-check "a final tag with no rc tag at all fails" "$(final_rc)" 1
-
-final_case
-lab_asset v1.2.3-rc.10 606 "$rc_sha" lab pass
-rm "$FX/asset-606.json"
-check "a lab result that cannot be downloaded fails closed" "$(final_rc)" 1
-unset GIT_TAGS
+ART_BRANCH=v1.2.3 kind_artifact 606 "$sha" "$sha" kind pass
+check "a final tag reads no release asset (none is served by the stub)" "$(final_rc)" 0
 
 echo "release-gate-test: $pass passed, $failed failed"
 ((failed == 0))

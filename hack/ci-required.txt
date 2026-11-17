@@ -55,7 +55,8 @@ advisory warm-caches-opencode-plugins
 # The `harness-repro` job of .github/workflows/harness-repro.yml (#176) is advisory, and is not a pull request or
 # merge queue check at all: it runs on a push to main, nightly and on dispatch, so it can never be required.
 
-# The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514) is advisory, and is not a pull request or
-# merge queue check at all: it runs on the nightly schedule, on rc tags (v*-rc.*) and on dispatch, so it can never be
-# required (a required name must report on every PR, push and merge_group build). It is `continue-on-error`, so a red
+# The `drill` job of .github/workflows/e2e-kind.yml (ADR 0109, #514, #1039) is not a merge check; it is a release check:
+# it is not a pull request or merge queue check at all (it runs on the nightly schedule, on every release tag, rc and
+# final, and on dispatch), so it can never be required here (a required name must report on every PR, push and
+# merge_group build). hack/release-gate.sh demands its result for every tag instead. It is `continue-on-error`, so a red
 # drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.

@@ -85,15 +85,15 @@ func (m Marks) Compute() Timings {
 
 // Result is drill-result.json: what a release gate reads.
 type Result struct {
-	RunID    string    `json:"runId"`
-	Commit   string    `json:"commit"`
-	Chart    string    `json:"chart"`
-	Topology *Topology `json:"topology"`
-	Started  time.Time `json:"started"`
-	Finished time.Time `json:"finished"`
-	Marks    Marks     `json:"marks"`
-	Timings  Timings   `json:"timings"`
-	Checks   []Check   `json:"checks"`
+	RunID    string          `json:"runId"`
+	Commit   string          `json:"commit"`
+	Chart    string          `json:"chart"`
+	Topology TopologySummary `json:"topology"`
+	Started  time.Time       `json:"started"`
+	Finished time.Time       `json:"finished"`
+	Marks    Marks           `json:"marks"`
+	Timings  Timings         `json:"timings"`
+	Checks   []Check         `json:"checks"`
 	// KnownGaps lists the checks that failed on a declared gap, with their issues.
 	KnownGaps []Check `json:"knownGaps"`
 	// Verdict is "pass" when every check passed or failed only on a known gap, else "fail".

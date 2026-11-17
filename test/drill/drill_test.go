@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1145,7 +1144,7 @@ spec:
 			Expect(reason).To(ContainSubstring("nonce"))
 		})
 
-		// The lab profile only (topology browserSignin, #518): the spec exists in the tree only then, because a
+		// Only when the topology asks for it (browserSignin; kind does, #1039): the spec exists in the tree only then, because a
 		// drill spec never skips (ADR 0109 decision 3) and a notrun check would turn the result red.
 		if browserProfile() {
 			It("signs in through the browser", Label("browser-signin"), func(ctx SpecContext) {
@@ -1161,7 +1160,7 @@ spec:
 				logFile, err := os.Create(filepath.Join(outDir, "browser-signin.log"))
 				must(err, "create the browser sign-in log")
 				defer func() { _ = logFile.Close() }()
-				cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "signin.spec")
+				cmd := webSpecCmd(ctx, "signin.spec")
 				// The password goes in the environment of the child only, never on its command line or into a log.
 				cmd.Env = append(os.Environ(),
 					"KOINON_DRILL_WEB_URL=http://"+addr,
@@ -1174,7 +1173,7 @@ spec:
 		}
 
 		// The drill's own OIDC provider (#983), on every profile. The Go flow goes through the install's real
-		// /auth/oidc/start and /auth/oidc/callback; the lab adds one browser sign-in through Dex's login form.
+		// /auth/oidc/start and /auth/oidc/callback; a topology with browserSignin (kind) adds one browser sign-in through Dex's login form.
 		It("signs in through the OIDC provider, and each user keeps the ID and the role", Label("oidc-signin"), func(ctx SpecContext) {
 			needs("release", "seed", "oidc-source")
 			oidcTarget(ctx, &dst)

@@ -1,10 +1,10 @@
 # 0085. Upgrade, compatibility and recovery policy
 
-- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285)
+- Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285; amended 2026-11-16: the restore drill passes in project CI for the tag, #1039)
 - Date: 2026-11-01
 - Area: install-operations
 - Tags: upgrade, backup-restore, migrations, secrets
-- Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md), [0109](0109-automated-restore-drill.md) (decisions 15 and 18, by reference)
+- Amended by: [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md), [0109](0109-automated-restore-drill.md) (decisions 1, 15 and 18 and work item 22, by reference)
 - Relates to: [0027](0027-repo-and-versioning.md) (forward-only migrations, upgrade test), [0030](0030-run-state-machine.md) (leases, epoch, takeover), [0032](0032-agent-home-checkpoints.md) (home checkpoints), [0056](0056-model-providers-pricing-and-budgets-per-org.md) (KEK and envelopes), [0060](0060-migrations-as-a-job.md) (migration Job), [0066](0066-triggers-and-scheduling.md) (DBOS), [0076](0076-database-modes.md) (database modes, backups), [0077](0077-pinned-openshell-and-installer.md) (OpenShell pins), [0045](0045-openshell-hardening-defaults.md) (pinned supervisor image)
 - Issue: old issue 336; covers old issue 331 and #64
 
@@ -583,3 +583,14 @@ Titles only here; each is opened after this ADR is accepted.
   `dbos/workflow.go` (`ForkWorkflowsInput`)
 - ADRs [0027](0027-repo-and-versioning.md), [0030](0030-run-state-machine.md), [0032](0032-agent-home-checkpoints.md), [0051](0051-session-home-generations.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0060](0060-migrations-as-a-job.md), [0066](0066-triggers-and-scheduling.md), [0076](0076-database-modes.md), [0077](0077-pinned-openshell-and-installer.md)
 - Runbook: [docs/ops/secret-keys.md](../ops/secret-keys.md)
+
+## Amendment (2026-11-16): the drill gates every tag in project CI (#1039)
+
+Amended by reference to [0109](0109-automated-restore-drill.md) (amendment 2026-11-16):
+
+- **Decision 1.** "has passed on the home lab" reads "has passed in project CI for the tag": the restore drill of
+  decision 15 runs on kind for every tag, rc and final, and the release gate judges its result.
+- **Decision 18.** "the full home-lab drill runs before each final minor release" reads "the kind drill runs for every
+  tag" (and nightly, as before). A run on a cluster of your own is informing and gates nothing.
+- **Work item 22.** "home lab: run the v0.1.0 restore drill and record RTO and RPO" reads "the restore drill passed in
+  project CI for the v0.1.0 tag; RTO and RPO are in its `drill-result.json`" (#275).

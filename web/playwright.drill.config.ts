@@ -3,7 +3,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { proxyFromEnv } from './src/lib/playwright-proxy.ts'
 
-// The browser sign-in of the restore drill on the lab profile (ADR 0109, #518). It drives the web UI that the
+// The browser sign-in of the restore drill (ADR 0109, #518, #1039: it runs on kind for every tag). It drives the web UI that the
 // restored koinon-api itself serves (the shipped build, no dev server), so KOINON_DRILL_WEB_URL is the
 // address of that API: the drill suite port-forwards it and passes the address in. Run by test/drill, not by
 // hand; to try it against any install: KOINON_DRILL_WEB_URL=... KOINON_DRILL_WEB_PASSWORD=... pnpm test:e2e-drill

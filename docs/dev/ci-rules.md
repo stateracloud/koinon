@@ -109,7 +109,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Secret scan | `gitleaks` | yes | yes | yes | - | - | - | minutes | yes |
 | CodeQL | `codeql` workflow | only if Go or web code changed | - | weekly | - | - | - | minutes | adv |
 | govulncheck | `go-vuln` (part of `go`, only if `go.mod` or `go.sum` changed), nightly `govulncheck.yml` | yes, if `go.mod` or `go.sum` changed | yes, same rule | nightly | yes | - | - | minutes | yes (`go`) |
-| Restore drill | `drill` job (ADR 0109) | - | - | - | yes | rc tag | final tag | long | adv |
+| Restore drill | `drill` job (ADR 0109) | - | - | - | yes | every tag (rc and final) | optional, informing (your own cluster) | about 30 min | no (a release check) |
 | Upgrade from last release | planned, #83, #519 | - | - | - | from v0.3 | from v0.3 | - | long | from v0.3 |
 | VM tier (Kata) | lab only | - | - | - | - | - | yes | n/a | no |
 | Real model | `docs/dev/real-model-tests.md` | outside CI | outside CI | outside CI | outside CI | outside CI | by hand | n/a | no |

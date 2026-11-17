@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,7 +20,7 @@ import (
 
 // The OIDC checks of the drill (ADR 0109, amendment 2026-11-13, #983). The drill runs its own Dex (fakeidp.go) with
 // three users. Most of the check is a Go HTTP flow through the install's real /auth/oidc/start and
-// /auth/oidc/callback, so it runs on kind as well as on the lab; the lab adds one browser sign-in.
+// /auth/oidc/callback, so it runs on every profile; a topology with browserSignin (kind) adds one browser sign-in.
 
 // oidcSourceRecords is what the source knew of each OIDC user before the backup, by username.
 var oidcSourceRecords = map[string]drill.OIDCIdentity{}
@@ -104,6 +103,7 @@ func oidcSource(ctx context.Context, s *side) {
 			continue
 		}
 		id := oidcSourceRecords[u.Username].UserID
+		// The product has no API to disable a user; this goes away with #1047 ("api: disable and enable a user").
 		out := sql(ctx, s, fmt.Sprintf("UPDATE users SET deleted_at = now() WHERE id = '%s' AND oidc_issuer = '%s' RETURNING id", id, drill.FakeIdPIssuer(top.FakesNamespace)))
 		Expect(out).To(Equal(id), "disable %s in Koinon", u.Username)
 		res := oidcSignIn(ctx, l, u)
@@ -160,7 +160,7 @@ func oidcTarget(ctx context.Context, s *side) {
 	Expect(oidcUserCount(ctx, s)).To(Equal(len(drill.IdPUsers())), "no sign-in on the copy made a user")
 
 	if top.BrowserSignin {
-		By("one browser sign-in through Dex's login form (lab)")
+		By("one browser sign-in through Dex's login form")
 		oidcBrowser(ctx, oidcSourceRecords[drill.UserAdmin], l)
 	}
 }
@@ -173,7 +173,7 @@ func oidcBrowser(ctx context.Context, want drill.OIDCIdentity, l drill.OIDCLogin
 	logFile, err := os.Create(filepath.Join(outDir, "oidc-signin-browser.log"))
 	must(err, "create the OIDC browser log")
 	defer func() { _ = logFile.Close() }()
-	cmd := exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", "oidc.spec")
+	cmd := webSpecCmd(ctx, "oidc.spec")
 	// The password is the drill's fake one; it goes in the child's environment only.
 	cmd.Env = append(os.Environ(),
 		"KOINON_DRILL_WEB_URL="+l.Base,

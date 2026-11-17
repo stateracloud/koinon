@@ -34,7 +34,7 @@ import (
 func newRunEvidenceCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "run-evidence",
-		Short: "Export one run's evidence for a lab drill",
+		Short: "Export one run's evidence for a restore drill",
 		Long: "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api run-evidence export --org O --run R --out DIR\n\n" +
 			"The export is JSON Lines: the run (with its sandbox enforcement mode), its traces (one per turn), its events, the leak " +
 			"guard's decisions and the outbound bytes per external sink. It carries no argument values, no secrets and no host names.",

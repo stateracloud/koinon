@@ -1,24 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# EXAMPLE of the lab profile (ADR 0109 decision 2, #518). Every name, registry and class below is made up: the
-# real file describes the home lab and lives OUTSIDE the repository (the operator keeps it, for example in
-# ~/.config/koinon/lab/), because the lab's topology never goes into git. Copy this file there and replace the
-# values; test/drill/topology_test.go checks that this example still loads, so the schema cannot drift.
+# EXAMPLE of the cluster profile (ADR 0109 decision 2, amended 2026-11-16, #1039): a drill on a real cluster of your
+# own. Every name, registry and class below is made up; your real file describes your cluster and lives OUTSIDE the
+# repository (for example in ~/.config/koinon/drill/). Copy this file there and replace the values;
+# test/drill/topology_test.go checks that this example still loads, so the schema cannot drift.
 #
-# Run (the operator supplies the kubeconfig; the drill reads no ambient one):
-#   KUBECONFIG=<lab kubeconfig> DRILL_TOPOLOGY=<your lab file> \
+# A cluster run is informing: the release gate reads only the kind drill of project CI (profile kind), so this result
+# gates nothing and is not uploaded anywhere. Use it to see how a restore behaves on your storage, network and images
+# (docs/dev/ci.md, "Run the drill on your own cluster").
+#
+# Run (you supply the kubeconfig; the drill reads no ambient one):
+#   KUBECONFIG=<your kubeconfig> DRILL_TOPOLOGY=<your file> \
 #   test/drill/run.sh
 # (optional: KOINON_DRILL_WEB_PASSWORD=<admin password of the restored copy>; the default is the seeded fake one.)
-# Then upload the result to the rc release the final tag promotes, as drill-result-lab.json (docs/dev/releasing.md).
 #
 # {run} is the run ID. Namespaces must start with koinon-drill-; gateway IDs with drill-.
-name: lab-example
-profile: lab
-# The lab gate includes the browser sign-in (web/e2e-drill): a password sign-in, and the OIDC sign-in through the
+name: cluster-example
+profile: cluster
+# Optional: the browser sign-in (web/e2e-drill): a password sign-in, and the OIDC sign-in through the
 # drill's own Dex login form. The machine that runs the drill needs pnpm
 # and a Chromium for Playwright (`pnpm --dir web exec playwright install chromium`).
-browserSignin: true
-context: example-lab-context
+browserSignin: false
+context: example-cluster-context
 source:
   namespace: koinon-drill-src-{run}
   release: koinon-drill-src-{run}
@@ -34,7 +37,7 @@ target:
 fakesNamespace: koinon-drill-fakes-{run}
 # The per-namespace hook (#927): after the drill creates each of its namespaces it adds these labels and applies
 # this manifest there (`kubectl apply -n <namespace> -f`). The file is the operator's, kept outside the repository
-# next to this one: it holds the access objects the lab needs in a fresh namespace (for example ExternalSecrets that
+# next to this one: it holds the access objects your cluster needs in a fresh namespace (for example ExternalSecrets that
 # bring a registry pull secret in). Objects in it must not name a namespace.
 namespaceHook: /etc/example/koinon-drill/namespace-hook.yaml
 namespaceLabels:
@@ -47,7 +50,7 @@ valuesFile: test/e2e/kind/koinon-values.yaml
 gatewayChart: oci://ghcr.io/nvidia/openshell/helm-chart
 gatewayVersion: 0.1.7
 gatewayValues: test/e2e/kind/openshell-values.yaml
-# Images on YOUR registry (the lab nodes cannot read the CI runner's local one).
+# Images on YOUR registry (your nodes cannot read the CI runner's local one).
 fakeModelImage: registry.example.invalid/koinon/koinon-fakemodel:e2e
 fakeMcpImage: registry.example.invalid/koinon/koinon-fakemcp:e2e
 objectStoreImage: chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860

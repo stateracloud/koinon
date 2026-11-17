@@ -3,6 +3,7 @@
 package drill_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,39 @@ func TestResultFileIsWritten(t *testing.T) {
 	}
 	if b, err := os.ReadFile(p); err != nil || len(b) == 0 {
 		t.Fatalf("%v %d", err, len(b))
+	}
+}
+
+// drill-result.json is uploaded and attached to the release: it carries a summary of the topology (name, profile,
+// browserSignin, the paths hack/release-gate.sh reads) and nothing else of it (#1039).
+func TestTheResultCarriesATopologySummaryOnly(t *testing.T) {
+	top, err := drill.LoadTopology("topology/kind.yaml", "a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := drill.Result{Commit: "abc", Topology: top.Summary()}
+	r.Finish()
+	p := filepath.Join(t.TempDir(), "drill-result.json")
+	if err := r.Write(p); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Topology map[string]any `json:"topology"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Topology) != 3 || got.Topology["name"] != "kind" || got.Topology["profile"] != "kind" || got.Topology["browserSignin"] != true {
+		t.Errorf("topology in the result: %v, want name, profile and browserSignin only", got.Topology)
+	}
+	for _, leak := range []string{"context", "source", "registry", "valuesFile", "namespaceHook"} {
+		if strings.Contains(string(b), leak) {
+			t.Errorf("the result mentions %q", leak)
+		}
 	}
 }
 
