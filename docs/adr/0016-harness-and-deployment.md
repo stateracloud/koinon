@@ -127,6 +127,17 @@ flowchart LR
   https://agentclientprotocol.com/libraries/community
 - 2026-10-21: OpenShell operator discussion. https://github.com/NVIDIA/OpenShell/issues/1719
 
+## Update (2026-11, issue 1085, epic 1082): the seam has two halves
+
+The Go contract `execution.Backend` is now `execution.Compute` plus `execution.Egress`.
+`Compute` holds the sandbox lifecycle, exec with stdin streaming, upload and state observation.
+`Egress` holds provider records, credentials and L7 policy. ADR 0097 moves those to the Koinon
+gateway, so a new driver implements `Compute` only. OpenShell stays the only driver and keeps
+`Egress` until it is removed. Two optional capabilities, `Suspender` and `Snapshotter` (a snapshot
+carries a digest), are for drivers that can suspend or snapshot a sandbox. OpenShell has neither.
+Package `internal/execution/executiontest` holds the contract suite that every driver must pass.
+The behaviour of the OpenShell driver does not change.
+
 ## Links
 
 - [0009](0009-agent-runtime.md), [0029](0029-run-level-resume.md), [0035](0035-v01-flavors.md),
