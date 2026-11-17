@@ -409,7 +409,7 @@ flowchart TD
 ## Open questions
 
 These need numbers from real traffic: the scrubbed recordings of #70. The implementer of #70
-measures; procoduck decides each number.
+measures; procoduck decides each number. Answered by the amendment of 2026-11-16 (#51) below.
 
 - **The byte cap.** The starting value (about 2 KB) against the `external-low` payload bytes real
   runs send after they hold both legs.
@@ -477,6 +477,48 @@ The list stays inside the same rule:
 - **Two lists for a private host.** The list says who may act through the connection. Whether the
   platform may reach a private address stays with `egress.allowedInternalHosts`; the refusal of a
   host that looks private names both.
+
+## Amendment (2026-11-16, #51): the open questions, measured
+
+The four open questions are closed with numbers from a real-model run: rc.25 on a maintainer test
+cluster, Anthropic Sonnet 5.5 and Haiku 5.5, direct and through OpenRouter, the lcm-upgrader task
+with its search and fetch tools declared `external-low`. This amendment records the values and
+decides nothing new.
+
+**Status of #51: it stays open.** This amendment does not close #51. The byte cap needs more
+research and lab runs, and the value stays 2048 until it is measured (decision of 2026-11-16). Two
+criteria are not met: the gateway-level `external-low` canary case (#1051) does not exist, and the
+maintainer has not confirmed the numbers of this ADR. #51 closes after the measure-only runs.
+
+- **The byte cap: keep 2048 per run for now; measure again.** The first reading was wrong. The
+  narrowed run sent about 305 bytes. One full lcm-upgrader run made 30 calls and sent about 2180 bytes. It went over 2048 and
+  the guard refused 2 calls with the reason `byte_cap`. The cap is per run and never resets, so the
+  run could not send more. The value stays 2048 until it is measured again on 3 or more full
+  lcm-upgrader runs. This amendment does not change it.
+- **Open: does a cap refusal stop the run?** The guard refuses the call and the agent may go on with
+  other calls. No rule says that a cap refusal ends the run. A later ADR decides this.
+- **Both legs: held in 4 of 5 runs that made external calls**, from decision 2 to 9 of the run. Every
+  run with external calls reached the approval branch, mostly because the template's tools had no
+  declared sink class and so defaulted to `external-high`. That is a gap in the template, not in the
+  guard; it is tracked in #1050 and not fixed here.
+- **The text-match threshold: keep 24.** The runs had 16 text matches with match lengths 21 to 42
+  (the k-gram is 21). All 16 were false alarms: a public project name in search queries and URLs,
+  the task's own date range, and identifiers the agent had just read from the server's own schema.
+  No true leak occurred. A lower threshold would add false alarms at lengths 21 to 23.
+- **A true-positive control is not in this data.** A real-model control was tried and the model
+  refused to send the planted secret, so the guard was not exercised. The guard-level control is the
+  replay corpus: `internal/mcpguard/replay_test.go` ("catches every planted leak to an external
+  sink") sends the RT1 canaries through `external-low` `web/fetch` and `search/web_search` calls and
+  asserts per case only what that case needs. A `caught` case on an `external-low` sink asserts only
+  that the action is not `Pass` (an `external-high` one also asserts the both-legs approval); it does
+  not prove which control (the URL rule or the taint approval) caused the refusal. The
+  `caught_before_both_legs` cases assert the URL rule or the taint reason. The end-to-end escape case
+  `test/escape/exfil_test.go` ("refuses or parks an external-high call...") sends a canary only on
+  `external-high` tools. **Follow-up:** no fake-model test sends a canary on an `external-low` call
+  through the gateway and checks the taint ask; one is needed (#1051).
+- **The cap's scope: per run stays.** No run in the data shared a home generation, so the
+  per-generation scope was not measured. The question reopens only if recordings show agents spreading
+  work across runs of one generation.
 
 ## Upstream verification
 
