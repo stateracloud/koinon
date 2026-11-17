@@ -216,20 +216,31 @@ jobs:
         with:
           version: v4.3.1
 
-      # The web suite only: Node and pnpm for Playwright (same pins as the web job in ci.yml).
+      # Node and pnpm, for every suite: images.sh builds the web UI into koinon-api (-tags webui, as the release
+      # does), and the web suite also drives Playwright (same pins as the web job in ci.yml).
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: inputs.suite == 'web'
         with:
           package_json_file: web/package.json
 
-      - name: Node and pnpm (web suite)
+      # No setup-node cache: its post step would save the store on any ref. The store is restored here and saved
+      # only from main (save step at the end of the job), like the Go cache above.
+      - name: Node and pnpm
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-      # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
-        if: inputs.suite == 'web'
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          package-manager-cache: false
+
+      - id: pnpmstore
+        name: pnpm store path
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - id: e2epnpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpmstore.outputs.path }}
+          key: e2e-pnpm-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: |
+            e2e-pnpm-${{ runner.os }}-
 
       - name: Runner facts
         run: |
@@ -410,6 +421,12 @@ jobs:
             ~/go/pkg/mod
           key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.e2epnpm.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.pnpmstore.outputs.path }}
+          key: e2e-pnpm-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+
   # The one check to require (ADR 0105). On a pull request it is always green: the quickstart there is advisory
   # and the queue is the proof, but the context must exist for the pull request to be enqueued. On a queue build,
   # a push, the nightly and a dispatch it is green when the quickstart passed or when it was skipped because
@@ -523,7 +540,7 @@ jobs:
 
       # The browser-signin check (topology browserSignin, test/drill/topology/kind.yaml) drives web/e2e-drill with
       # Playwright. Node and pnpm install the web dependencies here; the spec itself runs in the pinned Playwright
-      # image (hack/drill-web-run.sh, set below as KOINON_DRILL_WEB_RUNNER), so no browser or OS package comes from
+      # image (go tool drillwebrun, chosen by KOINON_DRILL_PLAYWRIGHT_IMAGE below), so no browser or OS package comes from
       # a live mirror (#569, hack/ci-playwright-image-test.sh). The job needs kind on the host, so only the spec
       # runs in the image. The image tag must carry the @playwright/test version of web/package.json.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -609,7 +626,6 @@ jobs:
           HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
-          KOINON_DRILL_WEB_RUNNER: ${{ github.workspace }}/hack/drill-web-run.sh
         run: test/drill/run.sh 2>&1 | tee "$RUNNER_TEMP/drill.log"
 
       - name: Summary
