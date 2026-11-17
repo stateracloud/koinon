@@ -50,7 +50,7 @@ func main() {
 
 func run(args []string, out, errOut io.Writer) (int, error) {
 	if len(args) < 2 {
-		return 0, fmt.Errorf("usage: dashboardmetrics SRC_ROOT DASHBOARD.json...")
+		return 0, fmt.Errorf("usage: dashboardmetrics SRC_ROOT DASHBOARD.json ...(one or more)")
 	}
 	registered, err := registeredMetrics(args[0])
 	if err != nil {
@@ -58,7 +58,7 @@ func run(args []string, out, errOut io.Writer) (int, error) {
 	}
 	findings := 0
 	for _, file := range args[1:] {
-		raw, err := os.ReadFile(file)
+		raw, err := os.ReadFile(file) //nolint:gosec // the operator names the dashboards
 		if err != nil {
 			return 0, err
 		}
@@ -67,12 +67,12 @@ func run(args []string, out, errOut io.Writer) (int, error) {
 			return 0, fmt.Errorf("%s: %w", file, err)
 		}
 		if len(exprs) == 0 {
-			fmt.Fprintf(errOut, "%s: no panel query\n", file)
+			_, _ = fmt.Fprintf(errOut, "%s: no panel query\n", file)
 			findings++
 		}
 		for _, expr := range exprs {
 			for _, msg := range check(expr, registered) {
-				fmt.Fprintf(errOut, "%s: %s\n", file, msg)
+				_, _ = fmt.Fprintf(errOut, "%s: %s\n", file, msg)
 				findings++
 			}
 		}
@@ -80,14 +80,14 @@ func run(args []string, out, errOut io.Writer) (int, error) {
 	if findings > 0 {
 		return 1, nil
 	}
-	fmt.Fprintln(out, "dashboardmetrics: ok")
+	_, _ = fmt.Fprintln(out, "dashboardmetrics: ok")
 	return 0, nil
 }
 
 // registeredMetrics returns the metric names the Go code under root registers (tests excluded).
 func registeredMetrics(root string) (map[string]bool, error) {
 	names := map[string]bool{}
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error { //nolint:gosec // root is the operator argument
 		if err != nil {
 			return err
 		}
@@ -101,7 +101,7 @@ func registeredMetrics(root string) (map[string]bool, error) {
 		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		src, err := os.ReadFile(p)
+		src, err := os.ReadFile(p) //nolint:gosec // p comes from the walk of the operator root
 		if err != nil {
 			return err
 		}
