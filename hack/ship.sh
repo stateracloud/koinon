@@ -355,7 +355,9 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			# pr-merge.sh reads the head and every required check, then enqueues (ADR 0105: the merge queue runs the kind
 			# e2e on the queue commit when the change needs it). SHIP_PR_MERGE is a test hook.
 			pm_rc=0
-			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pr_url##*/}" $([[ $admin == 1 ]] && echo --admin) || pm_rc=$?
+			pm_args=("${pr_url##*/}")
+			if [[ $admin == 1 ]]; then pm_args+=(--admin); fi
+			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pm_args[@]}" || pm_rc=$?
 			[[ $pm_rc == 0 ]] || fail "hack/pr-merge.sh ${pr_url##*/} exited $pm_rc (the pull request stays open; fix that, then run it again)"
 			say "auto-merge handed to pr-merge.sh"
 		fi
