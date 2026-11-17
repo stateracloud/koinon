@@ -50,7 +50,7 @@
 #
 # Output lines: `checks 7/9 pending: go,web`, `FAILED go (run 123)`, `MERGED abc1234`,
 # `conflict: merge origin/main`, `CLOSED`, `checks 9/9 green`, `REQUIRED e2e result skipped`, `TIMEOUT`.
-# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable),
+# Exit: 0 merged (or all checks green with --checks), 1 a check failed, 2 timeout (or, with --checks, the required contexts / review threads unreadable; or `gh pr view` failed 3 times in a row),
 #       3 closed without merge, 4 merge conflict (mergeStateStatus DIRTY), 5 draft (with --checks),
 #       6 stale PR head (with --checks), 7 unresolved review threads (BLOCKED with --checks, all green), 64 usage.
 #       8 the PR was in the merge queue and left it without merging (DEQUEUED).
@@ -60,7 +60,8 @@
 #       `in the merge queue (<position> <state>)` and continues to `MERGED` (exit 0). With --checks the head's
 #       checks are judged as before: they gate entry to the queue; the queue build's own checks are on the
 #       queue commit (gh-readonly-queue/...), not on the head.
-# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh.
+# Test hook: PR_WAIT_THREADS replaces hack/pr-threads.sh. PR_WAIT_GH_FAILS (default 3) is the number of failed `gh pr view`
+# reads in a row that ends the wait with exit 2.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -174,8 +175,14 @@ threads_sh=${PR_WAIT_THREADS:-$(cd "$(dirname "$0")" && pwd)/pr-threads.sh}
 stale_grace=${PR_WAIT_STALE_GRACE:-120} stale_since=""
 defined_for="" defined=""
 start=$SECONDS
+# A failing `gh pr view` is not "still pending" (issue 661): the first error is printed once, and a few failed reads in
+# a row end the wait with exit 2 instead of a silence until the timeout. A good read resets the count.
+gh_fails=0 gh_first_err="" gh_fail_max=${PR_WAIT_GH_FAILS:-3}
+view_err=$(mktemp "${TMPDIR:-/tmp}/pr-wait.XXXXXX")
+trap 'rm -f "$view_err"' EXIT
 while :; do
-  if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository 2>/dev/null) && [ -n "$json" ]; then
+  if json=$(gh pr view "$pr" --json state,isDraft,mergeStateStatus,mergeCommit,statusCheckRollup,headRefName,headRefOid,baseRefName,isCrossRepository 2>"$view_err") && [ -n "$json" ]; then
+    gh_fails=0
     state=$(jq -r '.state // ""' <<<"$json")
     mstate=$(jq -r '.mergeStateStatus // ""' <<<"$json")
     case $state in
@@ -445,6 +452,16 @@ while :; do
       emit "waiting for the newest run of each workflow"
     else
       emit "checks 0/0"
+    fi
+  else
+    gh_fails=$((gh_fails + 1))
+    if [ "$gh_fails" = 1 ]; then
+      gh_first_err=$(head -c 400 "$view_err" | tr '\n' ' ' | sed 's/ *$//')
+      echo "pr-wait: gh pr view $pr failed: ${gh_first_err:-no error text (empty answer)}" >&2
+    fi
+    if [ "$gh_fails" -ge "$gh_fail_max" ]; then
+      echo "pr-wait: gh pr view $pr failed $gh_fails times in a row; giving up (first error: ${gh_first_err:-none})" >&2
+      exit 2
     fi
   fi
   if [ $((SECONDS - start)) -ge "$timeout" ]; then

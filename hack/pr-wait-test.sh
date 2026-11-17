@@ -713,7 +713,41 @@ echo "$n" >"$FAKE_DIR/n"
 echo '{"state":"MERGED","mergeStateStatus":"CLEAN","mergeCommit":{"oid":"1234567890"},"statusCheckRollup":[]}'
 SH
 run 7 --interval 0
-expect "transient gh failure" 0 "MERGED 1234567"
+expect "transient gh failure" 0 "pr-wait: gh pr view 7 failed: no error text (empty answer)
+MERGED 1234567"
+
+# 8b. gh fails every time (issue 661): the first error is printed once and the wait ends with exit 2 after 3 reads in a row
+rm -rf "$FAKE_DIR"
+mkdir -p "$FAKE_DIR"
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$FAKE_DIR/n"
+echo "error $n: HTTP 401 bad credentials" >&2
+exit 1
+SH
+run 7 --interval 0 --timeout 600
+expect "gh fails three times in a row" 2 "pr-wait: gh pr view 7 failed: error 1: HTTP 401 bad credentials
+pr-wait: gh pr view 7 failed 3 times in a row; giving up (first error: error 1: HTTP 401 bad credentials)"
+[ "$(cat "$FAKE_DIR/n")" = 3 ] || { echo "FAIL: gh was called $(cat "$FAKE_DIR/n") times, want 3" >&2; fail=1; }
+
+# 8c. a good read resets the count: two failures, a pending read, two failures, then merged
+rm -rf "$FAKE_DIR"
+mkdir -p "$FAKE_DIR"
+cat >"$tmp/bin/gh" <<'SH'
+#!/usr/bin/env bash
+[ "$1 $2" = "pr view" ] || exit 1
+n=$(($(cat "$FAKE_DIR/n" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$FAKE_DIR/n"
+case $n in
+3) echo '{"state":"OPEN","mergeStateStatus":"CLEAN","statusCheckRollup":[]}' ;;
+6) echo '{"state":"MERGED","mergeStateStatus":"CLEAN","mergeCommit":{"oid":"1234567890"},"statusCheckRollup":[]}' ;;
+*) echo "boom $n" >&2; exit 1 ;;
+esac
+SH
+run 7 --interval 0 --timeout 600
+grep -q 'giving up' <<<"$out" && { echo "FAIL: a good read resets the failure count: $out" >&2; fail=1; }
+[ "$rc" = 0 ] && grep -q 'MERGED 1234567' <<<"$out" && echo "ok: a good read resets the failure count" || { echo "FAIL: reset: rc=$rc $out" >&2; fail=1; }
 
 # 9. usage
 run
