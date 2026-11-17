@@ -66,7 +66,21 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/docs/adr"
-cp "$repo/hack/adr-index.sh" "$seed/hack/"
+# The real hack/adr-index.sh runs the Go tool of this module; the fixture has no module and plain ADRs, so a stub
+# stands in. It rewrites the README index from each title and Status line, which is all ship.sh relies on.
+cat >"$seed/hack/adr-index.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+d=docs/adr
+{
+	sed -n '1,/^## Index$/p' "$d/README.md"
+	echo
+	for f in $(cd "$d" && /bin/ls | grep -E '^[0-9]{4}-.*\.md$' | sort); do
+		echo "| [${f:0:4}]($f) | $(sed -n '1s/^# [0-9]*\. *//p' "$d/$f") | $(sed -n 's/^- Status: *//p' "$d/$f" | head -1) |"
+	done
+} >"$d/README.md.new"
+mv "$d/README.md.new" "$d/README.md"
+SH
 cat >"$seed/hack/needs-e2e.sh" <<'SH'
 #!/usr/bin/env bash
 echo "needs-e2e $*" >>"$FAKE_LOG"

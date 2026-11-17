@@ -153,9 +153,12 @@ else
 			echo "ship: merge of origin/main failed without conflicts (a git hook refused?):" >&2
 			echo "$merge_out" >&2
 			exit 1
-		elif [[ $conflicts == docs/adr/README.md ]]; then
+		elif [[ -z $(grep -vxE 'docs/adr/(README\.md|adrs\.json|graph\.md)' <<<"$conflicts" || true) ]]; then
+			# the generated ADR files: take any side, then regenerate from the merged ADRs (issue 283)
+			mapfile -t gen <<<"$conflicts"
+			git checkout --ours -- "${gen[@]}" 2>/dev/null || true
 			hack/adr-index.sh >/dev/null
-			git add docs/adr/README.md
+			git add docs/adr/README.md docs/adr/adrs.json docs/adr/graph.md 2>/dev/null || git add docs/adr/README.md
 			git commit -q --no-edit --signoff
 			say "merged origin/main (regenerated docs/adr/README.md)"
 		else
