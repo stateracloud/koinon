@@ -131,7 +131,7 @@
         "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "savedWorkPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "guardPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the MCP leak guard (ExtMcp gRPC), reachable only from agentgateway (ADR 0091)"},
-        "leakGuardByteCap": {"type": "integer", "minimum": 1, "description": "bytes of external-low payload a run may send once its session holds both legs (ADR 0091)"},
+        "leakGuardByteCap": {"type": "integer", "minimum": 1, "description": "bytes of external-low payload a run may send once its session holds both legs before the guard records one over-threshold event for the run; no call is refused for it (ADR 0091)"},
         "durable": {
           "type": "object",
           "additionalProperties": false,

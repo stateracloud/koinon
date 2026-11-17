@@ -313,7 +313,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.guardAddr, "guard-addr", ":8083",
 		"listen address of the MCP leak guard (agentgateway's mcpGuardrails, ADR 0091); reachable only from agentgateway. Empty disables it, and the gateway then refuses every org MCP call")
 	fs.IntVar(&c.guardByteCap, "leak-guard-byte-cap", mcpguard.DefaultByteCap,
-		"payload bytes a run that holds both legs may send through external-low tools (ADR 0091 decision 5)")
+		"payload bytes a run that holds both legs may send through external-low tools before the guard records one over-threshold event; no call is refused for it (ADR 0091 decision 5, amendment 2026-11-17)")
 	fs.StringVar(&c.toolsAddr, "tools-addr", ":8081",
 		"listen address of the GitHub tools MCP server, for agentgateway only; empty disables it")
 	fs.StringVar(&c.secretsNamespace, "secrets-namespace", "",

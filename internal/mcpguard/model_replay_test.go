@@ -245,6 +245,7 @@ var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 			Expect(c.line.Args).To(MatchJSON(d.line.Args), "%s: the model sent other arguments", where(c))
 			Expect(c.class).To(Equal(d.class), where(c))
 			Expect(c.bytes).To(Equal(d.bytes), where(c))
+			Expect(c.charge).To(Equal(d.charge), where(c))
 			if c.line.Generation == keyOrder {
 				Expect(d.verdict.Action).To(Equal(NeedsDecision), where(c))
 				Expect(c.verdict.Action).To(Equal(Pass), "%s: the guard now joins the halves in either key order: drop keyOrder", where(c))
@@ -260,17 +261,22 @@ var _ = g.Describe("Replay with the fake model in the loop (#70)", func() {
 	g.It("decides a sample of the benign corpus, every server and tool, as the direct replay does, with no text match", func(ctx g.SpecContext) {
 		// gen-09 holds the long research run that goes over the byte cap.
 		calls := sameAsDirect(ctx, benignCorpus, []string{"gen-09"})
-		tools, overCap := map[string]bool{}, 0
+		tools, overCap, overByRun := map[string]bool{}, 0, map[string]int{}
 		for _, c := range calls {
-			if c.verdict.Reason == ReasonByteCap {
+			if c.charge.Crossed {
 				overCap++
+				overByRun[c.line.Run]++
+				// The call goes on: the byte count refuses nothing (ADR 0091 amendment 2026-11-17).
+				Expect(c.verdict.Action).To(Equal(Pass), where(c))
 			}
 			tools[c.line.Server+"/"+c.line.Tool] = true
 			Expect(c.verdict.Match).To(BeNil(), "%s: a benign payload matched private text", where(c))
 			Expect(c.verdict.Reason).NotTo(BeElementOf(ReasonTaint, ReasonURLRule, ReasonAmbiguous, ReasonCheck), where(c))
+			Expect(c.verdict.Reason).NotTo(Equal("byte_cap"), "%s: the byte count refuses nothing", where(c))
 		}
 		Expect(tools).To(HaveLen(9), "every server/tool of the benign corpus: %v", tools)
-		Expect(overCap).To(BeNumerically(">", 0), "the long research run reaches the byte cap through the model too")
+		Expect(overCap).To(BeNumerically(">", 0), "the long research run goes over the byte threshold through the model too, with no refusal")
+		Expect(overByRun).To(HaveLen(overCap), "one over-threshold event per run")
 	})
 
 	g.It("blocks a sample of the planted leaks per sink class, split ones included, on what the model sent", func(ctx g.SpecContext) {

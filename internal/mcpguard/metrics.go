@@ -15,7 +15,7 @@ import (
 var (
 	actions = []Action{Pass, Refuse, Approve, NeedsDecision}
 	reasons = []string{
-		ReasonInternal, ReasonClean, ReasonBothLegs, ReasonTaint, ReasonByteCap, ReasonURLRule, ReasonCheck,
+		ReasonInternal, ReasonClean, ReasonBothLegs, ReasonTaint, ReasonURLRule, ReasonCheck,
 		ReasonError, ReasonAmbiguous, ReasonIdentity, ReasonNoRun, ReasonExempt, ReasonAskTarget, ReasonFeedStalled,
 		ReasonReplyUnseen,
 	}
@@ -42,6 +42,9 @@ type Metrics struct {
 	// RecordErrors counts decisions the guard could not write to leak_guard_decisions (lab run
 	// evidence, #926). The call is not refused for it; the gap shows here and in the log. No label.
 	RecordErrors prometheus.Counter
+	// OverThreshold counts the runs that went over the byte threshold (ADR 0091 amendment
+	// 2026-11-17): one event per run, no label (the run is in no metric label, ADR 0023).
+	OverThreshold prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -71,6 +74,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_api_mcp_guard_record_errors_total",
 			Help: "Decisions of the MCP leak guard that could not be written to the decision records.",
 		}),
+		OverThreshold: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_api_mcp_guard_byte_threshold_runs_total",
+			Help: "Runs whose bytes sent out of the org through external-low sinks, while the session held both legs, went over the byte threshold. One per run; no call is refused for it.",
+		}),
 	}
 	for _, a := range actions {
 		for _, r := range reasons {
@@ -82,7 +89,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Legs.WithLabelValues("untrusted_input")
 	m.Legs.WithLabelValues("private_data")
 	if reg != nil {
-		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors)
+		reg.MustRegister(m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors, m.OverThreshold)
 	}
 	return m
 }
@@ -120,6 +127,12 @@ func (m *Metrics) recordFailed() {
 	}
 }
 
+func (m *Metrics) overThreshold() {
+	if m != nil {
+		m.OverThreshold.Inc()
+	}
+}
+
 func (m *Metrics) unseen(n int64) {
 	if m != nil {
 		m.Unseen.Add(float64(n))
@@ -140,5 +153,5 @@ func (m *Metrics) legs(l Legs) {
 
 // Collectors are the metrics to register.
 func (m *Metrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors}
+	return []prometheus.Collector{m.Decisions, m.Duration, m.Evictions, m.EvictedFingerprints, m.Legs, m.Unseen, m.RecordErrors, m.OverThreshold}
 }

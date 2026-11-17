@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRunEvidenceGuardRun = `-- name: GetRunEvidenceGuardRun :one
+SELECT capped_bytes, over_threshold_at, over_threshold_bytes
+FROM leak_guard_runs
+WHERE org_id = $1 AND run_id = $2
+`
+
+type GetRunEvidenceGuardRunParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+type GetRunEvidenceGuardRunRow struct {
+	CappedBytes        int32
+	OverThresholdAt    pgtype.Timestamptz
+	OverThresholdBytes pgtype.Int4
+}
+
+// The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+// amendment 2026-11-17). No row when the guard never charged the run.
+func (q *Queries) GetRunEvidenceGuardRun(ctx context.Context, arg GetRunEvidenceGuardRunParams) (GetRunEvidenceGuardRunRow, error) {
+	row := q.db.QueryRow(ctx, getRunEvidenceGuardRun, arg.OrgID, arg.RunID)
+	var i GetRunEvidenceGuardRunRow
+	err := row.Scan(&i.CappedBytes, &i.OverThresholdAt, &i.OverThresholdBytes)
+	return i, err
+}
+
 const getRunEvidenceRun = `-- name: GetRunEvidenceRun :one
 SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd, traced, last_turn_seq, content_purged_at FROM runs WHERE org_id = $1 AND id = $2
 `
@@ -114,30 +140,40 @@ func (q *Queries) GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceS
 const insertApprovedExecutionDecision = `-- name: InsertApprovedExecutionDecision :exec
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
-       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data
+       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
+       $1::int, $2::int, d.dest_host, $3::boolean
 FROM leak_guard_decisions d
-WHERE d.org_id = $1 AND d.agent_id = $2 AND d.run_id IS NOT DISTINCT FROM $3
-  AND d.server = $4 AND d.tool = $5 AND (d.action = 'approve' OR d.reason = 'ask_target')
+WHERE d.org_id = $4 AND d.agent_id = $5 AND d.run_id IS NOT DISTINCT FROM $6
+  AND d.server = $7 AND d.tool = $8 AND (d.action = 'approve' OR d.reason = 'ask_target')
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT 1
 `
 
 type InsertApprovedExecutionDecisionParams struct {
-	OrgID   pgtype.UUID
-	AgentID pgtype.UUID
-	RunID   pgtype.UUID
-	Server  string
-	Tool    string
+	ChargedBytes  int32
+	CapUsedBefore pgtype.Int4
+	OverThreshold bool
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	RunID         pgtype.UUID
+	Server        string
+	Tool          string
 }
 
 // A call a person approved has run through the gateway (internal/approvals). The guard's own record
 // of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 // decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
-// are counted once, when they left. Nothing is inserted when no parked decision is found.
+// are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+// amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+// inserted when no parked decision is found.
 func (q *Queries) InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error {
 	_, err := q.db.Exec(ctx, insertApprovedExecutionDecision,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.OverThreshold,
 		arg.OrgID,
 		arg.AgentID,
 		arg.RunID,
@@ -151,12 +187,14 @@ const insertLeakGuardDecision = `-- name: InsertLeakGuardDecision :exec
 
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 VALUES (
     $1, $2, $3,
     (SELECT r.id FROM runs r WHERE r.org_id = $1 AND r.agent_id = $2 AND r.state = 'running'),
     $4, $5, $6, $7, $8, $9::text[],
-    $10, $11, $12, $13, $14, $15)
+    $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19)
 `
 
 type InsertLeakGuardDecisionParams struct {
@@ -175,6 +213,10 @@ type InsertLeakGuardDecisionParams struct {
 	PayloadBytes   int32
 	UntrustedInput pgtype.Bool
 	PrivateData    pgtype.Bool
+	ChargedBytes   int32
+	CapUsedBefore  pgtype.Int4
+	DestHost       string
+	OverThreshold  bool
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -200,12 +242,65 @@ func (q *Queries) InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGua
 		arg.PayloadBytes,
 		arg.UntrustedInput,
 		arg.PrivateData,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.DestHost,
+		arg.OverThreshold,
+	)
+	return err
+}
+
+const insertSentDecision = `-- name: InsertSentDecision :exec
+INSERT INTO leak_guard_decisions (
+    org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
+    payload_bytes, untrusted_input, private_data, charged_bytes, cap_used_before, dest_host, over_threshold)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, 'pass', 'approved', '{}',
+    $8, $9, $10, $11, $12, $13, $14)
+`
+
+type InsertSentDecisionParams struct {
+	OrgID          pgtype.UUID
+	AgentID        pgtype.UUID
+	Generation     string
+	RunID          pgtype.UUID
+	Server         string
+	Tool           string
+	SinkClass      string
+	PayloadBytes   int32
+	UntrustedInput pgtype.Bool
+	PrivateData    pgtype.Bool
+	ChargedBytes   int32
+	CapUsedBefore  pgtype.Int4
+	DestHost       string
+	OverThreshold  bool
+}
+
+// A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+// 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+// and legs are the guard's own reading of the approved call, not a copy of another decision.
+func (q *Queries) InsertSentDecision(ctx context.Context, arg InsertSentDecisionParams) error {
+	_, err := q.db.Exec(ctx, insertSentDecision,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.RunID,
+		arg.Server,
+		arg.Tool,
+		arg.SinkClass,
+		arg.PayloadBytes,
+		arg.UntrustedInput,
+		arg.PrivateData,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.DestHost,
+		arg.OverThreshold,
 	)
 	return err
 }
 
 const listRunEvidenceDecisions = `-- name: ListRunEvidenceDecisions :many
-SELECT org_id, id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons, match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data, created_at FROM leak_guard_decisions
+SELECT org_id, id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons, match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data, created_at, charged_bytes, cap_used_before, dest_host, over_threshold FROM leak_guard_decisions
 WHERE org_id = $1 AND run_id = $2
 ORDER BY created_at, id
 `
@@ -243,6 +338,10 @@ func (q *Queries) ListRunEvidenceDecisions(ctx context.Context, arg ListRunEvide
 			&i.UntrustedInput,
 			&i.PrivateData,
 			&i.CreatedAt,
+			&i.ChargedBytes,
+			&i.CapUsedBefore,
+			&i.DestHost,
+			&i.OverThreshold,
 		); err != nil {
 			return nil, err
 		}

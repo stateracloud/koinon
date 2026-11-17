@@ -9,7 +9,7 @@
 # refuses every org MCP call, so the chart must always pass it.
 k8s=(--set gateway.mode=kubernetes)
 has "koinon-api serves the leak guard" '"--guard-addr", ":8083"' --show-only templates/deployments.yaml
-has "koinon-api passes the byte cap" '"--leak-guard-byte-cap", "2048"' --show-only templates/deployments.yaml
+has "koinon-api passes the byte threshold" '"--leak-guard-byte-cap", "16384"' --show-only templates/deployments.yaml
 has "api.leakGuardByteCap is used" '"--leak-guard-byte-cap", "4096"' --set api.leakGuardByteCap=4096 --show-only templates/deployments.yaml
 has "koinon-api names the guard port" 'name: guard$' --show-only templates/deployments.yaml
 has "the guard has its own Service" 'name: koinon-api-guard$' --show-only templates/deployments.yaml

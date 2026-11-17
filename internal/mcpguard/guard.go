@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -25,9 +26,10 @@ import (
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
 
-// DefaultByteCap is the byte cap per run of ADR 0091 decision 5: payload bytes a run that holds
+// DefaultByteCap is the byte threshold per run of ADR 0091 decision 5 (amended 2026-11-17: it alerts
+// and never refuses): payload bytes a run that holds
 // both legs may send through external-low sinks. "About 2 KB" until real traffic sets it.
-const DefaultByteCap = 2048
+const DefaultByteCap = 16 << 10
 
 // LookupBudget is the time the guard allows itself besides the taint check's own backstop: the
 // identity, declaration, session and run reads and writes.
@@ -335,6 +337,9 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	g.metrics.decided(out.Verdict, class, g.now().Sub(start))
 	g.logDecision(call, out, f)
 	g.recordDecision(ctx, call, out, f)
+	// The one over-threshold event of the run, raised when the committed charge of this call took the
+	// run over the threshold. The count never refuses the call (ADR 0091 amendment 2026-11-17).
+	g.raised(f.charge, call.Target, call.Tool)
 	return out
 }
 
@@ -358,6 +363,9 @@ type decisionFacts struct {
 	generation string
 	// payloadBytes is the size of the call's payload arguments.
 	payloadBytes int
+	// charge and destHost are the byte count and the fetch host of the call (the decision record).
+	charge   byteCharge
+	destHost string
 }
 
 // logDecision logs every refusal and every call sent to a person (an ask target or an approval),
@@ -417,6 +425,7 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	a, err := g.assess(ctx, c, decl, call.Arguments, true)
 	f.class, f.run, f.feedStalled, f.replyUnseen = a.class, a.run, a.feedStalled, a.replyUnseen
 	f.generation, f.payloadBytes = a.generation, a.args.PayloadBytes()
+	f.charge, f.destHost = a.charge, a.destHost
 	if a.legsRead {
 		l := a.legs
 		f.legs = &l
@@ -473,6 +482,14 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 		// A Decider must decide; anything else fails closed.
 		return Outcome{}, fmt.Errorf("mcpguard: the decider left the call undecided (%q)", out.Verdict.Action)
 	}
+	if out.Verdict.Action == Pass && a.class == sinkclass.ExternalLow && a.legs.Both() {
+		// A Decider let the held call on: it is sent now, so it is charged now.
+		bc, err := g.chargeSent(ctx, c.org.ID, a.runID, a.args.PayloadBytes(), nil)
+		if err != nil {
+			return Outcome{}, err
+		}
+		f.charge = bc
+	}
 	return out, nil
 }
 
@@ -528,6 +545,40 @@ type assessment struct {
 	replyUnseen bool
 	// generation is the home generation of the agent's sandbox, once read (external calls).
 	generation string
+	// charge is what the call did to the run's byte count (external-low calls the guard charged).
+	charge byteCharge
+	// destHost is the fetch host of the call's address arguments, when it has one.
+	destHost string
+	// runID is the agent's running run, once an external-low call looked it up.
+	runID pgtype.UUID
+}
+
+// maxDestHosts bounds how many hosts one decision record names.
+const maxDestHosts = 8
+
+// destHost returns the destinations of the call's http and https address arguments, sorted, joined
+// by a comma, or empty when it has none. A destination is the last two labels of the fetch host, as
+// the record is evidence and never payload: the labels below them can carry data (ADR 0091, the host
+// labels of an untrusted host are payload), so they are dropped. Never a path or a query. This is
+// a coarse stand-in for the registrable domain; a public-suffix list would be exact but is not
+// worth a dependency for a grouping key.
+func destHost(a Args) string {
+	var hosts []string
+	for _, v := range a.Address {
+		h, ok := sinkclass.FetchHost(v)
+		if !ok {
+			continue
+		}
+		// An IP literal has no domain: it is kept whole, never cut to its last two groups.
+		if labels := strings.Split(h, "."); len(labels) > 2 && net.ParseIP(h) == nil {
+			h = strings.Join(labels[len(labels)-2:], ".")
+		}
+		if !slices.Contains(hosts, h) {
+			hosts = append(hosts, h)
+		}
+	}
+	slices.Sort(hosts)
+	return strings.Join(hosts[:min(len(hosts), maxDestHosts)], ",")
 }
 
 func (a assessment) risk() map[string]any {
@@ -630,12 +681,13 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		g.log.Warn("mcp guard: the session's taint store dropped fingerprints; a miss may be text it once held",
 			"org", c.org.Slug, "agent", c.agent.ID.String(), "generation", gen)
 	}
-	f := Facts{Class: a.class, BothLegs: a.legs.Both(), Taint: taint, Cap: g.cap, PayloadBytes: args.PayloadBytes()}
+	f := Facts{Class: a.class, BothLegs: a.legs.Both(), Taint: taint}
+	a.destHost = destHost(args)
 	if a.class != sinkclass.ExternalLow || !charge {
 		a.verdict = a.stallMarked(Decide(f))
 		return a, nil
 	}
-	// external-low: the URL rule and the byte cap, charged to the run under its lock.
+	// external-low: the URL rule, and the run's byte count charged under its lock (never refusing).
 	run, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		o := refuse(ReasonNoRun, "refused by the leak guard: calls out of the org are only allowed while the agent works on a task")
@@ -645,6 +697,8 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	if err != nil {
 		return a, err
 	}
+	a.runID = run.ID
+	var bc byteCharge
 	err = pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		budget, err := q.LockLeakGuardRun(ctx, store.LockLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID})
@@ -657,9 +711,13 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 				return err
 			}
 		}
-		var capped int
-		a.verdict, capped = g.decideExternalLow(st, int(budget.CappedBytes), c.server, decl, args, f)
+		a.verdict, bc = g.decideExternalLow(st, int(budget.CappedBytes), budget.OverThresholdAt.Valid, c.server, decl, args, f)
 		a.verdict = a.stallMarked(a.verdict)
+		if c.ask {
+			// Every call of an ask target is held for a person, whatever the verdict: it is charged
+			// when a person allows it and it is sent (RecordSent), never here.
+			bc = byteCharge{Known: true, Before: bc.Before, After: bc.Before}
+		}
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -667,24 +725,89 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		if err != nil {
 			return err
 		}
-		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(capped, 1<<30)), UrlState: state}) //nolint:gosec // bounded
+		return q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: c.org.ID, RunID: run.ID, CappedBytes: int32(min(bc.After, 1<<30)), UrlState: state, Crossed: bc.Crossed}) //nolint:gosec // bounded
 	})
+	if err == nil {
+		// Only a charge that was committed is a fact of the run; a rolled-back one raises no event.
+		a.charge = bc
+	}
 	return a, err
 }
 
 // decideExternalLow decides an external-low call (ADR 0091 decision 5): the ADR 0084 URL rule,
-// which charges st, and, once the session holds both legs, the byte cap per run, where used is what
-// the run has sent since it held them. It returns the verdict and the run's count after the call. A
-// call that is refused leaves the run as it was: the caller saves neither st nor the count. The
-// replay suite drives it without Postgres, so the cap it checks is this one.
-func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, int) {
+// which charges st, and, once the session holds both legs, the run's byte count, where used is what
+// the run has sent since it held them. It returns the verdict and what the call did to the count
+// (the threshold is crossed, never enforced). A call that is refused leaves the run as it was: the
+// caller saves neither st nor the count. The replay suite drives it without Postgres, so the count
+// it keeps is this one.
+func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, byteCharge) {
 	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
-	f.CapUsed = used
-	if f.BothLegs {
-		f.OverCap = used+f.PayloadBytes > g.cap
-		used += f.PayloadBytes
+	v := Decide(f)
+	c := byteCharge{Known: true, Before: used, After: used}
+	// Only a call that goes out now is charged. A call held for a person (NeedsDecision) is charged
+	// when a person allows it and it is sent (chargeSent); a denied or expired call never is.
+	if f.BothLegs && v.Action == Pass {
+		c.Charged = args.PayloadBytes()
+		c.After = used + c.Charged
+		// One event per run: the call that takes the count past the threshold, once.
+		c.Crossed = !flagged && c.Charged > 0 && c.After > g.cap
 	}
-	return Decide(f), used
+	return v, c
+}
+
+// chargeSent charges n bytes of a call that has been sent after it was held for a decision (ADR 0091
+// amendment 2026-11-17), under the run's lock, so the one over-threshold event stays exact. then runs
+// in the same transaction with the charge. A failed charge returns an empty byteCharge.
+func (g *Guard) chargeSent(ctx context.Context, org, run pgtype.UUID, n int, then func(q *store.Queries, bc byteCharge) error) (byteCharge, error) {
+	var bc byteCharge
+	err := pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		b, err := q.LockLeakGuardRun(ctx, store.LockLeakGuardRunParams{OrgID: org, RunID: run})
+		if err != nil {
+			return err
+		}
+		used := int(b.CappedBytes)
+		bc = byteCharge{Known: true, Before: used, Charged: n, After: used + n}
+		bc.Crossed = !b.OverThresholdAt.Valid && n > 0 && bc.After > g.cap
+		err = q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{
+			OrgID: org, RunID: run,
+			CappedBytes: int32(min(bc.After, 1<<30)), //nolint:gosec // bounded
+			UrlState:    b.UrlState, Crossed: bc.Crossed,
+		})
+		if err != nil {
+			return err
+		}
+		if then != nil {
+			return then(q, bc)
+		}
+		return nil
+	})
+	if err != nil {
+		return byteCharge{}, err
+	}
+	return bc, nil
+}
+
+// raised counts the one over-threshold event of a run: the metric and the log line. The count never
+// refuses a call.
+func (g *Guard) raised(bc byteCharge, target, tool string) {
+	if !bc.Crossed {
+		return
+	}
+	g.metrics.overThreshold()
+	g.log.Warn("mcp guard: a run went over the byte threshold", "target", target, "tool", tool,
+		"threshold", g.cap, "bytes", bc.After)
+}
+
+// byteCharge is what one external-low call did to its run's byte count (ADR 0091 decision 5): the
+// count before the call, the bytes charged (none unless the session holds both legs and the call
+// is sent: a refused call and a call held for a person are not charged here) and the count after. Crossed marks the one call that took the run past the
+// threshold. The count never refuses a call.
+type byteCharge struct {
+	// Known is set when the guard read the run's count; a call that is not external-low never does.
+	Known                  bool
+	Before, Charged, After int
+	Crossed                bool
 }
 
 // stallMarked adds ReasonFeedStalled to a verdict that is open while the feed stalled, and

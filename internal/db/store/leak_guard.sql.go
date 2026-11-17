@@ -402,7 +402,7 @@ const lockLeakGuardRun = `-- name: LockLeakGuardRun :one
 INSERT INTO leak_guard_runs (org_id, run_id)
 VALUES ($1, $2)
 ON CONFLICT (org_id, run_id) DO UPDATE SET org_id = leak_guard_runs.org_id
-RETURNING org_id, run_id, capped_bytes, url_state, feed_epoch, feed_read, feed_done, updated_at
+RETURNING org_id, run_id, capped_bytes, url_state, feed_epoch, feed_read, feed_done, updated_at, over_threshold_at, over_threshold_bytes
 `
 
 type LockLeakGuardRunParams struct {
@@ -424,6 +424,8 @@ func (q *Queries) LockLeakGuardRun(ctx context.Context, arg LockLeakGuardRunPara
 		&i.FeedRead,
 		&i.FeedDone,
 		&i.UpdatedAt,
+		&i.OverThresholdAt,
+		&i.OverThresholdBytes,
 	)
 	return i, err
 }
@@ -522,13 +524,19 @@ func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallPa
 
 const saveLeakGuardRun = `-- name: SaveLeakGuardRun :exec
 UPDATE leak_guard_runs
-SET capped_bytes = $1, url_state = $2, updated_at = now()
-WHERE org_id = $3 AND run_id = $4
+SET capped_bytes = $1, url_state = $2,
+    -- The one over-threshold event of the run (ADR 0091 amendment 2026-11-17): set when the call
+    -- takes the count past the threshold, and kept after.
+    over_threshold_at = CASE WHEN $3::boolean THEN now() ELSE over_threshold_at END,
+    over_threshold_bytes = CASE WHEN $3::boolean THEN $1 ELSE over_threshold_bytes END,
+    updated_at = now()
+WHERE org_id = $4 AND run_id = $5
 `
 
 type SaveLeakGuardRunParams struct {
 	CappedBytes int32
 	UrlState    []byte
+	Crossed     bool
 	OrgID       pgtype.UUID
 	RunID       pgtype.UUID
 }
@@ -537,6 +545,7 @@ func (q *Queries) SaveLeakGuardRun(ctx context.Context, arg SaveLeakGuardRunPara
 	_, err := q.db.Exec(ctx, saveLeakGuardRun,
 		arg.CappedBytes,
 		arg.UrlState,
+		arg.Crossed,
 		arg.OrgID,
 		arg.RunID,
 	)

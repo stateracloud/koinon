@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -99,6 +100,20 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 		"state": string(run.State), "started_at": ts(run.StartedAt), "finished_at": ts(run.FinishedAt),
 		"outcome_reason": e.text(run.OutcomeReason.String), "sandbox": sandbox,
 	}
+	// The leak guard's byte count and its one over-threshold event (ADR 0091 amendment 2026-11-17).
+	guardRun, err := e.Q.GetRunEvidenceGuardRun(ctx, store.GetRunEvidenceGuardRunParams{OrgID: org, RunID: runID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		runLine["leak_guard"] = map[string]any{"charged_bytes": 0, "over_threshold": false}
+	case err != nil:
+		return sum, err
+	default:
+		lg := map[string]any{"charged_bytes": guardRun.CappedBytes, "over_threshold": guardRun.OverThresholdAt.Valid}
+		if guardRun.OverThresholdAt.Valid {
+			lg["over_threshold_at"], lg["over_threshold_bytes"] = ts(guardRun.OverThresholdAt), guardRun.OverThresholdBytes.Int32
+		}
+		runLine["leak_guard"] = lg
+	}
 	if err := line(bufs[FileRun], runLine); err != nil {
 		return sum, err
 	}
@@ -156,7 +171,8 @@ func (e *Exporter) Export(ctx context.Context, org, runID pgtype.UUID, sink Sink
 			"type": "decision", "run_id": uuidString(run.ID), "n": i + 1, "at": ts(d.CreatedAt), "generation": d.Generation,
 			"server": e.Hosts.Mask(d.Server), "tool": e.Hosts.Mask(d.Tool), "sink_class": d.SinkClass, "action": d.Action,
 			"reason": e.Hosts.Mask(d.Reason), "reasons": e.maskAll(d.Reasons), "match_count": d.MatchCount, "match_length": d.MatchLength, "match_encoding": d.MatchEncoding,
-			"payload_bytes": d.PayloadBytes,
+			"payload_bytes": d.PayloadBytes, "charged_bytes": d.ChargedBytes, "cap_used_before": nullInt(d.CapUsedBefore),
+			"dest_host": e.hostNames(d.DestHost), "over_threshold": d.OverThreshold,
 		}
 		if d.UntrustedInput.Valid {
 			l["untrusted_input"], l["private_data"] = d.UntrustedInput.Bool, d.PrivateData.Bool
@@ -227,6 +243,19 @@ func (e *Exporter) maskAll(in []string) []string {
 	return out
 }
 
+// hostNames replaces the comma-joined fetch hosts of a decision with their pseudonyms: the same host
+// has the same name in the whole export, so the lab can group by destination without the name.
+func (e *Exporter) hostNames(joined string) string {
+	if joined == "" {
+		return ""
+	}
+	parts := strings.Split(joined, ",")
+	for i, h := range parts {
+		parts[i] = e.Hosts.Name(h)
+	}
+	return strings.Join(parts, ",")
+}
+
 func (e *Exporter) text(s string) string { return e.Hosts.Mask(e.Scrubber.Text(s)) }
 
 // json scrubs a JSON payload. A payload that is not one JSON value is exported as a scrubbed string.
@@ -253,6 +282,14 @@ func ts(t pgtype.Timestamptz) any {
 		return nil
 	}
 	return t.Time.UTC().Format(time.RFC3339Nano)
+}
+
+// nullInt is the value of a column that is NULL when the guard did not read it.
+func nullInt(v pgtype.Int4) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Int32
 }
 
 func uuidString(u pgtype.UUID) string {

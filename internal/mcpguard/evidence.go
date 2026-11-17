@@ -6,6 +6,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -14,7 +16,8 @@ const recordTimeout = 3 * time.Second
 
 // recordDecision writes the decision of one call to leak_guard_decisions (lab run evidence, #926):
 // every decision, passes included, with the sink class, the verdict, its reasons, the length of the
-// text match and the size of the payload in bytes. Never an argument, a payload or a matched text.
+// text match, the size of the payload in bytes, the bytes charged to the run's count, the count before
+// the call, the fetch host and the one call that took the run over the threshold (#1058). Never an argument, a payload or a matched text.
 //
 // The record is evidence, not a control: a write that fails does not change the verdict (the guard
 // already failed closed on what it could not decide). The failure is logged and counted
@@ -37,6 +40,11 @@ func (g *Guard) recordDecision(ctx context.Context, call Call, out Outcome, f de
 		OrgID: f.who.org.ID, AgentID: f.who.agent.ID, Generation: f.generation,
 		Server: f.who.server.Name, Tool: call.Tool, SinkClass: class, Action: string(v.Action),
 		Reason: v.Reason, Reasons: append([]string{}, v.Reasons...), PayloadBytes: int32(min(f.payloadBytes, 1<<30)), //nolint:gosec // bounded
+		ChargedBytes: int32(min(f.charge.Charged, 1<<30)), //nolint:gosec // bounded
+		DestHost:     f.destHost, OverThreshold: f.charge.Crossed,
+	}
+	if f.charge.Known {
+		p.CapUsedBefore = pgtype.Int4{Int32: int32(min(f.charge.Before, 1<<30)), Valid: true} //nolint:gosec // bounded
 	}
 	if m := v.Match; m != nil {
 		p.MatchCount, p.MatchLength, p.MatchEncoding = 1, int32(min(m.Length, 1<<30)), m.Encoding //nolint:gosec // bounded

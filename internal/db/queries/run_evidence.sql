@@ -8,28 +8,52 @@
 -- decision costs one round trip. No argument, payload or matched text is stored.
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 VALUES (
     @org_id, @agent_id, @generation,
     (SELECT r.id FROM runs r WHERE r.org_id = @org_id AND r.agent_id = @agent_id AND r.state = 'running'),
     @server, @tool, @sink_class, @action, @reason, @reasons::text[],
-    @match_count, @match_length, @match_encoding, @payload_bytes, @untrusted_input, @private_data);
+    @match_count, @match_length, @match_encoding, @payload_bytes, @untrusted_input, @private_data,
+    @charged_bytes, @cap_used_before, @dest_host, @over_threshold);
 
 -- name: InsertApprovedExecutionDecision :exec
 -- A call a person approved has run through the gateway (internal/approvals). The guard's own record
 -- of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 -- decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
--- are counted once, when they left. Nothing is inserted when no parked decision is found.
+-- are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+-- amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+-- inserted when no parked decision is found.
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
-    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data)
+    match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
+    charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
-       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data
+       d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
+       @charged_bytes::int, sqlc.narg('cap_used_before')::int, d.dest_host, @over_threshold::boolean
 FROM leak_guard_decisions d
 WHERE d.org_id = @org_id AND d.agent_id = @agent_id AND d.run_id IS NOT DISTINCT FROM @run_id
   AND d.server = @server AND d.tool = @tool AND (d.action = 'approve' OR d.reason = 'ask_target')
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT 1;
+
+-- name: InsertSentDecision :exec
+-- A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+-- 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+-- and legs are the guard's own reading of the approved call, not a copy of another decision.
+INSERT INTO leak_guard_decisions (
+    org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
+    payload_bytes, untrusted_input, private_data, charged_bytes, cap_used_before, dest_host, over_threshold)
+VALUES (
+    @org_id, @agent_id, @generation, @run_id, @server, @tool, @sink_class, 'pass', 'approved', '{}',
+    @payload_bytes, @untrusted_input, @private_data, @charged_bytes, @cap_used_before, @dest_host, @over_threshold);
+
+-- name: GetRunEvidenceGuardRun :one
+-- The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+-- amendment 2026-11-17). No row when the guard never charged the run.
+SELECT capped_bytes, over_threshold_at, over_threshold_bytes
+FROM leak_guard_runs
+WHERE org_id = @org_id AND run_id = @run_id;
 
 -- name: ListRunEvidenceDecisions :many
 SELECT * FROM leak_guard_decisions

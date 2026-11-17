@@ -223,7 +223,7 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
 | Session state | `none`, `internal` | `external-low` | `external-high` |
 |---|---|---|---|
 | Not both legs | pass | today's limits | pass |
-| Both legs | pass | byte cap | ADR 0042 approval |
+| Both legs | pass | byte count (alert) | ADR 0042 approval |
 
 - **`none` and `internal` always pass.** They carry nothing out. The ADR 0057 tool tiers still
   govern writes, and integrity of what is written is not this guard's job.
@@ -245,9 +245,9 @@ the legs, whether a run was found and whether the feed stalled; never an argumen
   the payload bytes as sent (the URL's path, query and fragment, the search query), with no decoding,
   so it holds whatever the encoding. It counts from the first call after the run holds both legs,
   since no byte sent before that can carry private data under injected instructions. The **starting
-  value is about 2 KB**, set from real traffic measurements (open questions). A call that would go
-  over the cap is a **plain refusal** with a reason the agent can read, not an approval. The URL
-  shape rule keeps applying inside the cap.
+  value is about 2 KB**, set from real traffic measurements (open questions). *Amended
+  2026-11-17 (#1058): the threshold is 16 KiB and a call over it is not refused: the guard records one
+  event for the run (see the amendment at the end).* The URL shape rule keeps applying.
 - **Shipped templates reach the approval branch only through undeclared tools.** No shipped template
   combines a leg-setting read of untrusted input, private data and an auto-tier `external-high` tool
   among the tools it names; the templates test reads the sink classes and fails if one does. A tool
@@ -317,7 +317,8 @@ inside a list is refused, whatever its class would be.
 - Once a session holds both legs, no free-text body reaches a party outside the org without a person
   approving that exact call, with the payload on the card.
 - Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
-  the encoding.
+  the encoding. *Amended 2026-11-17 (#1058): withdrawn. The cap alerts and does not bound; see the
+  amendment at the end.*
 - Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
   a person, except the split, separator-padded base64 case named under "Not guaranteed" below.
 - Writes into the org's own private repos are never blocked as leaks, so the #70 class of false
@@ -325,12 +326,13 @@ inside a list is refused, whatever its class would be.
 
 **Not guaranteed:**
 
-- **Leaks under the byte cap.** Up to the cap per run leaves through `external-low` sinks, and a run
-  after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
-  stay small, and keys belong in the secret store, not in the context.
+- **Leaks under the byte cap.** *(Amended 2026-11-17, #1058: the cap alerts and never refuses, so
+  there is no bound; the run's one over-threshold event is the signal.)* Any volume per run leaves
+  through `external-low` sinks. A secret of 40 bytes fits under any threshold, so keys belong in the
+  secret store, not in the context.
 - **A split, separator-padded base64 secret.** A secret split across two arguments and encoded as
   separator-padded base64, with each half longer than the join ends, passes the text match. The same
-  text in one argument is still caught, and the byte cap and the session legs bound the damage. See
+  text in one argument is still caught, and the session legs bound the damage (the byte cap only alerts, since 2026-11-17). See
   decision 6 (known limit) and #369 for the general fix.
 - **A misclassified internal sink.** A repo or host declared internal that is in fact world-readable
   leaks freely. The classification has to be right; its default is external.
@@ -357,9 +359,8 @@ flowchart TD
   K -->|external-low| L{both legs?}
   K -->|external-high| H{both legs?}
   L -->|no| T[URL rule and today's budgets]
-  L -->|yes| B{within byte cap?}
-  B -->|no| R[plain refusal]
-  B -->|yes| M
+  L -->|yes| B[count bytes: one alert per run over the threshold]
+  B --> M
   T --> M{text match on payload?}
   H -->|yes| A[ADR 0042 approval: destination and payload]
   H -->|no| M2{text match on payload?}
@@ -378,7 +379,7 @@ flowchart TD
   the same kind. The false alarm goes away because in-org writes are internal and address arguments
   are never matched.
 - **Chase old issue 609's small encoded pieces.** Rejected: the byte cap bounds that class whatever the
-  encoding.
+  encoding. *(Amended 2026-11-17: the cap now alerts and does not bound.)*
 - **Keep the legs per server only.** Rejected: it cannot tell a private repo from a public one on the
   same server, so both the #70 false alarm and the GitHub public-repo leak stay possible.
 - **Refuse, instead of asking, for `external-high` in a session with both legs.** Not chosen: shipped
@@ -414,7 +415,7 @@ flowchart TD
 |---|---|
 | old issue 348 (merged core) | Freeze the decoders. Drop the any-pair joins and the pair windows; join payload arguments in call order. `doc.go` calls it a secondary signal. |
 | old issue 609 | Superseded by the byte cap; close as by design. |
-| old issue 349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. Byte-cap and URL-rule refusals are plain refusals; a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
+| old issue 349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. URL-rule refusals are plain refusals (the byte cap alerts only, since 2026-11-17); a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
 | old issue 350 / PR old issue 621 (schema) | Keep kind, legs, the URL reset, the fetch-trusted hosts and the threshold. Add a sink class per tool (default `external-high`), the address-argument declaration, and the org's own code-host scope. Can follow in old issue 349. |
 | old issue 351 (templates) | Keep. The test reads sink classes and fails on untrusted input, private data and an auto-tier `external-high` tool together. |
 | #70 / PR old issue 623 (tests) | Build the replay from real, scrubbed recordings, not the generated corpus, and assert per sink class. Keep the planted leaks and the RT1 canaries. The `northwind/platform-handbook` case becomes the "internal write passes" regression. |
@@ -589,3 +590,54 @@ the count to the database. If any step lags, or a harness gives a reply to the m
 finished update (a cut call left in progress), the next call of the model is taken as the same turn
 and an unseen reply does not count until the call ends or `UnseenAfter` passes. The loss is both
 legs of that reply. The guard cannot close this from the database alone.
+
+## Amendment (2026-11-17, #1058): the byte cap alerts and never refuses
+
+The maintainer decided that the byte cap of decision 5 no longer refuses a call. The cap detects
+bulk leaks. It does not stop them.
+
+**Why.** No AI gateway, AI security product or MCP gateway caps outbound data volume. The security
+products that count cumulative outbound volume per user only alert or score: Code42 and Mimecast
+Incydr ("File volume: Total size greater than", 15 minute window) and Microsoft Purview Insider Risk
+Management (cumulative exfiltration detection, 30 day baseline). The products that block on
+cumulative outbound bytes are network quotas, not leak guards: Sophos Firewall data transfer
+policies and MikroTik HotSpot `limit-bytes-out`. A refusal on a normal run is also nannying: agents
+work without approvals on routine calls (the measurement of 2026-11-16 showed a normal full run over
+the old value of 2048 bytes).
+
+**What changes.**
+
+- The guard keeps counting the **charged bytes** per run: the payload bytes of `external-low` calls
+  made while the session holds both legs. A call is **charged when it is sent**. A call that is
+  refused is not charged. A call held for a person's decision is not charged when the guard assesses
+  it: it is **charged when a person allows it and the executor sends it**, once (the approved re-run
+  adds a decision row with the charged bytes, and the parked row stays at 0). A denied or expired
+  call is never charged, because its data never left. The guard reads the size from the allowed call
+  itself, so another held call of the same tool is never charged in its place. Every call of an
+  ask target is held, so it is charged this way, whatever the verdict. A call that the executor
+  sends is charged only when its reply comes back, so the count is at most once for it. The count never refuses a call. The reason
+  `byte_cap` is removed.
+- The **threshold** is 16 KiB per run (the setting `--leak-guard-byte-cap` and the chart value
+  `leakGuardByteCap` stay; the default was 2 KiB). When the count of a run goes over it, the guard
+  records **one event for that run**, at the call whose charge took the count past the threshold (for
+  a held call, the moment it is sent): `leak_guard_runs.over_threshold_at` and `over_threshold_bytes`
+  (exported in `run.jsonl`), the mark `over_threshold` on the one decision row that crossed it, and
+  the counter `koinon_api_mcp_guard_byte_threshold_runs_total`. The metric has no label (ADR 0023: no
+  org, agent, user, ticket or run IDs), so Grafana shows how many runs crossed the threshold and the
+  run evidence says which.
+- Each **decision row** records `charged_bytes` (what the call added to the run's count),
+  `cap_used_before` (the count before the call) and `dest_host` (the last two labels of the fetch host of
+  an http or https address argument, such as `example.com`; it is not a public-suffix domain, so
+  `a.co.uk` is stored as `co.uk`; at most 8 hosts, sorted; empty when there is none). The run evidence exports them, with the host as a
+  pseudonym, so the lab reads the count from the rows. The stored count is the sum of the
+  charged bytes, except for a decision row that failed to write (counted as a record error). The migration only adds columns (ADR 0085 patch-line rule).
+- The URL rule and the text match are unchanged.
+
+**What the cap does not do.** A secret under about 1 KB (a token, a key) is far below any threshold
+that normal runs allow. Small secrets rely on the no-secrets rule (no credentials in a sandbox),
+the text match on every external payload, and the two legs. The cap only shows bulk loss after it
+happened, through allowed low-risk calls.
+
+The table of decision 5 reads, for both legs and `external-low`: pass, with the bytes counted. The
+open question "does a cap refusal stop the run?" of the amendment of 2026-11-16 is closed: there is
+no cap refusal.

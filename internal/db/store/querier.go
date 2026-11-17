@@ -618,6 +618,9 @@ type Querier interface {
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091
+	// amendment 2026-11-17). No row when the guard never charged the run.
+	GetRunEvidenceGuardRun(ctx context.Context, arg GetRunEvidenceGuardRunParams) (GetRunEvidenceGuardRunRow, error)
 	GetRunEvidenceRun(ctx context.Context, arg GetRunEvidenceRunParams) (Run, error)
 	GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceSandboxParams) (AgentSandbox, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
@@ -681,7 +684,9 @@ type Querier interface {
 	// A call a person approved has run through the gateway (internal/approvals). The guard's own record
 	// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 	// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
-	// are counted once, when they left. Nothing is inserted when no parked decision is found.
+	// are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+	// amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+	// inserted when no parked decision is found.
 	InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)
@@ -721,6 +726,10 @@ type Querier interface {
 	// source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
 	// same times. No row: the source is gone or not complete.
 	InsertSeededHomeCheckpoint(ctx context.Context, arg InsertSeededHomeCheckpointParams) (HomeCheckpoint, error)
+	// A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+	// 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+	// and legs are the guard's own reading of the approved call, not a copy of another decision.
+	InsertSentDecision(ctx context.Context, arg InsertSentDecisionParams) error
 	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
 	// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's

@@ -66,7 +66,7 @@ ADR 0091 decisions 1 to 4, 6, 7 and 9 stand. Decision 5 changes only in its both
 The judge runs **only** when `Decide` returns `Approve` with reason `both_legs` and **no `taint`
 match**, on a call of an auto-tier tool. Everything else stays rules:
 
-- `Pass` and `Refuse` never reach the judge. It cannot loosen a refusal (byte cap, URL rule, a check
+- `Pass` and `Refuse` never reach the judge. It cannot loosen a refusal (URL rule, a check
   that could not finish) or add a step to a pass.
 - A `taint` match stays a person's call, alone or with `both_legs`: the rules found private text in
   the payload.
@@ -147,7 +147,7 @@ this branch gets the card. A person's answer on a card resets the count in a row
 ### 7. Bounds
 
 - **A judge byte budget per run** on the payload bytes the judge allows, counted as sent, with no
-  decoding, like ADR 0091's byte cap. It is separate from the 2 KB `external-low` cap. Starting
+  decoding, like ADR 0091's byte cap. It is separate from the 16 KiB `external-low` alert threshold (ADR 0091, amended 2026-11-17: it alerts, it never refuses). Starting
   value **about 8 KB**, tuned from #70's data. A call that would go over it gets the card. This
   keeps a fooled judge's leak bounded whatever the encoding.
 - **A cap on judge calls per run**, starting at 30. Past it, the card.

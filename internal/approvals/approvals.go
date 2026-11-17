@@ -166,6 +166,10 @@ type Options struct {
 	// the agent's. If it fails the result is withheld and the request fails: a result the guard did
 	// not see could leave the org later unchecked. Nil records nothing.
 	OnMCPResult func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error
+	// OnMCPSent records an approved MCP call after the executor sent it and charges its bytes to the
+	// run (internal/mcpguard: a held call is charged when a person allows it and it is sent). Evidence,
+	// not a control: a failure is logged. Nil records the call with no charge.
+	OnMCPSent func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer) error
 }
 
 // Service decides and executes approval requests.
@@ -184,6 +188,7 @@ type Service struct {
 	log       *slog.Logger
 	hold      *restorehold.Guard
 	onMCP     func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer, result json.RawMessage) error
+	onSent    func(ctx context.Context, row store.ApprovalRequest, srv store.McpServer) error
 }
 
 // New returns a Service.
@@ -206,7 +211,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 	return &Service{
 		now:  opts.Now,
 		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts, dial: opts.DialContext,
-		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, hold: opts.RestoreHold, onMCP: opts.OnMCPResult,
+		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger, hold: opts.RestoreHold, onMCP: opts.OnMCPResult, onSent: opts.OnMCPSent,
 	}
 }
 

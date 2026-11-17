@@ -9,8 +9,10 @@
 // Decide is the table. A call's sink class comes from the tool's declaration and the call's
 // address arguments (internal/sinkclass, read only through classify.go). none and internal pass.
 // external-low passes under the ADR 0084 URL rule and its per-host and per-run budgets, and once
-// the session holds both legs under a byte cap per run (DefaultByteCap) counted in raw payload
-// bytes; over it the call is refused with text the agent reads. external-high with both legs is an
+// the session holds both legs the guard counts raw payload bytes per run (DefaultByteCap) when a call
+// is sent (a call held for a person is charged when a person allows it and it is sent; a denied or
+// expired call never is); over that threshold it records one event for the run and refuses nothing
+// (ADR 0091 amendment 2026-11-17). external-high with both legs is an
 // ADR 0042 approval of that exact call. The text match (internal/leakguard) runs on the payload of
 // external calls only, each string on its own and joined in call order and in three key orders
 // (#256: Args.Canonical, members sorted by key, each key next to its value; Args.Values, the

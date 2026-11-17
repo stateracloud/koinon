@@ -76,9 +76,10 @@ var _ = g.Describe("Replay (#352, ADR 0091)", func() {
 			Expect(byTool).To(HaveKey("costs/query"))
 		})
 
-		g.It("decides external calls by the table: pass before both legs, the byte cap and approvals after", func() {
+		g.It("decides external calls by the table: pass before both legs, a byte count that never refuses, and approvals after", func() {
 			counts := map[string]int{}
-			sent := map[string]int{} // run: external-low bytes after both legs, the oracle of the cap
+			crossed := map[string]int{} // run: over-threshold events, which must be one at most
+			sent := map[string]int{}    // run: external-low bytes after both legs, the oracle of the cap
 			for _, c := range calls {
 				if c.class != sinkclass.ExternalLow && c.class != sinkclass.ExternalHigh {
 					continue
@@ -92,20 +93,33 @@ var _ = g.Describe("Replay (#352, ADR 0091)", func() {
 					Expect(c.verdict.Action).To(Equal(NeedsDecision), where(c))
 					Expect(c.verdict.Reasons).To(Equal([]string{ReasonBothLegs}), where(c))
 					counts["external-high both"]++
-				case sent[c.line.Run]+c.bytes <= DefaultByteCap:
-					Expect(c.verdict.Action).To(Equal(Pass), "%s: %s %s", where(c), c.verdict.Reason, c.verdict.Detail)
-					sent[c.line.Run] += c.bytes
-					counts["external-low under cap"]++
 				default:
-					Expect(c.verdict.Action).To(Equal(Refuse), where(c))
-					Expect(c.verdict.Reason).To(Equal(ReasonByteCap), where(c))
-					Expect(c.verdict.Detail).To(ContainSubstring("may send at most 2048 bytes"))
-					counts["external-low over cap"]++
+					// The cap alerts and never refuses: the call passes, whatever the run has sent.
+					Expect(c.verdict.Action).To(Equal(Pass), "%s: %s %s", where(c), c.verdict.Reason, c.verdict.Detail)
+					Expect(c.charge.Before).To(Equal(sent[c.line.Run]), where(c))
+					Expect(c.charge.Charged).To(Equal(c.bytes), where(c))
+					sent[c.line.Run] += c.bytes
+					Expect(c.charge.After).To(Equal(sent[c.line.Run]), where(c))
+					if c.charge.Crossed {
+						crossed[c.line.Run]++
+						Expect(sent[c.line.Run]).To(BeNumerically(">", corpusByteCap), where(c))
+						counts["external-low over threshold"]++
+					} else {
+						counts["external-low counted"]++
+					}
 				}
 			}
 			// Every branch of the table is in the corpus.
-			for _, k := range []string{"external-low before", "external-high before", "external-high both", "external-low under cap", "external-low over cap"} {
+			for _, k := range []string{"external-low before", "external-high before", "external-high both", "external-low counted", "external-low over threshold"} {
 				Expect(counts[k]).To(BeNumerically(">", 0), k)
+			}
+			for run, n := range crossed {
+				Expect(n).To(Equal(1), "run %s: one over-threshold event per run", run)
+			}
+			for run, total := range sent {
+				if total > corpusByteCap {
+					Expect(crossed[run]).To(Equal(1), "run %s sent %d bytes: a run over the threshold has its event", run, total)
+				}
 			}
 			g.GinkgoWriter.Printf("benign external calls by branch: %v\n", counts)
 		})
