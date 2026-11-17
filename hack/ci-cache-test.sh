@@ -74,8 +74,8 @@ done
 for j in go-tidy go-lint go-test go-race-serial go-race-parallel; do
   check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'uses: \./\.github/actions/setup-go-cache'
 done
-# The one exception is `changes`: it restores the module cache alone, under the key without a week.
-check "no job but changes pastes a go-ci key (setup-go-cache defines it)" test "$(grep -c 'key: go-ci-' "$wf")" = 1
+# No job pastes a go-ci key: `changes` once restored the module cache alone, a dead restore removed in #662.
+check "no job pastes a go-ci key (setup-go-cache defines it)" test "$(grep -c 'key: go-ci-' "$wf")" = 0
 
 check "go-vet is not a job" test -z "$(job_body "$wf" go-vet)"
 check "go-vet is not a need of go" hasnt "$(job_body "$wf" go)" 'go-vet'
