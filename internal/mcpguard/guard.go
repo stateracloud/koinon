@@ -547,17 +547,31 @@ type assessment struct {
 	destHost string
 }
 
-// destHost returns the hosts of the call's http and https address arguments, sorted, joined by a
-// comma, or empty when it has none. A host only: never a path, a query or a payload.
+// maxDestHosts bounds how many hosts one decision record names.
+const maxDestHosts = 8
+
+// destHost returns the destinations of the call's http and https address arguments, sorted, joined
+// by a comma, or empty when it has none. A destination is the last two labels of the fetch host, as
+// the record is evidence and never payload: the labels below them can carry data (ADR 0091, the host
+// labels of an untrusted host are payload), so they are dropped. Never a path or a query. This is
+// a coarse stand-in for the registrable domain; a public-suffix list would be exact but is not
+// worth a dependency for a grouping key.
 func destHost(a Args) string {
 	var hosts []string
 	for _, v := range a.Address {
-		if h, ok := sinkclass.FetchHost(v); ok && !slices.Contains(hosts, h) {
+		h, ok := sinkclass.FetchHost(v)
+		if !ok {
+			continue
+		}
+		if labels := strings.Split(h, "."); len(labels) > 2 {
+			h = strings.Join(labels[len(labels)-2:], ".")
+		}
+		if !slices.Contains(hosts, h) {
 			hosts = append(hosts, h)
 		}
 	}
 	slices.Sort(hosts)
-	return strings.Join(hosts, ",")
+	return strings.Join(hosts[:min(len(hosts), maxDestHosts)], ",")
 }
 
 func (a assessment) risk() map[string]any {
@@ -720,7 +734,7 @@ func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool
 		c.Charged = args.PayloadBytes()
 		c.After = used + c.Charged
 		// One event per run: the call that takes the count past the threshold, once.
-		c.Crossed = !flagged && c.After > g.cap
+		c.Crossed = !flagged && c.Charged > 0 && c.After > g.cap
 	}
 	return v, c
 }

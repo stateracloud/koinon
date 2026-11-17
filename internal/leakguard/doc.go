@@ -13,8 +13,9 @@
 // package is a secondary alarm on top of it. It catches private text copied verbatim or in a
 // simple encoding (the decoders below) into the payload of an external call, the mistakes and
 // the unsophisticated attempts. It does not stop an adaptive attacker, who can always rewrite a
-// secret into a form no decoder undoes (paraphrase, a cipher, a scheme of its own); the byte cap
-// and the approval of an external-high call with both legs are what bound that case.
+// secret into a form no decoder undoes (paraphrase, a cipher, a scheme of its own); the approval
+// of an external-high call with both legs bounds that case, and the byte count only alerts (ADR 0091,
+// amended 2026-11-17).
 //
 // The decoders are frozen: a new encoding or evasion is not added here as it is found, since each
 // one added widens the cost and the false positives and still leaves the next. The arguments of
@@ -135,8 +136,8 @@
 // joined every ordered pair of arguments and decoded windows around each boundary, removed with
 // the rescope). Known limit (#286, ADR 0091 decision 6): the ends are raw bytes, so a split
 // secret in separator-padded base64 (or base64, \u escapes or percent-encoding of it) with each
-// half longer than 2*JoinEndBytes passes; the general fix is #369. Splits across calls are not reassembled; the per-host and per-run URL budgets and
-// the byte cap of a session with both legs bound them.
+// half longer than 2*JoinEndBytes passes; the general fix is #369. Splits across calls are not reassembled; the per-host and per-run URL budgets bound
+// them, and the byte count of a session with both legs alerts (ADR 0091, amended 2026-11-17).
 //
 // # Fingerprints (winnowing)
 //

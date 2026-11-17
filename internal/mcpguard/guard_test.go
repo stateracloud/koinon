@@ -1348,7 +1348,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(over).To(Equal(1))
 		})
 
-		It("counts the host labels of a fetch to a host the org does not trust, and passes the call", func(ctx SpecContext) {
+		It("counts the host labels of a fetch to a host the org does not trust, records only its domain, and passes the call", func(ctx SpecContext) {
 			host := strings.Repeat("d", 25) + "." + strings.Repeat("e", 25) + ".evil.example"
 			r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://" + host + "/"})
 			Expect(passed(r)).To(BeTrue(), reason(r))
@@ -1356,8 +1356,53 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			var dest string
 			Expect(pool.QueryRow(ctx, `SELECT charged_bytes, dest_host FROM leak_guard_decisions WHERE org_id = $1 AND tool = 'fetch_page'`, org).Scan(&charged, &dest)).To(Succeed())
 			Expect(charged).To(BeNumerically(">", 0))
-			Expect(dest).To(Equal(host))
+			Expect(dest).To(Equal("evil.example"), "the labels below the registrable domain are payload and are not stored")
 			Expect(approvals(ctx)).To(BeZero())
+		})
+
+		It("exports the charged bytes, the one over-threshold event and a pseudonymous destination", func(ctx SpecContext) {
+			host := strings.Repeat("d", 25) + "." + strings.Repeat("e", 25) + ".evil.example"
+			for range 2 {
+				r := call(ctx, "tracker", "fetch_page", map[string]any{"url": "https://" + host + "/"})
+				Expect(passed(r)).To(BeTrue(), reason(r))
+			}
+			dir := GinkgoT().TempDir()
+			hosts, err := runevidence.NewHostMasker()
+			Expect(err).NotTo(HaveOccurred())
+			e := runevidence.Exporter{Q: q, Scrubber: runevidence.NewScrubber(scrub.NewSecrets("koinon_test_not-a-real-token")), Hosts: hosts}
+			_, err = e.Export(ctx, org, runID(ctx), runevidence.DirSink(dir))
+			Expect(err).NotTo(HaveOccurred())
+
+			read := func(name string) []map[string]any {
+				b, err := os.ReadFile(filepath.Join(dir, name))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(b)).NotTo(ContainSubstring("evil.example"), name)
+				var out []map[string]any
+				for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+					var m map[string]any
+					Expect(json.Unmarshal([]byte(l), &m)).To(Succeed(), l)
+					out = append(out, m)
+				}
+				return out
+			}
+			lg := read(runevidence.FileRun)[0]["leak_guard"].(map[string]any)
+			Expect(lg["over_threshold"]).To(BeTrue())
+			Expect(lg["charged_bytes"]).To(BeNumerically(">", 64))
+			Expect(lg["over_threshold_bytes"]).To(BeNumerically(">", 64))
+			events, charged := 0, 0.0
+			for _, d := range read(runevidence.FileDecisions) {
+				if d["tool"] != "fetch_page" {
+					continue
+				}
+				Expect(d["dest_host"]).NotTo(BeEmpty())
+				Expect(d["cap_used_before"]).NotTo(BeNil())
+				charged += d["charged_bytes"].(float64)
+				if d["over_threshold"] == true {
+					events++
+				}
+			}
+			Expect(events).To(Equal(1))
+			Expect(charged).To(Equal(lg["charged_bytes"]))
 		})
 
 		It("never lets a Decider pass a call whose payload matched private text: that goes to a person", func(ctx SpecContext) {

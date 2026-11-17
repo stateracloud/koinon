@@ -116,6 +116,11 @@ var _ = g.Describe("Replay (#352, ADR 0091)", func() {
 			for run, n := range crossed {
 				Expect(n).To(Equal(1), "run %s: one over-threshold event per run", run)
 			}
+			for run, total := range sent {
+				if total > corpusByteCap {
+					Expect(crossed[run]).To(Equal(1), "run %s sent %d bytes: a run over the threshold has its event", run, total)
+				}
+			}
 			g.GinkgoWriter.Printf("benign external calls by branch: %v\n", counts)
 		})
 

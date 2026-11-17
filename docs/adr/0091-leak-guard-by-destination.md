@@ -309,7 +309,8 @@ inside a list is refused, whatever its class would be.
 - Once a session holds both legs, no free-text body reaches a party outside the org without a person
   approving that exact call, with the payload on the card.
 - Through `external-low` sinks, such a run sends at most the byte cap to untrusted hosts, whatever
-  the encoding.
+  the encoding. *Amended 2026-11-17 (#1058): withdrawn. The cap alerts and does not bound; see the
+  amendment at the end.*
 - Verbatim and simply-encoded copies of private text in the payload of an external call are shown to
   a person, except the split, separator-padded base64 case named under "Not guaranteed" below.
 - Writes into the org's own private repos are never blocked as leaks, so the #70 class of false
@@ -317,12 +318,13 @@ inside a list is refused, whatever its class would be.
 
 **Not guaranteed:**
 
-- **Leaks under the byte cap.** Up to the cap per run leaves through `external-low` sinks, and a run
+- **Leaks under the byte cap.** *(Amended 2026-11-17, #1058: the cap alerts and never refuses, so
+  there is no bound; the run's one over-threshold event is the signal.)* Up to the cap per run leaves through `external-low` sinks, and a run
   after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
   stay small, and keys belong in the secret store, not in the context.
 - **A split, separator-padded base64 secret.** A secret split across two arguments and encoded as
   separator-padded base64, with each half longer than the join ends, passes the text match. The same
-  text in one argument is still caught, and the byte cap and the session legs bound the damage. See
+  text in one argument is still caught, and the session legs bound the damage (the byte cap only alerts, since 2026-11-17). See
   decision 6 (known limit) and #369 for the general fix.
 - **A misclassified internal sink.** A repo or host declared internal that is in fact world-readable
   leaks freely. The classification has to be right; its default is external.
@@ -349,9 +351,8 @@ flowchart TD
   K -->|external-low| L{both legs?}
   K -->|external-high| H{both legs?}
   L -->|no| T[URL rule and today's budgets]
-  L -->|yes| B{within byte cap?}
-  B -->|no| R[plain refusal]
-  B -->|yes| M
+  L -->|yes| B[count bytes: one alert per run over the threshold]
+  B --> M
   T --> M{text match on payload?}
   H -->|yes| A[ADR 0042 approval: destination and payload]
   H -->|no| M2{text match on payload?}
@@ -370,7 +371,7 @@ flowchart TD
   the same kind. The false alarm goes away because in-org writes are internal and address arguments
   are never matched.
 - **Chase old issue 609's small encoded pieces.** Rejected: the byte cap bounds that class whatever the
-  encoding.
+  encoding. *(Amended 2026-11-17: the cap now alerts and does not bound.)*
 - **Keep the legs per server only.** Rejected: it cannot tell a private repo from a public one on the
   same server, so both the #70 false alarm and the GitHub public-repo leak stay possible.
 - **Refuse, instead of asking, for `external-high` in a session with both legs.** Not chosen: shipped
@@ -406,7 +407,7 @@ flowchart TD
 |---|---|
 | old issue 348 (merged core) | Freeze the decoders. Drop the any-pair joins and the pair windows; join payload arguments in call order. `doc.go` calls it a secondary signal. |
 | old issue 609 | Superseded by the byte cap; close as by design. |
-| old issue 349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. Byte-cap and URL-rule refusals are plain refusals; a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
+| old issue 349 (wiring) | The guard's input becomes tool, sink class, address args, payload args and session legs. It maintains the legs from responses and agentd's feed. Text matching on external payloads only. URL-rule refusals are plain refusals (the byte cap alerts only, since 2026-11-17); a text match or a both-legs `external-high` call is an approval. failClosed and a timeout over 5 s stay. |
 | old issue 350 / PR old issue 621 (schema) | Keep kind, legs, the URL reset, the fetch-trusted hosts and the threshold. Add a sink class per tool (default `external-high`), the address-argument declaration, and the org's own code-host scope. Can follow in old issue 349. |
 | old issue 351 (templates) | Keep. The test reads sink classes and fails on untrusted input, private data and an auto-tier `external-high` tool together. |
 | #70 / PR old issue 623 (tests) | Build the replay from real, scrubbed recordings, not the generated corpus, and assert per sink class. Keep the planted leaks and the RT1 canaries. The `northwind/platform-handbook` case becomes the "internal write passes" regression. |
