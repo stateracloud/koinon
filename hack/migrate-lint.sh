@@ -56,12 +56,21 @@ for f in "$dir"/*.sql; do
   expected=$((num + 1))
 done
 
+# A base that does not resolve must fail: a lint that cannot see the base proves nothing.
+merge_base=""
+if [[ -n $base ]]; then
+  merge_base=$(git merge-base "$base" HEAD 2>/dev/null) || {
+    echo "migrate-lint: base '$base' does not resolve to a merge base with HEAD (git fetch origin? wrong ref?)" >&2
+    exit 2
+  }
+fi
+
 if [[ -n $base ]]; then
   # Compare with the merge base, not the base tip: migrations the base gained since the
   # branch point are not this change's. A pathspec glob (not a list of the files present
   # here) is what lets deletions and renames show up. Only the .sql files are migrations;
   # the Go files next to them may change.
-  changed=$(git diff --name-only --diff-filter=MDR "$(git merge-base "$base" HEAD)" -- ":(glob)$dir/*.sql" || true)
+  changed=$(git diff --name-only --diff-filter=MDR "$merge_base" -- ":(glob)$dir/*.sql")
   changed=$(for f in $changed; do allowed "$f" || echo "$f"; done)
   if [[ -n $changed ]]; then
     echo "merged migrations must not change:"; echo "$changed"; fail=1
@@ -79,7 +88,7 @@ marker=hack/migrate-patch-line
 patch_line() {
   [[ ${MIGRATE_LINT_PATCH_LINE:-} == 1 ]] && return 0
   local m
-  m=$(git show "$(git merge-base "$base" HEAD):$marker" 2>/dev/null || cat "$marker" 2>/dev/null || true)
+  m=$(git show "$merge_base:$marker" 2>/dev/null || cat "$marker" 2>/dev/null || true)
   m=$(echo "$m" | tr -d '[:space:]')
   [[ -n $m && $m != none ]]
 }
@@ -113,7 +122,7 @@ strip_sql_comments() {
 }
 
 if [[ -n $base ]] && patch_line; then
-  added=$(git diff --name-only --diff-filter=A "$(git merge-base "$base" HEAD)" -- ":(glob)$dir/*.sql" || true)
+  added=$(git diff --name-only --diff-filter=A "$merge_base" -- ":(glob)$dir/*.sql")
   for f in $added; do
     # One statement per record: drop comments, split on ";", collapse whitespace.
     stmts=$(strip_sql_comments "$f" | awk -v RS=';' '{ gsub(/[[:space:]]+/, " "); print }')
