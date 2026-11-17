@@ -76,21 +76,17 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/docs/adr"
-# The real hack/adr-index.sh runs the Go tool of this module; the fixture has no module and plain ADRs, so a stub
-# stands in. It rewrites the README index from each title and Status line, which is all ship.sh relies on.
-cat >"$seed/hack/adr-index.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-d=docs/adr
-{
-	sed -n '1,/^## Index$/p' "$d/README.md"
-	echo
-	for f in $(cd "$d" && /bin/ls | grep -E '^[0-9]{4}-.*\.md$' | sort); do
-		echo "| [${f:0:4}]($f) | $(sed -n '1s/^# [0-9]*\. *//p' "$d/$f") | $(sed -n 's/^- Status: *//p' "$d/$f" | head -1) |"
-	done
-} >"$d/README.md.new"
-mv "$d/README.md.new" "$d/README.md"
-SH
+# The real ADR scripts run in the fixture: hack/adr-index.sh runs a built hack/cmd/adr (ADR_BIN), because the
+# fixture has no Go module. The fixture ADRs carry front matter and the repository's own areas, tags and template.
+(cd "$repo" && go build -o "$tmp/adr-bin" ./hack/cmd/adr)
+export ADR_BIN=$tmp/adr-bin
+cp "$repo/hack/adr-index.sh" "$seed/hack/"
+mkdir -p "$seed/docs/metadata"
+cp "$repo/docs/metadata/areas.txt" "$repo/docs/metadata/tags.txt" "$seed/docs/metadata/"
+cp "$repo/docs/adr/0000-template.md" "$seed/docs/adr/"
+adr_text() { # <number> <title>: a valid minimal ADR
+	printf -- '---\nstatus: accepted\ndate: 2026-11-17\narea: engineering-process\ntags: [docs]\n---\n# %s. %s\n\n- Status: Accepted\n- Date: 2026-11-17\n- Area: engineering-process\n- Tags: docs\n\n## Context\n\nx\n' "$1" "$2"
+}
 cat >"$seed/hack/needs-e2e.sh" <<'SH'
 #!/usr/bin/env bash
 echo "needs-e2e $*" >>"$FAKE_LOG"
@@ -108,7 +104,7 @@ cp "$repo/hack/git-identity-check.sh" "$seed/hack/"
 printf 'Test Dev <dev@example.invalid>\nadv <adv@example.invalid>\n' >"$seed/hack/git-identities.allowed"
 chmod +x "$seed/hack/"*.sh
 printf '# ADRs\n\n## Index\n' >"$seed/docs/adr/README.md"
-printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
+adr_text 0001 First >"$seed/docs/adr/0001-first.md"
 (cd "$seed" && hack/adr-index.sh >/dev/null && echo base >a.txt && git add -A && git commit -q -m seed && git remote add origin "$tmp/origin.git" && git push -q origin main)
 
 newwork() { # prints the path of a fresh clone on branch feat/1-x with an identity
@@ -257,9 +253,9 @@ reset_state
 w=$(newwork); cd "$w"
 git clone -q "$tmp/origin.git" "$adv"
 git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
-printf '# 0002. Second\n\n- Status: accepted\n' >"$adv/docs/adr/0002-second.md"
+adr_text 0002 Second >"$adv/docs/adr/0002-second.md"
 (cd "$adv" && hack/adr-index.sh >/dev/null && git add -A && git commit -q -m "adr 2" && git push -q origin main)
-printf '# 0003. Third\n\n- Status: accepted\n' >docs/adr/0003-third.md
+adr_text 0003 Third >docs/adr/0003-third.md
 hack/adr-index.sh >/dev/null
 rc=$(run "$tmp/o8" -m "docs: adr 3")
 check "ADR README conflict: exit 0" eq "$rc" 0
