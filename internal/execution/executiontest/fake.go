@@ -277,7 +277,8 @@ func (f *Fake) Upload(_ context.Context, workspace, sandbox, destDir string, arc
 		if err != nil {
 			return fail("Upload", execution.ErrInvalid, "read the archive: %w", err)
 		}
-		got[path.Join(destDir, h.Name)] = b
+		name := path.Clean("/" + h.Name)  // an entry cannot leave destDir
+		got[path.Join(destDir, name)] = b //nolint:gosec // G305: name is cleaned above and this is an in-memory map
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

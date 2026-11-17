@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported by convention
+	. "github.com/onsi/gomega"    //nolint:staticcheck // the Gomega DSL is dot-imported by convention
 
 	"github.com/stateracloud/koinon/internal/execution"
 )
