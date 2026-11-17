@@ -209,6 +209,9 @@ type Querier interface {
 	// (that backup then releases the old repository, as a seed would have).
 	CountHomeRepositorySeeds(ctx context.Context, orgID pgtype.UUID) (CountHomeRepositorySeedsRow, error)
 	CountLeakGuardFingerprints(ctx context.Context, arg CountLeakGuardFingerprintsParams) (int64, error)
+	// The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
+	// in the same model turn: the same live run and no tool call finished since the call opened (a reply
+	// cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 	CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
@@ -1291,6 +1294,7 @@ type Querier interface {
 	OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQuestionsForRunParams) ([]Question, error)
 	// A tools/call the guard passed whose result would set a leg (#254): open until the guard records
 	// that result.
+	// mark_run and mark_read are the turn mark (#1057): the live run and its feed_read, NULL without one.
 	OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.

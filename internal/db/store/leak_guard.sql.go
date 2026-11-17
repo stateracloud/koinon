@@ -139,16 +139,29 @@ func (q *Queries) CountLeakGuardFingerprints(ctx context.Context, arg CountLeakG
 const countLeakGuardOpenCalls = `-- name: CountLeakGuardOpenCalls :one
 SELECT count(*) FROM leak_guard_open_calls
 WHERE org_id = $1 AND agent_id = $2 AND generation = $3
+  AND (mark_run IS NULL OR mark_read IS NULL OR $4::uuid IS NULL OR $5::bigint IS NULL
+       OR mark_run <> $4::uuid OR mark_read < $5::bigint)
 `
 
 type CountLeakGuardOpenCallsParams struct {
 	OrgID      pgtype.UUID
 	AgentID    pgtype.UUID
 	Generation string
+	RunID      pgtype.UUID
+	FeedRead   pgtype.Int8
 }
 
+// The calls whose replies a decision treats as unseen (#1057). A call counts unless the decision is
+// in the same model turn: the same live run and no tool call finished since the call opened (a reply
+// cannot have reached the model). A call with no mark, or a decision with no live run, always counts.
 func (q *Queries) CountLeakGuardOpenCalls(ctx context.Context, arg CountLeakGuardOpenCallsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countLeakGuardOpenCalls, arg.OrgID, arg.AgentID, arg.Generation)
+	row := q.db.QueryRow(ctx, countLeakGuardOpenCalls,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.RunID,
+		arg.FeedRead,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -466,8 +479,8 @@ func (q *Queries) MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvi
 }
 
 const openLeakGuardCall = `-- name: OpenLeakGuardCall :exec
-INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO leak_guard_open_calls (org_id, agent_id, generation, target, tool, opened_at, mark_run, mark_read)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type OpenLeakGuardCallParams struct {
@@ -477,10 +490,13 @@ type OpenLeakGuardCallParams struct {
 	Target     string
 	Tool       string
 	OpenedAt   pgtype.Timestamptz
+	MarkRun    pgtype.UUID
+	MarkRead   pgtype.Int8
 }
 
 // A tools/call the guard passed whose result would set a leg (#254): open until the guard records
 // that result.
+// mark_run and mark_read are the turn mark (#1057): the live run and its feed_read, NULL without one.
 func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallParams) error {
 	_, err := q.db.Exec(ctx, openLeakGuardCall,
 		arg.OrgID,
@@ -489,6 +505,8 @@ func (q *Queries) OpenLeakGuardCall(ctx context.Context, arg OpenLeakGuardCallPa
 		arg.Target,
 		arg.Tool,
 		arg.OpenedAt,
+		arg.MarkRun,
+		arg.MarkRead,
 	)
 	return err
 }
