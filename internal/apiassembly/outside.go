@@ -51,6 +51,9 @@ type Outside struct {
 	// UI is the web UI to serve. Nil serves web.Dist(); NoUI serves none.
 	UI   fs.FS
 	NoUI bool
+	// NoScopeSync leaves the code-host scope reading off: nothing asks GitHub in the background, and
+	// Assembly.Scope is nil.
+	NoScopeSync bool
 	// Logger is where the services log. Nil uses slog.Default().
 	Logger *slog.Logger
 	// Services register more Connect services next to the platform's own.

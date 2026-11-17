@@ -61,8 +61,13 @@ type Assembly struct {
 
 // buildSurfaces mounts the domain: services.Server, admin REST and the API handler.
 func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembly, error) {
+	// A nil *Syncer in the interface would not read as nil, so it is set only when it exists.
+	var scopeSync services.ScopeSyncer
+	if d.scope != nil {
+		scopeSync = d.scope
+	}
 	svc := services.New(out.Pool, services.Options{
-		SandboxResources: &set.SandboxResources, ScopeSync: d.scope, ModelCheck: d.echo, Traces: d.traces, RestoreHold: d.hold,
+		SandboxResources: &set.SandboxResources, ScopeSync: scopeSync, ModelCheck: d.echo, Traces: d.traces, RestoreHold: d.hold,
 		Hub: pre.Hub, WatchPollInterval: set.WatchPoll, WatchHeartbeatInterval: set.WatchHeartbeat, WatchCancelGrace: set.WatchCancelGrace, Keys: d.keys, Tokens: d.tokens, Hosts: d.hosts, Approvals: d.approvals, Catalog: d.catalog, MCP: d.mcp, Notifier: pre.Notifier, DirectMessages: pre.DirectMessages, RunNow: pre.RunNow, URLPolicy: d.urlPolicy, Prices: pricing.Embedded(), Logger: out.Logger,
 	})
 	pool, kube := out.Pool, out.Kube

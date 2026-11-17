@@ -268,7 +268,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		opts.settings(&set)
 	}
 	out := apiassembly.Outside{
-		Pool: e.pool, Keyring: opts.keys, GitHub: opts.github, ModelChat: opts.modelChat,
+		Pool: e.pool, Keyring: opts.keys, GitHub: opts.github, NoScopeSync: !opts.scopeSync, ModelChat: opts.modelChat,
 		UI: opts.ui, NoUI: opts.ui == nil, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Services: []func(*connect.Server){registerProbe},
 	}
@@ -280,9 +280,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	})
 	Expect(err).NotTo(HaveOccurred())
 	e.traces, e.rpc = asm.Traces, asm.Server
-	if opts.scopeSync {
-		e.syncer = asm.Scope
-	}
+	e.syncer = asm.Scope
 	handler = asm.Handler
 	return e
 }

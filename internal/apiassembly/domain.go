@@ -137,6 +137,8 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	// The org's code-host scope (ADR 0091): each code-host connection's repositories and their
 	// visibility, read when a connection is created or tested and again every few minutes, so the
 	// leak guard calls a write into the org's own private repository internal only on a fresh reading.
-	d.scope = scopesync.New(pool, d.hosts, d.opener, out.Logger).WithRestoreHold(d.hold)
+	if !out.NoScopeSync {
+		d.scope = scopesync.New(pool, d.hosts, d.opener, out.Logger).WithRestoreHold(d.hold)
+	}
 	return d, nil
 }
