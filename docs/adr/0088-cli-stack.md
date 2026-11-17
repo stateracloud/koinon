@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-01
+area: frontend-ux
+tags: [cli, helm-chart, testing]
+relates: ["0060", "0076", "0079", "0085"]
+---
 # 0088. The command-line stack: cobra, pflag and viper, with Charm on a terminal only
 
 - Status: Accepted

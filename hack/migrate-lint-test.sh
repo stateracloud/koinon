@@ -136,4 +136,9 @@ echo none >hack/migrate-patch-line
 echo 'ALTER TABLE t RENAME TO u;' >"$dir/00004_p.sql" && git add -A && git commit -qam flip
 expect 1 "flipping the marker in the same change does not lift the rule"
 
+# A base that does not resolve fails loudly (issue 661): the lint cannot compare with a base it cannot see.
+git checkout -q main
+base=origin/no-such-branch
+expect 2 "base that does not resolve"
+
 exit $fail

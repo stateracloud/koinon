@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-28
+area: models-spend
+tags: [models, pricing]
+relates: ["0052", "0056", "0068", "0069"]
+---
 # 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
 
 - Status: Accepted (procoduck, 2026-10-28; built after v0.1.0, with the UI milestone); decisions 4 and 8 amended by [0098](0098-price-catalogue-updates-from-public-sources.md); OpenRouter parts of decisions 1, 2, 3, 4, 5, 6, 8, 9 and 10 amended 2026-11-11 (never embedded)

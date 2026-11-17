@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-28
+area: models-spend
+tags: [models, triggers, budgets]
+relates: ["0041", "0056", "0065", "0066", "0068", "0069"]
+---
 # 0072. The agent's model setting, "run now" for schedules, and the provider echo check
 
 - Status: Accepted

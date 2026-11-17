@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-01
+area: install-operations
+tags: [upgrade, backup-restore, migrations, secrets]
+relates: ["0027", "0030", "0032", "0045", "0056", "0060", "0066", "0076", "0077"]
+---
 # 0085. Upgrade, compatibility and recovery policy
 
 - Status: Accepted (scope decided by procoduck, 2026-10-31; decisions of 2026-11-01; a v0.1.0 gate; amended 2026-11-06: the schema promise starts at v0.3, see [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md); amended 2026-11-11: storage probe before a rotation, #285; amended 2026-11-16: the restore drill passes in project CI for the tag, #1039)

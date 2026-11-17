@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [api, release]
+decides: design.md#34
+---
 # 0034. Repository, module path, domain and API groups
 
 - Status: Accepted; amended 2026-10-26 (below)

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-28
+area: work-model
+tags: [tracing, runs, agentgateway, audit]
+amends: ["0023"]
+relates: ["0041", "0049", "0050", "0056", "0059", "0065", "0072", "0073"]
+---
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
 - Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9; amended 2026-10-30, 2026-10-31 and 2026-11-11 (below); platform destination and ceiling audit moved by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)

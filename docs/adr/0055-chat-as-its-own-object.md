@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-23
+area: work-model
+tags: [chat, tasks, audit]
+amends: ["0011", "0018"]
+supersedes: ["0017"]
+---
 # 0055. Chat is its own object
 
 - Status: Accepted

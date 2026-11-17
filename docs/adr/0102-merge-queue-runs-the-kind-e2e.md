@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-09
+area: engineering-process
+tags: [ci, e2e]
+amends: ["0094"]
+relates: ["0046"]
+---
 # 0102. The merge queue runs the kind e2e on the queue commit
 
 - Status: Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md)

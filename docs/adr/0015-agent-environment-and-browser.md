@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [sandbox, agent-home, egress, credentials]
+decides: design.md#15
+---
 # 0015. Agent environment and browser
 
 - Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) (and its amendment of 2026-11-11), [0113](0113-agent-package-access.md) and [0114](0114-model-credentials-by-type.md)

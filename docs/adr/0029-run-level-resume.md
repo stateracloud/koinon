@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [harness, runs, flavors, agent-home]
+decides: design.md#29
+---
 # 0029. Run-level resume through the harness session
 
 - Status: Accepted; amended by [0051](0051-session-home-generations.md)

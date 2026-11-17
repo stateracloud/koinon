@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-09
+area: engineering-process
+tags: [claims, ci]
+amends: ["0082", "0094"]
+relates: ["0046", "0082", "0094"]
+---
 # 0104. Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane
 
 - Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default)

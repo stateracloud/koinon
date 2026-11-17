@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-29
+area: runtime-sandbox
+tags: [sandbox, openshell, kubernetes, metrics]
+amends: ["0048", "0066"]
+relates: ["0002", "0023", "0061"]
+---
 # 0078. Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready
 
 - Status: Accepted (delivery in rc.7)

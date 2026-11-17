@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: frontend-ux
+tags: [ui, multi-tenancy, tasks, triggers]
+decides: design.md#18
+---
 # 0018. v1 screens and automatic personal orgs
 
 - Status: Accepted

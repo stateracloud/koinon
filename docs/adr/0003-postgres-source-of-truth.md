@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: install-operations
+tags: [database, eventing, kubernetes]
+decides: design.md#3
+---
 # 0003. Postgres via a Go API is the source of truth
 
 - Status: Accepted; amended 2026-10-26 (below)

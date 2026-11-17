@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [approvals, identity, ui]
+decides: design.md#20
+---
 # 0020. Agent builder proposes, admins activate
 
 - Status: Accepted

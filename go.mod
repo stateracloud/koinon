@@ -8,6 +8,7 @@ tool (
 	github.com/onsi/ginkgo/v2/ginkgo
 	github.com/pressly/goose/v3/cmd/goose
 	github.com/sqlc-dev/sqlc/cmd/sqlc
+	github.com/stateracloud/koinon/hack/cmd/adr
 	github.com/stateracloud/koinon/hack/cmd/agentsmdlint
 	github.com/stateracloud/koinon/hack/cmd/bash5lint
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc

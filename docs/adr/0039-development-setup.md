@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [testing, isolation, tooling]
+decides: design.md#39
+---
 # 0039. Development setup: a maintainer's Mac plus a Talos+Kata cluster
 
 - Status: Accepted

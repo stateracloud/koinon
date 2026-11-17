@@ -1,3 +1,9 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [ci, database, migrations, api, tooling]
+---
 # 0047. Repository scaffold, data model foundations and CI gates
 
 - Status: Accepted; amended 2026-10-26 (below); the pull request e2e rule amended by [0105](0105-merge-queue-route.md) (amendment of 2026-11-11, #572)

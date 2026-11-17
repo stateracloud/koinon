@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: security-audit
+tags: [credentials, security, egress]
+amends: ["0006", "0013", "0015"]
+---
 # 0044. In-sandbox credentials as a gated exception
 
 - Status: Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md)

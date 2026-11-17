@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [governance, adr-process]
+decides: design.md#38
+---
 # 0038. Governance: BDFL with a written path to maintainership
 
 - Status: Accepted

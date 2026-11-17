@@ -1,3 +1,9 @@
+---
+status: accepted
+date: 2026-11-14
+area: engineering-process
+tags: [adr-process, docs]
+---
 # 0117. Simplified Technical English for public project text
 
 - Status: Accepted

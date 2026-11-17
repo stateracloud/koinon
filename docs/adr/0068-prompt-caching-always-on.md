@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-28
+area: models-spend
+tags: [prompt-caching, models, pricing, agentgateway]
+relates: ["0048", "0056"]
+---
 # 0068. Prompt caching is always on for models that support it
 
 - Status: Accepted

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-11
+area: runtime-sandbox
+tags: [harness, flavors, dependencies, models]
+amends: ["0035", "0059", "0079"]
+relates: ["0016", "0032", "0045", "0051", "0052", "0056", "0068", "0069", "0080", "0093", "0097", "0113", "0114"]
+---
 # 0112. Harness definitions: any harness that speaks ACP, described as data
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core

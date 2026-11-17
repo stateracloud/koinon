@@ -1,3 +1,12 @@
+---
+status: accepted
+date: 2026-11-09
+area: engineering-process
+tags: [ci, e2e, github, claims]
+amends: ["0025", "0026", "0047", "0082", "0090", "0094"]
+supersedes: ["0102"]
+relates: ["0046", "0103", "0104"]
+---
 # 0105. One route to main: the merge queue, and drafts run nothing
 
 - Status: Accepted (procoduck, 2026-11-09; built in PR A #479 and PR B #487; amended 2026-11-11, below)

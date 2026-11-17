@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [identity, audit]
+decides: design.md#5
+---
 # 0005. Agents act as themselves
 
 - Status: Accepted

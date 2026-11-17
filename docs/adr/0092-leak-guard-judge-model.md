@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-03
+area: security-audit
+tags: [leak-guard, models, approvals, prompt-caching]
+amends: ["0091"]
+relates: ["0023", "0041", "0042", "0056", "0068", "0072", "0081", "0084"]
+---
 # 0092. Leak guard judge: rules, then a cheap judge model, then a person
 
 - Status: Accepted (decisions by procoduck, 2026-11-03)

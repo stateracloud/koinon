@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: models-spend
+tags: [agentgateway, models, mcp]
+amends: ["0013", "0014", "0016"]
+---
 # 0040. agentgateway as the model gateway and MCP gateway
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 and 2026-11-12 (below)

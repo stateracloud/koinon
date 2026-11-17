@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: product-scope
+tags: [roadmap, release]
+decides: design.md#24
+---
 # 0024. Release roadmap from v0.1 to v1.0
 
 - Status: Accepted

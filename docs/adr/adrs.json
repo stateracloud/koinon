@@ -1,0 +1,3284 @@
+[
+  {
+    "number": "0001",
+    "file": "0001-full-multi-tenancy.md",
+    "title": "Full multi-tenancy from the start",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "multi-tenancy"
+    ],
+    "decides": "design.md#1",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0002",
+    "file": "0002-namespace-per-org-isolation.md",
+    "title": "One namespace per org, mapped to one OpenShell workspace",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "multi-tenancy",
+      "openshell",
+      "kubernetes",
+      "isolation"
+    ],
+    "decides": "design.md#2",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0061",
+      "0075",
+      "0078",
+      "0106"
+    ]
+  },
+  {
+    "number": "0003",
+    "file": "0003-postgres-source-of-truth.md",
+    "title": "Postgres via a Go API is the source of truth",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "install-operations",
+    "tags": [
+      "database",
+      "eventing",
+      "kubernetes"
+    ],
+    "decides": "design.md#3",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0060",
+      "0071",
+      "0076"
+    ]
+  },
+  {
+    "number": "0004",
+    "file": "0004-human-identity.md",
+    "title": "Human identity: generic OIDC with roles in Postgres",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "auth",
+      "identity",
+      "multi-tenancy"
+    ],
+    "decides": "design.md#4",
+    "amends": [],
+    "amended_by": [
+      "0100"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0110"
+    ]
+  },
+  {
+    "number": "0005",
+    "file": "0005-agent-identity.md",
+    "title": "Agents act as themselves",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "identity",
+      "audit"
+    ],
+    "decides": "design.md#5",
+    "amends": [],
+    "amended_by": [
+      "0067"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0073",
+      "0096",
+      "0114"
+    ]
+  },
+  {
+    "number": "0006",
+    "file": "0006-identity-layers.md",
+    "title": "Identity layers: per-agent ServiceAccount, no usable token in the sandbox",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "identity",
+      "credentials",
+      "secrets",
+      "openshell"
+    ],
+    "decides": "design.md#6",
+    "amends": [],
+    "amended_by": [
+      "0043",
+      "0044",
+      "0048",
+      "0063",
+      "0065",
+      "0073",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0075",
+      "0113"
+    ]
+  },
+  {
+    "number": "0007",
+    "file": "0007-connector-model.md",
+    "title": "Connector model: type, connection, grant",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "connectors-tools",
+    "tags": [
+      "connectors",
+      "credentials",
+      "github"
+    ],
+    "decides": "design.md#7",
+    "amends": [],
+    "amended_by": [
+      "0049",
+      "0056",
+      "0062",
+      "0063",
+      "0064"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071"
+    ]
+  },
+  {
+    "number": "0008",
+    "file": "0008-approvals-and-risk-tiers.md",
+    "title": "Approvals: risk tiers per scope, enforced at the boundary",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "approvals",
+      "mcp",
+      "openshell"
+    ],
+    "decides": "design.md#8",
+    "amends": [],
+    "amended_by": [
+      "0042",
+      "0048"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0009",
+    "file": "0009-agent-runtime.md",
+    "title": "Agent runtime: persistent agent, ephemeral compute",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "runs",
+      "agent-home"
+    ],
+    "decides": "design.md#9",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0010",
+    "file": "0010-eventing.md",
+    "title": "Eventing: the ticket board is the queue",
+    "status": "superseded",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "eventing",
+      "triggers",
+      "tasks"
+    ],
+    "decides": "design.md#10",
+    "amends": [],
+    "amended_by": [
+      "0065",
+      "0066"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0011",
+    "file": "0011-agent-to-agent.md",
+    "title": "Agent-to-agent: A2A, persisted as tickets",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "tasks",
+      "mcp",
+      "runs"
+    ],
+    "decides": "design.md#11",
+    "amends": [],
+    "amended_by": [
+      "0055",
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0101"
+    ]
+  },
+  {
+    "number": "0012",
+    "file": "0012-cross-org-sharing.md",
+    "title": "Cross-org sharing through links with exposure profiles",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "multi-tenancy",
+      "approvals",
+      "budgets"
+    ],
+    "decides": "design.md#12",
+    "amends": [],
+    "amended_by": [
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0013",
+    "file": "0013-model-access.md",
+    "title": "Model access through one gateway with hierarchical budgets",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "agentgateway",
+      "budgets",
+      "spend-ledger",
+      "credentials"
+    ],
+    "decides": "design.md#13",
+    "amends": [],
+    "amended_by": [
+      "0040",
+      "0041",
+      "0044",
+      "0097",
+      "0114"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0014",
+    "file": "0014-mcp-and-tools.md",
+    "title": "MCP and tools: shared servers outside sandboxes, one progressive endpoint per agent",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "connectors-tools",
+    "tags": [
+      "mcp",
+      "agentgateway",
+      "credentials"
+    ],
+    "decides": "design.md#14",
+    "amends": [],
+    "amended_by": [
+      "0040",
+      "0057"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0015",
+    "file": "0015-agent-environment-and-browser.md",
+    "title": "Agent environment and browser",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "agent-home",
+      "egress",
+      "credentials"
+    ],
+    "decides": "design.md#15",
+    "amends": [],
+    "amended_by": [
+      "0044",
+      "0113",
+      "0114"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0016",
+    "file": "0016-harness-and-deployment.md",
+    "title": "Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "harness",
+      "openshell",
+      "kubernetes"
+    ],
+    "decides": "design.md#16",
+    "amends": [],
+    "amended_by": [
+      "0040",
+      "0048",
+      "0049"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0112"
+    ]
+  },
+  {
+    "number": "0017",
+    "file": "0017-board-and-chat-interaction-model.md",
+    "title": "Board and chat are two views of one ticket",
+    "status": "superseded",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "chat",
+      "tasks",
+      "ui"
+    ],
+    "decides": "design.md#17",
+    "amends": [],
+    "amended_by": [
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [
+      "0055"
+    ],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0018",
+    "file": "0018-v1-screens.md",
+    "title": "v1 screens and automatic personal orgs",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "frontend-ux",
+    "tags": [
+      "ui",
+      "multi-tenancy",
+      "tasks",
+      "triggers"
+    ],
+    "decides": "design.md#18",
+    "amends": [],
+    "amended_by": [
+      "0055",
+      "0065",
+      "0066"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0019",
+    "file": "0019-personal-agents-and-teams.md",
+    "title": "Personal agents call team agents through membership",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "multi-tenancy",
+      "identity",
+      "budgets"
+    ],
+    "decides": "design.md#19",
+    "amends": [],
+    "amended_by": [
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0073",
+      "0114"
+    ]
+  },
+  {
+    "number": "0020",
+    "file": "0020-agent-builder-and-templates.md",
+    "title": "Agent builder proposes, admins activate",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "approvals",
+      "identity",
+      "ui"
+    ],
+    "decides": "design.md#20",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071",
+      "0083",
+      "0084"
+    ]
+  },
+  {
+    "number": "0021",
+    "file": "0021-connector-setup-guides.md",
+    "title": "Machine-readable connector setup guides and secure inputs",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "connectors-tools",
+    "tags": [
+      "connectors",
+      "credentials",
+      "secrets"
+    ],
+    "decides": "design.md#21",
+    "amends": [],
+    "amended_by": [
+      "0056"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0022",
+    "file": "0022-frontend-architecture.md",
+    "title": "React SPA served by the Go API over connect-rpc",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "frontend-ux",
+    "tags": [
+      "ui",
+      "api",
+      "auth",
+      "eventing"
+    ],
+    "decides": "design.md#22",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0023",
+    "file": "0023-observability-and-audit.md",
+    "title": "Optional observability, hash-chained audit on by default",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "security-audit",
+    "tags": [
+      "audit",
+      "tracing",
+      "metrics",
+      "spend-ledger"
+    ],
+    "decides": "design.md#23",
+    "amends": [],
+    "amended_by": [
+      "0074",
+      "0100"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071",
+      "0073",
+      "0075",
+      "0078",
+      "0081",
+      "0084",
+      "0092",
+      "0093",
+      "0096",
+      "0097",
+      "0098",
+      "0107",
+      "0110"
+    ]
+  },
+  {
+    "number": "0024",
+    "file": "0024-roadmap.md",
+    "title": "Release roadmap from v0.1 to v1.0",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "product-scope",
+    "tags": [
+      "roadmap",
+      "release"
+    ],
+    "decides": "design.md#24",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0025",
+    "file": "0025-testing-strategy.md",
+    "title": "Deterministic, free CI with a continuous sandbox escape suite",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "testing",
+      "ci",
+      "e2e",
+      "security"
+    ],
+    "decides": "design.md#25",
+    "amends": [],
+    "amended_by": [
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0075",
+      "0080",
+      "0111"
+    ]
+  },
+  {
+    "number": "0026",
+    "file": "0026-home-lab-and-license.md",
+    "title": "Home lab for real isolation testing; Apache-2.0 with DCO",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "testing",
+      "isolation",
+      "ci"
+    ],
+    "decides": "design.md#26",
+    "amends": [],
+    "amended_by": [
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0027",
+    "file": "0027-repo-and-versioning.md",
+    "title": "Monorepo, one version, supply-chain hygiene",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "release",
+      "dependencies",
+      "registry",
+      "helm-chart",
+      "api"
+    ],
+    "decides": "design.md#27",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0060",
+      "0077",
+      "0083",
+      "0085",
+      "0099"
+    ]
+  },
+  {
+    "number": "0028",
+    "file": "0028-name-koinon.md",
+    "title": "Name the project Koinon",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "product-scope",
+    "tags": [
+      "api",
+      "registry",
+      "helm-chart"
+    ],
+    "decides": "design.md#28",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0029",
+    "file": "0029-run-level-resume.md",
+    "title": "Run-level resume through the harness session",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "harness",
+      "runs",
+      "flavors",
+      "agent-home"
+    ],
+    "decides": "design.md#29",
+    "amends": [],
+    "amended_by": [
+      "0051"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0030",
+    "file": "0030-run-state-machine.md",
+    "title": "Postgres run state machine with an ownership epoch",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "runs",
+      "database",
+      "tasks",
+      "triggers"
+    ],
+    "decides": "design.md#30",
+    "amends": [],
+    "amended_by": [
+      "0065",
+      "0066"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0085",
+      "0089"
+    ]
+  },
+  {
+    "number": "0031",
+    "file": "0031-artifacts-in-object-storage.md",
+    "title": "Artifacts in S3-compatible object storage",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "object-storage",
+      "tasks",
+      "mcp"
+    ],
+    "decides": "design.md#31",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071"
+    ]
+  },
+  {
+    "number": "0032",
+    "file": "0032-agent-home-checkpoints.md",
+    "title": "Agent home on a PVC, checkpointed incrementally to object storage",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "agent-home",
+      "backup-restore",
+      "object-storage",
+      "encryption"
+    ],
+    "decides": "design.md#32",
+    "amends": [],
+    "amended_by": [
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0085",
+      "0112"
+    ]
+  },
+  {
+    "number": "0033",
+    "file": "0033-file-based-memory.md",
+    "title": "File-based, scoped memory stores",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "memory",
+      "agent-home"
+    ],
+    "decides": "design.md#33",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071"
+    ]
+  },
+  {
+    "number": "0034",
+    "file": "0034-project-identity.md",
+    "title": "Repository, module path, domain and API groups",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "api",
+      "release"
+    ],
+    "decides": "design.md#34",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0035",
+    "file": "0035-v01-flavors.md",
+    "title": "v0.1 flavors: OpenCode, Hermes and pi over ACP",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "flavors",
+      "harness"
+    ],
+    "decides": "design.md#35",
+    "amends": [],
+    "amended_by": [
+      "0059",
+      "0112"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0036",
+    "file": "0036-v01-demo.md",
+    "title": "v0.1 demo: a 15-minute quickstart ending in one approved GitHub action",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "product-scope",
+    "tags": [
+      "roadmap",
+      "approvals",
+      "github",
+      "connectors"
+    ],
+    "decides": "design.md#36",
+    "amends": [],
+    "amended_by": [
+      "0049",
+      "0062",
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0037",
+    "file": "0037-tooling.md",
+    "title": "Tooling: goose, Starlight, ACP Go SDK, Tilt",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "tooling",
+      "migrations",
+      "database",
+      "docs"
+    ],
+    "decides": "design.md#37",
+    "amends": [],
+    "amended_by": [
+      "0060"
+    ],
+    "supersedes": [],
+    "superseded_by": [
+      "0108"
+    ],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0038",
+    "file": "0038-governance.md",
+    "title": "Governance: BDFL with a written path to maintainership",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "governance",
+      "adr-process"
+    ],
+    "decides": "design.md#38",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0082"
+    ]
+  },
+  {
+    "number": "0039",
+    "file": "0039-development-setup.md",
+    "title": "Development setup: a maintainer's Mac plus a Talos+Kata cluster",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "testing",
+      "isolation",
+      "tooling"
+    ],
+    "decides": "design.md#39",
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0040",
+    "file": "0040-agentgateway-model-and-mcp-gateway.md",
+    "title": "agentgateway as the model gateway and MCP gateway",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "models-spend",
+    "tags": [
+      "agentgateway",
+      "models",
+      "mcp"
+    ],
+    "amends": [
+      "0013",
+      "0014",
+      "0016"
+    ],
+    "amended_by": [
+      "0048",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0084"
+    ]
+  },
+  {
+    "number": "0041",
+    "file": "0041-koinon-spend-ledger-and-budget-stops.md",
+    "title": "Koinon spend ledger and budget stops",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "models-spend",
+    "tags": [
+      "spend-ledger",
+      "budgets",
+      "pricing",
+      "agentgateway"
+    ],
+    "amends": [
+      "0013"
+    ],
+    "amended_by": [
+      "0050",
+      "0056",
+      "0081",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0069",
+      "0071",
+      "0072",
+      "0074",
+      "0092",
+      "0093",
+      "0098",
+      "0114"
+    ]
+  },
+  {
+    "number": "0042",
+    "file": "0042-ask-tier-park-and-execute.md",
+    "title": "Ask tier: park the run, Koinon executes the approved call",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "work-model",
+    "tags": [
+      "approvals",
+      "runs",
+      "mcp",
+      "leak-guard"
+    ],
+    "amends": [
+      "0008"
+    ],
+    "amended_by": [
+      "0048",
+      "0065",
+      "0084"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0073",
+      "0075",
+      "0091",
+      "0092",
+      "0101"
+    ]
+  },
+  {
+    "number": "0043",
+    "file": "0043-workload-identity-adapters-and-koinon-issuer.md",
+    "title": "Workload identity adapters and a Koinon OIDC issuer",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "tenancy-identity",
+    "tags": [
+      "identity",
+      "credentials"
+    ],
+    "amends": [
+      "0006"
+    ],
+    "amended_by": [
+      "0063",
+      "0073"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0044",
+    "file": "0044-in-sandbox-credential-exception.md",
+    "title": "In-sandbox credentials as a gated exception",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "security-audit",
+    "tags": [
+      "credentials",
+      "security",
+      "egress"
+    ],
+    "amends": [
+      "0006",
+      "0013",
+      "0015"
+    ],
+    "amended_by": [
+      "0114"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0045",
+    "file": "0045-openshell-hardening-defaults.md",
+    "title": "OpenShell hardening defaults",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "openshell",
+      "isolation",
+      "kubernetes",
+      "security"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0048",
+      "0075"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0061",
+      "0069",
+      "0071",
+      "0080",
+      "0083",
+      "0085",
+      "0093",
+      "0097",
+      "0101",
+      "0106",
+      "0112",
+      "0113"
+    ]
+  },
+  {
+    "number": "0046",
+    "file": "0046-adr-conventions.md",
+    "title": "ADR conventions",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "adr-process",
+      "docs"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0115"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0082",
+      "0094",
+      "0102",
+      "0103",
+      "0104",
+      "0105",
+      "0106"
+    ]
+  },
+  {
+    "number": "0047",
+    "file": "0047-repository-scaffold.md",
+    "title": "Repository scaffold, data model foundations and CI gates",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "engineering-process",
+    "tags": [
+      "ci",
+      "database",
+      "migrations",
+      "api",
+      "tooling"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0076",
+      "0111"
+    ]
+  },
+  {
+    "number": "0048",
+    "file": "0048-openshell-spike-results.md",
+    "title": "OpenShell spike results",
+    "status": "accepted",
+    "date": "2026-10-21",
+    "area": "runtime-sandbox",
+    "tags": [
+      "openshell",
+      "isolation",
+      "credentials",
+      "agentgateway",
+      "approvals"
+    ],
+    "amends": [
+      "0006",
+      "0008",
+      "0016",
+      "0040",
+      "0042",
+      "0045"
+    ],
+    "amended_by": [
+      "0049",
+      "0052",
+      "0075",
+      "0078"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0061",
+      "0068",
+      "0069",
+      "0077"
+    ]
+  },
+  {
+    "number": "0049",
+    "file": "0049-v01-scope-decisions.md",
+    "title": "v0.1 scope: template, approvals, gateway modes and agentd placement",
+    "status": "accepted",
+    "date": "2026-10-22",
+    "area": "product-scope",
+    "tags": [
+      "roadmap",
+      "github",
+      "approvals",
+      "install",
+      "agentgateway"
+    ],
+    "amends": [
+      "0007",
+      "0016",
+      "0036",
+      "0048"
+    ],
+    "amended_by": [
+      "0051",
+      "0056",
+      "0058",
+      "0062",
+      "0063",
+      "0065",
+      "0066",
+      "0076",
+      "0077",
+      "0081",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0074",
+      "0079"
+    ]
+  },
+  {
+    "number": "0050",
+    "file": "0050-spend-ledger-ingestion-and-net-limits.md",
+    "title": "Spend ledger ingestion and net limits",
+    "status": "accepted",
+    "date": "2026-10-22",
+    "area": "models-spend",
+    "tags": [
+      "spend-ledger",
+      "budgets",
+      "agentgateway",
+      "pricing"
+    ],
+    "amends": [
+      "0041"
+    ],
+    "amended_by": [
+      "0056",
+      "0081",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0074",
+      "0087"
+    ]
+  },
+  {
+    "number": "0051",
+    "file": "0051-session-home-generations.md",
+    "title": "Session home generations",
+    "status": "accepted",
+    "date": "2026-10-22",
+    "area": "runtime-sandbox",
+    "tags": [
+      "agent-home",
+      "harness",
+      "sandbox",
+      "runs"
+    ],
+    "amends": [
+      "0029",
+      "0049"
+    ],
+    "amended_by": [
+      "0054",
+      "0065"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0084",
+      "0091",
+      "0093",
+      "0106",
+      "0112"
+    ]
+  },
+  {
+    "number": "0052",
+    "file": "0052-opencode-v2-flavor.md",
+    "title": "OpenCode flavor on OpenCode v2",
+    "status": "accepted",
+    "date": "2026-10-22",
+    "area": "runtime-sandbox",
+    "tags": [
+      "flavors",
+      "harness",
+      "mcp",
+      "dependencies"
+    ],
+    "amends": [
+      "0048"
+    ],
+    "amended_by": [
+      "0079"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0070",
+      "0071",
+      "0080",
+      "0093",
+      "0112"
+    ]
+  },
+  {
+    "number": "0053",
+    "file": "0053-hermes-context-file-patch.md",
+    "title": "Hermes context-file build patch: redo on every upgrade, with a guard test",
+    "status": "superseded",
+    "date": "2026-10-23",
+    "area": "runtime-sandbox",
+    "tags": [
+      "harness",
+      "flavors",
+      "dependencies"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [
+      "0059"
+    ],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0054",
+    "file": "0054-unkillable-sandbox-process.md",
+    "title": "A sandbox with an unkillable process is recreated",
+    "status": "accepted",
+    "date": "2026-10-23",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "agent-home",
+      "approvals",
+      "runs"
+    ],
+    "amends": [
+      "0051"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0055",
+    "file": "0055-chat-as-its-own-object.md",
+    "title": "Chat is its own object",
+    "status": "accepted",
+    "date": "2026-10-23",
+    "area": "work-model",
+    "tags": [
+      "chat",
+      "tasks",
+      "audit"
+    ],
+    "amends": [
+      "0011",
+      "0018"
+    ],
+    "amended_by": [
+      "0065"
+    ],
+    "supersedes": [
+      "0017"
+    ],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0056",
+    "file": "0056-model-providers-pricing-and-budgets-per-org.md",
+    "title": "Model providers, models, pricing and budgets per org",
+    "status": "accepted",
+    "date": "2026-10-23",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "pricing",
+      "budgets",
+      "encryption",
+      "credentials",
+      "api"
+    ],
+    "amends": [
+      "0007",
+      "0021",
+      "0041",
+      "0049",
+      "0050"
+    ],
+    "amended_by": [
+      "0097",
+      "0098"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0068",
+      "0069",
+      "0070",
+      "0071",
+      "0072",
+      "0074",
+      "0081",
+      "0085",
+      "0086",
+      "0092",
+      "0093",
+      "0096",
+      "0100",
+      "0112",
+      "0114"
+    ]
+  },
+  {
+    "number": "0057",
+    "file": "0057-mcp-servers.md",
+    "title": "MCP servers: remote and container, catalog, allowlists and discovery",
+    "status": "accepted",
+    "date": "2026-10-23",
+    "area": "connectors-tools",
+    "tags": [
+      "mcp",
+      "connectors",
+      "approvals",
+      "egress",
+      "credentials"
+    ],
+    "amends": [
+      "0014"
+    ],
+    "amended_by": [
+      "0084",
+      "0096",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071",
+      "0073",
+      "0091"
+    ]
+  },
+  {
+    "number": "0058",
+    "file": "0058-gateway-modes.md",
+    "title": "Gateway modes: standalone, kubernetes and shared",
+    "status": "accepted",
+    "date": "2026-10-23",
+    "area": "models-spend",
+    "tags": [
+      "agentgateway",
+      "models",
+      "budgets",
+      "kubernetes"
+    ],
+    "amends": [
+      "0049"
+    ],
+    "amended_by": [
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0069",
+      "0073"
+    ]
+  },
+  {
+    "number": "0059",
+    "file": "0059-v01-opencode-only.md",
+    "title": "v0.1 ships one harness: OpenCode v2",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "runtime-sandbox",
+    "tags": [
+      "flavors",
+      "harness",
+      "migrations",
+      "roadmap"
+    ],
+    "amends": [
+      "0035"
+    ],
+    "amended_by": [
+      "0112"
+    ],
+    "supersedes": [
+      "0053"
+    ],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0074",
+      "0093"
+    ]
+  },
+  {
+    "number": "0060",
+    "file": "0060-migrations-as-a-job.md",
+    "title": "Migrations run as a Job, not on start; an Argo CD Sync hook under Argo",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "install-operations",
+    "tags": [
+      "migrations",
+      "helm-chart",
+      "database",
+      "kubernetes"
+    ],
+    "amends": [
+      "0037"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0003",
+      "0027"
+    ],
+    "related_by": [
+      "0076",
+      "0085",
+      "0088",
+      "0099"
+    ]
+  },
+  {
+    "number": "0061",
+    "file": "0061-image-pull-secrets-and-registry-mirrors.md",
+    "title": "Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "install-operations",
+    "tags": [
+      "registry",
+      "helm-chart",
+      "openshell"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0045",
+      "0048"
+    ],
+    "related_by": [
+      "0077",
+      "0078",
+      "0079",
+      "0113"
+    ]
+  },
+  {
+    "number": "0062",
+    "file": "0062-code-host-connectors.md",
+    "title": "Code-host connectors: one interface per provider, capabilities as data",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "connectors-tools",
+    "tags": [
+      "connectors",
+      "github",
+      "gitea",
+      "egress"
+    ],
+    "amends": [
+      "0007",
+      "0036",
+      "0049"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0063",
+      "0071",
+      "0091"
+    ]
+  },
+  {
+    "number": "0063",
+    "file": "0063-forge-credential-classes.md",
+    "title": "Code-host credential classes: allow weaker credentials, with compensation",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "security-audit",
+    "tags": [
+      "credentials",
+      "gitea",
+      "github",
+      "secrets"
+    ],
+    "amends": [
+      "0006",
+      "0007",
+      "0043",
+      "0049"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0062"
+    ],
+    "related_by": [
+      "0071"
+    ]
+  },
+  {
+    "number": "0064",
+    "file": "0064-work-tracker-connectors.md",
+    "title": "Work-tracker connectors: tools and triggers, no sync",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "connectors-tools",
+    "tags": [
+      "work-tracker",
+      "connectors",
+      "triggers",
+      "tasks"
+    ],
+    "amends": [
+      "0007"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0065",
+    "file": "0065-work-model-tasks-inbox.md",
+    "title": "Work model: A2A-shaped tasks, the inbox, and asking people and agents",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "work-model",
+    "tags": [
+      "tasks",
+      "approvals",
+      "runs",
+      "agent-home",
+      "chat"
+    ],
+    "amends": [
+      "0006",
+      "0010",
+      "0011",
+      "0012",
+      "0017",
+      "0018",
+      "0019",
+      "0030",
+      "0032",
+      "0036",
+      "0042",
+      "0049",
+      "0051",
+      "0055"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071",
+      "0072",
+      "0073",
+      "0074",
+      "0089",
+      "0096"
+    ]
+  },
+  {
+    "number": "0066",
+    "file": "0066-triggers-and-scheduling.md",
+    "title": "Triggers and scheduling: DBOS on Koinon's Postgres, triggers on the agent version",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "work-model",
+    "tags": [
+      "triggers",
+      "eventing",
+      "runs",
+      "database"
+    ],
+    "amends": [
+      "0010",
+      "0018",
+      "0030",
+      "0049"
+    ],
+    "amended_by": [
+      "0078"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": [
+      "0071",
+      "0072",
+      "0076",
+      "0081",
+      "0085"
+    ]
+  },
+  {
+    "number": "0067",
+    "file": "0067-concierge.md",
+    "title": "The concierge: a setup and management assistant in koinon-api",
+    "status": "accepted",
+    "date": "2026-10-26",
+    "area": "work-model",
+    "tags": [
+      "identity",
+      "approvals",
+      "audit",
+      "ui"
+    ],
+    "amends": [
+      "0005"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0068",
+    "file": "0068-prompt-caching-always-on.md",
+    "title": "Prompt caching is always on for models that support it",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "models-spend",
+    "tags": [
+      "prompt-caching",
+      "models",
+      "pricing",
+      "agentgateway"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0048",
+      "0056"
+    ],
+    "related_by": [
+      "0069",
+      "0070",
+      "0072",
+      "0081",
+      "0092",
+      "0097",
+      "0098",
+      "0112"
+    ]
+  },
+  {
+    "number": "0069",
+    "file": "0069-native-model-formats.md",
+    "title": "Models speak their family's native API format",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "agentgateway",
+      "harness",
+      "prompt-caching"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0041",
+      "0045",
+      "0048",
+      "0056",
+      "0058",
+      "0068"
+    ],
+    "related_by": [
+      "0070",
+      "0072",
+      "0080",
+      "0097",
+      "0112"
+    ]
+  },
+  {
+    "number": "0070",
+    "file": "0070-model-metadata.md",
+    "title": "Model metadata: a reviewed snapshot from models.dev and OpenRouter",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "pricing"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0098"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0052",
+      "0056",
+      "0068",
+      "0069"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0071",
+    "file": "0071-skill-library.md",
+    "title": "The skill library: pinned, scanned skills delivered by agentd",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "connectors-tools",
+    "tags": [
+      "skills",
+      "security",
+      "harness",
+      "flavors"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0003",
+      "0007",
+      "0020",
+      "0023",
+      "0031",
+      "0033",
+      "0041",
+      "0045",
+      "0052",
+      "0056",
+      "0057",
+      "0062",
+      "0063",
+      "0065",
+      "0066"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0072",
+    "file": "0072-agent-model-run-now-echo-check.md",
+    "title": "The agent's model setting, \"run now\" for schedules, and the provider echo check",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "triggers",
+      "budgets"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0086"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0041",
+      "0056",
+      "0065",
+      "0066",
+      "0068",
+      "0069"
+    ],
+    "related_by": [
+      "0074",
+      "0092"
+    ]
+  },
+  {
+    "number": "0073",
+    "file": "0073-agent-passport.md",
+    "title": "Agent passport: a verifiable identity for every agent call",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "tenancy-identity",
+    "tags": [
+      "identity",
+      "mcp",
+      "agentgateway",
+      "audit"
+    ],
+    "amends": [
+      "0006",
+      "0043"
+    ],
+    "amended_by": [
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0005",
+      "0019",
+      "0023",
+      "0042",
+      "0057",
+      "0058",
+      "0065"
+    ],
+    "related_by": [
+      "0074",
+      "0096",
+      "0101"
+    ]
+  },
+  {
+    "number": "0074",
+    "file": "0074-run-traces-trace-router.md",
+    "title": "Run traces: a Koinon trace router to each org's OTLP backend",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "work-model",
+    "tags": [
+      "tracing",
+      "runs",
+      "agentgateway",
+      "audit"
+    ],
+    "amends": [
+      "0023"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0041",
+      "0049",
+      "0050",
+      "0056",
+      "0059",
+      "0065",
+      "0072",
+      "0073"
+    ],
+    "related_by": [
+      "0089",
+      "0093",
+      "0097",
+      "0100"
+    ]
+  },
+  {
+    "number": "0075",
+    "file": "0075-isolation-tiers.md",
+    "title": "Isolation tiers: vm, hardened and dev",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "runtime-sandbox",
+    "tags": [
+      "isolation",
+      "openshell",
+      "sandbox",
+      "kubernetes"
+    ],
+    "amends": [
+      "0045",
+      "0048"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0006",
+      "0023",
+      "0025",
+      "0042",
+      "0076",
+      "0077"
+    ],
+    "related_by": [
+      "0076",
+      "0077",
+      "0080",
+      "0083",
+      "0097",
+      "0101"
+    ]
+  },
+  {
+    "number": "0076",
+    "file": "0076-database-modes.md",
+    "title": "Database modes: bring your own, existing CNPG, or standalone Postgres",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "install-operations",
+    "tags": [
+      "database",
+      "install",
+      "backup-restore",
+      "helm-chart"
+    ],
+    "amends": [
+      "0049"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0003",
+      "0047",
+      "0060",
+      "0066",
+      "0075",
+      "0077"
+    ],
+    "related_by": [
+      "0075",
+      "0077",
+      "0085",
+      "0088",
+      "0098"
+    ]
+  },
+  {
+    "number": "0077",
+    "file": "0077-pinned-openshell-and-installer.md",
+    "title": "Koinon pins OpenShell and Agent Sandbox per release, and ships an installer",
+    "status": "accepted",
+    "date": "2026-10-28",
+    "area": "install-operations",
+    "tags": [
+      "install",
+      "openshell",
+      "helm-chart",
+      "release"
+    ],
+    "amends": [
+      "0049"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0027",
+      "0048",
+      "0061",
+      "0075",
+      "0076"
+    ],
+    "related_by": [
+      "0075",
+      "0076",
+      "0079",
+      "0085"
+    ]
+  },
+  {
+    "number": "0078",
+    "file": "0078-sandbox-observer.md",
+    "title": "Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready",
+    "status": "accepted",
+    "date": "2026-10-29",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "openshell",
+      "kubernetes",
+      "metrics"
+    ],
+    "amends": [
+      "0048",
+      "0066"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0023",
+      "0061"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0079",
+    "file": "0079-dependency-cooldown.md",
+    "title": "Dependency cooldown: three days everywhere, and a checked fast path for security fixes",
+    "status": "accepted",
+    "date": "2026-10-29",
+    "area": "engineering-process",
+    "tags": [
+      "dependencies",
+      "ci"
+    ],
+    "amends": [
+      "0052"
+    ],
+    "amended_by": [
+      "0112",
+      "0113"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0049",
+      "0061",
+      "0077"
+    ],
+    "related_by": [
+      "0082",
+      "0088",
+      "0090",
+      "0093",
+      "0094",
+      "0098",
+      "0111",
+      "0118"
+    ]
+  },
+  {
+    "number": "0080",
+    "file": "0080-tool-set-matches-egress-and-escape-hosts.md",
+    "title": "The tool set matches the sandbox's egress, and escape cases observe proxy decisions",
+    "status": "accepted",
+    "date": "2026-10-29",
+    "area": "runtime-sandbox",
+    "tags": [
+      "egress",
+      "harness",
+      "testing"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0113"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0025",
+      "0045",
+      "0052",
+      "0069",
+      "0075"
+    ],
+    "related_by": [
+      "0091",
+      "0112"
+    ]
+  },
+  {
+    "number": "0081",
+    "file": "0081-run-limits.md",
+    "title": "Run limits: model requests, spend and time; tokens are reported, not enforced",
+    "status": "accepted",
+    "date": "2026-10-29",
+    "area": "work-model",
+    "tags": [
+      "runs",
+      "budgets",
+      "spend-ledger",
+      "pricing"
+    ],
+    "amends": [
+      "0041",
+      "0049",
+      "0050"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0056",
+      "0066",
+      "0068"
+    ],
+    "related_by": [
+      "0087",
+      "0092",
+      "0101"
+    ]
+  },
+  {
+    "number": "0082",
+    "file": "0082-work-claims-and-ready-queue.md",
+    "title": "Work claims and the ready queue: a claim branch is the lock, the board is the queue",
+    "status": "accepted",
+    "date": "2026-10-30",
+    "area": "engineering-process",
+    "tags": [
+      "claims",
+      "ci",
+      "github"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0094",
+      "0103",
+      "0104",
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0038",
+      "0046",
+      "0079"
+    ],
+    "related_by": [
+      "0090",
+      "0094",
+      "0104"
+    ]
+  },
+  {
+    "number": "0083",
+    "file": "0083-sandbox-resources.md",
+    "title": "Sandbox resources: template defaults, platform bounds, requests and limits",
+    "status": "accepted",
+    "date": "2026-10-31",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "kubernetes",
+      "isolation"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0020",
+      "0027",
+      "0045",
+      "0075"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0084",
+    "file": "0084-leak-guard.md",
+    "title": "Leak guard: a taint check on every MCP tool call, in koinon-api",
+    "status": "accepted",
+    "date": "2026-10-31",
+    "area": "security-audit",
+    "tags": [
+      "leak-guard",
+      "egress",
+      "mcp",
+      "security"
+    ],
+    "amends": [
+      "0042",
+      "0057"
+    ],
+    "amended_by": [
+      "0091",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0020",
+      "0023",
+      "0040",
+      "0051"
+    ],
+    "related_by": [
+      "0092",
+      "0093",
+      "0096",
+      "0113",
+      "0114"
+    ]
+  },
+  {
+    "number": "0085",
+    "file": "0085-upgrade-compatibility-and-recovery-policy.md",
+    "title": "Upgrade, compatibility and recovery policy",
+    "status": "accepted",
+    "date": "2026-11-01",
+    "area": "install-operations",
+    "tags": [
+      "upgrade",
+      "backup-restore",
+      "migrations",
+      "secrets"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0099",
+      "0109"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0027",
+      "0030",
+      "0032",
+      "0045",
+      "0056",
+      "0060",
+      "0066",
+      "0076",
+      "0077"
+    ],
+    "related_by": [
+      "0088",
+      "0096",
+      "0097",
+      "0098",
+      "0100",
+      "0107",
+      "0108",
+      "0110",
+      "0111"
+    ]
+  },
+  {
+    "number": "0086",
+    "file": "0086-stored-org-default-model.md",
+    "title": "The org default model is stored, not derived",
+    "status": "accepted",
+    "date": "2026-11-01",
+    "area": "models-spend",
+    "tags": [
+      "models",
+      "pricing",
+      "multi-tenancy"
+    ],
+    "amends": [
+      "0072"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0056"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0087",
+    "file": "0087-turn-policy-is-a-pure-state-machine.md",
+    "title": "Turn policy is a pure state machine",
+    "status": "accepted",
+    "date": "2026-11-01",
+    "area": "work-model",
+    "tags": [
+      "runs",
+      "harness",
+      "testing"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0050",
+      "0081"
+    ],
+    "related_by": [
+      "0089"
+    ]
+  },
+  {
+    "number": "0088",
+    "file": "0088-cli-stack.md",
+    "title": "The command-line stack: cobra, pflag and viper, with Charm on a terminal only",
+    "status": "accepted",
+    "date": "2026-11-01",
+    "area": "frontend-ux",
+    "tags": [
+      "cli",
+      "helm-chart",
+      "testing"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0060",
+      "0076",
+      "0079",
+      "0085"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0089",
+    "file": "0089-run-outcome-writer.md",
+    "title": "One writer ends a run",
+    "status": "accepted",
+    "date": "2026-11-01",
+    "area": "work-model",
+    "tags": [
+      "runs",
+      "tasks",
+      "tracing"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0030",
+      "0065",
+      "0074",
+      "0087"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0090",
+    "file": "0090-scripts-require-bash-5.md",
+    "title": "Every repository script requires bash 5",
+    "status": "accepted",
+    "date": "2026-11-02",
+    "area": "engineering-process",
+    "tags": [
+      "tooling",
+      "ci"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0079",
+      "0082"
+    ],
+    "related_by": [
+      "0111",
+      "0118"
+    ]
+  },
+  {
+    "number": "0091",
+    "file": "0091-leak-guard-by-destination.md",
+    "title": "Leak guard by destination: sink classes, session legs and a byte cap",
+    "status": "accepted",
+    "date": "2026-11-03",
+    "area": "security-audit",
+    "tags": [
+      "leak-guard",
+      "egress",
+      "mcp",
+      "github"
+    ],
+    "amends": [
+      "0084"
+    ],
+    "amended_by": [
+      "0092",
+      "0097"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0042",
+      "0051",
+      "0057",
+      "0062",
+      "0080"
+    ],
+    "related_by": [
+      "0093",
+      "0096",
+      "0113"
+    ]
+  },
+  {
+    "number": "0092",
+    "file": "0092-leak-guard-judge-model.md",
+    "title": "Leak guard judge: rules, then a cheap judge model, then a person",
+    "status": "accepted",
+    "date": "2026-11-03",
+    "area": "security-audit",
+    "tags": [
+      "leak-guard",
+      "models",
+      "approvals",
+      "prompt-caching"
+    ],
+    "amends": [
+      "0091"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0041",
+      "0042",
+      "0056",
+      "0068",
+      "0072",
+      "0081",
+      "0084"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0093",
+    "file": "0093-koinon-core-opencode-plugin.md",
+    "title": "koinon.core: one Koinon-owned OpenCode plugin instead of a fork",
+    "status": "accepted",
+    "date": "2026-11-03",
+    "area": "runtime-sandbox",
+    "tags": [
+      "harness",
+      "flavors",
+      "spend-ledger"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0041",
+      "0045",
+      "0051",
+      "0052",
+      "0056",
+      "0059",
+      "0074",
+      "0079",
+      "0084",
+      "0091"
+    ],
+    "related_by": [
+      "0112"
+    ]
+  },
+  {
+    "number": "0094",
+    "file": "0094-work-claims-on-the-public-repository.md",
+    "title": "Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue",
+    "status": "accepted",
+    "date": "2026-11-05",
+    "area": "engineering-process",
+    "tags": [
+      "claims",
+      "github",
+      "ci"
+    ],
+    "amends": [
+      "0082"
+    ],
+    "amended_by": [
+      "0102",
+      "0104",
+      "0105"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0046",
+      "0079",
+      "0082"
+    ],
+    "related_by": [
+      "0103",
+      "0104",
+      "0111"
+    ]
+  },
+  {
+    "number": "0096",
+    "file": "0096-mcp-oauth-sign-in.md",
+    "title": "MCP sign-in: OAuth-authorized remote MCP servers",
+    "status": "accepted",
+    "date": "2026-11-06",
+    "area": "connectors-tools",
+    "tags": [
+      "mcp",
+      "auth",
+      "credentials",
+      "encryption"
+    ],
+    "amends": [
+      "0057"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0005",
+      "0023",
+      "0056",
+      "0065",
+      "0073",
+      "0084",
+      "0085",
+      "0091",
+      "0097"
+    ],
+    "related_by": [
+      "0097",
+      "0114"
+    ]
+  },
+  {
+    "number": "0097",
+    "file": "0097-koinon-owned-gateway.md",
+    "title": "A Koinon-owned gateway, in three steps",
+    "status": "accepted",
+    "date": "2026-11-06",
+    "area": "models-spend",
+    "tags": [
+      "agentgateway",
+      "mcp",
+      "models",
+      "spend-ledger",
+      "leak-guard"
+    ],
+    "amends": [
+      "0006",
+      "0013",
+      "0040",
+      "0041",
+      "0049",
+      "0050",
+      "0056",
+      "0057",
+      "0058",
+      "0073",
+      "0084",
+      "0091"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0045",
+      "0068",
+      "0069",
+      "0074",
+      "0075",
+      "0085",
+      "0096"
+    ],
+    "related_by": [
+      "0096",
+      "0099",
+      "0112",
+      "0114"
+    ]
+  },
+  {
+    "number": "0098",
+    "file": "0098-price-catalogue-updates-from-public-sources.md",
+    "title": "Update the model price catalogue from public sources",
+    "status": "accepted",
+    "date": "2026-11-06",
+    "area": "models-spend",
+    "tags": [
+      "pricing",
+      "models",
+      "spend-ledger",
+      "prompt-caching"
+    ],
+    "amends": [
+      "0056",
+      "0070"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0041",
+      "0068",
+      "0076",
+      "0079",
+      "0085"
+    ],
+    "related_by": [
+      "0100"
+    ]
+  },
+  {
+    "number": "0099",
+    "file": "0099-no-schema-or-upgrade-promise-before-v0-3.md",
+    "title": "No schema or upgrade promise before v0.3",
+    "status": "accepted",
+    "date": "2026-11-06",
+    "area": "install-operations",
+    "tags": [
+      "migrations",
+      "upgrade",
+      "release"
+    ],
+    "amends": [
+      "0085"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0027",
+      "0060",
+      "0097"
+    ],
+    "related_by": [
+      "0100",
+      "0111"
+    ]
+  },
+  {
+    "number": "0100",
+    "file": "0100-install-audit-chain.md",
+    "title": "An install-level audit chain for platform actions",
+    "status": "accepted",
+    "date": "2026-11-07",
+    "area": "security-audit",
+    "tags": [
+      "audit",
+      "database",
+      "migrations",
+      "helm-chart"
+    ],
+    "amends": [
+      "0004",
+      "0023"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0056",
+      "0074",
+      "0085",
+      "0098",
+      "0099"
+    ],
+    "related_by": [
+      "0107",
+      "0110"
+    ]
+  },
+  {
+    "number": "0101",
+    "file": "0101-agent-substrate-and-kagent-not-adopted.md",
+    "title": "Agent Substrate and kagent 1.x evaluated, not adopted for v0.x",
+    "status": "accepted",
+    "date": "2026-11-08",
+    "area": "runtime-sandbox",
+    "tags": [
+      "openshell",
+      "isolation",
+      "harness"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0011",
+      "0042",
+      "0045",
+      "0073",
+      "0075",
+      "0081"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0102",
+    "file": "0102-merge-queue-runs-the-kind-e2e.md",
+    "title": "The merge queue runs the kind e2e on the queue commit",
+    "status": "accepted",
+    "date": "2026-11-09",
+    "area": "engineering-process",
+    "tags": [
+      "ci",
+      "e2e"
+    ],
+    "amends": [
+      "0094"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [
+      "0105"
+    ],
+    "relates": [
+      "0046"
+    ],
+    "related_by": [
+      "0103"
+    ]
+  },
+  {
+    "number": "0103",
+    "file": "0103-recorded-review-verdict-check.md",
+    "title": "A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`",
+    "status": "deprecated",
+    "date": "2026-11-09",
+    "area": "engineering-process",
+    "tags": [
+      "ci",
+      "github"
+    ],
+    "amends": [
+      "0082"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0046",
+      "0094",
+      "0102"
+    ],
+    "related_by": [
+      "0105"
+    ]
+  },
+  {
+    "number": "0104",
+    "file": "0104-work-claims-reduced-to-the-lock.md",
+    "title": "Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane",
+    "status": "accepted",
+    "date": "2026-11-09",
+    "area": "engineering-process",
+    "tags": [
+      "claims",
+      "ci"
+    ],
+    "amends": [
+      "0082",
+      "0094"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0046",
+      "0082",
+      "0094"
+    ],
+    "related_by": [
+      "0105",
+      "0111"
+    ]
+  },
+  {
+    "number": "0105",
+    "file": "0105-merge-queue-route.md",
+    "title": "One route to main: the merge queue, and drafts run nothing",
+    "status": "accepted",
+    "date": "2026-11-09",
+    "area": "engineering-process",
+    "tags": [
+      "ci",
+      "e2e",
+      "github",
+      "claims"
+    ],
+    "amends": [
+      "0025",
+      "0026",
+      "0047",
+      "0082",
+      "0090",
+      "0094"
+    ],
+    "amended_by": [],
+    "supersedes": [
+      "0102"
+    ],
+    "superseded_by": [],
+    "relates": [
+      "0046",
+      "0103",
+      "0104"
+    ],
+    "related_by": [
+      "0108",
+      "0109",
+      "0111"
+    ]
+  },
+  {
+    "number": "0106",
+    "file": "0106-install-mark-owns-openshell-objects.md",
+    "title": "An install mark decides which OpenShell objects an install owns",
+    "status": "accepted",
+    "date": "2026-11-10",
+    "area": "runtime-sandbox",
+    "tags": [
+      "openshell",
+      "install",
+      "backup-restore"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0045",
+      "0046",
+      "0051"
+    ],
+    "related_by": [
+      "0109",
+      "0110"
+    ]
+  },
+  {
+    "number": "0107",
+    "file": "0107-restore-hold-mode.md",
+    "title": "Restore-hold mode: a restored install starts held",
+    "status": "accepted",
+    "date": "2026-11-10",
+    "area": "install-operations",
+    "tags": [
+      "backup-restore",
+      "helm-chart",
+      "upgrade"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0110"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0085",
+      "0100"
+    ],
+    "related_by": [
+      "0109"
+    ]
+  },
+  {
+    "number": "0108",
+    "file": "0108-docs-site-in-its-own-repository.md",
+    "title": "The docs site lives in its own repository; this repository owns the tested commands",
+    "status": "accepted",
+    "date": "2026-11-10",
+    "area": "engineering-process",
+    "tags": [
+      "docs",
+      "e2e"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [
+      "0037"
+    ],
+    "superseded_by": [],
+    "relates": [
+      "0085",
+      "0105"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0109",
+    "file": "0109-automated-restore-drill.md",
+    "title": "Automated restore drill",
+    "status": "accepted",
+    "date": "2026-11-10",
+    "area": "install-operations",
+    "tags": [
+      "backup-restore",
+      "testing",
+      "e2e"
+    ],
+    "amends": [
+      "0085"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0105",
+      "0106",
+      "0107"
+    ],
+    "related_by": [
+      "0111"
+    ]
+  },
+  {
+    "number": "0110",
+    "file": "0110-held-copy-isolation.md",
+    "title": "A restored copy does not act as its source",
+    "status": "accepted",
+    "date": "2026-11-10",
+    "area": "install-operations",
+    "tags": [
+      "backup-restore",
+      "identity",
+      "auth",
+      "openshell",
+      "mcp"
+    ],
+    "amends": [
+      "0107"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0004",
+      "0023",
+      "0085",
+      "0100",
+      "0106"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0111",
+    "file": "0111-ci-requirements.md",
+    "title": "CI requirements",
+    "status": "accepted",
+    "date": "2026-11-11",
+    "area": "engineering-process",
+    "tags": [
+      "ci",
+      "testing",
+      "release"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0025",
+      "0047",
+      "0079",
+      "0085",
+      "0090",
+      "0094",
+      "0099",
+      "0104",
+      "0105",
+      "0109"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0112",
+    "file": "0112-harness-definitions.md",
+    "title": "Harness definitions: any harness that speaks ACP, described as data",
+    "status": "accepted",
+    "date": "2026-11-11",
+    "area": "runtime-sandbox",
+    "tags": [
+      "harness",
+      "flavors",
+      "dependencies",
+      "models"
+    ],
+    "amends": [
+      "0035",
+      "0059",
+      "0079"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0016",
+      "0032",
+      "0045",
+      "0051",
+      "0052",
+      "0056",
+      "0068",
+      "0069",
+      "0080",
+      "0093",
+      "0097",
+      "0113",
+      "0114"
+    ],
+    "related_by": [
+      "0113",
+      "0114"
+    ]
+  },
+  {
+    "number": "0113",
+    "file": "0113-agent-package-access.md",
+    "title": "Agent package access: straight to allow-listed registries, in four levels",
+    "status": "accepted",
+    "date": "2026-11-11",
+    "area": "runtime-sandbox",
+    "tags": [
+      "egress",
+      "dependencies",
+      "registry",
+      "openshell"
+    ],
+    "amends": [
+      "0015",
+      "0079",
+      "0080"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0006",
+      "0045",
+      "0061",
+      "0084",
+      "0091",
+      "0112"
+    ],
+    "related_by": [
+      "0112"
+    ]
+  },
+  {
+    "number": "0114",
+    "file": "0114-model-credentials-by-type.md",
+    "title": "Model traffic always through the gateway; credentials handled by type",
+    "status": "accepted",
+    "date": "2026-11-11",
+    "area": "models-spend",
+    "tags": [
+      "credentials",
+      "models",
+      "budgets",
+      "spend-ledger",
+      "agentgateway"
+    ],
+    "amends": [
+      "0013",
+      "0015",
+      "0044"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0005",
+      "0019",
+      "0041",
+      "0056",
+      "0084",
+      "0096",
+      "0097",
+      "0112"
+    ],
+    "related_by": [
+      "0112"
+    ]
+  },
+  {
+    "number": "0115",
+    "file": "0115-document-metadata.md",
+    "title": "Document metadata: one area and controlled tags on every doc",
+    "status": "accepted",
+    "date": "2026-11-11",
+    "area": "engineering-process",
+    "tags": [
+      "adr-process",
+      "docs",
+      "ci"
+    ],
+    "amends": [
+      "0046"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0117",
+    "file": "0117-simplified-technical-english.md",
+    "title": "Simplified Technical English for public project text",
+    "status": "accepted",
+    "date": "2026-11-14",
+    "area": "engineering-process",
+    "tags": [
+      "adr-process",
+      "docs"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0118",
+    "file": "0118-hack-logic-in-go.md",
+    "title": "Logic in hack/ moves to Go programs that run with go tool",
+    "status": "accepted",
+    "date": "2026-11-16",
+    "area": "engineering-process",
+    "tags": [
+      "tooling",
+      "ci"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0079",
+      "0090"
+    ],
+    "related_by": []
+  }
+]

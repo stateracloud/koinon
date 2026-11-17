@@ -1,6 +1,12 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [adr-process, docs]
+---
 # 0046. ADR conventions
 
-- Status: Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header)
+- Status: Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header); amended 2026-11-17 (below)
 - Date: 2026-10-21
 - Area: engineering-process
 - Tags: adr-process, docs
@@ -23,6 +29,7 @@ yourself" rule; procoduck can overrule any of them.
    later one lists it as "Amended by NNNN"; the later one lists "Amends". A later ADR that replaces
    only some decisions may instead list "Supersedes in part" (and the older ADR "superseded in part
    by NNNN"); the link rules below treat it like "Amends".
+   _(Changed 2026-11-17: a YAML front matter block is the record of status and links; see the amendment below.)_
    - **Links go both ways.** "Amends", "Supersedes" and "Reduces" in one ADR need "Amended by",
      "Superseded by" and "Reduced by" (or the same words in the Status line) in the ADR it names, and the
      other way round. `hack/adr-lint.sh` fails on a link that has no matching link back, and on a
@@ -55,6 +62,27 @@ yourself" rule; procoduck can overrule any of them.
 ## Open questions
 
 None.
+
+## Amendment 2026-11-17: YAML front matter and a generated index
+
+Issue 283. The free-text header lines were the only record of how ADRs relate, and the index showed titles only. This
+amendment adds a checked block and generated views. It does not change the statuses or the marker rule above.
+
+1. Every ADR starts with a YAML front matter block (`---` lines) above the `# NNNN. Title` line. Keys: `status`
+   (`proposed`, `accepted`, `deprecated`, `superseded` or `rejected`), `date`, `area`, `tags` (the lists of
+   [0115](0115-document-metadata.md)), optional `decides` (`design.md#N`) and the lists `amends`, `supersedes`,
+   `relates`. ADR numbers are quoted four-digit strings, sorted, without duplicates. "Supersedes in part" goes in
+   `supersedes`. No key is written for "amended by" or "superseded by": the tool derives them from the later ADR.
+2. The prose header lines (`- Status:`, `- Amends:`, `- Relates to:` and the others) stay for readers, with their
+   notes. `hack/adr-lint.sh` checks that they name the same status, date, area, tags and numbers as the front
+   matter, and that the older ADR names each ADR that amends or supersedes it in its Status or "Amended by" line.
+3. `hack/adr-index.sh` generates the README index, `adrs.json` (the front matter plus the derived links) and
+   `graph.md` (a Mermaid graph of amends and supersedes) with the Go tool `hack/cmd/adr`. `hack/adr-lint.sh` fails when
+   one of them is stale. Nobody edits them by hand.
+4. `hack/adr find`, `hack/adr show` and `hack/adr graph` search and read the ADRs offline.
+5. The lint rejects syntax that only some editors understand: `[[wiki links]]`, callouts (`> [!note]`) and Dataview
+   blocks, outside code. Obsidian and Foam read the plain Markdown and the relative links. `.obsidian/` and
+   `.smart-env/` are in `.gitignore`.
 
 ## Upstream verification
 

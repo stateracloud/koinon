@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-10
+area: engineering-process
+tags: [docs, e2e]
+supersedes: ["0037"]
+relates: ["0085", "0105"]
+---
 # 0108. The docs site lives in its own repository; this repository owns the tested commands
 
 - Status: Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127)

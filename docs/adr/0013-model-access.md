@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: models-spend
+tags: [models, agentgateway, budgets, spend-ledger, credentials]
+decides: design.md#13
+---
 # 0013. Model access through one gateway with hierarchical budgets
 
 - Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0044](0044-in-sandbox-credential-exception.md), [0114](0114-model-credentials-by-type.md) and 2026-10-30 (below)

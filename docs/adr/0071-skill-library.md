@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-28
+area: connectors-tools
+tags: [skills, security, harness, flavors]
+relates: ["0003", "0007", "0020", "0023", "0031", "0033", "0041", "0045", "0052", "0056", "0057", "0062", "0063", "0065", "0066"]
+---
 # 0071. The skill library: pinned, scanned skills delivered by agentd
 
 - Status: Accepted (procoduck, 2026-10-28; built with the UI milestone after v0.1.0)

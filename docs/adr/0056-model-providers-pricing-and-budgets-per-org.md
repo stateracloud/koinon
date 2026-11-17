@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-23
+area: models-spend
+tags: [models, pricing, budgets, encryption, credentials, api]
+amends: ["0007", "0021", "0041", "0049", "0050"]
+---
 # 0056. Model providers, models, pricing and budgets per org
 
 - Status: Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md)
