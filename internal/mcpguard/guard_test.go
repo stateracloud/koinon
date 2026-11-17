@@ -1297,7 +1297,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				var host string
 				var over bool
 				Expect(rows.Scan(&payload, &charged, &before, &host, &over)).To(Succeed())
-				Expect(host).To(Equal("docs.example.com"))
+				Expect(host).To(Equal("example.com"), "only the domain is recorded")
 				Expect(charged).To(Equal(payload))
 				Expect(before).To(Equal(sum))
 				sum += charged
