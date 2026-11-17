@@ -37,15 +37,16 @@ WHERE d.org_id = @org_id AND d.agent_id = @agent_id AND d.run_id IS NOT DISTINCT
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT 1;
 
--- name: GetParkedExecutionDecision :one
--- The decision the guard parked for the call a person approved: what the call carries out, to charge
--- it when it is sent.
-SELECT sink_class, payload_bytes, untrusted_input, private_data
-FROM leak_guard_decisions
-WHERE org_id = @org_id AND agent_id = @agent_id AND run_id IS NOT DISTINCT FROM @run_id
-  AND server = @server AND tool = @tool AND (action = 'approve' OR reason = 'ask_target')
-ORDER BY created_at DESC, id DESC
-LIMIT 1;
+-- name: InsertSentDecision :exec
+-- A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+-- 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+-- and legs are the guard's own reading of the approved call, not a copy of another decision.
+INSERT INTO leak_guard_decisions (
+    org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
+    payload_bytes, untrusted_input, private_data, charged_bytes, cap_used_before, dest_host, over_threshold)
+VALUES (
+    @org_id, @agent_id, @generation, @run_id, @server, @tool, @sink_class, 'pass', 'approved', '{}',
+    @payload_bytes, @untrusted_input, @private_data, @charged_bytes, @cap_used_before, @dest_host, @over_threshold);
 
 -- name: GetRunEvidenceGuardRun :one
 -- The leak guard's count for the run: the bytes it charged and the one over-threshold event (ADR 0091

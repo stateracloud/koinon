@@ -327,9 +327,9 @@ inside a list is refused, whatever its class would be.
 **Not guaranteed:**
 
 - **Leaks under the byte cap.** *(Amended 2026-11-17, #1058: the cap alerts and never refuses, so
-  there is no bound; the run's one over-threshold event is the signal.)* Up to the cap per run leaves through `external-low` sinks, and a run
-  after a run in the same generation gets its own cap. A secret of 40 bytes fits, so the cap must
-  stay small, and keys belong in the secret store, not in the context.
+  there is no bound; the run's one over-threshold event is the signal.)* Any volume per run leaves
+  through `external-low` sinks. A secret of 40 bytes fits under any threshold, so keys belong in the
+  secret store, not in the context.
 - **A split, separator-padded base64 secret.** A secret split across two arguments and encoded as
   separator-padded base64, with each half longer than the join ends, passes the text match. The same
   text in one argument is still caught, and the session legs bound the damage (the byte cap only alerts, since 2026-11-17). See
@@ -612,7 +612,10 @@ the old value of 2048 bytes).
   refused is not charged. A call held for a person's decision is not charged when the guard assesses
   it: it is **charged when a person allows it and the executor sends it**, once (the approved re-run
   adds a decision row with the charged bytes, and the parked row stays at 0). A denied or expired
-  call is never charged, because its data never left. The count never refuses a call. The reason
+  call is never charged, because its data never left. The guard reads the size from the allowed call
+  itself, so another held call of the same tool is never charged in its place. Every call of an
+  ask target is held, so it is charged this way, whatever the verdict. A call whose reply is lost
+  after it left is not charged: the count is at most once. The count never refuses a call. The reason
   `byte_cap` is removed.
 - The **threshold** is 16 KiB per run (the setting `--leak-guard-byte-cap` and the chart value
   `leakGuardByteCap` stay; the default was 2 KiB). When the count of a run goes over it, the guard

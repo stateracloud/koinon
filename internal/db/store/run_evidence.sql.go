@@ -11,50 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getParkedExecutionDecision = `-- name: GetParkedExecutionDecision :one
-SELECT sink_class, payload_bytes, untrusted_input, private_data
-FROM leak_guard_decisions
-WHERE org_id = $1 AND agent_id = $2 AND run_id IS NOT DISTINCT FROM $3
-  AND server = $4 AND tool = $5 AND (action = 'approve' OR reason = 'ask_target')
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-type GetParkedExecutionDecisionParams struct {
-	OrgID   pgtype.UUID
-	AgentID pgtype.UUID
-	RunID   pgtype.UUID
-	Server  string
-	Tool    string
-}
-
-type GetParkedExecutionDecisionRow struct {
-	SinkClass      string
-	PayloadBytes   int32
-	UntrustedInput pgtype.Bool
-	PrivateData    pgtype.Bool
-}
-
-// The decision the guard parked for the call a person approved: what the call carries out, to charge
-// it when it is sent.
-func (q *Queries) GetParkedExecutionDecision(ctx context.Context, arg GetParkedExecutionDecisionParams) (GetParkedExecutionDecisionRow, error) {
-	row := q.db.QueryRow(ctx, getParkedExecutionDecision,
-		arg.OrgID,
-		arg.AgentID,
-		arg.RunID,
-		arg.Server,
-		arg.Tool,
-	)
-	var i GetParkedExecutionDecisionRow
-	err := row.Scan(
-		&i.SinkClass,
-		&i.PayloadBytes,
-		&i.UntrustedInput,
-		&i.PrivateData,
-	)
-	return i, err
-}
-
 const getRunEvidenceGuardRun = `-- name: GetRunEvidenceGuardRun :one
 SELECT capped_bytes, over_threshold_at, over_threshold_bytes
 FROM leak_guard_runs
@@ -283,6 +239,55 @@ func (q *Queries) InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGua
 		arg.MatchCount,
 		arg.MatchLength,
 		arg.MatchEncoding,
+		arg.PayloadBytes,
+		arg.UntrustedInput,
+		arg.PrivateData,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.DestHost,
+		arg.OverThreshold,
+	)
+	return err
+}
+
+const insertSentDecision = `-- name: InsertSentDecision :exec
+INSERT INTO leak_guard_decisions (
+    org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
+    payload_bytes, untrusted_input, private_data, charged_bytes, cap_used_before, dest_host, over_threshold)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, 'pass', 'approved', '{}',
+    $8, $9, $10, $11, $12, $13, $14)
+`
+
+type InsertSentDecisionParams struct {
+	OrgID          pgtype.UUID
+	AgentID        pgtype.UUID
+	Generation     string
+	RunID          pgtype.UUID
+	Server         string
+	Tool           string
+	SinkClass      string
+	PayloadBytes   int32
+	UntrustedInput pgtype.Bool
+	PrivateData    pgtype.Bool
+	ChargedBytes   int32
+	CapUsedBefore  pgtype.Int4
+	DestHost       string
+	OverThreshold  bool
+}
+
+// A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+// 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+// and legs are the guard's own reading of the approved call, not a copy of another decision.
+func (q *Queries) InsertSentDecision(ctx context.Context, arg InsertSentDecisionParams) error {
+	_, err := q.db.Exec(ctx, insertSentDecision,
+		arg.OrgID,
+		arg.AgentID,
+		arg.Generation,
+		arg.RunID,
+		arg.Server,
+		arg.Tool,
+		arg.SinkClass,
 		arg.PayloadBytes,
 		arg.UntrustedInput,
 		arg.PrivateData,

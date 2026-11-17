@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -568,7 +569,8 @@ func destHost(a Args) string {
 		if !ok {
 			continue
 		}
-		if labels := strings.Split(h, "."); len(labels) > 2 {
+		// An IP literal has no domain: it is kept whole, never cut to its last two groups.
+		if labels := strings.Split(h, "."); len(labels) > 2 && net.ParseIP(h) == nil {
 			h = strings.Join(labels[len(labels)-2:], ".")
 		}
 		if !slices.Contains(hosts, h) {
@@ -685,7 +687,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		a.verdict = a.stallMarked(Decide(f))
 		return a, nil
 	}
-	// external-low: the URL rule and the byte cap, charged to the run under its lock.
+	// external-low: the URL rule, and the run's byte count charged under its lock (never refusing).
 	run, err := g.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		o := refuse(ReasonNoRun, "refused by the leak guard: calls out of the org are only allowed while the agent works on a task")
@@ -711,6 +713,11 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 		}
 		a.verdict, bc = g.decideExternalLow(st, int(budget.CappedBytes), budget.OverThresholdAt.Valid, c.server, decl, args, f)
 		a.verdict = a.stallMarked(a.verdict)
+		if c.ask {
+			// Every call of an ask target is held for a person, whatever the verdict: it is charged
+			// when a person allows it and it is sent (RecordSent), never here.
+			bc = byteCharge{Known: true, Before: bc.Before, After: bc.Before}
+		}
 		if a.verdict.Action == Refuse {
 			return nil // nothing is charged for a call that does not leave
 		}
@@ -728,10 +735,11 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 }
 
 // decideExternalLow decides an external-low call (ADR 0091 decision 5): the ADR 0084 URL rule,
-// which charges st, and, once the session holds both legs, the byte cap per run, where used is what
-// the run has sent since it held them. It returns the verdict and the run's count after the call. A
-// call that is refused leaves the run as it was: the caller saves neither st nor the count. The
-// replay suite drives it without Postgres, so the cap it checks is this one.
+// which charges st, and, once the session holds both legs, the run's byte count, where used is what
+// the run has sent since it held them. It returns the verdict and what the call did to the count
+// (the threshold is crossed, never enforced). A call that is refused leaves the run as it was: the
+// caller saves neither st nor the count. The replay suite drives it without Postgres, so the count
+// it keeps is this one.
 func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool, srv store.McpServer, decl sinkclass.Declaration, args Args, f Facts) (Verdict, byteCharge) {
 	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
 	v := Decide(f)

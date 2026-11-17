@@ -601,9 +601,6 @@ type Querier interface {
 	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
 	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
 	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
-	// The decision the guard parked for the call a person approved: what the call carries out, to charge
-	// it when it is sent.
-	GetParkedExecutionDecision(ctx context.Context, arg GetParkedExecutionDecisionParams) (GetParkedExecutionDecisionRow, error)
 	GetPlatformPriceVersion(ctx context.Context, version int64) (PlatformPriceVersion, error)
 	// The platform price version valid at a time: the latest valid_from not after it.
 	GetPlatformPriceVersionAt(ctx context.Context, at pgtype.Timestamptz) (PlatformPriceVersion, error)
@@ -729,6 +726,10 @@ type Querier interface {
 	// source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
 	// same times. No row: the source is gone or not complete.
 	InsertSeededHomeCheckpoint(ctx context.Context, arg InsertSeededHomeCheckpointParams) (HomeCheckpoint, error)
+	// A call a person allowed has been sent (internal/mcpguard RecordSent): the pass with reason
+	// 'approved', with the bytes it was charged now (ADR 0091 amendment 2026-11-17). The size, class
+	// and legs are the guard's own reading of the approved call, not a copy of another decision.
+	InsertSentDecision(ctx context.Context, arg InsertSentDecisionParams) error
 	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
 	// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's

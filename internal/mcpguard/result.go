@@ -8,7 +8,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -226,38 +225,68 @@ func (g *Guard) RecordApproved(ctx context.Context, row store.ApprovalRequest, s
 // RecordSent records a call a person allowed after the guard held it, once the executor has sent it
 // (approvals.Options.OnMCPSent), and charges its bytes to the run (ADR 0091 amendment 2026-11-17: a
 // held call is charged when a person allows it and it is sent; a denied or expired call is never
-// charged, because its data never left). The charge and the new decision row are one transaction,
-// under the run's lock. A call that raised the run over the threshold raises the one event. It is
-// evidence, not a control: the caller logs a failure and returns the result.
+// charged, because its data never left). The size is read from the approved call itself, so
+// another parked call of the same tool is never charged in its place. The charge and the decision
+// row are one transaction under the run's lock. A call that takes the run over the threshold raises
+// the one event. It is evidence, not a control: the caller logs a failure and returns the result.
+// A call whose reply was lost after it left is not charged: the count is at most once.
 func (g *Guard) RecordSent(ctx context.Context, row store.ApprovalRequest, srv store.McpServer) error {
 	ctx, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
-	p := store.InsertApprovedExecutionDecisionParams{OrgID: row.OrgID, AgentID: row.AgentID, RunID: row.RunID, Server: srv.Name, Tool: row.Tool}
 	if !row.RunID.Valid {
-		return g.q.InsertApprovedExecutionDecision(ctx, p)
+		return nil
 	}
-	parked, err := g.q.GetParkedExecutionDecision(ctx, store.GetParkedExecutionDecisionParams{
-		OrgID: row.OrgID, AgentID: row.AgentID, RunID: row.RunID, Server: srv.Name, Tool: row.Tool})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil // no parked decision: nothing is invented
-	}
+	slug, err := g.q.GetOrgSlug(ctx, row.OrgID)
 	if err != nil {
 		return err
 	}
-	// The same rule as an unheld call: only an external-low call of a session that held both legs.
+	c := caller{org: store.Org{ID: row.OrgID, Slug: slug}, server: srv}
+	c.agent, err = g.q.GetAgent(ctx, store.GetAgentParams{OrgID: row.OrgID, ID: row.AgentID})
+	if err != nil {
+		return err
+	}
+	_, decl, err := g.tool(ctx, c, row.Tool)
+	if err != nil {
+		return err
+	}
+	pol, err := loadPolicy(ctx, g.q, c.org)
+	if err != nil {
+		return err
+	}
+	args, err := SplitArgs(json.RawMessage(row.ArgsJson), decl, pol.hosts())
+	if err != nil {
+		return err
+	}
+	class := pol.classify(srv, decl, args.Address, g.now())
+	if class != sinkclass.ExternalLow && class != sinkclass.ExternalHigh {
+		return nil // nothing left the org
+	}
+	gen, ok, err := Generation(ctx, g.q, row.OrgID, row.AgentID)
+	if err != nil || !ok {
+		return err
+	}
+	legs, err := g.state.Ensure(ctx, Session{Org: row.OrgID, Agent: row.AgentID, Generation: gen})
+	if err != nil {
+		return err
+	}
 	n := 0
-	if parked.SinkClass == string(sinkclass.ExternalLow) && parked.UntrustedInput.Valid && parked.UntrustedInput.Bool &&
-		parked.PrivateData.Valid && parked.PrivateData.Bool {
-		n = int(parked.PayloadBytes)
+	if class == sinkclass.ExternalLow && legs.UntrustedInput && legs.PrivateData {
+		n = args.PayloadBytes()
+	}
+	p := store.InsertSentDecisionParams{
+		OrgID: row.OrgID, AgentID: row.AgentID, Generation: gen, RunID: row.RunID, Server: srv.Name, Tool: row.Tool,
+		SinkClass: string(class), PayloadBytes: int32(min(args.PayloadBytes(), 1<<30)), //nolint:gosec // bounded
+		UntrustedInput: pgtype.Bool{Bool: legs.UntrustedInput, Valid: true}, PrivateData: pgtype.Bool{Bool: legs.PrivateData, Valid: true},
+		DestHost: destHost(args),
 	}
 	if n == 0 {
-		return g.q.InsertApprovedExecutionDecision(ctx, p)
+		return g.q.InsertSentDecision(ctx, p)
 	}
 	bc, err := g.chargeSent(ctx, row.OrgID, row.RunID, n, func(q *store.Queries, bc byteCharge) error {
 		p.ChargedBytes = int32(min(bc.Charged, 1<<30))                                  //nolint:gosec // bounded
 		p.CapUsedBefore = pgtype.Int4{Int32: int32(min(bc.Before, 1<<30)), Valid: true} //nolint:gosec // bounded
 		p.OverThreshold = bc.Crossed
-		return q.InsertApprovedExecutionDecision(ctx, p)
+		return q.InsertSentDecision(ctx, p)
 	})
 	if err != nil {
 		return err
