@@ -1,3 +1,9 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [openshell, isolation, kubernetes, security]
+---
 # 0045. OpenShell hardening defaults
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)

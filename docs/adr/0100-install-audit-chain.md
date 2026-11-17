@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-07
+area: security-audit
+tags: [audit, database, migrations, helm-chart]
+amends: ["0004", "0023"]
+relates: ["0056", "0074", "0085", "0098", "0099"]
+---
 # 0100. An install-level audit chain for platform actions
 
 - Status: Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1)

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-29
+area: work-model
+tags: [runs, budgets, spend-ledger, pricing]
+amends: ["0041", "0049", "0050"]
+relates: ["0023", "0056", "0066", "0068"]
+---
 # 0081. Run limits: model requests, spend and time; tokens are reported, not enforced
 
 - Status: Accepted

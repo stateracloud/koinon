@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [openshell, isolation, credentials, agentgateway, approvals]
+amends: ["0006", "0008", "0016", "0040", "0042", "0045"]
+---
 # 0048. OpenShell spike results
 
 - Status: Accepted (2026-10-26, accepted after implementation)

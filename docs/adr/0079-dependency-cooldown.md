@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-29
+area: engineering-process
+tags: [dependencies, ci]
+amends: ["0052"]
+relates: ["0049", "0061", "0077"]
+---
 # 0079. Dependency cooldown: three days everywhere, and a checked fast path for security fixes
 
 - Status: Accepted; amended by [0112](0112-harness-definitions.md) and [0113](0113-agent-package-access.md)

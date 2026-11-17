@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: install-operations
+tags: [registry, helm-chart, openshell]
+relates: ["0002", "0045", "0048"]
+---
 # 0061. Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes
 
 - Status: Accepted

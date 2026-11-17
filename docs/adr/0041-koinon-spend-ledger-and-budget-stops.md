@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: models-spend
+tags: [spend-ledger, budgets, pricing, agentgateway]
+amends: ["0013"]
+---
 # 0041. Koinon spend ledger and budget stops
 
 - Status: Accepted; amended 2026-10-30 (below)

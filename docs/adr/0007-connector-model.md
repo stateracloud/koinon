@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: connectors-tools
+tags: [connectors, credentials, github]
+decides: design.md#7
+---
 # 0007. Connector model: type, connection, grant
 
 - Status: Accepted

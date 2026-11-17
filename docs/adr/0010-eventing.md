@@ -1,3 +1,10 @@
+---
+status: superseded
+date: 2026-10-21
+area: work-model
+tags: [eventing, triggers, tasks]
+decides: design.md#10
+---
 # 0010. Eventing: the ticket board is the queue
 
 - Status: Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md)

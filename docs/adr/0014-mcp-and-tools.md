@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: connectors-tools
+tags: [mcp, agentgateway, credentials]
+decides: design.md#14
+---
 # 0014. MCP and tools: shared servers outside sandboxes, one progressive endpoint per agent
 
 - Status: Accepted; amended by [0040](0040-agentgateway-model-and-mcp-gateway.md) and [0057](0057-mcp-servers.md)

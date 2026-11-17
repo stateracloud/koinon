@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-28
+area: tenancy-identity
+tags: [identity, mcp, agentgateway, audit]
+amends: ["0006", "0043"]
+relates: ["0005", "0019", "0023", "0042", "0057", "0058", "0065"]
+---
 # 0073. Agent passport: a verifiable identity for every agent call
 
 - Status: Accepted (delivery after v0.1.0)

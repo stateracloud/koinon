@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [agent-home, backup-restore, object-storage, encryption]
+decides: design.md#32
+---
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted

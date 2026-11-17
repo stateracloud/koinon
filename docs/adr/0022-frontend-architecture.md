@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: frontend-ux
+tags: [ui, api, auth, eventing]
+decides: design.md#22
+---
 # 0022. React SPA served by the Go API over connect-rpc
 
 - Status: Accepted

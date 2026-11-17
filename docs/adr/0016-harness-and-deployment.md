@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [harness, openshell, kubernetes]
+decides: design.md#16
+---
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted

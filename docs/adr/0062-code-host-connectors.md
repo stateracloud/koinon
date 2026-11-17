@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: connectors-tools
+tags: [connectors, github, gitea, egress]
+amends: ["0007", "0036", "0049"]
+---
 # 0062. Code-host connectors: one interface per provider, capabilities as data
 
 - Status: Accepted

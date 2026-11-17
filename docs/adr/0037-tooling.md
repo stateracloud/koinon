@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [tooling, migrations, database, docs]
+decides: design.md#37
+---
 # 0037. Tooling: goose, Starlight, ACP Go SDK, Tilt
 
 - Status: Accepted; the migration run (on startup or by a subcommand) amended by [0060](0060-migrations-as-a-job.md); the docs-site decision (Starlight in `docs/site/`) superseded in part by [0108](0108-docs-site-in-its-own-repository.md)

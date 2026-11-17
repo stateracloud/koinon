@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: work-model
+tags: [tasks, approvals, runs, agent-home, chat]
+amends: ["0006", "0010", "0011", "0012", "0017", "0018", "0019", "0030", "0032", "0036", "0042", "0049", "0051", "0055"]
+---
 # 0065. Work model: A2A-shaped tasks, the inbox, and asking people and agents
 
 - Status: Accepted

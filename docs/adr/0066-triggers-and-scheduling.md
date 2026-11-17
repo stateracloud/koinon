@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: work-model
+tags: [triggers, eventing, runs, database]
+amends: ["0010", "0018", "0030", "0049"]
+---
 # 0066. Triggers and scheduling: DBOS on Koinon's Postgres, triggers on the agent version
 
 - Status: Accepted

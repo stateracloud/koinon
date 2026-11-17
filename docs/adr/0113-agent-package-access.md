@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-11
+area: runtime-sandbox
+tags: [egress, dependencies, registry, openshell]
+amends: ["0015", "0079", "0080"]
+relates: ["0006", "0045", "0061", "0084", "0091", "0112"]
+---
 # 0113. Agent package access: straight to allow-listed registries, in four levels
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release

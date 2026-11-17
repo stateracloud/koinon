@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [multi-tenancy, identity, budgets]
+decides: design.md#19
+---
 # 0019. Personal agents call team agents through membership
 
 - Status: Accepted

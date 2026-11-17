@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [multi-tenancy]
+decides: design.md#1
+---
 # 0001. Full multi-tenancy from the start
 
 - Status: Accepted

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-06
+area: install-operations
+tags: [migrations, upgrade, release]
+amends: ["0085"]
+relates: ["0027", "0060", "0097"]
+---
 # 0099. No schema or upgrade promise before v0.3
 
 - Status: Accepted (maintainer decision 2026-11-07)

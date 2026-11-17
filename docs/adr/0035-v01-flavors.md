@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [flavors, harness]
+decides: design.md#35
+---
 # 0035. v0.1 flavors: OpenCode, Hermes and pi over ACP
 
 - Status: Accepted; amended by [0059](0059-v01-opencode-only.md) and [0112](0112-harness-definitions.md)

@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-23
+area: models-spend
+tags: [agentgateway, models, budgets, kubernetes]
+amends: ["0049"]
+---
 # 0058. Gateway modes: standalone, kubernetes and shared
 
 - Status: Accepted; amended 2026-10-25 and 2026-10-26 (below)

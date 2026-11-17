@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [sandbox, runs, agent-home]
+decides: design.md#9
+---
 # 0009. Agent runtime: persistent agent, ephemeral compute
 
 - Status: Accepted; amended 2026-10-30 and 2026-11-07 (below)

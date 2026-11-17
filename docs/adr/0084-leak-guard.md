@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-31
+area: security-audit
+tags: [leak-guard, egress, mcp, security]
+amends: ["0042", "0057"]
+relates: ["0020", "0023", "0040", "0051"]
+---
 # 0084. Leak guard: a taint check on every MCP tool call, in koinon-api
 
 - Status: Accepted (decisions by procoduck, 2026-10-31; delivery before v0.1.0); amended by [0091](0091-leak-guard-by-destination.md) (2026-11-03: the main protection is where a call sends data; the text check is a frozen secondary alarm)

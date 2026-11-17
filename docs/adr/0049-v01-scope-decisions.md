@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-22
+area: product-scope
+tags: [roadmap, github, approvals, install, agentgateway]
+amends: ["0007", "0016", "0036", "0048"]
+---
 # 0049. v0.1 scope: template, approvals, gateway modes and agentd placement
 
 - Status: Accepted
