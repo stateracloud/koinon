@@ -971,8 +971,13 @@ type Approval struct {
 	CiFoldCase bool `protobuf:"varint,32,opt,name=ci_fold_case,json=ciFoldCase,proto3" json:"ci_fold_case,omitempty"`
 	// scope_id is the scope that let this call run without a decision; empty when a person (or the
 	// Trusted preset) decided it. scope_kind says which kind it was.
-	ScopeId       string    `protobuf:"bytes,33,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
-	ScopeKind     ScopeKind `protobuf:"varint,34,opt,name=scope_kind,json=scopeKind,proto3,enum=koinon.approval.v1alpha1.ScopeKind" json:"scope_kind,omitempty"`
+	ScopeId   string    `protobuf:"bytes,33,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
+	ScopeKind ScopeKind `protobuf:"varint,34,opt,name=scope_kind,json=scopeKind,proto3,enum=koinon.approval.v1alpha1.ScopeKind" json:"scope_kind,omitempty"`
+	// leak_guard is set when the leak guard (ADR 0091) put this call on a card (an MCP call or a
+	// code-host tool call): the reasons, the sink
+	// class and the legs. ListApprovals and GetApproval both set it, so a client that reads the list
+	// sees why the call waits. GetApproval also sets it in mcp.leak_guard.
+	LeakGuard     *LeakGuard `protobuf:"bytes,35,opt,name=leak_guard,json=leakGuard,proto3" json:"leak_guard,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1258,6 +1263,13 @@ func (x *Approval) GetScopeKind() ScopeKind {
 		return x.ScopeKind
 	}
 	return ScopeKind_SCOPE_KIND_UNSPECIFIED
+}
+
+func (x *Approval) GetLeakGuard() *LeakGuard {
+	if x != nil {
+		return x.LeakGuard
+	}
+	return nil
 }
 
 type isApproval_Call interface {
@@ -2385,7 +2397,7 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\x05files\x18\x05 \x03(\v2$.koinon.approval.v1alpha1.FileChangeR\x05files\"D\n" +
 	"\vCommentCall\x12!\n" +
 	"\fissue_number\x18\x01 \x01(\x03R\vissueNumber\x12\x12\n" +
-	"\x04body\x18\x02 \x01(\tR\x04body\"\x94\v\n" +
+	"\x04body\x18\x02 \x01(\tR\x04body\"\xd8\v\n" +
 	"\bApproval\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -2433,7 +2445,9 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"ciFoldCase\x12\x19\n" +
 	"\bscope_id\x18! \x01(\tR\ascopeId\x12B\n" +
 	"\n" +
-	"scope_kind\x18\" \x01(\x0e2#.koinon.approval.v1alpha1.ScopeKindR\tscopeKindB\x06\n" +
+	"scope_kind\x18\" \x01(\x0e2#.koinon.approval.v1alpha1.ScopeKindR\tscopeKind\x12B\n" +
+	"\n" +
+	"leak_guard\x18# \x01(\v2#.koinon.approval.v1alpha1.LeakGuardR\tleakGuardB\x06\n" +
 	"\x04call\"\xb0\x02\n" +
 	"\aMcpCall\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1f\n" +
@@ -2622,37 +2636,38 @@ var file_koinon_approval_v1alpha1_approval_proto_depIdxs = []int32{
 	30, // 17: koinon.approval.v1alpha1.Approval.created_at:type_name -> google.protobuf.Timestamp
 	30, // 18: koinon.approval.v1alpha1.Approval.executed_at:type_name -> google.protobuf.Timestamp
 	0,  // 19: koinon.approval.v1alpha1.Approval.scope_kind:type_name -> koinon.approval.v1alpha1.ScopeKind
-	15, // 20: koinon.approval.v1alpha1.McpCall.leak_guard:type_name -> koinon.approval.v1alpha1.LeakGuard
-	29, // 21: koinon.approval.v1alpha1.LeakGuard.destination:type_name -> koinon.approval.v1alpha1.LeakGuard.DestinationEntry
-	17, // 22: koinon.approval.v1alpha1.SavedWorkCall.files:type_name -> koinon.approval.v1alpha1.SavedFile
-	30, // 23: koinon.approval.v1alpha1.SavedWorkCall.expires_at:type_name -> google.protobuf.Timestamp
-	13, // 24: koinon.approval.v1alpha1.ListApprovalsResponse.approvals:type_name -> koinon.approval.v1alpha1.Approval
-	13, // 25: koinon.approval.v1alpha1.GetApprovalResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	3,  // 26: koinon.approval.v1alpha1.FileDiff.status:type_name -> koinon.approval.v1alpha1.FileStatus
-	23, // 27: koinon.approval.v1alpha1.GetApprovalDiffResponse.files:type_name -> koinon.approval.v1alpha1.FileDiff
-	0,  // 28: koinon.approval.v1alpha1.ApproveRequest.scope:type_name -> koinon.approval.v1alpha1.ScopeKind
-	30, // 29: koinon.approval.v1alpha1.ApproveRequest.scope_until:type_name -> google.protobuf.Timestamp
-	13, // 30: koinon.approval.v1alpha1.ApproveResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	13, // 31: koinon.approval.v1alpha1.DenyResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	18, // 32: koinon.approval.v1alpha1.ApprovalService.ListApprovals:input_type -> koinon.approval.v1alpha1.ListApprovalsRequest
-	20, // 33: koinon.approval.v1alpha1.ApprovalService.GetApproval:input_type -> koinon.approval.v1alpha1.GetApprovalRequest
-	22, // 34: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:input_type -> koinon.approval.v1alpha1.GetApprovalDiffRequest
-	25, // 35: koinon.approval.v1alpha1.ApprovalService.Approve:input_type -> koinon.approval.v1alpha1.ApproveRequest
-	27, // 36: koinon.approval.v1alpha1.ApprovalService.Deny:input_type -> koinon.approval.v1alpha1.DenyRequest
-	5,  // 37: koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes:input_type -> koinon.approval.v1alpha1.ListApprovalScopesRequest
-	7,  // 38: koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope:input_type -> koinon.approval.v1alpha1.RevokeApprovalScopeRequest
-	19, // 39: koinon.approval.v1alpha1.ApprovalService.ListApprovals:output_type -> koinon.approval.v1alpha1.ListApprovalsResponse
-	21, // 40: koinon.approval.v1alpha1.ApprovalService.GetApproval:output_type -> koinon.approval.v1alpha1.GetApprovalResponse
-	24, // 41: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:output_type -> koinon.approval.v1alpha1.GetApprovalDiffResponse
-	26, // 42: koinon.approval.v1alpha1.ApprovalService.Approve:output_type -> koinon.approval.v1alpha1.ApproveResponse
-	28, // 43: koinon.approval.v1alpha1.ApprovalService.Deny:output_type -> koinon.approval.v1alpha1.DenyResponse
-	6,  // 44: koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes:output_type -> koinon.approval.v1alpha1.ListApprovalScopesResponse
-	8,  // 45: koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope:output_type -> koinon.approval.v1alpha1.RevokeApprovalScopeResponse
-	39, // [39:46] is the sub-list for method output_type
-	32, // [32:39] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	15, // 20: koinon.approval.v1alpha1.Approval.leak_guard:type_name -> koinon.approval.v1alpha1.LeakGuard
+	15, // 21: koinon.approval.v1alpha1.McpCall.leak_guard:type_name -> koinon.approval.v1alpha1.LeakGuard
+	29, // 22: koinon.approval.v1alpha1.LeakGuard.destination:type_name -> koinon.approval.v1alpha1.LeakGuard.DestinationEntry
+	17, // 23: koinon.approval.v1alpha1.SavedWorkCall.files:type_name -> koinon.approval.v1alpha1.SavedFile
+	30, // 24: koinon.approval.v1alpha1.SavedWorkCall.expires_at:type_name -> google.protobuf.Timestamp
+	13, // 25: koinon.approval.v1alpha1.ListApprovalsResponse.approvals:type_name -> koinon.approval.v1alpha1.Approval
+	13, // 26: koinon.approval.v1alpha1.GetApprovalResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	3,  // 27: koinon.approval.v1alpha1.FileDiff.status:type_name -> koinon.approval.v1alpha1.FileStatus
+	23, // 28: koinon.approval.v1alpha1.GetApprovalDiffResponse.files:type_name -> koinon.approval.v1alpha1.FileDiff
+	0,  // 29: koinon.approval.v1alpha1.ApproveRequest.scope:type_name -> koinon.approval.v1alpha1.ScopeKind
+	30, // 30: koinon.approval.v1alpha1.ApproveRequest.scope_until:type_name -> google.protobuf.Timestamp
+	13, // 31: koinon.approval.v1alpha1.ApproveResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	13, // 32: koinon.approval.v1alpha1.DenyResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	18, // 33: koinon.approval.v1alpha1.ApprovalService.ListApprovals:input_type -> koinon.approval.v1alpha1.ListApprovalsRequest
+	20, // 34: koinon.approval.v1alpha1.ApprovalService.GetApproval:input_type -> koinon.approval.v1alpha1.GetApprovalRequest
+	22, // 35: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:input_type -> koinon.approval.v1alpha1.GetApprovalDiffRequest
+	25, // 36: koinon.approval.v1alpha1.ApprovalService.Approve:input_type -> koinon.approval.v1alpha1.ApproveRequest
+	27, // 37: koinon.approval.v1alpha1.ApprovalService.Deny:input_type -> koinon.approval.v1alpha1.DenyRequest
+	5,  // 38: koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes:input_type -> koinon.approval.v1alpha1.ListApprovalScopesRequest
+	7,  // 39: koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope:input_type -> koinon.approval.v1alpha1.RevokeApprovalScopeRequest
+	19, // 40: koinon.approval.v1alpha1.ApprovalService.ListApprovals:output_type -> koinon.approval.v1alpha1.ListApprovalsResponse
+	21, // 41: koinon.approval.v1alpha1.ApprovalService.GetApproval:output_type -> koinon.approval.v1alpha1.GetApprovalResponse
+	24, // 42: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:output_type -> koinon.approval.v1alpha1.GetApprovalDiffResponse
+	26, // 43: koinon.approval.v1alpha1.ApprovalService.Approve:output_type -> koinon.approval.v1alpha1.ApproveResponse
+	28, // 44: koinon.approval.v1alpha1.ApprovalService.Deny:output_type -> koinon.approval.v1alpha1.DenyResponse
+	6,  // 45: koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes:output_type -> koinon.approval.v1alpha1.ListApprovalScopesResponse
+	8,  // 46: koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope:output_type -> koinon.approval.v1alpha1.RevokeApprovalScopeResponse
+	40, // [40:47] is the sub-list for method output_type
+	33, // [33:40] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_koinon_approval_v1alpha1_approval_proto_init() }
