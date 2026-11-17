@@ -111,13 +111,17 @@ type Suspender interface {
 }
 
 // Snapshotter is an optional capability of a driver: save the state of a sandbox and start a new
-// sandbox from it (epic 1082, D5). The OpenShell driver does not implement it.
+// sandbox from it (epic 1082, D5). The OpenShell driver does not implement it. A snapshot belongs
+// to the workspace it was taken in (ADR 0002): restoring it in another workspace fails with
+// ErrNotFound. Snapshot.Kind says what the driver saved; D5 wants SnapshotDiskMemory, which a
+// driver that can save memory must use, and the contract suite accepts both kinds.
 type Snapshotter interface {
 	// SnapshotSandbox saves the state of a sandbox. The sandbox keeps running.
 	SnapshotSandbox(ctx context.Context, workspace, name string) (Snapshot, error)
 	// RestoreSandbox creates the sandbox spec.Name from a snapshot. It fails with ErrNotFound
-	// for an unknown snapshot, and with ErrInvalid when the snapshot's content does not match
-	// its digest.
+	// for an unknown snapshot or one from another workspace, with ErrInvalid when the digest of
+	// snapshot does not match the saved one or its content, and with ErrAlreadyExists when a
+	// sandbox with the name of spec exists.
 	RestoreSandbox(ctx context.Context, workspace string, snapshot SnapshotRef, spec SandboxSpec) (Sandbox, error)
 }
 

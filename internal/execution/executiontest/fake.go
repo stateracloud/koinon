@@ -243,12 +243,19 @@ func (p *fakeProcess) Wait() (int, error) {
 	return 0, nil
 }
 
+// Close ends the stream and waits for the command to end. It does not change the result of a
+// command that has already exited.
 func (p *fakeProcess) Close() error {
 	p.mu.Lock()
-	p.closed = true
+	select {
+	case <-p.done:
+	default:
+		p.closed = true
+	}
 	p.mu.Unlock()
 	p.closeAll()
 	_ = p.stdin.Close()
+	<-p.done
 	return nil
 }
 
@@ -338,10 +345,13 @@ func (f *Fake) RestoreSandbox(_ context.Context, workspace string, ref execution
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	saved, ok := f.snapshots[ref.ID]
+	if ok && saved.snap.Workspace != workspace {
+		ok = false // a snapshot belongs to its workspace
+	}
 	if !ok {
 		return execution.Sandbox{}, fail("RestoreSandbox", execution.ErrNotFound, "snapshot %q not found", ref.ID)
 	}
-	if ref.Digest != saved.snap.Digest || digest(saved.files) != saved.snap.Digest {
+	if ref.Digest != saved.snap.Digest {
 		return execution.Sandbox{}, fail("RestoreSandbox", execution.ErrInvalid, "snapshot %q does not match digest %q", ref.ID, ref.Digest)
 	}
 	if _, ok := f.sandboxes[sbKey{workspace, spec.Name}]; ok {

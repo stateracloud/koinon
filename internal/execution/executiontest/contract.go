@@ -12,11 +12,11 @@ package executiontest
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported by convention
@@ -97,6 +97,11 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 				Expect(again.ID).To(Equal(first.ID))
 			})
 
+			It("refuses to create a sandbox in a missing workspace with ErrNotFound", func(ctx SpecContext) {
+				_, err := h.Compute.CreateSandbox(ctx, "no-such-workspace", spec("sb"))
+				Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "got %v", err)
+			})
+
 			It("reports a missing sandbox as ErrNotFound", func(ctx SpecContext) {
 				_, err := h.Compute.GetSandbox(ctx, h.Workspace, "missing")
 				Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "got %v", err)
@@ -143,23 +148,45 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 
 				// Newline-delimited lines, as ACP sends them, plus a body larger than any pipe buffer.
 				want := strings.Repeat("{\"jsonrpc\":\"2.0\"}\n", 3) + strings.Repeat("x", 512<<10) + "\n"
-				var wg sync.WaitGroup
-				wg.Add(1)
+				werr := make(chan error, 1)
 				go func() {
-					defer GinkgoRecover()
-					defer wg.Done()
 					_, err := io.WriteString(p.Stdin(), want)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(p.Stdin().Close()).To(Succeed())
+					if cerr := p.Stdin().Close(); err == nil {
+						err = cerr
+					}
+					werr <- err
 				}()
 				got, err := io.ReadAll(p.Stdout())
 				Expect(err).NotTo(HaveOccurred())
-				wg.Wait()
+				Expect(<-werr).To(Succeed())
 				Expect(string(got)).To(Equal(want))
 
 				code, err := p.Wait()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(code).To(BeZero())
+
+				By("a Close after the exit keeps the result")
+				Expect(p.Close()).To(Succeed())
+				code, err = p.Wait()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(code).To(BeZero())
+			}, SpecTimeout(30*time.Second))
+
+			It("ends the command when its context is cancelled", func(ctx SpecContext) {
+				create(ctx, "sb")
+				cctx, cancel := context.WithCancel(ctx)
+				p, err := h.Compute.Exec(cctx, h.Workspace, "sb", execution.ExecRequest{Command: h.Exec})
+				Expect(err).NotTo(HaveOccurred())
+				DeferCleanup(p.Close)
+				cancel()
+				done := make(chan struct{})
+				go func() { defer close(done); _, _ = p.Wait() }()
+				Eventually(done).WithTimeout(settle).Should(BeClosed())
+			}, SpecTimeout(30*time.Second))
+
+			It("reports a missing sandbox as ErrNotFound", func(ctx SpecContext) {
+				_, err := h.Compute.Exec(ctx, h.Workspace, "missing", execution.ExecRequest{Command: h.Exec})
+				Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "got %v", err)
 			})
 
 			It("ends the command when the process is closed, and Close can repeat", func(ctx SpecContext) {
@@ -267,6 +294,24 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 				bad.Digest = fmt.Sprintf("%s:%s", strings.SplitN(snap.Digest, ":", 2)[0], strings.Repeat("0", 64))
 				_, err = s.RestoreSandbox(ctx, h.Workspace, bad, spec("copy"))
 				Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
+			})
+
+			It("does not restore a snapshot in another workspace", func(ctx SpecContext) {
+				create(ctx, "src")
+				snap, err := s.SnapshotSandbox(ctx, h.Workspace, "src")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = h.Compute.EnsureWorkspace(ctx, h.Workspace+"-other", nil)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = s.RestoreSandbox(ctx, h.Workspace+"-other", snap.SnapshotRef, spec("copy"))
+				Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "got %v", err)
+			})
+
+			It("refuses to restore onto an existing sandbox name with ErrAlreadyExists", func(ctx SpecContext) {
+				create(ctx, "src")
+				snap, err := s.SnapshotSandbox(ctx, h.Workspace, "src")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = s.RestoreSandbox(ctx, h.Workspace, snap.SnapshotRef, spec("src"))
+				Expect(errors.Is(err, execution.ErrAlreadyExists)).To(BeTrue(), "got %v", err)
 			})
 
 			It("reports an unknown snapshot as ErrNotFound", func(ctx SpecContext) {
