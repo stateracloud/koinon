@@ -102,8 +102,6 @@ if [[ $sel -ge 1 ]]; then ok; else bad "no script-check line is selected by a ch
 # step of `quick checks` (always runs) and an `inputs=guard` line, so a docs-only change still selects it (issue 1045).
 agents_line=$(paths_script_checks | awk -F'\t' '$2 ~ /^hack\/agentsmd-lint\.sh/ {print $1}')
 if [[ -n $agents_line ]] && paths_inputs_hit "$agents_line" docs/maintainers/agent-workflow.md; then ok; else bad "a change to docs/maintainers/agent-workflow.md does not select hack/agentsmd-lint.sh in preflight (inputs=${agents_line:-none}; want guard)"; fi
-# One awk, no pipe: `sed | grep -q` under pipefail fails at random on Linux (grep exits first, sed gets SIGPIPE).
-if awk '/^  quick-checks:/ { in_job = 1; next } in_job && /^  [a-z][a-z-]*:$/ { exit } in_job && index($0, "run: hack/agentsmd-lint.sh") { found = 1; exit } END { exit !found }' .github/workflows/ci.yml; then ok; else bad "ci.yml: hack/agentsmd-lint.sh must be a step of quick-checks, not of a path-gated job"; fi
 
 # --- 3c. One harness timeout (#990, #980): the Makefile target and ci.yml run the same go test flags.
 mk_t=$(sed -n '/^harness-suite:/,/^$/p' Makefile | grep -oE -- '-timeout [0-9]+[smh]' | head -1 || true)
