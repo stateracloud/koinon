@@ -97,7 +97,7 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 
 ## Decision
 
-_(Changed by [0119](0119-agent-substrate-execution-layer.md): the tier map follows D3 (the `vm` tier is a microVM per sandbox, `hardened` and `dev` as 0119 sets); phase 2.)_
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): the tier map follows D3 of 0119 (the `vm` tier is a microVM per sandbox; see 0119 for `hardened` and `dev`); phase 2.)_
 
 ### The tiers
 
