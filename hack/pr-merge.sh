@@ -52,7 +52,7 @@
 #   The closing line says what GitHub did, not what was asked: `merged`, `added to the merge queue`, `auto-merge
 #   armed but NOT queued: ... required review`, or `auto-merge enabled` (prv_merge_outcome).
 # Test hooks: PR_MERGE_WAIT, PR_MERGE_THREADS, PR_MERGE_CLAIM replace the helper scripts; PR_MERGE_NEEDS_E2E replaces needs-e2e.sh
-# (with PR_MERGE_TEST=1).
+# (with PR_MERGE_TEST=1); PR_MERGE_MIGRATE_LINT replaces the migrate-lint.sh run (same condition).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -258,6 +258,29 @@ fi
     ;;
   esac
 }
+
+# Migration lint against the base (issue 661), before anything is enqueued or merged: the queue and --admin both
+# skip nothing here. The lint reads the working tree, so it runs in a throwaway worktree at the head SHA that was
+# read above, not in this checkout (which can be on another branch or behind). A base or a head that cannot be
+# fetched is a tool failure (exit 2); a migration the lint refuses is exit 1.
+if [ "${PR_MERGE_TEST:-}" = 1 ] && [ -n "${PR_MERGE_MIGRATE_LINT:-}" ]; then
+  lint_rc=0
+  "$PR_MERGE_MIGRATE_LINT" "origin/$base" >&2 || lint_rc=$?
+else
+  git fetch -q --no-tags origin "$base" 2>/dev/null || { echo "pr-merge: git fetch origin $base failed; cannot run migrate-lint.sh; not merging" >&2; exit 2; }
+  git fetch -q --no-tags origin "refs/pull/$pr/head" 2>/dev/null || { echo "pr-merge: cannot fetch the head of PR $pr; cannot run migrate-lint.sh; not merging" >&2; exit 2; }
+  [ "$(git rev-parse FETCH_HEAD)" = "$sha" ] || { echo "pr-merge: PR $pr head is not ${sha:0:7} any more; run it again" >&2; exit 2; }
+  lint_dir=$(mktemp -d "${TMPDIR:-/tmp}/pr-merge-lint.XXXXXX") || { echo "pr-merge: mktemp failed; not merging" >&2; exit 2; }
+  git worktree add -q --detach "$lint_dir" "$sha" || { rm -rf "$lint_dir"; echo "pr-merge: cannot check out ${sha:0:7} for migrate-lint.sh; not merging" >&2; exit 2; }
+  lint_rc=0
+  (cd "$lint_dir" && "$here/migrate-lint.sh" "origin/$base") >&2 || lint_rc=$?
+  git worktree remove --force "$lint_dir" >/dev/null 2>&1 || rm -rf "$lint_dir"
+fi
+case $lint_rc in
+0) ;;
+1) echo "pr-merge: hack/migrate-lint.sh refuses the migrations of PR $pr against origin/$base; not merging" >&2; exit 1 ;;
+*) echo "pr-merge: hack/migrate-lint.sh could not run against origin/$base (exit $lint_rc); not merging" >&2; exit 2 ;;
+esac
 
 # Does the base branch have a merge queue (#225)? Read from the ruleset at run time, so the same script
 # serves the repository before and after the ruleset gains the rule. Only an exact `true` counts: an

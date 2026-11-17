@@ -112,7 +112,14 @@ cat >/dev/null
 # Without the plumbing flag the real script answers true for a ci.yml change (the `everything` rule).
 if [ "${CI_CHANGES_IGNORE_PLUMBING:-}" = 1 ]; then echo "harnesses=${HARNESSES:-false}"; else echo "harnesses=${HARNESSES_ALL:-true}"; fi
 SH
+cat >"$tmp/bin/mlint" <<'SH'
+#!/usr/bin/env bash
+echo "migrate-lint $*" >>"$FAKE_DIR/calls"
+[ "${LINT_RC:-0}" = 0 ] || echo "merged migrations must not change: stub"
+exit "${LINT_RC:-0}"
+SH
 chmod +x "$tmp/bin"/*
+export PR_MERGE_MIGRATE_LINT="$tmp/bin/mlint"
 export PR_MERGE_NEEDS_E2E="$tmp/bin/needs" PR_MERGE_CI_CHANGES="$tmp/bin/cich"
 
 fail=0
@@ -677,5 +684,21 @@ check "claim show fails: still merges" 0 merge
 grep -q 'pr-merge: note: cannot read the claim on #647; check it with claim.sh show 647' <<<"$out" || { echo "FAIL: unreadable claim prints a note: $out" >&2; fail=1; }
 KOINON_LANE=lane2 CLAIM_HOLDER="me#lane2" run 7
 grep -q 'WARNING' <<<"$out" && { echo "FAIL: KOINON_LANE=lane2 is the own lane" >&2; fail=1; }
+
+# Issue 661: migrate-lint.sh runs against the base before anything is enqueued or merged.
+setup false "$green"
+run 7
+check "migrate-lint runs against the base, then it enqueues" 0 merge
+grep -q "^migrate-lint origin/main$" "$FAKE_DIR/calls" || { echo "FAIL: migrate-lint gets the base: $(cat "$FAKE_DIR/calls")" >&2; fail=1; }
+setup false "$green"
+LINT_RC=1 run 7
+check "a migration the lint refuses is not enqueued" 1 nomerge
+grep -q 'migrate-lint.sh refuses the migrations of PR 7 against origin/main' <<<"$out" || { echo "FAIL: names the lint: $out" >&2; fail=1; }
+setup false "$green"
+LINT_RC=2 run 7
+check "a lint that cannot run (bad base) is not enqueued" 2 nomerge
+setup false "$green"
+LINT_RC=1 run 7 --admin --approved-at 2026-11-04T01:00:00Z
+check "--admin does not skip the lint" 1 nomerge
 
 exit "$fail"

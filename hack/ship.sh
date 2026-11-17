@@ -9,7 +9,7 @@
 # (a clone without an `upstream` remote, or KOINON_REPO=<fork>) the board step is skipped (no board).
 #
 #   hack/ship.sh [--message-file F | -m SUBJECT] [--pr-title T --pr-body FILE] [--draft] [--ready]
-#                [--e2e] [--auto-merge] [--hold] [--no-issue] [--dry-run]
+#                [--e2e] [--auto-merge] [--hold] [--admin] [--no-issue] [--dry-run]
 #
 # Before the push it looks up the branch's PR. A MERGED or CLOSED one is a refusal (exit 1): a push
 # cannot reach main through it; the message says how to continue on a new branch. Pushing to an open
@@ -31,9 +31,18 @@
 #   KOINON_SHIP_MAX_BLOB_MIB    blob size limit in MiB (default 5)
 #   KOINON_REPO, KOINON_BOARD, KOINON_BOARD_OWNER  the repository and project board (hack/repo-lib.sh)
 #
-# Steps: commit ok <sha> | blobs ok | merged origin/main | gitleaks ok (N commits) | pushed <branch> |
-#        PR #N <url> | board ok|none | ready | auto-merge on
-# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 4 merge conflict.
+# origin/main is merged into the branch only when it conflicts (git merge-tree, needs git 2.38; AGENTS.md: merge on a
+# conflict, never otherwise). A branch that is behind and merges clean is pushed as it is; the merge queue tests it on
+# main's tip. While a merge is in progress with unmerged paths, ship refuses to commit (it would commit the markers).
+# --admin is for a pull request that hack/pr-merge.sh --admin will merge (a `.github/**` change, ADR 0105): it skips the
+# merge queue, so nothing tests the branch on main's tip, and ship merges origin/main even when it merges clean (D2).
+# A failed `gh` read (network, auth) stops ship; "no pull request" is an empty answer and does not.
+# --auto-merge hands the pull request to hack/pr-merge.sh (it waits for the checks, then enqueues).
+#
+# Steps: commit ok <sha> | blobs ok | up to date with origin/main | behind origin/main, no conflict: not merged |
+#        merged origin/main | gitleaks ok (N commits) | pushed <branch> | PR #N <url> | board ok|none | ready |
+#        auto-merge handed to pr-merge.sh
+# Exit: 0 ok, 1 a gate failed (named on stderr), 2 usage, 4 merge conflict (or unmerged paths before a commit).
 # The gitleaks gate is never skipped and nothing is ever force-pushed.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -44,7 +53,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/repo-lib.sh"
 koinon_use_repo # KOINON_REPO picks the repository for every gh call below
 
-msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 no_issue=0 ready_done=0 cr_fresh=0
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below: ship may be run by a relative path
+msg_file="" subject="" pr_title="" pr_body="" draft=0 ready=0 e2e=0 auto=0 hold=0 dry=0 admin=0 no_issue=0 ready_done=0 cr_fresh=0
 need() { [[ $# -ge 2 ]] || { echo "ship: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -57,6 +67,7 @@ while [[ $# -gt 0 ]]; do
 	--e2e) e2e=1; shift ;;
 	--auto-merge) auto=1; shift ;;
 	--hold) hold=1; shift ;;
+	--admin) admin=1; shift ;;
 	--review) echo "ship: --review is gone (ADR 0104): a merge releases the claim; after a close without a merge run claim.sh release-pr <PR> or release <N>" >&2; exit 2 ;;
 	--no-issue) no_issue=1; shift ;;
 	--dry-run) dry=1; shift ;;
@@ -69,10 +80,27 @@ done
 [[ -z $pr_title && -z $pr_body ]] || [[ -n $pr_title && -n $pr_body ]] || { echo "ship: --pr-title and --pr-body go together" >&2; exit 2; }
 [[ -z $pr_body || -r $pr_body ]] || { echo "ship: cannot read $pr_body" >&2; exit 2; }
 [[ $draft == 0 || $ready == 0 ]] || { echo "ship: --draft and --ready contradict" >&2; exit 2; }
+[[ $auto == 0 || $draft == 0 ]] || { echo "ship: --auto-merge and --draft contradict (pr-merge.sh refuses a draft)" >&2; exit 2; }
 [[ $draft == 0 || -n $pr_title ]] || { echo "ship: --draft needs --pr-title/--pr-body" >&2; exit 2; }
 
 fail() { echo "ship: FAIL $*" >&2; exit 1; }
 say() { echo "$*"; }
+# gh_ask <what> <gh args...>: the answer of a gh read. A failed call stops ship with gh's own error; an empty answer is
+# a real answer (no pull request), so it passes. Without this a broken token looked like "no pull request".
+gh_ask() {
+	local what=$1 out err rc=0
+	shift
+	err=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
+	out=$(gh "$@" 2>"$err") || rc=$?
+	if [[ $rc != 0 ]]; then
+		local msg
+		msg=$(head -c 300 "$err" | tr '\n' ' ')
+		rm -f "$err"
+		fail "could not ask gh for $what (exit $rc): ${msg:-no error text}"
+	fi
+	rm -f "$err"
+	printf '%s\n' "$out"
+}
 
 cd "$(git rev-parse --show-toplevel)"
 branch=$(git symbolic-ref --short -q HEAD) || fail "detached HEAD; check out a feature branch"
@@ -102,6 +130,16 @@ say "identity $email"
 limit_mib=${KOINON_SHIP_MAX_BLOB_MIB:-5}
 limit=$((limit_mib * 1024 * 1024))
 
+# A merge or cherry-pick that stopped on a conflict leaves unmerged paths. `git add -A` would stage the markers and the
+# commit below would record them, so a re-run of ship after a conflict (exit 4) must stop here until they are resolved.
+unmerged=$(git diff --name-only --diff-filter=U)
+if [[ -n $unmerged ]]; then
+	echo "ship: unmerged paths (resolve them, git add them, commit; then run ship again):" >&2
+	printf 'ship:   %s\n' "${unmerged//$'\n'/$'\n'ship:   }" >&2
+	[[ ! -e $(git rev-parse --git-path MERGE_HEAD) ]] || echo "ship: a merge is in progress (MERGE_HEAD exists)" >&2
+	exit 4
+fi
+
 dirty=0
 [[ -n $(git status --porcelain) ]] && dirty=1
 
@@ -129,20 +167,31 @@ else
 fi
 
 # 3. blobs: any blob added in origin/main..HEAD over the limit
-big=$(git rev-list --objects origin/main..HEAD 2>/dev/null |
-	git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' |
-	awk -v l="$limit" '$1 == "blob" && $2 > l { printf "%s (%d MiB)\n", $3, $2 / 1048576 }' | head -3 || true)
+# The gate cannot say "ok" about a range it cannot read: a base that does not resolve fails it.
+git rev-parse --verify -q origin/main >/dev/null || fail "blobs: origin/main does not resolve (git fetch origin main); the blob check has no base"
+objs=$(git rev-list --objects origin/main..HEAD) || fail "blobs: git rev-list origin/main..HEAD failed"
+big=$(printf '%s' "$objs" | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' |
+	awk -v l="$limit" '$1 == "blob" && $2 > l && n++ < 3 { printf "%s (%d MiB)\n", $3, $2 / 1048576 }') || fail "blobs: git cat-file failed"
 [[ -z $big ]] || fail "blobs: over the $limit_mib MiB limit: $(tr '\n' ' ' <<<"$big")"
 say "blobs ok"
 
 # 4. fetch and merge origin/main
 if [[ $dry == 1 ]]; then
 	[[ $e2e == 1 ]] && say "dry-run: would add the e2e label before the push"
-	say "dry-run: would git fetch origin, merge origin/main if behind, run gitleaks, push $branch"
+	say "dry-run: would git fetch origin, merge origin/main only if it conflicts, run gitleaks, push $branch"
 else
 	git fetch -q origin
+	# Merge only on a conflict (D2): ask git merge-tree first. Exit 0 clean, 1 conflict, anything else is an error.
+	mt_rc=0
 	if git merge-base --is-ancestor origin/main HEAD; then
 		say "up to date with origin/main"
+	else
+		git merge-tree --write-tree origin/main HEAD >/dev/null 2>&1 || mt_rc=$?
+		[[ $mt_rc == 0 || $mt_rc == 1 ]] || fail "git merge-tree could not check origin/main for conflicts (exit $mt_rc; it needs git 2.38 or newer)"
+		if [[ $mt_rc == 0 && $admin == 1 ]]; then mt_rc=1; else [[ $mt_rc == 1 ]] || say "behind origin/main, no conflict: not merged"; fi
+	fi
+	if [[ $mt_rc == 0 ]]; then
+		:
 	elif merge_out=$(git merge -q --no-edit --signoff origin/main 2>&1); then
 		say "merged origin/main"
 	else
@@ -170,14 +219,14 @@ else
 			say "merged origin/main (regenerated docs/adr/README.md)"
 		else
 			echo "ship: merge conflict in: $(tr '\n' ' ' <<<"$conflicts")" >&2
-			echo "ship: resolve them, commit, and run ship again (merge in progress)" >&2
+			echo "ship: resolve them, git add them, commit, and run ship again (merge in progress; ship refuses to commit while paths are unmerged)" >&2
 			exit 4
 		fi
 	fi
 
 	# 4b. the branch's PR: a merged or closed one cannot take this push (old issue 431)
-	prinfo=$(gh pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
-		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv' 2>/dev/null || true)
+	prinfo=$(gh_ask "the pull request of $branch" pr list --head "$branch" --state all --json number,state,autoMergeRequest --jq \
+		'(map(select(.state == "OPEN"))[0] // (sort_by(.number) | last)) // empty | [.state, (.number | tostring), (.autoMergeRequest != null | tostring)] | @tsv')
 	pr_state="" pr_num="" pr_auto=false
 	if [[ -n $prinfo ]]; then IFS=$'\t' read -r pr_state pr_num pr_auto <<<"$prinfo"; fi
 	case $pr_state in
@@ -191,7 +240,7 @@ else
 		if [[ $pr_auto == true && $hold == 1 ]]; then
 			gh pr merge "$pr_num" --disable-auto >/dev/null || fail "could not turn auto-merge off on PR #$pr_num"
 			say "hold: auto-merge off on PR #$pr_num"
-			say "turn it back on after CI is green: gh pr merge $pr_num --auto --merge"
+			say "turn it back on after CI is green: hack/pr-merge.sh $pr_num"
 		elif [[ $pr_auto == true ]]; then
 			echo "ship: warning: PR #$pr_num has auto-merge on; it can merge at the old head before CI sees the new commits (use --hold to turn it off for the push)" >&2
 		fi
@@ -213,7 +262,7 @@ else
 	# 6. push. The e2e label goes on an open PR first, so the push already sees it; a new PR gets it
 	# at creation (step 7).
 	if [[ $e2e == 1 ]]; then
-		label_pr=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
+		label_pr=$(gh_ask "the open pull request of $branch" pr list --head "$branch" --state open --json url --jq '.[0].url // empty')
 		if [[ -n $label_pr ]]; then
 			gh pr edit "$label_pr" --add-label e2e >/dev/null || fail "could not add the e2e label"
 			say "label e2e"
@@ -253,9 +302,9 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 	if [[ $dry == 1 ]]; then
 		say "dry-run: would create or update the PR${pr_title:+ \"$pr_title\"}$([[ $draft == 1 ]] && echo ' (draft)'), add it to the board"
 		[[ $ready == 1 ]] && say "dry-run: would mark ready, then post @coderabbitai review once per head ($up only)"
-		[[ $auto == 1 ]] && say "dry-run: would enable auto-merge"
+		[[ $auto == 1 ]] && say "dry-run: would hand the pull request to hack/pr-merge.sh"
 	else
-		pr_url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)
+		pr_url=$(gh_ask "the open pull request of $branch" pr list --head "$branch" --state open --json url --jq '.[0].url // empty')
 		if [[ -n $pr_title ]]; then
 			if [[ -n $pr_url ]]; then
 				gh pr edit "$pr_url" --title "$pr_title" --body-file "$pr_body" >/dev/null
@@ -305,9 +354,22 @@ if [[ -n $pr_title || $ready == 1 || $auto == 1 ]]; then
 			fi
 		fi
 		if [[ $auto == 1 ]]; then
-			# No e2e refusal (ADR 0105): the merge queue runs the kind e2e on the queue commit when the change needs it.
-			gh pr merge "$pr_url" --auto --merge >/dev/null || fail "gh pr merge --auto failed"
-			say "auto-merge on"
+			# The push moves the head on GitHub a few seconds later; pr-merge.sh pins the head it reads, so wait for it.
+			want_head=$(git rev-parse HEAD)
+			for ((hw = 0; hw <= ${SHIP_HEAD_WAIT:-120}; hw += 5)); do
+				cur_head=$(gh_ask "the head of $pr_url" pr view "$pr_url" --json headRefOid --jq .headRefOid)
+				[[ $cur_head != "$want_head" ]] || break
+				[[ $hw -lt ${SHIP_HEAD_WAIT:-120} ]] || fail "GitHub still shows another head than ${want_head:0:7} on $pr_url after ${SHIP_HEAD_WAIT:-120}s; run hack/pr-merge.sh ${pr_url##*/} later"
+				sleep 5
+			done
+			# pr-merge.sh reads the head and every required check, then enqueues (ADR 0105: the merge queue runs the kind
+			# e2e on the queue commit when the change needs it). SHIP_PR_MERGE is a test hook.
+			pm_rc=0
+			pm_args=("${pr_url##*/}")
+			if [[ $admin == 1 ]]; then pm_args+=(--admin); fi
+			"${SHIP_PR_MERGE:-$script_dir/pr-merge.sh}" "${pm_args[@]}" || pm_rc=$?
+			[[ $pm_rc == 0 ]] || fail "hack/pr-merge.sh ${pr_url##*/} exited $pm_rc (the pull request stays open; fix that, then run it again)"
+			say "auto-merge handed to pr-merge.sh"
 		fi
 	fi
 fi
