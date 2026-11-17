@@ -747,7 +747,12 @@ esac
 SH
 run 7 --interval 0 --timeout 600
 grep -q 'giving up' <<<"$out" && { echo "FAIL: a good read resets the failure count: $out" >&2; fail=1; }
-[ "$rc" = 0 ] && grep -q 'MERGED 1234567' <<<"$out" && echo "ok: a good read resets the failure count" || { echo "FAIL: reset: rc=$rc $out" >&2; fail=1; }
+if [ "$rc" = 0 ] && grep -q 'MERGED 1234567' <<<"$out"; then
+  echo "ok: a good read resets the failure count"
+else
+  echo "FAIL: reset: rc=$rc $out" >&2
+  fail=1
+fi
 
 # 9. usage
 run
