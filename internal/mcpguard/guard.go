@@ -769,8 +769,12 @@ func (g *Guard) chargeSent(ctx context.Context, org, run pgtype.UUID, n int, the
 		used := int(b.CappedBytes)
 		bc = byteCharge{Known: true, Before: used, Charged: n, After: used + n}
 		bc.Crossed = !b.OverThresholdAt.Valid && n > 0 && bc.After > g.cap
-		if err := q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: org, RunID: run,
-			CappedBytes: int32(min(bc.After, 1<<30)), UrlState: b.UrlState, Crossed: bc.Crossed}); err != nil { //nolint:gosec // bounded
+		err = q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{
+			OrgID: org, RunID: run,
+			CappedBytes: int32(min(bc.After, 1<<30)), //nolint:gosec // bounded
+			UrlState:    b.UrlState, Crossed: bc.Crossed,
+		})
+		if err != nil {
 			return err
 		}
 		if then != nil {
