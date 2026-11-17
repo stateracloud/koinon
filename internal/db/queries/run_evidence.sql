@@ -21,18 +21,30 @@ VALUES (
 -- A call a person approved has run through the gateway (internal/approvals). The guard's own record
 -- of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 -- decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
--- are counted once, when they left. Nothing is inserted when no parked decision is found.
+-- are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+-- amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+-- inserted when no parked decision is found.
 INSERT INTO leak_guard_decisions (
     org_id, agent_id, generation, run_id, server, tool, sink_class, action, reason, reasons,
     match_count, match_length, match_encoding, payload_bytes, untrusted_input, private_data,
     charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
        d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
-       0, d.cap_used_before, d.dest_host, false
+       @charged_bytes::int, sqlc.narg('cap_used_before')::int, d.dest_host, @over_threshold::boolean
 FROM leak_guard_decisions d
 WHERE d.org_id = @org_id AND d.agent_id = @agent_id AND d.run_id IS NOT DISTINCT FROM @run_id
   AND d.server = @server AND d.tool = @tool AND (d.action = 'approve' OR d.reason = 'ask_target')
 ORDER BY d.created_at DESC, d.id DESC
+LIMIT 1;
+
+-- name: GetParkedExecutionDecision :one
+-- The decision the guard parked for the call a person approved: what the call carries out, to charge
+-- it when it is sent.
+SELECT sink_class, payload_bytes, untrusted_input, private_data
+FROM leak_guard_decisions
+WHERE org_id = @org_id AND agent_id = @agent_id AND run_id IS NOT DISTINCT FROM @run_id
+  AND server = @server AND tool = @tool AND (action = 'approve' OR reason = 'ask_target')
+ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: GetRunEvidenceGuardRun :one

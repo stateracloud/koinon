@@ -608,18 +608,24 @@ the old value of 2048 bytes).
 **What changes.**
 
 - The guard keeps counting the **charged bytes** per run: the payload bytes of `external-low` calls
-  made while the session holds both legs, for calls that were not refused. An approved re-run is not
-  charged again. The count never refuses a call. The reason `byte_cap` is removed.
+  made while the session holds both legs. A call is **charged when it is sent**. A call that is
+  refused is not charged. A call held for a person's decision is not charged when the guard assesses
+  it: it is **charged when a person allows it and the executor sends it**, once (the approved re-run
+  adds a decision row with the charged bytes, and the parked row stays at 0). A denied or expired
+  call is never charged, because its data never left. The count never refuses a call. The reason
+  `byte_cap` is removed.
 - The **threshold** is 16 KiB per run (the setting `--leak-guard-byte-cap` and the chart value
   `leakGuardByteCap` stay; the default was 2 KiB). When the count of a run goes over it, the guard
-  records **one event for that run**: `leak_guard_runs.over_threshold_at` and `over_threshold_bytes`
+  records **one event for that run**, at the call whose charge took the count past the threshold (for
+  a held call, the moment it is sent): `leak_guard_runs.over_threshold_at` and `over_threshold_bytes`
   (exported in `run.jsonl`), the mark `over_threshold` on the one decision row that crossed it, and
   the counter `koinon_api_mcp_guard_byte_threshold_runs_total`. The metric has no label (ADR 0023: no
   org, agent, user, ticket or run IDs), so Grafana shows how many runs crossed the threshold and the
   run evidence says which.
 - Each **decision row** records `charged_bytes` (what the call added to the run's count),
-  `cap_used_before` (the count before the call) and `dest_host` (the fetch host of an http or https
-  address argument; empty when there is none). The run evidence exports them, with the host as a
+  `cap_used_before` (the count before the call) and `dest_host` (the last two labels of the fetch host of
+  an http or https address argument, such as `example.com`; it is not a public-suffix domain, so
+  `a.co.uk` is stored as `co.uk`; at most 8 hosts, sorted; empty when there is none). The run evidence exports them, with the host as a
   pseudonym, so the lab reads the count from the rows. The stored count equals the sum of the
   charged bytes. The migration only adds columns (ADR 0085 patch-line rule).
 - The URL rule and the text match are unchanged.

@@ -8,6 +8,9 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/sinkclass"
 )
@@ -218,6 +221,49 @@ func (g *Guard) RecordApproved(ctx context.Context, row store.ApprovalRequest, s
 	}
 	_, err = g.record(ctx, c, resultLegs(c.server, decl), result)
 	return err
+}
+
+// RecordSent records a call a person allowed after the guard held it, once the executor has sent it
+// (approvals.Options.OnMCPSent), and charges its bytes to the run (ADR 0091 amendment 2026-11-17: a
+// held call is charged when a person allows it and it is sent; a denied or expired call is never
+// charged, because its data never left). The charge and the new decision row are one transaction,
+// under the run's lock. A call that raised the run over the threshold raises the one event. It is
+// evidence, not a control: the caller logs a failure and returns the result.
+func (g *Guard) RecordSent(ctx context.Context, row store.ApprovalRequest, srv store.McpServer) error {
+	ctx, cancel := context.WithTimeout(ctx, Deadline)
+	defer cancel()
+	p := store.InsertApprovedExecutionDecisionParams{OrgID: row.OrgID, AgentID: row.AgentID, RunID: row.RunID, Server: srv.Name, Tool: row.Tool}
+	if !row.RunID.Valid {
+		return g.q.InsertApprovedExecutionDecision(ctx, p)
+	}
+	parked, err := g.q.GetParkedExecutionDecision(ctx, store.GetParkedExecutionDecisionParams{
+		OrgID: row.OrgID, AgentID: row.AgentID, RunID: row.RunID, Server: srv.Name, Tool: row.Tool})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // no parked decision: nothing is invented
+	}
+	if err != nil {
+		return err
+	}
+	// The same rule as an unheld call: only an external-low call of a session that held both legs.
+	n := 0
+	if parked.SinkClass == string(sinkclass.ExternalLow) && parked.UntrustedInput.Valid && parked.UntrustedInput.Bool &&
+		parked.PrivateData.Valid && parked.PrivateData.Bool {
+		n = int(parked.PayloadBytes)
+	}
+	if n == 0 {
+		return g.q.InsertApprovedExecutionDecision(ctx, p)
+	}
+	bc, err := g.chargeSent(ctx, row.OrgID, row.RunID, n, func(q *store.Queries, bc byteCharge) error {
+		p.ChargedBytes = int32(min(bc.Charged, 1<<30))                                  //nolint:gosec // bounded
+		p.CapUsedBefore = pgtype.Int4{Int32: int32(min(bc.Before, 1<<30)), Valid: true} //nolint:gosec // bounded
+		p.OverThreshold = bc.Crossed
+		return q.InsertApprovedExecutionDecision(ctx, p)
+	})
+	if err != nil {
+		return err
+	}
+	g.raised(bc, srv.Name, row.Tool)
+	return nil
 }
 
 // Assess decides an ask-tier call without charging anything, for mcpask's single card: the

@@ -601,6 +601,9 @@ type Querier interface {
 	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
 	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
 	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
+	// The decision the guard parked for the call a person approved: what the call carries out, to charge
+	// it when it is sent.
+	GetParkedExecutionDecision(ctx context.Context, arg GetParkedExecutionDecisionParams) (GetParkedExecutionDecisionRow, error)
 	GetPlatformPriceVersion(ctx context.Context, version int64) (PlatformPriceVersion, error)
 	// The platform price version valid at a time: the latest valid_from not after it.
 	GetPlatformPriceVersionAt(ctx context.Context, at pgtype.Timestamptz) (PlatformPriceVersion, error)
@@ -684,7 +687,9 @@ type Querier interface {
 	// A call a person approved has run through the gateway (internal/approvals). The guard's own record
 	// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 	// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
-	// are counted once, when they left. Nothing is inserted when no parked decision is found.
+	// are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+	// amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+	// inserted when no parked decision is found.
 	InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
 	InsertGatewayStateRevision(ctx context.Context, arg InsertGatewayStateRevisionParams) (int64, error)

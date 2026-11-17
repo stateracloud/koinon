@@ -11,6 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getParkedExecutionDecision = `-- name: GetParkedExecutionDecision :one
+SELECT sink_class, payload_bytes, untrusted_input, private_data
+FROM leak_guard_decisions
+WHERE org_id = $1 AND agent_id = $2 AND run_id IS NOT DISTINCT FROM $3
+  AND server = $4 AND tool = $5 AND (action = 'approve' OR reason = 'ask_target')
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetParkedExecutionDecisionParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	RunID   pgtype.UUID
+	Server  string
+	Tool    string
+}
+
+type GetParkedExecutionDecisionRow struct {
+	SinkClass      string
+	PayloadBytes   int32
+	UntrustedInput pgtype.Bool
+	PrivateData    pgtype.Bool
+}
+
+// The decision the guard parked for the call a person approved: what the call carries out, to charge
+// it when it is sent.
+func (q *Queries) GetParkedExecutionDecision(ctx context.Context, arg GetParkedExecutionDecisionParams) (GetParkedExecutionDecisionRow, error) {
+	row := q.db.QueryRow(ctx, getParkedExecutionDecision,
+		arg.OrgID,
+		arg.AgentID,
+		arg.RunID,
+		arg.Server,
+		arg.Tool,
+	)
+	var i GetParkedExecutionDecisionRow
+	err := row.Scan(
+		&i.SinkClass,
+		&i.PayloadBytes,
+		&i.UntrustedInput,
+		&i.PrivateData,
+	)
+	return i, err
+}
+
 const getRunEvidenceGuardRun = `-- name: GetRunEvidenceGuardRun :one
 SELECT capped_bytes, over_threshold_at, over_threshold_bytes
 FROM leak_guard_runs
@@ -144,28 +188,36 @@ INSERT INTO leak_guard_decisions (
     charged_bytes, cap_used_before, dest_host, over_threshold)
 SELECT d.org_id, d.agent_id, d.generation, d.run_id, d.server, d.tool, d.sink_class, 'pass', 'approved', d.reasons,
        d.match_count, d.match_length, d.match_encoding, d.payload_bytes, d.untrusted_input, d.private_data,
-       0, d.cap_used_before, d.dest_host, false
+       $1::int, $2::int, d.dest_host, $3::boolean
 FROM leak_guard_decisions d
-WHERE d.org_id = $1 AND d.agent_id = $2 AND d.run_id IS NOT DISTINCT FROM $3
-  AND d.server = $4 AND d.tool = $5 AND (d.action = 'approve' OR d.reason = 'ask_target')
+WHERE d.org_id = $4 AND d.agent_id = $5 AND d.run_id IS NOT DISTINCT FROM $6
+  AND d.server = $7 AND d.tool = $8 AND (d.action = 'approve' OR d.reason = 'ask_target')
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT 1
 `
 
 type InsertApprovedExecutionDecisionParams struct {
-	OrgID   pgtype.UUID
-	AgentID pgtype.UUID
-	RunID   pgtype.UUID
-	Server  string
-	Tool    string
+	ChargedBytes  int32
+	CapUsedBefore pgtype.Int4
+	OverThreshold bool
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	RunID         pgtype.UUID
+	Server        string
+	Tool          string
 }
 
 // A call a person approved has run through the gateway (internal/approvals). The guard's own record
 // of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 // decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
-// are counted once, when they left. Nothing is inserted when no parked decision is found.
+// are counted once, when they left. The caller passes what the call was charged now (ADR 0091
+// amendment 2026-11-17: a held call is charged when a person allows it and it is sent). Nothing is
+// inserted when no parked decision is found.
 func (q *Queries) InsertApprovedExecutionDecision(ctx context.Context, arg InsertApprovedExecutionDecisionParams) error {
 	_, err := q.db.Exec(ctx, insertApprovedExecutionDecision,
+		arg.ChargedBytes,
+		arg.CapUsedBefore,
+		arg.OverThreshold,
 		arg.OrgID,
 		arg.AgentID,
 		arg.RunID,

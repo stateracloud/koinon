@@ -336,14 +336,9 @@ func (g *Guard) Check(ctx context.Context, call Call) Outcome {
 	g.metrics.decided(out.Verdict, class, g.now().Sub(start))
 	g.logDecision(call, out, f)
 	g.recordDecision(ctx, call, out, f)
-	if f.charge.Crossed {
-		// The one over-threshold event of the run, raised when the committed charge of this call took the
-		// run over the threshold. The count never refuses the call; a later check (an approval, a
-		// person's denial, a failed open) can still decide the call (ADR 0091 amendment 2026-11-17).
-		g.metrics.overThreshold()
-		g.log.Warn("mcp guard: a run went over the byte threshold", "target", call.Target, "tool", call.Tool,
-			"threshold", g.cap, "bytes", f.charge.After)
-	}
+	// The one over-threshold event of the run, raised when the committed charge of this call took the
+	// run over the threshold. The count never refuses the call (ADR 0091 amendment 2026-11-17).
+	g.raised(f.charge, call.Target, call.Tool)
 	return out
 }
 
@@ -486,6 +481,14 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 		// A Decider must decide; anything else fails closed.
 		return Outcome{}, fmt.Errorf("mcpguard: the decider left the call undecided (%q)", out.Verdict.Action)
 	}
+	if out.Verdict.Action == Pass && a.class == sinkclass.ExternalLow && a.legs.Both() {
+		// A Decider let the held call on: it is sent now, so it is charged now.
+		bc, err := g.chargeSent(ctx, c.org.ID, a.runID, a.args.PayloadBytes(), nil)
+		if err != nil {
+			return Outcome{}, err
+		}
+		f.charge = bc
+	}
 	return out, nil
 }
 
@@ -545,6 +548,8 @@ type assessment struct {
 	charge byteCharge
 	// destHost is the fetch host of the call's address arguments, when it has one.
 	destHost string
+	// runID is the agent's running run, once an external-low call looked it up.
+	runID pgtype.UUID
 }
 
 // maxDestHosts bounds how many hosts one decision record names.
@@ -690,6 +695,7 @@ func (g *Guard) assess(ctx context.Context, c caller, decl sinkclass.Declaration
 	if err != nil {
 		return a, err
 	}
+	a.runID = run.ID
 	var bc byteCharge
 	err = pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
@@ -730,7 +736,9 @@ func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool
 	f.URL, f.URLChecked = g.urlRule(st, srv, decl, args)
 	v := Decide(f)
 	c := byteCharge{Known: true, Before: used, After: used}
-	if f.BothLegs && v.Action != Refuse {
+	// Only a call that goes out now is charged. A call held for a person (NeedsDecision) is charged
+	// when a person allows it and it is sent (chargeSent); a denied or expired call never is.
+	if f.BothLegs && v.Action == Pass {
 		c.Charged = args.PayloadBytes()
 		c.After = used + c.Charged
 		// One event per run: the call that takes the count past the threshold, once.
@@ -739,9 +747,49 @@ func (g *Guard) decideExternalLow(st *leakguard.RunState, used int, flagged bool
 	return v, c
 }
 
+// chargeSent charges n bytes of a call that has been sent after it was held for a decision (ADR 0091
+// amendment 2026-11-17), under the run's lock, so the one over-threshold event stays exact. then runs
+// in the same transaction with the charge. A failed charge returns an empty byteCharge.
+func (g *Guard) chargeSent(ctx context.Context, org, run pgtype.UUID, n int, then func(q *store.Queries, bc byteCharge) error) (byteCharge, error) {
+	var bc byteCharge
+	err := pgx.BeginFunc(ctx, g.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		b, err := q.LockLeakGuardRun(ctx, store.LockLeakGuardRunParams{OrgID: org, RunID: run})
+		if err != nil {
+			return err
+		}
+		used := int(b.CappedBytes)
+		bc = byteCharge{Known: true, Before: used, Charged: n, After: used + n}
+		bc.Crossed = !b.OverThresholdAt.Valid && n > 0 && bc.After > g.cap
+		if err := q.SaveLeakGuardRun(ctx, store.SaveLeakGuardRunParams{OrgID: org, RunID: run,
+			CappedBytes: int32(min(bc.After, 1<<30)), UrlState: b.UrlState, Crossed: bc.Crossed}); err != nil { //nolint:gosec // bounded
+			return err
+		}
+		if then != nil {
+			return then(q, bc)
+		}
+		return nil
+	})
+	if err != nil {
+		return byteCharge{}, err
+	}
+	return bc, nil
+}
+
+// raised counts the one over-threshold event of a run: the metric and the log line. The count never
+// refuses a call.
+func (g *Guard) raised(bc byteCharge, target, tool string) {
+	if !bc.Crossed {
+		return
+	}
+	g.metrics.overThreshold()
+	g.log.Warn("mcp guard: a run went over the byte threshold", "target", target, "tool", tool,
+		"threshold", g.cap, "bytes", bc.After)
+}
+
 // byteCharge is what one external-low call did to its run's byte count (ADR 0091 decision 5): the
 // count before the call, the bytes charged (none unless the session holds both legs and the call
-// was not refused) and the count after. Crossed marks the one call that took the run past the
+// is sent: a refused call and a call held for a person are not charged here) and the count after. Crossed marks the one call that took the run past the
 // threshold. The count never refuses a call.
 type byteCharge struct {
 	// Known is set when the guard read the run's count; a call that is not external-low never does.
