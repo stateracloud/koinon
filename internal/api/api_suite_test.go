@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
@@ -434,6 +435,8 @@ var _ = Describe("the assembled API", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		Expect(chat.calls.Load()).To(BeZero(), "a held install sends nothing to the gateway")
 		Expect(approveStatus(ctx, c, f.org, req.ID.String(), req.ArgsSha256)).To(Equal(http.StatusBadRequest))
+		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: f.org, ApprovalId: req.ID.String(), ArgsSha256: req.ArgsSha256})
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition), "the hold, not a malformed request, refuses Approve")
 		var status string
 		Expect(e.pool.QueryRow(ctx, `SELECT status FROM approval_requests WHERE id = $1`, req.ID).Scan(&status)).To(Succeed())
 		Expect(status).To(Equal(string(store.ApprovalStatusPending)), "the held Approve decided nothing")
