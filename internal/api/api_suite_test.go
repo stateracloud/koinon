@@ -22,35 +22,37 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stateracloud/koinon/internal/adminapi"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
+	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/stateracloud/koinon/internal/api"
-	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/apiassembly"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/auth/oidctest"
-	"github.com/stateracloud/koinon/internal/catalog"
-	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/codehost/scopesync"
-	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/installbinding"
-	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
-	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tracedest"
-	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -147,6 +149,8 @@ type envOptions struct {
 	// modelChat is what the provider echo check sends its request through; nil means the check
 	// finds no gateway.
 	modelChat modelcheck.Chat
+	// settings changes the Settings that Assemble reads, after the suite has filled them.
+	settings func(*apiassembly.Settings)
 }
 
 // env is one API server on its own database.
@@ -254,47 +258,32 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	go func() { defer close(hubDone); e.hub.Run(hubCtx) }()
 	DeferCleanup(func() { stopHub(); <-hubDone })
 	Eventually(e.hub.Listening()).Should(BeClosed())
-	var catalogKeys catalog.Keys
-	if opts.keys != nil {
-		catalogKeys = opts.keys
+	var set apiassembly.Settings
+	set.EgressAllowedHosts = opts.allowedHosts
+	set.WatchPoll, set.WatchHeartbeat, set.WatchCancelGrace = opts.watchPoll, opts.watchHeartbeat, opts.watchCancelGrace
+	set.TrustedOrigins = opts.trustedOrigins
+	set.Namespace = "koinon"
+	set.SandboxResources = sandboxres.DefaultPolicy()
+	if opts.settings != nil {
+		opts.settings(&set)
 	}
-	tracePolicy := catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts}
-	traces, err := tracedest.New(e.pool, catalogKeys, tracePolicy, slog.New(slog.NewTextHandler(logOut, nil)))
+	out := apiassembly.Outside{
+		Pool: e.pool, Keyring: opts.keys, GitHub: opts.github, ModelChat: opts.modelChat,
+		UI: opts.ui, NoUI: opts.ui == nil, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
+		Services: []func(*connect.Server){registerProbe},
+	}
+	if opts.binding != nil {
+		out.Binding = cfg.Binding
+	}
+	asm, err := apiassembly.Assemble(ctx, out, set, apiassembly.Prebuilt{
+		Auth: svc, Hub: e.hub, Metrics: opts.metrics, DirectMessages: opts.directMessages, RunNow: opts.runNow,
+	})
 	Expect(err).NotTo(HaveOccurred())
-	e.traces = traces
-	hosts := providers.New(opts.github)
-	var scopeSync services.ScopeSyncer
-	var syncer *scopesync.Syncer
+	e.traces, e.rpc = asm.Traces, asm.Server
 	if opts.scopeSync {
-		syncer = scopesync.New(e.pool, hosts, openerOf(opts.keys), slog.New(slog.NewTextHandler(logOut, nil)))
-		scopeSync = syncer
+		e.syncer = asm.Scope
 	}
-	rpc := services.New(e.pool, services.Options{
-		Hosts: hosts, ScopeSync: scopeSync,
-		Prices:     pricing.Embedded(),
-		Traces:     traces,
-		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
-		MCP:        mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
-		ModelCheck: modelcheck.New(e.pool, opts.modelChat, prices.NewResolver(pricing.Embedded())),
-		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, WatchCancelGrace: opts.watchCancelGrace, DirectMessages: opts.directMessages, RunNow: opts.runNow,
-		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
-		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
-		URLPolicy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts},
-		Approvals: approvals.New(e.pool, approvals.Options{
-			Keys: openerOf(opts.keys), GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
-		}),
-	})
-
-	e.rpc, e.syncer = rpc, syncer
-
-	handler, err = api.NewHandler(api.Options{
-		Auth:           svc,
-		TrustedOrigins: opts.trustedOrigins,
-		Metrics:        opts.metrics,
-		Services:       []func(*connect.Server){registerProbe, rpc.Register},
-		UI:             opts.ui,
-	})
-	Expect(err).NotTo(HaveOccurred())
+	handler = asm.Handler
 	return e
 }
 
@@ -405,17 +394,86 @@ func mustTemplates() []*templates.Template {
 	return ts
 }
 
-// servicesKeys and openerOf turn a nil *Keyring into a nil interface, which the services check.
-func servicesKeys(k *secretstore.Keyring) services.Keys {
-	if k == nil {
-		return nil
-	}
-	return k
+// recordingChat answers the echo check and counts what reached it.
+type recordingChat struct{ calls atomic.Int32 }
+
+func (c *recordingChat) Complete(context.Context, pgtype.UUID, string, modelformat.Format, string) (string, error) {
+	c.calls.Add(1)
+	return modelcheck.Line, nil
 }
 
-func openerOf(k *secretstore.Keyring) connections.Opener {
-	if k == nil {
-		return nil
-	}
-	return k
-}
+// The suite starts the API through apiassembly.Assemble, as koinon-api does, so what Assemble
+// reads from Settings and Outside is covered here (ticket 2 of design-07-compose-api).
+var _ = Describe("the assembled API", func() {
+	It("refuses a sandbox override outside the bounds of Settings.SandboxResources", func(ctx SpecContext) {
+		e := newEnv(ctx, envOptions{settings: func(s *apiassembly.Settings) {
+			s.SandboxResources.Bounds.MemoryLimit = sandboxres.Range{Min: "512Mi", Max: "1Gi"}
+		}})
+		org, owner := e.newTeamOrg(ctx)
+		agent := owner.activeAgent(ctx, org)
+		set := func(limit string) error {
+			_, err := owner.agents.SetAgentSandboxResources(ctx, &agentv1alpha1.SetAgentSandboxResourcesRequest{
+				OrgId: org, AgentId: agent.GetId(), Resources: &agentv1alpha1.SandboxResources{MemoryLimit: limit},
+			})
+			return err
+		}
+		err := set("2Gi")
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("the platform allows 512Mi to 1Gi")))
+		Expect(set("1Gi")).To(Succeed())
+	})
+
+	It("refuses the echo check and Approve over HTTP while a restart is held", func(ctx SpecContext) {
+		chat := &recordingChat{}
+		e := newEnv(ctx, envOptions{modelChat: chat})
+		f := e.newOrgFixture(ctx)
+		req := e.pendingApproval(ctx, f)
+		provider := serveModel(ctx, e, f.org, "fake/faithful", true)
+
+		held := newEnvOn(ctx, e, envOptions{modelChat: chat, settings: func(s *apiassembly.Settings) { s.RestoreHold = true }})
+		c := f.owner.on(held)
+		_, err := c.providers.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: f.org, ProviderId: provider, Model: "fake/faithful"})
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(chat.calls.Load()).To(BeZero(), "a held install sends nothing to the gateway")
+		Expect(approveStatus(ctx, c, f.org, req.ID.String(), req.ArgsSha256)).To(Equal(http.StatusBadRequest))
+		var status string
+		Expect(e.pool.QueryRow(ctx, `SELECT status FROM approval_requests WHERE id = $1`, req.ID).Scan(&status)).To(Succeed())
+		Expect(status).To(Equal(string(store.ApprovalStatusPending)), "the held Approve decided nothing")
+
+		By("the same restart without the hold works")
+		open := f.owner.on(newEnvOn(ctx, e, envOptions{modelChat: chat}))
+		_, err = open.providers.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: f.org, ProviderId: provider, Model: "fake/faithful"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(chat.calls.Load()).To(Equal(int32(1)))
+	})
+
+	It("refuses a token issued under another install binding", func(ctx SpecContext) {
+		quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+		claim := func(hash string) func(*pgxpool.Pool) *installbinding.Binding {
+			return func(p *pgxpool.Pool) *installbinding.Binding {
+				b := installbinding.New(p, hash, false, quiet)
+				_, err := b.Claim(ctx, installbinding.Targets{})
+				Expect(err).NotTo(HaveOccurred())
+				return b
+			}
+		}
+		e := newEnv(ctx, envOptions{binding: claim("hash-source")})
+		org, owner := e.newTeamOrg(ctx)
+		res, err := owner.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{OrgId: org, Name: "ci", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN})
+		Expect(err).NotTo(HaveOccurred())
+		status := func(e *env) int {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.srv.URL+adminapi.BasePath+"/providers", nil)
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+res.GetSecret())
+			r, err := e.srv.Client().Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(r.Body.Close)
+			return r.StatusCode
+		}
+		Expect(status(e)).To(Equal(http.StatusOK), "the install that issued it accepts it")
+
+		By("the database comes back on another install")
+		copy := newEnvOn(ctx, e, envOptions{binding: claim("hash-copy")})
+		Expect(status(copy)).To(Equal(http.StatusUnauthorized))
+	})
+})
