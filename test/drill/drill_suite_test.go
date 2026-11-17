@@ -21,10 +21,14 @@ package drill_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,4 +157,21 @@ func webSpecCmd(ctx context.Context, spec string) *exec.Cmd {
 		return cmd
 	}
 	return exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", spec)
+}
+
+// requireWebUI fails before a browser spec when the API at base serves no web UI: GET / must return the HTML page
+// with the SPA root element (web/index.html). The API image is built with -tags webui and web/dist
+// (test/e2e/kind/images.sh); without them it answers 404 and the browser spec fails minutes later with a timeout (#1072).
+func requireWebUI(ctx context.Context, base string) {
+	GinkgoHelper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/", nil)
+	must(err, "build the GET / request for the web UI check")
+	resp, err := http.DefaultClient.Do(req)
+	must(err, "GET / on the API for the web UI check")
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	must(err, "read GET / on the API")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `id="root"`) {
+		Fail(fmt.Sprintf("api image built without -tags webui (GET / returned %d %q)", resp.StatusCode, strings.TrimSpace(string(body[:min(len(body), 80)]))))
+	}
 }

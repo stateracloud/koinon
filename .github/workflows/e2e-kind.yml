@@ -216,16 +216,15 @@ jobs:
         with:
           version: v4.3.1
 
-      # The web suite only: Node and pnpm for Playwright (same pins as the web job in ci.yml).
+      # Node and pnpm, for every suite: images.sh builds the web UI into koinon-api (-tags webui, as the release
+      # does), and the web suite also drives Playwright (same pins as the web job in ci.yml).
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: inputs.suite == 'web'
         with:
           package_json_file: web/package.json
 
-      - name: Node and pnpm (web suite)
+      - name: Node and pnpm
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
-        if: inputs.suite == 'web'
         with:
           node-version: 24
           cache: pnpm

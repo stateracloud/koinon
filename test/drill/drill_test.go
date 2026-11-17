@@ -1153,6 +1153,7 @@ spec:
 				addr, stop, err := kube.PortForward(context.WithoutCancel(ctx), dst.in.Namespace, "svc/"+dst.name("api"), 8080)
 				must(err, "port-forward the API of "+dst.in.Release+" for the browser")
 				defer stop()
+				requireWebUI(ctx, "http://"+addr)
 				password := os.Getenv("KOINON_DRILL_WEB_PASSWORD")
 				if password == "" {
 					password = drill.SeededPassword
