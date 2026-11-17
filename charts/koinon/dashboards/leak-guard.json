@@ -1,0 +1,79 @@
+{
+  "title": "Koinon leak guard",
+  "uid": "koinon-leak-guard",
+  "tags": ["koinon", "leak-guard"],
+  "schemaVersion": 39,
+  "editable": false,
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Leak guard",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Guard decisions by verdict",
+      "description": "Tool calls the MCP leak guard decided, by verdict (pass, refuse, approve, needs_decision).",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "interval": "1m",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 1},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "stacking": {"mode": "normal"}}}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (decision) (increase(koinon_api_mcp_guard_decisions_total[$__interval]))",
+          "legendFormat": "{{decision}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Refusals by reason",
+      "description": "Tool calls the MCP leak guard refused, by reason.",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "interval": "1m",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 1},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "stacking": {"mode": "normal"}}}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (increase(koinon_api_mcp_guard_decisions_total{decision=\"refuse\"}[$__interval]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Runs over the byte threshold",
+      "description": "Runs that sent more than the byte threshold out of the org while holding both legs. One count per run. No call is refused for it (ADR 0091).",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "interval": "1m",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 1},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars"}}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(koinon_api_mcp_guard_byte_threshold_runs_total[$__interval]))",
+          "legendFormat": "runs over the threshold"
+        }
+      ]
+    }
+  ]
+}

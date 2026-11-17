@@ -738,6 +738,14 @@
             "labels": {"type": "object", "additionalProperties": {"type": "string"}},
             "durableStrandedFor": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"}
           }
+        },
+        "grafanaDashboard": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
         }
       }
     },
