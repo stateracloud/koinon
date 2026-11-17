@@ -3,7 +3,8 @@
 // Command drillwebrun runs one web/e2e-drill spec in the pinned Playwright image (#1039), so the drill job
 // installs no browser and no OS package from a live mirror (hack/ci-playwright-image-test.sh, #569). The
 // drill host (the CI runner) needs kind and the cluster port-forwards, so the job itself cannot run in the
-// image; only the spec does. It replaces hack/drill-web-run.sh (ADR 0118, #1072).
+// image; only the spec does. It replaces hack/drill-web-run.sh (ADR 0118, #1072). The script has no wrapper: every caller is in
+// test/drill and changes in the same pull request (ADR 0118, amendment 2026-11-17).
 //
 // Usage, from inside the repository (test/drill does this when KOINON_DRILL_PLAYWRIGHT_IMAGE is set):
 //
