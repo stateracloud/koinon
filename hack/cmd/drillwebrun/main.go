@@ -22,6 +22,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -94,8 +95,10 @@ func dockerArgs(c config) ([]string, error) {
 	if c.OutputDir != "" && !filepath.IsAbs(c.OutputDir) {
 		return nil, fmt.Errorf("%s must be an absolute path: %q", outputDirEnv, c.OutputDir)
 	}
-	args := []string{"run", "--rm", "--init", "--ipc=host", "--network=host",
-		"--user", fmt.Sprintf("%d:%d", c.UID, c.GID), "-e", "HOME=/tmp"}
+	args := []string{
+		"run", "--rm", "--init", "--ipc=host", "--network=host",
+		"--user", fmt.Sprintf("%d:%d", c.UID, c.GID), "-e", "HOME=/tmp",
+	}
 	for _, name := range envNames(c.Environ) {
 		args = append(args, "-e", name)
 	}
@@ -134,34 +137,34 @@ func run(args, environ []string, wd, docker string, stdout, stderr io.Writer) in
 		}
 	}
 	if image == "" {
-		fmt.Fprintf(stderr, "drillwebrun: %s is not set (the pinned Playwright image, by digest)\n", imageEnv)
+		_, _ = fmt.Fprintf(stderr, "drillwebrun: %s is not set (the pinned Playwright image, by digest)\n", imageEnv)
 		return usageError
 	}
 	repo, err := findRepo(wd)
 	if err != nil {
-		fmt.Fprintln(stderr, "drillwebrun:", err)
+		_, _ = fmt.Fprintln(stderr, "drillwebrun:", err)
 		return usageError
 	}
 	c := config{Repo: repo, Image: image, Spec: spec, OutputDir: outDir, UID: os.Getuid(), GID: os.Getgid(), Environ: environ}
 	dargs, err := dockerArgs(c)
 	if err != nil {
-		fmt.Fprintln(stderr, "drillwebrun:", err)
+		_, _ = fmt.Fprintln(stderr, "drillwebrun:", err)
 		return usageError
 	}
 	if outDir != "" {
-		if err := os.MkdirAll(filepath.Dir(outDir), 0o755); err != nil {
-			fmt.Fprintln(stderr, "drillwebrun:", err)
+		if err := os.MkdirAll(filepath.Dir(outDir), 0o750); err != nil {
+			_, _ = fmt.Fprintln(stderr, "drillwebrun:", err)
 			return usageError
 		}
 	}
-	cmd := exec.Command(docker, dargs...)
+	cmd := exec.CommandContext(context.Background(), docker, dargs...) //nolint:gosec // G204: docker argv is built by dockerArgs from validated config
 	cmd.Env, cmd.Stdout, cmd.Stderr = environ, stdout, stderr
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode()
 		}
-		fmt.Fprintln(stderr, "drillwebrun:", err)
+		_, _ = fmt.Fprintln(stderr, "drillwebrun:", err)
 		return usageError
 	}
 	return 0
@@ -170,7 +173,7 @@ func run(args, environ []string, wd, docker string, stdout, stderr io.Writer) in
 func main() {
 	wd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "drillwebrun:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "drillwebrun:", err)
 		os.Exit(usageError)
 	}
 	os.Exit(run(os.Args[1:], os.Environ(), wd, "docker", os.Stdout, os.Stderr))
