@@ -135,7 +135,7 @@ limit=$((limit_mib * 1024 * 1024))
 unmerged=$(git diff --name-only --diff-filter=U)
 if [[ -n $unmerged ]]; then
 	echo "ship: unmerged paths (resolve them, git add them, commit; then run ship again):" >&2
-	sed 's/^/ship:   /' <<<"$unmerged" >&2
+	printf 'ship:   %s\n' "${unmerged//$'\n'/$'\n'ship:   }" >&2
 	[[ ! -e $(git rev-parse --git-path MERGE_HEAD) ]] || echo "ship: a merge is in progress (MERGE_HEAD exists)" >&2
 	exit 4
 fi
