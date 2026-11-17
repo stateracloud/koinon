@@ -20,7 +20,6 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 
 - Editing under `internal/db/`: read `internal/db/AGENTS.md` (migrations, keys, patch-line rule).
 - Editing under `charts/`: read `charts/AGENTS.md` (render rules, chart checks, admission tests).
-- Editing under `.github/`: read `.github/AGENTS.md` (CI and e2e rules, required checks).
 - Editing under `docs/adr/`: read `docs/adr/AGENTS.md` (ADR lint and index).
 - Editing under `api/proto/`: read `api/proto/AGENTS.md` (add-only fields, `make breaking`).
 
@@ -43,7 +42,7 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - A draft PR runs nothing in CI (its `go` and `web` report "draft: not run") and its green is not merge evidence; mark
   it ready (`gh pr ready`) for CI, and get WIP feedback from `hack/preflight.sh`.
-- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it. The rules for CI and e2e are in `.github/AGENTS.md`.
+- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans every commit of a pull
   request, so a leak fixed in a later commit still fails.
 
