@@ -9,6 +9,7 @@ relates: ["0002", "0023", "0061"]
 # 0078. Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready
 
 - Status: Accepted (delivery in rc.7)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-29
 - Area: runtime-sandbox
 - Tags: sandbox, openshell, kubernetes, metrics

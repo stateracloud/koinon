@@ -32,7 +32,9 @@
     ],
     "decides": "design.md#2",
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
@@ -138,7 +140,8 @@
       "0063",
       "0065",
       "0073",
-      "0097"
+      "0097",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -213,7 +216,9 @@
     ],
     "decides": "design.md#9",
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
@@ -264,7 +269,8 @@
     "superseded_by": [],
     "relates": [],
     "related_by": [
-      "0101"
+      "0101",
+      "0119"
     ]
   },
   {
@@ -358,7 +364,8 @@
     "amended_by": [
       "0044",
       "0113",
-      "0114"
+      "0114",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -382,7 +389,8 @@
     "amended_by": [
       "0040",
       "0048",
-      "0049"
+      "0049",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -549,7 +557,8 @@
     "amends": [],
     "amended_by": [
       "0074",
-      "0100"
+      "0100",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -702,7 +711,8 @@
     "decides": "design.md#29",
     "amends": [],
     "amended_by": [
-      "0051"
+      "0051",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -774,7 +784,8 @@
     "decides": "design.md#32",
     "amends": [],
     "amended_by": [
-      "0065"
+      "0065",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -956,7 +967,8 @@
     ],
     "amended_by": [
       "0048",
-      "0097"
+      "0097",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -1030,7 +1042,8 @@
       "0075",
       "0091",
       "0092",
-      "0101"
+      "0101",
+      "0119"
     ]
   },
   {
@@ -1079,7 +1092,9 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0119"
+    ]
   },
   {
     "number": "0045",
@@ -1097,7 +1112,8 @@
     "amends": [],
     "amended_by": [
       "0048",
-      "0075"
+      "0075",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -1197,7 +1213,8 @@
       "0049",
       "0052",
       "0075",
-      "0078"
+      "0078",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -1298,7 +1315,8 @@
     ],
     "amended_by": [
       "0054",
-      "0065"
+      "0065",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -1587,7 +1605,9 @@
       "openshell"
     ],
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -1970,7 +1990,8 @@
     "related_by": [
       "0074",
       "0096",
-      "0101"
+      "0101",
+      "0119"
     ]
   },
   {
@@ -2026,7 +2047,9 @@
       "0045",
       "0048"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -2098,7 +2121,9 @@
     "amends": [
       "0049"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -2132,7 +2157,9 @@
       "0048",
       "0066"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -2175,7 +2202,8 @@
       "0094",
       "0098",
       "0111",
-      "0118"
+      "0118",
+      "0119"
     ]
   },
   {
@@ -2192,7 +2220,8 @@
     ],
     "amends": [],
     "amended_by": [
-      "0113"
+      "0113",
+      "0119"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -2238,7 +2267,8 @@
     "related_by": [
       "0087",
       "0092",
-      "0101"
+      "0101",
+      "0119"
     ]
   },
   {
@@ -2286,7 +2316,9 @@
       "isolation"
     ],
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -2693,7 +2725,9 @@
       "0084",
       "0091"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -2809,7 +2843,7 @@
     "number": "0101",
     "file": "0101-agent-substrate-and-kagent-not-adopted.md",
     "title": "Agent Substrate and kagent 1.x evaluated, not adopted for v0.x",
-    "status": "accepted",
+    "status": "superseded",
     "date": "2026-11-08",
     "area": "runtime-sandbox",
     "tags": [
@@ -2820,7 +2854,9 @@
     "amends": [],
     "amended_by": [],
     "supersedes": [],
-    "superseded_by": [],
+    "superseded_by": [
+      "0119"
+    ],
     "relates": [
       "0011",
       "0042",
@@ -2961,7 +2997,9 @@
       "backup-restore"
     ],
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3079,7 +3117,9 @@
       "0100",
       "0106"
     ],
-    "related_by": []
+    "related_by": [
+      "0119"
+    ]
   },
   {
     "number": "0111",
@@ -3109,7 +3149,9 @@
       "0105",
       "0109"
     ],
-    "related_by": []
+    "related_by": [
+      "0119"
+    ]
   },
   {
     "number": "0112",
@@ -3129,7 +3171,9 @@
       "0059",
       "0079"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3170,7 +3214,9 @@
       "0079",
       "0080"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0119"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3278,6 +3324,62 @@
     "relates": [
       "0079",
       "0090"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0119",
+    "file": "0119-agent-substrate-execution-layer.md",
+    "title": "Agent Substrate is Koinon's execution layer",
+    "status": "proposed",
+    "date": "2026-11-18",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "isolation",
+      "kubernetes",
+      "egress",
+      "credentials",
+      "openshell"
+    ],
+    "amends": [
+      "0002",
+      "0006",
+      "0009",
+      "0015",
+      "0016",
+      "0023",
+      "0029",
+      "0032",
+      "0040",
+      "0045",
+      "0048",
+      "0051",
+      "0061",
+      "0075",
+      "0077",
+      "0078",
+      "0080",
+      "0083",
+      "0097",
+      "0106",
+      "0112",
+      "0113"
+    ],
+    "amended_by": [],
+    "supersedes": [
+      "0101"
+    ],
+    "superseded_by": [],
+    "relates": [
+      "0011",
+      "0042",
+      "0044",
+      "0073",
+      "0079",
+      "0081",
+      "0110",
+      "0111"
     ],
     "related_by": []
   }

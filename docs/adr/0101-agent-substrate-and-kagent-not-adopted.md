@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 date: 2026-11-08
 area: runtime-sandbox
 tags: [openshell, isolation, harness]
@@ -7,7 +7,7 @@ relates: ["0011", "0042", "0045", "0073", "0075", "0081"]
 ---
 # 0101. Agent Substrate and kagent 1.x evaluated, not adopted for v0.x
 
-- Status: Accepted (maintainer decision 2026-11-04)
+- Status: Superseded by [0119](0119-agent-substrate-execution-layer.md) (was: Accepted, maintainer decision 2026-11-04)
 - Date: 2026-11-08
 - Area: runtime-sandbox
 - Tags: openshell, isolation, harness

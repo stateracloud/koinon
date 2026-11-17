@@ -8,6 +8,7 @@ relates: ["0002", "0045", "0048"]
 # 0061. Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-26
 - Area: install-operations
 - Tags: registry, helm-chart, openshell

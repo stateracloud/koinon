@@ -8,6 +8,7 @@ decides: design.md#29
 # 0029. Run-level resume through the harness session
 
 - Status: Accepted; amended by [0051](0051-session-home-generations.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: harness, runs, flavors, agent-home

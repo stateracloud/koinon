@@ -7,6 +7,7 @@ tags: [openshell, isolation, kubernetes, security]
 # 0045. OpenShell hardening defaults
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: openshell, isolation, kubernetes, security

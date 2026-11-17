@@ -9,6 +9,7 @@ relates: ["0002", "0006", "0023", "0025", "0042", "0076", "0077"]
 # 0075. Isolation tiers: vm, hardened and dev
 
 - Status: Accepted (pending qualification on Bottlerocket)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-28
 - Area: runtime-sandbox
 - Tags: isolation, openshell, sandbox, kubernetes

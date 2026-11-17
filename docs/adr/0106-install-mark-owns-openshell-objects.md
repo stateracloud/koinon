@@ -8,6 +8,7 @@ relates: ["0002", "0045", "0046", "0051"]
 # 0106. An install mark decides which OpenShell objects an install owns
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-11-10
 - Area: runtime-sandbox
 - Tags: openshell, install, backup-restore

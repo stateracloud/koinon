@@ -9,6 +9,7 @@ relates: ["0006", "0045", "0061", "0084", "0091", "0112"]
 # 0113. Agent package access: straight to allow-listed registries, in four levels
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-11-11
 - Area: runtime-sandbox
 - Tags: egress, dependencies, registry, openshell

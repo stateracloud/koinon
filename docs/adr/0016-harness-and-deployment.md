@@ -8,7 +8,7 @@ decides: design.md#16
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted
-- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement)
+- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: harness, openshell, kubernetes

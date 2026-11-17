@@ -8,6 +8,7 @@ relates: ["0020", "0027", "0045", "0075"]
 # 0083. Sandbox resources: template defaults, platform bounds, requests and limits
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-31
 - Area: runtime-sandbox
 - Tags: sandbox, kubernetes, isolation

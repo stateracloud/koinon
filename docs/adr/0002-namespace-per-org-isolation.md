@@ -8,6 +8,7 @@ decides: design.md#2
 # 0002. One namespace per org, mapped to one OpenShell workspace
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: multi-tenancy, openshell, kubernetes, isolation

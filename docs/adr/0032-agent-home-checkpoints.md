@@ -8,7 +8,7 @@ decides: design.md#32
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built)
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: agent-home, backup-restore, object-storage, encryption

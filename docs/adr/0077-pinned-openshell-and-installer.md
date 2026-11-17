@@ -9,6 +9,7 @@ relates: ["0027", "0048", "0061", "0075", "0076"]
 # 0077. Koinon pins OpenShell and Agent Sandbox per release, and ships an installer
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-28
 - Area: install-operations
 - Tags: install, openshell, helm-chart, release

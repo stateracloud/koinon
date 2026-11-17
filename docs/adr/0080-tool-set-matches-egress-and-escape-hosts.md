@@ -8,6 +8,7 @@ relates: ["0025", "0045", "0052", "0069", "0075"]
 # 0080. The tool set matches the sandbox's egress, and escape cases observe proxy decisions
 
 - Status: Accepted; amended by [0113](0113-agent-package-access.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-29
 - Area: runtime-sandbox
 - Tags: egress, harness, testing
