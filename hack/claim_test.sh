@@ -64,8 +64,8 @@ eq "verdict: another human's held claim conflicts" "$(claim_verdict held bob ali
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/claim_test.XXXXXX")
 trap 'rm -f "$tmp" "$tmp".*' EXIT
-printf '# Sensitive paths.\n/.github/ @a @b\n/AGENTS.md @a\n/internal/auth/ @a\n' >"$tmp.co"
-eq "sensitive paths" "$(sensitive_paths "$tmp.co" | paste -sd, -)" ".github/**,AGENTS.md,internal/auth/**"
+printf '# Sensitive paths.\n/.github/ @a @b\n/AGENTS.md @a\n/**/AGENTS.md @a\n/internal/auth/ @a\n' >"$tmp.co"
+eq "sensitive paths" "$(sensitive_paths "$tmp.co" | paste -sd, -)" ".github/**,AGENTS.md,**/AGENTS.md,internal/auth/**"
 printf '* @a\n/x/ @a\n' >"$tmp.co"
 eq "no sensitive section" "$(sensitive_paths "$tmp.co")" ""
 eq "sensitive-paths command runs offline" "$(KOINON_CLAIM_CODEOWNERS="$here/../.github/CODEOWNERS" bash "$claim" sensitive-paths | head -1)" "$(sensitive_paths "$here/../.github/CODEOWNERS" | head -1)"

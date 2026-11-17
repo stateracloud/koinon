@@ -2,8 +2,8 @@
 
 # CI, e2e and merge reference
 
-The detail behind the short CI bullets in `AGENTS.md`. The rules an agent must not break stay in
-`AGENTS.md`; this page says how the gates work and why.
+The detail behind the short CI bullets in `AGENTS.md` and `.github/AGENTS.md`. The rules an agent must not break stay in
+those files; this page says how the gates work and why.
 
 The rules a CI check must follow, with their reasons and checks, are in [ci-rules.md](ci-rules.md) (ADR 0111). This page
 describes how the jobs work today. `hack/ci-rules-check.sh` (job `scripts`) checks the rules a script can decide.
@@ -19,7 +19,7 @@ fails one that did not run (NOT RUN); `hack/go-test.sh` exits 3 when an expected
 (docker, git, helm) was missing. A plain `func TestX` that passes in a Ginkgo package counts as a run
 test, so the suite reads "partly run" when only that test ran. A plain test that calls `testenv.RequireT`
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
-`go tool ginkgo -p ./internal/x`. `test/harnesses` needs the harness images: `make test-harnesses`.
+`GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the `testing` tag gives kopia an instant test key derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it). `test/harnesses` needs the harness images: `make test-harnesses`.
 
 ### Test result reuse (#43)
 
