@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-11
+area: engineering-process
+tags: [ci, testing, release]
+relates: ["0025", "0047", "0079", "0085", "0090", "0094", "0099", "0104", "0105", "0109"]
+---
 # 0111. CI requirements
 
 - Status: Accepted

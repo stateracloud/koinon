@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-01
+area: models-spend
+tags: [models, pricing, multi-tenancy]
+amends: ["0072"]
+relates: ["0056"]
+---
 # 0086. The org default model is stored, not derived
 
 - Status: Accepted

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-03
+area: security-audit
+tags: [leak-guard, egress, mcp, github]
+amends: ["0084"]
+relates: ["0042", "0051", "0057", "0062", "0080"]
+---
 # 0091. Leak guard by destination: sink classes, session legs and a byte cap
 
 - Status: Accepted (decisions by procoduck, 2026-11-03); amended by [0092](0092-leak-guard-judge-model.md) (2026-11-03: the both-legs `external-high` approval becomes rules, a judge model, then a person)

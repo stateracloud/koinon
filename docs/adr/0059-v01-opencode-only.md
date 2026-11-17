@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-26
+area: runtime-sandbox
+tags: [flavors, harness, migrations, roadmap]
+amends: ["0035"]
+supersedes: ["0053"]
+---
 # 0059. v0.1 ships one harness: OpenCode v2
 
 - Status: Accepted; amended by [0112](0112-harness-definitions.md)

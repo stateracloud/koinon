@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-05
+area: engineering-process
+tags: [claims, github, ci]
+amends: ["0082"]
+relates: ["0046", "0079", "0082"]
+---
 # 0094. Work claims on the public repository: one lock, claims by comment, a conflict check, the native merge queue
 
 - Status: Accepted (procoduck, 2026-11-05, after the grilling session and the probes, which changed no decision)

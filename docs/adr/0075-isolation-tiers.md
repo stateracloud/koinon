@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-28
+area: runtime-sandbox
+tags: [isolation, openshell, sandbox, kubernetes]
+amends: ["0045", "0048"]
+relates: ["0002", "0006", "0023", "0025", "0042", "0076", "0077"]
+---
 # 0075. Isolation tiers: vm, hardened and dev
 
 - Status: Accepted (pending qualification on Bottlerocket)

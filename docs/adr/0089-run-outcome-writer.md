@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-01
+area: work-model
+tags: [runs, tasks, tracing]
+relates: ["0030", "0065", "0074", "0087"]
+---
 # 0089. One writer ends a run
 
 - Status: Accepted

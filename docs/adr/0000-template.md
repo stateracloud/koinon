@@ -1,3 +1,13 @@
+---
+status: proposed # proposed | accepted | deprecated | superseded | rejected
+date: YYYY-MM-DD
+area: tenancy-identity # one area of docs/metadata/areas.txt
+tags: [identity] # one to six tags of docs/metadata/tags.txt
+# decides: design.md#N # omit for ADRs that are not in the design doc
+# amends: ["NNNN"] # ADRs whose decisions this one changes, quoted, sorted
+# supersedes: ["NNNN"] # ADRs this one replaces, wholly or in part
+# relates: ["NNNN"] # ADRs worth reading with this one
+---
 # NNNN. Short title in sentence case
 
 - Status: Proposed | Accepted | Superseded by [NNNN](NNNN-title.md) | Deprecated

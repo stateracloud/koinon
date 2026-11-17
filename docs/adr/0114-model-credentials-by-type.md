@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-11
+area: models-spend
+tags: [credentials, models, budgets, spend-ledger, agentgateway]
+amends: ["0013", "0015", "0044"]
+relates: ["0005", "0019", "0041", "0056", "0084", "0096", "0097", "0112"]
+---
 # 0114. Model traffic always through the gateway; credentials handled by type
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core

@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-03
+area: runtime-sandbox
+tags: [harness, flavors, spend-ledger]
+relates: ["0023", "0041", "0045", "0051", "0052", "0056", "0059", "0074", "0079", "0084", "0091"]
+---
 # 0093. koinon.core: one Koinon-owned OpenCode plugin instead of a fork
 
 - Status: Accepted in full (maintainer decision 2026-11-11, #603; every decision of this ADR, decision 2 included)

@@ -9,13 +9,16 @@ are in [0046](0046-adr-conventions.md).
 1. Reserve the number: `hack/claim.sh adr` creates the ref `claim/adr-NNNN` and prints `NNNN`, so two
    sessions cannot take one number. Gaps are fine; duplicates fail `hack/adr-lint.sh`.
 2. Copy [`0000-template.md`](0000-template.md) to `NNNN-short-title.md`. The first line must be
-   `# NNNN. Title` and the file needs a `- Status:` line: the index is generated from them. Fill
+   `# NNNN. Title` and the file needs a `- Status:` line: the index is generated from them. Fill in the YAML
+   front matter above the title (status, date, area, tags and the optional `decides`, `amends`, `supersedes`,
+   `relates`; [0046](0046-adr-conventions.md)) and keep the prose header lines in step with it. Fill
    in `- Area:` and `- Tags:` from [`docs/metadata/`](../metadata/) ([ADR 0115](0115-document-metadata.md),
    [how to choose](../dev/doc-metadata.md)); `hack/doc-meta-lint.sh` checks them.
 3. Fill in every section; mark reconstructed alternatives and inferred consequences.
-4. If it changes an earlier ADR, add "Amends" here and "Amended by" there, or "Superseded by".
-5. Run `hack/adr-index.sh` to regenerate the index below (never edit the table by hand; CI checks it
-   is current) and update `docs/design.md` in the same PR when the decision is in the overview.
+4. If it changes an earlier ADR, add `amends` (or `supersedes`) to the front matter and "Amends" to the
+   header here, and name this ADR in the Status or "Amended by" line there.
+5. Run `hack/adr-index.sh` to regenerate the index below, `adrs.json` and `graph.md` (never edit them by
+   hand; CI checks they are current; `hack/adr find`, `show` and `graph` read them offline) and update `docs/design.md` in the same PR when the decision is in the overview.
 6. Open a pull request.
 
 ## Index
@@ -67,7 +70,7 @@ are in [0046](0046-adr-conventions.md).
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md) |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md) |
-| [0046](0046-adr-conventions.md) | ADR conventions | Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header) |
+| [0046](0046-adr-conventions.md) | ADR conventions | Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header); amended 2026-11-17 (below) |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted; amended 2026-10-26 (below); the pull request e2e rule amended by [0105](0105-merge-queue-route.md) (amendment of 2026-11-11, #572) |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Accepted (2026-10-26, accepted after implementation) |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes and agentd placement | Accepted |
@@ -130,11 +133,11 @@ are in [0046](0046-adr-conventions.md).
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
 | [0108](0108-docs-site-in-its-own-repository.md) | The docs site lives in its own repository; this repository owns the tested commands | Accepted (maintainer decisions of 2026-11-10, issue #491); decision 9 amended 2026-11-11 (below, issue #127) |
 | [0109](0109-automated-restore-drill.md) | Automated restore drill | Accepted (amended 2026-11-13: phase 3 and the OIDC provider; amended 2026-11-16: every tag is gated by its own kind drill, #1039) |
-| [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, |
+| [0110](0110-held-copy-isolation.md) | A restored copy does not act as its source | Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0, the guards of decision 4 and decision 7 are the design they rest on. |
 | [0111](0111-ci-requirements.md) | CI requirements | Accepted |
-| [0112](0112-harness-definitions.md) | Harness definitions: any harness that speaks ACP, described as data | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
+| [0112](0112-harness-definitions.md) | Harness definitions: any harness that speaks ACP, described as data | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release, except the groundwork under "Timing" |
 | [0113](0113-agent-package-access.md) | Agent package access: straight to allow-listed registries, in four levels | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release |
-| [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core |
+| [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release. Decision 5 names no qualifying auth type yet (Verification) |
 | [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |
 | [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |

@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-06
+area: connectors-tools
+tags: [mcp, auth, credentials, encryption]
+amends: ["0057"]
+relates: ["0005", "0023", "0056", "0065", "0073", "0084", "0085", "0091", "0097"]
+---
 # 0096. MCP sign-in: OAuth-authorized remote MCP servers
 
 - Status: Accepted (2026-11-06)

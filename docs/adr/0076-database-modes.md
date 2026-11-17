@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-28
+area: install-operations
+tags: [database, install, backup-restore, helm-chart]
+amends: ["0049"]
+relates: ["0003", "0047", "0060", "0066", "0075", "0077"]
+---
 # 0076. Database modes: bring your own, existing CNPG, or standalone Postgres
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)

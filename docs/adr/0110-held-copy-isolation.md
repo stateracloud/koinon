@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-10
+area: install-operations
+tags: [backup-restore, identity, auth, openshell, mcp]
+amends: ["0107"]
+relates: ["0004", "0023", "0085", "0100", "0106"]
+---
 # 0110. A restored copy does not act as its source
 
 - Status: Accepted (decided by procoduck, 2026-11-10). Decisions 1, 2, 3, 5 and 6 record his answers; decision 0,

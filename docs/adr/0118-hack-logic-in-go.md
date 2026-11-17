@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-16
+area: engineering-process
+tags: [tooling, ci]
+relates: ["0079", "0090"]
+---
 # 0118. Logic in hack/ moves to Go programs that run with go tool
 
 - Status: Accepted

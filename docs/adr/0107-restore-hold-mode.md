@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-10
+area: install-operations
+tags: [backup-restore, helm-chart, upgrade]
+relates: ["0023", "0085", "0100"]
+---
 # 0107. Restore-hold mode: a restored install starts held
 
 - Status: Accepted

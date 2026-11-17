@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-10
+area: install-operations
+tags: [backup-restore, testing, e2e]
+amends: ["0085"]
+relates: ["0105", "0106", "0107"]
+---
 # 0109. Automated restore drill
 
 - Status: Accepted (amended 2026-11-13: phase 3 and the OIDC provider; amended 2026-11-16: every tag is gated by its own kind drill, #1039)

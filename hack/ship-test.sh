@@ -24,6 +24,7 @@ echo 0 >"$FAKE_CLAIM_RC"
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh $*" >>"$FAKE_LOG"
+[[ -z ${FAKE_GH_FAIL:-} ]] || { echo "gh: HTTP 401: Bad credentials" >&2; exit 1; }
 case "$1 $2" in
 "pr list")
 	if [[ " $* " == *" --state all "* ]]; then
@@ -42,6 +43,9 @@ case "$1 $2" in
 		while [[ $# -gt 0 ]]; do [[ $1 == --jq ]] && q=$2; shift; done
 		[[ -n ${FAKE_CR_JSON:-} ]] || exit 1
 		jq -r "$q" <<<"$FAKE_CR_JSON"
+	elif [[ " $* " == *" headRefOid "* ]]; then
+		[[ -z ${FAKE_HEAD_FAIL:-} ]] || { echo "gh: HTTP 401: Bad credentials" >&2; exit 1; }
+		echo "${FAKE_HEAD:-$(git rev-parse HEAD)}"
 	else
 		echo "${FAKE_PR_DRAFT:-true}"
 	fi
@@ -58,7 +62,13 @@ echo "gitleaks $*" >>"$FAKE_LOG"
 [[ ${FAKE_GITLEAKS_RC:-0} -eq 0 ]] || echo "Finding: fake leak"
 exit "${FAKE_GITLEAKS_RC:-0}"
 SH
-chmod +x "$tmp/bin/gh" "$tmp/bin/gitleaks"
+cat >"$tmp/bin/pr-merge" <<'SH'
+#!/usr/bin/env bash
+echo "pr-merge $*" >>"$FAKE_LOG"
+exit "${FAKE_PRMERGE_RC:-0}"
+SH
+chmod +x "$tmp/bin/gh" "$tmp/bin/gitleaks" "$tmp/bin/pr-merge"
+export SHIP_PR_MERGE="$tmp/bin/pr-merge"
 
 git init -q --bare -b main "$tmp/origin.git"
 seed=$tmp/seed
@@ -66,7 +76,17 @@ git init -q -b main "$seed"
 git -C "$seed" config user.name seed
 git -C "$seed" config user.email seed@example.invalid
 mkdir -p "$seed/hack" "$seed/docs/adr"
+# The real ADR scripts run in the fixture: hack/adr-index.sh runs a built hack/cmd/adr (KOINON_TEST_ADR_BIN), because the
+# fixture has no Go module. The fixture ADRs carry front matter and the repository's own areas, tags and template.
+(cd "$repo" && go build -buildvcs=false -o "$tmp/adr-bin" ./hack/cmd/adr)
+export KOINON_TEST_ADR_BIN=$tmp/adr-bin
 cp "$repo/hack/adr-index.sh" "$seed/hack/"
+mkdir -p "$seed/docs/metadata"
+cp "$repo/docs/metadata/areas.txt" "$repo/docs/metadata/tags.txt" "$seed/docs/metadata/"
+cp "$repo/docs/adr/0000-template.md" "$seed/docs/adr/"
+adr_text() { # <number> <title>: a valid minimal ADR
+	printf -- '---\nstatus: accepted\ndate: 2026-11-17\narea: engineering-process\ntags: [docs]\n---\n# %s. %s\n\n- Status: Accepted\n- Date: 2026-11-17\n- Area: engineering-process\n- Tags: docs\n\n## Context\n\nx\n' "$1" "$2"
+}
 cat >"$seed/hack/needs-e2e.sh" <<'SH'
 #!/usr/bin/env bash
 echo "needs-e2e $*" >>"$FAKE_LOG"
@@ -84,7 +104,7 @@ cp "$repo/hack/git-identity-check.sh" "$seed/hack/"
 printf 'Test Dev <dev@example.invalid>\nadv <adv@example.invalid>\n' >"$seed/hack/git-identities.allowed"
 chmod +x "$seed/hack/"*.sh
 printf '# ADRs\n\n## Index\n' >"$seed/docs/adr/README.md"
-printf '# 0001. First\n\n- Status: accepted\n' >"$seed/docs/adr/0001-first.md"
+adr_text 0001 First >"$seed/docs/adr/0001-first.md"
 (cd "$seed" && hack/adr-index.sh >/dev/null && echo base >a.txt && git add -A && git commit -q -m seed && git remote add origin "$tmp/origin.git" && git push -q origin main)
 
 newwork() { # prints the path of a fresh clone on branch feat/1-x with an identity
@@ -111,7 +131,7 @@ printf '#!/bin/sh\nexit 1\n' >"$tmp/failbin/mktemp"
 chmod +x "$tmp/failbin/mktemp"
 mktemp_fail_rc=0
 (cd "$guard" && PATH="$tmp/failbin:$PATH" && w=$(newwork)) >/dev/null 2>&1 || mktemp_fail_rc=$?
-reset_state() { : >"$FAKE_LOG"; unset FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
+reset_state() { : >"$FAKE_LOG"; unset FAKE_HEAD FAKE_HEAD_FAIL FAKE_GH_FAIL FAKE_PRMERGE_RC FAKE_PR_URL FAKE_PR_JSON FAKE_CR_JSON FAKE_COMMENT_RC FAKE_PR_CREATE_URL FAKE_PR_DRAFT FAKE_GITLEAKS_RC FAKE_BOARD_RC KOINON_ALLOWED_IDENTITIES KOINON_COMMIT_FOOTER || true; echo 1 >"$FAKE_NEEDS_RC"; echo 0 >"$FAKE_CLAIM_RC"; }
 
 fail=0
 pass=0
@@ -197,7 +217,7 @@ check "main: exit 1" eq "$rc" 1
 check "main refusal explained" has 'refusing to ship from main' "$tmp/o5"
 check "main: nothing committed" eq "$(git rev-list --count origin/main..HEAD)" 0
 
-# 6. merge of origin/main (never rebase), then push
+# 6. behind main and clean: no merge commit (D2: merge only on a conflict), then push
 reset_state
 w=$(newwork); cd "$w"
 adv=$tmp/adv
@@ -207,9 +227,11 @@ echo more >"$adv/b.txt" && git -C "$adv" add -A && git -C "$adv" commit -q -m "m
 echo mine >mine.txt
 rc=$(run "$tmp/o6" -m "feat: mine")
 check "behind main: exit 0" eq "$rc" 0
-check "merged line" has '^merged origin/main$' "$tmp/o6"
-check "pushed branch contains the new main" git --git-dir="$tmp/origin.git" merge-base --is-ancestor "$(git -C "$adv" rev-parse HEAD)" refs/heads/feat/1-x
-check "merge commit exists" eq "$(git rev-list --merges --count origin/main..HEAD)" 1
+check "behind and clean: says it did not merge" has '^behind origin/main, no conflict: not merged$' "$tmp/o6"
+check "behind and clean: no merged line" hasnt '^merged origin/main$' "$tmp/o6"
+check "behind and clean: pushed" branch_on_origin feat/1-x
+check "behind and clean: no merge commit" eq "$(git rev-list --merges --count origin/main..HEAD)" 0
+check "behind and clean: the pushed branch lacks the new main" bash -c "! git --git-dir=$tmp/origin.git merge-base --is-ancestor $(git -C "$adv" rev-parse HEAD) refs/heads/feat/1-x"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 rm -rf "$adv"
 
@@ -231,9 +253,9 @@ reset_state
 w=$(newwork); cd "$w"
 git clone -q "$tmp/origin.git" "$adv"
 git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
-printf '# 0002. Second\n\n- Status: accepted\n' >"$adv/docs/adr/0002-second.md"
+adr_text 0002 Second >"$adv/docs/adr/0002-second.md"
 (cd "$adv" && hack/adr-index.sh >/dev/null && git add -A && git commit -q -m "adr 2" && git push -q origin main)
-printf '# 0003. Third\n\n- Status: accepted\n' >docs/adr/0003-third.md
+adr_text 0003 Third >docs/adr/0003-third.md
 hack/adr-index.sh >/dev/null
 rc=$(run "$tmp/o8" -m "docs: adr 3")
 check "ADR README conflict: exit 0" eq "$rc" 0
@@ -243,7 +265,7 @@ check "ADR README: pushed" branch_on_origin feat/1-x
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 rm -rf "$adv"
 
-# 8b. a hook that refuses the merge commit is reported as such, not as a conflict
+# 8b. behind and clean: the merge never runs, so a pre-merge-commit hook is never reached (D2)
 reset_state
 w=$(newwork); cd "$w"
 git clone -q "$tmp/origin.git" "$adv"
@@ -255,12 +277,74 @@ chmod +x "$tmp/hooks/pre-merge-commit"
 git config core.hooksPath "$tmp/hooks"
 echo mine2 >mine2.txt
 rc=$(run "$tmp/o8b" -m "feat: mine2")
-check "hook-refused merge: exit 1" eq "$rc" 1
-check "hook-refused merge shows the hook output" has 'identity refused by hook' "$tmp/o8b"
-check "hook-refused merge is not called a conflict" hasnt 'merge conflict in' "$tmp/o8b"
-check "hook-refused merge leaves no merge in progress" bash -c "! git rev-parse -q --verify MERGE_HEAD"
-check "hook-refused merge pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+check "behind and clean with a merge hook: exit 0" eq "$rc" 0
+check "behind and clean: the merge hook did not run" hasnt 'identity refused by hook' "$tmp/o8b"
+check "behind and clean: pushed" branch_on_origin feat/1-x
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 rm -rf "$adv"
+
+# 8b2. --admin: the branch is behind and clean, and ship merges origin/main all the same (D2: pr-merge.sh --admin skips the queue)
+reset_state
+w=$(newwork); cd "$w"
+git clone -q "$tmp/origin.git" "$adv"
+git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
+echo more3 >"$adv/d3.txt" && git -C "$adv" add -A && git -C "$adv" commit -q -m "main moves a third time" && git -C "$adv" push -q origin main
+echo mine3 >mine3.txt
+rc=$(run "$tmp/o8b2" -m "ci: mine3" --admin)
+check "--admin behind and clean: exit 0" eq "$rc" 0
+check "--admin behind and clean: merged" has '^merged origin/main$' "$tmp/o8b2"
+check "--admin behind and clean: merge commit exists" eq "$(git rev-list --merges --count origin/main..HEAD)" 1
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+rm -rf "$adv"
+git config --unset core.hooksPath || true
+
+# 8c. a re-run after a conflict does not commit the markers (issue 661)
+reset_state
+w=$(newwork); cd "$w"
+git clone -q "$tmp/origin.git" "$adv"
+git -C "$adv" config user.name adv && git -C "$adv" config user.email adv@example.invalid
+echo main-side2 >"$adv/a.txt" && git -C "$adv" commit -qam "main edits a again" && git -C "$adv" push -q origin main
+echo branch-side2 >a.txt
+rc=$(run "$tmp/o8c1" -m "feat: edit a")
+check "re-run: first run stops on the conflict (exit 4)" eq "$rc" 4
+check "re-run: merge in progress" git rev-parse -q --verify MERGE_HEAD
+head_before=$(git rev-parse HEAD)
+rc=$(run "$tmp/o8c2" -m "feat: edit a")
+check "re-run with unmerged paths: exit 4" eq "$rc" 4
+check "re-run names the unmerged path" has 'ship:   a.txt' "$tmp/o8c2"
+check "re-run says a merge is in progress" has 'MERGE_HEAD exists' "$tmp/o8c2"
+check "re-run commits nothing" eq "$(git rev-parse HEAD)" "$head_before"
+check "re-run leaves the markers uncommitted" grep -q '<<<<<<<' a.txt
+check "re-run pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+rc=$(run "$tmp/o8c3" -m "feat: edit a" --dry-run)
+check "re-run with --dry-run is refused too" eq "$rc" 4
+echo resolved >a.txt && git add a.txt && git -c core.editor=true commit -q --no-edit --signoff
+rc=$(run "$tmp/o8c4" -m "feat: edit a")
+check "after the conflict is resolved and committed: exit 0" eq "$rc" 0
+check "after the resolution: pushed" branch_on_origin feat/1-x
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+rm -rf "$adv"
+
+# 8d. the blob gate fails when origin/main does not resolve; a failed gh read is not "no pull request" (issue 661)
+reset_state
+w=$(newwork); cd "$w"
+echo nb >nb.txt && git add -A && git commit -q -m nb
+git update-ref -d refs/remotes/origin/main
+rc=$(run "$tmp/o8d" -m "feat: nb")
+check "no origin/main: exit 1" eq "$rc" 1
+check "no origin/main: names the blob gate" has 'blobs: origin/main does not resolve' "$tmp/o8d"
+check "no origin/main: pushes nothing" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+reset_state
+w=$(newwork); cd "$w"
+echo ng >ng.txt
+export FAKE_GH_FAIL=1
+echo body >"$tmp/body.md"
+rc=$(run "$tmp/o8e" -m "feat: ng" --pr-title t --pr-body "$tmp/body.md")
+check "gh fails: exit 1" eq "$rc" 1
+check "gh fails: says it could not ask gh and shows gh's error" has 'could not ask gh for the pull request of feat/1-x.*Bad credentials' "$tmp/o8e"
+check "gh fails: nothing pushed" bash -c "! git --git-dir=$tmp/origin.git rev-parse -q --verify refs/heads/feat/1-x"
+check "gh fails: no pull request created" hasnt 'pr create' "$FAKE_LOG"
+unset FAKE_GH_FAIL
 
 # 9. gitleaks failure stops before the push
 reset_state
@@ -333,15 +417,46 @@ rc=$(run "$tmp/o11" -m "feat: e" --pr-title "t" --pr-body "$tmp/body.md" --ready
 check "needs e2e: auto-merge is allowed, exit 0" eq "$rc" 0
 check "no e2e refusal text" hasnt 'needs the kind e2e' "$tmp/o11"
 check "needs-e2e.sh is not consulted" hasnt 'needs-e2e' "$FAKE_LOG"
-check "gh pr merge --auto --merge for an e2e-relevant change" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
+check "pr-merge.sh for an e2e-relevant change" has '^pr-merge 123$' "$FAKE_LOG"
+check "no direct gh pr merge" hasnt 'gh pr merge' "$FAKE_LOG"
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 reset_state
 echo 1 >"$FAKE_NEEDS_RC"
 echo e2 >e2.txt
 rc=$(run "$tmp/o11b" -m "feat: e2" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
 check "e2e not needed: exit 0" eq "$rc" 0
-check "auto-merge on line" has '^auto-merge on$' "$tmp/o11b"
-check "gh pr merge --auto --merge" has 'gh pr merge .* --auto --merge' "$FAKE_LOG"
+check "auto-merge line" has '^auto-merge handed to pr-merge.sh$' "$tmp/o11b"
+check "hands the PR number to pr-merge.sh" has '^pr-merge 123$' "$FAKE_LOG"
+check "no direct gh pr merge" hasnt 'gh pr merge' "$FAKE_LOG"
+git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_PRMERGE_RC=5
+echo e3 >e3.txt
+rc=$(run "$tmp/o11c" -m "feat: e3" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
+check "pr-merge.sh refuses: ship exits 1" eq "$rc" 1
+check "pr-merge.sh refuses: names the exit code" has 'pr-merge.sh 123 exited 5' "$tmp/o11c"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_HEAD=0000000
+echo e4 >e4.txt
+rc=$(SHIP_HEAD_WAIT=0 run "$tmp/o11e" -m "feat: e4" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
+check "stale head on GitHub: exit 1" eq "$rc" 1
+check "stale head: names the problem" has 'GitHub still shows another head' "$tmp/o11e"
+check "stale head: pr-merge.sh not called" hasnt '^pr-merge' "$FAKE_LOG"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123 FAKE_HEAD_FAIL=1
+echo e5 >e5.txt
+rc=$(SHIP_HEAD_WAIT=0 run "$tmp/o11f" -m "feat: e5" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge)
+check "failed head read: exit 1" eq "$rc" 1
+check "failed head read: names gh, not a stale head" hasnt 'GitHub still shows another head' "$tmp/o11f"
+check "failed head read: pr-merge.sh not called" hasnt '^pr-merge' "$FAKE_LOG"
+reset_state
+export FAKE_PR_URL=https://example.invalid/o/r/pull/123
+echo e6 >e6.txt
+rc=$(run "$tmp/o11g" -m "feat: e6" --pr-title "t" --pr-body "$tmp/body.md" --auto-merge --admin)
+check "--admin with --auto-merge: exit 0" eq "$rc" 0
+check "--admin passes to pr-merge.sh" has '^pr-merge 123 --admin$' "$FAKE_LOG"
+rc=$(run "$tmp/o11d" -m "x" --pr-title t --pr-body "$tmp/body.md" --draft --auto-merge)
+check "--draft with --auto-merge is a usage error" eq "$rc" 2
 git --git-dir="$tmp/origin.git" update-ref -d refs/heads/feat/1-x
 
 # 11c. (old issue 392) --e2e: the label goes on an open PR before the push, on a new PR at creation
@@ -433,7 +548,7 @@ export FAKE_PR_JSON='[{"number":431,"state":"OPEN","autoMergeRequest":{"mergeMet
 rc=$(run "$tmp/o15e" -m "fix: o" --hold)
 check "--hold: exit 0" eq "$rc" 0
 check "--hold: gh pr merge --disable-auto" has 'gh pr merge 431 --disable-auto' "$FAKE_LOG"
-check "--hold: says how to turn it back on" has 'gh pr merge 431 --auto --merge' "$tmp/o15e"
+check "--hold: says how to turn it back on" has 'hack/pr-merge.sh 431' "$tmp/o15e"
 check "--hold: no warning" hasnt 'warning' "$tmp/o15e"
 check "--hold: auto-merge off before the push" bash -c "awk '/disable-auto/{a=NR} END{exit !a}' $FAKE_LOG"
 check "--hold: pushed" branch_on_origin feat/1-x

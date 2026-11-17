@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: product-scope
+tags: [api, registry, helm-chart]
+decides: design.md#28
+---
 # 0028. Name the project Koinon
 
 - Status: Accepted

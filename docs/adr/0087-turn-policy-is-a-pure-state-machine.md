@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-01
+area: work-model
+tags: [runs, harness, testing]
+relates: ["0050", "0081"]
+---
 # 0087. Turn policy is a pure state machine
 
 - Status: Accepted

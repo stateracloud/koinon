@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-26
+area: install-operations
+tags: [migrations, helm-chart, database, kubernetes]
+amends: ["0037"]
+relates: ["0003", "0027"]
+---
 # 0060. Migrations run as a Job, not on start; an Argo CD Sync hook under Argo
 
 - Status: Accepted

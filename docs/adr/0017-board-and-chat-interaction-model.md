@@ -1,3 +1,10 @@
+---
+status: superseded
+date: 2026-10-21
+area: work-model
+tags: [chat, tasks, ui]
+decides: design.md#17
+---
 # 0017. Board and chat are two views of one ticket
 
 - Status: Superseded by [0055](0055-chat-as-its-own-object.md) and [0065](0065-work-model-tasks-inbox.md)

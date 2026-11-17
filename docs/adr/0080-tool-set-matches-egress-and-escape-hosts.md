@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-29
+area: runtime-sandbox
+tags: [egress, harness, testing]
+relates: ["0025", "0045", "0052", "0069", "0075"]
+---
 # 0080. The tool set matches the sandbox's egress, and escape cases observe proxy decisions
 
 - Status: Accepted; amended by [0113](0113-agent-package-access.md)

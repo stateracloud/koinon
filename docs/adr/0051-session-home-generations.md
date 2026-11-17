@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-22
+area: runtime-sandbox
+tags: [agent-home, harness, sandbox, runs]
+amends: ["0029", "0049"]
+---
 # 0051. Session home generations
 
 - Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md), [0065](0065-work-model-tasks-inbox.md) and below (2026-10-23, 2026-10-24, 2026-10-26)

@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-22
+area: models-spend
+tags: [spend-ledger, budgets, agentgateway, pricing]
+amends: ["0041"]
+---
 # 0050. Spend ledger ingestion and net limits
 
 - Status: Accepted (2026-10-26, accepted after implementation); amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md) and 2026-10-23 (below)

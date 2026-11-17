@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: work-model
+tags: [approvals, runs, mcp, leak-guard]
+amends: ["0008"]
+---
 # 0042. Ask tier: park the run, Koinon executes the approved call
 
 - Status: Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md)

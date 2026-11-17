@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-26
+area: security-audit
+tags: [credentials, gitea, github, secrets]
+amends: ["0006", "0007", "0043", "0049"]
+relates: ["0062"]
+---
 # 0063. Code-host credential classes: allow weaker credentials, with compensation
 
 - Status: Accepted

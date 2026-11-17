@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-06
+area: models-spend
+tags: [agentgateway, mcp, models, spend-ledger, leak-guard]
+amends: ["0006", "0013", "0040", "0041", "0049", "0050", "0056", "0057", "0058", "0073", "0084", "0091"]
+relates: ["0023", "0045", "0068", "0069", "0074", "0075", "0085", "0096"]
+---
 # 0097. A Koinon-owned gateway, in three steps
 
 - Status: Accepted (2026-11-06)

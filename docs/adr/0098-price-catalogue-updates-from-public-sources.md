@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-11-06
+area: models-spend
+tags: [pricing, models, spend-ledger, prompt-caching]
+amends: ["0056", "0070"]
+relates: ["0023", "0041", "0068", "0076", "0079", "0085"]
+---
 # 0098. Update the model price catalogue from public sources
 
 - Status: Accepted (2026-11-06)

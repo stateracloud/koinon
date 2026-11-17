@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [memory, agent-home]
+decides: design.md#33
+---
 # 0033. File-based, scoped memory stores
 
 - Status: Accepted
