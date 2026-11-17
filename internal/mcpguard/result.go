@@ -262,8 +262,17 @@ func (g *Guard) RecordSent(ctx context.Context, row store.ApprovalRequest, srv s
 		return nil // nothing left the org
 	}
 	gen, ok, err := Generation(ctx, g.q, row.OrgID, row.AgentID)
-	if err != nil || !ok {
+	if err != nil {
 		return err
+	}
+	p := store.InsertSentDecisionParams{
+		OrgID: row.OrgID, AgentID: row.AgentID, Generation: gen, RunID: row.RunID, Server: srv.Name, Tool: row.Tool,
+		SinkClass: string(class), PayloadBytes: int32(min(args.PayloadBytes(), 1<<30)), //nolint:gosec // bounded
+		DestHost: destHost(args),
+	}
+	if !ok {
+		// No home generation (the sandbox is gone): the call left, but no session holds legs to charge.
+		return g.q.InsertSentDecision(ctx, p)
 	}
 	legs, err := g.state.Ensure(ctx, Session{Org: row.OrgID, Agent: row.AgentID, Generation: gen})
 	if err != nil {
@@ -273,12 +282,8 @@ func (g *Guard) RecordSent(ctx context.Context, row store.ApprovalRequest, srv s
 	if class == sinkclass.ExternalLow && legs.UntrustedInput && legs.PrivateData {
 		n = args.PayloadBytes()
 	}
-	p := store.InsertSentDecisionParams{
-		OrgID: row.OrgID, AgentID: row.AgentID, Generation: gen, RunID: row.RunID, Server: srv.Name, Tool: row.Tool,
-		SinkClass: string(class), PayloadBytes: int32(min(args.PayloadBytes(), 1<<30)), //nolint:gosec // bounded
-		UntrustedInput: pgtype.Bool{Bool: legs.UntrustedInput, Valid: true}, PrivateData: pgtype.Bool{Bool: legs.PrivateData, Valid: true},
-		DestHost: destHost(args),
-	}
+	p.UntrustedInput = pgtype.Bool{Bool: legs.UntrustedInput, Valid: true}
+	p.PrivateData = pgtype.Bool{Bool: legs.PrivateData, Valid: true}
 	if n == 0 {
 		return g.q.InsertSentDecision(ctx, p)
 	}

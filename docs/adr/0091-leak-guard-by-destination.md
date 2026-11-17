@@ -614,8 +614,8 @@ the old value of 2048 bytes).
   adds a decision row with the charged bytes, and the parked row stays at 0). A denied or expired
   call is never charged, because its data never left. The guard reads the size from the allowed call
   itself, so another held call of the same tool is never charged in its place. Every call of an
-  ask target is held, so it is charged this way, whatever the verdict. A call whose reply is lost
-  after it left is not charged: the count is at most once. The count never refuses a call. The reason
+  ask target is held, so it is charged this way, whatever the verdict. A call that the executor
+  sends is charged only when its reply comes back, so the count is at most once for it. The count never refuses a call. The reason
   `byte_cap` is removed.
 - The **threshold** is 16 KiB per run (the setting `--leak-guard-byte-cap` and the chart value
   `leakGuardByteCap` stay; the default was 2 KiB). When the count of a run goes over it, the guard
@@ -629,8 +629,8 @@ the old value of 2048 bytes).
   `cap_used_before` (the count before the call) and `dest_host` (the last two labels of the fetch host of
   an http or https address argument, such as `example.com`; it is not a public-suffix domain, so
   `a.co.uk` is stored as `co.uk`; at most 8 hosts, sorted; empty when there is none). The run evidence exports them, with the host as a
-  pseudonym, so the lab reads the count from the rows. The stored count equals the sum of the
-  charged bytes. The migration only adds columns (ADR 0085 patch-line rule).
+  pseudonym, so the lab reads the count from the rows. The stored count is the sum of the
+  charged bytes, except for a decision row that failed to write (counted as a record error). The migration only adds columns (ADR 0085 patch-line rule).
 - The URL rule and the text match are unchanged.
 
 **What the cap does not do.** A secret under about 1 KB (a token, a key) is far below any threshold
