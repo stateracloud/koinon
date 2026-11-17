@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [testing, ci, e2e, security]
+decides: design.md#25
+---
 # 0025. Deterministic, free CI with a continuous sandbox escape suite
 
 - Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind)

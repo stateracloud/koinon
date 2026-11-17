@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [multi-tenancy, approvals, budgets]
+decides: design.md#12
+---
 # 0012. Cross-org sharing through links with exposure profiles
 
 - Status: Accepted; who pays amended by [0065](0065-work-model-tasks-inbox.md)

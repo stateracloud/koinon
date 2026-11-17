@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: tenancy-identity
+tags: [identity, credentials]
+amends: ["0006"]
+---
 # 0043. Workload identity adapters and a Koinon OIDC issuer
 
 - Status: Accepted

@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: work-model
+tags: [object-storage, tasks, mcp]
+decides: design.md#31
+---
 # 0031. Artifacts in S3-compatible object storage
 
 - Status: Accepted

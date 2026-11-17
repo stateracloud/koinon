@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: work-model
+tags: [identity, approvals, audit, ui]
+amends: ["0005"]
+---
 # 0067. The concierge: a setup and management assistant in koinon-api
 
 - Status: Accepted

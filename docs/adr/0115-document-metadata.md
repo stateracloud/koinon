@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-11
+area: engineering-process
+tags: [adr-process, docs, ci]
+amends: ["0046"]
+---
 # 0115. Document metadata: one area and controlled tags on every doc
 
 - Status: Accepted

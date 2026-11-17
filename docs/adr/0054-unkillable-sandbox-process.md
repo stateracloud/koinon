@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-23
+area: runtime-sandbox
+tags: [sandbox, agent-home, approvals, runs]
+amends: ["0051"]
+---
 # 0054. A sandbox with an unkillable process is recreated
 
 - Status: Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard

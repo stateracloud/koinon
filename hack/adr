@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Find and read ADRs from the command line (issue 283). Works offline: it reads docs/adr/ and nothing else.
+#   hack/adr find [--area A] [--tag T] [--status S] [--text] [words...]
+#   hack/adr show [--body] NNNN       the metadata and the links in both directions
+#   hack/adr graph [--relates] [--depth N] [NNNN]    Mermaid graph (around NNNN)
+# The logic is Go: hack/cmd/adr (ADR 0118). Exit codes: 0 found, 1 nothing found, 2 usage or read error.
+
+# Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
+
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+# `go tool` finds the tool through the module of the working directory.
+cd "$repo"
+export ADR_ROOT=$repo
+exec go tool adr "$@"

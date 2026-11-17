@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-02
+area: engineering-process
+tags: [tooling, ci]
+relates: ["0079", "0082"]
+---
 # 0090. Every repository script requires bash 5
 
 - Status: Accepted; the lab as merge evidence (note of 2026-11-07 below) amended by [0105](0105-merge-queue-route.md)

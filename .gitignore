@@ -55,3 +55,7 @@ CLAUDE.local.md
 **/.claude/scheduled_tasks.json
 **/.claude/scheduled_tasks.lock
 **/.claude/worktrees/
+
+# Editor state for Obsidian and its plugins; ADRs stay plain Markdown (ADR 0046).
+.obsidian/
+.smart-env/

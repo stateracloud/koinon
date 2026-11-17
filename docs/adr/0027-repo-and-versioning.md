@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: engineering-process
+tags: [release, dependencies, registry, helm-chart, api]
+decides: design.md#27
+---
 # 0027. Monorepo, one version, supply-chain hygiene
 
 - Status: Accepted; amended 2026-10-25 (below)

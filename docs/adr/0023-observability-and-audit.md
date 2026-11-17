@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: security-audit
+tags: [audit, tracing, metrics, spend-ledger]
+decides: design.md#23
+---
 # 0023. Optional observability, hash-chained audit on by default
 
 - Status: Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)

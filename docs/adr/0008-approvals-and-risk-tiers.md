@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: work-model
+tags: [approvals, mcp, openshell]
+decides: design.md#8
+---
 # 0008. Approvals: risk tiers per scope, enforced at the boundary
 
 - Status: Accepted; amended by [0042](0042-ask-tier-park-and-execute.md)

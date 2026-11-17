@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-23
+area: connectors-tools
+tags: [mcp, connectors, approvals, egress, credentials]
+amends: ["0014"]
+---
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
 - Status: Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below)

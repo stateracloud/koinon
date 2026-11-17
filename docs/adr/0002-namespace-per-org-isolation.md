@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: runtime-sandbox
+tags: [multi-tenancy, openshell, kubernetes, isolation]
+decides: design.md#2
+---
 # 0002. One namespace per org, mapped to one OpenShell workspace
 
 - Status: Accepted

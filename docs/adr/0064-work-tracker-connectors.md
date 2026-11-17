@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-26
+area: connectors-tools
+tags: [work-tracker, connectors, triggers, tasks]
+amends: ["0007"]
+---
 # 0064. Work-tracker connectors: tools and triggers, no sync
 
 - Status: Accepted

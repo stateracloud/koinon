@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-22
+area: runtime-sandbox
+tags: [flavors, harness, mcp, dependencies]
+amends: ["0048"]
+---
 # 0052. OpenCode flavor on OpenCode v2
 
 - Status: Accepted

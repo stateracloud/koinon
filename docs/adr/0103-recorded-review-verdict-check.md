@@ -1,3 +1,11 @@
+---
+status: deprecated
+date: 2026-11-09
+area: engineering-process
+tags: [ci, github]
+amends: ["0082"]
+relates: ["0046", "0094", "0102"]
+---
 # 0103. A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`
 
 - Status: Deprecated (2026-11-11, #546: the check is removed; see the amendment). Earlier: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate

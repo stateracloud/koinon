@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: work-model
+tags: [runs, database, tasks, triggers]
+decides: design.md#30
+---
 # 0030. Postgres run state machine with an ownership epoch
 
 - Status: Accepted

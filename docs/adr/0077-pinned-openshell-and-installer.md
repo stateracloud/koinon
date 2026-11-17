@@ -1,3 +1,11 @@
+---
+status: accepted
+date: 2026-10-28
+area: install-operations
+tags: [install, openshell, helm-chart, release]
+amends: ["0049"]
+relates: ["0027", "0048", "0061", "0075", "0076"]
+---
 # 0077. Koinon pins OpenShell and Agent Sandbox per release, and ships an installer
 
 - Status: Accepted (delivery after v0.1.0, in v0.1.x)

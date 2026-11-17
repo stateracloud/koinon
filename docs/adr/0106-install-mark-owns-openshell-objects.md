@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-11-10
+area: runtime-sandbox
+tags: [openshell, install, backup-restore]
+relates: ["0002", "0045", "0046", "0051"]
+---
 # 0106. An install mark decides which OpenShell objects an install owns
 
 - Status: Accepted

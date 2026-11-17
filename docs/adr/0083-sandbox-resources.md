@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-31
+area: runtime-sandbox
+tags: [sandbox, kubernetes, isolation]
+relates: ["0020", "0027", "0045", "0075"]
+---
 # 0083. Sandbox resources: template defaults, platform bounds, requests and limits
 
 - Status: Accepted

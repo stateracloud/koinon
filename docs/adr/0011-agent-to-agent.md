@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: work-model
+tags: [tasks, mcp, runs]
+decides: design.md#11
+---
 # 0011. Agent-to-agent: A2A, persisted as tickets
 
 - Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md)

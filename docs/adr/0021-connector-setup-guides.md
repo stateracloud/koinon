@@ -1,3 +1,10 @@
+---
+status: accepted
+date: 2026-10-21
+area: connectors-tools
+tags: [connectors, credentials, secrets]
+decides: design.md#21
+---
 # 0021. Machine-readable connector setup guides and secure inputs
 
 - Status: Accepted
