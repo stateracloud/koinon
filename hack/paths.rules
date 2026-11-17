@@ -291,7 +291,7 @@ script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.ym
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh
-script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,hack/drill-web-run.sh,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
+script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh

@@ -142,13 +142,15 @@ func chartVersion() string {
 	return ""
 }
 
-// webSpecCmd builds the command that runs one web/e2e-drill spec. With KOINON_DRILL_WEB_RUNNER set (the CI drill
-// job: hack/drill-web-run.sh runs the spec in the pinned Playwright image, so no browser or OS package comes from
-// a live mirror) the runner is called with the spec name; without it, pnpm runs the spec on this machine, which
-// then needs its own Chromium.
+// webSpecCmd builds the command that runs one web/e2e-drill spec. With KOINON_DRILL_PLAYWRIGHT_IMAGE set (the CI
+// drill job) hack/cmd/drillwebrun runs the spec in that pinned Playwright image, so no browser or OS package comes
+// from a live mirror (#1072); `go tool` finds it through the module of the working directory. Without it, pnpm
+// runs the spec on this machine, which then needs its own Chromium.
 func webSpecCmd(ctx context.Context, spec string) *exec.Cmd {
-	if runner := os.Getenv("KOINON_DRILL_WEB_RUNNER"); runner != "" {
-		return exec.CommandContext(ctx, runner, spec)
+	if os.Getenv("KOINON_DRILL_PLAYWRIGHT_IMAGE") != "" {
+		cmd := exec.CommandContext(ctx, "go", "tool", "drillwebrun", spec)
+		cmd.Dir = repoRoot
+		return cmd
 	}
 	return exec.CommandContext(ctx, "pnpm", "--dir", filepath.Join(repoRoot, "web"), "run", "test:e2e-drill", spec)
 }

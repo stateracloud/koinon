@@ -10,6 +10,7 @@ tool (
 	github.com/sqlc-dev/sqlc/cmd/sqlc
 	github.com/stateracloud/koinon/hack/cmd/agentsmdlint
 	github.com/stateracloud/koinon/hack/cmd/bash5lint
+	github.com/stateracloud/koinon/hack/cmd/drillwebrun
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 	gotest.tools/gotestsum

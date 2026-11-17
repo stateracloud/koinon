@@ -347,9 +347,9 @@ topology stays in the output directory as `topology.json`). The kind topology tu
 the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
 that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
 environment of that process). The `drill` job installs Node and pnpm (`pnpm --dir web install --frozen-lockfile`) and runs the spec in the pinned
-Playwright image (the digest of `web-e2e`) through `hack/drill-web-run.sh`, which `test/drill` calls when
-`KOINON_DRILL_WEB_RUNNER` names it; the job installs no browser or OS package from a live mirror (#569). Without
-that variable the spec runs through pnpm on the machine, which then needs its own Chromium. Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
+Playwright image (the digest of `web-e2e`) through `go tool drillwebrun` (`hack/cmd/drillwebrun`, ADR 0118), which `test/drill` calls when
+`KOINON_DRILL_PLAYWRIGHT_IMAGE` is set. The tool mounts the parent of `PLAYWRIGHT_OUTPUT_DIR`, because Playwright removes its output directory and a mount point cannot be removed; its Docker spec runs as non-root in `go-test` on every pull request (#1072); the job installs no browser or OS package from a live mirror (#569). Without
+that image the spec runs through pnpm on the machine, which then needs its own Chromium. Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
 (or `no_proxy`) for the drill: `web/playwright.drill.config.ts` maps them to Playwright's `use.proxy` (Playwright
 ignores them itself). The server goes in without credentials; a user name and password in the URL are split out and
 URL-decoded. The bypass list is the `NO_PROXY` entries plus `127.0.0.1` and `localhost`, which the port-forward needs.

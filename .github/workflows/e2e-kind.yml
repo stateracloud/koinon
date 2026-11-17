@@ -523,7 +523,7 @@ jobs:
 
       # The browser-signin check (topology browserSignin, test/drill/topology/kind.yaml) drives web/e2e-drill with
       # Playwright. Node and pnpm install the web dependencies here; the spec itself runs in the pinned Playwright
-      # image (hack/drill-web-run.sh, set below as KOINON_DRILL_WEB_RUNNER), so no browser or OS package comes from
+      # image (go tool drillwebrun, chosen by KOINON_DRILL_PLAYWRIGHT_IMAGE below), so no browser or OS package comes from
       # a live mirror (#569, hack/ci-playwright-image-test.sh). The job needs kind on the host, so only the spec
       # runs in the image. The image tag must carry the @playwright/test version of web/package.json.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -609,7 +609,6 @@ jobs:
           HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
-          KOINON_DRILL_WEB_RUNNER: ${{ github.workspace }}/hack/drill-web-run.sh
         run: test/drill/run.sh 2>&1 | tee "$RUNNER_TEMP/drill.log"
 
       - name: Summary
