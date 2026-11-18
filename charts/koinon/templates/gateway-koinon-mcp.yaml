@@ -1,0 +1,177 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+gateway.mcp.driver=koinon: koinon-gateway serves the MCP path (ADR 0097 step 2, issue #278). It is
+its own Deployment and Service next to agentgateway, which keeps the LLM path and stays the fallback.
+
+The pods keep no state, so there are two or more, spread over nodes, with a PodDisruptionBudget. Each
+follows the State stream of koinon-api (the OTLP listener, with the same bearer token as agentgateway's
+access log) and applies the revision the reconciler published. A pod is not ready before its first
+revision applied, so a rollout never takes the old pods away before the new ones can serve.
+
+Secret custody (ADR 0097 decision 5, ADR 0120): the pod has no database login, no key-encryption key and
+no Kubernetes API access (no token is mounted). It reads the credential files of the MCP targets from the
+provider-keys Secret, at the path agentgateway reads them from, and nothing else. Decrypting org
+credentials in the gateway comes with the guard and the database role, in a later slice.
+*/ -}}
+{{- if include "koinon.mcpKoinon" . }}
+{{- if ne .Values.gateway.mode "standalone" }}
+{{- fail "gateway.mcp.driver=koinon needs gateway.mode=standalone: koinon-gateway reads the Secret the standalone reconciler fills, and kubernetes mode is frozen (ADR 0097 decision 4)" }}
+{{- end }}
+{{- $name := include "koinon.componentName" (list . "mcp-gateway") }}
+{{- $m := .Values.gateway.mcp.koinon }}
+{{- $drain := int $m.drainTimeoutSeconds }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+  annotations:
+    # Argo CD only: it is not ready before koinon-api serves the State stream and the reconciler has
+    # published a revision, as for the agentgateway Deployment.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ int $m.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "mcp-gateway") | nindent 8 }}
+      {{- with $m.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The drain deadline, then 30 seconds for the process to exit.
+      terminationGracePeriodSeconds: {{ add $drain 30 }}
+      {{- with include "koinon.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 14 }}
+      containers:
+        - name: koinon-gateway
+          image: {{ include "koinon.image" (list . $m.image) }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --listen-addr=:{{ int $m.port }}
+            - --health-addr=:15021
+            - --metrics-addr=:15020
+            - --state-url=http://{{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
+            - --state-token-file={{ include "koinon.otlpTokenDir" . }}/token
+            - --drain-timeout={{ $drain }}s
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KOINON_MEMORY_LIMIT_BYTES
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+          ports:
+            - name: mcp
+              containerPort: {{ int $m.port }}
+            - name: stats
+              containerPort: 15020
+            - name: health
+              containerPort: 15021
+          # Liveness stays 200 while the pod drains, readiness turns 503 on SIGTERM and before the
+          # first revision applied.
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+            periodSeconds: 5
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # The credential files of the MCP targets, as in the agentgateway pod: a directory mount,
+            # so a rotated credential needs no restart.
+            - name: provider-keys
+              mountPath: /secrets/providers
+              readOnly: true
+            {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: provider-keys
+          secret:
+            secretName: {{ include "koinon.gatewayProvidersName" . }}
+            defaultMode: 0444
+        {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
+      {{- with $m.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 4 }}
+  ports:
+    - name: mcp
+      port: {{ int $m.port }}
+      targetPort: mcp
+    - name: stats
+      port: 15020
+      targetPort: stats
+---
+# A node drain evicts the pods one at a time; each drains for up to the drain timeout.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+spec:
+  maxUnavailable: {{ int $m.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 6 }}
+{{- end }}
