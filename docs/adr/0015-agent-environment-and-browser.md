@@ -87,6 +87,21 @@ agent. The first open question above (which cache product) is closed; the second
 names the many installing programs) is that ADR's pending spike. `environment.lock` and the promotion of
 common tools are not changed here.
 
+## Amendment (2026-11-18, ADR 0119, issue #1087)
+
+On the substrate driver a flavor image is the harness image plus the Koinon guest launcher
+(`cmd/koinon-guest-launcher`, built `CGO_ENABLED=0`) and its policy, not an OpenShell base image
+with a supervisor. The launcher wraps every harness Exec: it applies `no_new_privs`, a capability
+allowlist, Landlock filesystem rules and a seccomp deny filter inside the guest, then execs the
+agent. Two policy files in `/etc/koinon/guest-launcher/` (`policy-vm.json`, `policy-gvisor.json`) hold paths, mode switches and a
+user, never a credential. Substrate has no exec in its control API; the driver runs the harness over the
+in-guest ProcessService, so the process is a child of the guest server and the image ENTRYPOINT does
+not wrap it. The contract is therefore an exec prefix: every substrate-driver Exec of a harness
+(the ACP launch in particular) is `koinon-guest-launcher --policy /etc/koinon/guest-launcher/<policy of the tier> -- <EntryScript> ...`
+(`harness.Descriptor.LauncherPrefix(tier)`). The image ENTRYPOINT stays only as a default; on its own it does
+not harden a ProcessService exec. The controls follow ADR 0120 section 4. On the vm tier Landlock is required (fail closed); on the gVisor tiers it stays best effort and the substrate driver must mount the root filesystem read-only, with only /sandbox and /tmp writable (#1088). Tools that an agent installs (ADR 0113) still land in its home inside the
+guest. The OpenShell driver, the default, keeps the plain image and its exec path unchanged.
+
 ## Links
 
 - [0032](0032-agent-home-checkpoints.md), [0035](0035-v01-flavors.md),

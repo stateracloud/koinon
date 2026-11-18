@@ -17,6 +17,45 @@ import (
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 )
 
+// Tier is the isolation tier of a Substrate guest (ADR 0075, 0120 section 4).
+type Tier string
+
+const (
+	// TierVM is a microVM guest. Its guest controls fail closed.
+	TierVM Tier = "vm"
+	// TierHardened is a gVisor guest with the hardened controls.
+	TierHardened Tier = "hardened"
+	// TierDev is a gVisor guest for development.
+	TierDev Tier = "dev"
+)
+
+// launcherPolicyDir is where the substrate overlay image carries the launcher's policy files.
+const launcherPolicyDir = "/etc/koinon/guest-launcher/"
+
+// LauncherPrefix is the command prefix the substrate driver puts in front of every Exec of the
+// harness, the ACP launch included: the Koinon guest launcher, the policy of the tier, then "--"
+// and the real command (ADR 0119, 0120 section 4; docs/dev/guest-launcher.md). Substrate has no
+// exec in its control API and the driver runs the harness through the in-guest ProcessService, so
+// the process is a child of the guest server and the image ENTRYPOINT never wraps it.
+//
+// The vm tier gets the policy that requires Landlock and fails closed without it (ADR 0120
+// section 4.3); the gVisor tiers get the policy that applies Landlock when the kernel has it, with
+// the read-only root the driver mounts as the control (maintainer decision, issue #1087). A tier
+// this function does not know has no prefix: ok is false and the driver must not start the guest.
+// OpenShell paths ignore it.
+func (d Descriptor) LauncherPrefix(tier Tier) (prefix []string, ok bool) {
+	var policy string
+	switch tier {
+	case TierVM:
+		policy = "policy-vm.json"
+	case TierHardened, TierDev:
+		policy = "policy-gvisor.json"
+	default:
+		return nil, false
+	}
+	return []string{"/usr/local/bin/koinon-guest-launcher", "--policy", launcherPolicyDir + policy, "--"}, true
+}
+
 // OpenCode is the name of the built-in OpenCode harness.
 const OpenCode = "opencode"
 
