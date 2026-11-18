@@ -133,7 +133,12 @@ func run(addr, httpAddr, header, value string, useTLS bool, tlsHosts []string, c
 	})
 	// A server that wants per-user OAuth, as the MCP authorization specification describes it: a 401
 	// whose WWW-Authenticate names the protected resource metadata.
-	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, _ *http.Request) {
+	// It records the request, so a test sees that the add-time OAuth check came without a credential.
+	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, r *http.Request) {
+		recs.add(record{
+			Time: time.Now(), Method: r.Method, Path: r.URL.Path, Authorized: r.Header.Get(header) == value,
+			Agent: r.Header.Get("X-Koinon-Agent"), ClientAuthorization: r.Header.Get("Authorization") != "",
+		})
 		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://fakemcp/.well-known/oauth-protected-resource"`)
 		http.Error(w, "sign in", http.StatusUnauthorized)
 	})

@@ -143,7 +143,8 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	anonymous := 0
 	for _, r := range recs {
 		if r.Agent == "" {
-			// koinon-api's add-time OAuth check: direct, and it carries no credential.
+			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
+			// it carries no credential. The API probes with the system roots, so it cannot reach the HTTPS port.
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
 			anonymous++
 			continue
