@@ -49,6 +49,7 @@ data:
       substrate:
         controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
         routerAddress: {{ .Values.execution.substrate.routerAddress | quote }}
+        allowUnhardened: {{ .Values.execution.substrate.allowUnhardened | default false }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt

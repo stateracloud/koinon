@@ -8,6 +8,7 @@ execution:
     controlAddress: api.ate-system.svc.cluster.local:443
     routerAddress: atenet-router.ate-system.svc.cluster.local:80
     tokenAudience: ateapi
+    allowUnhardened: true
 sandboxObserver:
   enabled: false
 sandboxNetworkPolicy:

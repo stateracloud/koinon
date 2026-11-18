@@ -554,7 +554,8 @@
             "routerAddress": {"type": "string"},
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
-            "tokenAudience": {"type": "string"}
+            "tokenAudience": {"type": "string"},
+            "allowUnhardened": {"type": "boolean"}
           }
         }
       }

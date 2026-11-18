@@ -1015,6 +1015,9 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if not .Values.execution.substrate.tokenAudience }}
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
+{{- if not .Values.execution.substrate.allowUnhardened }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)" }}
+{{- end }}
 {{- range $k := list "sandboxObserver" "sandboxNetworkPolicy" "sandboxLimitRange" }}
 {{- if (index $.Values $k).enabled }}
 {{- fail (printf "%s.enabled acts on OpenShell's namespaces and pods: set it to false with execution.driver=substrate" $k) }}
@@ -1077,6 +1080,8 @@ it carries no credentials.
   value: {{ .Values.execution.substrate.controlAddress | quote }}
 - name: KOINON_SUBSTRATE_ROUTER_ADDRESS
   value: {{ .Values.execution.substrate.routerAddress | quote }}
+- name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
+  value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
 {{- if .Values.execution.substrate.caSecret }}

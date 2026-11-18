@@ -73,8 +73,8 @@ type Config struct {
 	// changed behind the same address (upstream T-25; ADR 0119 D5). It is required for snapshots:
 	// when it is nil, SnapshotSandbox and RestoreSandbox fail closed with [execution.ErrUnsupported],
 	// because a digest over the control API's metadata alone would restore a changed object without
-	// error. The production object-store reader that fills it is a later slice (Part of #1082); the
-	// driver is wired into the reconciler only after it exists, so no install runs snapshots without it.
+	// error. The production object-store reader that fills it is a later slice (Part of #1082, slice e).
+	// Until then the reconciler wiring leaves it nil and every snapshot fails closed.
 	ContentDigest func(ctx context.Context, objectURI string) (string, error)
 	// DrainTimeout bounds each of the two waits of a suspend for the router calls that started
 	// before it: first for the short calls (stdin writes, uploads) to end by themselves, then,

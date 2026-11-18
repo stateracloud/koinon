@@ -30,6 +30,11 @@ type Substrate struct {
 	CAFile          string
 	ServerName      string
 	BearerTokenFile string
+	// AllowUnhardened acknowledges that the substrate path does not yet run the harness behind the
+	// guest launcher or mount the root read-only on the gVisor tiers (issue #1088 slices b and c).
+	// Validate refuses the substrate driver without it, so no install gets an unhardened guest by
+	// accident. Exit condition: both slices have merged; then the flag and chart value are removed.
+	AllowUnhardened bool
 }
 
 // Execution selects the execution driver a binary uses and says how to reach it.
@@ -51,6 +56,7 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.CAFile, "substrate-ca-file", "", "CA file that signed ateapi's certificate; empty uses the system roots")
 	fs.StringVar(&e.Substrate.ServerName, "substrate-server-name", "", "name checked against ateapi's certificate")
+	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path runs the harness without the guest launcher and a read-only root until issue #1088 slices b and c land; required with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
 }
 
@@ -65,6 +71,9 @@ func (e *Execution) Validate(openshellAddress string) error {
 	case DriverSubstrate:
 		if e.Substrate.ControlAddress == "" || e.Substrate.RouterAddress == "" {
 			return errors.New("--substrate-control-address and --substrate-router-address are required with --execution-driver=substrate")
+		}
+		if !e.Substrate.AllowUnhardened {
+			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)")
 		}
 	default:
 		return fmt.Errorf("--execution-driver %q: want %s or %s", e.Driver, DriverOpenShell, DriverSubstrate)

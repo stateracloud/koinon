@@ -20,13 +20,15 @@ var _ = Describe("Execution", func() {
 		e := cli.Execution{Driver: cli.DriverSubstrate}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-control-address")))
 		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80"}
+		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-allow-unhardened")))
+		e.Substrate.AllowUnhardened = true
 		Expect(e.Validate("")).To(Succeed())
 	})
 	It("refuses an unknown driver", func() {
 		Expect((&cli.Execution{Driver: "nomad"}).Validate("x")).To(MatchError(ContainSubstring("nomad")))
 	})
 	It("dials substrate lazily and exposes its collectors", func() {
-		c, err := cli.Execution{Driver: cli.DriverSubstrate, Substrate: cli.Substrate{ControlAddress: "127.0.0.1:1", RouterAddress: "127.0.0.1:2"}}.Dial()
+		c, err := cli.Execution{Driver: cli.DriverSubstrate, Substrate: cli.Substrate{ControlAddress: "127.0.0.1:1", RouterAddress: "127.0.0.1:2", AllowUnhardened: true}}.Dial()
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(c.Close)
 		Expect(c.Backend).NotTo(BeNil())

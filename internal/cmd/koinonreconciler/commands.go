@@ -61,6 +61,7 @@ var configKeys = map[string]string{
 	"substrate-router-address":             "execution.substrate.routerAddress",
 	"substrate-ca-file":                    "execution.substrate.caFile",
 	"substrate-server-name":                "execution.substrate.serverName",
+	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
 	"substrate-token-file":                 "execution.substrate.tokenFile",
 	"openshell-address":                    "openshell.address",
 	"openshell-tls-dir":                    "openshell.tls",

@@ -6,6 +6,7 @@
 
 sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+	--set execution.substrate.allowUnhardened=true
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
 # OpenShell stays the default: no Substrate input reaches any component.
@@ -35,3 +36,7 @@ done
 if render --set execution.driver=substrate >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
 grep -q 'controlAddress' "$out/sub.err" || fail "the missing-address error must name execution.substrate.controlAddress"
 if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown driver must not render"; fi
+# Substrate is refused until the guest launcher and the read-only root land (#1088 slices b and c).
+if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null 2>"$out/sub.err"; then fail "substrate without allowUnhardened must not render"; fi
+grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
+env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"

@@ -615,6 +615,9 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
+    # Required true with substrate: the harness does not yet run behind the guest launcher and the
+    # gVisor tiers have no read-only root (issue #1088 slices b and c). Remove when both have merged.
+    allowUnhardened: false
 
 openshell:
   # host:port of the gateway. Required: the chart refuses to render without it.
