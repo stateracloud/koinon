@@ -123,7 +123,7 @@ func TestReplyForUnowedIDKeepsOwedEntries(t *testing.T) {
 
 // The timer of a request that was answered must not remove a newer request that reuses its ID.
 func TestStaleOwedTimerKeepsNewerEntry(t *testing.T) {
-	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]*owedEntry{}, pending: map[string]pendingCall{}, timeout: 200 * time.Millisecond}
+	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]*owedEntry{}, pending: map[string]pendingCall{}, timeout: 600 * time.Millisecond}
 	ctx := context.Background()
 	if _, ok := c.serverRequest(ctx, ping(1)); !ok {
 		t.Fatal("request 1 was not admitted")
@@ -131,11 +131,11 @@ func TestStaleOwedTimerKeepsNewerEntry(t *testing.T) {
 	if err := c.Write(ctx, &jsonrpc.Response{ID: ping(1).ID, Result: []byte("{}")}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	if _, ok := c.serverRequest(ctx, ping(1)); !ok { // a new request with the same ID
 		t.Fatal("the new request was not admitted")
 	}
-	time.Sleep(150 * time.Millisecond) // the timer of the first request has fired, the second has not
+	time.Sleep(450 * time.Millisecond) // the timer of the first request (600 ms) has fired, the second (900 ms) has not
 	c.mu.Lock()
 	n := len(c.owed)
 	c.mu.Unlock()

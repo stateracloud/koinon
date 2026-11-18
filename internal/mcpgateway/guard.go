@@ -145,8 +145,15 @@ type failClosed struct {
 	m   *Metrics
 }
 
-func (f failClosed) loaded() bool {
-	if lc, ok := f.g.(LoadChecker); ok && lc.Loaded() != nil {
+// loaded reports that the guard's rules are in force. A LoadChecker that panics counts as not loaded.
+func (f failClosed) loaded() (ok bool) {
+	defer func() {
+		if recover() != nil {
+			f.m.guardFailure(guardPanic)
+			ok = false
+		}
+	}()
+	if lc, isLC := f.g.(LoadChecker); isLC && lc.Loaded() != nil {
 		f.m.guardFailure(guardNotLoaded)
 		return false
 	}

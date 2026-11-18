@@ -258,17 +258,21 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		row.CredKind = CredentialError
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
-	defer cancel()
 	// The call check is the ask tier and the request-side checks (ADR 0097 decision 5). It runs after
 	// the grants and before any upstream message, and it may wait for a person; CallTimeout bounds it.
-	if v := g.g.checkCall(cctx, Call{
+	kctx, kcancel := context.WithTimeout(ctx, g.o.CallTimeout)
+	v := g.g.checkCall(kctx, Call{
 		Agent: agent, Target: target, Org: t.Org, Tool: tool, Credential: row.CredKind, Arguments: p.Arguments,
-	}); v.Refuse {
+	})
+	kcancel()
+	if v.Refuse {
 		row.Verdict = v.Reason
 		finish(OutcomeRefusedGuard)
 		return refusedResult(v.Reason)
 	}
+	// The upstream call has its own full limit: a long wait for a person must not shorten it.
+	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
+	defer cancel()
 	// One attempt. A call is never sent again: a lost session error can reach every call on a shared
 	// session, so it does not prove that this call ran nothing, and a write could run twice. The
 	// session is evicted, and the next call connects again.

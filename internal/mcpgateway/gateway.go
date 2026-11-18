@@ -139,14 +139,14 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 	}
 	for _, t := range c.MCP {
 		switch {
-		case t.Name == "" || strings.Contains(t.Name, "_"):
-			drop("", dropInvalidName)
-		case t.URL == "":
-			drop(t.Name, dropNoURL)
 		case seen[t.Name]:
 			// Two entries claim one name: neither can be trusted to be the right one.
 			delete(s.targets, t.Name)
 			drop(t.Name, dropDuplicateName)
+		case t.Name == "" || strings.Contains(t.Name, "_"):
+			drop("", dropInvalidName)
+		case t.URL == "":
+			drop(t.Name, dropNoURL)
 		case isAllowGuard(g.o.Guard) && t.Org != "":
 			drop(t.Name, dropOrgNeedsGuard)
 		case t.CredentialHeader != "" && !credentialSafeURL(t.URL):

@@ -191,8 +191,8 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		case <-sctx.Done():
 		}
 	}()
-	// The credential kind is the target's own: a connection is per (target, agent), and a config change
-	// that changes the credential changes the target, which retires the session.
+	// Message.Credential is the kind at connect time, kept for the life of the session (it ends at the
+	// idle TTL or a config change). The credential value is read on every request, not here.
 	credKind := CredentialError
 	if c, err := g.o.Credentials.Credential(ctx, t, key.agent); err == nil {
 		credKind = c.Kind
