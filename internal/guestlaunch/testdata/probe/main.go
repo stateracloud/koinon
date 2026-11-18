@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+//go:build linux
+
 // Command probe is the escape probe the guest launcher test runs inside a container, ported from
 // hack/spike/probe/escape_probe.py (items 8.9, 8.11 and 8.12) as a static Go program so the test
 // image needs no Python. Each attempt prints "name open|blocked detail".

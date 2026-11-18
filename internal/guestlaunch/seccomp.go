@@ -70,21 +70,32 @@ func BuildSeccomp(s SeccompPolicy) (filter []bpf.Instruction, skipped []string, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("assemble seccomp policy: %w", err)
 	}
+	var clone3Nr uint32
 	if clone3, ok := info.SyscallNames["clone3"]; ok {
-		insts = append(clone3ENOSYS(info, uint32(clone3)), insts...)
+		clone3Nr = uint32(clone3)
 	}
-	return insts, skipped, nil
+	return append(archPrefix(info, clone3Nr), insts...), skipped, nil
 }
 
-// clone3ENOSYS is a self-contained prefix: on the native architecture a clone3 call returns ENOSYS,
-// everything else falls through to the next instruction.
-func clone3ENOSYS(info *arch.Info, nr uint32) []bpf.Instruction {
+// archPrefix runs before the go-seccomp-bpf program. A call from any other architecture than the
+// native one (the i386 compat ABI through int 0x80 on x86_64, AArch32 on arm64) returns ENOSYS, so
+// the deny list cannot be bypassed with another syscall numbering; go-seccomp-bpf itself would let
+// such a call through (its default action is allow). On the native architecture a clone3 call
+// (when nr is not 0) returns ENOSYS and everything else falls through.
+func archPrefix(info *arch.Info, clone3 uint32) []bpf.Instruction {
 	const enosys = 38
-	return []bpf.Instruction{
+	ret := bpf.RetConstant{Val: uint32(seccomp.ActionErrno) | enosys}
+	insts := []bpf.Instruction{
 		bpf.LoadAbsolute{Off: 4, Size: 4}, // seccomp_data.arch
-		bpf.JumpIf{Cond: bpf.JumpNotEqual, Val: uint32(info.ID), SkipTrue: 3},
-		bpf.LoadAbsolute{Off: 0, Size: 4}, // seccomp_data.nr
-		bpf.JumpIf{Cond: bpf.JumpNotEqual, Val: nr, SkipTrue: 1},
-		bpf.RetConstant{Val: uint32(seccomp.ActionErrno) | enosys},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: uint32(info.ID), SkipTrue: 1},
+		ret,
 	}
+	if clone3 != 0 {
+		insts = append(insts,
+			bpf.LoadAbsolute{Off: 0, Size: 4}, // seccomp_data.nr
+			bpf.JumpIf{Cond: bpf.JumpNotEqual, Val: clone3, SkipTrue: 1},
+			ret,
+		)
+	}
+	return insts
 }

@@ -20,7 +20,8 @@ Order of steps, all on one locked OS thread, then `execve`:
    used: they would change how agents reach their tools.
 5. seccomp deny filter (`internal/guestlaunch/seccomp.go`): the deny list returns `EPERM`; `clone`
    with a namespace flag returns `EPERM`; `clone3` returns `ENOSYS` so glibc falls back to `clone`
-   (as Docker's default profile does); x32 is refused by go-seccomp-bpf.
+   (as Docker's default profile does); a call from a foreign architecture (the i386 compat ABI
+   through `int 0x80`, AArch32) returns `ENOSYS`; x32 is refused by go-seccomp-bpf.
 
 Exit 64 is a usage or policy error; exit 70 is a control that the policy requires and the guest
 could not apply (fail closed).

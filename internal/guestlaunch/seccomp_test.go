@@ -76,6 +76,17 @@ var _ = Describe("BuildSeccomp", func() {
 				Expect(run(insts, info, info.SyscallNames["clone3"], 0)).To(Equal(enosys))
 			})
 
+			It("refuses a call from a foreign architecture (i386 compat ptrace)", func() {
+				vm, err := bpf.NewVM(insts)
+				Expect(err).NotTo(HaveOccurred())
+				pkt := make([]byte, 64)
+				binary.BigEndian.PutUint32(pkt[0:], 26) // ptrace in the i386 numbering
+				binary.BigEndian.PutUint32(pkt[4:], 0x40000003)
+				ret, err := vm.Run(pkt)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(uint32(ret)).To(Equal(enosys))
+			})
+
 			It("names only calls the architecture knows", func() {
 				for _, n := range skipped {
 					Expect(info.SyscallNames).NotTo(HaveKey(n))
