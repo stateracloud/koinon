@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"k8s.io/client-go/dynamic"
@@ -36,6 +37,13 @@ type preflightConfig struct {
 	probeTimeout     time.Duration
 	probeNamePrefix  string
 	probeInstance    string
+
+	driver                string
+	substratePools        []string
+	substrateNodeSelector []string
+	substrateVMTier       bool
+	substrateProbes       bool
+	substrateNamespace    string
 
 	netpolProbe      bool
 	netpolTimeout    time.Duration
@@ -67,6 +75,12 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
 	fs.StringVar(&c.supervisorImages, "supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
 	fs.IntVar(&c.check.SupervisorTokenMaxSeconds, "supervisor-token-max-seconds", 0, "sandboxPolicy.supervisorTokenMaxSeconds: fail when the OpenShell gateway's supervisor token lifetime is above it")
+	fs.StringVar(&c.driver, "driver", "openshell", "execution.driver: openshell or substrate (substrate replaces the OpenShell and Agent Sandbox checks)")
+	fs.StringVar(&c.substrateNamespace, "substrate-namespace", "ate-system", "namespace of Agent Substrate")
+	fs.StringArrayVar(&c.substratePools, "substrate-worker-pool", nil, "<tier>=<WorkerPool name> that must be ready (repeatable)")
+	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
+	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
+	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod and the device probe pod in the Substrate namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -82,6 +96,35 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 func (c *preflightConfig) validate() error {
 	c.check.OpenShellPlaintext = c.tlsDir == ""
 	c.check.SupervisorImages = splitList(c.supervisorImages)
+	switch c.driver {
+	case "openshell":
+	case "substrate":
+		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, VMTier: c.substrateVMTier, WorkerPools: map[string]string{}}
+		for _, kv := range c.substratePools {
+			tier, name, ok := strings.Cut(kv, "=")
+			if !ok || tier == "" || name == "" {
+				return fmt.Errorf("--substrate-worker-pool %q: want <tier>=<name>", kv)
+			}
+			sub.WorkerPools[tier] = name
+		}
+		if len(c.substrateNodeSelector) > 0 {
+			sub.NodeSelector = map[string]string{}
+		}
+		for _, kv := range c.substrateNodeSelector {
+			k, v, ok := strings.Cut(kv, "=")
+			if !ok || k == "" {
+				return fmt.Errorf("--substrate-node-selector %q: want <key>=<value>", kv)
+			}
+			sub.NodeSelector[k] = v
+		}
+		c.check.Substrate = &sub
+		c.seccompProbe = false // the guest seccomp probe is Kata's (ADR 0048); the launcher reports its own controls (ADR 0120)
+		if c.substrateProbes && (c.probeImage == "" || c.namespace == "") {
+			return errors.New("--substrate-probes needs --probe-image and --namespace (or POD_NAMESPACE)")
+		}
+	default:
+		return fmt.Errorf("--driver %q: want openshell or substrate", c.driver)
+	}
 	if c.seccompProbe && (c.probeImage == "" || c.namespace == "") {
 		return errors.New("--seccomp-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
 	}
@@ -123,7 +166,34 @@ func newPreflightCommand() *cobra.Command {
 		Short: "Run inside the NetworkPolicy probe's server pod",
 		Args:  cobra.NoArgs,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return preflight.ServeNetPolProbe(cmd.Context(), "") },
-	}, newNetPolClientCommand())
+	}, newNetPolClientCommand(), newIssuerProbeCommand(), &cobra.Command{
+		Use:   "devices-probe",
+		Short: "Run inside the Substrate device probe pod: report that the node's devices were mounted",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), preflight.SubstrateDevicesProbeMarker, "ok")
+			return err
+		},
+	})
+	return cmd
+}
+
+// newIssuerProbeCommand is "preflight issuer-probe", the Substrate issuer probe pod.
+func newIssuerProbeCommand() *cobra.Command {
+	var issuer string
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "issuer-probe",
+		Short: "Run inside the Substrate issuer probe pod: fetch the OIDC discovery document from the issuer URL",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), preflight.ProbeIssuerFromPod(cmd.Context(), issuer, timeout))
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&issuer, "issuer", "", "the service-account token issuer URL")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long the fetch may take")
+	mustRequire(cmd, "issuer")
 	return cmd
 }
 
@@ -147,25 +217,55 @@ func newNetPolClientCommand() *cobra.Command {
 
 // runPreflight is "koinon-api preflight": the install checks.
 func runPreflight(ctx context.Context, cfg preflightConfig, out io.Writer) error {
-	rc, err := restConfig(cfg.kubeconfig)
+	checker, _, closeGateway, err := buildChecker(cfg)
 	if err != nil {
 		return err
+	}
+	defer closeGateway()
+	if failed := preflight.Write(out, checker.Run(ctx)); failed > 0 {
+		return fmt.Errorf("%w: %d checks", preflight.ErrFailed, failed)
+	}
+	return nil
+}
+
+// buildChecker wires the preflight's Kubernetes clients and probes from the flags. The returned
+// function closes the OpenShell connection.
+func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface, func(), error) {
+	noop := func() {}
+	rc, err := restConfig(cfg.kubeconfig)
+	if err != nil {
+		return nil, nil, noop, err
 	}
 	kube, err := kubernetes.NewForConfig(rc)
 	if err != nil {
-		return err
+		return nil, nil, noop, err
 	}
 	dyn, err := dynamic.NewForConfig(rc)
 	if err != nil {
-		return err
+		return nil, nil, noop, err
 	}
 	checker := &preflight.Checker{Kube: kube, Dynamic: dyn, Config: cfg.check, CallTimeout: cfg.timeout}
-	if cfg.check.OpenShellAddress != "" {
+	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
+		prober := preflight.KubeSubstrateProber{
+			Client:           kube,
+			Namespace:        sub.Namespace,
+			NamePrefix:       cfg.probeNamePrefix,
+			Image:            cfg.probeImage,
+			ImagePullSecrets: splitList(cfg.probePullSecrets),
+			NodeSelector:     sub.NodeSelector,
+			Timeout:          cfg.probeTimeout,
+			Labels: map[string]string{
+				"app.kubernetes.io/name": "koinon", "app.kubernetes.io/part-of": "koinon",
+			},
+		}
+		checker.Issuer, checker.IssuerProbe, checker.Devices = preflight.NewIssuerResolver(kube), prober, prober
+	}
+	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
 		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()
 		if err != nil {
-			return err
+			return nil, nil, noop, err
 		}
-		defer func() { _ = gw.Close() }()
+		noop = func() { _ = gw.Close() }
 		checker.OpenShell = gw
 	}
 	labels := map[string]string{
@@ -199,10 +299,7 @@ func runPreflight(ctx context.Context, cfg preflightConfig, out io.Writer) error
 			Timeout:          cfg.probeTimeout,
 		}
 	}
-	if failed := preflight.Write(out, checker.Run(ctx)); failed > 0 {
-		return fmt.Errorf("%w: %d checks", preflight.ErrFailed, failed)
-	}
-	return nil
+	return checker, kube, noop, nil
 }
 
 func restConfig(kubeconfig string) (*rest.Config, error) {

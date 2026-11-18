@@ -159,6 +159,9 @@ type Config struct {
 	// SandboxObserverDisabled is sandboxObserver.enabled=false: the preflight warns that a sandbox that
 	// cannot pull its image will show an unknown cause.
 	SandboxObserverDisabled bool
+	// Substrate is set when execution.driver is substrate: the Substrate checks replace the
+	// OpenShell, Agent Sandbox, RuntimeClass and guest seccomp checks (ADR 0119).
+	Substrate *SubstrateConfig
 }
 
 // OpenShell is the part of the OpenShell gateway API the preflight calls.
@@ -181,7 +184,11 @@ type Checker struct {
 	Prober Prober
 	// NetPol is nil when the NetworkPolicy probe is disabled.
 	NetPol NetPolProber
-	Config Config
+	// Issuer, IssuerProbe and Devices serve the Substrate checks; nil disables the check (a warning).
+	Issuer      IssuerResolver
+	IssuerProbe IssuerProber
+	Devices     DevicesProber
+	Config      Config
 	// CallTimeout bounds each API and gateway call; the probes have their own timeouts.
 	CallTimeout time.Duration
 }
@@ -190,6 +197,9 @@ type Checker struct {
 // The NetworkPolicy probe runs alongside the other checks, so that the two probes' timeouts do
 // not add up against the preflight Job's deadline.
 func (c *Checker) Run(ctx context.Context) []Result {
+	if c.Config.Substrate != nil {
+		return c.runSubstrate(ctx)
+	}
 	netpol := make(chan Result, 1)
 	go func() { netpol <- c.checkNetworkPolicy(ctx) }()
 	results := []Result{

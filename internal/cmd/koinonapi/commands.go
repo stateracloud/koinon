@@ -41,7 +41,7 @@ func NewRootCommand() *cobra.Command {
 	// reads KOINON_KEK_ACTIVE_PERIOD (--kek-active-period of the keys commands); serve ignores it.
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES", "KOINON_KEK_ACTIVE_PERIOD")
 	cli.DefaultTo(root, "serve")
-	root.AddCommand(newServeCommand(v), newMigrateCommand(), newPreflightCommand(), newEnsureSecretsCommand(),
+	root.AddCommand(newServeCommand(v), newMigrateCommand(), newPreflightCommand(), newSubstrateCommand(), newEnsureSecretsCommand(),
 		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand(), newModelMetadataCommand(), newOrgLimitsCommand(), newUsersCommand(), newRunEvidenceCommand(), newRestoreCommand())
 	return root
 }
