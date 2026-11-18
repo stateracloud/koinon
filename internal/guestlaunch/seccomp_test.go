@@ -59,6 +59,32 @@ var _ = Describe("BuildSeccomp", func() {
 				}
 			})
 
+			It("denies io_uring with EPERM", func() {
+				for _, n := range []string{"io_uring_setup", "io_uring_enter", "io_uring_register"} {
+					Expect(info.SyscallNames).To(HaveKey(n))
+					Expect(run(insts, info, info.SyscallNames[n], 0)).To(Equal(eperm), n)
+				}
+			})
+
+			It("denies socket(AF_VSOCK) and allows the other families", func() {
+				socket := info.SyscallNames["socket"]
+				Expect(run(insts, info, socket, 40)).To(Equal(eperm), "AF_VSOCK")
+				// The domain is an int: whatever sits in the high word of the register does not change it.
+				Expect(run(insts, info, socket, 0xdeadbeef00000028)).To(Equal(eperm), "AF_VSOCK with a dirty high word")
+				for _, family := range []uint64{1, 2, 10, 16, 17} { // UNIX, INET, INET6, NETLINK, PACKET
+					Expect(run(insts, info, socket, family)).To(Equal(allow), "family %d", family)
+				}
+			})
+
+			It("answers a call of the x32 ABI with ENOSYS", func() {
+				if info.Name != "x86_64" {
+					Skip("x32 exists on x86_64 only")
+				}
+				for _, nr := range []int{0x40000000, 0x40000000 + info.SyscallNames["ptrace"], 0x40000000 + 41, 0x7fffffff} {
+					Expect(run(insts, info, nr, 0)).To(Equal(enosys), "nr %#x", nr)
+				}
+			})
+
 			It("allows ordinary syscalls", func() {
 				for _, n := range []string{"read", "write", "openat", "execve", "futex", "socket", "connect", "mmap"} {
 					Expect(run(insts, info, info.SyscallNames[n], 0)).To(Equal(allow), n)
@@ -105,9 +131,17 @@ var _ = Describe("BuildSeccomp", func() {
 		Expect(run(insts, info, info.SyscallNames["mount"], 0)).To(Equal(allow), "the replaced list no longer names mount")
 	})
 
-	It("skips a name the architecture does not have", func() {
-		_, skipped, err := guestlaunch.BuildSeccomp(guestlaunch.SeccompPolicy{DenyExtra: []string{"nope_not_a_call"}})
+	It("skips a name the running architecture does not have", func() {
+		info, _ := arch.GetInfo("")
+		other := "arm_fadvise64_64" // arm only
+		if _, ok := info.SyscallNames[other]; ok {
+			other = "_sysctl" // gone from arm64
+			if _, ok := info.SyscallNames[other]; ok {
+				Skip("no name the running architecture lacks")
+			}
+		}
+		_, skipped, err := guestlaunch.BuildSeccomp(guestlaunch.SeccompPolicy{DenyExtra: []string{other}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(skipped).To(ContainElement("nope_not_a_call"))
+		Expect(skipped).To(ContainElement(other))
 	})
 })

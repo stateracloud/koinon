@@ -31,6 +31,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	var image string // unique per run: parallel runs and leftovers never share a tag
 	var dir string
 	var runWith func(flags []string, argv ...string) (string, int)
+	// broadCaps lets every attempt of the probe reach the point where only the launcher can stop it.
+	broadCaps := []string{"--cap-add=SYS_ADMIN", "--cap-add=SYS_PTRACE"}
 
 	build := func(pkg, out string) {
 		cmd := exec.Command("go", "build", "-o", filepath.Join(dir, out), pkg)
@@ -63,9 +65,21 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		add("bin/probe", filepath.Join(dir, "probe"), 0o755)
 		policy := []byte(`{
   "capabilities": {"allow": ["CAP_SYS_ADMIN", "CAP_SYS_PTRACE"]},
-  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev"]},
+  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"]},
   "seccomp": {"mode": "require"}
 }`)
+		// The image policies, as the overlay carries them (cmd/koinon-guest-launcher).
+		images := map[string][]byte{}
+		for _, name := range []string{"policy-vm.json", "policy-gvisor.json"} {
+			b, err := os.ReadFile(filepath.Join(repoRoot(), "cmd", "koinon-guest-launcher", name))
+			Expect(err).NotTo(HaveOccurred())
+			images[name] = b
+		}
+		for name, doc := range images {
+			Expect(tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(doc))})).To(Succeed())
+			_, err := tw.Write(doc)
+			Expect(err).NotTo(HaveOccurred())
+		}
 		for name, doc := range map[string][]byte{
 			"policy.json":           policy,
 			"user-best-effort.json": []byte(`{"landlock":{"mode":"off"},"user":{"mode":"best_effort","uid":1000,"gid":1000}}`),
@@ -86,16 +100,26 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	AfterAll(func() { _ = exec.Command("docker", "rmi", "-f", image).Run() })
 
 	// run starts the container with argv as its command and returns the combined output and exit code.
-	run := func(argv ...string) (string, int) { return runWith(nil, argv...) }
+	run := func(argv ...string) (string, int) { return runWith(broadCaps, argv...) }
+	// runWith starts a container as root with no network, no Docker seccomp (unless flags name a
+	// profile) and no AppArmor, and only the capabilities that flags add to Docker's defaults.
 	runWith = func(flags []string, argv ...string) (string, int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		args := append([]string{
-			"run", "--rm", "--network=none", "--user=0",
-			"--cap-add=SYS_ADMIN", "--cap-add=SYS_PTRACE",
-			"--security-opt=seccomp=unconfined", "--security-opt=apparmor=unconfined",
-		}, flags...)
-		args = append(append(args, image), argv...)
+		args := []string{
+			"run", "--rm", "--network=none", "--user=0", "--security-opt=apparmor=unconfined",
+			// A device node that no policy names, for the probe to open.
+			"--device=/dev/zero:/dev/koinon-unlisted",
+		}
+		own := false
+		for _, f := range flags {
+			own = own || strings.HasPrefix(f, "--security-opt=seccomp=")
+		}
+		if !own {
+			args = append(args, "--security-opt=seccomp=unconfined")
+		}
+		args = append(append(args, flags...), image)
+		args = append(args, argv...)
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
 		code := 0
@@ -116,13 +140,25 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		}
 		return m
 	}
-	attempts := []string{"ptrace", "mount", "bpf", "keyctl", "perf_event_open", "unshare_newuser", "unshare_newns", "write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe"}
+	attempts := []string{
+		"ptrace", "mount", "bpf", "keyctl", "perf_event_open", "unshare_newuser", "unshare_newns",
+		"clone_newuser", "clone3", "io_uring_setup", "socket_vsock",
+		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
+		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
+	}
+	// skipWithoutLandlock turns the one outcome that means "this Docker host has no Landlock of the
+	// ABI the policy needs" into a skip; every other failure stays a failure.
+	skipWithoutLandlock := func(out string, code int) {
+		if code == 70 && strings.Contains(out, "landlock required but the kernel") {
+			Skip("the Docker host kernel has no Landlock of ABI 5 or newer")
+		}
+	}
 
 	It("shows every attempt open without the launcher (control)", func() {
 		out, code := run("/bin/probe")
 		Expect(code).To(Equal(0), out)
 		v := verdicts(out)
-		for _, a := range []string{"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe"} {
+		for _, a := range []string{"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3"} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}
 	})
@@ -130,9 +166,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	It("blocks the escape attempts and keeps the allowed paths writable", func() {
 		// SYS_ADMIN and SYS_PTRACE stay in the allowlist so only seccomp and Landlock can be the cause.
 		out, code := run("/launcher", "--policy", "/policy.json", "--", "/bin/probe")
-		if code == 70 && strings.Contains(out, "landlock required but the kernel does not provide it") {
-			Skip("the Docker host kernel has no Landlock")
-		}
+		skipWithoutLandlock(out, code)
 		Expect(code).To(Equal(0), out)
 		v := verdicts(out)
 		for _, a := range attempts {
@@ -140,7 +174,63 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		}
 		Expect(v).To(HaveKeyWithValue("write:/sandbox/koinon-probe", "open"), out)
 		Expect(v).To(HaveKeyWithValue("write:/tmp/koinon-probe", "open"), out)
+		Expect(v).To(HaveKeyWithValue("dev_allowed:/dev/null", "open"), "a listed device node works\n"+out)
+		Expect(v).To(HaveKeyWithValue("dev_list", "open"), "/dev can be listed\n"+out)
+		// A block device node in /dev, when the host gives the container one, cannot be written.
+		if bv, ok := v["dev_write_blockdev"]; ok {
+			Expect(bv).To(Equal("blocked"), out)
+		}
 		Expect(out).To(ContainSubstring("NoNewPrivs: 1"))
+	})
+
+	// The two image policies of ADR 0120 section 4.2 and 4.3.
+	Describe("the image policies in the shape the Substrate guest gives a payload", func() {
+		// Root with only CAP_KILL, CAP_NET_BIND_SERVICE and CAP_AUDIT_WRITE (phase 0 result, issue #1087).
+		substrate := []string{"--cap-drop=ALL", "--cap-add=KILL", "--cap-add=NET_BIND_SERVICE", "--cap-add=AUDIT_WRITE"}
+
+		DescribeTable("leave the payload no capability and set no_new_privs",
+			func(policy string) {
+				out, code := runWith(substrate, "/launcher", "--policy", "/"+policy, "--", "/bin/probe")
+				skipWithoutLandlock(out, code)
+				Expect(code).To(Equal(0), out)
+				for _, f := range []string{"CapPrm", "CapEff", "CapAmb"} {
+					Expect(out).To(MatchRegexp(`status `+f+`: 0+\b`), f+"\n"+out)
+				}
+				Expect(out).To(ContainSubstring("status NoNewPrivs: 1"))
+				v := verdicts(out)
+				for _, a := range attempts {
+					Expect(v).To(HaveKeyWithValue(a, "blocked"), a+"\n"+out)
+				}
+				if bv, ok := v["dev_write_blockdev"]; ok {
+					Expect(bv).To(Equal("blocked"), out)
+				}
+			},
+			Entry("vm tier", "policy-vm.json"),
+			Entry("gVisor tiers", "policy-gvisor.json"),
+		)
+
+		// A host without Landlock is simulated by a Docker seccomp profile that hides the syscall.
+		noLandlock := func() []string {
+			prof := `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["landlock_create_ruleset"],"action":"SCMP_ACT_ERRNO","errnoRet":38}]}`
+			path := filepath.Join(dir, "no-landlock.json")
+			Expect(os.WriteFile(path, []byte(prof), 0o600)).To(Succeed())
+			return append([]string{"--security-opt=seccomp=" + path}, substrate...)
+		}
+
+		It("fails closed on the vm tier when Landlock is unavailable", func() {
+			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")
+			Expect(code).To(Equal(70), out)
+			Expect(out).To(ContainSubstring("landlock required but the kernel does not provide it"))
+			Expect(out).NotTo(ContainSubstring("ptrace"), "the payload never started")
+		})
+
+		It("starts on the gVisor tiers when Landlock is unavailable and says what the control is", func() {
+			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
+			Expect(code).To(Equal(0), out)
+			Expect(out).To(ContainSubstring("filesystem rules NOT applied"))
+			Expect(out).To(ContainSubstring("read-only root"))
+			Expect(verdicts(out)).To(HaveKeyWithValue("ptrace", "blocked"), "every other control still applies")
+		})
 	})
 
 	// Phase 0 (issue #1087): the Substrate guest gives payloads no CAP_SETUID or CAP_SETGID.
@@ -166,7 +256,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		})
 
 		It("continues as root with a clear log line when the guest lacks CAP_SETUID", func() {
-			out, code := runWith(noSetuid, "/launcher", "--policy", "/user-best-effort.json", "--", "/bin/probe")
+			out, code := runWith(append(append([]string{}, broadCaps...), noSetuid...), "/launcher", "--policy", "/user-best-effort.json", "--", "/bin/probe")
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("user drop failed, continuing as the current user"))
 			Expect(out).To(ContainSubstring("uid 0"))
@@ -174,7 +264,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		})
 
 		It("fails closed when the policy requires it", func() {
-			out, code := runWith(noSetuid, "/launcher", "--policy", "/user-require.json", "--", "/bin/probe")
+			out, code := runWith(append(append([]string{}, broadCaps...), noSetuid...), "/launcher", "--policy", "/user-require.json", "--", "/bin/probe")
 			Expect(code).To(Equal(70), out)
 			Expect(out).To(ContainSubstring("user drop to 1000:1000 required but failed"))
 			Expect(out).NotTo(ContainSubstring("ptrace"), "the payload never started")

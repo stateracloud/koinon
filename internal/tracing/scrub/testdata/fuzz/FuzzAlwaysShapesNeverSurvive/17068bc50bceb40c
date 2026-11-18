@@ -1,5 +1,0 @@
-go test fuzz v1
-byte('à')
-byte('\u0091')
-byte('u')
-string("\xb3\xe3垹\xe42")

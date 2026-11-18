@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
+	llsyscall "github.com/landlock-lsm/go-landlock/landlock/syscall"
 	"golang.org/x/net/bpf"
 	"golang.org/x/sys/unix"
 )
@@ -231,17 +232,25 @@ func landlockABI() int {
 	return int(v)
 }
 
+// minLandlockABI is the Landlock ABI the policy needs: V5 adds ioctl on device files, which the
+// device rules grant on single nodes (ADR 0120 section 4.3). Below it a require policy refuses to
+// start, and a best-effort one runs without Landlock rules.
+const minLandlockABI = 5
+
 func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 	if l.Mode == ModeOff {
 		log.Info("guest launcher: landlock off by policy")
 		return nil
 	}
 	abi := landlockABI()
-	if abi == 0 {
+	if abi < minLandlockABI {
 		if l.Mode == ModeRequire {
-			return errors.New("guest launcher: landlock required but the kernel does not provide it")
+			if abi == 0 {
+				return errors.New("guest launcher: landlock required but the kernel does not provide it")
+			}
+			return fmt.Errorf("guest launcher: landlock required but the kernel ABI is %d, version %d is needed", abi, minLandlockABI)
 		}
-		log.Warn("guest launcher: landlock unavailable in this kernel (landlock_create_ruleset failed), filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)")
+		log.Warn("guest launcher: landlock unavailable or too old in this kernel, filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)", "kernel_abi", abi)
 		return nil
 	}
 	var rules []landlock.Rule
@@ -251,11 +260,27 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 	if len(l.ReadWrite) > 0 {
 		rules = append(rules, landlock.RWDirs(l.ReadWrite...).IgnoreIfMissing())
 	}
-	if len(l.Devices) > 0 {
-		rules = append(rules, landlock.RWDirs(l.Devices...).WithIoctlDev().IgnoreIfMissing())
+	if len(l.ListDirs) > 0 {
+		rules = append(rules, landlock.PathAccess(landlock.AccessFSSet(llsyscall.AccessFSReadDir), l.ListDirs...).IgnoreIfMissing())
+	}
+	// A device node is a file and gets the file rights; a directory such as /dev/pts gets the
+	// directory rights too. Both allow ioctl on device files.
+	var devFiles, devDirs []string
+	for _, d := range l.Devices {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			devDirs = append(devDirs, d)
+		} else {
+			devFiles = append(devFiles, d)
+		}
+	}
+	if len(devFiles) > 0 {
+		rules = append(rules, landlock.RWFiles(devFiles...).WithIoctlDev().IgnoreIfMissing())
+	}
+	if len(devDirs) > 0 {
+		rules = append(rules, landlock.RWDirs(devDirs...).WithIoctlDev().IgnoreIfMissing())
 	}
 	// Filesystem rules only: network and scoped rules would change how agents talk to their tools.
-	cfg := landlock.V7
+	cfg := landlock.V5
 	if l.Mode == ModeBestEffort {
 		cfg = cfg.BestEffort()
 	}
@@ -266,7 +291,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)", "error", err.Error())
 		return nil
 	}
-	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite)
+	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite, "devices", l.Devices)
 	return nil
 }
 

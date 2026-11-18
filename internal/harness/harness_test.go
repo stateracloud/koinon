@@ -36,21 +36,23 @@ func TestTableMatchesTemplates(t *testing.T) {
 }
 
 // The substrate driver wraps every harness Exec in the guest launcher; the prefix must end in "--"
-// so the launcher takes the rest as the payload, and its policy path must match the image.
+// so the launcher takes the rest as the payload, and its policy must be the one of the tier: the vm
+// tier requires Landlock, the gVisor tiers do not (ADR 0120 section 4).
 func TestLauncherPrefixShape(t *testing.T) {
+	want := map[harness.Tier]string{
+		harness.TierVM:       "/etc/koinon/guest-launcher/policy-vm.json",
+		harness.TierHardened: "/etc/koinon/guest-launcher/policy-gvisor.json",
+		harness.TierDev:      "/etc/koinon/guest-launcher/policy-gvisor.json",
+	}
 	for _, d := range harness.All() {
-		p := d.LauncherPrefix
-		if len(p) < 2 || p[0] != "/usr/local/bin/koinon-guest-launcher" || p[len(p)-1] != "--" {
-			t.Errorf("harness %q: LauncherPrefix %v must start with the launcher and end with --", d.Name, p)
-		}
-		hasPolicy := false
-		for i, a := range p {
-			if a == "--policy" && i+1 < len(p) && p[i+1] == "/etc/koinon/guest-launcher/policy.json" {
-				hasPolicy = true
+		for tier, policy := range want {
+			p, ok := d.LauncherPrefix(tier)
+			if !ok || len(p) != 4 || p[0] != "/usr/local/bin/koinon-guest-launcher" || p[1] != "--policy" || p[2] != policy || p[3] != "--" {
+				t.Errorf("harness %q tier %q: LauncherPrefix = %v, %v; want the launcher, --policy %s, --", d.Name, tier, p, ok, policy)
 			}
 		}
-		if !hasPolicy {
-			t.Errorf("harness %q: LauncherPrefix %v lacks the image policy", d.Name, p)
+		if p, ok := d.LauncherPrefix("unknown"); ok || p != nil {
+			t.Errorf("harness %q: an unknown tier got the prefix %v; it must fail closed", d.Name, p)
 		}
 	}
 }

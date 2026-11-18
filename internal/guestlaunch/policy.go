@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
@@ -50,8 +51,13 @@ type LandlockPolicy struct {
 	// ReadWrite paths may be read, written, created and removed (execution is allowed too: agents
 	// run what they install under their home).
 	ReadWrite []string `json:"read_write"`
-	// Devices are read-write paths that also allow ioctl on device files (/dev).
+	// Devices are the device nodes (files) and device directories that may be read, written and
+	// used with ioctl, each named one by one (ADR 0120 section 4.3: null, zero, full, random,
+	// urandom, tty, ptmx, pts, shm). Nothing else under /dev is accessible.
 	Devices []string `json:"devices"`
+	// ListDirs are directories whose entries may be listed and nothing else: /dev is listed so
+	// tools work, but a node in it that Devices does not name cannot be opened or created.
+	ListDirs []string `json:"list_dirs"`
 }
 
 // SeccompPolicy is the deny filter: every other syscall stays allowed.
@@ -60,6 +66,13 @@ type SeccompPolicy struct {
 	// Deny replaces the built-in deny list when non-empty; DenyExtra adds to whichever list applies.
 	Deny      []string `json:"deny"`
 	DenyExtra []string `json:"deny_extra"`
+}
+
+// DefaultDevices are the device paths a payload may use. A block device or any other node under
+// /dev is outside the list on purpose.
+var DefaultDevices = []string{
+	"/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/ptmx",
+	"/dev/pts", "/dev/shm",
 }
 
 // UserPolicy drops the payload to a non-root user.
@@ -85,6 +98,9 @@ var DefaultSeccompDeny = []string{
 	"fsmount", "fspick", "mount_setattr", "setns", "unshare",
 	// kernel code, keys and tracing
 	"bpf", "keyctl", "add_key", "request_key", "perf_event_open", "userfaultfd",
+	// io_uring runs file and network operations in the kernel outside the seccomp and Landlock
+	// checks of the calls it replaces, and is a steady source of kernel bugs.
+	"io_uring_setup", "io_uring_enter", "io_uring_register",
 	"kexec_load", "kexec_file_load", "init_module", "finit_module", "delete_module",
 	"create_module", "get_kernel_syms", "query_module",
 	// host state
@@ -101,7 +117,8 @@ func DefaultPolicy() Policy {
 			Mode:      ModeBestEffort,
 			ReadExec:  []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/opt", "/proc", "/sys", "/run", "/var/lib"},
 			ReadWrite: []string{"/sandbox", "/tmp", "/var/tmp", "/home", "/root", "/var/cache", "/var/log"},
-			Devices:   []string{"/dev"},
+			Devices:   slices.Clone(DefaultDevices),
+			ListDirs:  []string{"/dev"},
 		},
 		Seccomp: SeccompPolicy{Mode: ModeRequire},
 		User:    UserPolicy{Mode: ModeBestEffort},
@@ -124,7 +141,7 @@ func ParsePolicy(r io.Reader) (Policy, error) {
 		return Policy{}, fmt.Errorf("guest launcher policy: %w", err)
 	}
 	if raw.Landlock != nil {
-		p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices = nil, nil, nil
+		p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs = nil, nil, nil, nil
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -152,10 +169,20 @@ func (p Policy) Validate() error {
 			return fmt.Errorf("guest launcher policy: unknown capability %q", c)
 		}
 	}
-	for _, list := range [][]string{p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices} {
+	for _, list := range [][]string{p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs} {
 		for _, path := range list {
 			if !strings.HasPrefix(path, "/") {
 				return fmt.Errorf("guest launcher policy: landlock path %q is not absolute", path)
+			}
+		}
+	}
+	// A name no architecture has is a typo, and a typo must not silently leave a call allowed. A name
+	// only another architecture has is fine: BuildSeccomp skips it on this one.
+	known := knownSyscalls()
+	for _, list := range [][]string{p.Seccomp.Deny, p.Seccomp.DenyExtra} {
+		for _, n := range list {
+			if !known[n] {
+				return fmt.Errorf("guest launcher policy: seccomp names unknown syscall %q", n)
 			}
 		}
 	}
