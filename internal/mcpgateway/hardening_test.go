@@ -103,8 +103,16 @@ var _ = Describe("a hostile or odd target", func() {
 		plain := gateway.MCPConfig{Keys: []gateway.Key{k2.Key}, MCPState: gateway.MCPState{
 			MCP: []gateway.MCPTarget{{Name: "t", Org: "acme", URL: "http://t.example/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/dev/null"}},
 		}}
-		_, err = gw.ApplyMCP(ctx, plain)
-		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
+		// A credential on a plain http URL closes that route only. The rest of the config applies,
+		// so a key revocation never waits on an unrelated target.
+		gw2 := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		rev, err := gw2.ApplyMCP(ctx, plain)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gw2.Revision()).To(Equal(rev))
+		revoked := gateway.MCPConfig{MCPState: plain.MCPState}
+		rev2, err := gw2.ApplyMCP(ctx, revoked)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev2).NotTo(Equal(rev))
 		ok := gateway.MCPConfig{Keys: []gateway.Key{k2.Key}, MCPState: gateway.MCPState{
 			MCP: []gateway.MCPTarget{{Name: "t", Org: "acme", URL: "https://t.example/mcp"}},
 		}}
@@ -252,6 +260,8 @@ var _ = Describe("a hostile or odd target", func() {
 		_, err := gw.ApplyMCP(ctx, cfg("http://[::1]:9/mcp"))
 		Expect(err).NotTo(HaveOccurred())
 		_, err = gw.ApplyMCP(ctx, cfg("http://example.com/mcp"))
-		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
+		Expect(err).NotTo(HaveOccurred()) // the route closes; the config applies
+		_, err = gw.ApplyMCP(ctx, cfg("https:mcp"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

@@ -5,7 +5,6 @@ package mcpgateway
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -89,23 +88,5 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return t.base.RoundTrip(req)
 }
 
-// credentialSafeURL says a credential may travel to raw. It must be https. A loopback address is
-// the one exception: its traffic does not leave the machine (a sidecar, a test).
-func credentialSafeURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" {
-		return false
-	}
-	if u.Scheme == "https" {
-		return true
-	}
-	if u.Scheme != "http" {
-		return false
-	}
-	h := u.Hostname()
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
-}
+// credentialSafeURL says a credential may travel to raw (see gateway.CredentialSafeURL).
+func credentialSafeURL(raw string) bool { return gateway.CredentialSafeURL(raw) }

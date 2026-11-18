@@ -42,7 +42,7 @@ func (t *guardTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	}
 	c := &guardConn{
 		inner: inner, guard: t.guard, target: t.target, agent: t.agent,
-		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]pendingCall{},
+		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]pendingCall{}, owed: map[string]struct{}{},
 		workers: make(chan struct{}, maxInboundWorkers), notes: make(chan jsonrpc.Message, maxQueuedNotes),
 	}
 	t.conn.Store(c)
@@ -80,6 +80,7 @@ type guardConn struct {
 
 	mu      sync.Mutex
 	pending map[string]pendingCall // request ID -> the call the gateway sent
+	owed    map[string]struct{}    // server requests the SDK has not yet answered
 }
 
 // pendingCall is a call the gateway sent: its method and the context of the call, which its

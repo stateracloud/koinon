@@ -103,7 +103,8 @@ type snapshot struct {
 var ErrInvalidConfig = errors.New("mcpgateway: invalid config")
 
 // ApplyMCP implements gateway.MCPGateway. It is idempotent and returns once the new config is live.
-// A rejected config leaves the previous one serving.
+// A rejected config leaves the previous one serving. A target that can never be served safely (a
+// credential on a URL that is not https) is left out, which closes its route; the rest applies.
 func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Revision, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err // the apply deadline passed: keep the config that serves
@@ -136,7 +137,9 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 			return "", fmt.Errorf("%w: target %q is an org target and needs a real guard", ErrInvalidConfig, t.Name)
 		}
 		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
-			return "", fmt.Errorf("%w: target %q has a credential and a URL that is not https", ErrInvalidConfig, t.Name)
+			// The route closes: the target is left out, and the rest of the config applies. A key
+			// revocation must never wait on an unrelated target (ADR 0120).
+			continue
 		}
 		s.targets[t.Name] = t
 	}

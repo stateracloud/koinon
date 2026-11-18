@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -403,6 +404,9 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return err
 	}
 	if header != "" {
+		if !gateway.CredentialSafeURL(rawURL) {
+			return invalid("url must be https when the server has a credential (http is allowed only on a loopback address)")
+		}
 		if !headerPattern.MatchString(header) {
 			return invalid("credential header must be an HTTP header name")
 		}
