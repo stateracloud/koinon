@@ -1801,9 +1801,11 @@ var _ = Describe("Reconciler", func() {
 
 			cc := pool.Config().ConnConfig
 			proxy := newSilentProxy(net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port))))
-			DeferCleanup(proxy.close)
 			viaProxy := poolVia(ctx, pool, proxy)
-			DeferCleanup(viaProxy.Close)
+			// DeferCleanup runs last-in first-out, and the proxy must close before the pool: pool.Close
+			// closes each connection with a context, and pgx then sends a cancel request through the
+			// frozen proxy and waits for it (15 s) instead of failing at once on a closed socket.
+			DeferCleanup(func() { proxy.close(); viaProxy.Close() })
 			old, err := reconciler.New(viaProxy, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			run(old)
@@ -1820,6 +1822,38 @@ var _ = Describe("Reconciler", func() {
 			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+time.Second),
 				"within heartbeat + ping timeout (and a margin for the scheduler)")
 			Expect(logs.String()).To(ContainSubstring("did not answer"))
+		})
+
+		It("keeps the lead on a quiet but healthy connection across several heartbeat periods (#635)", func(ctx SpecContext) {
+			const heartbeat, pingTimeout = 200 * time.Millisecond, 400 * time.Millisecond
+			cfg.ResyncInterval = time.Hour
+			cfg.LeaderHeartbeat, cfg.LeaderPingTimeout = heartbeat, pingTimeout
+			mg.mu.Lock()
+			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			entered := mg.entered
+			mg.mu.Unlock()
+			DeferCleanup(func() {
+				mg.mu.Lock()
+				defer mg.mu.Unlock()
+				if mg.hold != nil {
+					close(mg.hold)
+				}
+			})
+
+			cc := pool.Config().ConnConfig
+			proxy := newSilentProxy(net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port))))
+			viaProxy := poolVia(ctx, pool, proxy)
+			DeferCleanup(func() { proxy.close(); viaProxy.Close() })
+			r, err := reconciler.New(viaProxy, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			run(r)
+			Eventually(entered).Should(BeClosed(), "the leader's pass is inside Apply")
+
+			// The connection is idle between heartbeats but answers each one: no false step-down.
+			Consistently(mg.canceledAt, 6*heartbeat, 50*time.Millisecond).Should(BeZero(), "the lead was not cancelled")
+			Expect(holders(ctx)).To(Equal(1), "the lock is still held")
+			Expect(leading()).To(Equal(1))
+			Expect(logs.String()).NotTo(ContainSubstring("did not answer"))
 		})
 
 		It("retries a failed lead after a short backoff with jitter, not after the resync interval", func() {
