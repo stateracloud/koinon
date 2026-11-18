@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -191,5 +192,63 @@ var _ = Describe("a hostile or odd target", func() {
 			Expect(res.IsError).To(BeFalse())
 			Expect(text(res)).To(Equal("sse ok"))
 		}
+	})
+
+	It("sends a call again once when the target lost the session, and treats a pointer pass-all guard as no guard", func(ctx SpecContext) {
+		newHandler := func() http.Handler {
+			return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+				s := mcp.NewServer(&mcp.Implementation{Name: "x", Version: "0"}, nil)
+				mcp.AddTool(s, &mcp.Tool{Name: "read"}, func(context.Context, *mcp.CallToolRequest, echoArgs) (*mcp.CallToolResult, any, error) {
+					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "again"}}}, nil, nil
+				})
+				return s
+			}, nil)
+		}
+		var cur atomic.Pointer[http.Handler]
+		h := newHandler()
+		cur.Store(&h)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*cur.Load()).ServeHTTP(w, r) }))
+		DeferCleanup(func() { srv.CloseClientConnections(); srv.Close() })
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		DeferCleanup(gw.Drain)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", gw.Handler())
+		front := httptest.NewServer(mux)
+		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
+		key := mustKey(agent)
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+			MCP:   []gateway.MCPTarget{{Name: "t", Org: "acme", URL: srv.URL}},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {{Target: "t", All: true}}},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front.URL, key.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_read"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse())
+		h2 := newHandler() // the target restarts: its sessions are gone
+		cur.Store(&h2)
+		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "t_read"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse())
+
+		ptr := mcpgateway.New(mcpgateway.Options{Guard: &mcpgateway.AllowGuard{}})
+		_, err = ptr.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+			MCP: []gateway.MCPTarget{{Name: "t", Org: "acme", URL: "https://t.example/mcp"}},
+		}})
+		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
+	})
+
+	It("accepts a credential on a loopback IPv6 URL and refuses it on a plain http host", func(ctx SpecContext) {
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		k := mustKey(agent)
+		cfg := func(u string) gateway.MCPConfig {
+			return gateway.MCPConfig{Keys: []gateway.Key{k.Key}, MCPState: gateway.MCPState{MCP: []gateway.MCPTarget{
+				{Name: "t", Org: "acme", URL: u, CredentialHeader: "X-Api-Key", CredentialFile: "/dev/null"},
+			}}}
+		}
+		_, err := gw.ApplyMCP(ctx, cfg("http://[::1]:9/mcp"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = gw.ApplyMCP(ctx, cfg("http://example.com/mcp"))
+		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
 	})
 })

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -104,6 +105,12 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return u, nil
 	}
+	// A request that carries an old snapshot must not evict the session of the current config, nor
+	// connect to a target an apply changed or removed.
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+		g.mu.Unlock()
+		return nil, errConfigChanged
+	}
 	stale := g.pool[key]
 	delete(g.pool, key)
 	g.mu.Unlock()
@@ -128,7 +135,7 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return u, nil
 	}
-	if cur, ok := g.pool[key]; ok && cur.cfg == t && cur.acquire() { // another request connected first
+	if cur, ok := g.pool[key]; ok && cur.cfg == t && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
 		g.mu.Unlock()
 		u.refs, u.retired = 0, true
 		u.retire()
@@ -168,13 +175,14 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	client.AddRoots(&mcp.Root{URI: RootURI, Name: "workspace"}) //nolint:staticcheck // see above
 	// The handshake has a deadline; the stream of a legacy SSE target must outlive it. The stream
 	// context ends when the session retires, or when the handshake fails.
+	var handed atomic.Bool
 	sctx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	timer := time.AfterFunc(g.o.CallTimeout, stop)
 	go func() {
 		select {
 		case <-ctx.Done():
 			// The caller gave up before the handshake ended.
-			if !timer.Stop() {
+			if handed.Load() || !timer.Stop() {
 				return
 			}
 			stop()
@@ -188,7 +196,13 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		stop()
 		return nil, err
 	}
-	timer.Stop()
+	handed.Store(true)
+	if !timer.Stop() || sctx.Err() != nil {
+		// The deadline or the caller ended the stream as the handshake finished: do not pool it.
+		_ = s.Close()
+		stop()
+		return nil, context.DeadlineExceeded
+	}
 	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop, gt: gt}, nil
 }
 

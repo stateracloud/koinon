@@ -132,7 +132,7 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		if t.URL == "" {
 			return "", fmt.Errorf("%w: target %q has no URL", ErrInvalidConfig, t.Name)
 		}
-		if _, isAllow := g.o.Guard.(AllowGuard); isAllow && t.Org != "" {
+		if isAllowGuard(g.o.Guard) && t.Org != "" {
 			return "", fmt.Errorf("%w: target %q is an org target and needs a real guard", ErrInvalidConfig, t.Name)
 		}
 		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
@@ -152,6 +152,15 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 	old := g.snap.Swap(s)
 	g.evictChanged(old, s)
 	return s.rev, nil
+}
+
+// isAllowGuard reports the pass-all guard, by value or by pointer.
+func isAllowGuard(g Guard) bool {
+	switch g.(type) {
+	case AllowGuard, *AllowGuard:
+		return true
+	}
+	return false
 }
 
 // revisionOf derives the revision from the content, so equal configs give equal revisions.

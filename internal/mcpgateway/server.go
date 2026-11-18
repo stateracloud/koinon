@@ -20,7 +20,10 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
-var errDraining = errors.New("mcpgateway: draining")
+var (
+	errDraining      = errors.New("mcpgateway: draining")
+	errConfigChanged = errors.New("mcpgateway: the target config changed")
+)
 
 type agentKey struct{}
 
@@ -260,13 +263,21 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	// One attempt. A call that may have reached the target is never sent again: a write could run
 	// twice. A session known to be lost is replaced before the call, in session().
 	var res *mcp.CallToolResult
-	u, err := g.session(cctx, t, agent)
-	if err == nil {
+	var err error
+	// The one case that runs again: the target says the session is gone, so it ran nothing.
+	for attempt := range 2 {
+		var u *upstream
+		if u, err = g.session(cctx, t, agent); err != nil {
+			break
+		}
 		res, err = u.session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: p.Arguments})
 		u.release()
 		var je *jsonrpc.Error
 		if err != nil && !errors.As(err, &je) && cctx.Err() == nil {
 			g.evict(u) // a lost connection: the next call connects again
+		}
+		if err == nil || attempt == 1 || !errors.Is(err, mcp.ErrSessionMissing) {
+			break
 		}
 	}
 	switch {

@@ -262,7 +262,9 @@ func (c *guardConn) contextFor(msg jsonrpc.Message) (context.Context, context.Ca
 		p, found := c.pending[idKey(m.ID)]
 		c.mu.Unlock()
 		if found && p.ctx != nil {
-			return p.ctx, func() {}
+			// The values of the call (trace, agent) stay; its cancellation does not, so a late
+			// response is still judged and reported.
+			return context.WithTimeout(context.WithoutCancel(p.ctx), unsolicitedTimeout)
 		}
 	}
 	return context.WithTimeout(c.life, unsolicitedTimeout)
@@ -276,13 +278,14 @@ func (c *guardConn) overloaded(msg jsonrpc.Message) {
 		c.mu.Lock()
 		delete(c.pending, idKey(m.ID))
 		c.mu.Unlock()
-		go c.deliver(readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")})
-	case *jsonrpc.Request:
+		c.wg.Add(1) // counted, so a read error is delivered after this response
 		go func() {
-			ctx, cancel := context.WithTimeout(c.life, unsolicitedTimeout)
-			defer cancel()
-			_ = c.inner.Write(ctx, errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded"))
+			defer c.wg.Done()
+			c.deliver(readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")})
 		}()
+	case *jsonrpc.Request:
+		// Dropped, with no answer: the target times out. A write here would let a hostile target make
+		// the gateway open one outbound request per message.
 	}
 }
 
