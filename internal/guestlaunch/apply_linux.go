@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -61,7 +62,7 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 		return err
 	}
 	log.Info("guest launcher: starting payload", "path", path)
-	return syscall.Exec(path, argv, env)
+	return syscall.Exec(path, argv, env) //nolint:gosec // the launcher's purpose: exec the payload the policy names
 }
 
 func lookPath(name string, env []string) (string, error) {
@@ -324,7 +325,12 @@ func loadSeccomp(insts []bpf.Instruction) error {
 	for i, r := range raw {
 		prog[i] = unix.SockFilter{Code: r.Op, Jt: r.Jt, Jf: r.Jf, K: r.K}
 	}
-	fprog := unix.SockFprog{Len: uint16(len(prog)), Filter: &prog[0]}
+	n := len(prog)
+	if n == 0 || n > math.MaxUint16 {
+		return fmt.Errorf("seccomp program has %d instructions, want 1..%d", n, math.MaxUint16)
+	}
+	fprog := unix.SockFprog{Len: uint16(n), Filter: &prog[0]}
+	//nolint:gosec // seccomp(2) takes a pointer to the sock_fprog; no safe wrapper exists
 	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, 0, uintptr(unsafe.Pointer(&fprog)))
 	if errno != 0 {
 		return errno
