@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -96,7 +97,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
 		code := 0
-		if ee, ok := err.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		} else if err != nil {
 			Fail(err.Error())
