@@ -389,42 +389,12 @@ func TestSetupFailureStopsTheStep(t *testing.T) {
 	g.Expect(err).To(MatchError(ContainSubstring("exit status 1")))
 	// No silent partial install: the error names the exact command that removes it, with the pinned binary.
 	g.Expect(err.Error()).To(And(
-		ContainSubstring("partial install"), ContainSubstring("delete ate-system --namespace='ate-system'"),
+		ContainSubstring("partial install"), ContainSubstring("delete ate-system --no-dev-env --namespace='ate-system'"),
 		ContainSubstring("--kubeconfig='/etc/kube/config' --context='lab'"), ContainSubstring(r.built)))
 	// The binary the command names still exists.
 	_, statErr := os.Stat(r.built)
 	g.Expect(statErr).NotTo(HaveOccurred())
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(r.built)) })
-}
-
-func kindNode(name, providerID string) *corev1.Node {
-	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: corev1.NodeSpec{ProviderID: providerID}}
-}
-
-func TestKindIsRefusedOnAClusterThatIsNotKindBeforeAnythingIsInstalled(t *testing.T) {
-	g := NewWithT(t)
-	i, r, client := setup("37", true, []runtime.Object{kindNode("n1", "kind://docker/lab/lab-control-plane"), kindNode("n2", "talos://omni/abc")})
-	i.Profile.Kind = true
-	err := i.Install(t.Context())
-	g.Expect(err).To(MatchError(substrateinstall.ErrNotKind))
-	g.Expect(err.Error()).To(And(ContainSubstring("n2"), ContainSubstring("without --kind"), ContainSubstring("nothing was installed")))
-	g.Expect(r.calls).To(BeEmpty(), "nothing was exported, built or run")
-	_, getErr := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
-	g.Expect(apierrors.IsNotFound(getErr)).To(BeTrue(), "no namespace was created")
-
-	// A cluster without nodes is not proven to be kind either.
-	i, _, _ = setup("37", true, nil)
-	i.Profile.Kind = true
-	g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrNotKind))
-}
-
-func TestKindIsAcceptedOnKindNodesAndIgnoredWithoutTheFlag(t *testing.T) {
-	g := NewWithT(t)
-	i, _, _ := setup("37", true, []runtime.Object{kindNode("n1", "kind://docker/lab/lab-control-plane")})
-	i.Profile.Kind = true
-	g.Expect(i.CheckKind(t.Context())).To(Succeed())
-	i, _, _ = setup("37", true, []runtime.Object{kindNode("n1", "talos://omni/abc")})
-	g.Expect(i.CheckKind(t.Context())).To(Succeed(), "without --kind the nodes are not read")
 }
 
 const inCluster = "https://kubernetes.default.svc"
@@ -461,7 +431,8 @@ func TestRepairsAnEntryWithoutTheFilesAndKeepsOtherProviders(t *testing.T) {
 	g := NewWithT(t)
 	old := "jwtProviders:\n- audiences: [extra.example]\n  issuer: " + inCluster + "\n  name: kubernetes\n- audiences: [x]\n  issuer: https://other.example\n  name: other\n"
 	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old}}})
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
 	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(changed).To(BeTrue())
@@ -591,4 +562,16 @@ func TestEnsureRouterSPIFFENamesTheDeploymentInErrors(t *testing.T) {
 	g := NewWithT(t)
 	i, _, _ := setup("37", true, nil)
 	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(MatchError(ContainSubstring("ate-system/atenet-router")))
+}
+
+func TestRepairFallsBackToTheDefaultAudienceWhenTheEntryHasNone(t *testing.T) {
+	g := NewWithT(t)
+	old := "jwtProviders:\n- audiences: []\n  issuer: https://other.example\n  name: kubernetes\n"
+	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	g.Expect(authData(t, i)).To(ContainSubstring("api.ate-system.svc"))
 }

@@ -91,6 +91,9 @@ func (p Profile) Validate() error {
 	return nil
 }
 
+// noDevEnvFlag is passed to ate-setup deploy and delete alike, so a delete undoes the same install.
+const noDevEnvFlag = "--no-dev-env"
+
 // egressProviderFlag selects the bundled Kubernetes Secrets provider of the egress gateway; ate-setup
 // requires one provider form for deploy ate-system.
 const egressProviderFlag = `--credential-provider={"name":"k8s.io"}`
@@ -105,7 +108,7 @@ func (p Profile) SetupArgs(namespace string) []string {
 	}
 	args := []string{
 		"deploy", "ate-system",
-		"--no-dev-env",
+		noDevEnvFlag,
 		"--namespace=" + namespace,
 		"--storage-bucket-name=" + p.StorageBucket,
 		egressProviderFlag,
@@ -196,6 +199,9 @@ func (b *Build) Dir() string { return b.dir }
 
 // Binary is the ate-setup built from the tree.
 func (b *Build) Binary() string { return b.binary }
+
+// Root is the temporary directory that holds the tree and the binary; Cleanup deletes it.
+func (b *Build) Root() string { return b.tmp }
 
 // Cleanup deletes the tree and the binary.
 func (b *Build) Cleanup() { _ = os.RemoveAll(b.tmp) }
@@ -420,8 +426,8 @@ func (i *Installer) Install(ctx context.Context) error {
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, i.Out); err != nil {
 		keepBuild = true
-		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again:\n  %s",
-			PinnedVersion, err, cleanupCommand(setup, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
+		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again:\n  %s\nThe build directory %s stays so that command can run; delete it after the cleanup.",
+			PinnedVersion, err, cleanupCommand(setup, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context), setup.Root())
 	}
 	if _, err := i.EnsureAPIAuthentication(ctx, profile.ExpectedJWTIssuer); err != nil {
 		return err
@@ -441,8 +447,8 @@ func (i *Installer) Install(ctx context.Context) error {
 // cleanupCommand is the command that removes what ate-setup deploy ate-system created (ate-setup delete
 // ate-system). It runs from the exported tree, as ate-setup reads manifests from it.
 func cleanupCommand(b *Build, namespace, kubeconfig, kctx string) string {
-	return fmt.Sprintf("cd %s && %s delete ate-system --namespace=%s --kubeconfig=%s --context=%s",
-		shellQuote(b.Dir()), shellQuote(b.Binary()), shellQuote(namespace), shellQuote(kubeconfig), shellQuote(kctx))
+	return fmt.Sprintf("cd %s && %s delete ate-system %s --namespace=%s --kubeconfig=%s --context=%s",
+		shellQuote(b.Dir()), shellQuote(b.Binary()), noDevEnvFlag, shellQuote(namespace), shellQuote(kubeconfig), shellQuote(kctx))
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
