@@ -1043,7 +1043,8 @@
       "0091",
       "0092",
       "0101",
-      "0119"
+      "0119",
+      "0120"
     ]
   },
   {
@@ -1093,14 +1094,15 @@
     "superseded_by": [],
     "relates": [],
     "related_by": [
-      "0119"
+      "0119",
+      "0120"
     ]
   },
   {
     "number": "0045",
     "file": "0045-openshell-hardening-defaults.md",
     "title": "OpenShell hardening defaults",
-    "status": "accepted",
+    "status": "superseded",
     "date": "2026-10-21",
     "area": "runtime-sandbox",
     "tags": [
@@ -1116,7 +1118,9 @@
       "0119"
     ],
     "supersedes": [],
-    "superseded_by": [],
+    "superseded_by": [
+      "0120"
+    ],
     "relates": [],
     "related_by": [
       "0061",
@@ -1217,7 +1221,9 @@
       "0119"
     ],
     "supersedes": [],
-    "superseded_by": [],
+    "superseded_by": [
+      "0120"
+    ],
     "relates": [],
     "related_by": [
       "0061",
@@ -2048,7 +2054,8 @@
       "0048"
     ],
     "amended_by": [
-      "0119"
+      "0119",
+      "0120"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -2234,7 +2241,8 @@
     ],
     "related_by": [
       "0091",
-      "0112"
+      "0112",
+      "0120"
     ]
   },
   {
@@ -2726,7 +2734,8 @@
       "0091"
     ],
     "amended_by": [
-      "0119"
+      "0119",
+      "0120"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -3118,7 +3127,8 @@
       "0106"
     ],
     "related_by": [
-      "0119"
+      "0119",
+      "0120"
     ]
   },
   {
@@ -3380,6 +3390,42 @@
       "0081",
       "0110",
       "0111"
+    ],
+    "related_by": [
+      "0120"
+    ]
+  },
+  {
+    "number": "0120",
+    "file": "0120-execution-hardening-defaults.md",
+    "title": "Execution hardening defaults",
+    "status": "accepted",
+    "date": "2026-11-18",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "isolation",
+      "egress",
+      "credentials",
+      "security",
+      "kubernetes"
+    ],
+    "amends": [
+      "0075",
+      "0097"
+    ],
+    "amended_by": [],
+    "supersedes": [
+      "0045",
+      "0048"
+    ],
+    "superseded_by": [],
+    "relates": [
+      "0042",
+      "0044",
+      "0080",
+      "0110",
+      "0119"
     ],
     "related_by": []
   }
