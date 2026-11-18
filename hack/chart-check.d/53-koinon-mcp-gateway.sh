@@ -24,6 +24,13 @@ if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=
   fail "koinon-gateway accepts one replica"
 fi
 
+# The metrics (15020) and health (15021) listeners are fixed, so the serving port cannot take them.
+for p in 15020 15021; do
+  if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mcp.koinon.port=$p >/dev/null 2>&1; then
+    fail "koinon-gateway accepts port $p, the fixed metrics or health port"
+  fi
+done
+
 # Drain: the pod grace period is the shutdown delay, the drain timeout and 30 seconds, and the process gets the timeout.
 has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 65$' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway is told the drain timeout" '--drain-timeout=30s$' "${mcp[@]}" "${mcp_only[@]}"

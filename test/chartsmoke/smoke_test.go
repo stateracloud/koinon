@@ -645,7 +645,9 @@ func describeMode(name, valuesFile string) {
 			metrics := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("stats")}}}
 			Expect(w.ProbeHTTP(ctx, metrics, probeDeadline)).To(BeEmpty(), "/metrics; logs:\n%s", w.Logs(ctx))
 			Expect(c.ReadinessProbe).NotTo(BeNil())
-			Expect(w.ProbeHTTP(ctx, c.ReadinessProbe, 3*time.Second)).NotTo(BeEmpty(), "ready before any config applied; logs:\n%s", w.Logs(ctx))
+			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
+			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
+			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
 			Expect(w.Running(ctx)).To(BeTrue(), "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
