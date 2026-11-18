@@ -247,27 +247,32 @@ func (c *guardConn) pump() {
 
 // handle runs the guard on a response or a server request and passes the result on.
 func (c *guardConn) handle(msg jsonrpc.Message) {
-	ctx, cancel := c.contextFor(msg)
+	ctx, cancel, p := c.contextFor(msg)
 	defer cancel()
-	if out, ok := c.inbound(ctx, msg); ok {
+	if out, ok := c.inbound(ctx, msg, p); ok {
 		c.deliver(readResult{msg: out})
 	}
 }
 
 // contextFor returns the context a message is judged under: the call's own context for a response,
-// a bounded one for anything that answers no call of ours.
-func (c *guardConn) contextFor(msg jsonrpc.Message) (context.Context, context.CancelFunc) {
+// a bounded one for anything that answers no call of ours. It takes the pending record of a response
+// once, so the context and the method come from the same record.
+func (c *guardConn) contextFor(msg jsonrpc.Message) (context.Context, context.CancelFunc, pendingCall) {
+	var p pendingCall
 	if m, ok := msg.(*jsonrpc.Response); ok {
 		c.mu.Lock()
-		p, found := c.pending[idKey(m.ID)]
+		p = c.pending[idKey(m.ID)]
+		delete(c.pending, idKey(m.ID))
 		c.mu.Unlock()
-		if found && p.ctx != nil {
+		if p.ctx != nil {
 			// The values of the call (trace, agent) stay; its cancellation does not, so a late
 			// response is still judged and reported.
-			return context.WithTimeout(context.WithoutCancel(p.ctx), unsolicitedTimeout)
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), unsolicitedTimeout)
+			return ctx, cancel, p
 		}
 	}
-	return context.WithTimeout(c.life, unsolicitedTimeout)
+	ctx, cancel := context.WithTimeout(c.life, unsolicitedTimeout)
+	return ctx, cancel, p
 }
 
 // overloaded answers a message the connection has no room to inspect. A response becomes an error
@@ -296,7 +301,7 @@ func (c *guardConn) noteLoop() {
 		select {
 		case msg := <-c.notes:
 			ctx, cancel := context.WithTimeout(c.life, unsolicitedTimeout)
-			if out, ok := c.inbound(ctx, msg); ok {
+			if out, ok := c.inbound(ctx, msg, pendingCall{}); ok {
 				c.deliver(readResult{msg: out})
 			}
 			cancel()
@@ -307,7 +312,7 @@ func (c *guardConn) noteLoop() {
 }
 
 // inbound returns the message to hand to the SDK, or false when the message stops here.
-func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message) (jsonrpc.Message, bool) {
+func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message, p pendingCall) (jsonrpc.Message, bool) {
 	switch m := msg.(type) {
 	case *jsonrpc.Request:
 		if !m.ID.IsValid() {
@@ -319,10 +324,7 @@ func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message) (jsonrpc.M
 		}
 		return c.serverRequest(ctx, m)
 	case *jsonrpc.Response:
-		c.mu.Lock()
-		method := c.pending[idKey(m.ID)].method
-		delete(c.pending, idKey(m.ID))
-		c.mu.Unlock()
+		method := p.method
 		kind := KindResult
 		if m.Error != nil {
 			kind = KindError

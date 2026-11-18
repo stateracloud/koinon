@@ -198,7 +198,7 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		return nil, err
 	}
 	handed.Store(true)
-	if !timer.Stop() || sctx.Err() != nil {
+	if !timer.Stop() || sctx.Err() != nil || ctx.Err() != nil {
 		// The deadline or the caller ended the stream as the handshake finished: do not pool it.
 		_ = s.Close()
 		stop()

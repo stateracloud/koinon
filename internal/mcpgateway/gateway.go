@@ -149,6 +149,9 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		s.grants[a] = cp
 	}
 	s.rev = revisionOf(c)
+	if err := ctx.Err(); err != nil { // the deadline passed: the old config keeps serving
+		return "", err
+	}
 	old := g.snap.Swap(s)
 	g.evictChanged(old, s)
 	return s.rev, nil

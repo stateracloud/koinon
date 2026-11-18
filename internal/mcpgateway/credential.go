@@ -93,7 +93,7 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 // the one exception: its traffic does not leave the machine (a sidecar, a test).
 func credentialSafeURL(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Hostname() == "" {
 		return false
 	}
 	if u.Scheme == "https" {
