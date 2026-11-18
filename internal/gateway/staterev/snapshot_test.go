@@ -65,7 +65,7 @@ func richState() gateway.State {
 	}
 	s.RestrictModels(agentA, "b", "a")
 	s.MCP = []gateway.MCPTarget{
-		{Name: "wiki", URL: "http://wiki/mcp", Org: "acme", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/creds/wiki", CAFile: "/creds/wiki-ca"},
+		{Name: "wiki", URL: "http://wiki/mcp", Org: "acme", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/creds/wiki", CAFile: "/creds/wiki-ca", InsecureSkipVerify: true},
 		{Name: "docs", URL: "http://docs/sse", SSE: true},
 	}
 	s.GrantTools(agentA, gateway.ToolGrant{Target: "wiki", Tools: []string{"search", "read"}}, gateway.ToolGrant{Target: "docs", All: true})
@@ -133,7 +133,7 @@ var _ = Describe("secret material", func() {
 	reviewedLeaves := []string{
 		"Keys[].Agent.Name", "Keys[].Agent.Org", "Keys[].Hash", "Keys[].ID",
 		"Limits{}.Amount", "Limits{}.Generation", "Limits{}.Unit", "Limits{}.Window", "Limits{}~Name", "Limits{}~Org",
-		"MCP[].CAFile", "MCP[].CredentialFile", "MCP[].CredentialHeader", "MCP[].CredentialPrefix", "MCP[].Name", "MCP[].Org", "MCP[].SSE", "MCP[].URL",
+		"MCP[].CAFile", "MCP[].CredentialFile", "MCP[].CredentialHeader", "MCP[].CredentialPrefix", "MCP[].InsecureSkipVerify", "MCP[].Name", "MCP[].Org", "MCP[].SSE", "MCP[].URL",
 		"Models{}[]", "Models{}~Name", "Models{}~Org",
 		"Providers[].AnthropicWorkspaceID", "Providers[].APIKeyFile", "Providers[].BaseURL",
 		"Providers[].Models[].Format", "Providers[].Models[].Guard", "Providers[].Models[].Name",

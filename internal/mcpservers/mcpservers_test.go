@@ -273,17 +273,31 @@ var _ = Describe("Service", func() {
 				Expect(err).NotTo(HaveOccurred())
 				return strings.Repeat(string(set.CA), (60<<10)/len(set.CA))
 			}
+			// The cap is global, so the specs that fill it must give the bytes back to the other specs.
+			var orgs []pgtype.UUID
+			BeforeEach(func() {
+				orgs = []pgtype.UUID{org}
+				DeferCleanup(func(ctx SpecContext) {
+					for _, o := range orgs {
+						_, err := pool.Exec(ctx, `DELETE FROM mcp_servers WHERE org_id = $1`, o)
+						Expect(err).NotTo(HaveOccurred())
+					}
+				})
+			})
 			It("refuses a save that takes all orgs over the global cap, so an accepted save is always served", func(ctx SpecContext) {
 				b := big()
 				Expect(len(b)).To(BeNumerically("<", mcpservers.MaxCABundleBytes))
 				// Two orgs, each at about 120 KiB of their 128 KiB budget: 240 of the 256 KiB global cap.
-				for _, o := range []pgtype.UUID{org, func() pgtype.UUID { o, _, _ := pgtest.NewOrg(ctx, pool); return o }()} {
+				second, _, _ := pgtest.NewOrg(ctx, pool)
+				orgs = append(orgs, second)
+				for _, o := range []pgtype.UUID{org, second} {
 					for _, name := range []string{"one", "two"} {
 						_, err := svc.Create(ctx, o, actor, user, mcpservers.Input{Name: name, URL: "https://" + name + ".example.test/mcp", CABundle: b})
 						Expect(err).NotTo(HaveOccurred())
 					}
 				}
 				third, _, _ := pgtest.NewOrg(ctx, pool)
+				orgs = append(orgs, third)
 				_, err := svc.Create(ctx, third, actor, user, mcpservers.Input{Name: "three", URL: "https://three.example.test/mcp", CABundle: b})
 				Expect(err).To(MatchError(ContainSubstring("all servers on this installation")))
 				one, err := faketls.Make("koinon test CA", []string{"private.example.test"})

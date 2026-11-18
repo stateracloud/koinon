@@ -285,16 +285,24 @@ var _ = Describe("a hostile or odd target", func() {
 			MCP: []gateway.MCPTarget{
 				{Name: "scratch", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true},
 				{Name: "plain", Org: "acme", URL: tlsUp.URL + "/mcp"},
-				{Name: "both", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true, CAFile: writeFile("both.crt", "not a certificate")},
 			},
-			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {grant("scratch"), grant("plain"), grant("both")}},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {grant("scratch"), grant("plain")}},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = gw.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{MCP: []gateway.MCPTarget{
+			{Name: "both", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true, CAFile: writeFile("both.crt", "x")},
+		}}})
+		Expect(err).To(MatchError(ContainSubstring("exclude each other")), "a CA file and skipped verification are refused together")
+		_, err = gw.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+			MCP:   []gateway.MCPTarget{{Name: "scratch", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true}, {Name: "plain", Org: "acme", URL: tlsUp.URL + "/mcp"}},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {grant("scratch"), grant("plain")}},
 		}})
 		Expect(err).NotTo(HaveOccurred())
 		s := connect(ctx, front.URL, key.Material)
 		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "scratch_read_item", Arguments: map[string]any{"text": "x"}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeFalse())
-		for _, name := range []string{"plain", "both"} {
+		for _, name := range []string{"plain"} {
 			res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: name + "_read_item", Arguments: map[string]any{"text": "x"}})
 			Expect(err != nil || res.IsError).To(BeTrue(), "%s must not connect", name)
 		}
