@@ -152,6 +152,7 @@ harness-opencode: ## Build the OpenCode harness image (koinon/sandbox:dev-<hash>
 .PHONY: guest-launcher
 guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
 	for arch in amd64 arm64; do \
+		mkdir -p build/guest-launcher/linux-$$arch && \
 		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
 			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
 	done
