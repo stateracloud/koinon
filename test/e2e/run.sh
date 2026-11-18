@@ -223,6 +223,14 @@ done_step "Fakes deployed"
 step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
 e1 client-cert
+# The fake MCP server serves HTTPS with a CA it makes at start (ADR 0120: a credential goes only over HTTPS).
+# Read that CA through the API server's Service proxy (the "https:" prefix) and give it to the gateway in a Secret,
+# which the chart mounts (test/e2e/kind/koinon-values.yaml, gateway.standalone.mcpUpstreamCA). The test driver
+# trusts the same CA. It is a public certificate; no key is stored.
+MCP_CA="$OUT/fakemcp-ca.pem"
+"${K[@]}" get --raw "/api/v1/namespaces/$FAKES/services/https:fakemcp:8080/proxy/_fake/ca" >"$MCP_CA"
+grep -q 'BEGIN CERTIFICATE' "$MCP_CA" || { echo "the fake MCP server returned no CA" >&2; exit 1; }
+"${K[@]}" -n "$NS" create secret generic mcp-upstream-ca --from-file=ca.crt="$MCP_CA" --dry-run=client -o yaml | "${K[@]}" apply -f -
 if [[ $SUITE == go ]]; then
   e1 model-provider
   # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
@@ -284,7 +292,8 @@ go)
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
-    KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_URL="https://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$MCP_CA" \
     KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
     KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
     KOINON_E2E_PASSWORD="$password" \

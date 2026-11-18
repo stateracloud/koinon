@@ -112,11 +112,14 @@ spec:
         - name: fakemcp
           image: localhost:5001/koinon-fakemcp:e2e
           imagePullPolicy: Always
-          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token"]
+          # HTTPS with a CA made at start (ADR 0120: Koinon sends a credential only over HTTPS). run.sh reads the
+          # CA from /_fake/ca and gives it to the gateway in the Secret mcp-upstream-ca. No key is in the tree.
+          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token", "-tls",
+                 "-tls-hosts", "fakemcp.koinon-e2e-fakes.svc,fakemcp.koinon-e2e-fakes.svc.cluster.local,fakemcp.koinon-e2e-fakes,fakemcp,localhost,127.0.0.1"]
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: http, scheme: HTTPS}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false

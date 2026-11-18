@@ -19,19 +19,11 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"flag"
 	"log/slog"
-	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -40,6 +32,7 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -103,7 +96,7 @@ func main() {
 	srv := &http.Server{Addr: *addr, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
 	var caPEM []byte
 	if *useTLS {
-		cert, pemBytes, err := selfSigned(strings.Split(*tlsHosts, ","))
+		cert, pemBytes, err := faketls.SelfSigned("koinon-fakegithub test CA", strings.Split(*tlsHosts, ","))
 		if err != nil {
 			slog.Error("generate the TLS certificate", "err", err)
 			os.Exit(1)
@@ -165,39 +158,4 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
-}
-
-// selfSigned makes a certificate for hosts (names and IPs) that is its own CA, and returns it
-// with its PEM, which a connection's caBundle trusts.
-func selfSigned(hosts []string) (tls.Certificate, []byte, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	tpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(time.Now().UnixNano()),
-		Subject:               pkix.Name{CommonName: "koinon-fakegithub test CA"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	for _, h := range hosts {
-		if h = strings.TrimSpace(h); h == "" {
-			continue
-		}
-		if ip := net.ParseIP(h); ip != nil {
-			tpl.IPAddresses = append(tpl.IPAddresses, ip)
-		} else {
-			tpl.DNSNames = append(tpl.DNSNames, h)
-		}
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, nil, err
-	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }
