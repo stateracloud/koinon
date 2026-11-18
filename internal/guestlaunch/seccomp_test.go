@@ -131,6 +131,17 @@ var _ = Describe("BuildSeccomp", func() {
 		Expect(run(insts, info, info.SyscallNames["mount"], 0)).To(Equal(allow), "the replaced list no longer names mount")
 	})
 
+	It("keeps the process-access calls denied when a policy replaces the list", func() {
+		insts, _, err := guestlaunch.BuildSeccomp(guestlaunch.SeccompPolicy{Deny: []string{"syslog"}})
+		Expect(err).NotTo(HaveOccurred())
+		info, _ := arch.GetInfo("")
+		for _, n := range []string{"ptrace", "process_vm_readv", "process_vm_writev", "pidfd_getfd", "kcmp"} {
+			Expect(info.SyscallNames).To(HaveKey(n))
+			Expect(run(insts, info, info.SyscallNames[n], 0)).To(Equal(eperm), n)
+		}
+		Expect(run(insts, info, info.SyscallNames["mount"], 0)).To(Equal(allow), "the replaced list no longer names mount")
+	})
+
 	It("skips a name the running architecture does not have", func() {
 		info, _ := arch.GetInfo("")
 		other := "arm_fadvise64_64" // arm only

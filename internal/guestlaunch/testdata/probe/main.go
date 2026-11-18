@@ -59,11 +59,101 @@ func write(path string) {
 	report("write:"+path, err == nil, fmt.Sprint(err))
 }
 
+// inheritedFd is where "inherit" leaves a socket without CLOEXEC, as a guest server could leave its
+// vsock socket: the launcher must not pass it to the payload.
+const inheritedFd = 7
+
+// inherit plays the guest server before the launcher: it leaves a Unix socket at fd 7 without
+// CLOEXEC, starts an outside process (no launcher, so no Landlock domain and no filter) that holds a
+// socket at fd 3, and execs argv (the launcher, or the probe for the control run). The probe that
+// runs next reads the pid from KOINON_PROBE_OTHER_PID.
+func inherit(argv []string) {
+	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err == nil {
+		err = unix.Dup3(fd, inheritedFd, 0)
+	}
+	if err != nil {
+		fmt.Println("probe: inherit:", err)
+		os.Exit(2)
+	}
+	holder := exec.Command(os.Args[0], "sleep")
+	holder.ExtraFiles = []*os.File{os.NewFile(uintptr(fd), "socket")}
+	if err := holder.Start(); err != nil {
+		fmt.Println("probe: cannot start the outside process:", err)
+		os.Exit(2)
+	}
+	env := append(os.Environ(), fmt.Sprintf("KOINON_PROBE_OTHER_PID=%d", holder.Process.Pid))
+	err = unix.Exec(argv[0], argv, env)
+	fmt.Println("probe: exec:", err)
+	os.Exit(2)
+}
+
+// blockedAny reports an attempt as blocked on any error, with the error as the detail.
+func blockedAny(name string, err error, detail string) {
+	report(name, err == nil, detail+" "+fmt.Sprint(err))
+}
+
+// fdChecks are the ways a payload could get a socket it did not create (docs/dev/guest-launcher.md,
+// "The vsock channel").
+func fdChecks() {
+	_, err := unix.FcntlInt(inheritedFd, unix.F_GETFD, 0)
+	blockedAny("inherited_fd", err, "fd 7 left open without CLOEXEC before the launcher")
+
+	// Reopening a socket through its /proc fd link: the kernel refuses this for every socket (ENXIO).
+	if s, serr := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0); serr == nil {
+		f, oerr := os.OpenFile(fmt.Sprintf("/proc/self/fd/%d", s), os.O_RDWR, 0)
+		if oerr == nil {
+			_ = f.Close()
+		}
+		blockedAny("proc_reopen_own_socket", oerr, "open(/proc/self/fd/<own socket>)")
+		_ = unix.Close(s)
+	}
+
+	other := os.Getenv("KOINON_PROBE_OTHER_PID")
+	if other == "" {
+		return
+	}
+	var pid int
+	_, _ = fmt.Sscan(other, &pid)
+	_, err = os.ReadDir("/proc/" + other + "/fd")
+	blockedAny("proc_fd_list_other", err, "readdir(/proc/<outside pid>/fd)")
+	f, err := os.OpenFile("/proc/"+other+"/fd/3", os.O_RDWR, 0)
+	if err == nil {
+		_ = f.Close()
+	}
+	blockedAny("proc_fd_open_other", err, "open(/proc/<outside pid>/fd/3), a socket")
+	_, err = os.ReadFile("/proc/" + other + "/environ")
+	blockedAny("proc_environ_other", err, "read(/proc/<outside pid>/environ)")
+
+	buf := make([]byte, 8)
+	local := []unix.Iovec{{Base: &buf[0], Len: uint64(len(buf))}}
+	remote := []unix.RemoteIovec{{Base: 0x400000, Len: len(buf)}}
+	_, err = unix.ProcessVMReadv(pid, local, remote, 0)
+	denied("process_vm_readv_other", err, "process_vm_readv(<outside pid>)")
+	err = unix.PtraceAttach(pid)
+	denied("ptrace_other", err, "PTRACE_ATTACH <outside pid>")
+	pfd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		fmt.Println("pidfd_getfd_other skip pidfd_open:", err)
+		return
+	}
+	got, err := unix.PidfdGetfd(pfd, 3, 0)
+	if err == nil {
+		_ = unix.Close(got)
+	}
+	denied("pidfd_getfd_other", err, "pidfd_getfd(<outside pid>, 3)")
+	_ = unix.Close(pfd)
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "sleep" {
 		time.Sleep(time.Minute)
 		return
 	}
+	if len(os.Args) > 3 && os.Args[1] == "inherit" && os.Args[2] == "--" {
+		inherit(os.Args[3:])
+	}
+	fdChecks()
 	// ptrace of our own child: allowed to an unprivileged process, so only seccomp stops it.
 	child := exec.Command(os.Args[0], "sleep")
 	if err := child.Start(); err != nil {

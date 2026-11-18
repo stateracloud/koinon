@@ -4,6 +4,7 @@ package guestlaunch
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	seccomp "github.com/elastic/go-seccomp-bpf"
@@ -38,7 +39,12 @@ func knownSyscalls() map[string]bool {
 	return known
 }
 
-// denyList returns the sorted deny list the policy asks for.
+// processAccessDeny are the calls that read another process's memory or take its descriptors. They
+// stay denied when a policy replaces the deny list: they are what keeps the guest server's vsock
+// descriptors out of the payload's reach (docs/dev/guest-launcher.md, "The vsock channel").
+var processAccessDeny = []string{"ptrace", "process_vm_readv", "process_vm_writev", "pidfd_getfd", "kcmp"}
+
+// denyList returns the sorted deny list the policy asks for, always with processAccessDeny.
 func (s SeccompPolicy) denyList() []string {
 	base := DefaultSeccompDeny
 	if len(s.Deny) > 0 {
@@ -46,7 +52,7 @@ func (s SeccompPolicy) denyList() []string {
 	}
 	seen := map[string]bool{}
 	var out []string
-	for _, n := range append(append([]string{}, base...), s.DenyExtra...) {
+	for _, n := range slices.Concat(base, s.DenyExtra, processAccessDeny) {
 		if !seen[n] {
 			seen[n] = true
 			out = append(out, n)

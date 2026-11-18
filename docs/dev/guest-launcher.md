@@ -31,6 +31,9 @@ koinon-guest-launcher [--policy FILE] [--check] -- COMMAND [ARG...]
 
 Order of steps, all on one locked OS thread, then `execve`:
 
+0. Every descriptor above 2 is marked close-on-exec (`close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)`;
+   where the kernel lacks it, `FD_CLOEXEC` on each entry of `/proc/self/fd`; neither works: exit
+   70). The `execve` then closes them all, so nothing the guest server left open reaches the payload.
 1. `no_new_privs`.
 2. User drop to the policy's uid and gid (`setgroups`, `setresgid`, `setresuid`).
 3. Capability allowlist: bounding set (needs `CAP_SETPCAP`), then permitted, effective, inheritable
@@ -49,11 +52,34 @@ Order of steps, all on one locked OS thread, then `execve`:
    `socket(AF_VSOCK)` returns `EPERM`; a call from a foreign architecture (the i386 compat ABI
    through `int 0x80`, AArch32) returns `ENOSYS`; x32 (a number from 0x40000000 up on x86_64) returns `ENOSYS`, from go-seccomp-bpf.
 
-The vsock channel belongs to the guest server, not to the payload: the guest server runs outside the
-launcher's filter and keeps its own vsock sockets, and the payload that the launcher starts cannot
-open one. Every name in `seccomp.deny` and `deny_extra` is checked against the syscall names of all
+Every name in `seccomp.deny` and `deny_extra` is checked against the syscall names of all
 architectures the filter library knows: a name none has fails `Validate`; a name only another
-architecture has is skipped on this one and logged.
+architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`,
+`process_vm_writev`, `pidfd_getfd` and `kcmp` stay denied when a policy replaces `seccomp.deny`.
+
+### The vsock channel
+
+The vsock channel belongs to the guest server, not to the payload. The guest server runs outside the
+launcher and keeps its own vsock sockets; the payload runs as uid 0 until the non-root gap closes, so
+uid alone does not keep it out. Each way to a socket the payload did not create is closed:
+
+| Way | Control |
+| --- | --- |
+| `socket(AF_VSOCK)` | seccomp, `EPERM` |
+| A descriptor inherited without CLOEXEC | step 0 above: closed by the `execve` |
+| `open("/proc/<pid>/fd/<n>")` of a socket | the kernel: a socket cannot be opened through its fd link (`ENXIO`, even for unconfined root; `sock_no_open` in `net/socket.c`) |
+| `pidfd_getfd`, `ptrace`, `process_vm_readv`/`writev`, `kcmp` | seccomp, `EPERM`, in every policy |
+| `/proc/<pid>/mem`, `environ` and fd links of the guest server | the kernel's ptrace access check: the payload has no capability, so the guest server's permitted set is not a subset of its own (`cap_ptrace_access_check`); on the `vm` tier Landlock also refuses ptrace access to a process outside its domain |
+
+`pidfd_open` stays allowed: a pidfd only signals and waits (signals need no pidfd for the same uid),
+and the Go runtime and libuv use it for their children. Landlock keeps read on all of `/proc`:
+Landlock binds a rule to the inode a path names when the rule is added, so `/proc/self` resolves
+once, to the launcher's own `/proc/<pid>`. The payload keeps that pid across the `execve`, but each
+process it starts (a shell, git, a Node worker) has another pid, and such a rule leaves every child
+without its own `/proc/self` (tested: the child gets `EACCES`). Landlock cannot express "the
+caller's own pid"; the per-process entries that matter are guarded by the ptrace access check above.
+A uid-0 payload can still read the guest server's `status` and `cmdline`, and list the numbers in
+its `fd` directory (a mode check only, no descriptor); that closes with the non-root user.
 
 Exit 64 is a usage or policy error; exit 70 is a control that the policy requires and the guest
 could not apply (fail closed).
@@ -116,5 +142,8 @@ the Substrate guest gives a payload (root, `--cap-drop=ALL` plus `KILL`, `NET_BI
 by a Docker seccomp profile, `policy-vm.json` exits 70 and `policy-gvisor.json` starts. The probe
 tries `clone(CLONE_NEWUSER)`, `clone3`, `io_uring_setup`, `socket(AF_VSOCK)`, creating a file or
 a block device node in `/dev`, opening an unlisted node and, when the host gives one, a block
-device. The specs skip on a kernel with Landlock below ABI 5. Probe results in a microVM and in gVisor are a lab run, recorded
+device. Before the launcher, the probe plays the guest server (`probe inherit --`): it leaves a
+socket at fd 7 without CLOEXEC and starts an outside process that holds a socket; the payload then
+tries the inherited fd, `/proc/<pid>/fd/3`, `environ`, `ptrace`, `process_vm_readv` and
+`pidfd_getfd` on that process, also with `close_range` and with Landlock hidden. The specs skip on a kernel with Landlock below ABI 5. Probe results in a microVM and in gVisor are a lab run, recorded
 on #1087.

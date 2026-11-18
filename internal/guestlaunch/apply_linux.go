@@ -41,6 +41,13 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 	// Privilege state is per thread: do everything on one thread and exec from it.
 	runtime.LockOSThread()
 
+	// No descriptor above stderr reaches the payload: a socket the guest server left open without
+	// CLOEXEC (its vsock channel among them) would otherwise pass into the payload with the exec.
+	if err := closeInheritedFds(); err != nil {
+		return err
+	}
+	log.Info("guest launcher: descriptors above 2 close on exec")
+
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("guest launcher: set no_new_privs: %w", err)
 	}
@@ -63,6 +70,41 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 	}
 	log.Info("guest launcher: starting payload", "path", path)
 	return syscall.Exec(path, argv, env) //nolint:gosec // the launcher's purpose: exec the payload the policy names
+}
+
+// closeInheritedFds marks every descriptor from 3 up close-on-exec, so the execve that starts the
+// payload closes them all at once. Marking, not closing: the Go runtime holds descriptors of its own
+// (the netpoller's epoll), and closing one under it before the exec can crash the launcher. It uses
+// close_range(3, ~0U, CLOSE_RANGE_CLOEXEC) (Linux 5.11); on a kernel without it (ENOSYS, or EINVAL
+// for the flag on 5.9 and 5.10, or a gVisor that lacks it) it sets FD_CLOEXEC on each descriptor
+// /proc/self/fd lists. It fails closed: a descriptor it cannot mark stops the launch.
+func closeInheritedFds() error {
+	err := unix.CloseRange(3, math.MaxUint32, unix.CLOSE_RANGE_CLOEXEC)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) {
+		return fmt.Errorf("guest launcher: close_range: %w", err)
+	}
+	return cloexecFromProc()
+}
+
+func cloexecFromProc() error {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return fmt.Errorf("guest launcher: close_range unavailable and /proc/self/fd unreadable: %w", err)
+	}
+	for _, e := range entries {
+		fd, err := strconv.Atoi(e.Name())
+		if err != nil || fd < 3 {
+			continue
+		}
+		// The descriptor of the directory read above is already closed; EBADF is that one.
+		if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC); err != nil && !errors.Is(err, unix.EBADF) {
+			return fmt.Errorf("guest launcher: set close-on-exec on fd %d: %w", fd, err)
+		}
+	}
+	return nil
 }
 
 func lookPath(name string, env []string) (string, error) {

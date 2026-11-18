@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -140,12 +141,29 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		}
 		return m
 	}
-	attempts := []string{
+	// fdAttempts are the ways to a socket the payload did not create: a descriptor left open without
+	// CLOEXEC before the launcher, and the descriptors of a process outside the launcher.
+	fdAttempts := []string{
+		"inherited_fd", "proc_reopen_own_socket", "proc_fd_open_other",
+		"process_vm_readv_other", "ptrace_other", "pidfd_getfd_other",
+	}
+	// procReadAttempts read another process's /proc entries without taking a descriptor. A payload
+	// that holds CAP_SYS_PTRACE (policy.json keeps it on purpose) passes the kernel's access check;
+	// the image policies leave the payload no capability, and then they are blocked. The probe also
+	// lists /proc/<pid>/fd (proc_fd_list_other): for the same uid that is a mode check only and shows
+	// numbers, not descriptors, so it is reported and not asserted.
+	procReadAttempts := []string{"proc_environ_other"}
+	attempts := append([]string{
 		"ptrace", "mount", "bpf", "keyctl", "perf_event_open", "unshare_newuser", "unshare_newns",
 		"clone_newuser", "clone3", "io_uring_setup", "socket_vsock",
 		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
 		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
-	}
+	}, fdAttempts...)
+	// inherit runs argv after the probe has played the guest server: a socket at fd 7 without
+	// CLOEXEC and an outside process that holds a socket.
+	inherit := func(argv ...string) []string { return append([]string{"/bin/probe", "inherit", "--"}, argv...) }
+	// enxio is the kernel's answer to open() of a socket through its /proc fd link.
+	const enxio = "no such device or address"
 	// skipWithoutLandlock turns the one outcome that means "this Docker host has no Landlock of the
 	// ABI the policy needs" into a skip; every other failure stays a failure.
 	skipWithoutLandlock := func(out string, code int) {
@@ -155,17 +173,23 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	}
 
 	It("shows every attempt open without the launcher (control)", func() {
-		out, code := run("/bin/probe")
+		out, code := run(inherit("/bin/probe")...)
 		Expect(code).To(Equal(0), out)
 		v := verdicts(out)
-		for _, a := range []string{"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3"} {
+		for _, a := range []string{
+			"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3",
+			"inherited_fd", "proc_fd_list_other", "proc_environ_other", "ptrace_other", "pidfd_getfd_other",
+		} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}
+		// Even unconfined, a socket cannot be opened through its /proc fd link: the kernel answers ENXIO.
+		Expect(out).To(MatchRegexp(`proc_reopen_own_socket blocked .*`+enxio), out)
+		Expect(out).To(MatchRegexp(`proc_fd_open_other blocked .*`+enxio), out)
 	})
 
 	It("blocks the escape attempts and keeps the allowed paths writable", func() {
 		// SYS_ADMIN and SYS_PTRACE stay in the allowlist so only seccomp and Landlock can be the cause.
-		out, code := run("/launcher", "--policy", "/policy.json", "--", "/bin/probe")
+		out, code := run(inherit("/launcher", "--policy", "/policy.json", "--", "/bin/probe")...)
 		skipWithoutLandlock(out, code)
 		Expect(code).To(Equal(0), out)
 		v := verdicts(out)
@@ -190,7 +214,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 		DescribeTable("leave the payload no capability and set no_new_privs",
 			func(policy string) {
-				out, code := runWith(substrate, "/launcher", "--policy", "/"+policy, "--", "/bin/probe")
+				out, code := runWith(substrate, inherit("/launcher", "--policy", "/"+policy, "--", "/bin/probe")...)
 				skipWithoutLandlock(out, code)
 				Expect(code).To(Equal(0), out)
 				for _, f := range []string{"CapPrm", "CapEff", "CapAmb"} {
@@ -198,7 +222,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 				}
 				Expect(out).To(ContainSubstring("status NoNewPrivs: 1"))
 				v := verdicts(out)
-				for _, a := range attempts {
+				for _, a := range slices.Concat(attempts, procReadAttempts) {
 					Expect(v).To(HaveKeyWithValue(a, "blocked"), a+"\n"+out)
 				}
 				if bv, ok := v["dev_write_blockdev"]; ok {
@@ -209,13 +233,33 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 			Entry("gVisor tiers", "policy-gvisor.json"),
 		)
 
-		// A host without Landlock is simulated by a Docker seccomp profile that hides the syscall.
-		noLandlock := func() []string {
-			prof := `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["landlock_create_ruleset"],"action":"SCMP_ACT_ERRNO","errnoRet":38}]}`
-			path := filepath.Join(dir, "no-landlock.json")
+		// A host without a syscall is simulated by a Docker seccomp profile that answers it ENOSYS.
+		hide := func(syscall string) []string {
+			prof := `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["` + syscall + `"],"action":"SCMP_ACT_ERRNO","errnoRet":38}]}`
+			path := filepath.Join(dir, "no-"+syscall+".json")
 			Expect(os.WriteFile(path, []byte(prof), 0o600)).To(Succeed())
 			return append([]string{"--security-opt=seccomp=" + path}, substrate...)
 		}
+		noLandlock := func() []string { return hide("landlock_create_ruleset") }
+
+		It("closes inherited descriptors through /proc/self/fd when close_range is missing", func() {
+			out, code := runWith(hide("close_range"), inherit("/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")...)
+			skipWithoutLandlock(out, code)
+			Expect(code).To(Equal(0), out)
+			Expect(verdicts(out)).To(HaveKeyWithValue("inherited_fd", "blocked"), out)
+		})
+
+		It("keeps the outside process's descriptors closed to a root payload without Landlock", func() {
+			// No Landlock domain: the kernel's capability rule (the target's permitted set is not a
+			// subset of the payload's empty one) is what refuses the access.
+			out, code := runWith(noLandlock(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
+			Expect(code).To(Equal(0), out)
+			Expect(out).To(ContainSubstring("uid 0"))
+			v := verdicts(out)
+			for _, a := range slices.Concat(fdAttempts, procReadAttempts) {
+				Expect(v).To(HaveKeyWithValue(a, "blocked"), a+"\n"+out)
+			}
+		})
 
 		It("fails closed on the vm tier when Landlock is unavailable", func() {
 			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")
