@@ -19,22 +19,44 @@ import (
 	"time"
 )
 
-// SelfSigned makes a certificate for hosts (names and IPs) that is its own CA, and returns it with
-// its PEM, which a client's CA bundle trusts. commonName names the certificate.
+// SelfSigned makes a CA and a server certificate for hosts (names and IPs) that the CA signs. It returns
+// the server certificate and the PEM of the CA, which a client's CA bundle trusts. The server certificate
+// is not a CA: strict clients (rustls) refuse a CA certificate as a server certificate. commonName names
+// the CA.
 func SelfSigned(commonName string, hosts []string) (tls.Certificate, []byte, error) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	caTpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTpl, caTpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
 	tpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(time.Now().UnixNano()),
-		Subject:               pkix.Name{CommonName: commonName},
+		SerialNumber:          big.NewInt(time.Now().UnixNano() + 1),
+		Subject:               pkix.Name{CommonName: commonName + " server"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:                  true,
 	}
 	for _, h := range hosts {
 		if h = strings.TrimSpace(h); h == "" {
@@ -46,10 +68,10 @@ func SelfSigned(commonName string, hosts []string) (tls.Certificate, []byte, err
 			tpl.DNSNames = append(tpl.DNSNames, h)
 		}
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	der, err := x509.CreateCertificate(rand.Reader, tpl, caCert, &key.PublicKey, caKey)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), nil
 }

@@ -23,6 +23,9 @@ func TestSelfSignedVerifiesForItsHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if leaf.IsCA {
+		t.Error("the server certificate is a CA: strict clients refuse it")
+	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
 		t.Fatal("the PEM is not a certificate")
