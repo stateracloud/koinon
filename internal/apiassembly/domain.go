@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -114,6 +115,10 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	d.catalog = catalog.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	d.mcp = mcpservers.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy).WithPreflight(mcpservers.OAuthPreflight(d.urlPolicy)).WithRestoreHold(d.hold)
+	if set.GatewayMode == project.GatewayKubernetes {
+		// The Kubernetes driver cannot render a per-target TLS policy (gateway.MCPTargetCA).
+		d.mcp.WithoutTargetTLS()
+	}
 	// The provider echo check sends one request through the gateway with the org's model-check key,
 	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
 	// access the check answers that it is not configured.

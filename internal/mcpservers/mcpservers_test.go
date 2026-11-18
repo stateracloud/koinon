@@ -194,6 +194,26 @@ var _ = Describe("Service", func() {
 			)
 		})
 
+		Describe("a gateway that cannot render a per-server TLS policy (#278)", func() {
+			It("refuses a CA bundle or insecureSkipVerify on create and update, and still takes a plain server", func(ctx SpecContext) {
+				svc.WithoutTargetTLS()
+				set, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+				Expect(err).NotTo(HaveOccurred())
+				ca := string(set.CA)
+				_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: ca})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("gateway.mode=standalone"))
+				_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "scratch", URL: "https://scratch.example.test/mcp", InsecureSkipVerify: true})
+				Expect(err).To(HaveOccurred())
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "plain", URL: "https://plain.example.test/mcp"})
+				Expect(err).NotTo(HaveOccurred())
+				on := true
+				_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{InsecureSkipVerify: &on})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("gateway.mode=standalone"))
+			})
+		})
+
 		Describe("a server that skips certificate verification (#278)", func() {
 			insecure := true
 			It("is kept, shown, audited and handed to the preflight", func(ctx SpecContext) {
@@ -323,7 +343,7 @@ var _ = Describe("Service", func() {
 			})
 		})
 
-		It("refuses a credential on a URL that is not https, as the gateway would drop it (ADR 0120)", func(ctx SpecContext) {
+		It("refuses a credential on a URL that is not https, as the gateway would drop it (ADR 0057 amendment 2026-11-18)", func(ctx SpecContext) {
 			_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "http://x.example.com/mcp", CredentialValue: "not-a-real-token"})
 			Expect(err).To(MatchError(ContainSubstring("must be https")))
 			_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "http://x.example.com/mcp"})

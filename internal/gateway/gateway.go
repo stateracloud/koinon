@@ -160,9 +160,10 @@ type LedgerBudgets interface {
 
 // MCPTargetCA is implemented by a driver that cannot render a per-target TLS policy for an MCP target:
 // a TLS root of its own or a skipped certificate check (the Kubernetes driver: the CRD path is frozen
-// for MCP, ADR 0097 decision 4). A caller leaves a server with a CA bundle or with insecureSkipVerify
-// out of the state and reports it on that server, because a driver that refused the whole state for
-// one target would hold back every other org's change. A driver that does not implement it renders
+// for MCP, ADR 0097 decision 4). koinon-api refuses a save that sets either when gateway.mode is
+// kubernetes (mcpservers.Service.WithoutTargetTLS). The reconciler, as a guard for a row saved
+// earlier, leaves such a server out of the state and reports it on that server, because a driver that
+// refused the whole state for one target would hold back every other org's change. A driver that does not implement it renders
 // per-target TLS policy.
 type MCPTargetCA interface {
 	RendersMCPTargetCA() bool

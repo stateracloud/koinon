@@ -166,6 +166,29 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
 	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 
+	By("a second server with insecureSkipVerify and no CA completes the real TLS handshake through the gateway")
+	// The fake's certificate is signed by a per-run CA that is in no root store, so only the skipped
+	// check lets the gateway's handshake pass; the prober's tool listing is a real call through it.
+	code, body = admin(ctx, http.MethodPost, "/mcp-servers",
+		fmt.Sprintf(`{"name":"scratch","url":%q,"credentialHeader":"X-Api-Key","credentialValue":%q,"insecureSkipVerify":true}`, fakeMCPURL, fakeMCPKey))
+	Expect(code).To(Equal(http.StatusCreated), string(body))
+	var scratch struct {
+		ID string `json:"id"`
+	}
+	Expect(json.Unmarshal(body, &scratch)).To(Succeed())
+	Eventually(func(g Gomega) {
+		code, body := admin(ctx, http.MethodGet, "/mcp-servers/"+scratch.ID)
+		g.Expect(code).To(Equal(http.StatusOK), string(body))
+		var s struct {
+			Health, HealthReason string
+			ToolsSyncedAt        *time.Time
+		}
+		g.Expect(json.Unmarshal(body, &s)).To(Succeed())
+		g.Expect(s.Health).To(Equal("healthy"), s.HealthReason)
+		g.Expect(s.ToolsSyncedAt).NotTo(BeNil())
+	}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+	Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
+
 	By("an admin confirms read_item as auto and allows the agent")
 	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/read_item/tier", `{"tier":"auto"}`)
 	Expect(code).To(Equal(http.StatusOK), string(body))

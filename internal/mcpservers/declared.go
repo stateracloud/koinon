@@ -52,6 +52,9 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return false, err
 	}
+	if err := s.checkTargetTLS(in.CABundle, in.InsecureSkipVerify); err != nil {
+		return false, err
+	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return false, err
 	}
@@ -83,12 +86,14 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 		if cur != nil {
 			exceptID = cur.ID
 		}
-		if err := checkCABudgets(ctx, q, org, exceptID, in.CABundle); err != nil {
-			return err
-		}
 		// A lost credential (keys forget) is written again from the Secret, which still holds it.
 		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil
+		}
+		if cur == nil || cur.CaBundle != in.CABundle {
+			if err := checkCABudgets(ctx, q, org, exceptID, in.CABundle); err != nil {
+				return err
+			}
 		}
 		// A new server or a new address is one the prober will dial: a held install applies neither
 		// (the importer skips this Secret and goes on; ADR 0107). A change of credential alone dials nothing.

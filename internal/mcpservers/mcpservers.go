@@ -270,6 +270,24 @@ type Service struct {
 	policy    catalog.URLPolicy
 	preflight Preflight
 	hold      *restorehold.Guard
+	// noTargetTLS is set when the configured gateway cannot render a per-target TLS policy.
+	noTargetTLS bool
+}
+
+// WithoutTargetTLS says the configured gateway cannot render a server's own CA or a skipped
+// certificate check (gateway.mode=kubernetes, see gateway.MCPTargetCA). The service then refuses a
+// save that sets either, instead of accepting a server the reconciler would leave out.
+func (s *Service) WithoutTargetTLS() *Service {
+	s.noTargetTLS = true
+	return s
+}
+
+// checkTargetTLS refuses a CA bundle or insecureSkipVerify when the gateway cannot render it.
+func (s *Service) checkTargetTLS(caBundle string, insecure bool) error {
+	if s.noTargetTLS && (caBundle != "" || insecure) {
+		return invalid("this installation's gateway (gateway.mode=kubernetes) cannot trust a server's own CA or skip the certificate check, so caBundle and insecureSkipVerify are refused; use gateway.mode=standalone, or a server with a certificate from a public CA")
+	}
+	return nil
 }
 
 // WithRestoreHold makes the preflight (the only outward call of this service) refuse with
@@ -676,6 +694,9 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return Server{}, err
 	}
+	if err := s.checkTargetTLS(in.CABundle, in.InsecureSkipVerify); err != nil {
+		return Server{}, err
+	}
 	if in.Class != nil {
 		d, err := in.Class.Normalize()
 		if err != nil {
@@ -809,16 +830,21 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err := ValidateTLSTrust(u, caBundle, insecure); err != nil {
 			return err
 		}
-		if caBundle != "" && caBundle != cur.CaBundle {
-			if err := checkCABudgets(ctx, q, org, sid, caBundle); err != nil {
-				return err
-			}
+		if err := s.checkTargetTLS(caBundle, insecure); err != nil {
+			return err
 		}
 		if err := s.policy.Check(ctx, u); err != nil {
 			return err
 		}
 		if u != cur.Url || transport != string(cur.Transport) || caBundle != cur.CaBundle || insecure != cur.InsecureSkipVerify {
 			if err := s.runPreflight(ctx, u, transport, caBundle, insecure); err != nil {
+				return err
+			}
+		}
+		// After the preflight (up to 8 s of network): the budget check takes the global advisory
+		// lock, which must be held only for the writes.
+		if caBundle != "" && caBundle != cur.CaBundle {
+			if err := checkCABudgets(ctx, q, org, sid, caBundle); err != nil {
 				return err
 			}
 		}

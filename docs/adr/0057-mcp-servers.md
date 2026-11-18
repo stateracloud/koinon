@@ -325,7 +325,7 @@ JSON document is now decoded before its text is fingerprinted, up to three level
 
 Status: accepted (the maintainer's decision on #278).
 
-- **https rule.** A server with a credential must have an https URL (ADR 0120). Plain http stays allowed
+- **https rule.** A server with a credential must have an https URL (this amendment records the rule). Plain http stays allowed
   for a loopback address (`gateway.CredentialSafeURL`). The API refuses the rest when you add or change the
   server, and the reconciler leaves such a row out of the gateway state, so a row from before the rule is
   not served with its credential in the clear.
@@ -358,9 +358,12 @@ Status: accepted (the maintainer's decision on #278).
 - **Add-time check.** The API's own probe uses the same bundle, and only that bundle. A certificate that does not verify gives an
   error that says to put the CA in `caBundle`.
 - **Declared servers** read the keys `caBundle` and `insecureSkipVerify` (`true` or `false`) from the labelled Secret.
-- The `kubernetes` gateway mode cannot render a per-target CA, so it leaves a server that has one out of
-  the gateway state and reports it on that server (the render itself refuses such a target as a last
-  guard); use `gateway.mode=standalone`.
+- The `kubernetes` gateway mode cannot render a per-target CA or a skipped certificate check (ADR 0097
+  decision 4 freezes the CRD path for MCP). koinon-api knows the mode (`KOINON_GATEWAY_MODE`, set by the
+  chart) and refuses a save with `caBundle` or `insecureSkipVerify` in that mode, with a message that names
+  `gateway.mode=standalone`. That covers the API and declared Secrets. As guards the reconciler still leaves
+  out a row that has either (a row saved before the mode changed) and reports it on that server, and the
+  render refuses such a target.
 
 ## Upstream verification
 
