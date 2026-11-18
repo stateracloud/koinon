@@ -397,12 +397,12 @@ if ! grep -qx 'harnesses=true' <<<"$out"; then
 	fails=$((fails + 1))
 fi
 
-# chartsmoke: real `go list` of the suite plus the three cmd binaries images_test builds; seed
+# chartsmoke: real `go list` of the suite plus the four cmd binaries images_test builds; seed
 # inputs the graph cannot name (charts/, hack/versions.env) must also turn the job on.
 cs_suite=$(GOOS=linux go list -deps -test -f '{{.ImportPath}}' ./test/chartsmoke/... | awk '{print $1}' | grep -F "$mod/" | grep -v '\.test$' | sed -e "s#^$mod/##" -e 's#_test$##' | sort -u)
-cs_cmds=$(GOOS=linux go list -deps -f '{{.ImportPath}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler | awk '{print $1}' | grep -F "$mod/" | sed -e "s#^$mod/##" | sort -u)
+cs_cmds=$(GOOS=linux go list -deps -f '{{.ImportPath}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler ./cmd/koinon-gateway | awk '{print $1}' | grep -F "$mod/" | sed -e "s#^$mod/##" | sort -u)
 cs_dirs=$(printf '%s\n%s\n' "$cs_suite" "$cs_cmds" | sort -u)
-for pkg in test/chartsmoke cmd/koinon-api cmd/koinon-agentd cmd/koinon-reconciler internal/preflight web api/admin/v1; do
+for pkg in test/chartsmoke cmd/koinon-api cmd/koinon-agentd cmd/koinon-reconciler cmd/koinon-gateway internal/preflight web api/admin/v1; do
 	total=$((total + 1))
 	if ! grep -qxF "$pkg" <<<"$cs_dirs"; then
 		echo "FAIL: go list of chartsmoke does not contain $pkg"

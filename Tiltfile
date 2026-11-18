@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Inner loop (ADR 0039, plan item X1): builds koinon-api, koinon-reconciler and koinon-agentd with ko,
+# Inner loop (ADR 0039, plan item X1): builds koinon-api, koinon-reconciler, koinon-agentd and koinon-gateway with ko,
 # the harness images with `make harness-*`, and deploys charts/koinon (values: hack/dev/values*.yaml)
 # into the namespace `koinon`. Two profiles, chosen by the kube context:
 #
@@ -75,7 +75,7 @@ for f in harnesses:
 # local registry that `make dev-kind-up` starts (localhost:5001, test/e2e/kind/registry.sh); on a remote
 # cluster it pushes to your registry.
 def ko_image(name):
-    # The chart's images are <image.registry>/api, /reconciler and /agentd (#167); the binary is cmd/koinon-<name>.
+    # The chart's images are <image.registry>/api, /reconciler, /agentd and /gateway (#167); the binary is cmd/koinon-<name>.
     repo = registry + '/' + name
     ref_file = '.tilt-ko-' + name
     custom_build(
@@ -90,7 +90,7 @@ def ko_image(name):
         skips_local_docker=True,
     )
 
-for n in ['api', 'reconciler', 'agentd']:
+for n in ['api', 'reconciler', 'agentd', 'gateway']:
     ko_image(n)
 
 # Harness images are not in any pod spec Tilt sees (the reconciler starts sandboxes from them), so

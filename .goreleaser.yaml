@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Release configuration (plan item REL1, ADR 0027). GoReleaser OSS builds the three Koinon images
+# Release configuration (plan item REL1, ADR 0027). GoReleaser OSS builds the four Koinon images
 # with its kos pipe, pushes them to ghcr.io/stateracloud/koinon, signs the manifests when the workflow
 # asks for it and drafts the GitHub release with notes from the Conventional Commits.
 # .github/workflows/release.yml runs it on a tag; docs/dev/releasing.md describes the process.
