@@ -38,7 +38,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
@@ -419,7 +421,9 @@ func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor
 	for {
 		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
 		if err != nil {
-			if ctx.Err() != nil {
+			// The server can end the call on the propagated deadline a moment before the client's
+			// ctx is done: that is the bound too.
+			if ctx.Err() != nil || status.Code(err) == codes.DeadlineExceeded {
 				return nil, fail(op, execution.ErrUnavailable, "sandbox %s did not settle after suspend: %v", k, err)
 			}
 			return nil, execution.GRPCError(op, err)
