@@ -5,12 +5,14 @@ package preflight_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,14 +36,16 @@ type fakeIssuer struct {
 func (f fakeIssuer) Issuer(context.Context) (string, error) { return f.issuer, f.err }
 
 type fakeIssuerProbe struct {
-	res IssuerResult
-	err error
+	res    IssuerResult
+	err    error
+	probed string
 }
 
 // IssuerResult aliases the package type for brevity.
 type IssuerResult = preflight.IssuerResult
 
-func (f fakeIssuerProbe) ProbeIssuer(context.Context, string) (IssuerResult, error) {
+func (f *fakeIssuerProbe) ProbeIssuer(_ context.Context, issuer string) (IssuerResult, error) {
+	f.probed = issuer
 	return f.res, f.err
 }
 
@@ -85,7 +89,7 @@ type substrateCluster struct {
 	kube    []runtime.Object
 	dynamic []runtime.Object
 	issuer  fakeIssuer
-	probe   fakeIssuerProbe
+	probe   *fakeIssuerProbe
 	devices fakeDevices
 	config  preflight.Config
 }
@@ -94,10 +98,10 @@ func healthySubstrate() *substrateCluster {
 	c := &substrateCluster{
 		minor:  "37",
 		issuer: fakeIssuer{issuer: "https://issuer.example.com"},
-		probe:  fakeIssuerProbe{res: IssuerResult{Reachable: true, Detail: "HTTP 200 OK"}},
+		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, Detail: "HTTP 200 OK"}},
 	}
 	c.kube = []runtime.Object{
-		deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1),
+		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.0", nil, 1),
 		deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
 	}
 	for _, name := range preflight.SubstrateCRDs {
@@ -210,7 +214,7 @@ var _ = Describe("Substrate checks", func() {
 
 	It("fails when a node lacks the microVM devices, and skips the probe outside the vm tier", func(ctx SpecContext) {
 		c := healthySubstrate()
-		c.devices = fakeDevices{err: errors.New("FailedMount: /dev/kvm is not a character device")}
+		c.devices = fakeDevices{err: fmt.Errorf("%w: FailedMount: /dev/kvm is not a character device", preflight.ErrDevicesMissing)}
 		r := find(c.run(ctx), "Substrate node devices")
 		Expect(r.Status).To(Equal(preflight.Fail))
 		Expect(r.Message).To(And(ContainSubstring("/dev/kvm"), ContainSubstring("/dev/vhost-vsock")))
@@ -218,26 +222,66 @@ var _ = Describe("Substrate checks", func() {
 		Expect(checks(c.run(ctx))).NotTo(ContainElement("Substrate node devices"))
 	})
 
+	It("reports the real cause when the device probe pod cannot run, not a missing /dev/kvm", func(ctx SpecContext) {
+		c := healthySubstrate()
+		c.devices = fakeDevices{err: errors.New(`create probe pod: namespaces "ate-system" not found`)}
+		r := find(c.run(ctx), "Substrate node devices")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring(`namespaces "ate-system" not found`))
+		Expect(r.Message).NotTo(ContainSubstring("/dev/kvm"))
+		Expect(r.Fix).NotTo(ContainSubstring("KVM"))
+	})
+
+	It("reads the version from a component image name, not the Deployment name", func(ctx SpecContext) {
+		c := healthySubstrate()
+		c.kube[0] = deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v0.9.0", nil, 1)
+		r := find(c.run(ctx), "Agent Substrate")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring("v0.9.0"))
+	})
+
 	Describe("service-account issuer", func() {
 		It("fails with the supported fixes when a pod cannot reach an IPv6 ULA issuer", func(ctx SpecContext) {
 			c := healthySubstrate()
 			c.issuer = fakeIssuer{issuer: "https://[fdae:1::1]:10001"}
-			c.probe = fakeIssuerProbe{res: IssuerResult{Detail: "dial tcp [fdae:1::1]:10001: connect: network is unreachable"}}
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Detail: "dial tcp [fdae:1::1]:10001: connect: network is unreachable"}}
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(And(
-				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("not reachable from a pod in namespace ate-system"),
+				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("from a pod in namespace ate-system"),
 				ContainSubstring("invalid bearer token"), ContainSubstring("IPv6 unique-local address"),
 			))
-			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("discovery-URL override"), ContainSubstring("not a supported install")))
+			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("--expected-jwt-issuer"), ContainSubstring("not a supported install")))
 		})
 
 		It("fails, not warns, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
 			c := healthySubstrate()
-			c.probe = fakeIssuerProbe{res: IssuerResult{Reachable: true, Unverified: true, Detail: "TLS verification failed"}}
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, Unverified: true, Detail: "TLS verification failed"}}
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(ContainSubstring("invalid bearer token"))
+		})
+
+		It("passes with the in-cluster issuer and shows the cluster's own issuer string as information", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.issuer = fakeIssuer{issuer: "https://[fdae:1::1]:10001"}
+			c.config.Substrate.ExpectedIssuer = "https://kubernetes.default.svc"
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://kubernetes.default.svc", Detail: "ok"}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Pass), r.Message)
+			Expect(c.probe.probed).To(Equal("https://kubernetes.default.svc"))
+			Expect(r.Message).To(And(ContainSubstring("discovery document names https://[fdae:1::1]:10001"), ContainSubstring("carry iss https://kubernetes.default.svc")))
+		})
+
+		It("fails when the tokens of pods carry another issuer than Substrate would trust", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.issuer = fakeIssuer{issuer: "https://[fdae:1::1]:10001"}
+			c.config.Substrate.ExpectedIssuer = "https://kubernetes.default.svc"
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://[fdae:1::1]:10001", Detail: "ok"}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(And(ContainSubstring("unexpected issuer"), ContainSubstring("https://[fdae:1::1]:10001")))
+			Expect(r.Fix).To(ContainSubstring("--expected-jwt-issuer https://[fdae:1::1]:10001"))
 		})
 
 		It("fails when the discovery document cannot be read or the probe pod fails", func(ctx SpecContext) {
@@ -245,7 +289,7 @@ var _ = Describe("Substrate checks", func() {
 			c.issuer = fakeIssuer{err: errors.New("forbidden")}
 			Expect(find(c.run(ctx), "Service-account issuer").Fix).To(ContainSubstring("system:service-account-issuer-discovery"))
 			c = healthySubstrate()
-			c.probe = fakeIssuerProbe{err: errors.New("timed out")}
+			c.probe = &fakeIssuerProbe{err: errors.New("timed out")}
 			Expect(find(c.run(ctx), "Service-account issuer").Message).To(ContainSubstring("timed out"))
 		})
 
@@ -261,9 +305,10 @@ var _ = Describe("Substrate checks", func() {
 		})
 
 		It("round-trips the probe output", func() {
-			res, err := preflight.ParseIssuerProbeOutput(preflight.IssuerResult{Reachable: true, Unverified: true, Detail: "HTTP 200 OK"}.String() + "\n")
+			want := preflight.IssuerResult{Reachable: true, Unverified: true, TokenIssuer: "https://k.example", Detail: "HTTP 200 OK"}
+			res, err := preflight.ParseIssuerProbeOutput(want.String() + "\n")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res).To(Equal(preflight.IssuerResult{Reachable: true, Unverified: true, Detail: "HTTP 200 OK"}))
+			Expect(res).To(Equal(want))
 			_, err = preflight.ParseIssuerProbeOutput("noise")
 			Expect(err).To(HaveOccurred())
 		})
@@ -276,6 +321,37 @@ var _ = Describe("Substrate checks", func() {
 			Expect(*v.HostPath.Type).To(Equal(corev1.HostPathCharDev))
 		}
 		Expect(*p.Spec.AutomountServiceAccountToken).To(BeFalse())
+	})
+
+	It("gives the issuer probe pod the default ServiceAccount token and no hostPath", func() {
+		p := preflight.KubeSubstrateProber{Namespace: "ate-system", NamePrefix: "x", Image: "img"}.IssuerPod("https://kubernetes.default.svc")
+		Expect(*p.Spec.AutomountServiceAccountToken).To(BeTrue())
+		Expect(p.Spec.Volumes).To(BeEmpty())
+		Expect(p.Spec.Containers[0].Args).To(ContainElements("issuer-probe", "https://kubernetes.default.svc"))
+	})
+
+	It("tells a FailedMount (a missing device) from a probe pod that cannot be created", func(ctx SpecContext) {
+		client := fake.NewClientset(&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Name: "e", Namespace: "ate-system"},
+			InvolvedObject: corev1.ObjectReference{Name: "fresh"}, Type: corev1.EventTypeWarning,
+			Reason: "FailedMount", Message: "hostPath type check failed: /dev/kvm is not a character device",
+		})
+		client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+			a.(k8stesting.CreateAction).GetObject().(*corev1.Pod).Name = "fresh"
+			return false, nil, nil
+		})
+		p := preflight.KubeSubstrateProber{Client: client, Namespace: "ate-system", NamePrefix: "x", Image: "img", Timeout: 50 * time.Millisecond, PollInterval: time.Millisecond}
+		Expect(p.ProbeDevices(ctx)).To(MatchError(preflight.ErrDevicesMissing))
+
+		client = fake.NewClientset()
+		client.PrependReactor("create", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "ate-system")
+		})
+		p.Client = client
+		err := p.ProbeDevices(ctx)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.Is(err, preflight.ErrDevicesMissing)).To(BeFalse())
+		Expect(err.Error()).To(ContainSubstring("not found"))
 	})
 
 	It("puts only the device probe on the worker nodes", func() {

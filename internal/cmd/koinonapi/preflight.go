@@ -45,6 +45,7 @@ type preflightConfig struct {
 	substrateVMTier       bool
 	substrateProbes       bool
 	substrateNamespace    string
+	substrateIssuer       string
 
 	netpolProbe      bool
 	netpolTimeout    time.Duration
@@ -82,6 +83,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringArrayVar(&c.substratePools, "substrate-worker-pool", nil, "<tier>=<WorkerPool name> that must be ready (repeatable)")
 	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
 	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
+	fs.StringVar(&c.substrateIssuer, "substrate-expected-issuer", "", "the service-account issuer Substrate trusts (ate-setup --ateapi-expected-jwt-issuer); empty is the issuer in the API server's discovery document")
 	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod and the device probe pod in the Substrate namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
@@ -101,7 +103,7 @@ func (c *preflightConfig) validate() error {
 	switch c.driver {
 	case "openshell":
 	case "substrate":
-		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, VMTier: c.substrateVMTier, WorkerPools: map[string]string{}}
+		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, WorkerPools: map[string]string{}}
 		for _, kv := range c.substratePools {
 			tier, name, ok := strings.Cut(kv, "=")
 			if !ok || tier == "" || name == "" {
@@ -186,7 +188,7 @@ func newIssuerProbeCommand() *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "issuer-probe",
-		Short: "Run inside the Substrate issuer probe pod: fetch the OIDC discovery document from the issuer URL",
+		Short: "Run inside the Substrate issuer probe pod: fetch the OIDC discovery document and JWKS the way Substrate's api server does",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), preflight.ProbeIssuerFromPod(cmd.Context(), issuer, timeout))

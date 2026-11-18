@@ -49,7 +49,7 @@ func newSubstrateCommand() *cobra.Command {
 		Use:   "install",
 		Short: "Build the pinned ate-setup, check the prerequisites, run it with the Koinon profile, then run the preflight",
 		Long: "Exports the pinned Substrate commit from a git repository, builds ate-setup from that export, then runs the Substrate prerequisite preflight (Kubernetes 1.37 or later, the node devices of the vm tier, a " +
-			"service-account issuer that pods can reach) and stops before it installs anything when one fails. " +
+			"service-account issuer that Substrate's api server can validate from a pod) and stops before it installs anything when one fails. " +
 			"Then it runs ate-setup deploy ate-system (" + substrateinstall.PinnedVersion + ", pre-built images) with the Koinon profile, waits for the CRDs, " +
 			"lets the router accept the atenet client and runs the full preflight. Run it before helm install " +
 			"with execution.driver: substrate.",
@@ -85,6 +85,11 @@ func newSubstrateCommand() *cobra.Command {
 	f.StringVar(&profile.StorageBucket, "storage-bucket", "", "object-storage bucket for snapshots")
 	f.StringVar(&profile.SandboxClasses, "sandbox-classes", "", "ate-setup --sandbox-classes (default gvisor,microvm)")
 	f.StringVar(&profile.ImageRepo, "image-repo", "", "registry path of the Substrate release images (default the pinned public path)")
+	f.StringVar(&profile.PostgresStorageClass, "postgres-storage-class", "", "StorageClass of the bundled PostgreSQL volume (ate-setup --ateapi-postgres-storage-class); needed on a cluster without a default StorageClass")
+	f.StringVar(&profile.SetupCSI, "setup-csi", "", "ate-setup --setup-csi: also install a CSI driver (nfs, hostpath, both or none; default none)")
+	f.StringVar(&profile.ExpectedJWTIssuer, "expected-jwt-issuer", "", "service-account issuer Substrate's api server trusts (ate-setup --ateapi-expected-jwt-issuer); default is the issuer in the API server's discovery document. "+
+		"Set https://kubernetes.default.svc when the tokens carry that issuer but the discovery document names an address pods cannot reach")
+	f.BoolVar(&profile.Kind, "kind", false, "target a local kind cluster (ate-setup --kind)")
 	mustRequire(install, "substrate-source")
 	mustRequire(install, "kubeconfig")
 	mustRequire(install, "context")

@@ -19,6 +19,15 @@ koinon-api substrate install --substrate-source /path/to/substrate \
   --substrate-worker-pool vm=<WorkerPool name>
 ```
 
+Options for a real cluster, passed to `ate-setup` under the names the pinned `ate-setup` defines:
+
+| `koinon-api substrate install` | `ate-setup` | When you need it |
+| --- | --- | --- |
+| `--postgres-storage-class <name>` | `--ateapi-postgres-storage-class` | The cluster has no default StorageClass: the bundled Postgres claim stays Pending without it. |
+| `--setup-csi nfs\|hostpath\|both\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`; `hostpath` is for kind only). |
+| `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
+| `--kind` | `--kind` | The cluster is a local kind cluster. |
+
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
 `ate-setup` call, and it never acts on the ambient current context. `--substrate-probes=false` is refused:
 the probe pods are the prerequisite checks.
@@ -39,14 +48,16 @@ server image with no tag fails the preflight. The preflight finds the api server
 (`ate-api-server`), not by position.
 
 The images are pinned by tag, not by digest. When Substrate publishes image digests with a release, they
-get pinned in `substratepin.go`. The image repository stays on the Unverified list below.
+get pinned in `substratepin.go`. The images live at `ghcr.io/agent-substrate/substrate/<component>:v1.0.0`,
+named by component (`ateapi` for the container `ate-api-server`), not by Deployment. The preflight reads the
+tag of the image of that container and never the image name.
 
 Order of the step:
 
 1. Build and check `ate-setup` (above).
 2. Run the prerequisite checks that need no namespace: the Kubernetes version and whether the service-account
    issuer can be read. When one fails, nothing was created.
-3. Create the Substrate namespace (Pod Security `privileged`) when it is missing. The probe pods run there.
+3. Create the Substrate namespace (Pod Security `enforce`, `warn` and `audit` all `privileged`) when it is missing. The probe pods run there.
 4. Run the probe checks (node devices, issuer reachability). Before each probe pod starts, the prober
    deletes stale probe pods that an earlier run left (same `component` and `part-of=koinon` labels). When a
    check fails and the installer created the namespace, the installer deletes the namespace again. A
@@ -85,24 +96,47 @@ The kubeconfig of the installer needs these rules:
 - With the vm tier: one node mounts `/dev/kvm`, `/dev/net/tun`, `/dev/vhost-vsock` and `/dev/vhost-net`
   (a probe pod with `CharDevice` host paths; only the node it lands on is checked, so use
   `--substrate-node-selector` to aim it at workers).
-- The service-account issuer answers from a pod in the Substrate namespace, with a certificate that
-  pod trusts. An issuer that answers only without TLS verification fails: Substrate rejects the tokens.
+- Substrate's api server can validate service-account tokens from a pod in its namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
   WorkerPool with all its workers ready (`status.readyReplicas`) and every sandbox class resolved.
 
-## Service-account issuer not reachable
+## Service-account issuer
 
-Substrate v1.0.0 fetches the OIDC discovery document and the JWKS from the issuer URL in the
-service-account tokens. `ate-setup` has `--ateapi-expected-jwt-issuer`, but it sets the issuer the api
-server trusts, not where it fetches from. On Talos the issuer is an IPv6 unique-local address that pods
-cannot route to, and every call then fails with "invalid bearer token". Supported fixes:
+The probe repeats what Substrate v1.0.0's api server does to validate a token, from a pod with the default
+ServiceAccount of the Substrate namespace (source at commit `b34fbee7`):
 
-1. Set the API server's `--service-account-issuer` (and `--service-account-jwks-uri`) to a URL that
-   pods reach. On Talos, set `cluster.apiServer.extraArgs`.
-2. Wait for an upstream discovery-URL override in Substrate (not yet requested; a human posts it).
+- `internal/oidcjwt/oidcjwt.go` `discoverKeysForIssuer` (line 606): `GET <issuer>/.well-known/openid-configuration`,
+  the document's `issuer` must equal the configured issuer, then `GET` its `jwks_uri`.
+- `cmd/ate-setup/internal/steps/create.go` `kubernetesJWTProvider` (line 253): for the in-cluster issuer
+  `https://kubernetes.default.svc` the provider carries the pod's own `ca.crt` and `token`. For any other issuer
+  it has neither: system roots, no credential.
+- `internal/oidcjwt/http.go` `issuerDiscoveryTransport.RoundTrip` (line 146): the token goes on requests under the issuer and
+  on `https` requests to `/openid/v1/jwks`, so a `jwks_uri` on the API server's address works.
+- `internal/oidcjwt/oidcjwt.go` `Verify` (line 277): a token is accepted only when its `iss` equals the issuer.
 
-A sidecar that serves a copy of the discovery document on the issuer address is not a supported install.
+The issuer Substrate trusts is `--expected-jwt-issuer` when you give it, else the `issuer` of the API server's
+discovery document (`ate-setup` `jwtIssuer`, create.go line 229). The cluster's own issuer string is shown as
+information. The check fails when:
+
+- the discovery document or the JWKS cannot be fetched by that path from a pod. On a cluster whose own issuer
+  is an address pods cannot route to (an Omni or Talos IPv6 unique-local address), the default issuer fails
+  this way, and every call then fails with "invalid bearer token";
+- the connection works only without TLS verification;
+- the `iss` claim of the pod's own token differs from the issuer Substrate would trust ("unexpected issuer").
+
+Supported fixes, in this order:
+
+1. The tokens already carry `https://kubernetes.default.svc` (the API server lists it first in
+   `--service-account-issuer`): pass `--expected-jwt-issuer https://kubernetes.default.svc`. Substrate then
+   reads discovery from the in-cluster API server with the pod's token. Pods need no route to anything else.
+2. Otherwise set the API server's first `--service-account-issuer` to `https://kubernetes.default.svc`, or to a
+   URL that pods reach with a certificate from the system roots. On Talos, set `cluster.apiServer.extraArgs`.
+   Later `--service-account-issuer` values are only accepted for validation, not used to sign.
+
+The API server serves the discovery document and the JWKS to every service account through the
+`system:service-account-issuer-discovery` ClusterRoleBinding. A sidecar that serves a copy of the discovery
+document on the issuer address is not a supported install.
 
 ## Verified and unverified
 
@@ -121,11 +155,10 @@ credentials from OpenBao, and that was not done here). The names above come from
 - `--namespace` other than `ate-system`: ate-setup has the flag, but the lab found that `deploy ate-system`
   names three namespaces literally. The SPIFFE ID and the checks follow the configured namespace; an
   install into another one is untested.
-- The release image path `ghcr.io/agent-substrate/substrate` and that it holds every image under tag
-  `v1.0.0` (the Substrate docs say releases publish there; nothing was pulled).
 - An S3-compatible object store and an external Postgres: `--storage-bucket-name` is the only storage flag
   of `ate-setup`. The bundled Postgres is the default; an external one is set by environment
   (`ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING`), which this step does not pass yet.
 - That `--credential-provider='{"name":"k8s.io"}'` is the provider Koinon wants.
-- The `ate-setup --version` output format after a build with these `-ldflags`; the installer matches the version as a word and `commit=` exactly.
+- A full install with the new options (`--postgres-storage-class` and the others) and the in-cluster issuer
+  probe on a cluster; the lab run before them stopped at the issuer probe.
 - The RBAC of the preflight ServiceAccount (issuer discovery, `kube-root-ca.crt`): chart work.
