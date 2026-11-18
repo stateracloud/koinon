@@ -221,7 +221,11 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(tw.Close()).To(Succeed())
 
-				Expect(h.Compute.Upload(ctx, h.Workspace, "sb", "/sandbox", &buf)).To(Succeed())
+				err = h.Compute.Upload(ctx, h.Workspace, "sb", "/sandbox", &buf)
+				if errors.Is(err, execution.ErrUnsupported) {
+					Skip(driver + " does not support uploads")
+				}
+				Expect(err).NotTo(HaveOccurred())
 				if h.Uploaded != nil {
 					got, ok := h.Uploaded("sb", "/sandbox", "dir/a.txt")
 					Expect(ok).To(BeTrue(), "the file is in the sandbox")
@@ -231,6 +235,9 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 
 			It("reports a missing sandbox as ErrNotFound", func(ctx SpecContext) {
 				err := h.Compute.Upload(ctx, h.Workspace, "missing", "/sandbox", bytes.NewReader(nil))
+				if errors.Is(err, execution.ErrUnsupported) {
+					Skip(driver + " does not support uploads")
+				}
 				Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "got %v", err)
 			})
 		})
