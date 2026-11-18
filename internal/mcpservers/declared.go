@@ -27,6 +27,11 @@ type Declared struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialValue  string
+	// CABundle is the Secret's caBundle key: PEM certificates of the one CA that signs the server's
+	// certificate; only this CA is trusted for the server.
+	CABundle string
+	// InsecureSkipVerify is the Secret's insecureSkipVerify key: the certificate is not verified.
+	InsecureSkipVerify bool
 	// Disabled is the Secret's disabled key. It is applied in the transaction of the upsert, so a new
 	// server declared disabled is never visible enabled (ADR 0110 decision 5).
 	Disabled bool
@@ -36,12 +41,18 @@ type Declared struct {
 // changed. A declared server wins a name collision: the UI server of the same name is disabled
 // until the declared one goes. A name declared by another Secret is an error.
 func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared) (changed bool, err error) {
-	in := Input{Name: d.Name, URL: d.URL, Transport: d.Transport, CredentialHeader: d.CredentialHeader, CredentialPrefix: d.CredentialPrefix, CredentialValue: d.CredentialValue}
+	in := Input{Name: d.Name, URL: d.URL, Transport: d.Transport, CredentialHeader: d.CredentialHeader, CredentialPrefix: d.CredentialPrefix, CredentialValue: d.CredentialValue, CABundle: d.CABundle, InsecureSkipVerify: d.InsecureSkipVerify}
 	normalize(&in)
 	if err := ValidateName(in.Name); err != nil {
 		return false, err
 	}
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
+		return false, err
+	}
+	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
+		return false, err
+	}
+	if err := s.checkTargetTLS(in.CABundle, in.InsecureSkipVerify); err != nil {
 		return false, err
 	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
@@ -71,13 +82,22 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				}
 			}
 		}
+		var exceptID pgtype.UUID
+		if cur != nil {
+			exceptID = cur.ID
+		}
 		// A lost credential (keys forget) is written again from the Secret, which still holds it.
 		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil
 		}
+		if cur == nil || cur.CaBundle != in.CABundle {
+			if err := checkCABudgets(ctx, q, org, exceptID, in.CABundle); err != nil {
+				return err
+			}
+		}
 		// A new server or a new address is one the prober will dial: a held install applies neither
 		// (the importer skips this Secret and goes on; ADR 0107). A change of credential alone dials nothing.
-		if cur == nil || cur.Url != in.URL || string(cur.Transport) != in.Transport {
+		if cur == nil || cur.Url != in.URL || string(cur.Transport) != in.Transport || cur.CaBundle != in.CABundle || cur.InsecureSkipVerify != in.InsecureSkipVerify {
 			if err := s.hold.Err(); err != nil {
 				return err
 			}
@@ -101,6 +121,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			row, err = q.CreateMCPServer(ctx, store.CreateMCPServerParams{
 				OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 				CredentialHeader: pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
+				CaBundle: in.CABundle, InsecureSkipVerify: in.InsecureSkipVerify,
 				Source: store.ConfigSourceSecret, ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
 				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
 			})
@@ -114,7 +135,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				return err
 			}
 			row, err = q.UpdateDeclaredMCPServer(ctx, store.UpdateDeclaredMCPServerParams{
-				OrgID: org, ID: id, Url: in.URL, Transport: store.McpTransport(in.Transport),
+				OrgID: org, ID: id, Url: in.URL, Transport: store.McpTransport(in.Transport), CaBundle: in.CABundle, InsecureSkipVerify: in.InsecureSkipVerify,
 				CredentialHeader: pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
 				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
 			})

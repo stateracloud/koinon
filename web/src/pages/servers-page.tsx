@@ -160,6 +160,16 @@ function ServerCard({
         <dd>{transportLabel(s.transport)}</dd>
         <dt className="text-muted-foreground">Credential</dt>
         <dd>{s.credentialLostAt ? 'Lost; enter it again' : s.hasCredential ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
+        <dt className="text-muted-foreground">Certificate</dt>
+        <dd>
+          {s.insecureSkipVerify ? (
+            <span className="text-destructive font-medium">Not verified: the server&apos;s identity is not checked (insecure)</span>
+          ) : s.caBundle ? (
+            'Only the CA given for this server is trusted'
+          ) : (
+            'Verified against the public roots'
+          )}
+        </dd>
         <dt className="text-muted-foreground">Gateway target</dt>
         <dd className="break-all">
           <code>{s.gatewayTarget}</code>

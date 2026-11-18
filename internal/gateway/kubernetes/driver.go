@@ -54,6 +54,10 @@ func (d *Driver) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.Is
 // LedgerEnforcesBudgets implements gateway.LedgerBudgets: only a limit of zero binds here.
 func (d *Driver) LedgerEnforcesBudgets() bool { return true }
 
+// RendersMCPTargetCA implements gateway.MCPTargetCA: this driver cannot render a per-target TLS root.
+// Render still refuses such a target, as a last guard; the reconciler leaves the server out first.
+func (d *Driver) RendersMCPTargetCA() bool { return false }
+
 // Usage implements gateway.ModelGateway. Usage arrives through the access log, exported over OTLP
 // to the spend ledger.
 func (d *Driver) Usage() gateway.UsageReader { return gateway.NoUsage{} }

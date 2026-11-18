@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/faketls"
 )
 
 func providerSecret(provider, workspace, models string) *corev1.Secret {
@@ -127,5 +128,66 @@ func TestParseDisabled(t *testing.T) {
 	conn := &corev1.Secret{Data: map[string][]byte{"name": []byte("c"), "connector": []byte("gitea"), declarative.KeyDisabled: []byte("maybe")}}
 	if _, err := declarative.ParseConnection(conn, "v"); err == nil || !strings.Contains(err.Error(), "disabled must be true or false") {
 		t.Errorf("connection: %v", err)
+	}
+}
+
+// TestParseMCPServerCABundle covers the optional caBundle key of an mcp-server Secret (#278).
+func TestParseMCPServerCABundle(t *testing.T) {
+	set, err := faketls.Make("koinon test CA", []string{"mcp.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := func(url, bundle string) *corev1.Secret {
+		return &corev1.Secret{Data: map[string][]byte{"name": []byte("wiki"), "url": []byte(url), declarative.KeyCABundle: []byte(bundle)}}
+	}
+	d, err := declarative.ParseMCPServer(sec("https://mcp.example.com/mcp", string(set.CA)), "v")
+	if err != nil || d.CABundle != strings.TrimSpace(string(set.CA)) {
+		t.Fatalf("a valid bundle: %v %q", err, d.CABundle)
+	}
+	for name, s := range map[string]*corev1.Secret{
+		"http url":    sec("http://mcp.example.com/mcp", string(set.CA)),
+		"not PEM":     sec("https://mcp.example.com/mcp", "not a certificate"),
+		"a key block": sec("https://mcp.example.com/mcp", "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----"),
+	} {
+		if _, err := declarative.ParseMCPServer(s, "v"); err == nil || !strings.Contains(err.Error(), declarative.KeyCABundle) {
+			t.Errorf("%s: want an error naming %s, got %v", name, declarative.KeyCABundle, err)
+		}
+	}
+}
+
+// TestParseMCPServerInsecureSkipVerify covers the optional insecureSkipVerify key of an mcp-server Secret (#278).
+func TestParseMCPServerInsecureSkipVerify(t *testing.T) {
+	set, err := faketls.Make("koinon test CA", []string{"mcp.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := func(url, insecure, bundle string) *corev1.Secret {
+		data := map[string][]byte{"name": []byte("wiki"), "url": []byte(url)}
+		if insecure != "" {
+			data[declarative.KeyInsecureSkipVerify] = []byte(insecure)
+		}
+		if bundle != "" {
+			data[declarative.KeyCABundle] = []byte(bundle)
+		}
+		return &corev1.Secret{Data: data}
+	}
+	d, err := declarative.ParseMCPServer(sec("https://mcp.example.com/mcp", "true", ""), "v")
+	if err != nil || !d.InsecureSkipVerify {
+		t.Fatalf("true on https: %v %v", err, d.InsecureSkipVerify)
+	}
+	for _, v := range []string{"", "false"} {
+		d, err = declarative.ParseMCPServer(sec("https://mcp.example.com/mcp", v, ""), "v")
+		if err != nil || d.InsecureSkipVerify {
+			t.Fatalf("%q: want verification on, got %v %v", v, err, d.InsecureSkipVerify)
+		}
+	}
+	for name, s := range map[string]*corev1.Secret{
+		"http url":      sec("http://mcp.example.com/mcp", "true", ""),
+		"not a boolean": sec("https://mcp.example.com/mcp", "yes", ""),
+		"with a CA":     sec("https://mcp.example.com/mcp", "true", string(set.CA)),
+	} {
+		if _, err := declarative.ParseMCPServer(s, "v"); err == nil || !strings.Contains(err.Error(), declarative.KeyInsecureSkipVerify) {
+			t.Errorf("%s: want an error naming %s, got %v", name, declarative.KeyInsecureSkipVerify, err)
+		}
 	}
 }

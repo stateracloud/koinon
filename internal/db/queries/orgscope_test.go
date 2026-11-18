@@ -74,6 +74,7 @@ var crossOrgQueries = map[string]string{
 	"questions.sql:ListOrgsWithDueQuestions":              "the question timers: finds every org that has an open question with a reminder or an expiry due",
 	"questions.sql:ListOrgsWithQuestionsOfFinishedRuns":   "the question sweep: finds every org that has a question whose run ended",
 	"spend.sql:ListOrgsWithDueSettlements":                "the spend settler: finds every org with a provisional entry due for an attempt",
+	"mcp.sql:SumMCPCABundleBytes":                         "the MCP CA budget: sums the CA bundle bytes of every org's servers, a byte count only, to hold the installation-wide 256 KiB cap at save time under LockMCPCABudget",
 	"cost_reconciliation.sql:ListCostReportProviders":     "the daily cost reconciliation: finds every provider with a cost API key",
 	"audit.sql:ListAuditEventsAllOrgs":                    "platform admins: reads the audit log across every org",
 	"audit.sql:ListAuditChainOrgs":                        "the audit verifier: lists every org that has a chain",

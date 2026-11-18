@@ -30,6 +30,9 @@ env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:4
 has "preflight checks the agentgateway controller" '--agentgateway-controller=agentgateway$' "${k8s[@]}" --show-only templates/preflight.yaml
 has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
 env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
+# koinon-api refuses a server CA / insecureSkipVerify save when the gateway cannot render it (#278).
+env_is KOINON_GATEWAY_MODE '"kubernetes"' "${k8s[@]}"
+env_is KOINON_GATEWAY_MODE '"standalone"'
 # koinon-api reaches the gateway's LLM listener for the provider echo check, on the same host and port.
 env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080"'
 env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:4000"' "${k8s[@]}"

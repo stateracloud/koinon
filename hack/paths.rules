@@ -348,6 +348,8 @@ e2e-binary - ./cmd/koinon-gateway
 e2e-binary - ./cmd/koinon-fakemodel
 e2e-binary - ./cmd/koinon-fakegithub
 e2e-binary - ./cmd/koinon-fakemcp
+# run.sh runs this one with `go run` (per-run fake TLS material), not ko: it is still an e2e input.
+e2e-binary - ./cmd/koinon-faketls
 #
 # A path is relevant when it is forced, or needed and not ignored, or in the build graph.
 # Needed. A renamed binary directory breaks `go list` (that also fails closed), so cmd/ is a backstop.

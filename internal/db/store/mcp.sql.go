@@ -59,14 +59,14 @@ const createMCPServer = `-- name: CreateMCPServer :one
 
 INSERT INTO mcp_servers (org_id, id, name, url, transport, credential_header, credential_prefix, credential,
                          source, managed_by_secret, declared_version, disabled_reason, created_by,
-                         kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id)
+                         kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, ca_bundle, insecure_skip_verify)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13,
         COALESCE($14::mcp_server_kind, 'other'),
         COALESCE($15::boolean, true),
         COALESCE($16::boolean, true),
-        $17)
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
+        $17, $18, $19)
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
 `
 
 type CreateMCPServerParams struct {
@@ -87,6 +87,8 @@ type CreateMCPServerParams struct {
 	ExposesUntrustedInput pgtype.Bool
 	ExposesPrivateData    pgtype.Bool
 	CodeHostConnectionID  pgtype.UUID
+	CaBundle              string
+	InsecureSkipVerify    bool
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -116,6 +118,8 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 		arg.ExposesUntrustedInput,
 		arg.ExposesPrivateData,
 		arg.CodeHostConnectionID,
+		arg.CaBundle,
+		arg.InsecureSkipVerify,
 	)
 	var i McpServer
 	err := row.Scan(
@@ -151,6 +155,8 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
@@ -258,7 +264,7 @@ func (q *Queries) GetConnectionForMCPLink(ctx context.Context, arg GetConnection
 }
 
 const getMCPServer = `-- name: GetMCPServer :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify FROM mcp_servers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -303,6 +309,8 @@ func (q *Queries) GetMCPServer(ctx context.Context, arg GetMCPServerParams) (Mcp
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
@@ -395,7 +403,7 @@ func (q *Queries) GetMCPToolForUpdate(ctx context.Context, arg GetMCPToolForUpda
 }
 
 const getServedMCPServerByName = `-- name: GetServedMCPServerByName :one
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify FROM mcp_servers
 WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 `
 
@@ -440,6 +448,8 @@ func (q *Queries) GetServedMCPServerByName(ctx context.Context, arg GetServedMCP
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
@@ -627,7 +637,7 @@ func (q *Queries) ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgent
 }
 
 const listMCPServers = `-- name: ListMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify FROM mcp_servers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -674,6 +684,8 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 			&i.AdminDisabledNote,
 			&i.AdminDisabledUnderBy,
 			&i.AdminDisabledUnderNote,
+			&i.CaBundle,
+			&i.InsecureSkipVerify,
 		); err != nil {
 			return nil, err
 		}
@@ -686,7 +698,7 @@ func (q *Queries) ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpS
 }
 
 const listMCPServersLinkedToConnectionForUpdate = `-- name: ListMCPServersLinkedToConnectionForUpdate :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify FROM mcp_servers
 WHERE org_id = $1 AND code_host_connection_id = $2
 ORDER BY name, id
 FOR UPDATE
@@ -741,6 +753,8 @@ func (q *Queries) ListMCPServersLinkedToConnectionForUpdate(ctx context.Context,
 			&i.AdminDisabledNote,
 			&i.AdminDisabledUnderBy,
 			&i.AdminDisabledUnderNote,
+			&i.CaBundle,
+			&i.InsecureSkipVerify,
 		); err != nil {
 			return nil, err
 		}
@@ -967,7 +981,7 @@ func (q *Queries) ListMissingMCPServersOfAgent(ctx context.Context, arg ListMiss
 }
 
 const listServedMCPServers = `-- name: ListServedMCPServers :many
-SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note FROM mcp_servers
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify FROM mcp_servers
 WHERE org_id = $1 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
 ORDER BY name
 `
@@ -1016,6 +1030,8 @@ func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) (
 			&i.AdminDisabledNote,
 			&i.AdminDisabledUnderBy,
 			&i.AdminDisabledUnderNote,
+			&i.CaBundle,
+			&i.InsecureSkipVerify,
 		); err != nil {
 			return nil, err
 		}
@@ -1079,6 +1095,17 @@ func (q *Queries) ListUnavailableMCPServersOfAgent(ctx context.Context, arg List
 	return items, nil
 }
 
+const lockMCPCABudget = `-- name: LockMCPCABudget :exec
+SELECT pg_advisory_xact_lock(hashtextextended('koinon.mcp_ca_budget', 0))
+`
+
+// Serializes the saves that add CA bundle bytes, so the global total checked below cannot be passed by
+// two orgs saving at the same moment. Held until the transaction ends.
+func (q *Queries) LockMCPCABudget(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockMCPCABudget)
+	return err
+}
+
 const markMCPServerRemoved = `-- name: MarkMCPServerRemoved :exec
 UPDATE mcp_servers
 SET removed_at = now(), disabled_reason = $1
@@ -1134,7 +1161,7 @@ SET consecutive_failures = CASE WHEN $1::boolean THEN 0 ELSE consecutive_failure
     health_checked_at = now(),
     tools_synced_at = CASE WHEN $1::boolean AND $4::boolean THEN now() ELSE tools_synced_at END
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
 `
 
 type RecordMCPServerProbeParams struct {
@@ -1191,6 +1218,8 @@ func (q *Queries) RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerP
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
@@ -1273,7 +1302,7 @@ SET kind = $1, exposes_untrusted_input = $2,
     exposes_private_data = $3,
     code_host_connection_id = $4
 WHERE org_id = $5 AND id = $6
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
 `
 
 type SetMCPServerDataClassParams struct {
@@ -1330,6 +1359,8 @@ func (q *Queries) SetMCPServerDataClass(ctx context.Context, arg SetMCPServerDat
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
@@ -1514,6 +1545,22 @@ func (q *Queries) ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServers
 	return err
 }
 
+const sumMCPCABundleBytes = `-- name: SumMCPCABundleBytes :one
+SELECT COALESCE(SUM(octet_length(ca_bundle)), 0)::bigint AS total
+FROM mcp_servers
+WHERE removed_at IS NULL AND id IS DISTINCT FROM $1::uuid
+`
+
+// The CA bundle bytes of every server of every org that is not removed, except one server (the one
+// being saved; the zero UUID for a new server). The reconciler serves a subset of these, so the sum
+// is an upper bound of what it puts in the gateway Secret.
+func (q *Queries) SumMCPCABundleBytes(ctx context.Context, exceptID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumMCPCABundleBytes, exceptID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const touchMCPTool = `-- name: TouchMCPTool :exec
 UPDATE mcp_tools
 SET present = true, last_seen_at = now(), read_only_hint = $1,
@@ -1549,9 +1596,9 @@ func (q *Queries) TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) erro
 
 const updateDeclaredMCPServer = `-- name: UpdateDeclaredMCPServer :one
 UPDATE mcp_servers
-SET url = $1, transport = $2, credential_header = $3,
-    credential_prefix = $4, credential = $5,
-    declared_version = $6, removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL,
+SET url = $1, transport = $2, ca_bundle = $3, insecure_skip_verify = $4, credential_header = $5,
+    credential_prefix = $6, credential = $7,
+    declared_version = $8, removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
     -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
@@ -1561,25 +1608,29 @@ SET url = $1, transport = $2, credential_header = $3,
     -- external-high until an admin links it again (ADR 0091 decision 3).
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
-WHERE org_id = $7 AND id = $8 AND source = 'secret'
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
+WHERE org_id = $9 AND id = $10 AND source = 'secret'
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
 `
 
 type UpdateDeclaredMCPServerParams struct {
-	Url              string
-	Transport        McpTransport
-	CredentialHeader pgtype.Text
-	CredentialPrefix string
-	Credential       []byte
-	DeclaredVersion  pgtype.Text
-	OrgID            pgtype.UUID
-	ID               pgtype.UUID
+	Url                string
+	Transport          McpTransport
+	CaBundle           string
+	InsecureSkipVerify bool
+	CredentialHeader   pgtype.Text
+	CredentialPrefix   string
+	Credential         []byte
+	DeclaredVersion    pgtype.Text
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
 }
 
 func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error) {
 	row := q.db.QueryRow(ctx, updateDeclaredMCPServer,
 		arg.Url,
 		arg.Transport,
+		arg.CaBundle,
+		arg.InsecureSkipVerify,
 		arg.CredentialHeader,
 		arg.CredentialPrefix,
 		arg.Credential,
@@ -1621,17 +1672,19 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }
 
 const updateMCPServer = `-- name: UpdateMCPServer :one
 UPDATE mcp_servers
-SET url = $1, transport = $2,
-    credential_lost_at = CASE WHEN $3::boolean THEN NULL ELSE credential_lost_at END,
-    credential_header = CASE WHEN $4::boolean THEN $5 ELSE credential_header END,
-    credential_prefix = CASE WHEN $4::boolean THEN $6 ELSE credential_prefix END,
-    credential = CASE WHEN $3::boolean THEN $7 ELSE credential END,
+SET url = $1, transport = $2, ca_bundle = $3, insecure_skip_verify = $4,
+    credential_lost_at = CASE WHEN $5::boolean THEN NULL ELSE credential_lost_at END,
+    credential_header = CASE WHEN $6::boolean THEN $7 ELSE credential_header END,
+    credential_prefix = CASE WHEN $6::boolean THEN $8 ELSE credential_prefix END,
+    credential = CASE WHEN $5::boolean THEN $9 ELSE credential END,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,
     -- both legs), so a class declared for the old endpoint cannot narrow the guard for the new one (ADR 0084).
     kind = CASE WHEN url IS DISTINCT FROM $1 THEN 'other'::mcp_server_kind ELSE kind END,
@@ -1641,23 +1694,25 @@ SET url = $1, transport = $2,
     -- external-high until an admin links it again (ADR 0091 decision 3).
     code_host_connection_id = CASE WHEN url IS DISTINCT FROM $1 THEN NULL ELSE code_host_connection_id END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
-WHERE org_id = $8 AND id = $9
-RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note
+WHERE org_id = $10 AND id = $11
+RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by, admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
 `
 
 type UpdateMCPServerParams struct {
-	Url               string
-	Transport         McpTransport
-	SetCredential     bool
-	SetCredentialMeta bool
-	CredentialHeader  pgtype.Text
-	CredentialPrefix  string
-	Credential        []byte
-	OrgID             pgtype.UUID
-	ID                pgtype.UUID
+	Url                string
+	Transport          McpTransport
+	CaBundle           string
+	InsecureSkipVerify bool
+	SetCredential      bool
+	SetCredentialMeta  bool
+	CredentialHeader   pgtype.Text
+	CredentialPrefix   string
+	Credential         []byte
+	OrgID              pgtype.UUID
+	ID                 pgtype.UUID
 }
 
-// A change of the URL, transport or credential starts health over: the new settings are unproven.
+// A change of the URL, transport, CA bundle, certificate check or credential starts health over: the new settings are unproven.
 // credential is written only when @set_credential is true (the patch sets or removes it). The caller
 // read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
 // envelope since, so writing back the envelope that was read would undo it. credential_header and
@@ -1670,6 +1725,8 @@ func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams
 	row := q.db.QueryRow(ctx, updateMCPServer,
 		arg.Url,
 		arg.Transport,
+		arg.CaBundle,
+		arg.InsecureSkipVerify,
 		arg.SetCredential,
 		arg.SetCredentialMeta,
 		arg.CredentialHeader,
@@ -1712,6 +1769,8 @@ func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams
 		&i.AdminDisabledNote,
 		&i.AdminDisabledUnderBy,
 		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
 	)
 	return i, err
 }

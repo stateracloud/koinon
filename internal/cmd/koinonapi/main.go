@@ -206,7 +206,9 @@ type config struct {
 	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
 	gatewayMCPURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
-	gatewayURL           string
+	gatewayURL string
+	// gatewayMode is the chart's gateway.mode (standalone or kubernetes).
+	gatewayMode          project.GatewayMode
 	egressAllowedHosts   string
 	providerAllowedHosts string
 }
@@ -327,6 +329,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
 		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener as koinon-api reaches it (for example http://koinon-gateway.koinon.svc:8080), for the provider echo check; empty disables the check")
+	c.gatewayMode = project.GatewayStandalone
+	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
@@ -707,7 +711,7 @@ func serve(ctx context.Context, cfg config) error {
 		Pool: pool, Kube: kube, Keyring: keyring, Binding: binding, BindingOwner: bindingOwner, Ready: gate.ReadyHandler(),
 	}, apiassembly.Settings{
 		SandboxResources: cfg.sandboxResources, EgressAllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts),
-		Namespace: cfg.secretsNamespace, GatewayMCPURL: cfg.gatewayMCPURL, GatewayURL: cfg.gatewayURL, GitHubAPIURL: cfg.githubAPIURL,
+		Namespace: cfg.secretsNamespace, GatewayMCPURL: cfg.gatewayMCPURL, GatewayURL: cfg.gatewayURL, GatewayMode: cfg.gatewayMode, GitHubAPIURL: cfg.githubAPIURL,
 		WatchPoll: cfg.watchPoll, TrustedOrigins: splitList(cfg.trustedOrigins), RestoreHold: cfg.restoreHold,
 		GuardByteCap: cfg.guardByteCap, PublicURL: cfg.publicURL, OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: cfg.oidcRedirectURL,
 		AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions,

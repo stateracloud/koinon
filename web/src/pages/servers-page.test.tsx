@@ -19,6 +19,7 @@ import {
   type AcknowledgeToolReviewRequest,
   type CreateServerRequest,
   type DeleteServerRequest,
+  type Server,
   type SetAgentServersRequest,
   type SetServerClassRequest,
   type SetToolSinkRequest,
@@ -81,7 +82,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
-function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; failSink?: string; allowed?: { serverId: string; tools: string[] }[] } = {}) {
+function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
     twos: [] as SetToolTwoApproversRequest[],
@@ -122,7 +123,7 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
       },
       listServers: () => {
         calls.listed++
-        return { servers: [docs, issues, managed, gone] }
+        return { servers: [docs, issues, managed, gone, ...(opts.extraServers ?? [])] }
       },
       listTools: () => ({ tools: [...current.values()] }),
       createServer: (req) => {
@@ -310,6 +311,71 @@ describe('Servers page', () => {
     expect(calls.creates[0]).toMatchObject({ name: 'newone', url: 'https://new.example.com/mcp', transport: 'streamable-http', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', credentialValue: 'not-a-real-token' })
     await waitFor(() => expect(screen.queryByRole('form', { name: 'Add server' })).not.toBeInTheDocument())
     expect(document.body.textContent).not.toContain('not-a-real-token')
+  })
+
+  it('adds a server with a private CA certificate', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'
+    await userEvent.type(within(form).getByLabelText('Name'), 'private')
+    await userEvent.type(within(form).getByLabelText('URL'), 'https://mcp.internal.example/mcp')
+    await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
+    await userEvent.paste(pem)
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await waitFor(() => expect(calls.creates).toHaveLength(1))
+    expect(calls.creates[0]).toMatchObject({ name: 'private', url: 'https://mcp.internal.example/mcp', caBundle: pem })
+  })
+
+  it('refuses a CA certificate on an http URL before it sends anything', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'private')
+    await userEvent.type(within(form).getByLabelText('URL'), 'http://mcp.internal.example/mcp')
+    await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
+    await userEvent.paste('-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    expect(await within(form).findByText('A CA certificate needs an https URL.')).toBeInTheDocument()
+    expect(calls.creates).toHaveLength(0)
+  })
+
+  it('adds a server that skips certificate verification, with a warning', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'scratch')
+    await userEvent.type(within(form).getByLabelText('URL'), 'https://scratch.example/mcp')
+    expect(within(form).queryByText(/impostor/)).not.toBeInTheDocument()
+    await userEvent.click(within(form).getByLabelText('Skip certificate verification (insecure)'))
+    expect(within(form).getByText(/can be sent to an impostor/)).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await waitFor(() => expect(calls.creates).toHaveLength(1))
+    expect(calls.creates[0]).toMatchObject({ name: 'scratch', insecureSkipVerify: true, caBundle: '' })
+  })
+
+  it('refuses skipped verification on an http URL, and with a CA certificate, before it sends anything', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'scratch')
+    await userEvent.type(within(form).getByLabelText('URL'), 'http://scratch.example/mcp')
+    await userEvent.click(within(form).getByLabelText('Skip certificate verification (insecure)'))
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    expect(await within(form).findByText('Skipping verification needs an https URL.')).toBeInTheDocument()
+    expect(calls.creates).toHaveLength(0)
+  })
+
+  it('shows on the server list when verification is off, and when only one CA is trusted', async () => {
+    const off = create(ServerSchema, { id: 's-off', name: 'scratch', url: 'https://scratch.example/mcp', source: 'ui', insecureSkipVerify: true })
+    const pinned = create(ServerSchema, { id: 's-ca', name: 'private', url: 'https://private.example/mcp', source: 'ui', caBundle: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----' })
+    setup({ extraServers: [off, pinned] })
+    const offCard = (await screen.findByRole('heading', { name: 'scratch' })).closest('li') as HTMLElement
+    expect(within(offCard).getByText(/Not verified/)).toBeInTheDocument()
+    const caCard = (await screen.findByRole('heading', { name: 'private' })).closest('li') as HTMLElement
+    expect(within(caCard).getByText(/Only the CA given for this server is trusted/)).toBeInTheDocument()
+    const docsCard = (await screen.findByRole('heading', { name: 'docs' })).closest('li') as HTMLElement
+    expect(within(docsCard).getByText(/public roots/)).toBeInTheDocument()
   })
 
   it('shows the OAuth refusal at the URL field and keeps the form', async () => {

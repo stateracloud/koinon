@@ -3,10 +3,14 @@
 package drill
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/stateracloud/koinon/internal/faketls"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // SeededPassword is the fixed fake password the seed gives the bootstrap admin.
@@ -40,9 +44,19 @@ func FakeModelURL(fakesNS string) string {
 	return fmt.Sprintf("http://fakemodel.%s.svc:8080/v1", fakesNS)
 }
 
-// FakeMCPURL is the URL the seed registers the fake MCP server under.
+// FakeMCPURL is the URL the seed registers the fake MCP server under. It is https: the server has a
+// credential, and Koinon sends a credential only over https (ADR 0120).
 func FakeMCPURL(fakesNS string) string {
-	return fmt.Sprintf("http://fakemcp.%s.svc:8080/mcp", fakesNS)
+	return fmt.Sprintf("https://fakemcp.%s.svc:8080/mcp", fakesNS)
+}
+
+// FakeMCPTLS makes the throw-away CA and server certificate of one drill run's fake MCP server. The
+// certificate goes to the fake as a Secret (FakeMCPManifest); the CA PEM is the server record's caBundle,
+// so the gateway trusts it for that server only. Nothing is kept in the repository.
+func FakeMCPTLS(fakesNS string) (faketls.Set, error) {
+	return faketls.Make(project.Name+"-drill fakemcp CA", []string{
+		fmt.Sprintf("fakemcp.%s.svc", fakesNS), fmt.Sprintf("fakemcp.%s.svc.cluster.local", fakesNS), "fakemcp", "localhost", "127.0.0.1",
+	})
 }
 
 // Fake MCP server credential: the header the gateway injects and its (obviously fake) value.
@@ -313,8 +327,20 @@ spec:
 // FakeMCPManifest is the fake MCP server (cmd/koinon-fakemcp) in the fakes namespace. It serves
 // read_item, write_item and fetch_url, and refuses a request without the credential header; the drill
 // registers it with FakeMCPKey so the agent's ask-tier call parks for an approval.
-func FakeMCPManifest(ns, runID, image string) string {
-	return fmt.Sprintf(`apiVersion: apps/v1
+func FakeMCPManifest(ns, runID, image string, tls faketls.Set) string {
+	return fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: fakemcp-tls
+  namespace: %[1]s
+  labels:
+    %[3]s: "%[2]s"
+type: Opaque
+data:
+  tls.crt: %[7]s
+  tls.key: %[8]s
+---
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fakemcp
@@ -333,16 +359,21 @@ spec:
         - name: fakemcp
           image: %[4]s
           imagePullPolicy: IfNotPresent
-          args: ["-addr", ":8080", "-header", "%[5]s", "-value", "%[6]s"]
+          args: ["-addr", ":8080", "-header", "%[5]s", "-value", "%[6]s", "-tls-cert-file", "/tls/tls.crt", "-tls-key-file", "/tls/tls.key"]
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: http, scheme: HTTPS}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
+      volumes:
+        - name: tls
+          secret: {secretName: fakemcp-tls}
 ---
 apiVersion: v1
 kind: Service
@@ -355,5 +386,6 @@ spec:
   selector: {app: fakemcp}
   ports:
     - {name: http, port: 8080, targetPort: http}
-`, ns, runID, RunLabel, image, FakeMCPHeader, FakeMCPKey)
+`, ns, runID, RunLabel, image, FakeMCPHeader, FakeMCPKey,
+		base64.StdEncoding.EncodeToString(tls.Cert), base64.StdEncoding.EncodeToString(tls.Key))
 }

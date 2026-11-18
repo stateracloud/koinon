@@ -12,6 +12,7 @@ harnesses/opencode/plugins/node_modules/
 # Tilt
 tilt_modules/
 .tilt-ko-*
+.tilt-fakemcp-tls/
 
 # Binaries built into the repo root with go build ./cmd/<name>
 /koinon-api
@@ -23,6 +24,7 @@ tilt_modules/
 /koinon-fakegitea
 /koinon-fakemcp
 /koinon-fakecicost
+/koinon-faketls
 /koinon-rt1-promgen
 /.e2e-out/
 

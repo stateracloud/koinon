@@ -29,7 +29,7 @@ import {
   type ServerFormState,
 } from '@/lib/mcp-servers'
 
-const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false, kind: 'other', legs: ['untrusted_input', 'private_data'] }
+const base: ServerFormState = { name: 'docs', url: ' https://mcp.example.com/mcp ', transport: 'streamable-http', mode: 'none', header: '', value: '', removeCredential: false, kind: 'other', legs: ['untrusted_input', 'private_data'], caBundle: '', insecureSkipVerify: false }
 const not = 'not-a-real-token'
 
 describe('serverNameError', () => {
@@ -43,7 +43,7 @@ describe('serverNameError', () => {
 
 describe('buildCreateRequest', () => {
   it('sends no credential fields without a credential', () => {
-    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '', class: { kind: 'other', dataClass: ['untrusted_input', 'private_data'] } })
+    expect(buildCreateRequest(base)).toEqual({ name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', credentialHeader: '', credentialPrefix: '', credentialValue: '', caBundle: '', insecureSkipVerify: false, class: { kind: 'other', dataClass: ['untrusted_input', 'private_data'] } })
   })
   it('builds a bearer token as Authorization with the Bearer prefix', () => {
     expect(buildCreateRequest({ ...base, mode: 'bearer', value: not })).toMatchObject({ credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', credentialValue: not })
@@ -83,6 +83,35 @@ describe('buildUpdateRequest', () => {
   it('removes the credential on request or when set to none', () => {
     expect(buildUpdateRequest(stored, { ...initialForm(stored), removeCredential: true })).toEqual({ removeCredential: true })
     expect(buildUpdateRequest(stored, { ...initialForm(stored), mode: 'none' })).toEqual({ removeCredential: true })
+  })
+})
+
+describe('the CA certificate of a server', () => {
+  const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'
+  const base = initialForm()
+  it('is empty by default and sent with a new server', () => {
+    expect(base.caBundle).toBe('')
+    expect(buildCreateRequest({ ...base, name: 'wiki', url: 'https://mcp.example.com/mcp', caBundle: `${pem}\n` })).toMatchObject({ caBundle: pem })
+  })
+  it('is at most 64 KiB', () => {
+    const big = `${pem}\n`.repeat(Math.ceil((64 << 10) / (pem.length + 1)) + 1)
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: big }).caBundle).toMatch(/64 KiB/)
+  })
+  it('needs an https URL and certificates only', () => {
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: pem }).caBundle).toBeUndefined()
+    expect(formErrors({ ...base, url: 'http://mcp.example.com/mcp', caBundle: pem }).caBundle).toMatch(/https/)
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: 'hello' }).caBundle).toMatch(/PEM/)
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: '-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----' }).caBundle).toMatch(/never paste a private key/i)
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: '' }).caBundle).toBeUndefined()
+  })
+  it('is sent on an edit only when it changed, and an empty one clears it', () => {
+    const s = create(ServerSchema, { id: 's-1', name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', caBundle: pem })
+    expect(initialForm(s).caBundle).toBe(pem)
+    expect(buildUpdateRequest(s, initialForm(s))).toEqual({})
+    expect(buildUpdateRequest(s, { ...initialForm(s), caBundle: '' })).toEqual({ caBundle: '' })
+  })
+  it('places a certificate refusal at its field', () => {
+    expect(serverErrorField("the server's TLS certificate does not verify; if it is signed by a private CA, put that CA's PEM certificate in the server's CA bundle field (caBundle)")).toBe('ca')
   })
 })
 
@@ -180,5 +209,28 @@ describe('the sink class of a tool (ADR 0091)', () => {
     expect(validateSink({ ...f, addressArgs: 'a, a' })).toMatch(/twice/)
     expect(validateSink({ ...f, addressArgs: 'a,b,c,d,e,f,g,h,i' })).toMatch(/at most 8/)
     expect(validateSink({ ...f, derivation: 'nope' })).toMatch(/Choose/)
+  })
+})
+
+describe('skipping certificate verification for a server', () => {
+  const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'
+  const base = initialForm()
+  it('is off by default and sent with a new server', () => {
+    expect(base.insecureSkipVerify).toBe(false)
+    expect(buildCreateRequest({ ...base, name: 'wiki', url: 'https://mcp.example.com/mcp', insecureSkipVerify: true })).toMatchObject({ insecureSkipVerify: true })
+  })
+  it('needs an https URL', () => {
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', insecureSkipVerify: true }).insecureSkipVerify).toBeUndefined()
+    expect(formErrors({ ...base, url: 'http://mcp.example.com/mcp', insecureSkipVerify: true }).insecureSkipVerify).toMatch(/https/)
+    expect(formErrors({ ...base, url: 'http://mcp.example.com/mcp', insecureSkipVerify: false }).insecureSkipVerify).toBeUndefined()
+  })
+  it('excludes a CA certificate', () => {
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: pem, insecureSkipVerify: true }).insecureSkipVerify).toMatch(/not both/)
+  })
+  it('is sent on an edit only when it changed', () => {
+    const s = create(ServerSchema, { id: 's-1', name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', insecureSkipVerify: true })
+    expect(initialForm(s).insecureSkipVerify).toBe(true)
+    expect(buildUpdateRequest(s, initialForm(s))).toEqual({})
+    expect(buildUpdateRequest(s, { ...initialForm(s), insecureSkipVerify: false })).toEqual({ insecureSkipVerify: false })
   })
 })

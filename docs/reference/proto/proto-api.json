@@ -9263,7 +9263,7 @@
           "name": "MCPTarget",
           "fullName": "koinon.gateway.v1alpha1.MCPTarget",
           "file": "koinon/gateway/v1alpha1/state.proto",
-          "description": "MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in\nthe gateway, not the credential; credential_header and credential_prefix say how it is sent.",
+          "description": "MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in\nthe gateway, not the credential; credential_header and credential_prefix say how it is sent. ca_file is\nwhere the target's own CA bundle (public certificates) is mounted, empty for the system roots.",
           "deprecated": false,
           "fields": [
             {
@@ -9324,6 +9324,24 @@
               "name": "credential_file",
               "number": 7,
               "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_file",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 9,
+              "type": "bool",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -10467,6 +10485,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "class is what the server exposes; leaving it out is the unclassified default (kind \"other\", both\nlegs)."
+            },
+            {
+              "name": "ca_bundle",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle is a PEM bundle of the one CA that signs the server's certificate; only this CA is trusted\nfor this server (it replaces the public roots). Empty uses the public roots. Certificates only, at\nmost 64 KiB."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 10,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify turns the certificate check off for this server (as curl -k). https only;\nrefused together with ca_bundle."
             }
           ]
         },
@@ -10871,6 +10907,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is\nnot called, probed or offered to runs. Unset otherwise."
+            },
+            {
+              "name": "ca_bundle",
+              "number": 25,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is\ntrusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the\npublic roots. It is public (certificates only)."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 26,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but\nthe server's identity is not checked and its credential can be sent to an impostor. https only; never\nset together with ca_bundle."
             }
           ]
         },
@@ -11519,6 +11573,24 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "ca_bundle",
+              "number": 9,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle replaces the server's CA bundle; set to \"\" to go back to the public roots. Unset keeps it."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 10,
+              "type": "bool",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify turns the certificate check off (true) or on (false). Unset keeps it."
             }
           ]
         },

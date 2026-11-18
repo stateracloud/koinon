@@ -63,7 +63,7 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 	for _, t := range u.GetMcp().GetTargets() {
 		s.MCP = append(s.MCP, gateway.MCPTarget{
 			Name: t.GetName(), URL: t.GetUrl(), SSE: t.GetSse(), Org: t.GetOrg(),
-			CredentialHeader: t.GetCredentialHeader(), CredentialPrefix: t.GetCredentialPrefix(), CredentialFile: t.GetCredentialFile(),
+			CredentialHeader: t.GetCredentialHeader(), CredentialPrefix: t.GetCredentialPrefix(), CredentialFile: t.GetCredentialFile(), CAFile: t.GetCaFile(), InsecureSkipVerify: t.GetInsecureSkipVerify(),
 		})
 	}
 	for _, at := range u.GetMcp().GetTools() {
@@ -216,6 +216,8 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 			CredentialHeader: t.CredentialHeader, CredentialPrefix: t.CredentialPrefix,
 			// The path the credential is mounted at, not the credential.
 			CredentialFile: t.CredentialFile,
+			// The path of the target's public CA bundle.
+			CaFile: t.CAFile, InsecureSkipVerify: t.InsecureSkipVerify,
 		})
 	}
 	slices.SortFunc(out.Targets, func(a, b *gwv1.MCPTarget) int {

@@ -87,6 +87,18 @@ func fixtures() []fixture {
 	)
 	mcpServers.GrantTools(agentG, gateway.ToolGrant{Target: "globex-search", Tools: []string{"query"}})
 
+	// A private CA of one server (#278): only that target names it, so every other https target keeps the
+	// system roots (backendTLS.root replaces them for the target it is set on).
+	mcpServerCA := gateway.State{MCP: []gateway.MCPTarget{
+		{Name: "acme-wiki", Org: "acme", URL: "https://mcp.wiki.example.com/mcp", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/secrets/upstream/mcp_wiki", CAFile: "/secrets/upstream/mcp_ca.crt"},
+		{Name: "acme-legacy", Org: "acme", URL: "https://legacy.example.com/sse", SSE: true},
+		// A target that skips the certificate check (#278): backendTLS.insecure, on this target alone.
+		{Name: "acme-scratch", Org: "acme", URL: "https://scratch.example.com/mcp", InsecureSkipVerify: true},
+		{Name: "globex-search", Org: "globex", URL: "https://search.example.org/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/secrets/upstream/mcp_search"},
+	}}
+	mcpServerCA.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+	mcpServerCA.GrantTools(agentA, gateway.ToolGrant{Target: "acme-wiki", Tools: []string{"read_page"}})
+
 	// ADR 0069: one org with a model of each format, the Anthropic one on a workspace-scoped provider.
 	formats := gateway.State{Providers: []gateway.Provider{
 		{
@@ -133,5 +145,6 @@ func fixtures() []fixture {
 		{name: "mcp-servers", state: mcpServers},
 		{name: "model-formats", state: formats},
 		{name: "budgets-precision", state: budgets, options: standalone.Options{DatabaseURL: "sqlite:///data/agentgateway.db?mode=rwc"}},
+		{name: "mcp-server-ca", state: mcpServerCA},
 	}
 }

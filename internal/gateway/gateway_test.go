@@ -378,3 +378,20 @@ var _ = Describe("State.Validate and '$'", func() {
 		Entry("the MCP credential prefix", target("https://mcp.example.com/mcp", "Authorization", "Bearer $$ "), `mcp target "acme-wiki": credential prefix contains '$'`),
 	)
 })
+
+var _ = Describe("State.Validate and a target's TLS trust (#278)", func() {
+	target := func(url string, insecure bool, caFile string) gateway.State {
+		return gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: url, InsecureSkipVerify: insecure, CAFile: caFile}}}
+	}
+	It("accepts skipped verification on https and a CA file on https", func() {
+		Expect(target("https://mcp.example.com/mcp", true, "").Validate()).To(Succeed())
+		Expect(target("HTTPS://mcp.example.com/mcp", true, "").Validate()).To(Succeed())
+		Expect(target("https://mcp.example.com/mcp", false, "/secrets/upstream/mcp_ca.crt").Validate()).To(Succeed())
+	})
+	It("refuses skipped verification on a URL that is not https", func() {
+		Expect(target("http://mcp.example.com/mcp", true, "").Validate()).To(MatchError(ContainSubstring("insecureSkipVerify needs an https URL")))
+	})
+	It("refuses skipped verification together with a CA file", func() {
+		Expect(target("https://mcp.example.com/mcp", true, "/secrets/upstream/mcp_ca.crt").Validate()).To(MatchError(ContainSubstring("exclude each other")))
+	})
+})
