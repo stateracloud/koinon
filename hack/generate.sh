@@ -58,12 +58,16 @@ gen_rc=0
 # binary could link both drivers (#1088). The vendored file stays unmodified: a copy with the one number
 # moved is what buf reads. The option is descriptor metadata of Substrate's own server, never on the wire.
 substrate_proto=$tmp/substrate-proto
-mkdir -p "$substrate_proto"
-cp third_party/substrate/proto/*.proto "$substrate_proto"/
-sed 's/^\(  MethodAnnotation method = \)50000;$/\151000;/' third_party/substrate/proto/ateapi.proto >"$substrate_proto/ateapi.proto"
-grep -q 'MethodAnnotation method = 51000;' "$substrate_proto/ateapi.proto" || { echo "generate: the Substrate extension number patch no longer applies (hack/generate.sh)" >&2; exit 1; }
+prepare_substrate_proto() {
+	mkdir -p "$substrate_proto" \
+		&& cp third_party/substrate/proto/*.proto "$substrate_proto"/ \
+		&& sed 's/^\(  MethodAnnotation method = \)50000;$/\151000;/' third_party/substrate/proto/ateapi.proto >"$substrate_proto/ateapi.proto" \
+		&& { grep -q 'MethodAnnotation method = 51000;' "$substrate_proto/ateapi.proto" \
+			|| { echo "generate: the Substrate extension number patch no longer applies (hack/generate.sh)" >&2; return 1; }; }
+}
 buf generate \
 	&& buf generate --template buf.gen.openshell.yaml \
+	&& prepare_substrate_proto \
 	&& buf generate --template buf.gen.substrate.yaml "$substrate_proto" \
 	&& buf generate --template buf.gen.agentgateway.yaml \
 	&& buf generate --template buf.gen.googleapis.yaml \

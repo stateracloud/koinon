@@ -22,6 +22,9 @@ repo=$tmp/repo
 mkdir -p "$repo/web/src/gen/google/rpc" "$repo/internal/gen" "$repo/hack" \
 	"$repo/internal/db/store" "$repo/internal/audit/internal/auditstore" "$repo/internal/adminapi" \
 	"$repo/api/admin/v1" "$tmp/bin"
+mkdir -p "$repo/third_party/substrate/proto"
+printf 'message X {\n  MethodAnnotation method = 50000;\n}\n' >"$repo/third_party/substrate/proto/ateapi.proto"
+echo 'syntax = "proto3";' >"$repo/third_party/substrate/proto/guest.proto"
 echo 'tracked' >"$repo/web/src/gen/google/rpc/error_details_pb.ts"
 echo 'go-gen' >"$repo/internal/gen/keep.go"
 echo 'store' >"$repo/internal/db/store/models.go"
