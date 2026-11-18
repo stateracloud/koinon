@@ -8,6 +8,7 @@ decides: design.md#15
 # 0015. Agent environment and browser
 
 - Status: Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) (and its amendment of 2026-11-11), [0113](0113-agent-package-access.md) and [0114](0114-model-credentials-by-type.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: sandbox, agent-home, egress, credentials
@@ -21,6 +22,8 @@ model. Browsers are useful for agents, but cookies are bearer credentials that w
 secret model.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carry the guest server and launcher, not OpenShell base images; phase 2.)_
 
 - Flavor images are based on OpenShell sandbox images.
 - Agents self-install into `$HOME` (with mise/aqua, uv, npm) from allowlisted sources through a

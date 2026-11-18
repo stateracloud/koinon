@@ -8,6 +8,7 @@ relates: ["0020", "0027", "0045", "0075"]
 # 0083. Sandbox resources: template defaults, platform bounds, requests and limits
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-31
 - Area: runtime-sandbox
 - Tags: sandbox, kubernetes, isolation
@@ -28,6 +29,8 @@ once it has touched it, so a memory request below the limit lets a node be over-
 that cannot be reclaimed.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): resources map to the actor template and worker pool sizes; phase 2.)_
 
 1. **A sandbox's agent container gets requests and limits for CPU and memory.** `SandboxSpec`
    carries `CPURequest`, `CPULimit`, `MemoryRequest` and `MemoryLimit`, and the OpenShell backend

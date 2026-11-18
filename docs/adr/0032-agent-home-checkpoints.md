@@ -8,7 +8,7 @@ decides: design.md#32
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built)
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); old issue 169 (restore through the upload channel); AR1 (archive tier built); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: agent-home, backup-restore, object-storage, encryption
@@ -34,6 +34,8 @@ PVCs are zone-bound, though, and give no history or rollback. Moving an agent to
 cluster, rolling back a bad self-install, or exporting an agent all need a copy outside the volume.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): home is a Substrate durable volume, with Koinon tar checkpoints that carry a digest; restore goes over `FileSystemService`; snapshots follow D5; phase 2.)_
 
 - **Where the home lives:** a PVC managed through the Agent Sandbox `volumeClaimTemplates`.
 - **When it's checkpointed** to object storage under the org prefix

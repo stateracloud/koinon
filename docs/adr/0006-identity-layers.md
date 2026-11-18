@@ -11,7 +11,7 @@ decides: design.md#6
 - Date: 2026-10-21
 - Area: tenancy-identity
 - Tags: identity, credentials, secrets, openshell
-- Amended by: [0048](0048-openshell-spike-results.md) (resolves the spike verification), [0097](0097-koinon-owned-gateway.md) (its open trust-domain question, answered in decision 11)
+- Amended by: [0048](0048-openshell-spike-results.md) (resolves the spike verification), [0097](0097-koinon-owned-gateway.md) (its open trust-domain question, answered in decision 11); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Decision: [design.md#6](../design.md)
 - Verification: done by the OpenShell spike, see [0048](0048-openshell-spike-results.md) (was: Pending: OpenShell spike, old issue 3)
 
@@ -34,6 +34,8 @@ the binary and destination, and the credential binding covers the host, port and
 answers 403.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): the actor identity is a short-lived token injected outside the guest (D1, D11); phase 2.)_
 
 - Each agent has its own Kubernetes ServiceAccount, used as its stable workload identity.
 - The sandbox gets **no usable token**. The ServiceAccount token is not mounted (Agent Sandbox

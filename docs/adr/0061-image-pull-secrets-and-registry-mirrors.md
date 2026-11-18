@@ -8,6 +8,7 @@ relates: ["0002", "0045", "0048"]
 # 0061. Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-26
 - Area: install-operations
 - Tags: registry, helm-chart, openshell
@@ -29,6 +30,8 @@ the gateway copies the named Secrets into the workspace namespace for every sand
 immutable copies owned by the Sandbox, and puts them in `imagePullSecrets` of both pods.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): how the Substrate node agent pulls actor images and uses mirrors is open question Q4 of 0119; phase 2.)_
 
 1. **Sandbox pods get their pull secret from OpenShell's `server.sandboxImagePullSecrets`.** Koinon's chart
    does not copy Secrets and does not patch ServiceAccounts. The docs tell the operator to set it, and the

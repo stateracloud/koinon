@@ -9,6 +9,7 @@ relates: ["0002", "0023", "0061"]
 # 0078. Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready
 
 - Status: Accepted (delivery in rc.7)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-29
 - Area: runtime-sandbox
 - Tags: sandbox, openshell, kubernetes, metrics
@@ -53,6 +54,8 @@ The reason that matters most to operators is the pull error: a mistyped flavor i
 credentials, or a mirror that is down. Today the run fails after the cap with "the cause is unknown".
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an actor-state observer replaces the pod observer; superseded at phase 5.)_
 
 1. **The reconciler reads the pod, with `get` only.** When a sandbox is in phase Provisioning and OpenShell's
    reason is one of `ConfigurationPending`, `DependenciesNotReady` or `SchedulingGated`, the reconciler gets

@@ -11,7 +11,7 @@ amends: ["0006", "0008", "0016", "0040", "0042", "0045"]
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: openshell, isolation, credentials, agentgateway, approvals
-- Amended by: [0052](0052-opencode-v2-flavor.md), [0049](0049-v01-scope-decisions.md) (extends it), [0075](0075-isolation-tiers.md) (decision 2), [0078](0078-sandbox-observer.md) (decision 3) and 2026-10-26 (below)
+- Amended by: [0052](0052-opencode-v2-flavor.md), [0049](0049-v01-scope-decisions.md) (extends it), [0075](0075-isolation-tiers.md) (decision 2), [0078](0078-sandbox-observer.md) (decision 3) and 2026-10-26 (below); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0042](0042-ask-tier-park-and-execute.md),
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
@@ -46,6 +46,8 @@ policy, credential injection) in its own pod outside the Kata VM, and the **work
 network egress at all; the supervisor relays its traffic through a connection into the VM.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): its execution, install and reconciler decisions go with #1084 and the Substrate driver; its gateway decisions stay with 0040 and 0097; phases 1 and 2.)_
 
 ### Execution layer
 

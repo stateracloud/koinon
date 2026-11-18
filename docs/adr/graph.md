@@ -7,11 +7,13 @@ The `relates` links are left out; `hack/adr graph --relates` draws them.
 
 ```mermaid
 flowchart LR
+  n0002["0002: One namespace per org, mapped to one OpenShell workspace"]
   n0004["0004: Human identity: generic OIDC with roles in Postgres"]
   n0005["0005: Agents act as themselves"]
   n0006["0006: Identity layers: per-agent ServiceAccount, no usable token in the sandbox"]
   n0007["0007: Connector model: type, connection, grant"]
   n0008["0008: Approvals: risk tiers per scope, enforced at the boundary"]
+  n0009["0009: Agent runtime: persistent agent, ephemeral compute"]
   n0010["0010: Eventing: the ticket board is the queue"]
   n0011["0011: Agent-to-agent: A2A, persisted as tickets"]
   n0012["0012: Cross-org sharing through links with exposure profiles"]
@@ -53,6 +55,7 @@ flowchart LR
   n0058["0058: Gateway modes: standalone, kubernetes and shared"]
   n0059["0059: v0.1 ships one harness: OpenCode v2"]
   n0060["0060: Migrations run as a Job, not on start; an Argo CD Sync hook under Argo"]
+  n0061["0061: Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes"]
   n0062["0062: Code-host connectors: one interface per provider, capabilities as data"]
   n0063["0063: Code-host credential classes: allow weaker credentials, with compensation"]
   n0064["0064: Work-tracker connectors: tools and triggers, no sync"]
@@ -71,6 +74,7 @@ flowchart LR
   n0080["0080: The tool set matches the sandbox's egress, and escape cases observe proxy decisions"]
   n0081["0081: Run limits: model requests, spend and time; tokens are reported, not enforced"]
   n0082["0082: Work claims and the ready queue: a claim branch is the lock, the board is the queue"]
+  n0083["0083: Sandbox resources: template defaults, platform bounds, requests and limits"]
   n0084["0084: Leak guard: a taint check on every MCP tool call, in koinon-api"]
   n0085["0085: Upgrade, compatibility and recovery policy"]
   n0086["0086: The org default model is stored, not derived"]
@@ -83,10 +87,12 @@ flowchart LR
   n0098["0098: Update the model price catalogue from public sources"]
   n0099["0099: No schema or upgrade promise before v0.3"]
   n0100["0100: An install-level audit chain for platform actions"]
+  n0101["0101: Agent Substrate and kagent 1.x evaluated, not adopted for v0.x"]
   n0102["0102: The merge queue runs the kind e2e on the queue commit"]
   n0103["0103: A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/`"]
   n0104["0104: Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane"]
   n0105["0105: One route to main: the merge queue, and drafts run nothing"]
+  n0106["0106: An install mark decides which OpenShell objects an install owns"]
   n0107["0107: Restore-hold mode: a restored install starts held"]
   n0108["0108: The docs site lives in its own repository; this repository owns the tested commands"]
   n0109["0109: Automated restore drill"]
@@ -95,6 +101,7 @@ flowchart LR
   n0113["0113: Agent package access: straight to allow-listed registries, in four levels"]
   n0114["0114: Model traffic always through the gateway; credentials handled by type"]
   n0115["0115: Document metadata: one area and controlled tags on every doc"]
+  n0119["0119: Agent Substrate is Koinon's execution layer"]
   n0013 --> n0040
   n0014 --> n0040
   n0016 --> n0040
@@ -220,4 +227,27 @@ flowchart LR
   n0015 --> n0114
   n0044 --> n0114
   n0046 --> n0115
+  n0002 --> n0119
+  n0006 --> n0119
+  n0009 --> n0119
+  n0015 --> n0119
+  n0016 --> n0119
+  n0023 --> n0119
+  n0029 --> n0119
+  n0032 --> n0119
+  n0040 --> n0119
+  n0045 --> n0119
+  n0048 --> n0119
+  n0051 --> n0119
+  n0061 --> n0119
+  n0075 --> n0119
+  n0077 --> n0119
+  n0078 --> n0119
+  n0080 --> n0119
+  n0083 --> n0119
+  n0097 --> n0119
+  n0106 --> n0119
+  n0112 --> n0119
+  n0113 --> n0119
+  n0101 ==>|supersedes| n0119
 ```

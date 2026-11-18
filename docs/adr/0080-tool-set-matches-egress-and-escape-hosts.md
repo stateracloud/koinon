@@ -8,6 +8,7 @@ relates: ["0025", "0045", "0052", "0069", "0075"]
 # 0080. The tool set matches the sandbox's egress, and escape cases observe proxy decisions
 
 - Status: Accepted; amended by [0113](0113-agent-package-access.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-29
 - Area: runtime-sandbox
 - Tags: egress, harness, testing
@@ -26,6 +27,8 @@ the network must be what the sandbox's proxy actually does.
    allow or deny decision.
 
 ## Decisions
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): egress hosts and registry rules are gateway routes; phase 2.)_
 
 1. **One predicate says whether an agent has web egress:** `agentconfig.Config.WebEgress()`. It is
    false for every version today: a connector grant opens its connection's host only, the npm

@@ -8,6 +8,7 @@ decides: design.md#2
 # 0002. One namespace per org, mapped to one OpenShell workspace
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: multi-tenancy, openshell, kubernetes, isolation
@@ -27,6 +28,8 @@ OpenShell's Kubernetes driver supports three workspace modes:
 - `operator`, where namespaces are pre-provisioned and allowlisted.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an org is an atespace, and worker pools are shared or per org (D6); phase 2.)_
 
 - Each org gets one namespace, which maps to one OpenShell workspace, using
   `workspaceMode: managed`.

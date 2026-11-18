@@ -124,7 +124,7 @@ are in [0046](0046-adr-conventions.md).
 | [0098](0098-price-catalogue-updates-from-public-sources.md) | Update the model price catalogue from public sources | Accepted (2026-11-06) |
 | [0099](0099-no-schema-or-upgrade-promise-before-v0-3.md) | No schema or upgrade promise before v0.3 | Accepted (maintainer decision 2026-11-07) |
 | [0100](0100-install-audit-chain.md) | An install-level audit chain for platform actions | Accepted (maintainer decision 2026-11-07; anchors in v0.1, signed checkpoints after v0.1) |
-| [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Accepted (maintainer decision 2026-11-04) |
+| [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Superseded by [0119](0119-agent-substrate-execution-layer.md) (was: Accepted, maintainer decision 2026-11-04) |
 | [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md) |
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Deprecated (2026-11-11, #546: the check is removed; see the amendment). Earlier: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate |
 | [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default) |
@@ -141,3 +141,4 @@ are in [0046](0046-adr-conventions.md).
 | [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |
 | [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |
+| [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification) |

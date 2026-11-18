@@ -9,6 +9,7 @@ relates: ["0023", "0045", "0068", "0069", "0074", "0075", "0085", "0096"]
 # 0097. A Koinon-owned gateway, in three steps
 
 - Status: Accepted (2026-11-06)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-11-06
 - Area: models-spend
 - Tags: agentgateway, mcp, models, spend-ledger, leak-guard
@@ -103,6 +104,8 @@ credential injection, with no budgets and no tool-call guard. No product researc
 and an MCP tool-call guard on a third-party data plane.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): actor token identity; forge and registry L7 routes join the gateway (D1, D11); phase 1.)_
 
 ### 1. Koinon owns its gateway
 

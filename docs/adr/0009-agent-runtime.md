@@ -8,6 +8,7 @@ decides: design.md#9
 # 0009. Agent runtime: persistent agent, ephemeral compute
 
 - Status: Accepted; amended 2026-10-30 and 2026-11-07 (below)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: sandbox, runs, agent-home
@@ -21,6 +22,8 @@ running for each one is expensive. Kubernetes Agent Sandbox and OpenShell's Kube
 provide suspend and resume, keeping the volumes.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): `keep_warm` maps to resumed actors and worker pool sizing; phase 2.)_
 
 - **Persistent agent, ephemeral compute:**
   - Each agent has a durable home volume ([0032](0032-agent-home-checkpoints.md)).

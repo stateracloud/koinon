@@ -8,6 +8,7 @@ decides: design.md#29
 # 0029. Run-level resume through the harness session
 
 - Status: Accepted; amended by [0051](0051-session-home-generations.md)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: harness, runs, flavors, agent-home
@@ -39,6 +40,8 @@ scope for its beta. The home volume is therefore the only state that survives
 ([0032](0032-agent-home-checkpoints.md)).
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): idempotency records live only in the gateway; phase 2.)_
 
 - **Resume from the last saved session turn.** When a run continues after a park, a suspend or a
   crash, `agentd` reconnects to the harness and continues from the last turn the harness saved:

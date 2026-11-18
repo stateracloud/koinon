@@ -8,7 +8,7 @@ decides: design.md#16
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted
-- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement)
+- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0048](0048-openshell-spike-results.md), [0049](0049-v01-scope-decisions.md) (agentd placement); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: harness, openshell, kubernetes
@@ -27,6 +27,8 @@ The Agent Client Protocol (ACP) is a JSON-RPC-over-stdio protocol that all v0.1 
 pi through an adapter.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carry the guest server and launcher, not OpenShell base images; phase 2.)_
 
 - The control plane talks to the OpenShell gateway (gRPC) through an **`ExecutionBackend`**
   interface. OpenSandbox is the alternative implementation.

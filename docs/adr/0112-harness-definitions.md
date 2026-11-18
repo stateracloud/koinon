@@ -10,6 +10,7 @@ relates: ["0016", "0032", "0045", "0051", "0052", "0056", "0068", "0069", "0080"
 
 - Status: Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core
   release, except the groundwork under "Timing"
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-11-11
 - Area: runtime-sandbox
 - Tags: harness, flavors, dependencies, models
@@ -59,6 +60,8 @@ harness someone brings is neither tested by Koinon nor an image, and the word su
 product.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): snapshots follow D5 and uploads go over `FileSystemService`; phase 2.)_
 
 ### Boundary and words
 

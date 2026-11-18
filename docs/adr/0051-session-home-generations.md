@@ -8,6 +8,7 @@ amends: ["0029", "0049"]
 # 0051. Session home generations
 
 - Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md), [0065](0065-work-model-tasks-inbox.md) and below (2026-10-23, 2026-10-24, 2026-10-26)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-22
 - Area: runtime-sandbox
 - Tags: agent-home, harness, sandbox, runs
@@ -30,6 +31,8 @@ while a run was parked on an approval; once approved, the resumed run loaded its
 home.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): home is a Substrate durable volume and snapshots follow D5; phase 2.)_
 
 1. **Home generation.** `agent_sandboxes.home_generation` identifies the sandbox's current home
    volume: the OpenShell ID of the sandbox, as the reconciler last observed it. Every created

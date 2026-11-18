@@ -8,6 +8,7 @@ decides: design.md#23
 # 0023. Optional observability, hash-chained audit on by default
 
 - Status: Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: security-audit
 - Tags: audit, tracing, metrics, spend-ledger
@@ -28,6 +29,8 @@ which emits per-request cost (`llm.cost`), token metrics and OTel traces. The Ko
 events for every policy decision.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): Substrate metrics are scraped with a label allowlist that drops actor IDs; phase 2.)_
 
 - Metrics: every Koinon component exposes `/metrics`; the Helm chart can optionally create
   ServiceMonitors. Nothing requires Prometheus.

@@ -8,6 +8,7 @@ relates: ["0002", "0045", "0046", "0051"]
 # 0106. An install mark decides which OpenShell objects an install owns
 
 - Status: Accepted
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-11-10
 - Area: runtime-sandbox
 - Tags: openshell, install, backup-restore
@@ -28,6 +29,8 @@ binds a database to a key Secret). A namespace name is not unique either: a rest
 namespace on another cluster that shares the gateway, or a different namespace on the same cluster.
 
 ## Decision
+
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): an atespace label replaces the install mark; superseded at phase 5 when OpenShell is removed.)_
 
 1. **A random install mark.** The chart's ensure-secrets hook Job makes the Secret `koinon-install-mark`
    once, with a random `token` (`installMark.existingSecret` names a Secret the operator manages). The
