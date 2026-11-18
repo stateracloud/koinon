@@ -38,6 +38,7 @@ type upstream struct {
 	key     poolKey
 	cfg     gateway.MCPTarget
 	session *mcp.ClientSession
+	stop    context.CancelFunc // ends the stream context of the session
 
 	mu       sync.Mutex
 	lastUsed time.Time
@@ -53,6 +54,7 @@ func (u *upstream) retire() {
 	u.mu.Unlock()
 	if closeNow {
 		_ = u.session.Close()
+		u.stop()
 	}
 }
 
@@ -65,6 +67,7 @@ func (u *upstream) release() {
 	u.mu.Unlock()
 	if closeNow {
 		_ = u.session.Close()
+		u.stop()
 	}
 }
 
@@ -117,13 +120,23 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		u.retire()
 		return nil, errDraining
 	}
-	if cur, ok := g.pool[key]; ok && cur.acquire() { // another request connected first
+	u.refs = 1
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+		// The config changed while this session connected. Serve this one call on it, never pool it.
+		u.retired = true
 		g.mu.Unlock()
+		return u, nil
+	}
+	if cur, ok := g.pool[key]; ok && cur.cfg == t && cur.acquire() { // another request connected first
+		g.mu.Unlock()
+		u.refs, u.retired = 0, true
 		u.retire()
 		return cur, nil
 	}
+	if cur, ok := g.pool[key]; ok {
+		cur.retire()
+	}
 	g.pool[key] = u
-	u.refs = 1
 	g.mu.Unlock()
 	return u, nil
 }
@@ -152,13 +165,29 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	// ADR 0097 decision 5 has the gateway answer roots/list with one fixed folder. Roots are
 	// deprecated from MCP 2026-07-28 but work for twelve more months; sampling stays unadvertised.
 	client.AddRoots(&mcp.Root{URI: RootURI, Name: "workspace"}) //nolint:staticcheck // see above
-	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
-	defer cancel()
-	s, err := client.Connect(cctx, &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}, nil)
+	// The handshake has a deadline; the stream of a legacy SSE target must outlive it. The stream
+	// context ends when the session retires, or when the handshake fails.
+	sctx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	timer := time.AfterFunc(g.o.CallTimeout, stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			// The caller gave up before the handshake ended.
+			if !timer.Stop() {
+				return
+			}
+			stop()
+		case <-sctx.Done():
+		}
+	}()
+	s, err := client.Connect(sctx, &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}, nil)
 	if err != nil {
+		timer.Stop()
+		stop()
 		return nil, err
 	}
-	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now()}, nil
+	timer.Stop()
+	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop}, nil
 }
 
 // evict drops the upstream session of key, so the next call connects again.

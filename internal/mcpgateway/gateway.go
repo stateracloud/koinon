@@ -104,7 +104,13 @@ var ErrInvalidConfig = errors.New("mcpgateway: invalid config")
 
 // ApplyMCP implements gateway.MCPGateway. It is idempotent and returns once the new config is live.
 // A rejected config leaves the previous one serving.
-func (g *Gateway) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.Revision, error) {
+func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Revision, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err // the apply deadline passed: keep the config that serves
+	}
+	if err := c.Validate(); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
 	s := &snapshot{
 		keys:    map[string]gateway.Key{},
 		targets: map[string]gateway.MCPTarget{},
@@ -126,10 +132,21 @@ func (g *Gateway) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.Revi
 		if t.URL == "" {
 			return "", fmt.Errorf("%w: target %q has no URL", ErrInvalidConfig, t.Name)
 		}
+		if _, isAllow := g.o.Guard.(AllowGuard); isAllow && t.Org != "" {
+			return "", fmt.Errorf("%w: target %q is an org target and needs a real guard", ErrInvalidConfig, t.Name)
+		}
+		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
+			return "", fmt.Errorf("%w: target %q has a credential and a URL that is not https", ErrInvalidConfig, t.Name)
+		}
 		s.targets[t.Name] = t
 	}
 	for a, gs := range c.Tools {
-		s.grants[a] = slices.Clone(gs)
+		cp := make([]gateway.ToolGrant, len(gs))
+		for i, gr := range gs {
+			cp[i] = gr
+			cp[i].Tools = slices.Clone(gr.Tools)
+		}
+		s.grants[a] = cp
 	}
 	s.rev = revisionOf(c)
 	old := g.snap.Swap(s)
