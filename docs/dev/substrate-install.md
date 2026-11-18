@@ -130,12 +130,18 @@ Supported fixes, in this order:
 1. Set the API server's first `--service-account-issuer` to `https://kubernetes.default.svc`. Substrate then
    reads discovery from the in-cluster API server with the pod's token, and pods need no route to anything else.
    On Talos, set `cluster.apiServer.extraArgs`. Later `--service-account-issuer` values are only accepted for
-   validation, not used to sign.
+   validation, not used to sign: keep the old value as the second one so tokens already issued stay valid.
+   When the discovery document's `jwks_uri` is not reachable from pods, also set `--service-account-jwks-uri`
+   to `https://kubernetes.default.svc/openid/v1/jwks`.
 2. Or set it to a URL that pods reach with a certificate from the system roots.
 
-Kubernetes signs tokens with the first issuer and writes the same value as `issuer` in the discovery document, so
+The real requirement: pods in the Substrate namespace reach the issuer Substrate trusts, because Substrate v1.0.0
+has no separate discovery URL (`cmd/ateapi/main.go` line 674 passes the issuer to `HTTPKeySource`). Kubernetes
+signs tokens with the first issuer and writes the same value as `issuer` in the discovery document, so
 `--expected-jwt-issuer` cannot turn an unroutable issuer into a reachable one. It is only an override that must
-equal the `iss` of the cluster's tokens.
+equal the `iss` of the cluster's tokens. In particular, `--expected-jwt-issuer=https://kubernetes.default.svc` on a
+cluster whose tokens carry another `iss` fails twice: the discovery document names the other issuer (oidcjwt.go
+line 618) and every token is rejected as "unexpected issuer" (line 277).
 
 The API server serves the discovery document and the JWKS to every service account through the
 `system:service-account-issuer-discovery` ClusterRoleBinding. A sidecar that serves a copy of the discovery
@@ -152,8 +158,9 @@ that `internal/version` takes its version and commit from `-ldflags -X`, and tha
 
 ### Unverified
 
-Not checked against a running cluster in this change (no koinon-lab kubeconfig file exists; labrun mints
-credentials from OpenBao, and that was not done here). The names above come from the source:
+On a lab cluster whose issuer is an IPv6 address pods cannot reach, the issuer probe failed with the message
+above and the installer installed nothing. Everything after that check is not verified on a cluster; the names
+above come from the source:
 
 - `--namespace` other than `ate-system`: ate-setup has the flag, but the lab found that `deploy ate-system`
   names three namespaces literally. The SPIFFE ID and the checks follow the configured namespace; an
@@ -165,3 +172,9 @@ credentials from OpenBao, and that was not done here). The names above come from
 - A full install with the new options (`--postgres-storage-class` and the others) and the in-cluster issuer
   probe on a cluster; the lab run before them stopped at the issuer probe.
 - The RBAC of the preflight ServiceAccount (issuer discovery, `kube-root-ca.crt`): chart work.
+
+### Known gaps
+
+- The installer does not pre-create the `rustfs-data` PersistentVolumeClaim of the bundled object store, and
+  `--postgres-storage-class` covers only the Postgres volume. On a cluster without a default StorageClass that
+  claim stays Pending: mark a StorageClass as the default before the install. No preflight check catches this yet.

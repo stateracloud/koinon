@@ -553,8 +553,11 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		}
 		return Result{
 			Check: check, Status: Fail, Message: msg + info + tokenInfo,
-			Fix: "set the API server's first --service-account-issuer to https://kubernetes.default.svc (Substrate then reads discovery from the in-cluster API server with the pod's token), " +
+			Fix: "pods in " + ns + " must reach the issuer Substrate trusts, and Substrate v1.0.0 has no separate discovery URL. " +
+				"Set the API server's first --service-account-issuer to https://kubernetes.default.svc (Substrate then reads discovery from the in-cluster API server with the pod's token), " +
 				"or to a URL that pods reach with a certificate from the system roots (on Talos: cluster.apiServer.extraArgs service-account-issuer). " +
+				"Keep the old value as a second --service-account-issuer so tokens already issued stay valid, and when the discovery document's jwks_uri is not reachable from pods, " +
+				"set --service-account-jwks-uri to https://kubernetes.default.svc/openid/v1/jwks. " +
 				"Kubernetes signs tokens and names the discovery issuer from that first value, so --expected-jwt-issuer cannot replace it. A sidecar that fakes the issuer is not a supported install",
 		}
 	}
@@ -562,8 +565,10 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, ns, res.TokenIssuer),
-			Fix: "pass --expected-jwt-issuer " + res.TokenIssuer + " (the value ate-setup would otherwise take from discovery), or make the API server sign tokens with the issuer Substrate trusts " +
-				"(the first --service-account-issuer; later ones are only accepted for validation)",
+			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.0 fetches discovery from the issuer itself. " +
+				"Drop --expected-jwt-issuer (or set it to " + res.TokenIssuer + ") and run the check again: it then probes that URL. " +
+				"If pods cannot reach it, set the API server's first --service-account-issuer to https://kubernetes.default.svc or another URL pods reach " +
+				"(Kubernetes signs tokens with the first value; later ones are only accepted for validation)",
 		}
 	}
 	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s%s", ns, issuer, info, tokenInfo)}
@@ -598,15 +603,18 @@ var inClusterIssuers = []string{"https://kubernetes.default.svc", "https://kuber
 //     own address works).
 //   - internal/oidcjwt/oidcjwt.go Verify: a token is accepted only when its iss claim equals the issuer.
 //
-// So the issuer URL need not be routable when it is the in-cluster one: that is the supported shape on
-// clusters whose own issuer is an address pods cannot reach (an Omni or Talos IPv6 address). The probe
-// reports the iss claim of its own token so the caller can compare it. The issuer counts as reachable only
+// So the in-cluster issuer needs no route outside the cluster, but only when the cluster itself issues tokens
+// with it (its first --service-account-issuer): the discovery document must name it and the tokens must carry
+// it. Naming it in Substrate alone, on a cluster whose own issuer is an address pods cannot reach (an Omni or
+// Talos IPv6 address), fails both checks. The probe reports the iss claim of its own token so the caller can
+// compare it. The issuer counts as reachable only
 // when both fetches answer 2xx. When only an unverified connection works, the result is reachable and
 // Unverified. The HTTP status goes into Detail.
 func ProbeIssuerFromPod(ctx context.Context, issuer string, timeout time.Duration) IssuerResult {
 	return ProbeIssuerWith(ctx, issuer, timeout, IssuerProbeFiles{
 		CAFile: IssuerCAFile, TokenFile: IssuerTokenFile,
-		InCluster: slices.Contains(inClusterIssuers, strings.TrimSuffix(issuer, "/")),
+		// An exact match, as ate-setup's switch: a trailing slash gets neither the CA nor the token there.
+		InCluster: slices.Contains(inClusterIssuers, issuer),
 	})
 }
 

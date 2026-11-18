@@ -251,7 +251,11 @@ var _ = Describe("Substrate checks", func() {
 				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("from a pod in namespace ate-system"),
 				ContainSubstring("invalid bearer token"), ContainSubstring("IPv6 unique-local address"),
 			))
-			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("not a supported install")))
+			Expect(r.Fix).To(And(
+				ContainSubstring("must reach the issuer Substrate trusts"), ContainSubstring("no separate discovery URL"),
+				ContainSubstring("service-account-issuer"), ContainSubstring("cannot replace it"), ContainSubstring("not a supported install"),
+			))
+			Expect(r.Fix).NotTo(ContainSubstring("--expected-jwt-issuer https://kubernetes.default.svc"))
 		})
 
 		It("fails, not warns, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
@@ -291,7 +295,13 @@ var _ = Describe("Substrate checks", func() {
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(And(ContainSubstring("unexpected issuer"), ContainSubstring("https://[fdae:1::1]:10001")))
-			Expect(r.Fix).To(ContainSubstring("--expected-jwt-issuer https://[fdae:1::1]:10001"))
+			// The token's iss is the one to trust, and only when pods reach it: never the in-cluster issuer as an override.
+			Expect(r.Fix).To(And(
+				ContainSubstring("must trust the iss the tokens carry (https://[fdae:1::1]:10001)"),
+				ContainSubstring("must reach that URL"),
+				ContainSubstring("first --service-account-issuer to https://kubernetes.default.svc"),
+			))
+			Expect(r.Fix).NotTo(ContainSubstring("--expected-jwt-issuer https://kubernetes.default.svc"))
 		})
 
 		It("fails when the discovery document cannot be read or the probe pod fails", func(ctx SpecContext) {

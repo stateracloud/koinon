@@ -63,9 +63,10 @@ type Profile struct {
 	// SetupCSI is ate-setup --setup-csi (nfs, hostpath, both or none); empty leaves ate-setup's default, none.
 	SetupCSI string
 	// ExpectedJWTIssuer is ate-setup --ateapi-expected-jwt-issuer: the service-account issuer Substrate's api
-	// server trusts. Empty lets ate-setup read it from the API server's discovery document. Set it to
-	// https://kubernetes.default.svc when the cluster's tokens carry that issuer but its discovery document
-	// names an address pods cannot reach.
+	// server trusts. Empty lets ate-setup read it from the API server's discovery document. It must equal the
+	// iss of the cluster's tokens, and Substrate v1.0.0 fetches discovery from this URL, so pods must reach it.
+	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
+	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
 	// Kind is ate-setup --kind: target a local kind cluster (kind overlays, host-architecture images).
 	Kind bool
