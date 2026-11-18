@@ -8,13 +8,15 @@ Instructions for coding agents working on Koinon. Humans: [CONTRIBUTING.md](CONT
 ## Hard rules
 
 - **Never Kyverno.** Admission policy is native ValidatingAdmissionPolicy only.
-- **No secrets in sandboxes.** Credentials stay in Koinon's gateway or the secret store; the execution layer injects
-  only a short-lived actor identity token, outside the guest. Never put a credential in sandbox env, images, home
-  volumes, snapshots or logs. The only exception is ADR 0044 and it is gated.
+- **No secrets in sandboxes.** Credentials stay in Koinon's gateway, the secret store or, until ADR 0119 phase 5
+  (ADR 0120 section 7), OpenShell provider records; the execution layer injects only a short-lived actor identity
+  token, outside the guest. Never put a credential in sandbox env, images, home volumes, snapshots or logs. The only
+  exception is ADR 0044 and it is gated.
 - No CNI-specific features (no Cilium dependency).
 - Don't weaken the execution hardening defaults of ADR 0120 (default-deny egress and enforced L7 rules on every
   inspected or credentialed route, in every tier; Landlock and seccomp in the guest where the tier supports them) or
-  the isolation tiers of ADR 0075 (a microVM per sandbox for the `vm` tier).
+  the isolation tiers of ADR 0075 (a microVM per sandbox for the `vm` tier). Until #1094 removes the OpenShell
+  driver, its profile in ADR 0120 section 7 also holds (`enforcement: enforce` in every tier).
 
 ## Rules for a folder
 

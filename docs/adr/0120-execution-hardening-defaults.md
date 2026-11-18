@@ -182,6 +182,13 @@ credential Koinon rotates; Landlock `hard_requirement`; OpenShell telemetry off;
 enabled; the runtime class follows the tier (`kata` for `vm`); the deny-all NetworkPolicy, which keeps
 the deny-all shape with no allow rules, a stricter form of 2.4. They are a profile of this ADR, not separate decisions.
 
+The install requirements of 0048 decision 2 that guard credentials and attachment also stay in force for
+the OpenShell driver: the OpenShell `vault` credential driver on its own KV mount, outside any broadly
+usable External Secrets store, reached over HTTPS, with a policy limited to create/read/update on
+`<mount>/data/openshell/provider-credentials/*` and delete on the metadata path; the label
+`openshell.ai/sandbox-attachable: "true"` on every RuntimeClass Koinon uses; and a CNI that enforces
+egress NetworkPolicy (the fence of 2.4 depends on it). Preflight keeps checking them until the driver is removed.
+
 Transition exceptions: today the OpenShell driver injects a gateway key, not the short-lived
 actor token of 1.2, and credentials live in OpenShell provider records with the supervisor swapping
 the placeholder inside the sandbox pod, which counts as its egress layer for 1.3 and 2.1 (this is why
