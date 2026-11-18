@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,12 +56,37 @@ type Profile struct {
 	SandboxClasses string
 	// ImageRepo is the registry path of the release images; empty means the pinned public path.
 	ImageRepo string
+	// PostgresStorageClass is the StorageClass of the bundled PostgreSQL volume
+	// (ate-setup --ateapi-postgres-storage-class); empty uses the cluster default. A cluster without a
+	// default StorageClass leaves the bundled Postgres Pending until this is set.
+	PostgresStorageClass string
+	// SetupCSI is ate-setup --setup-csi (nfs, hostpath, both or none); empty leaves ate-setup's default, none.
+	SetupCSI string
+	// ExpectedJWTIssuer is ate-setup --ateapi-expected-jwt-issuer: the service-account issuer Substrate's api
+	// server trusts. Empty lets ate-setup read it from the API server's discovery document. It must equal the
+	// iss of the cluster's tokens, and Substrate v1.0.0 fetches discovery from this URL, so pods must reach it.
+	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
+	// both the tokens and the discovery document, so that flag is the one to change.
+	ExpectedJWTIssuer string
+	// Kind is ate-setup --kind: target a local kind cluster (kind overlays, host-architecture images).
+	Kind bool
 }
+
+// csiDrivers are the values of ate-setup --setup-csi (cmd/ate-setup/internal/steps/csi.go ValidateCSIDriver).
+var csiDrivers = []string{"nfs", "hostpath", "both", "none"}
 
 // Validate says what the profile lacks.
 func (p Profile) Validate() error {
 	if p.StorageBucket == "" {
 		return errors.New("substrate profile lacks the storage bucket")
+	}
+	if p.SetupCSI != "" && !slices.Contains(csiDrivers, p.SetupCSI) {
+		return fmt.Errorf("substrate profile: unknown CSI driver %q (valid: %s)", p.SetupCSI, strings.Join(csiDrivers, ", "))
+	}
+	if p.ExpectedJWTIssuer != "" {
+		if u, err := url.Parse(p.ExpectedJWTIssuer); err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+			return fmt.Errorf("substrate profile: the expected JWT issuer %q must be an https URL without query or fragment", p.ExpectedJWTIssuer)
+		}
 	}
 	return nil
 }
@@ -89,6 +115,18 @@ func (p Profile) SetupArgs(namespace string) []string {
 	}
 	if p.SandboxClasses != "" {
 		args = append(args, "--sandbox-classes="+p.SandboxClasses)
+	}
+	if p.PostgresStorageClass != "" {
+		args = append(args, "--ateapi-postgres-storage-class="+p.PostgresStorageClass)
+	}
+	if p.SetupCSI != "" {
+		args = append(args, "--setup-csi="+p.SetupCSI)
+	}
+	if p.ExpectedJWTIssuer != "" {
+		args = append(args, "--ateapi-expected-jwt-issuer="+p.ExpectedJWTIssuer)
+	}
+	if p.Kind {
+		args = append(args, "--kind")
 	}
 	return args
 }
@@ -325,6 +363,10 @@ func (i *Installer) Install(ctx context.Context) error {
 	if err := i.Profile.Validate(); err != nil {
 		return err
 	}
+	// The issuer probe checks the issuer ate-setup is about to write.
+	sub := i.Checker.Config.SubstrateOrDefault()
+	sub.ExpectedIssuer = i.Profile.ExpectedJWTIssuer
+	i.Checker.Config.Substrate = &sub
 	if i.Kubeconfig == "" || i.Context == "" {
 		return errors.New("the installer needs a kubeconfig and a context: it does not act on the ambient current context")
 	}
@@ -336,6 +378,18 @@ func (i *Installer) Install(ctx context.Context) error {
 	// Checks that need no namespace come first: a cluster that cannot run Substrate fails with nothing created.
 	if failed := preflight.Write(i.Out, i.Checker.SubstrateStaticPrerequisites(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
+	}
+	// One issuer for the probe and for ate-setup, passed to ate-setup explicitly: there a flag wins over an
+	// EXPECTED_JWT_ISSUER in the operator's environment, which would otherwise replace the discovery issuer.
+	profile := i.Profile
+	if profile.ExpectedJWTIssuer == "" && i.Checker.Issuer != nil {
+		issuer, err := i.Checker.SubstrateIssuer(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: read the service-account issuer: %w; nothing was installed", ErrPrerequisites, err)
+		}
+		profile.ExpectedJWTIssuer = issuer
+		sub.ExpectedIssuer = issuer
+		i.Checker.Config.Substrate = &sub
 	}
 	created, err := i.EnsureNamespace(ctx)
 	if err != nil {
@@ -353,7 +407,7 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
-	args := append(i.Profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
+	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, i.Out); err != nil {
 		return fmt.Errorf("ate-setup %s: %w", PinnedVersion, err)
@@ -394,8 +448,14 @@ func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("read namespace %s: %w", ns, err)
 	}
 	_, err = i.Kube.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:   ns,
-		Labels: map[string]string{"pod-security.kubernetes.io/enforce": "privileged"},
+		Name: ns,
+		// warn and audit too: the device probe mounts hostPath devices, and without them the API server
+		// warns about the restricted profile on every probe pod.
+		Labels: map[string]string{
+			"pod-security.kubernetes.io/enforce": "privileged",
+			"pod-security.kubernetes.io/warn":    "privileged",
+			"pod-security.kubernetes.io/audit":   "privileged",
+		},
 	}}, metav1.CreateOptions{})
 	switch {
 	case apierrors.IsAlreadyExists(err):
@@ -407,7 +467,7 @@ func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 }
 
 // WaitNamespaceReady waits until the controllers have filled the Substrate namespace: the probe pods use
-// the default ServiceAccount and the issuer probe mounts the kube-root-ca.crt ConfigMap, and both appear
+// the default ServiceAccount and the issuer probe mounts the default ServiceAccount token, whose ca.crt is the kube-root-ca.crt ConfigMap, and both appear
 // some time after a namespace is created. Without the wait a probe pod on a fresh cluster is refused or
 // stays in FailedMount.
 func (i *Installer) WaitNamespaceReady(ctx context.Context) error {
