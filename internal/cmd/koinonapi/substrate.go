@@ -65,6 +65,10 @@ func newSubstrateCommand() *cobra.Command {
 			if !c.substrateProbes {
 				return errors.New("substrate install runs the probe pods: --substrate-probes=false is only for preflight")
 			}
+			if c.substrateIssuer != "" {
+				// The install writes the issuer ate-setup trusts; a second flag for the probe alone could disagree with it.
+				return errors.New("substrate install takes the issuer from --expected-jwt-issuer: --substrate-expected-issuer is only for preflight")
+			}
 			return c.validate()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {

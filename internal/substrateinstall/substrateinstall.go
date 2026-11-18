@@ -84,7 +84,7 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("substrate profile: unknown CSI driver %q (valid: %s)", p.SetupCSI, strings.Join(csiDrivers, ", "))
 	}
 	if p.ExpectedJWTIssuer != "" {
-		if u, err := url.Parse(p.ExpectedJWTIssuer); err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		if u, err := url.Parse(p.ExpectedJWTIssuer); err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 			return fmt.Errorf("substrate profile: the expected JWT issuer %q must be an https URL without query or fragment", p.ExpectedJWTIssuer)
 		}
 	}
@@ -379,6 +379,18 @@ func (i *Installer) Install(ctx context.Context) error {
 	if failed := preflight.Write(i.Out, i.Checker.SubstrateStaticPrerequisites(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
+	// One issuer for the probe and for ate-setup, passed to ate-setup explicitly: there a flag wins over an
+	// EXPECTED_JWT_ISSUER in the operator's environment, which would otherwise replace the discovery issuer.
+	profile := i.Profile
+	if profile.ExpectedJWTIssuer == "" && i.Checker.Issuer != nil {
+		issuer, err := i.Checker.SubstrateIssuer(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: read the service-account issuer: %w; nothing was installed", ErrPrerequisites, err)
+		}
+		profile.ExpectedJWTIssuer = issuer
+		sub.ExpectedIssuer = issuer
+		i.Checker.Config.Substrate = &sub
+	}
 	created, err := i.EnsureNamespace(ctx)
 	if err != nil {
 		return err
@@ -395,7 +407,7 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
-	args := append(i.Profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
+	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, i.Out); err != nil {
 		return fmt.Errorf("ate-setup %s: %w", PinnedVersion, err)

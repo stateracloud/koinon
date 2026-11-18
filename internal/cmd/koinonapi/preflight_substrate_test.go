@@ -59,5 +59,10 @@ var _ = Describe("preflight --driver substrate", func() {
 		It("refuses to run with the probes off", func() {
 			Expect(run("--kubeconfig=/k", "--context=lab", "--substrate-probes=false")).To(MatchError(ContainSubstring("--substrate-probes=false")))
 		})
+
+		It("refuses the preflight-only issuer flag, so the probe and ate-setup cannot use different issuers", func() {
+			Expect(run("--kubeconfig=/k", "--context=lab", "--substrate-expected-issuer=https://kubernetes.default.svc")).
+				To(MatchError(ContainSubstring("--expected-jwt-issuer")))
+		})
 	})
 })
