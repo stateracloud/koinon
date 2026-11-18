@@ -157,6 +157,10 @@ func (d *Driver) prune(ctx context.Context, o Options, r Rendered) error {
 		}
 		for _, u := range live {
 			if !want[kind+"/"+u.GetName()] {
+				// A leader that lost its lease must not delete what the next leader made (issue 635).
+				if err := gateway.CheckFence(ctx); err != nil {
+					return fmt.Errorf("kubernetes: prune stopped, leadership is not confirmed: %w", err)
+				}
 				if err := d.Store.Delete(ctx, kind, o.Namespace, u.GetName()); err != nil {
 					return fmt.Errorf("kubernetes: delete %s/%s: %w", kind, u.GetName(), err)
 				}

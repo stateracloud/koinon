@@ -83,6 +83,12 @@ const (
 	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (old issue 315).
 	DefaultKeepWarmPerOrg = 2
 	DefaultResyncInterval = 30 * time.Second
+	// DefaultLeaderHeartbeat is how long the leader's lock connection may be silent before the
+	// leader checks it with a query (issue 635).
+	DefaultLeaderHeartbeat = 4 * time.Second
+	// DefaultLeaderPingTimeout bounds that check. A leader that cannot confirm its lock connection
+	// within heartbeat + ping timeout (8 s by default) stops its work.
+	DefaultLeaderPingTimeout = 4 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
 	DefaultMCPProbeInterval = 60 * time.Second
 )
@@ -159,6 +165,12 @@ type Config struct {
 	KeepWarmPerOrg int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
+	// LeaderHeartbeat and LeaderPingTimeout bound the time a leader works after its lock connection
+	// died without a TCP reset (hard node loss, partition): LeaderHeartbeat + LeaderPingTimeout.
+	// Defaults 4 s and 4 s. TCP keepalive alone would take about 2.5 minutes, and a TCP proxy or
+	// pooler in between answers keepalive probes for a dead peer.
+	LeaderHeartbeat   time.Duration
+	LeaderPingTimeout time.Duration
 	// Checkpoints turns on home checkpoints (checkpoint.go): a sandbox is stopped, recreated or
 	// archived only after its home was backed up, and a recreated sandbox keeps its home
 	// generation and gets the home restored. koinon-agentd writes the checkpoints.
@@ -301,6 +313,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
+	}
+	if cfg.LeaderHeartbeat <= 0 {
+		cfg.LeaderHeartbeat = DefaultLeaderHeartbeat
+	}
+	if cfg.LeaderPingTimeout <= 0 {
+		cfg.LeaderPingTimeout = DefaultLeaderPingTimeout
 	}
 	if cfg.ResyncInterval == 0 {
 		cfg.ResyncInterval = DefaultResyncInterval

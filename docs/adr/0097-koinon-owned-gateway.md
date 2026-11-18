@@ -395,7 +395,7 @@ number is followed. `internal/gateway/stateclient` is the copy's side: it applie
 after that half applied, never acks a half that failed, and reconnects with jittered backoff. A lost ack
 (three tries) ends the stream, so the reconnect replays the newest revision and acks it again without
 applying it twice. Acks are recorded and gate nothing; the reconciler still pushes state with Apply. Slice
-4 moves the gate and must first settle the stale-leader fence of issue 635. Prior art: Envoy's xDS (versioned
+4 moves the gate and must first settle the stale-leader term fence (issue 635, still open for it; the heartbeat bound and prune fence are done). Prior art: Envoy's xDS (versioned
 full snapshots, ACK per resource type); here one revision number covers both halves, there is no NACK
 (a failed half is simply not acked) and the copy id stands in for the nonce.
 

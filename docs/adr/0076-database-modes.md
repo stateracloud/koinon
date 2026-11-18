@@ -158,6 +158,31 @@ which a follower now waits on with a blocking `pg_advisory_lock`, #573) need one
 as long as the process leads. Transaction and statement pooling (PgBouncer's `pool_mode =
 transaction` or `statement`) do not work.
 
+## Amendment (2026-11-18): the time two reconcilers can lead is bounded (#635)
+
+A hard node loss or a partition closes the leader's lock connection without a TCP reset. Postgres
+frees the session lock on its side after its own detection; the old leader would see the loss only
+when TCP keepalive ends the socket (about 2.5 minutes with the Go defaults, and never when a proxy or
+pooler in between answers the probes). In that time two reconcilers could lead, and the old one could
+prune objects the new one made.
+
+- **Bound: heartbeat + ping timeout, 8 s by default** (`LeaderHeartbeat` 4 s, `LeaderPingTimeout` 4 s).
+  The leader reads its lock connection in slices of one heartbeat. A quiet slice is followed by
+  `SELECT 1` that must be answered within the ping timeout; if not, the leader cancels its work (a
+  running pass, the sandbox queue) and restarts the lead. Application-level, so it also works
+  through a pooler or proxy.
+- **Fence before destructive steps.** The lead context carries a fence (`gateway.WithFence`): it
+  refuses once the connection was last confirmed longer ago than the bound. The Kubernetes gateway
+  driver checks it before every delete of its prune, so a stuck reader cannot extend the window for
+  deletes.
+- **Not closed: full fencing.** Within the bound, a write of the old leader can still land. A leader
+  term that each write carries and the database refuses when stale (the owner's choice, issue 635
+  comments) needs a schema change and a term on every write path. Issue 635 stays open for it (this
+  change is `Refs #635`, not `Closes`); the exit condition is the term fence, to be settled with the
+  gateway state stream (#279 S4), which has the same stale-publish question.
+- The spec "stops the old leader within the detection bound after a silent connection loss" cuts the
+  connection with a proxy that drops all bytes and keeps the sockets open.
+
 ## Consequences
 
 - **A plain cluster is enough** with `standalone`: no operator and no cloud database.
