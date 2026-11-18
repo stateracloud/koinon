@@ -123,7 +123,7 @@ func Main(ctx context.Context, args []string) int {
 
 // readToken reads the bearer token from file, trimmed of the trailing newline.
 func readToken(file string) (string, error) {
-	b, err := os.ReadFile(file)
+	b, err := os.ReadFile(file) //nolint:gosec // the path is the operator's --state-token-file flag
 	if err != nil {
 		return "", fmt.Errorf("read the State stream token: %w", err) // the error names the file, never its content
 	}

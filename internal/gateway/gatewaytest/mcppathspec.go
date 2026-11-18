@@ -89,7 +89,7 @@ func mcpPathSpec(env Env) {
 			}
 			url := func(s string, p int) string { return "http://" + env.Host + ":" + itoa(p) + "/mcp" + s }
 			state = gateway.State{MCPState: gateway.MCPState{MCP: []gateway.MCPTarget{
-				{Name: "alpha", URL: url("", port(alpha)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("mcp_key")},
+				{Name: "alpha", URL: url("", port(alpha)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("mcp_key")}, //nolint:gosec // a header name and a test key file, not a credential
 				{Name: "beta", URL: url("", port(beta))},
 			}}}
 			for _, k := range []gateway.IssuedKey{keyReader, keyBoth, keyNone, keyOld} {

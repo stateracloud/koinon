@@ -9,8 +9,6 @@ postgres:
     secretName: koinon-db
 bootstrapAdmin:
   enabled: false
-preflight:
-  enabled: false
 gateway:
   mcp:
     driver: koinon
