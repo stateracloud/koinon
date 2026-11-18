@@ -278,11 +278,12 @@ func (c *guardConn) overloaded(msg jsonrpc.Message) {
 		c.mu.Lock()
 		delete(c.pending, idKey(m.ID))
 		c.mu.Unlock()
-		c.wg.Add(1) // counted, so a read error is delivered after this response
-		go func() {
-			defer c.wg.Done()
-			c.deliver(readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")})
-		}()
+		// No goroutine: a hostile target must not grow one per message. The error goes in at once, or
+		// the response is dropped and its call ends at its own deadline.
+		select {
+		case c.in <- readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")}:
+		default:
+		}
 	case *jsonrpc.Request:
 		// Dropped, with no answer: the target times out. A write here would let a hostile target make
 		// the gateway open one outbound request per message.

@@ -141,11 +141,12 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		u.retire()
 		return cur, nil
 	}
-	if cur, ok := g.pool[key]; ok {
-		cur.retire()
-	}
+	displaced := g.pool[key]
 	g.pool[key] = u
 	g.mu.Unlock()
+	if displaced != nil {
+		displaced.retire() // outside the lock: Close can wait on the network
+	}
 	return u, nil
 }
 
