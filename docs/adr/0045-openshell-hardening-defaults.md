@@ -1,12 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-10-21
 area: runtime-sandbox
 tags: [openshell, isolation, kubernetes, security]
 ---
 # 0045. OpenShell hardening defaults
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
+- Status: Superseded by [0120](0120-execution-hardening-defaults.md) (was: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md))
 - Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
@@ -33,7 +33,7 @@ Research on OpenShell `main` (2026-10-21) found defaults that weaken Koinon's mo
 
 ## Decision
 
-_(Changed by [0119](0119-agent-substrate-execution-layer.md): superseded by the execution hardening defaults ADR (#1084): default-deny egress and enforced L7 on every inspected or credentialed route in every tier; phase 1.)_
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): superseded by [0120](0120-execution-hardening-defaults.md), execution hardening defaults (#1084): default-deny egress and enforced L7 on every inspected or credentialed route in every tier; phase 1.)_
 
 The reconciler and Helm chart always set:
 
@@ -86,7 +86,8 @@ user namespaces, SELinux where present, a dedicated tainted sandbox pool and enf
 or `dev` (kind and CI only).
 
 - Decision 5: `default_runtime_class_name` follows the tier. The Kata runtime class stays required
-  for the `vm` tier.
+  for the `vm` tier. (Changed 2026-11-17 by ADR 0075's amendment of that date: the `vm` tier requires a
+  microVM, not the Kata runtime class; `kata` stays the default.)
 - Decision 6: the VAP's allowed runtime classes are the tier's.
 - Decisions 1 to 4 and 7, and the 0048 additions (`stable_placeholder`, Landlock `hard_requirement`,
   telemetry off, requester-identity VAP rules, `io.katacontainers.*` denied), hold in every tier.

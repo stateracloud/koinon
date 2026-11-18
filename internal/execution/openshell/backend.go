@@ -49,7 +49,12 @@ type Backend struct {
 	owner string
 }
 
-var _ execution.Backend = (*Backend)(nil)
+// The OpenShell driver implements both halves of the seam. It has no Suspender and no Snapshotter.
+var (
+	_ execution.Backend = (*Backend)(nil)
+	_ execution.Compute = (*Backend)(nil)
+	_ execution.Egress  = (*Backend)(nil)
+)
 
 // New returns a Backend on an existing connection. The caller owns conn.
 func New(conn grpc.ClientConnInterface) *Backend {

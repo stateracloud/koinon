@@ -69,7 +69,7 @@ are in [0046](0046-adr-conventions.md).
 | [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted; amended by [0048](0048-openshell-spike-results.md), [0065](0065-work-model-tasks-inbox.md) and [0084](0084-leak-guard.md) |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted; amended 2026-11-11 (below) and by [0114](0114-model-credentials-by-type.md) |
-| [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md) |
+| [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Superseded by [0120](0120-execution-hardening-defaults.md) (was: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)) |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted; amended by [0115](0115-document-metadata.md) (Area and Tags in the header); amended 2026-11-17 (below) |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted; amended 2026-10-26 (below); the pull request e2e rule amended by [0105](0105-merge-queue-route.md) (amendment of 2026-11-11, #572) |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Accepted (2026-10-26, accepted after implementation) |
@@ -142,3 +142,4 @@ are in [0046](0046-adr-conventions.md).
 | [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |
 | [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification) |
+| [0120](0120-execution-hardening-defaults.md) | Execution hardening defaults | Accepted (decisions D1, D2, D5 and D7 settled by the maintainer on 2026-11-18) |

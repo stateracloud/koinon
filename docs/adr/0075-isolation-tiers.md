@@ -9,7 +9,7 @@ relates: ["0002", "0006", "0023", "0025", "0042", "0076", "0077"]
 # 0075. Isolation tiers: vm, hardened and dev
 
 - Status: Accepted (pending qualification on Bottlerocket)
-- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer); [0120](0120-execution-hardening-defaults.md) (execution hardening defaults)
 - Date: 2026-10-28
 - Area: runtime-sandbox
 - Tags: isolation, openshell, sandbox, kubernetes
@@ -98,6 +98,8 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 ## Decision
 
 _(Changed by [0119](0119-agent-substrate-execution-layer.md): the tier map follows D3 of 0119 (the `vm` tier is a microVM per sandbox; see 0119 for `hardened` and `dev`); phase 2.)_
+
+_(Changed by [0120](0120-execution-hardening-defaults.md): the hardening of 0120 holds in every tier, and the preflight fails the `vm` and `hardened` tiers on a cluster without a NetworkPolicy engine.)_
 
 ### The tiers
 
@@ -370,3 +372,36 @@ the listed names, and the chart default plus the escape suite (`runc` and `gviso
 be one of the admitted classes (the chart fails the render otherwise); its default is unchanged.
 
 Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.
+
+## Amendment (2026-11-17): the vm tier requires a microVM, not Kata (issue 1080)
+
+Kata was the easiest microVM to start with. It was never the property that the `vm` tier protects.
+Other runtimes now run agent sandboxes in a microVM on Kubernetes without a Kata RuntimeClass (for
+example Agent Substrate starts Cloud Hypervisor with a Kata guest from its own worker pod). The
+maintainer decided on 2026-11-17 to drop the Kata requirement.
+
+- **The `vm` tier is defined by properties, not by a product.** A runtime qualifies when every sandbox
+  runs in its own microVM with:
+  - a separate guest kernel under hardware virtualisation (KVM or the cloud's equivalent);
+  - guest seccomp on;
+  - OpenShell `enforcement: enforce` and the other ADR 0045 defaults, wherever OpenShell runs.
+- **Kata stays the default and the golden path.** The chart default (`openshell.runtimeClassName:
+  kata`, `sandboxPolicy.runtimeClasses`) does not change. AKS Pod Sandboxing and GKE Sandbox `microvm`
+  stay listed.
+- **A qualified runtime with its own RuntimeClass is admissible.** Decision 2's "a RuntimeClass of one of
+  these" is read as "a RuntimeClass of a runtime that meets the definition above". The class is
+  admitted by naming it in `sandboxPolicy.runtimeClasses` (the values schema already allows any
+  DNS-style name, see the 2026-11-01 amendment) after the runtime's own escape-suite run; the chart
+  default list does not change.
+- **A runtime without a RuntimeClass** (one that starts the VMM itself) needs its own decision on how
+  admission scopes it, because decision 2's "a RuntimeClass of one of these" and ADR 0045 decision 6
+  do not apply to it. That decision comes with the runtime's own issue; this amendment only removes
+  the Kata name.
+- **Qualification (decisions 2 and 10).** Each runtime is qualified by its own escape-suite run before
+  the docs name it supported. The spec "runs in a Kata guest, not on the host kernel" (decision 9) is
+  read as "runs in a microVM guest, not on the host kernel"; renaming the spec is a test change, not
+  part of this amendment.
+- **Decision 11 is changed:** its line "The Kata runtime class stays required for the `vm` tier" is
+  replaced by "A microVM, as defined above, stays required for the `vm` tier". The other lines hold.
+
+AGENTS.md's hard rule is reworded to match.
