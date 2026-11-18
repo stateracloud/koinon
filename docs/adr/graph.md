@@ -102,6 +102,7 @@ flowchart LR
   n0114["0114: Model traffic always through the gateway; credentials handled by type"]
   n0115["0115: Document metadata: one area and controlled tags on every doc"]
   n0119["0119: Agent Substrate is Koinon's execution layer"]
+  n0120["0120: Execution hardening defaults"]
   n0013 --> n0040
   n0014 --> n0040
   n0016 --> n0040
@@ -250,4 +251,8 @@ flowchart LR
   n0112 --> n0119
   n0113 --> n0119
   n0101 ==>|supersedes| n0119
+  n0075 --> n0120
+  n0097 --> n0120
+  n0045 ==>|supersedes| n0120
+  n0048 ==>|supersedes| n0120
 ```

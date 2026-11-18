@@ -106,12 +106,12 @@ For more: [`docs/design.md`](docs/design.md), the [ADR index](docs/adr/README.md
   supervisor swaps a placeholder for the real secret only on requests to allowed endpoints. Model
   provider keys stay at the gateway; the sandbox's gateway key is worthless anywhere else
   ([ADR 0040](docs/adr/0040-agentgateway-model-and-mcp-gateway.md),
-  [ADR 0045](docs/adr/0045-openshell-hardening-defaults.md)). One narrow, opt-in exception for
+  [ADR 0120](docs/adr/0120-execution-hardening-defaults.md)). One narrow, opt-in exception for
   credentials that cannot be held outside the sandbox is in
   [ADR 0044](docs/adr/0044-in-sandbox-credential-exception.md).
 - **Policy is enforced in every tier.** Koinon renders OpenShell network policy with
   `enforcement: enforce` and a ValidatingAdmissionPolicy on the sandbox namespaces
-  ([ADR 0045](docs/adr/0045-openshell-hardening-defaults.md)).
+  ([ADR 0120](docs/adr/0120-execution-hardening-defaults.md)).
 - **One isolation tier per install.** The default is `vm`: a VM per sandbox, for example with Kata
   ([ADR 0075](docs/adr/0075-isolation-tiers.md)).
 - **Risky actions need a person.** Each connector scope has a risk tier, and the grant's preset says
