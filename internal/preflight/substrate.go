@@ -11,6 +11,7 @@ package preflight
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -113,13 +116,18 @@ type IssuerResolver interface {
 
 // IssuerResult is what an issuer probe pod saw.
 type IssuerResult struct {
+	// Reachable is true when the discovery document and the JWKS answered 2xx and the document names
+	// the probed URL as its issuer.
 	Reachable bool
-	Detail    string
+	// Unverified is true when that worked only over an unverified TLS connection: the pods do not
+	// trust the issuer's certificate and Substrate's api server will refuse it.
+	Unverified bool
+	Detail     string
 }
 
 // String formats the result as the probe prints it.
 func (r IssuerResult) String() string {
-	return fmt.Sprintf("%s reachable=%t detail=%q", SubstrateIssuerProbeMarker, r.Reachable, r.Detail)
+	return fmt.Sprintf("%s reachable=%t unverified=%t detail=%q", SubstrateIssuerProbeMarker, r.Reachable, r.Unverified, r.Detail)
 }
 
 // IssuerProber checks from a pod in Substrate's namespace that the issuer URL answers.
@@ -461,6 +469,13 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 	if err != nil {
 		return Result{Check: check, Status: Fail, Message: fmt.Sprintf("issuer probe pod: %v", err)}
 	}
+	if res.Reachable && res.Unverified {
+		return Result{
+			Check: check, Status: Warn,
+			Message: fmt.Sprintf("a pod in %s reaches %s, but only without verifying its TLS certificate (%s); Substrate's api server verifies it and would fail with \"invalid bearer token\"", c.Config.Substrate.Namespace, issuer, res.Detail),
+			Fix:     "serve the issuer with a certificate signed by the cluster CA (kube-root-ca.crt) or a CA the Substrate pods trust",
+		}
+	}
 	if res.Reachable {
 		return Result{Check: check, Status: Pass, Message: fmt.Sprintf("a pod in %s reaches %s", c.Config.Substrate.Namespace, issuer)}
 	}
@@ -481,33 +496,79 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 // issuerDiscoveryPath is the discovery path the probe fetches under the issuer.
 const issuerDiscoveryPath = "/.well-known/openid-configuration"
 
-// ProbeIssuerFromPod is what the issuer probe pod runs: it dials the issuer and asks for the
-// discovery document. It sends no credential and does not verify the certificate, because it checks
-// that the URL is reachable, not that it is trusted; any HTTP answer counts.
+// IssuerCAFile is where the issuer probe pod mounts the cluster CA bundle (the kube-root-ca.crt
+// ConfigMap that every namespace has), so the probe can verify TLS as Substrate's api server does.
+const IssuerCAFile = "/etc/koinon/cluster-ca/ca.crt"
+
+// ProbeIssuerFromPod is what the issuer probe pod runs. It does what Substrate's api server does:
+// fetch the discovery document and then its jwks_uri, without a credential, over verified TLS (the
+// system roots plus the cluster CA at IssuerCAFile). The issuer counts as reachable only when both
+// answer 2xx and the document's issuer equals the probed URL. When only an unverified connection
+// works, the result is reachable and Unverified. The HTTP status goes into Detail.
 func ProbeIssuerFromPod(ctx context.Context, issuer string, timeout time.Duration) IssuerResult {
 	u, err := url.Parse(issuer)
 	if err != nil || u.Host == "" {
 		return IssuerResult{Detail: "not a URL"}
 	}
+	res := fetchIssuer(ctx, issuer, timeout, issuerTLS(true))
+	if res.Reachable || !strings.Contains(res.Detail, "certificate") && !strings.Contains(res.Detail, "x509") {
+		return res
+	}
+	if unv := fetchIssuer(ctx, issuer, timeout, issuerTLS(false)); unv.Reachable {
+		unv.Unverified = true
+		unv.Detail = "TLS verification failed: " + truncate(res.Detail, 150)
+		return unv
+	}
+	return res
+}
+
+func fetchIssuer(ctx context.Context, issuer string, timeout time.Duration, tlsCfg *tls.Config) IssuerResult {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: timeout}).DialContext,
-			// Reachability only: no credential is sent and the answer is not trusted.
-			TLSClientConfig: reachabilityTLS(),
+			DialContext:     (&net.Dialer{Timeout: timeout}).DialContext,
+			TLSClientConfig: tlsCfg,
 		},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(issuer, "/")+issuerDiscoveryPath, http.NoBody)
-	if err != nil {
-		return IssuerResult{Detail: err.Error()}
+	get := func(target string) (int, []byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+		if err != nil {
+			return 0, nil, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return resp.StatusCode, body, nil
 	}
-	resp, err := client.Do(req)
+	docURL := strings.TrimSuffix(issuer, "/") + issuerDiscoveryPath
+	code, body, err := get(docURL)
 	if err != nil {
 		return IssuerResult{Detail: truncate(err.Error(), 200)}
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	_ = resp.Body.Close()
-	return IssuerResult{Reachable: true, Detail: "HTTP " + resp.Status}
+	if code/100 != 2 {
+		return IssuerResult{Detail: fmt.Sprintf("discovery document: HTTP %d (anonymous access needed)", code)}
+	}
+	var doc struct {
+		Issuer  string `json:"issuer"`
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil || doc.JWKSURI == "" {
+		return IssuerResult{Detail: "discovery document: HTTP " + strconv.Itoa(code) + " but no jwks_uri in the JSON"}
+	}
+	if doc.Issuer != issuer {
+		return IssuerResult{Detail: fmt.Sprintf("discovery document: issuer %q differs from %q", truncate(doc.Issuer, 100), issuer)}
+	}
+	jcode, _, err := get(doc.JWKSURI)
+	if err != nil {
+		return IssuerResult{Detail: "jwks_uri: " + truncate(err.Error(), 200)}
+	}
+	if jcode/100 != 2 {
+		return IssuerResult{Detail: fmt.Sprintf("jwks_uri: HTTP %d (anonymous access needed)", jcode)}
+	}
+	return IssuerResult{Reachable: true, Detail: fmt.Sprintf("discovery HTTP %d, jwks HTTP %d", code, jcode)}
 }
 
 // ParseIssuerProbeOutput reads the probe line from the probe pod's log.
@@ -518,7 +579,8 @@ func ParseIssuerProbeOutput(log string) (IssuerResult, error) {
 			continue
 		}
 		var res IssuerResult
-		reach, detail, _ := strings.Cut(rest, " detail=")
+		flags, detail, _ := strings.Cut(rest, " detail=")
+		reach, unverified, _ := strings.Cut(flags, " ")
 		switch reach {
 		case "reachable=true":
 			res.Reachable = true
@@ -526,6 +588,7 @@ func ParseIssuerProbeOutput(log string) (IssuerResult, error) {
 		default:
 			return IssuerResult{}, fmt.Errorf("malformed probe output %q", truncate(line, 200))
 		}
+		res.Unverified = unverified == "unverified=true"
 		res.Detail, _ = strconv.Unquote(detail)
 		return res, nil
 	}
@@ -599,7 +662,11 @@ func (p KubeSubstrateProber) pod(component string, args []string, volumes []core
 
 // IssuerPod is the issuer probe pod.
 func (p KubeSubstrateProber) IssuerPod(issuer string) *corev1.Pod {
-	return p.pod("issuer-probe", []string{"preflight", "issuer-probe", "--issuer", issuer}, nil, nil)
+	vols := []corev1.Volume{{Name: "cluster-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"},
+	}}}}
+	mounts := []corev1.VolumeMount{{Name: "cluster-ca", MountPath: path.Dir(IssuerCAFile), ReadOnly: true}}
+	return p.pod("issuer-probe", []string{"preflight", "issuer-probe", "--issuer", issuer}, vols, mounts)
 }
 
 // DevicesPod is the device probe pod. It mounts each device as a hostPath of type CharDevice, so the
@@ -706,8 +773,22 @@ func (p KubeSubstrateProber) podLogs(ctx context.Context, namespace, name string
 	return string(b), err
 }
 
-// reachabilityTLS is a TLS config that accepts any certificate: the probe checks that the URL
-// answers, sends no credential and does not trust the answer.
-func reachabilityTLS() *tls.Config {
-	return &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12} //nolint:gosec // reachability only
+// issuerTLS is the TLS config of the probe: verified against the system roots and the cluster CA
+// when verify is true, otherwise accepting any certificate (only to tell "unreachable" from "not
+// trusted"; the answer then yields a Warn, never a Pass).
+func issuerTLS(verify bool) *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if !verify {
+		cfg.InsecureSkipVerify = true //nolint:gosec // only to classify a failed verification
+		return cfg
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if pem, err := os.ReadFile(IssuerCAFile); err == nil {
+		pool.AppendCertsFromPEM(pem)
+	}
+	cfg.RootCAs = pool
+	return cfg
 }

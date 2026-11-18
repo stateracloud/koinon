@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +22,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/preflight"
 	"github.com/stateracloud/koinon/internal/substrateinstall"
@@ -159,4 +161,37 @@ func TestProfileNamesWhatIsMissing(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(substrateinstall.Profile{ObjectStoreBucket: "b"}.Validate()).To(MatchError(And(
 		ContainSubstring("object store endpoint"), ContainSubstring("database secret"), Not(ContainSubstring("bucket")))))
+}
+
+// A fresh cluster has no ate-system: ate-setup creates it. The prerequisite probes run pods there
+// first, so the installer must create the namespace before them. The fake clientset does not enforce
+// namespaces, so this test adds the API server's rule.
+func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
+	g := NewWithT(t)
+	i, r, client := setup("37", true, nil)
+	client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		ca := a.(k8stesting.CreateAction)
+		// The tracker, not the clientset: a reactor that calls the clientset deadlocks on its lock.
+		nsGVR := corev1.SchemeGroupVersion.WithResource("namespaces")
+		if _, err := client.Tracker().Get(nsGVR, "", ca.GetNamespace()); apierrors.IsNotFound(err) {
+			return true, nil, apierrors.NewNotFound(corev1.Resource("namespaces"), ca.GetNamespace())
+		}
+		pod := ca.GetObject().(*corev1.Pod)
+		pod.Name = "probe"
+		pod.Status.Phase = corev1.PodSucceeded
+		return false, nil, nil
+	})
+	i.Checker.IssuerProbe = preflight.KubeSubstrateProber{
+		Client: client, Namespace: "ate-system", NamePrefix: "t", Image: "img", PollInterval: time.Millisecond, Timeout: time.Second,
+		Logs: func(context.Context, string, string) (string, error) {
+			return preflight.IssuerResult{Reachable: true, Detail: "ok"}.String() + "\n" + preflight.SubstrateDevicesProbeMarker + "\n", nil
+		},
+	}
+	i.Checker.Devices = i.Checker.IssuerProbe.(preflight.KubeSubstrateProber)
+	i.Checker.Config.Substrate.VMTier = true
+	_ = i.Install(t.Context()) // later checks fail: Substrate itself is not installed in the fake
+	g.Expect(r.calls).To(HaveLen(1), "the prerequisites passed, so ate-setup ran")
+	ns, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(ns.Labels).To(HaveKeyWithValue("pod-security.kubernetes.io/enforce", "privileged"))
 }

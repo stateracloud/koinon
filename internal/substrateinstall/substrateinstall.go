@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,8 +53,10 @@ type Profile struct {
 func (p Profile) Validate() error {
 	var missing []string
 	for _, f := range []struct{ name, v string }{
-		{"object store endpoint", p.ObjectStoreEndpoint}, {"object store bucket", p.ObjectStoreBucket},
-		{"object store secret", p.ObjectStoreSecret}, {"database secret", p.DatabaseSecret},
+		{"object store endpoint", p.ObjectStoreEndpoint},
+		{"object store bucket", p.ObjectStoreBucket},
+		{"object store secret", p.ObjectStoreSecret},
+		{"database secret", p.DatabaseSecret},
 	} {
 		if f.v == "" {
 			missing = append(missing, f.name)
@@ -110,6 +113,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	if err := i.Profile.Validate(); err != nil {
 		return err
 	}
+	if err := i.EnsureNamespace(ctx); err != nil {
+		return err
+	}
 	if failed := preflight.Write(i.Out, i.Checker.SubstratePrerequisites(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
@@ -124,6 +130,29 @@ func (i *Installer) Install(ctx context.Context) error {
 	}
 	if failed := preflight.Write(i.Out, i.Checker.Run(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks after the install", preflight.ErrFailed, failed)
+	}
+	return nil
+}
+
+// EnsureNamespace creates Substrate's namespace when it is missing, with Pod Security enforce=privileged
+// (the device probe mounts hostPath devices and Substrate's workers are privileged, plan section 4.4).
+// The prerequisite probes run pods there before ate-setup, which creates the namespace on a fresh
+// cluster. An existing namespace is left as it is.
+func (i *Installer) EnsureNamespace(ctx context.Context) error {
+	ns := i.Checker.Config.SubstrateOrDefault().Namespace
+	_, err := i.Kube.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		return nil
+	case !apierrors.IsNotFound(err):
+		return fmt.Errorf("read namespace %s: %w", ns, err)
+	}
+	_, err = i.Kube.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   ns,
+		Labels: map[string]string{"pod-security.kubernetes.io/enforce": "privileged"},
+	}}, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create namespace %s: %w", ns, err)
 	}
 	return nil
 }

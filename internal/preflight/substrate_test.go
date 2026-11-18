@@ -201,6 +201,14 @@ var _ = Describe("Substrate checks", func() {
 			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("discovery-URL override"), ContainSubstring("not a supported install")))
 		})
 
+		It("warns, not passes, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.probe = fakeIssuerProbe{res: IssuerResult{Reachable: true, Unverified: true, Detail: "TLS verification failed"}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Message).To(ContainSubstring("invalid bearer token"))
+		})
+
 		It("fails when the discovery document cannot be read or the probe pod fails", func(ctx SpecContext) {
 			c := healthySubstrate()
 			c.issuer = fakeIssuer{err: errors.New("forbidden")}
@@ -222,9 +230,9 @@ var _ = Describe("Substrate checks", func() {
 		})
 
 		It("round-trips the probe output", func() {
-			res, err := preflight.ParseIssuerProbeOutput(preflight.IssuerResult{Reachable: true, Detail: "HTTP 200 OK"}.String() + "\n")
+			res, err := preflight.ParseIssuerProbeOutput(preflight.IssuerResult{Reachable: true, Unverified: true, Detail: "HTTP 200 OK"}.String() + "\n")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res).To(Equal(preflight.IssuerResult{Reachable: true, Detail: "HTTP 200 OK"}))
+			Expect(res).To(Equal(preflight.IssuerResult{Reachable: true, Unverified: true, Detail: "HTTP 200 OK"}))
 			_, err = preflight.ParseIssuerProbeOutput("noise")
 			Expect(err).To(HaveOccurred())
 		})
