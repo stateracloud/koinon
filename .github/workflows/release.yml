@@ -30,7 +30,7 @@ concurrency:
 
 env:
   # Every package lives under the repository that builds it (#167): ghcr.io/<owner>/<repo>/api,
-  # /reconciler, /agentd, /sandbox and /charts/koinon.
+  # /reconciler, /agentd, /gateway, /sandbox and /charts/koinon.
   KOINON_IMAGE_REGISTRY: ghcr.io/${{ github.repository }}
   CHART_REPOSITORY: oci://ghcr.io/${{ github.repository }}/charts
 
@@ -408,7 +408,7 @@ jobs:
           cosign sign --yes "$HARNESS_REF"
           # dist/digests.txt holds one line per image; hack/release-refs.sh turns it into digest refs.
           # dist/sbom/<name>-index.spdx.json is the SPDX SBOM of the image index.
-          # <name> is the last path element of the repository (api, reconciler, agentd); ko may
+          # <name> is the last path element of the repository (api, reconciler, agentd, gateway); ko may
           # prefix the SBOM file with the registry path, so match on the suffix and demand one file.
           while read -r name ref; do
             cosign sign --yes "$ref"
