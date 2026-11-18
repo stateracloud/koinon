@@ -238,8 +238,7 @@ spec:
     - ports:
         - port: mcp
       from:
-        - namespaceSelector:
-            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+        # Only koinon-api calls this gateway until agents move to it (and the guard is in place).
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}

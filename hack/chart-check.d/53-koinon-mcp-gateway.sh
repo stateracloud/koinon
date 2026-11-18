@@ -51,9 +51,20 @@ lacks "koinon-gateway has no RBAC" 'name: koinon-mcp-gateway$' "${mcp[@]}" --sho
 has "koinon-gateway runs non-root with a read-only root" 'readOnlyRootFilesystem: true$' "${mcp[@]}" "${mcp_only[@]}"
 
 # Network: koinon-api's State stream port admits the pods, and the pods have a NetworkPolicy of their own.
-has "the State stream port admits koinon-gateway" 'component: mcp-gateway$' "${mcp[@]}" --show-only templates/networkpolicy.yaml
-lacks "the State stream port admits koinon-gateway only when selected" 'component: mcp-gateway$' --show-only templates/networkpolicy.yaml
-has "koinon-gateway egress carves out the private ranges" '10.0.0.0/8' "${mcp[@]}" --show-only templates/networkpolicy.yaml
+# netpol_doc NAME [helm args]: the one NetworkPolicy document called NAME, so an assertion cannot
+# pass on text that another policy renders.
+netpol_doc() {
+  local n=$1; shift
+  render "$@" --show-only templates/networkpolicy.yaml | awk -v n="$n" 'BEGIN { RS = "\n---\n" } $0 ~ ("\n  name: " n "\n") { print }'
+}
+api_np=$(netpol_doc koinon-api "${mcp[@]}")
+grep -q 'component: mcp-gateway$' <<<"$api_np" || fail "the State stream port of koinon-api does not admit koinon-gateway"
+api_off=$(netpol_doc koinon-api)
+if grep -q 'component: mcp-gateway$' <<<"$api_off"; then fail "the State stream port admits koinon-gateway when it is not selected"; fi
+mcp_np=$(netpol_doc koinon-mcp-gateway "${mcp[@]}")
+[ -n "$mcp_np" ] || fail "koinon-gateway has no NetworkPolicy of its own"
+grep -q '10.0.0.0/8' <<<"$mcp_np" || fail "koinon-gateway egress does not carve out the private ranges"
+if grep -q 'openshell.ai/managed-by' <<<"$mcp_np"; then fail "koinon-gateway admits sandbox namespaces before agents use it"; fi
 
 # The switch is refused until the operator accepts that org targets are dropped (until the guard slice).
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" --set gateway.mcp.driver=koinon >/dev/null 2>&1; then

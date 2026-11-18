@@ -160,7 +160,7 @@ var _ = Describe("koinon-gateway, served", func() {
 		Expect(os.WriteFile(tokenFile, []byte(fakeStreamToken+"\n"), 0o600)).To(Succeed())
 		cfg := config{
 			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile,
-			podName: "koinon-gateway-0", drain: 5 * time.Second,
+			podName: "koinon-gateway-0", drain: 5 * time.Second, shutdownDelay: 600 * time.Millisecond,
 		}
 		ctx, term := context.WithCancel(context.Background())
 		DeferCleanup(term)
@@ -192,10 +192,17 @@ var _ = Describe("koinon-gateway, served", func() {
 		Expect(tools.Tools).To(HaveLen(1))
 		Expect(tools.Tools[0].Name).To(Equal("tools_ping"))
 
-		// SIGTERM: not ready at once, new requests are refused, and run returns without an error.
+		// SIGTERM: not ready at once, but the gateway keeps serving for the shutdown delay, so a request
+		// that is still routed here does not fail. Liveness stays 200. After the drain, new requests are
+		// refused and run returns without an error.
 		term()
-		Eventually(func() int { return status("/readyz") }, 5*time.Second, 20*time.Millisecond).ShouldNot(Equal(http.StatusOK))
+		Eventually(func() int { return status("/readyz") }, 5*time.Second, 20*time.Millisecond).Should(Equal(http.StatusServiceUnavailable))
+		Expect(status("/healthz")).To(Equal(http.StatusOK))
+		_, err = sess.ListTools(specCtx, nil)
+		Expect(err).NotTo(HaveOccurred(), "a request during the shutdown delay is served")
 		Eventually(done, 10*time.Second).Should(Receive(BeNil()))
+		_, err = sess.ListTools(specCtx, nil)
+		Expect(err).To(HaveOccurred(), "a request after the drain is refused")
 	}, SpecTimeout(40*time.Second))
 })
 
