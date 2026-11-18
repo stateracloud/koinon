@@ -57,8 +57,8 @@ The Substrate v1.0.0 guest gives payloads root with only `CAP_KILL`, `CAP_NET_BI
 `CAP_AUDIT_WRITE`. Without `CAP_SETUID` and `CAP_SETGID` the launcher cannot drop to uid 10001
 (`setresgid: operation not permitted`; phase 0 result, comment on #1087). The default `user.mode`
 is `best_effort`: the launcher logs "user drop failed, continuing as the current user" and applies
-every other control. `user.mode: require` fails closed. Closing the gap needs an upstream Substrate
-option for the payload uid/gid or capabilities, or a different design. As root the payload also keeps
+every other control. `user.mode: require` fails closed. Tracked on #1087 (needs a payload uid/gid
+option in Substrate). As root the payload also keeps
 the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted and effective sets are
 reduced to the allowlist. When the drop works, the bounding set is shrunk before it (while root),
 and the allowlist is restored as effective, inheritable and ambient for the non-root user.
@@ -79,8 +79,7 @@ Tracked on #1087 until the maintainer files separate issues:
    applies the exec prefix.
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
 3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
-4. Non-root payload user: waits for an upstream Substrate payload uid/gid option (Koinon issue to be
-   filed). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
+4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
    every other control applied; `require` still fails closed.
 
 ## Tests
