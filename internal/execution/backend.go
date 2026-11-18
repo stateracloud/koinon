@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package execution is Koinon's contract with the execution layer (ADR 0016): workspaces,
-// provider records, policy, sandbox lifecycle and exec streams. The OpenShell gateway is the
-// implementation (package execution/openshell); the types here carry no OpenShell types so
-// that upstream churn stays inside the implementation.
+// provider records, policy, sandbox lifecycle and exec streams. The seam has two halves:
+// [Compute] (sandbox lifecycle, exec, upload) and [Egress] (provider records and L7 policy, which
+// ADR 0097 moves to the Koinon gateway). The OpenShell gateway is the only driver today (package
+// execution/openshell); the types here carry no OpenShell types so that upstream churn stays inside
+// the implementation. Package executiontest holds the contract every driver must pass.
 //
 // The types are deliberately narrower than the OpenShell API. They cannot express the
 // settings ADR 0045 and ADR 0048 forbid: there is no audit enforcement, no TLS skip, no
@@ -17,25 +19,18 @@ import (
 	"time"
 )
 
-// Backend drives the execution layer. "Ensure" methods are idempotent: they create what is
-// missing, update what differs and do nothing when the record already matches.
-type Backend interface {
+// Compute runs sandboxes: it creates, starts, stops and deletes them, runs commands in them and
+// uploads files into them. It carries nothing about the network or about credentials, so a driver
+// that has no such notion (Agent Substrate, epic 1082) implements it as it is. The contract suite
+// in package executiontest says what every driver must do. "Ensure" methods are idempotent: they
+// create what is missing and do nothing when the record already matches.
+//
+// A driver may also implement the optional capabilities [Suspender] and [Snapshotter].
+type Compute interface {
 	// EnsureWorkspace makes sure the org's workspace exists (one per org, ADR 0002). Labels
 	// apply only on creation; OpenShell 0.1.7 has no workspace update (its UpdateSandbox, off by
 	// default, changes a stopped sandbox, not a workspace).
 	EnsureWorkspace(ctx context.Context, name string, labels map[string]string) (Workspace, error)
-
-	// EnsureProvider makes sure the provider's workspace-scoped profile and the provider
-	// record exist and match. Credential values are write-only: they are pushed when the
-	// record is created and whenever CredentialRevision changes.
-	EnsureProvider(ctx context.Context, workspace string, p Provider) error
-
-	// DeleteProvider removes a provider record. A missing record is not an error.
-	DeleteProvider(ctx context.Context, workspace, name string) error
-
-	// DeleteProviderProfile removes a workspace-scoped provider profile. A missing profile is
-	// not an error. OpenShell refuses while a provider attached to a sandbox uses it.
-	DeleteProviderProfile(ctx context.Context, workspace, id string) error
 
 	// CreateSandbox creates a sandbox, or returns the existing one with the same name.
 	// It does not compare an existing sandbox with spec; the caller decides on drift.
@@ -55,14 +50,10 @@ type Backend interface {
 	// wait for it but observes it, because GetSandbox reports PhaseDeleting until it is done.
 	DeleteSandbox(ctx context.Context, workspace, name string) (DeleteOutcome, error)
 
-	// EnsurePolicy makes the sandbox's policy match p and returns the policy version. On a
-	// running sandbox only the network rules may change (OpenShell rejects other changes);
-	// those need a new sandbox.
-	EnsurePolicy(ctx context.Context, workspace, sandbox string, p Policy) (uint32, error)
-
 	// Exec starts a command in a ready sandbox without a TTY: stdin and stdout are byte
 	// streams (no echo, no CRLF), suitable for newline-delimited JSON-RPC such as ACP.
 	// Cancelling ctx, or calling Process.Close, closes the streams and ends the command.
+	// Exec on a sandbox that is not ready fails with ErrFailedPrecondition.
 	Exec(ctx context.Context, workspace, sandbox string, req ExecRequest) (Process, error)
 
 	// Upload extracts the tar stream into destDir in a ready sandbox, creating destDir first,
@@ -74,6 +65,93 @@ type Backend interface {
 	// upload without end-of-file and is returned in the error chain. An execution layer that
 	// does not support uploads fails with ErrUnsupported.
 	Upload(ctx context.Context, workspace, sandbox, destDir string, tar io.Reader) error
+}
+
+// Egress is the network and credential half of the seam: provider records, the credentials in
+// them and the L7 policy of a sandbox. It exists only because OpenShell enforces egress inside the
+// sandbox. ADR 0097 moves L7 rules and credential injection to the Koinon gateway, which holds
+// per-route rules (epic 1082, D2), so a driver behind the gateway does not implement Egress and no
+// new caller may depend on it. The OpenShell driver keeps it until it is removed (epic 1082, D9).
+// Code that needs no egress takes [Compute], not [Backend].
+type Egress interface {
+	// EnsureProvider makes sure the provider's workspace-scoped profile and the provider
+	// record exist and match. Credential values are write-only: they are pushed when the
+	// record is created and whenever CredentialRevision changes.
+	EnsureProvider(ctx context.Context, workspace string, p Provider) error
+
+	// DeleteProvider removes a provider record. A missing record is not an error.
+	DeleteProvider(ctx context.Context, workspace, name string) error
+
+	// DeleteProviderProfile removes a workspace-scoped provider profile. A missing profile is
+	// not an error. OpenShell refuses while a provider attached to a sandbox uses it.
+	DeleteProviderProfile(ctx context.Context, workspace, id string) error
+
+	// EnsurePolicy makes the sandbox's policy match p and returns the policy version. On a
+	// running sandbox only the network rules may change (OpenShell rejects other changes);
+	// those need a new sandbox.
+	EnsurePolicy(ctx context.Context, workspace, sandbox string, p Policy) (uint32, error)
+}
+
+// Backend drives the execution layer as OpenShell shapes it: [Compute] and [Egress] together.
+// The reconciler takes a Backend while OpenShell is the only driver. It is the one place that
+// joins the halves, so removing Egress later changes this line and its callers, not the drivers.
+type Backend interface {
+	Compute
+	Egress
+}
+
+// Suspender is an optional capability of a driver: suspend a sandbox keeping its memory, and
+// resume it. A sandbox that is suspended is observed as PhaseSuspended. The OpenShell driver
+// does not implement it (StopSandbox keeps the home volume only).
+type Suspender interface {
+	// SuspendSandbox suspends a running sandbox. Suspending a suspended one is a no-op.
+	SuspendSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
+	// ResumeSandbox resumes a suspended sandbox. Resuming a running one is a no-op.
+	ResumeSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
+}
+
+// Snapshotter is an optional capability of a driver: save the state of a sandbox and start a new
+// sandbox from it (epic 1082, D5). The OpenShell driver does not implement it. A snapshot belongs
+// to the workspace it was taken in (ADR 0002): restoring it in another workspace fails with
+// ErrNotFound. Snapshot.Kind says what the driver saved; D5 wants SnapshotDiskMemory, which a
+// driver that can save memory must use, and the contract suite accepts both kinds.
+type Snapshotter interface {
+	// SnapshotSandbox saves the state of a sandbox. The sandbox keeps running.
+	SnapshotSandbox(ctx context.Context, workspace, name string) (Snapshot, error)
+	// RestoreSandbox creates the sandbox spec.Name from a snapshot. It fails with ErrNotFound
+	// for an unknown snapshot or one from another workspace, with ErrInvalid when the digest of
+	// snapshot does not match the saved one or its content, and with ErrAlreadyExists when a
+	// sandbox with the name of spec exists.
+	RestoreSandbox(ctx context.Context, workspace string, snapshot SnapshotRef, spec SandboxSpec) (Sandbox, error)
+}
+
+// SnapshotKind says what a snapshot holds.
+type SnapshotKind string
+
+// Snapshot kinds.
+const (
+	// SnapshotDisk holds the writable disk only; the restored sandbox boots.
+	SnapshotDisk SnapshotKind = "disk"
+	// SnapshotDiskMemory holds disk and memory; the restored sandbox continues where it was.
+	SnapshotDiskMemory SnapshotKind = "disk+memory"
+)
+
+// SnapshotRef names a snapshot and pins its content. The digest lets the caller check that the
+// bytes it restores are the bytes it saved.
+type SnapshotRef struct {
+	ID string
+	// Digest is "<algorithm>:<hex>", for example "sha256:...". It is never empty.
+	Digest string
+}
+
+// Snapshot is a saved sandbox state.
+type Snapshot struct {
+	SnapshotRef
+	Kind      SnapshotKind
+	Workspace string
+	// Sandbox is the name of the sandbox the snapshot was taken from.
+	Sandbox   string
+	CreatedAt time.Time
 }
 
 // Workspace is an OpenShell workspace.
@@ -253,6 +331,7 @@ const (
 	PhaseStopped      Phase = "Stopped"
 	PhaseStarting     Phase = "Starting"
 	PhaseCompleted    Phase = "Completed"
+	PhaseSuspended    Phase = "Suspended"
 )
 
 // ExecRequest is a command to run in a sandbox.
