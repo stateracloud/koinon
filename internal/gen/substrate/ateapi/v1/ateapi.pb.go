@@ -9977,9 +9977,9 @@ var file_ateapi_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
 		ExtensionType: (*MethodAnnotation)(nil),
-		Field:         50000,
+		Field:         51000,
 		Name:          "substrate.ateapi.v1.method",
-		Tag:           "bytes,50000,opt,name=method",
+		Tag:           "bytes,51000,opt,name=method",
 		Filename:      "ateapi.proto",
 	},
 }
@@ -9992,7 +9992,7 @@ var (
 
 // Extension fields to descriptorpb.MethodOptions.
 var (
-	// optional substrate.ateapi.v1.MethodAnnotation method = 50000;
+	// optional substrate.ateapi.v1.MethodAnnotation method = 51000;
 	E_Method = &file_ateapi_proto_extTypes[1]
 )
 
@@ -10549,94 +10549,94 @@ const file_ateapi_proto_rawDesc = "" +
 	"\x0eSCOPE_ATESPACE\x10\x01\x12\x10\n" +
 	"\fSCOPE_GLOBAL\x10\x022\xca&\n" +
 	"\aControl\x12Y\n" +
-	"\bGetActor\x12$.substrate.ateapi.v1.GetActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\x82\xb5\x18\a\n" +
+	"\bGetActor\x12$.substrate.ateapi.v1.GetActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12_\n" +
-	"\vCreateActor\x12'.substrate.ateapi.v1.CreateActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\x82\xb5\x18\a\n" +
+	"\vCreateActor\x12'.substrate.ateapi.v1.CreateActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12_\n" +
-	"\vUpdateActor\x12'.substrate.ateapi.v1.UpdateActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\x82\xb5\x18\a\n" +
+	"\vUpdateActor\x12'.substrate.ateapi.v1.UpdateActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12p\n" +
-	"\fSuspendActor\x12(.substrate.ateapi.v1.SuspendActorRequest\x1a).substrate.ateapi.v1.SuspendActorResponse\"\v\x82\xb5\x18\a\n" +
+	"\fSuspendActor\x12(.substrate.ateapi.v1.SuspendActorRequest\x1a).substrate.ateapi.v1.SuspendActorResponse\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12m\n" +
-	"\vResumeActor\x12'.substrate.ateapi.v1.ResumeActorRequest\x1a(.substrate.ateapi.v1.ResumeActorResponse\"\v\x82\xb5\x18\a\n" +
+	"\vResumeActor\x12'.substrate.ateapi.v1.ResumeActorRequest\x1a(.substrate.ateapi.v1.ResumeActorResponse\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12m\n" +
-	"\vRevertActor\x12'.substrate.ateapi.v1.RevertActorRequest\x1a(.substrate.ateapi.v1.RevertActorResponse\"\v\x82\xb5\x18\a\n" +
+	"\vRevertActor\x12'.substrate.ateapi.v1.RevertActorRequest\x1a(.substrate.ateapi.v1.RevertActorResponse\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12_\n" +
-	"\vDeleteActor\x12'.substrate.ateapi.v1.DeleteActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\x82\xb5\x18\a\n" +
+	"\vDeleteActor\x12'.substrate.ateapi.v1.DeleteActorRequest\x1a\x1a.substrate.ateapi.v1.Actor\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12\x7f\n" +
-	"\x14GetActorEgressPolicy\x120.substrate.ateapi.v1.GetActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x14GetActorEgressPolicy\x120.substrate.ateapi.v1.GetActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fEgressPolicy\x12\x85\x01\n" +
-	"\x17CreateActorEgressPolicy\x123.substrate.ateapi.v1.CreateActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x17CreateActorEgressPolicy\x123.substrate.ateapi.v1.CreateActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fEgressPolicy\x12\x85\x01\n" +
-	"\x17UpdateActorEgressPolicy\x123.substrate.ateapi.v1.UpdateActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x17UpdateActorEgressPolicy\x123.substrate.ateapi.v1.UpdateActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fEgressPolicy\x12\x85\x01\n" +
-	"\x17DeleteActorEgressPolicy\x123.substrate.ateapi.v1.DeleteActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x17DeleteActorEgressPolicy\x123.substrate.ateapi.v1.DeleteActorEgressPolicyRequest\x1a!.substrate.ateapi.v1.EgressPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fEgressPolicy\x12p\n" +
-	"\fMintActorJwt\x12(.substrate.ateapi.v1.MintActorJwtRequest\x1a).substrate.ateapi.v1.MintActorJwtResponse\"\v\x82\xb5\x18\a\n" +
+	"\fMintActorJwt\x12(.substrate.ateapi.v1.MintActorJwtRequest\x1a).substrate.ateapi.v1.MintActorJwtResponse\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12W\n" +
-	"\tCreateTag\x12%.substrate.ateapi.v1.CreateTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\x82\xb5\x18\x05\n" +
+	"\tCreateTag\x12%.substrate.ateapi.v1.CreateTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\xc2\xf3\x18\x05\n" +
 	"\x03Tag\x12Q\n" +
-	"\x06GetTag\x12\".substrate.ateapi.v1.GetTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\x82\xb5\x18\x05\n" +
+	"\x06GetTag\x12\".substrate.ateapi.v1.GetTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\xc2\xf3\x18\x05\n" +
 	"\x03Tag\x12b\n" +
-	"\bListTags\x12$.substrate.ateapi.v1.ListTagsRequest\x1a%.substrate.ateapi.v1.ListTagsResponse\"\t\x82\xb5\x18\x05\n" +
+	"\bListTags\x12$.substrate.ateapi.v1.ListTagsRequest\x1a%.substrate.ateapi.v1.ListTagsResponse\"\t\xc2\xf3\x18\x05\n" +
 	"\x03Tag\x12W\n" +
-	"\tUpdateTag\x12%.substrate.ateapi.v1.UpdateTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\x82\xb5\x18\x05\n" +
+	"\tUpdateTag\x12%.substrate.ateapi.v1.UpdateTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\xc2\xf3\x18\x05\n" +
 	"\x03Tag\x12W\n" +
-	"\tDeleteTag\x12%.substrate.ateapi.v1.DeleteTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\x82\xb5\x18\x05\n" +
+	"\tDeleteTag\x12%.substrate.ateapi.v1.DeleteTagRequest\x1a\x18.substrate.ateapi.v1.Tag\"\t\xc2\xf3\x18\x05\n" +
 	"\x03Tag\x12n\n" +
-	"\vListWorkers\x12'.substrate.ateapi.v1.ListWorkersRequest\x1a(.substrate.ateapi.v1.ListWorkersResponse\"\f\x82\xb5\x18\b\n" +
+	"\vListWorkers\x12'.substrate.ateapi.v1.ListWorkersRequest\x1a(.substrate.ateapi.v1.ListWorkersResponse\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12]\n" +
-	"\tGetWorker\x12%.substrate.ateapi.v1.GetWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\x82\xb5\x18\b\n" +
+	"\tGetWorker\x12%.substrate.ateapi.v1.GetWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12c\n" +
-	"\fCreateWorker\x12(.substrate.ateapi.v1.CreateWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\x82\xb5\x18\b\n" +
+	"\fCreateWorker\x12(.substrate.ateapi.v1.CreateWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12c\n" +
-	"\fUpdateWorker\x12(.substrate.ateapi.v1.UpdateWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\x82\xb5\x18\b\n" +
+	"\fUpdateWorker\x12(.substrate.ateapi.v1.UpdateWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12c\n" +
-	"\fDeleteWorker\x12(.substrate.ateapi.v1.DeleteWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\x82\xb5\x18\b\n" +
+	"\fDeleteWorker\x12(.substrate.ateapi.v1.DeleteWorkerRequest\x1a\x1b.substrate.ateapi.v1.Worker\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12n\n" +
-	"\vDrainWorker\x12'.substrate.ateapi.v1.DrainWorkerRequest\x1a(.substrate.ateapi.v1.DrainWorkerResponse\"\f\x82\xb5\x18\b\n" +
+	"\vDrainWorker\x12'.substrate.ateapi.v1.DrainWorkerRequest\x1a(.substrate.ateapi.v1.DrainWorkerResponse\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12\x86\x01\n" +
-	"\x13MarkWorkerAvailable\x12/.substrate.ateapi.v1.MarkWorkerAvailableRequest\x1a0.substrate.ateapi.v1.MarkWorkerAvailableResponse\"\f\x82\xb5\x18\b\n" +
+	"\x13MarkWorkerAvailable\x12/.substrate.ateapi.v1.MarkWorkerAvailableRequest\x1a0.substrate.ateapi.v1.MarkWorkerAvailableResponse\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12\x8c\x01\n" +
-	"\x15MarkWorkerUnavailable\x121.substrate.ateapi.v1.MarkWorkerUnavailableRequest\x1a2.substrate.ateapi.v1.MarkWorkerUnavailableResponse\"\f\x82\xb5\x18\b\n" +
+	"\x15MarkWorkerUnavailable\x121.substrate.ateapi.v1.MarkWorkerUnavailableRequest\x1a2.substrate.ateapi.v1.MarkWorkerUnavailableResponse\"\f\xc2\xf3\x18\b\n" +
 	"\x06Worker\x12\xa4\x01\n" +
-	"\x1aListWorkerActorAssignments\x126.substrate.ateapi.v1.ListWorkerActorAssignmentsRequest\x1a7.substrate.ateapi.v1.ListWorkerActorAssignmentsResponse\"\x15\x82\xb5\x18\x11\n" +
+	"\x1aListWorkerActorAssignments\x126.substrate.ateapi.v1.ListWorkerActorAssignmentsRequest\x1a7.substrate.ateapi.v1.ListWorkerActorAssignmentsResponse\"\x15\xc2\xf3\x18\x11\n" +
 	"\x0fActorAssignment\x12j\n" +
 	"\n" +
-	"ListActors\x12&.substrate.ateapi.v1.ListActorsRequest\x1a'.substrate.ateapi.v1.ListActorsResponse\"\v\x82\xb5\x18\a\n" +
+	"ListActors\x12&.substrate.ateapi.v1.ListActorsRequest\x1a'.substrate.ateapi.v1.ListActorsResponse\"\v\xc2\xf3\x18\a\n" +
 	"\x05Actor\x12k\n" +
-	"\x0eCreateAtespace\x12*.substrate.ateapi.v1.CreateAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\x82\xb5\x18\n" +
+	"\x0eCreateAtespace\x12*.substrate.ateapi.v1.CreateAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\xc2\xf3\x18\n" +
 	"\n" +
 	"\bAtespace\x12e\n" +
-	"\vGetAtespace\x12'.substrate.ateapi.v1.GetAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\x82\xb5\x18\n" +
+	"\vGetAtespace\x12'.substrate.ateapi.v1.GetAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\xc2\xf3\x18\n" +
 	"\n" +
 	"\bAtespace\x12v\n" +
-	"\rListAtespaces\x12).substrate.ateapi.v1.ListAtespacesRequest\x1a*.substrate.ateapi.v1.ListAtespacesResponse\"\x0e\x82\xb5\x18\n" +
+	"\rListAtespaces\x12).substrate.ateapi.v1.ListAtespacesRequest\x1a*.substrate.ateapi.v1.ListAtespacesResponse\"\x0e\xc2\xf3\x18\n" +
 	"\n" +
 	"\bAtespace\x12k\n" +
-	"\x0eDeleteAtespace\x12*.substrate.ateapi.v1.DeleteAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\x82\xb5\x18\n" +
+	"\x0eDeleteAtespace\x12*.substrate.ateapi.v1.DeleteAtespaceRequest\x1a\x1d.substrate.ateapi.v1.Atespace\"\x0e\xc2\xf3\x18\n" +
 	"\n" +
 	"\bAtespace\x12\x7f\n" +
-	"\x13CreateActorTemplate\x12/.substrate.ateapi.v1.CreateActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\x82\xb5\x18\x0f\n" +
+	"\x13CreateActorTemplate\x12/.substrate.ateapi.v1.CreateActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\xc2\xf3\x18\x0f\n" +
 	"\rActorTemplate\x12y\n" +
-	"\x10GetActorTemplate\x12,.substrate.ateapi.v1.GetActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\x82\xb5\x18\x0f\n" +
+	"\x10GetActorTemplate\x12,.substrate.ateapi.v1.GetActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\xc2\xf3\x18\x0f\n" +
 	"\rActorTemplate\x12\x8a\x01\n" +
-	"\x12ListActorTemplates\x12..substrate.ateapi.v1.ListActorTemplatesRequest\x1a/.substrate.ateapi.v1.ListActorTemplatesResponse\"\x13\x82\xb5\x18\x0f\n" +
+	"\x12ListActorTemplates\x12..substrate.ateapi.v1.ListActorTemplatesRequest\x1a/.substrate.ateapi.v1.ListActorTemplatesResponse\"\x13\xc2\xf3\x18\x0f\n" +
 	"\rActorTemplate\x12\x7f\n" +
-	"\x13DeleteActorTemplate\x12/.substrate.ateapi.v1.DeleteActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\x82\xb5\x18\x0f\n" +
+	"\x13DeleteActorTemplate\x12/.substrate.ateapi.v1.DeleteActorTemplateRequest\x1a\".substrate.ateapi.v1.ActorTemplate\"\x13\xc2\xf3\x18\x0f\n" +
 	"\rActorTemplate\x12\x81\x01\n" +
-	"\x15GetGlobalAccessPolicy\x121.substrate.ateapi.v1.GetGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x15GetGlobalAccessPolicy\x121.substrate.ateapi.v1.GetGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x87\x01\n" +
-	"\x18CreateGlobalAccessPolicy\x124.substrate.ateapi.v1.CreateGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x18CreateGlobalAccessPolicy\x124.substrate.ateapi.v1.CreateGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x87\x01\n" +
-	"\x18UpdateGlobalAccessPolicy\x124.substrate.ateapi.v1.UpdateGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x18UpdateGlobalAccessPolicy\x124.substrate.ateapi.v1.UpdateGlobalAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x85\x01\n" +
-	"\x17GetAtespaceAccessPolicy\x123.substrate.ateapi.v1.GetAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x17GetAtespaceAccessPolicy\x123.substrate.ateapi.v1.GetAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x8b\x01\n" +
-	"\x1aCreateAtespaceAccessPolicy\x126.substrate.ateapi.v1.CreateAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x1aCreateAtespaceAccessPolicy\x126.substrate.ateapi.v1.CreateAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x8b\x01\n" +
-	"\x1aUpdateAtespaceAccessPolicy\x126.substrate.ateapi.v1.UpdateAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x1aUpdateAtespaceAccessPolicy\x126.substrate.ateapi.v1.UpdateAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy\x12\x8b\x01\n" +
-	"\x1aDeleteAtespaceAccessPolicy\x126.substrate.ateapi.v1.DeleteAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\x82\xb5\x18\x0e\n" +
+	"\x1aDeleteAtespaceAccessPolicy\x126.substrate.ateapi.v1.DeleteAtespaceAccessPolicyRequest\x1a!.substrate.ateapi.v1.AccessPolicy\"\x12\xc2\xf3\x18\x0e\n" +
 	"\fAccessPolicy2\xfd\a\n" +
 	"\rWorkerService\x12u\n" +
 	"\x12AcquireWorkerEpoch\x12..substrate.ateapi.v1.AcquireWorkerEpochRequest\x1a/.substrate.ateapi.v1.AcquireWorkerEpochResponse\x12i\n" +
@@ -10648,7 +10648,7 @@ const file_ateapi_proto_rawDesc = "" +
 	"\x18ReportActorSnapshotState\x124.substrate.ateapi.v1.ReportActorSnapshotStateRequest\x1a5.substrate.ateapi.v1.ReportActorSnapshotStateResponse\x12u\n" +
 	"\x12ReportActorCrashed\x12..substrate.ateapi.v1.ReportActorCrashedRequest\x1a/.substrate.ateapi.v1.ReportActorCrashedResponse:f\n" +
 	"\bresource\x12\x1f.google.protobuf.MessageOptions\x18І\x03 \x01(\v2'.substrate.ateapi.v1.ResourceAnnotationR\bresource:_\n" +
-	"\x06method\x12\x1e.google.protobuf.MethodOptions\x18І\x03 \x01(\v2%.substrate.ateapi.v1.MethodAnnotationR\x06methodB+Z)go.ate.dev/substrate/api/ateapi/v1;ateapib\x06proto3"
+	"\x06method\x12\x1e.google.protobuf.MethodOptions\x18\xb8\x8e\x03 \x01(\v2%.substrate.ateapi.v1.MethodAnnotationR\x06methodB+Z)go.ate.dev/substrate/api/ateapi/v1;ateapib\x06proto3"
 
 var (
 	file_ateapi_proto_rawDescOnce sync.Once

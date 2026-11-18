@@ -47,6 +47,7 @@ import (
 )
 
 type config struct {
+	execution        cli.Execution
 	databaseURL      string
 	openshellAddr    string
 	openshellTLSDir  string
@@ -79,7 +80,8 @@ type config struct {
 // flags registers the settings of koinon-agentd.
 func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string")
-	fs.StringVar(&c.openshellAddr, "openshell-address", "", "OpenShell gateway host:port")
+	c.execution.Flags(fs)
+	fs.StringVar(&c.openshellAddr, "openshell-address", "", "OpenShell gateway host:port (--execution-driver=openshell)")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.installMark, "install-mark", "", "this install's random mark (the chart's koinon-install-mark Secret); agentd then refuses to exec in or upload to a sandbox another install owns")
@@ -141,7 +143,7 @@ func NewRootCommand() *cobra.Command {
 	c.flags(cmd.Flags())
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	cli.EnvAlias(cmd, "owner-id", "POD_NAME")
-	for _, n := range []string{"database-url", "openshell-address", "gateway-url"} {
+	for _, n := range []string{"database-url", "gateway-url"} {
 		if err := cmd.MarkFlagRequired(n); err != nil {
 			panic(fmt.Sprintf("koinon-agentd: %v", err))
 		}
@@ -157,8 +159,13 @@ func (c *config) validate() error {
 	if c.databaseURL == "" {
 		return errors.New("--database-url is required")
 	}
-	if c.openshellAddr == "" {
-		return errors.New("--openshell-address is required")
+	if c.execution.Driver == "" {
+		c.execution.Driver = cli.DriverOpenShell
+	}
+	c.execution.OpenShell = cli.OpenShell{Address: c.openshellAddr, TLSDir: c.openshellTLSDir, ServerName: c.openshellName}
+	c.execution.Owner = c.installMark
+	if err := c.execution.Validate(c.openshellAddr); err != nil {
+		return err
 	}
 	if c.pool.GatewayURL == "" {
 		return errors.New("--gateway-url is required")
@@ -226,14 +233,13 @@ func run(ctx context.Context, cfg config) error {
 	defer db.Close()
 	audit.WarnSharedWriterLogin(ctx, db, "koinon-agentd", slog.Default())
 
-	backend, err := cli.OpenShell{Address: cfg.openshellAddr, TLSDir: cfg.openshellTLSDir, ServerName: cfg.openshellName}.Dial()
+	conn, err := cfg.execution.Dial()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = backend.Close() }()
-	if cfg.installMark != "" {
-		backend.WithOwner(execution.OwnerID(cfg.installMark))
-	} else {
+	defer func() { _ = conn.Close() }()
+	backend := conn.Backend
+	if cfg.installMark == "" && !cfg.execution.IsSubstrate() {
 		slog.Warn("no install mark: agentd does not check who owns a sandbox (set --install-mark)")
 	}
 
@@ -254,6 +260,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
+	reg.MustRegister(conn.Collectors...)
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
 	restorehold.Metric(reg, cfg.restoreHold)
 	// The MCP leak guard's feed (ADR 0091 decision 4): agentd fingerprints the sandbox's own tool

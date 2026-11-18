@@ -53,9 +53,18 @@ restore() {
 # Chain with && and record rc (not `if ! { ...; }`): under `set -e`, a failing command inside an
 # `if` test does not stop a brace group, so a later successful step would hide the failure.
 gen_rc=0
+# Substrate's ateapi.proto declares a MethodOptions extension at number 50000, the number of OpenShell's
+# authorization extension; two Go packages that register the same extension number panic at init, so no
+# binary could link both drivers (#1088). The vendored file stays unmodified: a copy with the one number
+# moved is what buf reads. The option is descriptor metadata of Substrate's own server, never on the wire.
+substrate_proto=$tmp/substrate-proto
+mkdir -p "$substrate_proto"
+cp third_party/substrate/proto/*.proto "$substrate_proto"/
+sed 's/^\(  MethodAnnotation method = \)50000;$/\151000;/' third_party/substrate/proto/ateapi.proto >"$substrate_proto/ateapi.proto"
+grep -q 'MethodAnnotation method = 51000;' "$substrate_proto/ateapi.proto" || { echo "generate: the Substrate extension number patch no longer applies (hack/generate.sh)" >&2; exit 1; }
 buf generate \
 	&& buf generate --template buf.gen.openshell.yaml \
-	&& buf generate --template buf.gen.substrate.yaml \
+	&& buf generate --template buf.gen.substrate.yaml "$substrate_proto" \
 	&& buf generate --template buf.gen.agentgateway.yaml \
 	&& buf generate --template buf.gen.googleapis.yaml \
 	&& buf generate --template buf.gen.docs.yaml \
