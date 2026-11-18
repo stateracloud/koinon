@@ -278,6 +278,12 @@ var _ = Describe("Substrate checks", func() {
 		Expect(*p.Spec.AutomountServiceAccountToken).To(BeFalse())
 	})
 
+	It("puts only the device probe on the worker nodes", func() {
+		prober := preflight.KubeSubstrateProber{Namespace: "ate-system", NamePrefix: "x", Image: "img", NodeSelector: map[string]string{"pool": "workers"}}
+		Expect(prober.DevicesPod().Spec.NodeSelector).To(Equal(map[string]string{"pool": "workers"}))
+		Expect(prober.IssuerPod("https://issuer.example.com").Spec.NodeSelector).To(BeEmpty())
+	})
+
 	It("deletes stale probe pods of the same component before it creates its own", func(ctx SpecContext) {
 		stale := func(name, component, partOf string) *corev1.Pod {
 			return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ate-system", Labels: map[string]string{

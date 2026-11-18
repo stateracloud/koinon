@@ -49,6 +49,8 @@ type runner struct {
 	existed bool
 	// built is the binary path "go build" wrote.
 	built string
+	// cloneErr is what "git clone" returns.
+	cloneErr error
 }
 
 func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Writer) error {
@@ -56,6 +58,9 @@ func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Wr
 	r.dirs = append(r.dirs, dir)
 	switch {
 	case name == "git":
+		if slices.Contains(args, "clone") {
+			return r.cloneErr
+		}
 		for _, a := range args {
 			if out, ok := strings.CutPrefix(a, "--output="); ok {
 				return writeTar(out, r.tarEntries)
@@ -104,6 +109,14 @@ func writeTar(path string, entries []tar.Header) error {
 		entries = []tar.Header{{Name: "cmd/ate-setup/main.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4}}
 	}
 	for _, h := range entries {
+		if h.Typeflag == tar.TypeReg && h.Size > 4 {
+			// A header that claims a huge file: the extractor must refuse it before it reads the content,
+			// so the archive ends here.
+			if err := tw.WriteHeader(&h); err != nil {
+				return err
+			}
+			return f.Close()
+		}
 		if h.Typeflag == tar.TypeReg {
 			h.Size = 4
 		}
@@ -153,6 +166,12 @@ func router(args ...string) *appsv1.Deployment {
 
 func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.Object) (*substrateinstall.Installer, *runner, *fake.Clientset) {
 	client := fake.NewClientset(kube...)
+	// Like the controllers of a real cluster, fill a new namespace with the default ServiceAccount and
+	// the cluster CA ConfigMap. The tracker, not the clientset: a reactor that calls the clientset deadlocks.
+	client.PrependReactor("create", "namespaces", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		fillNamespace(client, a.(k8stesting.CreateAction).GetObject().(*corev1.Namespace).Name)
+		return false, nil, nil
+	})
 	client.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{Major: "1", Minor: minor, GitVersion: "v1." + minor}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"}, crds...)
@@ -172,6 +191,25 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 		Out:          io.Discard,
 		PollInterval: time.Millisecond, WaitTimeout: 50 * time.Millisecond,
 	}, r, client
+}
+
+func fillNamespace(client *fake.Clientset, ns string) {
+	_ = client.Tracker().Add(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: ns}})
+	_ = client.Tracker().Add(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: ns}})
+}
+
+// On a fresh cluster the default ServiceAccount and kube-root-ca.crt appear after the namespace. The
+// probe pods need both, so the installer waits for them, and gives up cleanly when they do not come.
+func TestWaitsForTheNamespaceToBeFilledBeforeTheProbes(t *testing.T) {
+	g := NewWithT(t)
+	i, r, client := setup("37", true, nil)
+	client.ReactionChain = client.ReactionChain[1:] // drop the filling reactor that setup prepended
+	err := i.Install(t.Context())
+	g.Expect(err).To(MatchError(And(ContainSubstring("not ready in time"), ContainSubstring("ServiceAccount default"), ContainSubstring("ConfigMap kube-root-ca.crt"))))
+	g.Expect(r.setupCalls()).To(BeEmpty())
+	nss, err := client.CoreV1().Namespaces().List(t.Context(), metav1.ListOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(nss.Items).To(BeEmpty(), "the namespace the installer created is removed")
 }
 
 func TestStopsBeforeInstallingWhenAPrerequisiteFails(t *testing.T) {
@@ -194,6 +232,7 @@ func TestStopsBeforeInstallingWhenAPrerequisiteFails(t *testing.T) {
 func TestLeavesAnExistingNamespaceAloneWhenAPrerequisiteFails(t *testing.T) {
 	g := NewWithT(t)
 	i, _, client := setup("37", false, []runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ate-system"}}})
+	fillNamespace(client, "ate-system")
 	g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrPrerequisites))
 	_, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
@@ -231,7 +270,12 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 	b, err := i.BuildSetup(t.Context())
 	g.Expect(err).NotTo(HaveOccurred())
 	defer b.Cleanup()
-	g.Expect(r.calls[0]).To(Equal([]string{"git", "-c", "core.fsmonitor=", "-C", "/src/substrate", "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
+	// The source repository is only cloned: its config, attributes and replace refs never reach the export.
+	g.Expect(r.calls[0][:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet"}))
+	g.Expect(r.calls[0]).To(ContainElements("--bare", "/src/substrate"))
+	clone := r.calls[0][len(r.calls[0])-1]
+	g.Expect(filepath.Base(clone)).To(Equal("repo.git"))
+	g.Expect(r.calls[1]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
 	var archive, build []string
 	for _, c := range r.calls {
 		switch {
@@ -241,7 +285,8 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 			build = c
 		}
 	}
-	g.Expect(archive).To(And(ContainElement("core.fsmonitor="), ContainElement(substrateinstall.PinnedCommit)))
+	g.Expect(archive[:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone}))
+	g.Expect(archive).To(ContainElement(substrateinstall.PinnedCommit))
 	g.Expect(build).To(And(ContainElement("-trimpath"), ContainElement("./cmd/ate-setup")))
 	g.Expect(strings.Join(build, " ")).To(ContainSubstring("internal/version.Commit=" + substrateinstall.PinnedCommit))
 	_, err = os.Stat(filepath.Join(b.Dir(), "cmd", "ate-setup", "main.go"))
@@ -267,6 +312,16 @@ func TestRefusesAnUnpinnedBuildOrRepository(t *testing.T) {
 		"path out of the export": func(r *runner) {
 			r.tarEntries = []tar.Header{{Name: "../evil", Typeflag: tar.TypeReg, Mode: 0o644}}
 		},
+		"nested path out of the export": func(r *runner) {
+			r.tarEntries = []tar.Header{{Name: "cmd/../../evil", Typeflag: tar.TypeReg, Mode: 0o644}}
+		},
+		"absolute path in the export": func(r *runner) {
+			r.tarEntries = []tar.Header{{Name: "/tmp/evil", Typeflag: tar.TypeReg, Mode: 0o644}}
+		},
+		"export above the size limit": func(r *runner) {
+			r.tarEntries = []tar.Header{{Name: "big", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1<<30 + 1}}
+		},
+		"clone fails": func(r *runner) { r.cloneErr = errors.New("clone failed") },
 	} {
 		tmp := t.TempDir()
 		i, r, _ := setup("37", true, nil)

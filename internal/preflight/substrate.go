@@ -643,9 +643,11 @@ type KubeSubstrateProber struct {
 	Image            string
 	ImagePullSecrets []string
 	Labels           map[string]string
-	NodeSelector     map[string]string
-	Timeout          time.Duration
-	PollInterval     time.Duration
+	// NodeSelector places the device probe on the worker nodes. The issuer probe does not use it: it
+	// checks the network path of the cluster, not of the workers.
+	NodeSelector map[string]string
+	Timeout      time.Duration
+	PollInterval time.Duration
 	// Logs reads a pod's log; nil reads it through Client.
 	Logs func(ctx context.Context, namespace, name string) (string, error)
 }
@@ -671,7 +673,6 @@ func (p KubeSubstrateProber) pod(component string, args []string, volumes []core
 			EnableServiceLinks:           ptr.To(false),
 			ActiveDeadlineSeconds:        &deadline,
 			ImagePullSecrets:             pullSecrets,
-			NodeSelector:                 p.NodeSelector,
 			Volumes:                      volumes,
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot:   ptr.To(true),
@@ -720,7 +721,9 @@ func (p KubeSubstrateProber) DevicesPod() *corev1.Pod {
 		}}})
 		mounts = append(mounts, corev1.VolumeMount{Name: name, MountPath: "/probe" + dev, ReadOnly: true})
 	}
-	return p.pod("devices-probe", []string{"preflight", "devices-probe"}, volumes, mounts)
+	pod := p.pod("devices-probe", []string{"preflight", "devices-probe"}, volumes, mounts)
+	pod.Spec.NodeSelector = p.NodeSelector
+	return pod
 }
 
 // ProbeIssuer runs the issuer probe pod.

@@ -133,11 +133,18 @@ var ErrPrerequisites = errors.New("substrate prerequisites failed")
 // not the pinned release.
 var ErrPin = errors.New("not the pinned Substrate release")
 
-// gitArgs prefixes a git call so that a repository's configuration cannot run a program (the file
-// system monitor hook) while the installer reads it.
+// gitArgs prefixes a git call so that a repository cannot change what the installer reads: replace refs
+// are ignored (an object id then names its own content) and the file system monitor hook does not run.
 func gitArgs(repo string, args ...string) []string {
-	return append([]string{"-c", "core.fsmonitor=", "-C", repo}, args...)
+	return append([]string{"--no-replace-objects", "-c", "core.fsmonitor=", "-C", repo}, args...)
 }
+
+// Limits of the export: the pinned Substrate tree is far below them, and they stop a hostile archive
+// from filling the disk.
+const (
+	maxExportBytes   = 1 << 30
+	maxExportEntries = 100_000
+)
 
 // Build is the exported source tree and the ate-setup built from it.
 type Build struct {
@@ -162,13 +169,6 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 	if i.SourceRepo == "" {
 		return nil, fmt.Errorf("%w: no Substrate source repository", ErrPin)
 	}
-	got, err := i.Runner.Output(ctx, "", "git", gitArgs(i.SourceRepo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
-	if err != nil {
-		return nil, fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err)
-	}
-	if strings.TrimSpace(got) != PinnedCommit {
-		return nil, fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got))
-	}
 	tmp, err := os.MkdirTemp(i.TempDir, "koinon-substrate-")
 	if err != nil {
 		return nil, fmt.Errorf("temporary directory: %w", err)
@@ -178,8 +178,23 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 		b.Cleanup()
 		return nil, err
 	}
+	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
+	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
+	// of the source runs in git archive and no replace ref substitutes the pinned objects.
+	repo := filepath.Join(tmp, "repo.git")
+	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
+	if err := i.Runner.Run(ctx, "", "git", clone, i.Out); err != nil {
+		return fail(fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err))
+	}
+	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
+	if err != nil {
+		return fail(fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err))
+	}
+	if strings.TrimSpace(got) != PinnedCommit {
+		return fail(fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got)))
+	}
 	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(i.SourceRepo, "archive", "--format=tar", "--output="+archive, PinnedCommit), i.Out); err != nil {
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), i.Out); err != nil {
 		return fail(fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err))
 	}
 	if err := extractTar(archive, b.dir); err != nil {
@@ -220,17 +235,26 @@ func checkVersionLine(line string) error {
 	return nil
 }
 
-// extractTar unpacks a tar archive of regular files and directories into dir. It refuses a path that
-// leaves dir and a link of any kind.
+// extractTar unpacks a tar archive of regular files and directories into dir. It refuses a name that is
+// not a local path, a link of any kind, and an archive above maxExportBytes or maxExportEntries. Every
+// file operation goes through an os.Root on dir, so the kernel also keeps each write inside dir.
 func extractTar(archive, dir string) error {
 	f, err := os.Open(archive) //nolint:gosec // the path is inside the temporary directory the installer made
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	root := filepath.Clean(dir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	tr := tar.NewReader(f)
-	for {
+	var total int64
+	for entries := 0; ; entries++ {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -238,23 +262,30 @@ func extractTar(archive, dir string) error {
 		if err != nil {
 			return fmt.Errorf("read the export: %w", err)
 		}
-		target := filepath.Join(root, filepath.FromSlash(h.Name))
-		if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
-			return fmt.Errorf("the export has the path %q outside its directory", h.Name)
+		if entries >= maxExportEntries {
+			return fmt.Errorf("the export has more than %d entries", maxExportEntries)
+		}
+		if h.Typeflag == tar.TypeXGlobalHeader {
+			continue // git archive writes the commit id here
+		}
+		name, err := localName(h.Name)
+		if err != nil {
+			return err
 		}
 		switch h.Typeflag {
 		case tar.TypeDir:
-			err = os.MkdirAll(target, 0o750)
+			err = root.MkdirAll(name, 0o750)
 		case tar.TypeReg:
-			if err = os.MkdirAll(filepath.Dir(target), 0o750); err == nil {
+			if total += h.Size; h.Size < 0 || total > maxExportBytes {
+				return fmt.Errorf("the export is larger than %d bytes", int64(maxExportBytes))
+			}
+			if err = root.MkdirAll(filepath.Dir(name), 0o750); err == nil {
 				mode := os.FileMode(0o600)
 				if h.Mode&0o100 != 0 {
 					mode = 0o700
 				}
-				err = writeExtracted(target, tr, mode)
+				err = writeExtracted(root, name, tr, h.Size, mode)
 			}
-		case tar.TypeXGlobalHeader:
-			// git archive writes the commit id here.
 		default:
 			err = fmt.Errorf("the export has an entry %q of type %c", h.Name, h.Typeflag)
 		}
@@ -264,12 +295,24 @@ func extractTar(archive, dir string) error {
 	}
 }
 
-func writeExtracted(path string, r io.Reader, mode os.FileMode) error {
-	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) //nolint:gosec // inside the temporary directory; extractTar refuses paths that leave it
+// localName turns an archive entry name into a path relative to the extraction root, or refuses it when
+// it is absolute or climbs out with "..".
+func localName(entry string) (string, error) {
+	name := filepath.Clean(filepath.FromSlash(entry))
+	if !filepath.IsLocal(name) {
+		return "", fmt.Errorf("the export has the path %q outside its directory", entry)
+	}
+	return name, nil
+}
+
+// writeExtracted writes exactly size bytes of r to name under root: a header that understates its
+// content cannot make the file larger.
+func writeExtracted(root *os.Root, name string, r io.Reader, size int64, mode os.FileMode) error {
+	out, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, r)
+	_, err = io.CopyN(out, r, size)
 	return errors.Join(err, out.Close())
 }
 
@@ -296,6 +339,12 @@ func (i *Installer) Install(ctx context.Context) error {
 	}
 	created, err := i.EnsureNamespace(ctx)
 	if err != nil {
+		return err
+	}
+	if err := i.WaitNamespaceReady(ctx); err != nil {
+		if created {
+			i.removeNamespace(ctx)
+		}
 		return err
 	}
 	if failed := preflight.Write(i.Out, i.Checker.SubstrateProbePrerequisites(ctx)); failed > 0 {
@@ -355,6 +404,37 @@ func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("create namespace %s: %w", ns, err)
 	}
 	return true, nil
+}
+
+// WaitNamespaceReady waits until the controllers have filled the Substrate namespace: the probe pods use
+// the default ServiceAccount and the issuer probe mounts the kube-root-ca.crt ConfigMap, and both appear
+// some time after a namespace is created. Without the wait a probe pod on a fresh cluster is refused or
+// stays in FailedMount.
+func (i *Installer) WaitNamespaceReady(ctx context.Context) error {
+	ns := i.Checker.Config.SubstrateOrDefault().Namespace
+	ctx, cancel := context.WithTimeout(ctx, orDuration(i.WaitTimeout, 2*time.Minute))
+	defer cancel()
+	for {
+		var missing []string
+		if _, err := i.Kube.CoreV1().ServiceAccounts(ns).Get(ctx, "default", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			missing = append(missing, "ServiceAccount default")
+		} else if err != nil {
+			return fmt.Errorf("read ServiceAccount %s/default: %w", ns, err)
+		}
+		if _, err := i.Kube.CoreV1().ConfigMaps(ns).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			missing = append(missing, "ConfigMap kube-root-ca.crt")
+		} else if err != nil {
+			return fmt.Errorf("read ConfigMap %s/kube-root-ca.crt: %w", ns, err)
+		}
+		if len(missing) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("namespace %s not ready in time, missing: %s", ns, strings.Join(missing, ", "))
+		case <-time.After(orDuration(i.PollInterval, 2*time.Second)):
+		}
+	}
 }
 
 // WaitCRDs waits until every Substrate CRD has the condition Established=True.
