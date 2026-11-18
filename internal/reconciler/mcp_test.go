@@ -417,27 +417,53 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(string(sec.Data[strings.TrimPrefix(t.CAFile, "/secrets/providers/")])).To(Equal(string(ca.CA)))
 	})
 
-	It("leaves out a server whose CA bundle would take the Secret over the budget, and still applies the others (#278)", func(ctx SpecContext) {
+	It("gives each org its own CA budget: one org at its limit is refused at save time and does not starve another org (#278)", func(ctx SpecContext) {
 		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
 		Expect(err).NotTo(HaveOccurred())
 		bundle := strings.Repeat(string(ca.CA), 60000/len(ca.CA))
 		Expect(len(bundle)).To(BeNumerically("<=", mcpservers.MaxCABundleBytes))
 		actor := audit.System("koinon-test:spec")
-		for i := 0; i < 5; i++ { // 5 x ~60 KB is over the 256 KiB budget
+		for i := 0; i < 2; i++ { // 2 x ~60 KB is this org's whole budget
 			s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: fmt.Sprintf("big%d", i), URL: fmt.Sprintf("https://big%d.example.test/mcp", i), CABundle: bundle})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, s.ID) })
 		}
+		_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "big2", URL: "https://big2.example.test/mcp", CABundle: bundle})
+		Expect(err).To(MatchError(ContainSubstring("the CA bundles of this org's servers are over 128 KiB in total")))
+
+		other, otherUser := newOrgWithSlug(ctx, uniq("cab"))
+		DeferCleanup(func(ctx SpecContext) { _, _ = pool.Exec(ctx, `DELETE FROM mcp_servers WHERE org_id = $1`, other) })
+		osrv, err := svc.Create(ctx, other, actor, otherUser, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(osrv.CABundle).NotTo(BeEmpty())
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		for i := 0; i < 2; i++ {
+			_, ok := targetOf(mg.last(), fmt.Sprintf("%s-big%d", slug, i))
+			Expect(ok).To(BeTrue())
+		}
+		var otherSlug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, other).Scan(&otherSlug)).To(Succeed())
+		_, ok := targetOf(mg.last(), otherSlug+"-private")
+		Expect(ok).To(BeTrue(), "the other org's CA server is served")
+	})
+
+	It("leaves out a CA-bundled server when the gateway cannot render a per-target CA, and still applies the others (#278)", func(ctx SpecContext) {
+		mg.noTargetCA = true
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
 
 		err = r.ReconcileAll(ctx)
-		Expect(err).To(MatchError(ContainSubstring("the CA bundles of all servers are over 256 KiB in total")))
-		served := 0
-		for i := 0; i < 5; i++ {
-			if _, ok := targetOf(mg.last(), fmt.Sprintf("%s-big%d", slug, i)); ok {
-				served++
-			}
-		}
-		Expect(served).To(Equal(4))
+		Expect(err).To(MatchError(ContainSubstring(slug + "/private not served: it has a CA bundle, which gateway.mode=kubernetes cannot render")))
+		_, ok := targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-private")
+		Expect(ok).To(BeFalse())
 	})
 
 	It("does not serve a stored credentialed server whose URL is not https, and still applies the others (ADR 0120)", func(ctx SpecContext) {

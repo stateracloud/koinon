@@ -230,7 +230,7 @@ func caTransport(base http.RoundTripper, caFile string) (http.RoundTripper, erro
 	if !ok {
 		return nil, errors.New("mcpgateway: a target with a CA bundle needs an *http.Transport")
 	}
-	pem, err := os.ReadFile(caFile)
+	pem, err := os.ReadFile(caFile) //nolint:gosec // the path is the rendered CA file in the gateway Secret mount
 	if err != nil {
 		return nil, fmt.Errorf("mcpgateway: read the CA bundle: %w", err)
 	}

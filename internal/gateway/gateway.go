@@ -158,6 +158,15 @@ type LedgerBudgets interface {
 	LedgerEnforcesBudgets() bool
 }
 
+// MCPTargetCA is implemented by a driver that cannot render a per-target TLS root for an MCP target
+// (the Kubernetes driver: the CRD path is frozen for MCP, ADR 0097 decision 4). A caller leaves a
+// server with a CA bundle out of the state and reports it on that server, because a driver that
+// refused the whole state for one target would hold back every other org's change. A driver that
+// does not implement it renders per-target roots.
+type MCPTargetCA interface {
+	RendersMCPTargetCA() bool
+}
+
 // Revision identifies an applied configuration. Drivers derive it from the
 // rendered content, so equal States give equal revisions.
 type Revision string

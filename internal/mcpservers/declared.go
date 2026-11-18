@@ -76,6 +76,15 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				}
 			}
 		}
+		if in.CABundle != "" {
+			var exceptID pgtype.UUID
+			if cur != nil {
+				exceptID = cur.ID
+			}
+			if err := CheckOrgCABudget(all, exceptID, in.CABundle); err != nil {
+				return err
+			}
+		}
 		// A lost credential (keys forget) is written again from the Secret, which still holds it.
 		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid && !cur.CredentialLostAt.Valid {
 			return nil

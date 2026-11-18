@@ -432,6 +432,27 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 // certificates need a few KiB.
 const MaxCABundleBytes = 64 << 10
 
+// MaxOrgCABundleBytes bounds the CA bundles of all servers of one org. The reconciler keeps the
+// bundles of all orgs in one Secret with a global cap; a budget per org means one org cannot use up
+// the share of the others.
+const MaxOrgCABundleBytes = 128 << 10
+
+// CheckOrgCABudget refuses a bundle that takes the org's bundles over MaxOrgCABundleBytes. others are
+// the org's servers as stored; the server named by except (zero for a new one) is counted with its
+// new bundle instead of its stored one.
+func CheckOrgCABudget(others []store.McpServer, except pgtype.UUID, bundle string) error {
+	total := len(bundle)
+	for _, r := range others {
+		if r.ID != except && !r.RemovedAt.Valid {
+			total += len(r.CaBundle)
+		}
+	}
+	if total > MaxOrgCABundleBytes {
+		return invalid("the CA bundles of this org's servers are over %d KiB in total", MaxOrgCABundleBytes>>10)
+	}
+	return nil
+}
+
 // ValidateCABundle checks a server's CA bundle: empty (the system roots), or PEM certificates only
 // on an https URL (a CA verifies a TLS certificate, and an http URL has none).
 func ValidateCABundle(rawURL, bundle string) error {
@@ -632,6 +653,15 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 				return err
 			}
 		}
+		if in.CABundle != "" {
+			all, err := q.ListMCPServers(ctx, org)
+			if err != nil {
+				return err
+			}
+			if err := CheckOrgCABudget(all, pgtype.UUID{}, in.CABundle); err != nil {
+				return err
+			}
+		}
 		row, err = q.CreateMCPServer(ctx, p)
 		if err != nil {
 			return err
@@ -718,6 +748,15 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		if err := ValidateCABundle(u, caBundle); err != nil {
 			return err
+		}
+		if caBundle != "" && caBundle != cur.CaBundle {
+			all, err := q.ListMCPServers(ctx, org)
+			if err != nil {
+				return err
+			}
+			if err := CheckOrgCABudget(all, sid, caBundle); err != nil {
+				return err
+			}
 		}
 		if err := s.policy.Check(ctx, u); err != nil {
 			return err

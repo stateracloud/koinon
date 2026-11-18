@@ -41,8 +41,9 @@ type servedMCP struct {
 
 // maxMCPCABytes bounds the CA bundles of all servers in the provider-keys Secret, which serves every
 // org and holds about 1 MiB. While a change settles, the old and the new file both stay, so the
-// budget is a quarter of the Secret. A server over it is left out, so one org cannot make the Secret
-// too long for the others.
+// budget is a quarter of the Secret. Each org also has its own budget (mcpservers.MaxOrgCABundleBytes,
+// checked when a bundle is saved), so one org cannot use up the share of the others; a server over
+// the global cap is left out and reported.
 const maxMCPCABytes = 256 << 10
 
 // loadMCP reads every org's enabled servers and their tools. A server that cannot be served (its URL
@@ -53,7 +54,12 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 	out := servedMCP{files: map[string][]byte{}}
 	var errs []error
 	owner := map[string]string{}
+	rendersCA := true
+	if g, ok := r.gw.(gateway.MCPTargetCA); ok {
+		rendersCA = g.RendersMCPTargetCA()
+	}
 	for _, org := range orgs {
+		orgBytes := 0
 		rows, err := r.q.ListServedMCPServers(ctx, org.ID)
 		if err != nil {
 			return out, errs, fmt.Errorf("reconciler: list MCP servers of org %s: %w", org.Slug, err)
@@ -103,6 +109,14 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
+				if !rendersCA {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has a CA bundle, which gateway.mode=kubernetes cannot render; use gateway.mode=standalone", org.Slug, row.Name))
+					continue
+				}
+				if orgBytes+len(row.CaBundle) > mcpservers.MaxOrgCABundleBytes {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of the org's servers are over %d KiB in total", org.Slug, row.Name, mcpservers.MaxOrgCABundleBytes>>10))
+					continue
+				}
 				if out.bytes+len(row.CaBundle) > maxMCPCABytes {
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of all servers are over %d KiB in total", org.Slug, row.Name, maxMCPCABytes>>10))
 					continue
@@ -111,6 +125,7 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				out.files[s.CAFile] = []byte(row.CaBundle)
 				out.bytes += len(row.CaBundle)
+				orgBytes += len(row.CaBundle)
 			}
 			tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org.ID, ServerID: row.ID})
 			if err != nil {
