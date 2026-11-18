@@ -4,13 +4,16 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -115,12 +118,25 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	lctx, cancel := context.WithCancelCause(ctx)
 	wake := make(chan struct{}, 1)
 	readerDone := make(chan struct{})
+	// alive is the time of the last proof that the lock connection works: a notification or the
+	// answer to a heartbeat. The fence (gateway.WithFence) refuses a destructive step once it is older
+	// than the detection bound, even if the reader itself is stuck (issue 635).
+	var alive atomic.Int64
+	alive.Store(time.Now().UnixNano())
+	bound := r.cfg.LeaderHeartbeat + r.cfg.LeaderPingTimeout
+	fence := func() error {
+		if age := time.Since(time.Unix(0, alive.Load())); age > bound {
+			return fmt.Errorf("reconciler: the leader lock connection was last confirmed %s ago", age.Round(time.Millisecond))
+		}
+		return nil
+	}
 	go func() {
 		defer close(readerDone)
 		for {
-			if _, err := conn.Conn().WaitForNotification(lctx); err != nil {
+			err := r.waitOrPing(lctx, conn.Conn(), &alive)
+			if err != nil {
 				if lctx.Err() == nil {
-					cancel(fmt.Errorf("wait for notification: %w", err))
+					cancel(err)
 				}
 				return
 			}
@@ -138,9 +154,10 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	// stops with lctx, which also ends when the connection (and with it the lock) is lost.
 	queue := r.newWorkQueue(lctx)
 	defer queue.Stop()
+	fctx := gateway.WithFence(lctx, fence)
 
 	for {
-		pctx, pcancel := context.WithTimeout(lctx, passTimeout)
+		pctx, pcancel := context.WithTimeout(fctx, passTimeout)
 		_, err := r.reconcilePass(pctx, queue)
 		pcancel()
 		r.observeUnmarkedDue(lctx)
@@ -153,6 +170,40 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 			}
 			return true, err
 		}
+	}
+}
+
+// waitOrPing returns nil on a notification. While the connection is quiet it checks it every
+// LeaderHeartbeat with a query that must be answered within LeaderPingTimeout, and returns an error
+// when it is not. A peer that vanished without a TCP reset (hard node loss, partition, a proxy that
+// dropped the flow) gives no socket error; TCP keepalive would see it only after about 2.5 minutes,
+// and not at all through a proxy that answers the probes itself. Postgres frees the lock earlier
+// on its side, so this bound is the time two reconcilers can lead (issue 635). A read timeout does
+// not close a pgx connection, so the wait can be repeated on the same connection.
+func (r *Reconciler) waitOrPing(ctx context.Context, c *pgx.Conn, alive *atomic.Int64) error {
+	for {
+		wctx, wcancel := context.WithTimeout(ctx, r.cfg.LeaderHeartbeat)
+		_, err := c.WaitForNotification(wctx)
+		wcancel()
+		switch {
+		case err == nil:
+			alive.Store(time.Now().UnixNano())
+			return nil
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case !errors.Is(err, context.DeadlineExceeded):
+			return fmt.Errorf("wait for notification: %w", err)
+		}
+		pctx, pcancel := context.WithTimeout(ctx, r.cfg.LeaderPingTimeout)
+		_, err = c.Exec(pctx, "SELECT 1")
+		pcancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("leader lock connection did not answer within %s: %w", r.cfg.LeaderPingTimeout, err)
+		}
+		alive.Store(time.Now().UnixNano())
 	}
 }
 

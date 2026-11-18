@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1772,13 +1774,86 @@ var _ = Describe("Reconciler", func() {
 			Eventually(mg.applyTimes).Should(HaveLen(2))
 			// The order of the old pass's cancel and the new leader's first write is NOT guaranteed:
 			// the server frees the lock when the backend dies, and the old leader learns of the dead
-			// connection by its own read, so the follower can write first. That two-leader window is
-			// tracked in issue 635.
+			// connection by its own read, so the follower can write first. The window of a silent
+			// loss is bounded by the leader's heartbeat (issue 635, the spec below).
 			// applyTimes records the start of an Apply and appliedCount its end, so the new leader's
 			// pass can have started and not yet finished here (#861): wait for the finish, and then
 			// hold the count (the old pass was cancelled and must never add to it).
 			Eventually(mg.appliedCount).Should(Equal(1), "only the new leader's pass finished")
 			Consistently(mg.appliedCount, "500ms", "50ms").Should(Equal(1))
+		})
+
+		It("stops the old leader within the detection bound after a silent connection loss (#635)", func(ctx SpecContext) {
+			const heartbeat, pingTimeout = 400 * time.Millisecond, 400 * time.Millisecond
+			cfg.ResyncInterval = time.Hour
+			cfg.LeaderHeartbeat, cfg.LeaderPingTimeout = heartbeat, pingTimeout
+			mg.mu.Lock()
+			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			entered := mg.entered
+			mg.mu.Unlock()
+			DeferCleanup(func() {
+				mg.mu.Lock()
+				defer mg.mu.Unlock()
+				if mg.hold != nil {
+					close(mg.hold)
+				}
+			})
+
+			cc := pool.Config().ConnConfig
+			proxy := newSilentProxy(net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port))))
+			viaProxy := poolVia(ctx, pool, proxy)
+			// DeferCleanup runs last-in first-out, and the proxy must close before the pool: pool.Close
+			// closes each connection with a context, and pgx then sends a cancel request through the
+			// frozen proxy and waits for it (15 s) instead of failing at once on a closed socket.
+			DeferCleanup(func() { proxy.close(); viaProxy.Close() })
+			old, err := reconciler.New(viaProxy, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			run(old)
+			Eventually(entered).Should(BeClosed(), "the old leader's pass is inside Apply")
+			Expect(holders(ctx)).To(Equal(1))
+
+			// The connection goes silent: no reset, the server keeps the lock. Nothing but the
+			// leader's own heartbeat can see it.
+			froze := time.Now()
+			proxy.freeze()
+			Eventually(mg.canceledAt).WithTimeout(5 * time.Second).ShouldNot(BeZero())
+			took := mg.canceledAt().Sub(froze)
+			GinkgoWriter.Printf("old leader stopped %s after the connection went silent\n", took)
+			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+time.Second),
+				"within heartbeat + ping timeout (and a margin for the scheduler)")
+			Expect(logs.String()).To(ContainSubstring("did not answer"))
+		})
+
+		It("keeps the lead on a quiet but healthy connection across several heartbeat periods (#635)", func(ctx SpecContext) {
+			const heartbeat, pingTimeout = 200 * time.Millisecond, 400 * time.Millisecond
+			cfg.ResyncInterval = time.Hour
+			cfg.LeaderHeartbeat, cfg.LeaderPingTimeout = heartbeat, pingTimeout
+			mg.mu.Lock()
+			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			entered := mg.entered
+			mg.mu.Unlock()
+			DeferCleanup(func() {
+				mg.mu.Lock()
+				defer mg.mu.Unlock()
+				if mg.hold != nil {
+					close(mg.hold)
+				}
+			})
+
+			cc := pool.Config().ConnConfig
+			proxy := newSilentProxy(net.JoinHostPort(cc.Host, strconv.Itoa(int(cc.Port))))
+			viaProxy := poolVia(ctx, pool, proxy)
+			DeferCleanup(func() { proxy.close(); viaProxy.Close() })
+			r, err := reconciler.New(viaProxy, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			run(r)
+			Eventually(entered).Should(BeClosed(), "the leader's pass is inside Apply")
+
+			// The connection is idle between heartbeats but answers each one: no false step-down.
+			Consistently(mg.canceledAt, 6*heartbeat, 50*time.Millisecond).Should(BeZero(), "the lead was not cancelled")
+			Expect(holders(ctx)).To(Equal(1), "the lock is still held")
+			Expect(leading()).To(Equal(1))
+			Expect(logs.String()).NotTo(ContainSubstring("did not answer"))
 		})
 
 		It("retries a failed lead after a short backoff with jitter, not after the resync interval", func() {

@@ -157,6 +157,26 @@ var _ = Describe("Driver without a cluster", func() {
 		Expect(mem.names("Gateway")).To(Equal([]string{"koinon-gateway"}))
 	})
 
+	It("refuses to prune when the leader's fence is stale, and prunes when it holds (#635)", func(ctx SpecContext) {
+		_, err := d.Apply(ctx, fullState())
+		Expect(err).NotTo(HaveOccurred())
+
+		s := fullState()
+		s.RevokeKey("k-gggggggggggg")
+		s.Providers = s.Providers[:1]
+
+		lost := errors.New("lock connection unconfirmed")
+		stale := gateway.WithFence(ctx, func() error { return lost })
+		_, err = d.Apply(stale, s)
+		Expect(err).To(MatchError(lost))
+		Expect(mem.names("AgentgatewayModel")).To(HaveLen(2), "a stale fence deletes nothing")
+
+		fresh := gateway.WithFence(ctx, func() error { return nil })
+		_, err = d.Apply(fresh, s)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mem.names("AgentgatewayModel")).To(HaveLen(1), "a fence that holds lets the prune delete")
+	})
+
 	It("returns the revision with a RejectedError for the refused objects only", func(ctx SpecContext) {
 		mem.status = func(u *unstructured.Unstructured) map[string]any {
 			if u.GetKind() == gwk8s.KindModel && u.GetLabels()[gwk8s.LabelOrg] == "acme" {
