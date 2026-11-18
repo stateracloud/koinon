@@ -15,6 +15,11 @@ for f in "${value_files[@]}"; do
 		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
 		continue
 	fi
+	if [[ $name == substrate-values ]]; then
+		# koinon-api substrate install runs the Substrate preflight before helm install (#1088).
+		[[ $enabled == false ]] || { echo "$name: the OpenShell preflight hook renders with execution.driver=substrate" >&2; exit 1; }
+		continue
+	fi
 	[[ $enabled == true ]] || { echo "$name: preflight hook not rendered" >&2; exit 1; }
 	rendered=$(preflight_job "$f")
 	for want in 'kind: Job' 'helm.sh/hook: pre-install,pre-upgrade' 'helm.sh/hook-output-log-policy: hook-failed,hook-succeeded' \
