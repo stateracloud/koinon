@@ -109,7 +109,7 @@ chart-check: ## Lint and render the Helm chart in every mode and validate it wit
 	hack/chart-check.sh
 
 .PHONY: generate
-# The OpenShell client, the agentgateway ExtMcp server and the googleapis ErrorInfo types are generated after buf.gen.yaml, whose clean step
+# The OpenShell and Substrate clients, the agentgateway ExtMcp server and the googleapis ErrorInfo types are generated after buf.gen.yaml, whose clean step
 # empties internal/gen and web/src/gen. hack/generate.sh restores those trees when any step fails (#349).
 generate: ## Regenerate protobuf, sqlc and admin API code
 	GO=$(GO) hack/generate.sh

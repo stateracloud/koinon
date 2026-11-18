@@ -65,6 +65,10 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 				return sb.Phase, err
 			}
 		}
+		// stopped is what a stopped sandbox reports. A driver whose only way to stop is to suspend
+		// (Agent Substrate: a stopped actor is a suspended one) reports PhaseSuspended; both mean the
+		// sandbox keeps its state and is not ready.
+		stopped := BeElementOf(execution.PhaseStopped, execution.PhaseSuspended)
 		create := func(ctx SpecContext, name string) execution.Sandbox {
 			sb, err := h.Compute.CreateSandbox(ctx, h.Workspace, spec(name))
 			Expect(err).NotTo(HaveOccurred())
@@ -114,7 +118,7 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 
 				_, err = h.Compute.StopSandbox(ctx, h.Workspace, "sb")
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(phaseOf(ctx, "sb")).WithTimeout(settle).Should(Equal(execution.PhaseStopped))
+				Eventually(phaseOf(ctx, "sb")).WithTimeout(settle).Should(stopped)
 				_, err = h.Compute.StopSandbox(ctx, h.Workspace, "sb")
 				Expect(err).NotTo(HaveOccurred(), "stop of a stopped sandbox")
 
@@ -204,7 +208,7 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 				create(ctx, "sb")
 				_, err := h.Compute.StopSandbox(ctx, h.Workspace, "sb")
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(phaseOf(ctx, "sb")).WithTimeout(settle).Should(Equal(execution.PhaseStopped))
+				Eventually(phaseOf(ctx, "sb")).WithTimeout(settle).Should(stopped)
 				_, err = h.Compute.Exec(ctx, h.Workspace, "sb", execution.ExecRequest{Command: h.Exec})
 				Expect(errors.Is(err, execution.ErrFailedPrecondition)).To(BeTrue(), "got %v", err)
 			})

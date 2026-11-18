@@ -174,7 +174,7 @@ func (r *Reconciler) unreadableGate(ctx context.Context, w *work, sb execution.S
 // wakeForBackup starts a stopped sandbox: agentd reads the home over exec. It stops again once
 // idle, with its checkpoint complete.
 func (r *Reconciler) wakeForBackup(ctx context.Context, w *work, ws string, sb execution.Sandbox) error {
-	if sb.Phase != execution.PhaseStopped {
+	if !sb.Phase.IsStopped() {
 		return nil
 	}
 	if _, err := r.backend.StartSandbox(ctx, ws, w.names().Sandbox); err != nil {

@@ -55,6 +55,7 @@ restore() {
 gen_rc=0
 buf generate \
 	&& buf generate --template buf.gen.openshell.yaml \
+	&& buf generate --template buf.gen.substrate.yaml \
 	&& buf generate --template buf.gen.agentgateway.yaml \
 	&& buf generate --template buf.gen.googleapis.yaml \
 	&& buf generate --template buf.gen.docs.yaml \

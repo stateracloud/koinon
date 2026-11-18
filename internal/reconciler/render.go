@@ -226,7 +226,7 @@ func sandboxState(p execution.Phase) store.SandboxState {
 		return store.SandboxStateReady
 	case execution.PhaseStopping:
 		return store.SandboxStateStopping
-	case execution.PhaseStopped:
+	case execution.PhaseStopped, execution.PhaseSuspended:
 		return store.SandboxStateStopped
 	case execution.PhaseDeleting:
 		return store.SandboxStateDeleting

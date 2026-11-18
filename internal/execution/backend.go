@@ -42,7 +42,9 @@ type Compute interface {
 	// StartSandbox starts a stopped sandbox. Starting a running one is a no-op.
 	StartSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
 
-	// StopSandbox stops a sandbox and keeps its home volume. Stopping a stopped one is a no-op.
+	// StopSandbox stops a sandbox and keeps its home volume. Stopping a stopped one is a no-op. A
+	// stopped sandbox is observed as PhaseStopped, or as PhaseSuspended on a driver whose only
+	// stopped state is a suspended one (Agent Substrate).
 	StopSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
 
 	// DeleteSandbox requests the deletion of a sandbox. A missing sandbox is not an error
@@ -333,6 +335,10 @@ const (
 	PhaseCompleted    Phase = "Completed"
 	PhaseSuspended    Phase = "Suspended"
 )
+
+// IsStopped reports whether the phase is a stopped one that keeps the sandbox state: PhaseStopped,
+// or PhaseSuspended on a driver whose only stopped state is a suspended one (see StopSandbox).
+func (p Phase) IsStopped() bool { return p == PhaseStopped || p == PhaseSuspended }
 
 // ExecRequest is a command to run in a sandbox.
 type ExecRequest struct {

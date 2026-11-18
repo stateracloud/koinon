@@ -1518,7 +1518,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			}
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
 		}
-	case execution.PhaseStopped:
+	case execution.PhaseStopped, execution.PhaseSuspended:
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
 			release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash)
 			if err != nil || held {
@@ -1816,7 +1816,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 				return err
 			}
 		}
-		if sb.Phase != execution.PhaseStopped {
+		if !sb.Phase.IsStopped() {
 			return r.record(ctx, w, sb, w.sb.SpecHash, "archived; waiting for the sandbox to stop")
 		}
 		final = store.SandboxStateRetained
