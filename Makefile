@@ -147,6 +147,22 @@ harness-opencode: ## Build the OpenCode harness image (koinon/sandbox:dev-<hash>
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) $(call harness_cache,opencode) $(harness_secret) $$base_args \
 		--build-context common=harnesses/common --tag koinon/sandbox:$(call harness_tag,opencode) harnesses/opencode
 
+# The substrate overlay (ADR 0119, issue #1087): the harness image plus koinon-guest-launcher as its
+# entrypoint wrapper. Only the substrate driver uses it; the OpenShell images above do not change.
+.PHONY: guest-launcher
+guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
+			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
+	done
+
+.PHONY: harness-substrate-opencode
+harness-substrate-opencode: harness-opencode guest-launcher ## Build the OpenCode harness image with the guest launcher (koinon/sandbox:<tag>-substrate)
+	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
+		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,opencode) \
+		--build-context launcher=build/guest-launcher \
+		--tag koinon/sandbox:$(call harness_tag,opencode)-substrate cmd/koinon-guest-launcher
+
 .PHONY: harnesses
 harnesses: $(addprefix harness-,$(HARNESSES)) ## Build all harness images
 

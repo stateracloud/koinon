@@ -26,6 +26,7 @@ require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/dbos-inc/dbos-transact-golang v1.8.0
+	github.com/elastic/go-seccomp-bpf v1.6.0
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-jose/go-jose/v4 v4.1.9
@@ -33,6 +34,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/kopia/kopia v0.23.1
+	github.com/landlock-lsm/go-landlock v0.11.2
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
@@ -62,6 +64,7 @@ require (
 	golang.org/x/crypto v0.59.0
 	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.38.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.44.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
@@ -305,7 +308,6 @@ require (
 	golang.org/x/exp v0.0.0-20261109185158-a52e3aef5920 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect
-	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.52.1-0.20261106145633-d407941a339a // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
@@ -320,6 +322,7 @@ require (
 	howett.net/plist v1.0.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.78 // indirect
 	modernc.org/libc v1.80.2 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

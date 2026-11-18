@@ -87,6 +87,16 @@ agent. The first open question above (which cache product) is closed; the second
 names the many installing programs) is that ADR's pending spike. `environment.lock` and the promotion of
 common tools are not changed here.
 
+## Amendment (2026-11-18, ADR 0119, issue #1087)
+
+On the substrate driver a flavor image is the harness image plus the Koinon guest launcher
+(`cmd/koinon-guest-launcher`, built `CGO_ENABLED=0`) and its policy, not an OpenShell base image
+with a supervisor. The launcher is the entrypoint wrapper: it applies `no_new_privs`, a capability
+allowlist, Landlock filesystem rules and a seccomp deny filter inside the guest, then execs the
+agent. The policy file `/etc/koinon/guest-launcher/policy.json` holds paths, mode switches and a
+user, never a credential. Tools that an agent installs (ADR 0113) still land in its home inside the
+guest. The OpenShell driver, the default, keeps the plain image and its exec path unchanged.
+
 ## Links
 
 - [0032](0032-agent-home-checkpoints.md), [0035](0035-v01-flavors.md),

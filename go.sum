@@ -187,6 +187,8 @@ github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/edsrzf/mmap-go v1.2.0 h1:hXLYlkbaPzt1SaQk+anYwKSRNhufIDCchSPkUD6dD84=
 github.com/edsrzf/mmap-go v1.2.0/go.mod h1:19H/e8pUPLicwkyNgOykDXkJ9F0MHE+Z52B8EIth78Q=
+github.com/elastic/go-seccomp-bpf v1.6.0 h1:NYduiYxRJ0ZkIyQVwlSskcqPPSg6ynu5pK0/d7SQATs=
+github.com/elastic/go-seccomp-bpf v1.6.0/go.mod h1:5tFsTvH4NtWGfpjsOQD53H8HdVQ+zSZFRUDSGevC0Kc=
 github.com/elastic/go-sysinfo v1.15.5 h1:fCVUDmjHgljLUQCygherMnsRRJ9AkuAQIywTL7dEH28=
 github.com/elastic/go-sysinfo v1.15.5/go.mod h1:ZBVXmqS368dOn/jvijV/zHLfakWTYHBZPk3G244lHrU=
 github.com/elastic/go-windows v1.0.2 h1:yoLLsAsV5cfg9FLhZ9EXZ2n2sQFKeDYrHenkcivY4vI=
@@ -417,6 +419,8 @@ github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
+github.com/landlock-lsm/go-landlock v0.11.2 h1:QS17AXv0o19V55BJFPpKhU/s6KC71nXvJZkjIvCyTYg=
+github.com/landlock-lsm/go-landlock v0.11.2/go.mod h1:3AwAZcTiexERgrATGcYh6E8qebWYxE3C2VyU3HkWzJE=
 github.com/lucasb-eyer/go-colorful v1.4.1 h1:1EO+WB73+EH8EVbzlrG3KLAfEypQWVHIBqlTf+2hNss=
 github.com/lucasb-eyer/go-colorful v1.4.1/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e h1:Q6MvJtQK/iRcRtzAscm/zF23XxJlbECiGPyRicsX+Ak=
@@ -951,6 +955,8 @@ k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad h1:oXImqH8mQNk7PmvzKhmN3d
 k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad/go.mod h1:0/mqHCVhlumdJ3BhCfnjSZQE037nAhNodh1/hK0T8/I=
 k8s.io/utils v0.0.0-20260626114624-be93311217bd h1:Ea7fgQ5we8Y9T0OX5o0dAHzQOBRI07D/dEYRaB9ZZEs=
 k8s.io/utils v0.0.0-20260626114624-be93311217bd/go.mod h1:xDxuJ0whA3d0I4mf/C4ppKHxXynQ+fxnkmQH0vTHnuk=
+kernel.org/pub/linux/libs/security/libcap/psx v1.2.78 h1:PC3yNs51cX5LZ7U57a7xielBcoXB3xnV+rXD8V0H0DQ=
+kernel.org/pub/linux/libs/security/libcap/psx v1.2.78/go.mod h1:+l6Ee2F59XiJ2I6WR5ObpC1utCQJZ/VLsEbQCD8RG24=
 modernc.org/cc/v4 v4.30.6-0.20261101114202-1b9d1a076f6b h1:WE5SLOURcNd8s6uPR/n4WV4weQxxYKi5OpEZkfNVvdE=
 modernc.org/cc/v4 v4.30.6-0.20261101114202-1b9d1a076f6b/go.mod h1:OnovgIhbbMXMu1aISnJ0wvVD1KnW+cAUJkIrAWh+kVI=
 modernc.org/ccgo/v4 v4.38.1 h1:wdxJVBuFT8JufZnnQyS6Bbz3NOWhViD0xJOGR96Bpd4=

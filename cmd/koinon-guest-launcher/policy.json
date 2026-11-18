@@ -1,0 +1,11 @@
+{
+  "capabilities": { "allow": [] },
+  "landlock": {
+    "mode": "best_effort",
+    "read_exec": ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/opt", "/proc", "/sys", "/run", "/var/lib"],
+    "read_write": ["/sandbox", "/tmp", "/var/tmp", "/home", "/root", "/var/cache", "/var/log"],
+    "devices": ["/dev"]
+  },
+  "seccomp": { "mode": "require" },
+  "user": { "mode": "best_effort", "uid": 10001, "gid": 10001 }
+}
