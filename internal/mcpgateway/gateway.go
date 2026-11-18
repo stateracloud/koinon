@@ -42,6 +42,8 @@ type Options struct {
 	// HTTPClient is the base of the upstream HTTP clients. Nil builds one with a pool sized for
 	// many streams to few hosts (Go's default keeps 2 idle connections per host).
 	HTTPClient *http.Client
+	// Metrics counts what the gateway drops or refuses on its own. Nil counts nothing.
+	Metrics *Metrics
 	// Logger gets the gateway's own log lines. They never carry arguments, results or tokens.
 	Logger *slog.Logger
 	// IdleTTL is how long an unused upstream session lives. Zero means 5 minutes.
@@ -56,6 +58,7 @@ type Options struct {
 // and Handler serves agents.
 type Gateway struct {
 	o    Options
+	g    failClosed // the guard, as the gateway calls it: not loaded or panicking refuses
 	snap atomic.Pointer[snapshot]
 
 	mu    sync.Mutex
@@ -86,7 +89,7 @@ func New(o Options) *Gateway {
 	if o.HTTPClient == nil {
 		o.HTTPClient = newHTTPClient()
 	}
-	g := &Gateway{o: o, pool: map[poolKey]*upstream{}}
+	g := &Gateway{o: o, g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
 	g.snap.Store(&snapshot{})
 	return g
 }
@@ -112,6 +115,7 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 	if err := c.Validate(); err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
+	seen := map[string]bool{}
 	s := &snapshot{
 		keys:    map[string]gateway.Key{},
 		targets: map[string]gateway.MCPTarget{},
@@ -123,27 +127,39 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		}
 		s.keys[k.Hash] = k
 	}
+	// A target that cannot be served safely is left out, which closes its route; the rest of the
+	// config applies. A key revocation must never wait on an unrelated target (ADR 0120 section 2:
+	// a rule that fails to load closes the route). The log line names the target and a fixed
+	// reason; it carries no org, agent or user ID and no URL. Validate has refused the shapes that
+	// no config may have, for the API too; the checks here are the ones only this gateway knows.
+	applied := gateway.MCPConfig{Keys: c.Keys}
+	drop := func(name, reason string) {
+		g.o.Logger.Warn("mcp target dropped", "target", name, "reason", reason)
+		g.o.Metrics.dropped(reason)
+	}
 	for _, t := range c.MCP {
-		if t.Name == "" || strings.Contains(t.Name, "_") {
-			return "", fmt.Errorf("%w: target name %q must be a DNS-label name without underscores", ErrInvalidConfig, t.Name)
+		switch {
+		case t.Name == "" || strings.Contains(t.Name, "_"):
+			drop("", dropInvalidName)
+		case t.URL == "":
+			drop(t.Name, dropNoURL)
+		case seen[t.Name]:
+			// Two entries claim one name: neither can be trusted to be the right one.
+			delete(s.targets, t.Name)
+			drop(t.Name, dropDuplicateName)
+		case isAllowGuard(g.o.Guard) && t.Org != "":
+			drop(t.Name, dropOrgNeedsGuard)
+		case t.CredentialHeader != "" && !credentialSafeURL(t.URL):
+			drop(t.Name, dropCredentialNeedsHTTPS)
+		default:
+			s.targets[t.Name] = t
 		}
-		if _, dup := s.targets[t.Name]; dup {
-			return "", fmt.Errorf("%w: target %q is listed twice", ErrInvalidConfig, t.Name)
+		seen[t.Name] = true
+	}
+	for _, t := range c.MCP {
+		if _, ok := s.targets[t.Name]; ok {
+			applied.MCP = append(applied.MCP, t)
 		}
-		if t.URL == "" {
-			return "", fmt.Errorf("%w: target %q has no URL", ErrInvalidConfig, t.Name)
-		}
-		if isAllowGuard(g.o.Guard) && t.Org != "" {
-			return "", fmt.Errorf("%w: target %q is an org target and needs a real guard", ErrInvalidConfig, t.Name)
-		}
-		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
-			// The route closes: the target is left out, and the rest of the config applies. A key
-			// revocation must never wait on an unrelated target (ADR 0120). The log line names the
-			// target and a fixed reason; it carries no org, agent or user ID and no URL.
-			g.o.Logger.Warn("mcp target dropped", "target", t.Name, "reason", "credential_needs_https")
-			continue
-		}
-		s.targets[t.Name] = t
 	}
 	for a, gs := range c.Tools {
 		cp := make([]gateway.ToolGrant, len(gs))
@@ -153,7 +169,9 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		}
 		s.grants[a] = cp
 	}
-	s.rev = revisionOf(c)
+	// The revision names what serves: a dropped target changes it.
+	applied.Tools = c.Tools
+	s.rev = revisionOf(applied)
 	if err := ctx.Err(); err != nil { // the deadline passed: the old config keeps serving
 		return "", err
 	}

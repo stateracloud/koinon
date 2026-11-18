@@ -125,9 +125,18 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(err).To(MatchError(context.Canceled))
 		Expect(gw.Revision()).To(BeEmpty())
 
+		// An org target with no real guard closes its route only (ADR 0120: a rule that fails to load
+		// closes the route). The config applies, and its revision is the one of the config without it.
 		noGuard := mcpgateway.New(mcpgateway.Options{})
-		_, err = noGuard.ApplyMCP(ctx, ok)
-		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
+		rev3, err := noGuard.ApplyMCP(ctx, ok)
+		Expect(err).NotTo(HaveOccurred())
+		withoutTarget := gateway.MCPConfig{Keys: []gateway.Key{k2.Key}}
+		rev4, err := noGuard.ApplyMCP(ctx, withoutTarget)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev3).To(Equal(rev4))
+		rev5, err := gw.ApplyMCP(ctx, ok)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev5).NotTo(Equal(rev3))
 	})
 
 	It("copies the tool names of a grant, so the caller cannot widen it after the apply", func(ctx SpecContext) {
@@ -175,7 +184,9 @@ var _ = Describe("a hostile or odd target", func() {
 	})
 
 	It("keeps the stream of a legacy SSE target open after the handshake", func(ctx SpecContext) {
+		var connections atomic.Int32 // one per SSE session the target accepted
 		srv := httptest.NewServer(mcp.NewSSEHandler(func(*http.Request) *mcp.Server {
+			connections.Add(1)
 			s := mcp.NewServer(&mcp.Implementation{Name: "sse", Version: "0"}, nil)
 			mcp.AddTool(s, &mcp.Tool{Name: "read"}, func(context.Context, *mcp.CallToolRequest, echoArgs) (*mcp.CallToolResult, any, error) {
 				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "sse ok"}}}, nil, nil
@@ -203,6 +214,9 @@ var _ = Describe("a hostile or odd target", func() {
 			Expect(res.IsError).To(BeFalse())
 			Expect(text(res)).To(Equal("sse ok"))
 		}
+		// Both calls used one upstream session: the second did not connect again.
+		Expect(connections.Load()).To(BeEquivalentTo(1))
+		Expect(gw.OpenSessions()).To(Equal(1))
 	})
 
 	It("never sends a call again when the target lost the session, and treats a pointer pass-all guard as no guard", func(ctx SpecContext) {
@@ -246,10 +260,14 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(res.IsError).To(BeFalse()) // the session was replaced
 
 		ptr := mcpgateway.New(mcpgateway.Options{Guard: &mcpgateway.AllowGuard{}})
-		_, err = ptr.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+		rev, err := ptr.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
 			MCP: []gateway.MCPTarget{{Name: "t", Org: "acme", URL: "https://t.example/mcp"}},
 		}})
-		Expect(err).To(MatchError(mcpgateway.ErrInvalidConfig))
+		// The org target is dropped: the pointer form is no real guard either.
+		Expect(err).NotTo(HaveOccurred())
+		bare, err := ptr.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rev).To(Equal(bare))
 	})
 
 	It("accepts a credential on a loopback IPv6 URL and refuses it on a plain http host", func(ctx SpecContext) {

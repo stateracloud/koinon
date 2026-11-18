@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/stateracloud/koinon/internal/gateway"
 )
@@ -177,7 +178,7 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	// The handshake has a deadline; the stream of a legacy SSE target must outlive it. The stream
 	// context ends when the session retires, or when the handshake fails.
 	var handed atomic.Bool
-	sctx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	sctx, stop := context.WithCancel(detach(ctx))
 	timer := time.AfterFunc(g.o.CallTimeout, stop)
 	go func() {
 		select {
@@ -190,7 +191,16 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		case <-sctx.Done():
 		}
 	}()
-	gt := &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}
+	// The credential kind is the target's own: a connection is per (target, agent), and a config change
+	// that changes the credential changes the target, which retires the session.
+	credKind := CredentialError
+	if c, err := g.o.Credentials.Credential(ctx, t, key.agent); err == nil {
+		credKind = c.Kind
+	}
+	gt := &guardTransport{
+		inner: inner, guard: g.g, target: t.Name, org: t.Org, cred: credKind, agent: key.agent,
+		timeout: g.o.CallTimeout, log: g.o.Logger, metrics: g.o.Metrics,
+	}
 	s, err := client.Connect(sctx, gt, nil)
 	if err != nil {
 		timer.Stop()
@@ -259,4 +269,13 @@ func (g *Gateway) OpenSessions() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return len(g.pool)
+}
+
+// detach returns a context for the life of a pooled session. It keeps no cancellation and no value of
+// the request that connected the session: a session serves many requests, and the snapshot and the
+// trace span of the first one must not judge the messages of the later ones.
+func detach(ctx context.Context) context.Context {
+	ctx = context.WithoutCancel(ctx)
+	ctx = context.WithValue(ctx, reqKey{}, (*snapshot)(nil))
+	return trace.ContextWithSpan(ctx, trace.SpanFromContext(context.Background()))
 }

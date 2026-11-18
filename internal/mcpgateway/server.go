@@ -32,7 +32,7 @@ type agentKey struct{}
 type reqKey struct{}
 
 func (g *Gateway) snapOf(ctx context.Context) *snapshot {
-	if s, ok := ctx.Value(reqKey{}).(*snapshot); ok {
+	if s, ok := ctx.Value(reqKey{}).(*snapshot); ok && s != nil {
 		return s
 	}
 	return g.snap.Load()
@@ -260,6 +260,15 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 
 	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
 	defer cancel()
+	// The call check is the ask tier and the request-side checks (ADR 0097 decision 5). It runs after
+	// the grants and before any upstream message, and it may wait for a person; CallTimeout bounds it.
+	if v := g.g.checkCall(cctx, Call{
+		Agent: agent, Target: target, Org: t.Org, Tool: tool, Credential: row.CredKind, Arguments: p.Arguments,
+	}); v.Refuse {
+		row.Verdict = v.Reason
+		finish(OutcomeRefusedGuard)
+		return refusedResult(v.Reason)
+	}
 	// One attempt. A call is never sent again: a lost session error can reach every call on a shared
 	// session, so it does not prove that this call ran nothing, and a write could run twice. The
 	// session is evicted, and the next call connects again.

@@ -4,6 +4,10 @@ package mcpgateway
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/gateway"
 )
@@ -49,9 +53,15 @@ func (k Kind) String() string {
 // Message is one raw JSON-RPC message on an upstream connection, with who it belongs to.
 type Message struct {
 	Target string
-	Agent  gateway.AgentRef
-	Dir    Direction
-	Kind   Kind
+	// Org is the org of the target ("" for a platform target), so a rule can tell an org's own server
+	// from one of Koinon's.
+	Org string
+	// Credential is the kind of credential the gateway sends to the target for this agent
+	// (CredentialNone, CredentialStatic, CredentialError, ...). It never holds a value.
+	Credential string
+	Agent      gateway.AgentRef
+	Dir        Direction
+	Kind       Kind
 	// Method is the method of a request or notification. For a result or an error it is the method
 	// of the request it answers, or "" when the gateway did not send that request (an unmatched
 	// response).
@@ -92,6 +102,172 @@ const (
 // taint the run (ADR 0097 decision 5). The gateway refuses the request itself either way.
 type ViolationReporter interface {
 	Violation(ctx context.Context, m Message, v Violation)
+}
+
+// Call is one tools/call, as the request-side check sees it, after the grant check and before the
+// target is contacted. Arguments are the agent's raw arguments: the checker reads them and neither
+// logs nor keeps them.
+type Call struct {
+	Agent      gateway.AgentRef
+	Target     string
+	Org        string
+	Tool       string
+	Credential string
+	Arguments  json.RawMessage
+}
+
+// CallChecker is the optional part of a Guard that decides on a whole tool call: the ask tier and the
+// request-side leak check (ADR 0097 decision 5, ADR 0057 item 7, ADR 0091). It may block while a person
+// decides. The gateway runs it as middleware, after the grant check; a refusal ends the call before
+// any upstream message is sent.
+type CallChecker interface {
+	CheckCall(ctx context.Context, c Call) Verdict
+}
+
+// LoadChecker is the optional part of a Guard whose rules load after the process starts. While Loaded
+// returns an error the rules are not in force, so every route closes: no message passes and no call
+// is sent (ADR 0120 section 2: a rule that fails to load closes the route).
+type LoadChecker interface {
+	Loaded() error
+}
+
+// Reasons the gateway gives when the guard itself fails. They are fixed texts: they carry no error text.
+const (
+	reasonGuardNotLoaded = "refused: the guard rules are not loaded"
+	reasonGuardFailed    = "refused: the guard failed to decide"
+)
+
+// failClosed wraps the configured guard. It is the only way the gateway calls the guard: a guard that
+// is not loaded, or that panics, refuses; it never passes.
+type failClosed struct {
+	g   Guard
+	log *slog.Logger
+	m   *Metrics
+}
+
+func (f failClosed) loaded() bool {
+	if lc, ok := f.g.(LoadChecker); ok && lc.Loaded() != nil {
+		f.m.guardFailure(guardNotLoaded)
+		return false
+	}
+	return true
+}
+
+func (f failClosed) Inspect(ctx context.Context, m Message) (v Verdict) {
+	if !f.loaded() {
+		return Verdict{Refuse: true, Reason: reasonGuardNotLoaded}
+	}
+	defer func() {
+		if recover() != nil {
+			f.log.Error("guard panicked", "target", m.Target, "kind", m.Kind.String())
+			f.m.guardFailure(guardPanic)
+			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
+		}
+	}()
+	return f.g.Inspect(ctx, m)
+}
+
+// checkCall runs the call-level check, if the guard has one. A guard with none passes the call: the
+// message guard still sees its wire messages.
+func (f failClosed) checkCall(ctx context.Context, c Call) (v Verdict) {
+	if !f.loaded() {
+		return Verdict{Refuse: true, Reason: reasonGuardNotLoaded}
+	}
+	cc, ok := f.g.(CallChecker)
+	if !ok {
+		return Verdict{}
+	}
+	defer func() {
+		if recover() != nil {
+			f.log.Error("guard panicked", "target", c.Target, "kind", "call")
+			f.m.guardFailure(guardPanic)
+			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
+		}
+	}()
+	return cc.CheckCall(ctx, c)
+}
+
+// Violation implements ViolationReporter, so a panic in the real reporter cannot end a connection.
+func (f failClosed) Violation(ctx context.Context, m Message, v Violation) {
+	r, ok := f.g.(ViolationReporter)
+	if !ok {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			f.m.guardFailure(guardPanic)
+		}
+	}()
+	r.Violation(ctx, m, v)
+}
+
+// Fixed label values of the gateway's metrics (ADR 0023): no org, agent, target or tool name.
+const (
+	guardNotLoaded = "not_loaded"
+	guardPanic     = "panic"
+
+	dropCredentialNeedsHTTPS = "credential_needs_https" //nolint:gosec // a metric label, not a credential
+	dropInvalidName          = "invalid_name"
+	dropDuplicateName        = "duplicate_name"
+	dropNoURL                = "no_url"
+	dropOrgNeedsGuard        = "org_needs_guard"
+)
+
+// Metrics are the gateway's Prometheus counters. Every label has a fixed set of values (ADR 0023).
+// A nil *Metrics is valid and counts nothing.
+type Metrics struct {
+	// NotesDropped counts server notifications dropped because the inspection queue was full.
+	NotesDropped prometheus.Counter
+	// GuardFailures counts messages and calls refused because the guard was not loaded or panicked.
+	GuardFailures *prometheus.CounterVec
+	// Dropped counts config entries ApplyMCP left out, which closes their route, by reason.
+	Dropped *prometheus.CounterVec
+}
+
+// NewMetrics creates the counters and registers them with reg (nil: not registered).
+func NewMetrics(reg prometheus.Registerer) *Metrics {
+	m := &Metrics{
+		NotesDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_gateway_mcp_notifications_dropped_total",
+			Help: "Server notifications the MCP path dropped because its inspection queue was full.",
+		}),
+		GuardFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_mcp_guard_failures_total",
+			Help: "MCP messages and calls refused because the guard was not loaded or failed, by reason.",
+		}, []string{"reason"}),
+		Dropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_mcp_config_dropped_total",
+			Help: "MCP config entries left out of the applied config, which closes their route, by reason.",
+		}, []string{"reason"}),
+	}
+	for _, r := range []string{guardNotLoaded, guardPanic} {
+		m.GuardFailures.WithLabelValues(r)
+	}
+	for _, r := range []string{dropCredentialNeedsHTTPS, dropInvalidName, dropDuplicateName, dropNoURL, dropOrgNeedsGuard} {
+		m.Dropped.WithLabelValues(r)
+	}
+	if reg != nil {
+		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped)
+	}
+	return m
+}
+
+func (m *Metrics) guardFailure(reason string) {
+	if m != nil {
+		m.GuardFailures.WithLabelValues(reason).Inc()
+	}
+}
+
+func (m *Metrics) noteDropped() {
+	if m != nil {
+		m.NotesDropped.Inc()
+	}
+}
+
+func (m *Metrics) dropped(reason string) {
+	if m != nil {
+		m.Dropped.WithLabelValues(reason).Inc()
+	}
 }
 
 // AllowGuard passes every message. It is for tests and for a gateway whose guard is not configured
