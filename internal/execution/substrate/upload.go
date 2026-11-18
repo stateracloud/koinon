@@ -13,9 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/stateracloud/koinon/internal/execution"
 	ateenvv1alpha "github.com/stateracloud/koinon/internal/gen/substrate/ateenv/v1alpha"
 )
@@ -73,44 +70,74 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 }
 
 // writeFile streams r into a file in the guest.
+//
+// A client-streaming call reports most errors late: opening it succeeds, and a guest daemon that is
+// not listening yet shows only on Send (as io.EOF) or on CloseAndRecv. So the retry covers the whole
+// open, send and close sequence, on Unavailable and bounded by the guest ready timeout. A retry
+// needs the bytes again, and r cannot be read twice: the driver keeps the first chunk, and an
+// archive that fits in it is retried to the end. A larger archive is retried while nothing beyond
+// the first chunk was read; after that the error goes to the caller, who owns the stream.
 func (d *Driver) writeFile(ctx context.Context, op string, k key, path string, r io.Reader) error {
 	wctx, end, err := d.enter(ctx, op, k)
 	if err != nil {
 		return err
 	}
 	defer end()
-	cancel := end // aborts without end-of-file
-	var stream ateenvv1alpha.FileSystemService_WriteFileClient
+	first := make([]byte, uploadChunk)
+	n, rerr := io.ReadFull(r, first)
+	first = first[:n]
+	complete := false
+	switch {
+	case rerr == nil:
+	case errors.Is(rerr, io.EOF), errors.Is(rerr, io.ErrUnexpectedEOF):
+		complete = true
+	default:
+		return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)}
+	}
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
 	delay := d.cfg.PollInterval
 	for {
-		s, err := d.files.WriteFile(route(wctx, k))
+		retry, err := d.writeAttempt(wctx, op, k, path, first, complete, r)
 		if err == nil {
-			stream = s
-			break
+			return nil
 		}
-		if status.Code(err) != codes.Unavailable || time.Now().After(deadline) {
-			return execution.GRPCError(op, err)
+		if !retry || !errors.Is(err, execution.ErrUnavailable) || time.Now().After(deadline) {
+			return err
 		}
 		if err := sleep(ctx, delay); err != nil {
 			return execution.GRPCError(op, err)
 		}
+		delay = min(delay*2, 8*d.cfg.PollInterval)
 	}
+}
+
+// writeAttempt is one open, send and close of the file. retry says whether the bytes it consumed
+// from r can be sent again.
+func (d *Driver) writeAttempt(ctx context.Context, op string, k key, path string, first []byte, complete bool, r io.Reader) (retry bool, _ error) {
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel() // ends the call; before CloseAndRecv it aborts without end-of-file
+	stream, err := d.files.WriteFile(route(actx, k))
+	if err != nil {
+		return true, execution.GRPCError(op, err)
+	}
+	sent := int64(len(first))
+	msg := &ateenvv1alpha.WriteFileRequest{Path: path, Mode: 0o600, Chunk: first}
+	if err := stream.Send(msg); err != nil {
+		if errors.Is(err, io.EOF) { // the guest ended the stream: its status says why
+			_, err = stream.CloseAndRecv()
+		}
+		return true, execution.GRPCError(op, err)
+	}
+	retry = complete
 	buf := make([]byte, uploadChunk)
-	var sent int64
-	first := true
-	for {
+	for !complete {
 		n, rerr := r.Read(buf)
 		if n > 0 {
-			msg := &ateenvv1alpha.WriteFileRequest{Chunk: buf[:n]}
-			if first {
-				msg.Path, msg.Mode, first = path, 0o600, false
-			}
-			if err := stream.Send(msg); err != nil {
-				if errors.Is(err, io.EOF) { // the guest ended the stream: its status says why
+			if err := stream.Send(&ateenvv1alpha.WriteFileRequest{Chunk: buf[:n]}); err != nil {
+				if errors.Is(err, io.EOF) {
 					_, err = stream.CloseAndRecv()
 				}
-				return execution.GRPCError(op, err)
+				return false, execution.GRPCError(op, err)
 			}
 			sent += int64(n)
 		}
@@ -120,22 +147,16 @@ func (d *Driver) writeFile(ctx context.Context, op string, k key, path string, r
 		if rerr == io.EOF {
 			break
 		}
-		cancel() // abort without end-of-file
-		return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)}
-	}
-	if first { // an empty archive still makes a file, so that tar reports it
-		if err := stream.Send(&ateenvv1alpha.WriteFileRequest{Path: path, Mode: 0o600}); err != nil && !errors.Is(err, io.EOF) {
-			return execution.GRPCError(op, err)
-		}
+		return false, &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)} // cancel aborts the write
 	}
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		return execution.GRPCError(op, err)
+		return retry, execution.GRPCError(op, err)
 	}
 	if resp.GetBytesWritten() != sent {
-		return fail(op, execution.ErrUnavailable, "guest wrote %d of %d bytes", resp.GetBytesWritten(), sent)
+		return false, fail(op, execution.ErrUnavailable, "guest wrote %d of %d bytes", resp.GetBytesWritten(), sent)
 	}
-	return nil
+	return false, nil
 }
 
 // runOnce runs a command in the guest without stdin and waits for it. It returns the exit code and

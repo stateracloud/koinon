@@ -232,6 +232,26 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
 		})
 
+		It("retries the whole write on Unavailable that arrives when the stream closes", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			Expect(tw.WriteHeader(&tar.Header{Name: "a.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2})).To(Succeed())
+			_, _ = tw.Write([]byte("hi"))
+			Expect(tw.Close()).To(Succeed())
+			cl.FailNextWriteFiles(ws, "sb", 2)
+			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
+			Expect(cl.Calls("WriteFile")).To(Equal(3), "two failed streams and one that worked")
+		})
+
+		It("gives up after the ready timeout when every write ends Unavailable", func(ctx SpecContext) {
+			dd, c := newDriver(substrate.Config{PollInterval: time.Millisecond, GuestReadyTimeout: 50 * time.Millisecond})
+			ready(ctx, dd, "sb")
+			c.FailNextWriteFiles(ws, "sb", 1<<20)
+			err := dd.Upload(ctx, ws, "sb", "/work", strings.NewReader("x"))
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+		})
+
 		It("uploads a large archive and leaves no temporary file", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			var buf bytes.Buffer
@@ -406,6 +426,28 @@ var _ = Describe("the Substrate driver", func() {
 	})
 
 	Describe("delete", func() {
+		It("leaves no gate behind when a sandbox with a running process is deleted", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(d.GateCount()).To(Equal(1))
+			out, err := d.DeleteSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(out).To(Equal(execution.DeleteCompleted))
+			Expect(p.Close()).To(Succeed())
+			Eventually(d.GateCount).Should(BeZero())
+		})
+
+		It("forgets the gate of a sandbox that ran a command to its end", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"echo", "hi"}})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = io.ReadAll(p.Stdout())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Close()).To(Succeed())
+			Eventually(d.GateCount).Should(BeZero())
+		})
+
 		It("reports an actor that is still going away as accepted", func(ctx SpecContext) {
 			dd, c := newDriver()
 			c.AsyncDelete = true

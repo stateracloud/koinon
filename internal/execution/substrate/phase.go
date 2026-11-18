@@ -90,6 +90,9 @@ type Observation struct {
 func (d *Driver) Observe(ctx context.Context, workspace, name string) (Observation, error) {
 	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
+		if isCode(err, codeNotFound) {
+			d.forget(key{workspace, name})
+		}
 		return Observation{}, execution.GRPCError("Observe", err)
 	}
 	o := Observation{

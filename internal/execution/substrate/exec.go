@@ -59,7 +59,7 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	pr, pw := io.Pipe()
 	p := &proc{d: d, k: k, id: started.GetProcessId(), stderr: req.Stderr, ctx: pctx, cancel: cancel, pr: pr, pw: pw, done: make(chan struct{})}
 	p.in = &stdin{p: p}
-	d.gate(k).add(p)
+	d.addProc(k, p)
 	go p.pump()
 	return p, nil
 }
@@ -151,7 +151,7 @@ func (p *proc) finish(code int, err error) {
 		_ = p.pw.Close()
 	}
 	p.code, p.err = code, err
-	p.d.gate(p.k).remove(p)
+	p.d.removeProc(p.k, p)
 	p.cancel()
 	close(p.done)
 }

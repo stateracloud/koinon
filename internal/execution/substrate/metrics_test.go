@@ -3,6 +3,7 @@
 package substrate_test
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +67,41 @@ var _ = Describe("the metrics scrape", func() {
 		Expect(series).To(HaveKeyWithValue("ate_actors|state=running", 7.0))
 		Expect(series).To(HaveKeyWithValue("ate_resume_seconds|count", 3.0))
 		Expect(series["ate_resume_seconds|sum"]).To(BeNumerically("~", 1.6, 1e-9))
+	})
+
+	It("counts the series a merge had to drop, with no label, and keeps summaries as count and sum", func() {
+		body := `# TYPE h histogram
+h_bucket{actor="a",le="1"} 1
+h_bucket{actor="a",le="+Inf"} 1
+h_sum{actor="a"} 1
+h_count{actor="a"} 1
+h_bucket{actor="b",le="2"} 1
+h_bucket{actor="b",le="+Inf"} 1
+h_sum{actor="b"} 2
+h_count{actor="b"} 1
+# TYPE s summary
+s{actor="a",quantile="0.5"} 1
+s_sum{actor="a"} 3
+s_count{actor="a"} 2
+s{actor="b",quantile="0.5"} 1
+s_sum{actor="b"} 4
+s_count{actor="b"} 3
+`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+		DeferCleanup(srv.Close)
+		var logs strings.Builder
+		reg := prometheus.NewPedanticRegistry()
+		Expect(reg.Register(&substrate.Collector{
+			Scraper: &substrate.Scraper{URL: srv.URL},
+			Logger:  slog.New(slog.NewTextHandler(&logs, nil)),
+		})).To(Succeed())
+		Expect(testutil.GatherAndCompare(reg, strings.NewReader(`# HELP koinon_substrate_scrape_dropped_series_total Series left out when dropping labels merged series that could not be added (histograms with other bucket bounds). No labels: ADR 0023.
+# TYPE koinon_substrate_scrape_dropped_series_total counter
+koinon_substrate_scrape_dropped_series_total 1
+`), "koinon_substrate_scrape_dropped_series_total")).To(Succeed())
+		Expect(testutil.GatherAndCount(reg, "s")).To(Equal(1), "the two summaries merge into one")
+		Expect(testutil.GatherAndCount(reg, "h")).To(Equal(1))
+		Expect(strings.Count(logs.String(), "series dropped")).To(Equal(1), "logged once across scrapes: %s", logs.String())
 	})
 
 	It("scrapes over HTTP and exposes the result through a registry, with an error gauge", func() {

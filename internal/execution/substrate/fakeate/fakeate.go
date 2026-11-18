@@ -225,6 +225,20 @@ func (c *Cluster) FailNextOutputStreams(atespace, name string, n int) {
 	}
 }
 
+// FailNextWriteFiles makes the next n WriteFile streams of an actor end with Unavailable when the
+// client closes them, after the data arrived: client-streaming errors show on Send or CloseAndRecv,
+// not when the stream opens.
+func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failWrite = n
+		a.smu.Unlock()
+	}
+}
+
 // TamperTag changes what the control API reports about a tag's stored snapshot, as a swapped
 // object would.
 func (c *Cluster) TamperTag(atespace, name string) {

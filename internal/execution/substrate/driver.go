@@ -215,6 +215,9 @@ func checkSpec(op string, spec execution.SandboxSpec) error {
 func (d *Driver) GetSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
 	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
+		if isCode(err, codeNotFound) {
+			d.forget(key{workspace, name})
+		}
 		return execution.Sandbox{}, execution.GRPCError("GetSandbox", err)
 	}
 	return sandboxFrom(workspace, actor), nil
@@ -238,20 +241,31 @@ func (d *Driver) StopSandbox(ctx context.Context, workspace, name string) (execu
 func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (execution.DeleteOutcome, error) {
 	const op = "DeleteSandbox"
 	k := key{workspace, name}
-	g := d.gate(k)
-	g.pause() // no guest traffic while the actor goes away
-	defer g.unpause()
+	g := d.pauseGate(k) // no guest traffic while the actor goes away
+	paused := true
+	unpause := func() {
+		if paused {
+			paused = false
+			g.unpause()
+		}
+	}
+	defer unpause()
 	actor, err := d.control.DeleteActor(ctx, &ateapiv1.DeleteActorRequest{Actor: ref(workspace, name)})
 	switch {
 	case isCode(err, codeNotFound):
+		unpause()
+		d.forget(k)
 		return execution.DeleteAbsent, nil
 	case err != nil:
 		return "", execution.GRPCError(op, err)
 	}
+	// The actor is gone or going: drop the gate as soon as nothing uses it. A process that is
+	// still registered drops it when it ends.
+	unpause()
+	d.forget(k)
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}
-	d.forget(k)
 	return execution.DeleteCompleted, nil
 }
 
@@ -268,8 +282,7 @@ func (d *Driver) ResumeSandbox(ctx context.Context, workspace, name string) (exe
 }
 
 func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
-	g := d.gate(key{workspace, name})
-	g.pause()
+	g := d.pauseGate(key{workspace, name})
 	defer g.unpause()
 	resp, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
 		Actor:   ref(workspace, name),

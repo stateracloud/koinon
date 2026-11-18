@@ -378,6 +378,15 @@ func (g *guestServer) WriteFile(stream ateenvv1alpha.FileSystemService_WriteFile
 	if name == "" {
 		return status.Error(codes.InvalidArgument, "no file data received")
 	}
+	a.smu.Lock()
+	fail := a.failWrite > 0
+	if fail {
+		a.failWrite--
+	}
+	a.smu.Unlock()
+	if fail {
+		return status.Error(codes.Unavailable, "the guest daemon is not listening yet")
+	}
 	g.c.mu.Lock()
 	a.files[path.Clean(name)] = buf
 	g.c.mu.Unlock()

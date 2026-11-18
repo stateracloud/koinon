@@ -29,10 +29,11 @@ type actor struct {
 	files   map[string][]byte
 	nextPID int
 
-	smu     sync.Mutex
-	failOut int // the next output streams that fail at once with Unavailable
-	streams map[int]context.CancelFunc
-	nextSID int
+	smu       sync.Mutex
+	failOut   int // the next output streams that fail at once with Unavailable
+	failWrite int // the next WriteFile streams that end with Unavailable when the client closes
+	streams   map[int]context.CancelFunc
+	nextSID   int
 }
 
 func (a *actor) dropStreams() {

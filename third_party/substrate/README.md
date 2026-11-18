@@ -27,5 +27,5 @@ own protos.
 1. Copy the two files from the new tag, unmodified, and update the tag and commit above.
 2. Run `make generate`, then `go test ./internal/execution/...`.
 3. Check the upstream changes to the RPCs `internal/execution/substrate` uses and to the behaviour
-   `internal/execution/substrate/fakes` imitates (state names, the guest's output offsets, the
+   `internal/execution/substrate/fakeate` imitates (state names, the guest's output offsets, the
    rule that a router request resumes a suspended actor).

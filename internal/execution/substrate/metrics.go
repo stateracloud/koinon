@@ -6,10 +6,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,36 +45,47 @@ type Scraper struct {
 
 // Scrape fetches the endpoint and returns the metric families with only allowed labels.
 func (s *Scraper) Scrape(ctx context.Context) ([]*dto.MetricFamily, error) {
+	fams, _, err := s.scrape(ctx)
+	return fams, err
+}
+
+// scrape is Scrape that also returns how many series the merge had to drop.
+func (s *Scraper) scrape(ctx context.Context) ([]*dto.MetricFamily, int, error) {
 	cl := s.Client
 	if cl == nil {
 		cl = &http.Client{Timeout: 10 * time.Second}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Accept", "text/plain;version=0.0.4")
 	resp, err := cl.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("substrate: scrape %s: %w", s.URL, err)
+		return nil, 0, fmt.Errorf("substrate: scrape %s: %w", s.URL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("substrate: scrape %s: %s", s.URL, resp.Status)
+		return nil, 0, fmt.Errorf("substrate: scrape %s: %s", s.URL, resp.Status)
 	}
 	labels := s.Labels
 	if labels == nil {
 		labels = DefaultMetricLabels
 	}
-	return Parse(io.LimitReader(resp.Body, maxScrapeBytes), labels)
+	return parse(io.LimitReader(resp.Body, maxScrapeBytes), labels)
 }
 
 // Parse reads Prometheus text and applies the allowlist.
 func Parse(r io.Reader, allowed []string) ([]*dto.MetricFamily, error) {
+	fams, _, err := parse(r, allowed)
+	return fams, err
+}
+
+func parse(r io.Reader, allowed []string) ([]*dto.MetricFamily, int, error) {
 	parser := expfmt.NewTextParser(model.UTF8Validation)
 	byName, err := parser.TextToMetricFamilies(r)
 	if err != nil {
-		return nil, fmt.Errorf("substrate: parse metrics: %w", err)
+		return nil, 0, fmt.Errorf("substrate: parse metrics: %w", err)
 	}
 	names := make([]string, 0, len(byName))
 	for n := range byName {
@@ -79,17 +93,26 @@ func Parse(r io.Reader, allowed []string) ([]*dto.MetricFamily, error) {
 	}
 	sort.Strings(names)
 	var out []*dto.MetricFamily
+	dropped := 0
 	for _, n := range names {
-		out = append(out, Sanitize(byName[n], allowed))
+		f, d := sanitize(byName[n], allowed)
+		out = append(out, f)
+		dropped += d
 	}
-	return out, nil
+	return out, dropped, nil
 }
 
 // Sanitize drops every label of a family that is not in allowed and merges the series that are then
 // equal: counters, gauges and untyped values add up, histograms add bucket by bucket (a series with
 // other bounds than the first is left out), summaries keep their count and sum and lose quantiles
-// that cannot be added.
+// that cannot be added. [Collector] exposes a summary as count and sum, like Sanitize keeps it.
 func Sanitize(f *dto.MetricFamily, allowed []string) *dto.MetricFamily {
+	out, _ := sanitize(f, allowed)
+	return out
+}
+
+// sanitize is Sanitize that also counts the series it had to leave out of a merge.
+func sanitize(f *dto.MetricFamily, allowed []string) (_ *dto.MetricFamily, dropped int) {
 	out := &dto.MetricFamily{Name: f.Name, Help: f.Help, Type: f.Type}
 	merged := map[string]*dto.Metric{}
 	var order []string
@@ -132,15 +155,19 @@ func Sanitize(f *dto.MetricFamily, allowed []string) *dto.MetricFamily {
 			order = append(order, id)
 			continue
 		}
-		addMetric(have, m)
+		if !addMetric(have, m) {
+			dropped++
+		}
 	}
 	for _, id := range order {
 		out.Metric = append(out.Metric, merged[id])
 	}
-	return out
+	return out, dropped
 }
 
-func addMetric(dst, src *dto.Metric) {
+// addMetric adds src to dst. It reports false when src cannot be added, because it is of another
+// kind or a histogram with other bucket bounds.
+func addMetric(dst, src *dto.Metric) bool {
 	switch {
 	case dst.Counter != nil && src.Counter != nil:
 		*dst.Counter.Value += src.Counter.GetValue()
@@ -151,11 +178,11 @@ func addMetric(dst, src *dto.Metric) {
 	case dst.Histogram != nil && src.Histogram != nil:
 		h, s := dst.Histogram, src.Histogram
 		if len(h.Bucket) != len(s.Bucket) {
-			return
+			return false
 		}
 		for i := range h.Bucket {
 			if h.Bucket[i].GetUpperBound() != s.Bucket[i].GetUpperBound() {
-				return
+				return false
 			}
 		}
 		for i := range h.Bucket {
@@ -166,7 +193,10 @@ func addMetric(dst, src *dto.Metric) {
 	case dst.Summary != nil && src.Summary != nil:
 		*dst.Summary.SampleCount += src.Summary.GetSampleCount()
 		*dst.Summary.SampleSum += src.Summary.GetSampleSum()
+	default:
+		return false
 	}
+	return true
 }
 
 // Collector exposes a Scraper's metrics through a Prometheus registry. It scrapes when it is
@@ -176,9 +206,17 @@ type Collector struct {
 	Scraper *Scraper
 	// Timeout bounds one scrape. Default 5 s.
 	Timeout time.Duration
+	// Logger gets the one line that says series were dropped. Nil uses slog.Default().
+	Logger *slog.Logger
+
+	dropped atomic.Uint64
+	logOnce sync.Once
 }
 
-var scrapeErr = prometheus.NewDesc("koinon_substrate_scrape_error", "1 when the last scrape of a Substrate metrics endpoint failed.", nil, nil)
+var (
+	scrapeErr     = prometheus.NewDesc("koinon_substrate_scrape_error", "1 when the last scrape of a Substrate metrics endpoint failed.", nil, nil)
+	scrapeDropped = prometheus.NewDesc("koinon_substrate_scrape_dropped_series_total", "Series left out when dropping labels merged series that could not be added (histograms with other bucket bounds). No labels: ADR 0023.", nil, nil)
+)
 
 // Describe implements prometheus.Collector. It sends nothing: the series are not known in advance
 // (an unchecked collector).
@@ -192,12 +230,23 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), t)
 	defer cancel()
-	fams, err := c.Scraper.Scrape(ctx)
+	fams, dropped, err := c.Scraper.scrape(ctx)
 	v := 0.0
 	if err != nil {
 		v = 1
 	}
 	ch <- prometheus.MustNewConstMetric(scrapeErr, prometheus.GaugeValue, v)
+	if dropped > 0 {
+		c.dropped.Add(uint64(dropped))
+		c.logOnce.Do(func() {
+			l := c.Logger
+			if l == nil {
+				l = slog.Default()
+			}
+			l.Warn("substrate metrics: series dropped while merging after label removal; see koinon_substrate_scrape_dropped_series_total", "url", c.Scraper.URL)
+		})
+	}
+	ch <- prometheus.MustNewConstMetric(scrapeDropped, prometheus.CounterValue, float64(c.dropped.Load()))
 	for _, f := range fams {
 		for _, m := range f.GetMetric() {
 			names := make([]string, len(m.GetLabel()))
@@ -221,6 +270,8 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 					buckets[b.GetUpperBound()] = b.GetCumulativeCount()
 				}
 				pm, merr = prometheus.NewConstHistogram(desc, m.Histogram.GetSampleCount(), m.Histogram.GetSampleSum(), buckets, vals...)
+			case m.Summary != nil: // count and sum only: quantiles of merged series cannot be added
+				pm, merr = prometheus.NewConstSummary(desc, m.Summary.GetSampleCount(), m.Summary.GetSampleSum(), map[float64]float64{}, vals...)
 			default:
 				continue
 			}
