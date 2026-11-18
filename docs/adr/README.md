@@ -141,4 +141,4 @@ are in [0046](0046-adr-conventions.md).
 | [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |
 | [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |
-| [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Proposed (decisions D1-D11 settled by the maintainer on 2026-11-18; acceptance waits for the phase 0 result, see Verification) |
+| [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification) |

@@ -8,13 +8,11 @@ Instructions for coding agents working on Koinon. Humans: [CONTRIBUTING.md](CONT
 ## Hard rules
 
 - **Never Kyverno.** Admission policy is native ValidatingAdmissionPolicy only.
-- **No secrets in sandboxes.** Credentials stay in Koinon's gateway or the secret store; the execution layer injects only
-  a short-lived actor identity token, outside the guest. Never put a credential in sandbox env, images, home volumes,
-  snapshots or logs. The only exception is ADR 0044 and it is gated.
+- **No secrets in sandboxes.** Credentials stay in OpenShell provider records, agentgateway or the secret store; never
+  put them in sandbox env, images, home volumes or logs. The only exception is ADR 0044 and it is gated.
 - No CNI-specific features (no Cilium dependency).
-- Don't weaken the execution hardening defaults of the hardening ADR (#1084: default-deny egress and enforced L7 rules
-  on every inspected or credentialed route, in every tier; Landlock and seccomp in the guest where the tier supports
-  them) or the isolation tiers of ADR 0075 (a microVM per sandbox for the `vm` tier).
+- Don't weaken OpenShell defaults from ADR 0045 (`enforcement: enforce` in every tier) or the isolation tiers of ADR
+  0075 (the Kata runtime class is required for the `vm` tier).
 
 ## Rules for a folder
 
@@ -108,8 +106,8 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 - **Root causes, not workarounds.** When you hit the same workaround twice, find out why and fix the cause. An interim
   fix is allowed only with an issue that names the exit condition (when it can be removed), linked from the code or doc
   that carries it.
-- **Agent Substrate upstream.** Issues need a first-hand human user story and a repro on a plain Substrate install. A
-  human posts upstream, in their own words; an agent drafts. No AI attribution upstream. Further rules for the text:
+- **OpenShell upstream (NVIDIA/OpenShell).** A human posts upstream, in their own words; an agent drafts. The rules for
+  the text (no AI attribution, a human user story, a vouch before a pull request) are in
   [agent-workflow.md](docs/maintainers/agent-workflow.md#openshell-upstream).
 - **Non-interactive shell.** No pagers and no prompts: `git --no-pager`, `GH_PAGER=cat`, `PAGER=cat`, `gh ... --json` or
   `--jq` instead of tables. Use the real tool, not a shell alias (`/bin/ls`, not an `ls` that is really `eza`), and do

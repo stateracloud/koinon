@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-18
 area: runtime-sandbox
 tags: [sandbox, isolation, kubernetes, egress, credentials, openshell]
@@ -9,7 +9,7 @@ relates: ["0011", "0042", "0044", "0073", "0079", "0081", "0110", "0111"]
 ---
 # 0119. Agent Substrate is Koinon's execution layer
 
-- Status: Proposed (decisions D1-D11 settled by the maintainer on 2026-11-18; acceptance waits for the phase 0 result, see Verification)
+- Status: Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification)
 - Date: 2026-11-18
 - Area: runtime-sandbox
 - Tags: sandbox, isolation, kubernetes, egress, credentials, openshell
@@ -17,7 +17,7 @@ relates: ["0011", "0042", "0044", "0073", "0079", "0081", "0110", "0111"]
 - Amends: [0002](0002-namespace-per-org-isolation.md), [0006](0006-identity-layers.md), [0009](0009-agent-runtime.md), [0015](0015-agent-environment-and-browser.md), [0016](0016-harness-and-deployment.md), [0023](0023-observability-and-audit.md), [0029](0029-run-level-resume.md), [0032](0032-agent-home-checkpoints.md), [0040](0040-agentgateway-model-and-mcp-gateway.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0051](0051-session-home-generations.md), [0061](0061-image-pull-secrets-and-registry-mirrors.md), [0075](0075-isolation-tiers.md), [0077](0077-pinned-openshell-and-installer.md), [0078](0078-sandbox-observer.md), [0080](0080-tool-set-matches-egress-and-escape-hosts.md), [0083](0083-sandbox-resources.md), [0097](0097-koinon-owned-gateway.md), [0106](0106-install-mark-owns-openshell-objects.md), [0112](0112-harness-definitions.md), [0113](0113-agent-package-access.md)
 - Relates to: [0011](0011-agent-to-agent.md), [0042](0042-ask-tier-park-and-execute.md), [0044](0044-in-sandbox-credential-exception.md), [0073](0073-agent-passport.md), [0079](0079-dependency-cooldown.md), [0081](0081-run-limits.md), [0110](0110-held-copy-isolation.md), [0111](0111-ci-requirements.md)
 - Issue: [#1083](https://github.com/stateracloud/koinon/issues/1083), part of [#1082](https://github.com/stateracloud/koinon/issues/1082)
-- Verification: Pending the phase 0 spike result (numbers and the proofs P-A, P-B, P-C), see Verification below
+- Verification: Phase 0 reported: trial timings and the proofs P-A, P-B and P-C, see Verification below
 
 ## Context
 
@@ -210,9 +210,12 @@ The text of an older ADR is not rewritten: it stays as the record of its time.
 
 ## AGENTS.md text changes
 
-These rules are part of this decision. The phase 1 rows (No secrets, hardening, upstream) are applied to
-AGENTS.md in this change; this change merges only when 0119 is accepted. The hardening rule names the
-hardening ADR by issue (#1084) until that ADR has a number. The later rows land in their phases:
+These rules are part of this decision. The text below is planned: the hardening rule lands in #1084 (the
+execution hardening ADR) and the removal rows in #1094. OpenShell stays the only driver until phase 4, so
+AGENTS.md is unchanged by this decision. For the upstream rule, `docs/maintainers/agent-workflow.md` gets a
+Substrate section when it lands, and the OpenShell upstream rules still apply until phase 5. Until the
+hardening ADR exists, the hardening rule reads "ADR 0045 until the execution hardening ADR (#1084) replaces
+it". The hardening rule names that ADR by issue (#1084) until it has a number.
 
 | Rule today | New text | When |
 | --- | --- | --- |
@@ -279,22 +282,36 @@ Each gets a tracking issue under #1082.
 
 ## Verification
 
-Pending: the phase 0 spike. State at the time of writing, from the lab trial of 2026-11-17 and 2026-11-18 on
-a Talos cluster with Kubernetes 1.37.1:
+Phase 0 has reported. It ran on the maintainer's lab cluster (Talos, Kubernetes 1.37.1, nested KVM) against
+Substrate v1.0.0. The Kubernetes prerequisites passed (certificates API with `PodCertificateRequest` and
+`ClusterTrustBundle`, kubelet gates, `/dev/kvm`, `/dev/net/tun`, vhost-vsock), the installer completed in
+about 6 minutes, and the four microVM assets matched their sha256 pins.
 
-- Passed: the Kubernetes prerequisites (the certificates API serves `PodCertificateRequest` and
-  `ClusterTrustBundle`, the kubelet gates are on, both workers have `/dev/kvm`, `/dev/net/tun` and
-  vhost-vsock); the Substrate installer completed in about 6 minutes; the four microVM assets matched their
-  sha256 pins; the `microvm` class applied and 3 of 3 worker pods were ready in 12 s; cleanup left nothing
-  behind.
-- Not passed: the measurement step stopped at the first API call (`create atespace`) with "invalid bearer
-  token". The suspected cause is that the cluster's service-account issuer is a non-default address that
-  the Substrate API server cannot reach; this is a hypothesis, not confirmed.
-- No timing numbers exist yet (cold boot, resume), and P-A, P-B and P-C have not run.
+- **Trial timings.** Cold boot through the API: p50 2.37 s, p90 2.58 s (n=5). Resume through the API: p50
+  0.49 s, p90 0.62 s (n=12). Resume through the CLI: p50 0.81 s. Suspend (sync): p50 1.85 s. Atelet
+  restore: p50 0.34 s. Guest egress is blocked by default.
+- **Install finding.** The Talos service-account issuer is an IPv6 ULA address that pods cannot route to.
+  Substrate v1.0.0 fetches discovery and JWKS from the issuer URL and has no override, so the first API call
+  failed with "invalid bearer token". The Koinon preflight must check issuer reachability (#1089).
+- **P-A, ACP stream: pass.** A stand-in ACP echo server over the in-guest `ProcessService` ran 30 minutes
+  and 2000 prompts with gapless output; turn latency p50 18 ms, p90 65 ms. A 10 MiB tar upload through
+  `FileSystemService` took 0.62 s with a matching sha256. Three suspend/resume cycles mid-stream lost 0
+  lines; the client re-subscribes by byte offset. A stream held open across a suspend was not tested.
+  Substrate has no exec API (upstream issue 185), so `ProcessService` is the path.
+- **P-B, gateway-only egress: pass.** 17 probes. The gateway by name returned 200 with the injected actor
+  JWT. Blocked: the gateway ClusterIP, public IPs (HTTP and tcp/22), 169.254.169.254, the API ClusterIP,
+  node :6443, kubelet :10250 and outside DNS (UDP and TCP). Deleting the policy closed the route in about
+  10 s. It needs the router ingress SPIFFE allow-list flag. Not tried: TLS to the gateway.
+- **P-C, guest hardening: pass with a gap.** A Go launcher applies Landlock (ABI 7), seccomp and
+  `no_new_privs`; 27 of 29 ported escape probes pass (the baseline as root: 17 open). Gap: the guest runs
+  payloads as root with only CAP_KILL, NET_BIND_SERVICE and AUDIT_WRITE, and no CAP_SETUID or CAP_SETGID,
+  so the launcher cannot drop to a non-root user. This is an open item for #1087 (an upstream request). The
+  gVisor class has not run yet.
+- **Router resume.** Any traffic through the router resumes a suspended actor, so pollers must stop before
+  suspend (#1088).
 
-This ADR stays Proposed until the maintainer has read the phase 0 result (numbers with p50 and p90, and the
-three proofs, each passing or with a cause and an upstream issue) and said go. Acceptance then cites that
-result here and changes the status.
+The maintainer read this result and accepted the ADR on 2026-11-18. The "resume under 500 ms" claim is
+now measured: API resume p50 0.49 s.
 
 ## Upstream verification
 
@@ -320,7 +337,7 @@ A quick check (about 15 minutes) of comparable sandbox platforms:
   <https://kagent.dev/docs/kagent/concepts/agent-substrate/>
 
 None of these publishes a benchmark that we rely on; Substrate's "resume under 500 ms" stays unverified
-until the phase 0 spike measures it. The full research workflow is not run for this ADR; it was settled
+until the phase 0 spike measured it (see Verification). The full research workflow is not run for this ADR; it was settled
 by the maintainer after a plan that cites these sources.
 
 ## Links

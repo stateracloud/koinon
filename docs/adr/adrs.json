@@ -3331,7 +3331,7 @@
     "number": "0119",
     "file": "0119-agent-substrate-execution-layer.md",
     "title": "Agent Substrate is Koinon's execution layer",
-    "status": "proposed",
+    "status": "accepted",
     "date": "2026-11-18",
     "area": "runtime-sandbox",
     "tags": [
