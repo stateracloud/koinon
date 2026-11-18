@@ -54,9 +54,9 @@ build_ko() {
   pnpm --dir web build
   [[ -f web/dist/index.html ]] || { echo "images.sh: web/dist/index.html is missing after the web build; koinon-api would have no UI (-tags webui)" >&2; exit 1; }
   step "Koinon images (ko, linux/$arch) pushed to $REPO"
-  # The chart's images are <image.registry>/api, /reconciler and /agentd (#167), so each is built --bare
+  # The chart's images are <image.registry>/api, /reconciler, /agentd and /gateway (#167), so each is built --bare
   # into its own repository; the fakes keep ko's import-path names.
-  for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd; do
+  for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd gateway:./cmd/koinon-gateway; do
     flags=${GOFLAGS:-}
     [[ ${pair%%:*} == api ]] && flags="${flags:+$flags }-tags=webui"
     GOFLAGS=$flags KO_DOCKER_REPO="$REPO/${pair%%:*}" "${KO:-ko}" build --bare --tags e2e \
@@ -64,7 +64,7 @@ build_ko() {
   done
   KO_DOCKER_REPO=$REPO "${KO:-ko}" build --base-import-paths --tags e2e \
     --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
-  echo "-- images: ko build and push (6 binaries): $(( $(date +%s) - ts ))s"
+  echo "-- images: ko build and push (7 binaries): $(( $(date +%s) - ts ))s"
 }
 
 build_harness() {

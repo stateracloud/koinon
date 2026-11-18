@@ -348,6 +348,39 @@ gateway:
     nodeSelector: {}
     tolerations: []
     affinity: {}
+  # The MCP path (ADR 0097 step 2, issue #278). agentgateway: agentgateway serves MCP (the default, and the
+  # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
+  # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
+  # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
+  # gets stays agentgateway's until the follow-up that moves it (see ADR 0097).
+  mcp:
+    driver: agentgateway
+    koinon:
+      image:
+        repository: gateway
+        tag: ""
+        digest: ""
+      # Two replicas at least: the pods keep no state, so a rollout or a node drain loses nothing.
+      replicas: 2
+      port: 8080
+      # On SIGTERM readiness turns 503 at once and the pod keeps serving for the shutdown delay, so the
+      # Service and clients stop sending to it. Then it refuses new requests and lets calls in flight
+      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
+      shutdownDelaySeconds: 5
+      drainTimeoutSeconds: 30
+      # Until the guard slice the gateway drops every org MCP target, so koinon-api's approved calls to
+      # org MCP servers fail through it, and so does its live check of an agent's MCP tools (same URL). The
+# platform tool servers are not reachable through it yet. The switch is refused unless this is true.
+      acceptOrgTargetsDropped: false
+      podDisruptionBudget:
+        maxUnavailable: 1
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {memory: 256Mi}
+      podAnnotations: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
   kubernetes:
     # The GatewayClass of the existing controller.
     gatewayClassName: agentgateway

@@ -11,7 +11,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 
 | Artifact | Where |
 | --- | --- |
-| `api` (with the web UI), `reconciler`, `agentd` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
+| `api` (with the web UI), `reconciler`, `agentd`, `gateway` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
 | `harnesses/opencode`, the OpenCode harness (ADR 0059) | `ghcr.io/stateracloud/koinon/sandbox:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
 | Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
@@ -260,7 +260,7 @@ first. Do the steps in this order:
 3. Check the `sign` job passed in the release run. If it failed, fix it and cut the next rc; do not
    make anything public.
 4. Org owner: for each package under `github.com/orgs/stateracloud/packages` set **Package settings →
-   Change visibility → Public**: `koinon/api`, `koinon/reconciler`, `koinon/agentd`, `koinon/sandbox`,
+   Change visibility → Public**: `koinon/api`, `koinon/reconciler`, `koinon/agentd`, `koinon/gateway`, `koinon/sandbox`,
    `koinon/charts/koinon` and any other `koinon/*` package the run pushed (the run's package list is
    the check). A package that was created earlier stays private until you change it.
 5. Verify with no login (below).
@@ -272,7 +272,7 @@ Run these on a machine with no `docker login ghcr.io` and no `gh auth` (for exam
 
 ```sh
 V=0.1.0-rc.N
-for p in api reconciler agentd sandbox; do
+for p in api reconciler agentd gateway sandbox; do
   docker pull ghcr.io/stateracloud/koinon/$p:$V
   cosign verify ghcr.io/stateracloud/koinon/$p:$V \
     --certificate-identity-regexp '^https://github.com/stateracloud/koinon/\.github/workflows/release\.yml@refs/tags/v' \

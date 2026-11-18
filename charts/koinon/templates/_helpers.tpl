@@ -258,6 +258,25 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- if eq .Values.gateway.mode "standalone" }}{{ int .Values.gateway.standalone.port }}{{ else }}{{ int .Values.gateway.kubernetes.port }}{{ end -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the MCP path (gateway.mcp.driver=koinon). Empty otherwise. */}}
+{{- define "koinon.mcpKoinon" -}}
+{{- if eq .Values.gateway.mcp.driver "koinon" }}true{{ end -}}
+{{- end }}
+
+{{/* The MCP gateway's Service, fully qualified like koinon.gatewayHost. */}}
+{{- define "koinon.mcpGatewayHost" -}}
+{{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
+{{- end }}
+
+{{/* The URL koinon-api sends approved MCP calls to. */}}
+{{- define "koinon.gatewayMCPURL" -}}
+{{- if include "koinon.mcpKoinon" . -}}
+{{- printf "http://%s:%d/mcp" (include "koinon.mcpGatewayHost" .) (int .Values.gateway.mcp.koinon.port) -}}
+{{- else -}}
+{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- end -}}
+{{- end }}
+
 {{/*
 The labels the agentgateway controller puts on the proxy pods of Koinon's Gateway (kubernetes mode):
 the Gateway's name is the label value. NetworkPolicies select the proxy by them.
@@ -323,7 +342,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
-  value: {{ printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
+  value: {{ include "koinon.gatewayMCPURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
 - name: KOINON_GATEWAY_MODE
   value: {{ .Values.gateway.mode | quote }}

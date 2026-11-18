@@ -52,7 +52,7 @@ chartsmoke_dirs() {
 	else
 		out=$(GOOS=linux go list -deps -test -f '{{if not .Standard}}{{.Dir}}{{end}}' ./test/chartsmoke/...) || return 1
 		out+=$'\n'
-		out+=$(GOOS=linux go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler) || return 1
+		out+=$(GOOS=linux go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./cmd/koinon-api ./cmd/koinon-agentd ./cmd/koinon-reconciler ./cmd/koinon-gateway) || return 1
 		dirs=$(strip_mod_dirs <<<"$out")
 	fi
 	grep -qxF test/chartsmoke <<<"$dirs" || return 1

@@ -344,6 +344,7 @@ script-skip - hack/doc-meta-lint.sh
 e2e-binary - ./cmd/koinon-api
 e2e-binary - ./cmd/koinon-reconciler
 e2e-binary - ./cmd/koinon-agentd
+e2e-binary - ./cmd/koinon-gateway
 e2e-binary - ./cmd/koinon-fakemodel
 e2e-binary - ./cmd/koinon-fakegithub
 e2e-binary - ./cmd/koinon-fakemcp

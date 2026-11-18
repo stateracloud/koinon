@@ -15,13 +15,13 @@ import (
 )
 
 // koinonImages are the binaries the chart runs in images that Koinon builds. The chart's package
-// names are shorter (<image.registry>/api, /reconciler, /agentd; #167), see imageBinary. A new
+// names are shorter (<image.registry>/api, /reconciler, /agentd, /gateway; #167), see imageBinary. A new
 // Koinon image in the chart that is not listed here fails the suite, so a new component cannot slip
 // past the smoke test.
-var koinonImages = []string{"koinon-api", "koinon-agentd", "koinon-reconciler"}
+var koinonImages = []string{"koinon-api", "koinon-agentd", "koinon-reconciler", "koinon-gateway"}
 
 // imageBinary maps the last path element of a Koinon image reference to its binary.
-var imageBinary = map[string]string{"api": "koinon-api", "agentd": "koinon-agentd", "reconciler": "koinon-reconciler"}
+var imageBinary = map[string]string{"api": "koinon-api", "agentd": "koinon-agentd", "reconciler": "koinon-reconciler", "gateway": "koinon-gateway"}
 
 // imageName is the binary of a Koinon image reference without tag or digest, else the last path
 // element of the reference.

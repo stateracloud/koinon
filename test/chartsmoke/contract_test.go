@@ -16,16 +16,18 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/cmd/koinonagentd"
 	"github.com/stateracloud/koinon/internal/cmd/koinonapi"
+	"github.com/stateracloud/koinon/internal/cmd/koinongateway"
 	"github.com/stateracloud/koinon/internal/cmd/koinonreconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
 // commandTrees are the binaries whose command tree the contract test knows (ADR 0088). A binary
 // that has moved to the shared CLI stack adds itself here; until then its containers are not
-// checked. koinon-api, koinon-agentd and koinon-reconciler are all on the stack (old issue 497, old issue 458, old issue 457).
+// checked. koinon-api, koinon-agentd, koinon-reconciler and koinon-gateway are all on the stack (old issue 497, old issue 458, old issue 457).
 var commandTrees = map[string]func() *cobra.Command{
 	"koinon-api":        koinonapi.NewRootCommand,
 	"koinon-agentd":     koinonagentd.NewRootCommand,
+	"koinon-gateway":    koinongateway.NewRootCommand,
 	"koinon-reconciler": koinonreconciler.NewRootCommand,
 }
 

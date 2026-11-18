@@ -50,7 +50,7 @@ copy_one() {
 	done
 }
 
-for name in api reconciler agentd sandbox; do
+for name in api reconciler agentd gateway sandbox; do
 	copy_one "$src/$name" "$dest/$name"
 done
 copy_one "$src/charts/koinon" "$dest/charts/koinon"

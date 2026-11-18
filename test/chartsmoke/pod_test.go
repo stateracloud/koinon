@@ -310,6 +310,37 @@ func (w *workload) ProbeHTTP(ctx context.Context, pr *corev1.Probe, deadline tim
 	return fmt.Sprintf("%s did not become ready within %s: %s", url, deadline, last)
 }
 
+// ProbeStatus sends one GET for an httpGet probe and returns the HTTP status it answers, polling
+// until the deadline while the connection fails. It returns 0 and why not when nothing answers.
+func (w *workload) ProbeStatus(ctx context.Context, pr *corev1.Probe, deadline time.Duration) (int, string) {
+	h := pr.HTTPGet
+	port := intOrName{num: h.Port.IntValue()}
+	if h.Port.Type == intstr.String {
+		port = intOrName{name: h.Port.StrVal}
+	}
+	n := w.portNumber(port)
+	mapped, err := w.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", n))
+	if err != nil {
+		return 0, fmt.Sprintf("port %d is not published: %v", n, err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%s%s", mapped.Port(), h.Path)
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	last := "no answer yet"
+	stop := time.Now().Add(deadline)
+	for time.Now().Before(stop) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := httpClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			return resp.StatusCode, ""
+		}
+		last = err.Error()
+		time.Sleep(250 * time.Millisecond)
+	}
+	return 0, fmt.Sprintf("%s did not answer within %s: %s", url, deadline, last)
+}
+
 // env resolves the container's environment. It returns the variables by name (for $(NAME) in
 // args) and the final list.
 func (r *runner) env(ctx context.Context, owner string, ps corev1.PodSpec, c corev1.Container) (map[string]string, map[string]string) {
