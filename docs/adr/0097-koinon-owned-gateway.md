@@ -9,7 +9,7 @@ relates: ["0023", "0045", "0068", "0069", "0074", "0075", "0085", "0096"]
 # 0097. A Koinon-owned gateway, in three steps
 
 - Status: Accepted (2026-11-06)
-- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
+- Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer); [0120](0120-execution-hardening-defaults.md) (execution hardening defaults)
 - Date: 2026-11-06
 - Area: models-spend
 - Tags: agentgateway, mcp, models, spend-ledger, leak-guard

@@ -1,12 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-10-21
 area: runtime-sandbox
 tags: [openshell, isolation, kubernetes, security]
 ---
 # 0045. OpenShell hardening defaults
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
+- Status: Superseded by [0120](0120-execution-hardening-defaults.md) (was: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md))
 - Amended by: [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer)
 - Date: 2026-10-21
 - Area: runtime-sandbox
@@ -33,7 +33,7 @@ Research on OpenShell `main` (2026-10-21) found defaults that weaken Koinon's mo
 
 ## Decision
 
-_(Changed by [0119](0119-agent-substrate-execution-layer.md): superseded by the execution hardening defaults ADR (#1084): default-deny egress and enforced L7 on every inspected or credentialed route in every tier; phase 1.)_
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): superseded by [0120](0120-execution-hardening-defaults.md), execution hardening defaults (#1084): default-deny egress and enforced L7 on every inspected or credentialed route in every tier; phase 1.)_
 
 The reconciler and Helm chart always set:
 
