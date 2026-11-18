@@ -555,7 +555,8 @@
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
-            "allowUnhardened": {"type": "boolean"}
+            "allowUnhardened": {"type": "boolean"},
+            "gatewayClientNamespaceSelector": {"type": "object"}
           }
         }
       }

@@ -122,7 +122,8 @@ spec:
 {{- end }}
 {{- if eq .Values.gateway.mode "standalone" }}
 ---
-# Sandboxes reach agentgateway through their OpenShell supervisor pods.
+# Sandboxes reach agentgateway through their OpenShell supervisor pods; with execution.driver=substrate
+# the actors' traffic arrives through atenet from Substrate's namespace (execution.substrate.gatewayClientNamespaceSelector).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -169,7 +170,7 @@ spec:
         - port: llm
       from:
         - namespaceSelector:
-            {{- toYaml .Values.sandboxPolicy.namespaceSelector | nindent 12 }}
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
@@ -194,7 +195,8 @@ spec:
 # The proxy the agentgateway controller runs for Koinon's Gateway (plan item G2). The controller
 # labels its pods gateway.networking.k8s.io/gateway-name; the policy is standard networking.k8s.io/v1
 # and selects only that Gateway's pods, so other gateways in the namespace are not affected.
-# Sandboxes reach it through their OpenShell supervisor pods, as in standalone mode.
+# Sandboxes reach it through their OpenShell supervisor pods, or through atenet with the substrate
+# driver, as in standalone mode.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -244,7 +246,7 @@ spec:
         - port: {{ .Values.gateway.kubernetes.port }}
       from:
         - namespaceSelector:
-            {{- toYaml .Values.sandboxPolicy.namespaceSelector | nindent 12 }}
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}

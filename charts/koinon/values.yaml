@@ -596,7 +596,6 @@ harnessPrepull:
     requests: {cpu: 5m, memory: 8Mi}
     limits: {memory: 32Mi}
 
-# OpenShell gateway that the reconciler and agentd talk to over gRPC.
 # The execution layer that runs the agents' sandboxes (ADR 0119, epic #1082).
 execution:
   # openshell (the default until the epic flips it) or substrate (Agent Substrate). Install Substrate
@@ -618,7 +617,14 @@ execution:
     # Required true with substrate: the harness does not yet run behind the guest launcher and the
     # gVisor tiers have no read-only root (issue #1088 slices b and c). Remove when both have merged.
     allowUnhardened: false
+    # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
+    # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the
+    # gateway NetworkPolicy under substrate.
+    gatewayClientNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ate-system
 
+# OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
   # host:port of the gateway. Required: the chart refuses to render without it.
   address: ""

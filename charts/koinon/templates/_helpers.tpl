@@ -442,6 +442,15 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- eq (.Values.execution.driver | default "openshell") "substrate" -}}
 {{- end }}
 
+{{/* The namespaces whose pods may reach the gateway's model port: OpenShell's sandbox namespaces, or with the substrate driver the namespace atenet runs in. */}}
+{{- define "koinon.sandboxClientNamespaceSelector" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+{{- toYaml .Values.execution.substrate.gatewayClientNamespaceSelector -}}
+{{- else -}}
+{{- toYaml .Values.sandboxPolicy.namespaceSelector -}}
+{{- end -}}
+{{- end }}
+
 {{- define "koinon.substrateTokenDir" -}}
 /var/run/koinon/substrate
 {{- end }}

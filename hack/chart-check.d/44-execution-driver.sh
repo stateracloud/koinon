@@ -40,3 +40,14 @@ if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown dr
 if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null 2>"$out/sub.err"; then fail "substrate without allowUnhardened must not render"; fi
 grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
 env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
+
+# The gateway NetworkPolicy admits the model port from Substrate's namespace, not OpenShell's, with
+# the substrate driver; the default is unchanged.
+for gm in standalone kubernetes; do
+	gwargs=(--set gateway.mode=$gm)
+	has "openshell driver admits OpenShell's namespaces ($gm)" 'openshell.ai/managed-by: openshell' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+	lacks "openshell driver has no Substrate peer ($gm)" 'ate-system' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+	has "substrate admits Substrate's namespace ($gm)" 'kubernetes.io/metadata.name: ate-system' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+	lacks "substrate has no openshell.ai/managed-by peer ($gm)" 'openshell.ai/managed-by' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+done
+has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: substrate-x' "${sub[@]}" --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x --show-only templates/networkpolicy.yaml
