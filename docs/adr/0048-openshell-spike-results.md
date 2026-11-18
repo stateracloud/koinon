@@ -11,7 +11,7 @@ amends: ["0006", "0008", "0016", "0040", "0042", "0045"]
 - Date: 2026-10-21
 - Area: runtime-sandbox
 - Tags: openshell, isolation, credentials, agentgateway, approvals
-- Amended by: [0052](0052-opencode-v2-flavor.md), [0049](0049-v01-scope-decisions.md) (extends it), [0075](0075-isolation-tiers.md) (decision 2), [0078](0078-sandbox-observer.md) (decision 3) and 2026-10-26 (below); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer); [0120](0120-execution-hardening-defaults.md) (supersedes decisions 2 and 3 of the execution layer, the install requirements and hardening defaults)
+- Amended by: [0052](0052-opencode-v2-flavor.md), [0049](0049-v01-scope-decisions.md) (extends it), [0075](0075-isolation-tiers.md) (decision 2), [0078](0078-sandbox-observer.md) (decision 3) and 2026-10-26 (below); [0119](0119-agent-substrate-execution-layer.md) (Agent Substrate execution layer); [0120](0120-execution-hardening-defaults.md) (superseded in part by 0120: decision 2, the install requirements, and decision 3, the hardening defaults)
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0042](0042-ask-tier-park-and-execute.md),
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
@@ -47,13 +47,14 @@ network egress at all; the supervisor relays its traffic through a connection in
 
 ## Decision
 
-_(Changed by [0119](0119-agent-substrate-execution-layer.md): its execution, install and reconciler decisions go with [0120](0120-execution-hardening-defaults.md) (hardening)  and the Substrate driver; its gateway decisions stay with 0040 and 0097; phases 1 and 2.)_
+_(Changed by [0119](0119-agent-substrate-execution-layer.md): its execution, install and reconciler decisions go with [0120](0120-execution-hardening-defaults.md) (hardening) and the Substrate driver; its gateway decisions stay with 0040 and 0097; phases 1 and 2.)_
 
 ### Execution layer
 
 1. OpenShell 0.1.5 on Agent Sandbox stays Koinon's execution backend (ADR 0016). The OpenSandbox
    fallback is not needed. _(Changed by [0077](0077-pinned-openshell-and-installer.md), amendment of 2026-11-09: the pin is OpenShell 0.1.7.)_
 2. **Install requirements**, documented and checked by Koinon's preflight:
+   _(Changed by [0120](0120-execution-hardening-defaults.md): runtime-neutral rules in 0120 sections 1-6; the OpenShell values stay as the profile of 0120 section 7.)_
    - Kata with **guest seccomp enabled** (`disable_guest_seccomp = false`). Without it the pod's
      `RuntimeDefault` profile is not applied inside the VM and OpenShell's default-allow filter
      leaves `keyctl`/`add_key` open (8.12). Preflight starts a test Kata pod and checks
@@ -65,6 +66,7 @@ _(Changed by [0119](0119-agent-substrate-execution-layer.md): its execution, ins
      External Secrets store, reached over **HTTPS**; its policy needs create/read/update on
      `<mount>/data/openshell/provider-credentials/*` and delete on the metadata path.
 3. **Hardening defaults added to ADR 0045** (reconciler, Helm chart and VAP):
+   _(Changed by [0120](0120-execution-hardening-defaults.md): runtime-neutral rules in 0120 sections 1-6; the OpenShell values stay as the profile of 0120 section 7.)_
    - every credential Koinon rotates sets `stable_placeholder: true` (2.7);
    - `landlock.compatibility: hard_requirement` (3, 8.12);
    - OpenShell telemetry off;

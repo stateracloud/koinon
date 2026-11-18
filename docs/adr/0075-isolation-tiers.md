@@ -99,6 +99,8 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
 
 _(Changed by [0119](0119-agent-substrate-execution-layer.md): the tier map follows D3 of 0119 (the `vm` tier is a microVM per sandbox; see 0119 for `hardened` and `dev`); phase 2.)_
 
+_(Changed by [0120](0120-execution-hardening-defaults.md): the hardening of 0120 holds in every tier, and the preflight fails the `vm` and `hardened` tiers on a cluster without a NetworkPolicy engine.)_
+
 ### The tiers
 
 1. **Every install has one isolation tier,** set by `isolation.tier` in the chart: `vm` (the

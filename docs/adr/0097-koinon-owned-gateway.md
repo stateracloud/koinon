@@ -107,6 +107,8 @@ and an MCP tool-call guard on a third-party data plane.
 
 _(Changed by [0119](0119-agent-substrate-execution-layer.md): actor token identity; forge and registry L7 routes join the gateway (D1, D11); phase 1.)_
 
+_(Changed by [0120](0120-execution-hardening-defaults.md): the gateway is the only L7 enforcement point, and it has no audit-only mode.)_
+
 ### 1. Koinon owns its gateway
 
 The **gateway** (GLOSSARY) becomes Koinon code: a Go data plane for the MCP path and the model path,

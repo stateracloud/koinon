@@ -13,7 +13,7 @@ relates: ["0042", "0044", "0080", "0110", "0119"]
 - Date: 2026-11-18
 - Area: runtime-sandbox
 - Tags: sandbox, isolation, egress, credentials, security, kubernetes
-- Supersedes: [0045](0045-openshell-hardening-defaults.md) (wholly); [0048](0048-openshell-spike-results.md) (its execution-layer hardening parts: decision 2 install requirements and decision 3 hardening defaults)
+- Supersedes: [0045](0045-openshell-hardening-defaults.md) (wholly); supersedes in part [0048](0048-openshell-spike-results.md) (its execution-layer hardening parts: decision 2 install requirements and decision 3 hardening defaults)
 - Amends: [0075](0075-isolation-tiers.md) (the hardening that holds in every tier), [0097](0097-koinon-owned-gateway.md) (the gateway is the only L7 enforcement point)
 - Relates to: [0042](0042-ask-tier-park-and-execute.md), [0044](0044-in-sandbox-credential-exception.md), [0080](0080-tool-set-matches-egress-and-escape-hosts.md), [0110](0110-held-copy-isolation.md), [0119](0119-agent-substrate-execution-layer.md) (the ADR that names this one)
 - Issue: [#1084](https://github.com/stateracloud/koinon/issues/1084), part of [#1082](https://github.com/stateracloud/koinon/issues/1082)
@@ -101,7 +101,7 @@ ADR 0119 phase 1 gateway routes for OpenShell exist.
 ### 4. A VM boundary on the golden path, and the guest controls inside it
 
 1. The golden path is a microVM per sandbox (the `vm` tier of [0075](0075-isolation-tiers.md) as
-   amended). The `hardened` tier is gVisor on a pool that the operator may taint. The `dev` tier is
+   amended). The `hardened` tier is gVisor on a tainted node pool. The `dev` tier is
    gVisor on kind and CI. A tier below the `vm` tier is never the default of a production install.
 2. Inside the guest, the Koinon guest launcher ([#1087](https://github.com/stateracloud/koinon/issues/1087))
    applies, before it starts the payload: `no_new_privs`; a capability drop to the smallest set the
@@ -164,10 +164,10 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    and only from the controller identity; image digests pinned; no `hostNetwork`; no hostPath outside
    the documented set; ephemeral containers and `pods/exec` into workers denied; the worker pool,
    sandbox config and storage driver objects writable only by the installer identity.
-4. **A tainted node pool for workers is an operator option, not a requirement.** The chart documents
+4. **A tainted node pool for workers.** The `hardened` tier requires the tainted pool
+   ([0075](0075-isolation-tiers.md)); for the other tiers it is an operator option. The chart documents
    it and the preflight reports whether Koinon's own pods (API, gateway, reconciler, database) can run
-   on a node that also runs workers. It warns and does not block. The `hardened` tier needs the pool
-   ([0075](0075-isolation-tiers.md)). Dropping the extra capabilities follows upstream when it allows.
+   on a node that also runs workers. For a tier where the pool is an option it warns and does not block. Dropping the extra capabilities follows upstream when it allows.
 5. During the window the OpenShell sandbox namespaces keep their existing policy: only the Agent
    Sandbox controller creates sandbox pods (rules on the requesting identity, with no break-glass), the
    allowed runtime classes follow the tier, `hostNetwork`, ephemeral containers and
@@ -243,14 +243,14 @@ spec needs a new ADR.
 ## Open questions
 
 - Substrate's own snapshot encryption and bucket layout: does its store meet 5.3 and 5.4, or does Koinon
-  encrypt every export? The answer decides how much code the `MEMORY` gate needs. The lane that adds the
-  fidelity files the issue.
+  encrypt every export? The answer decides how much code the `MEMORY` gate needs. Tracked in
+  [#1090](https://github.com/stateracloud/koinon/issues/1090).
 - gVisor: Landlock, seccomp and capability drop have not run in the `hardened` guest. Phase 0 did only the
-  microVM. Until it runs, the `hardened` tier's guest controls (section 4.2) are a requirement, not a proof.
+  microVM. Until it runs, the `hardened` tier's guest controls (section 4.2) are a requirement, not a proof. Tracked in [#1092](https://github.com/stateracloud/koinon/issues/1092).
 - The guest runs payloads as root without `CAP_SETUID` or `CAP_SETGID`, so the launcher cannot drop to
-  a non-root user (#1087, an upstream request).
+  a non-root user ([#1087](https://github.com/stateracloud/koinon/issues/1087), an upstream request).
 - Snapshot expiry values and the retention of the digest record: set when the first snapshot feature
-  lands.
+  lands. Tracked in [#1090](https://github.com/stateracloud/koinon/issues/1090).
 
 ## Upstream verification
 
