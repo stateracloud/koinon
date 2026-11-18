@@ -16,17 +16,86 @@ git clone https://github.com/agent-substrate/substrate /path/to/substrate
 koinon-api substrate install --substrate-source /path/to/substrate \
   --kubeconfig <file> --context <context> \
   --probe-image <koinon-api image> --storage-bucket <bucket> \
-  --substrate-worker-pool vm=<WorkerPool name>
+  --platform generic
 ```
 
-Options for a real cluster, passed to `ate-setup` under the names the pinned `ate-setup` defines:
+`--platform` is described [below](#platforms). On `generic` there is no vm tier, so you give no
+`--substrate-worker-pool vm=...`.
+
+## Platforms
+
+`ate-setup` v1.0.0 has two install routes: GKE (GCS for snapshots, a Google service account, the GKE
+credential provider) and kind. The kind route is mostly "not GCP": it installs an in-cluster object store
+(rustfs) for snapshots and an atelet without the GKE credential-provider hostPaths, which a read-only-root
+node such as Talos cannot create (upstream issue #2669). So Koinon uses it on any Kubernetes flavor and
+corrects what is only right for a laptop. `--platform` chooses:
+
+| `--platform` | `ate-setup` route | Use it for |
+| --- | --- | --- |
+| `generic` | `--kind` with Koinon's corrections (below), gvisor sandbox class only | Any cluster that is not kind or GKE: Talos, kubeadm, k3s, EKS and so on. The installer host needs no docker. |
+| `kind` | `--kind`, unchanged (microVM assets are staged with docker on the installer host) | A local kind cluster. The installer reads the nodes first and refuses it unless every node has a `kind://` providerID, before it creates anything. |
+| `gke` | no `--kind` (GCS) | GKE. `--gcp-project-id` and `--snapshot-transfer-gsa-name` go to `ate-setup` (it reads `PROJECT_ID` and `SNAPSHOT_TRANSFER_GSA_NAME` when you leave them out). |
+
+Without `--platform` the installer reads the nodes: `kind` when every node has a `kind://` providerID,
+else `generic` (with a warning when every node is a GKE node). It never detects `gke`: ask for it. `--kind` still works and means `--platform kind`; it is
+deprecated.
+
+### What `generic` corrects
+
+`ate-setup` has no overlay hook at this pin: it picks `manifests/ate-install/kind` by name and reads the
+manifests from the source tree. The installer already owns that tree (the temporary export of the pinned
+commit), so it writes the corrections into the export before `ate-setup` runs: kustomize patch files that the
+kind kustomization lists, and a few exact text edits where a patch cannot reach (items of an args list). An
+edit that does not find its text exactly once stops the install: a changed pin is never corrected by a
+half-fitting edit. The corrections:
+
+1. The sandbox class is `gvisor` only. The microVM class stages its guest assets with
+   `docker run --network container:<node>` on the installer host, for the host architecture, which only works
+   on a kind node. `--sandbox-classes` other than `gvisor`, and `--setup-csi hostpath` or `both` (they reach
+   into a kind node over docker), are refused on `generic`. The installer also turns the node-device probe of
+   the vm tier off. Microvm asset staging from inside the cluster is follow-up work.
+2. The snapshot bucket exists. `ate-setup` sets the snapshot location to `gs://<--storage-bucket>/`, but the
+   rustfs bucket-init Job creates only `ate-snapshots`. The Job now creates `--storage-bucket`.
+3. Storage. The object-store volume is `--rustfs-storage-size` (default 10Gi) with `--rustfs-storage-class`;
+   the bundled PostgreSQL volume is `--postgres-storage-size` (default 20Gi) with `--postgres-storage-class`.
+   Without a class name the cluster default StorageClass is used. The kind route has 1Gi for both.
+4. Credentials. The object-store root credentials are random keys in the Secret `koinon-rustfs-credentials`
+   in the Substrate namespace, not the fixed `rustfsadmin`. The installer creates the Secret once and keeps
+   it. A Secret that lacks a key is an error that names the Secret; the installer never rewrites it and never
+   prints a key.
+5. atelet logs at `info` (the kind overlay sets `debug`) and has no local-registry replacement.
+
+The kind route also brings its observability and sizing: an `otel-system` namespace with an OpenTelemetry collector
+and Prometheus, `OTEL_TRACES_SAMPLER=parentbased_always_on` on the api server, and a CPU request of 250m and
+limit of 2 on PostgreSQL. `generic` keeps them. With `--setup-csi nfs`, `ate-setup` checks the kernel of the
+installer host (`/proc/filesystems`), not that of the nodes. The root credentials of rustfs come from the Secret
+on every start; the installer cannot tell that a recreated Secret no longer matches data written with older keys.
+
+Volume claims are immutable once created. Before anything is created, the installer refuses a changed class or a
+smaller size for the existing `rustfs-data` claim, and any changed size or class of the PostgreSQL volume. The
+bucket-init Job deletes itself 5 minutes after it finishes, so a run with another bucket creates a new Job.
+
+`ate-setup --kind` starts every deploy with `docker info`. On `generic` the installer puts a small `docker`
+script first in the `PATH` of `ate-setup` that answers that one call and fails any other docker call with a
+message. Exit condition: upstream plans a generic install
+([agent-substrate/substrate #1782](https://github.com/agent-substrate/substrate/issues/1782)); Koinon moves to
+it and drops the corrections and the script. There is no upstream Helm chart yet (#79), and Koinon does not fork.
+
+The storage preflight of `generic` fails, before anything is created, when a named StorageClass does not
+exist, or when a volume has no named class and the cluster has no default class.
+
+## Options
+
+Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
 
 | `koinon-api substrate install` | `ate-setup` | When you need it |
 | --- | --- | --- |
-| `--postgres-storage-class <name>` | `--ateapi-postgres-storage-class` | The cluster has no default StorageClass: the bundled Postgres claim stays Pending without it. |
-| `--setup-csi nfs\|hostpath\|both\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`; `hostpath` and `both` are for kind only, so use `nfs` on another cluster). |
+| `--platform generic\|gke\|kind` | `--kind` or none | See [Platforms](#platforms). |
+| `--postgres-storage-class <name>` | `--ateapi-postgres-storage-class` | The cluster has no default StorageClass, or you want another class: the bundled Postgres claim stays Pending without one. |
+| `--postgres-storage-size`, `--rustfs-storage-class`, `--rustfs-storage-size` | none (Koinon patch) | `generic` only. See [What `generic` corrects](#what-generic-corrects). |
+| `--gcp-project-id`, `--snapshot-transfer-gsa-name` | the same names | `gke` only. |
+| `--setup-csi nfs\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`). `hostpath` and `both` are for kind only; `generic` refuses them. |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
-| `--kind` | `--kind` | The cluster is a local kind cluster. The installer reads the nodes first and refuses `--kind` unless every node has a `kind://` providerID, before it creates anything: the kind overlays, host-architecture images and hostPath volumes break a real cluster. |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
 `ate-setup` call, and it never acts on the ambient current context. `--substrate-probes=false` is refused:
@@ -81,6 +150,9 @@ image is part of S2 (chart work).
 The kubeconfig of the installer needs these rules:
 
 - `namespaces`: get, create, delete
+- `nodes`: list (platform detection and the kind check)
+- `storageclasses` (group `storage.k8s.io`): list (the `generic` storage preflight)
+- `secrets` in the Substrate namespace: get, create (the `generic` object-store credentials)
 - `pods`: create, get, delete, list in the Substrate namespace; `pods/log`: get
 - `events`: list (the probe reads the kubelet event of a pod that did not start)
 - `customresourcedefinitions`: get
@@ -224,6 +296,7 @@ above come from the source:
 
 ### Known gaps
 
-- The installer does not pre-create the `rustfs-data` PersistentVolumeClaim of the bundled object store, and
-  `--postgres-storage-class` covers only the Postgres volume. On a cluster without a default StorageClass that
-  claim stays Pending: mark a StorageClass as the default before the install. No preflight check catches this yet.
+- The `generic` platform is verified against the pinned source and a rendered kustomization of the kind
+  overlay (no `rustfsadmin`, the Koinon bucket, sizes and classes, `info` log level). A full install on a
+  Talos cluster with a default StorageClass is not yet verified.
+- microVM asset staging from inside the cluster (the vm tier on `generic`) is not done.

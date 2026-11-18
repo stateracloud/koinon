@@ -10,15 +10,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ErrNotKind is returned when --kind is set on a cluster whose nodes are not kind nodes.
-var ErrNotKind = fmt.Errorf("--kind is set, but the cluster is not a kind cluster")
+// ErrNotKind is returned when --platform kind is set on a cluster whose nodes are not kind nodes.
+var ErrNotKind = fmt.Errorf("--platform kind is set, but the cluster is not a kind cluster")
 
-// CheckKind refuses --kind on a cluster that is not kind. kind sets every node's providerID to
-// kind://<provider>/<cluster>/<node> (kind pkg/cluster/internal/kubeadm config: "provider-id"); --kind makes
-// ate-setup use kind overlays, host-architecture images and hostPath volumes, which break a real cluster.
-// It reads nodes only, so it runs before anything is created.
+// kindProviderPrefix starts the providerID of every kind node (kind pkg/cluster/internal/kubeadm config:
+// "provider-id" is kind://<provider>/<cluster>/<node>).
+const kindProviderPrefix = "kind://"
+
+// CheckKind refuses --platform kind on a cluster that is not kind. The kind platform uses ate-setup's kind
+// overlays unchanged, with host-architecture microVM assets and hostPath volumes, which break another
+// cluster: the generic platform is the route for those. It reads nodes only, so it runs before anything
+// is created.
 func (i *Installer) CheckKind(ctx context.Context) error {
-	if !i.Profile.Kind {
+	if i.Profile.Platform != PlatformKind {
 		return nil
 	}
 	nodes, err := i.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
@@ -29,8 +33,8 @@ func (i *Installer) CheckKind(ctx context.Context) error {
 		return fmt.Errorf("%w: it has no nodes; nothing was installed", ErrNotKind)
 	}
 	for _, n := range nodes.Items {
-		if !strings.HasPrefix(n.Spec.ProviderID, "kind://") {
-			return fmt.Errorf("%w: node %s has providerID %q (a kind node has kind://...). Run again without --kind, or with the kubeconfig and context of the kind cluster; nothing was installed", ErrNotKind, n.Name, n.Spec.ProviderID)
+		if !strings.HasPrefix(n.Spec.ProviderID, kindProviderPrefix) {
+			return fmt.Errorf("%w: node %s has providerID %q (a kind node has kind://...). Use --platform generic for another Kubernetes cluster, or the kubeconfig and context of the kind cluster; nothing was installed", ErrNotKind, n.Name, n.Spec.ProviderID)
 		}
 	}
 	return nil
