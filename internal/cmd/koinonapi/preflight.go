@@ -25,6 +25,7 @@ import (
 
 type preflightConfig struct {
 	kubeconfig       string
+	kubeContext      string
 	namespace        string
 	timeout          time.Duration
 	check            preflight.Config
@@ -53,6 +54,7 @@ type preflightConfig struct {
 // flags registers the flags of "koinon-api preflight".
 func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
+	fs.StringVar(&c.kubeContext, "context", "", "kubeconfig context; empty uses the kubeconfig's current context (needs --kubeconfig)")
 	fs.StringVar(&c.namespace, "namespace", "", "release namespace, where the seccomp probe pod runs")
 	fs.DurationVar(&c.timeout, "call-timeout", 15*time.Second, "timeout of each Kubernetes API and gateway call")
 	c.check.PostgresMode, c.check.GatewayMode = project.PostgresCNPG, project.GatewayStandalone
@@ -232,7 +234,7 @@ func runPreflight(ctx context.Context, cfg preflightConfig, out io.Writer) error
 // function closes the OpenShell connection.
 func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface, func(), error) {
 	noop := func() {}
-	rc, err := restConfig(cfg.kubeconfig)
+	rc, err := restConfigContext(cfg.kubeconfig, cfg.kubeContext)
 	if err != nil {
 		return nil, nil, noop, err
 	}
@@ -300,6 +302,24 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 		}
 	}
 	return checker, kube, noop, nil
+}
+
+// restConfigContext is restConfig with a kubeconfig context: the named one, not the file's current one.
+func restConfigContext(kubeconfig, kubeContext string) (*rest.Config, error) {
+	if kubeContext == "" {
+		return restConfig(kubeconfig)
+	}
+	if kubeconfig == "" {
+		return nil, errors.New("--context needs --kubeconfig")
+	}
+	rc, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig},
+		&clientcmd.ConfigOverrides{CurrentContext: kubeContext},
+	).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes client config (context %s): %w", kubeContext, err)
+	}
+	return rc, nil
 }
 
 func restConfig(kubeconfig string) (*rest.Config, error) {

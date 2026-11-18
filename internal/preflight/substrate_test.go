@@ -5,6 +5,7 @@ package preflight_test
 import (
 	"context"
 	"errors"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -18,6 +19,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/preflight"
 )
@@ -165,6 +167,17 @@ var _ = Describe("Substrate checks", func() {
 		c = healthySubstrate()
 		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.1 is not the pinned release v1.0.0"))
+		c = healthySubstrate()
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server", nil, 1)
+		untagged := find(c.run(ctx), "Agent Substrate")
+		Expect(untagged.Status).To(Equal(preflight.Fail))
+		Expect(untagged.Message).To(ContainSubstring("no tag"))
+		// The api server is found by container name, not by position: a sidecar first does not hide it.
+		c = healthySubstrate()
+		d := deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1)
+		d.Spec.Template.Spec.Containers = append([]corev1.Container{{Name: "objectstore-plugin", Image: "example.com/ate/plugin:v9"}}, d.Spec.Template.Spec.Containers...)
+		c.kube[0] = d
+		Expect(find(c.run(ctx), "Agent Substrate").Status).To(Equal(preflight.Pass))
 	})
 
 	It("fails when the router does not allow the atenet client", func(ctx SpecContext) {
@@ -263,5 +276,39 @@ var _ = Describe("Substrate checks", func() {
 			Expect(*v.HostPath.Type).To(Equal(corev1.HostPathCharDev))
 		}
 		Expect(*p.Spec.AutomountServiceAccountToken).To(BeFalse())
+	})
+
+	It("deletes stale probe pods of the same component before it creates its own", func(ctx SpecContext) {
+		stale := func(name, component, partOf string) *corev1.Pod {
+			return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ate-system", Labels: map[string]string{
+				"app.kubernetes.io/component": component, "app.kubernetes.io/part-of": partOf,
+			}}}
+		}
+		client := fake.NewClientset(
+			stale("old-devices", "devices-probe", "koinon"),
+			stale("other-component", "issuer-probe", "koinon"),
+			stale("other-owner", "devices-probe", "someone-else"),
+		)
+		client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+			pod := a.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+			pod.Name = "fresh"
+			pod.Status.Phase = corev1.PodSucceeded
+			return false, nil, nil
+		})
+		p := preflight.KubeSubstrateProber{
+			Client: client, Namespace: "ate-system", NamePrefix: "x", Image: "img",
+			Labels: map[string]string{"app.kubernetes.io/part-of": "koinon"}, Timeout: time.Second, PollInterval: time.Millisecond,
+			Logs: func(context.Context, string, string) (string, error) {
+				return preflight.SubstrateDevicesProbeMarker + " ok\n", nil
+			},
+		}
+		Expect(p.ProbeDevices(ctx)).To(Succeed())
+		left, err := client.CoreV1().Pods("ate-system").List(ctx, metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		var names []string
+		for _, pod := range left.Items {
+			names = append(names, pod.Name)
+		}
+		Expect(names).To(ConsistOf("other-component", "other-owner"))
 	})
 })

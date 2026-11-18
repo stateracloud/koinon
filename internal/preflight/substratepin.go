@@ -13,6 +13,8 @@ const (
 	SubstratePinnedVersion = "v1.0.0"
 	SubstratePinnedCommit  = "b34fbee742906494b5eb4f1f36987176bf8770a4"
 	// SubstratePinnedImageRepo is the registry path of the release images (ate-setup --image-repo).
+	// The images are pinned by tag (the release version), not by digest: image digests get pinned here when
+	// Substrate publishes them with the release. The repository path stays on the doc's Unverified list.
 	// Unverified: taken from docs/dev/releasing.md of the release, not pulled.
 	SubstratePinnedImageRepo = "ghcr.io/agent-substrate/substrate"
 )

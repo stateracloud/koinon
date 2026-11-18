@@ -3,9 +3,13 @@
 package substrateinstall_test
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,28 +34,89 @@ import (
 
 var crdGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 
+// runner is a fake of git, go and ate-setup. It records the calls, writes the export that "git archive"
+// would write and the binary that "go build" would build, and reports what the test sets.
 type runner struct {
 	calls [][]string
 	err   error
-	// What the pin probes report: the ate-setup --version line, the checkout's HEAD and its git status.
-	version, head, dirty string
-	dirs                 []string
+	// What the probes report: the ate-setup --version line, and what the repository resolves the pinned commit to.
+	version, resolved string
+	// tarEntries are the export's entries; nil is one file.
+	tarEntries []tar.Header
+	dirs       []string
+	// ranIn is the directory ate-setup ran in, and existed is whether it existed then.
+	ranIn   string
+	existed bool
+	// built is the binary path "go build" wrote.
+	built string
 }
 
 func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Writer) error {
 	r.calls = append(r.calls, append([]string{name}, args...))
 	r.dirs = append(r.dirs, dir)
+	switch {
+	case name == "git":
+		for _, a := range args {
+			if out, ok := strings.CutPrefix(a, "--output="); ok {
+				return writeTar(out, r.tarEntries)
+			}
+		}
+	case name == "go":
+		for n, a := range args {
+			if a == "-o" {
+				r.built = args[n+1]
+				return os.WriteFile(r.built, []byte("binary"), 0o700)
+			}
+		}
+	case strings.HasSuffix(name, "ate-setup"):
+		r.ranIn = dir
+		_, err := os.Stat(dir)
+		r.existed = err == nil
+	}
 	return r.err
 }
 
 func (r *runner) Output(_ context.Context, _, name string, args []string) (string, error) {
-	switch {
-	case name == "git" && args[0] == "rev-parse":
-		return r.head + "\n", nil
-	case name == "git":
-		return r.dirty, nil
+	r.calls = append(r.calls, append([]string{name}, args...))
+	if name == "git" {
+		return r.resolved + "\n", nil
 	}
 	return r.version, nil
+}
+
+func (r *runner) setupCalls() [][]string {
+	var out [][]string
+	for _, c := range r.calls {
+		if strings.HasSuffix(c[0], "ate-setup") && len(c) > 1 && c[1] == "deploy" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func writeTar(path string, entries []tar.Header) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	tw := tar.NewWriter(f)
+	if entries == nil {
+		entries = []tar.Header{{Name: "cmd/ate-setup/main.go", Typeflag: tar.TypeReg, Mode: 0o644, Size: 4}}
+	}
+	for _, h := range entries {
+		if h.Typeflag == tar.TypeReg {
+			h.Size = 4
+		}
+		if err := tw.WriteHeader(&h); err != nil {
+			return err
+		}
+		if h.Typeflag == tar.TypeReg {
+			if _, err := tw.Write([]byte("main")); err != nil {
+				return err
+			}
+		}
+	}
+	return errors.Join(tw.Close(), f.Close())
 }
 
 type issuer struct{ url string }
@@ -81,7 +146,7 @@ func router(args ...string) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "atenet-router", Namespace: "ate-system"},
 		Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "router", Args: args}},
+			Containers: []corev1.Container{{Name: "envoy"}, {Name: "atenet-router", Args: args}},
 		}}},
 	}
 }
@@ -92,8 +157,8 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"}, crds...)
 	r := &runner{
-		version: "ate-setup version go.ate.dev/substrate.Version=" + substrateinstall.PinnedVersion + " commit=" + substrateinstall.PinnedCommit + " built=x darwin/arm64",
-		head:    substrateinstall.PinnedCommit,
+		version:  "ate-setup version " + substrateinstall.PinnedVersion + " commit=" + substrateinstall.PinnedCommit + " built=unknown darwin/arm64",
+		resolved: substrateinstall.PinnedCommit,
 	}
 	checker := &preflight.Checker{
 		Kube: client, Dynamic: dyn, CallTimeout: time.Second,
@@ -101,7 +166,8 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 		Config: preflight.Config{Substrate: &preflight.SubstrateConfig{}},
 	}
 	return &substrateinstall.Installer{
-		Kube: client, Dynamic: dyn, Checker: checker, Runner: r, SetupBinary: "/opt/ate-setup", SourceDir: "/src/substrate",
+		Kube: client, Dynamic: dyn, Checker: checker, Runner: r, SourceRepo: "/src/substrate",
+		Kubeconfig: "/etc/kube/config", Context: "lab",
 		Profile:      substrateinstall.Profile{StorageBucket: "snapshots"},
 		Out:          io.Discard,
 		PollInterval: time.Millisecond, WaitTimeout: 50 * time.Millisecond,
@@ -114,11 +180,23 @@ func TestStopsBeforeInstallingWhenAPrerequisiteFails(t *testing.T) {
 		minor     string
 		reachable bool
 	}{"kubernetes below 1.37": {"36", true}, "unreachable issuer": {"37", false}} {
-		i, r, _ := setup(tc.minor, tc.reachable, nil)
+		i, r, client := setup(tc.minor, tc.reachable, nil)
 		err := i.Install(t.Context())
 		g.Expect(err).To(MatchError(substrateinstall.ErrPrerequisites), name)
-		g.Expect(r.calls).To(BeEmpty(), name)
+		g.Expect(r.setupCalls()).To(BeEmpty(), name)
+		// Whatever the installer created for its probes is gone again: no namespace remains.
+		nss, err := client.CoreV1().Namespaces().List(t.Context(), metav1.ListOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(nss.Items).To(BeEmpty(), name)
 	}
+}
+
+func TestLeavesAnExistingNamespaceAloneWhenAPrerequisiteFails(t *testing.T) {
+	g := NewWithT(t)
+	i, _, client := setup("37", false, []runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ate-system"}}})
+	g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrPrerequisites))
+	_, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
 }
 
 func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
@@ -131,28 +209,86 @@ func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
 	// The CRDs are present but Substrate's api server is not: the full preflight after the install fails, setup ran once.
 	err := i.Install(t.Context())
 	g.Expect(err).To(MatchError(preflight.ErrFailed))
-	g.Expect(r.calls).To(HaveLen(1))
-	g.Expect(r.calls[0][0]).To(Equal("/opt/ate-setup"))
-	g.Expect(r.dirs[0]).To(Equal("/src/substrate"))
-	g.Expect(strings.Join(r.calls[0], " ")).To(And(
+	calls := r.setupCalls()
+	g.Expect(calls).To(HaveLen(1))
+	g.Expect(calls[0][0]).To(Equal(r.built))
+	g.Expect(r.built).To(HaveSuffix("ate-setup"))
+	g.Expect(strings.Join(calls[0], " ")).To(And(
 		ContainSubstring("deploy ate-system"), ContainSubstring("--storage-bucket-name=snapshots"),
 		ContainSubstring("--image-tag="+substrateinstall.PinnedVersion),
+		ContainSubstring("--kubeconfig=/etc/kube/config"), ContainSubstring("--context=lab"),
 		ContainSubstring("--ingress-allowed-spiffe-ids="+preflight.SubstrateRouterSPIFFEID("ate-system"))))
+	// ate-setup ran in the exported tree, and the tree is removed afterwards.
+	g.Expect(r.existed).To(BeTrue())
+	g.Expect(filepath.Base(r.ranIn)).To(Equal("src"))
+	_, statErr := os.Stat(filepath.Dir(r.ranIn))
+	g.Expect(os.IsNotExist(statErr)).To(BeTrue(), "the temporary directory is deleted")
 }
 
-func TestRefusesAnUnpinnedBinaryOrCheckout(t *testing.T) {
+func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
+	g := NewWithT(t)
+	i, r, _ := setup("37", true, nil)
+	b, err := i.BuildSetup(t.Context())
+	g.Expect(err).NotTo(HaveOccurred())
+	defer b.Cleanup()
+	g.Expect(r.calls[0]).To(Equal([]string{"git", "-c", "core.fsmonitor=", "-C", "/src/substrate", "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
+	var archive, build []string
+	for _, c := range r.calls {
+		switch {
+		case c[0] == "git" && slices.Contains(c, "archive"):
+			archive = c
+		case c[0] == "go":
+			build = c
+		}
+	}
+	g.Expect(archive).To(And(ContainElement("core.fsmonitor="), ContainElement(substrateinstall.PinnedCommit)))
+	g.Expect(build).To(And(ContainElement("-trimpath"), ContainElement("./cmd/ate-setup")))
+	g.Expect(strings.Join(build, " ")).To(ContainSubstring("internal/version.Commit=" + substrateinstall.PinnedCommit))
+	_, err = os.Stat(filepath.Join(b.Dir(), "cmd", "ate-setup", "main.go"))
+	g.Expect(err).NotTo(HaveOccurred())
+}
+
+func TestRefusesAnUnpinnedBuildOrRepository(t *testing.T) {
 	g := NewWithT(t)
 	for name, mutate := range map[string]func(*runner){
-		"other version": func(r *runner) { r.version = strings.Replace(r.version, "Version=v1.0.0", "Version=v1.0.1", 1) },
+		"other version": func(r *runner) { r.version = strings.Replace(r.version, substrateinstall.PinnedVersion, "v1.0.1", 1) },
 		"other commit": func(r *runner) {
 			r.version = strings.Replace(r.version, "commit="+substrateinstall.PinnedCommit, "commit=deadbeef", 1)
 		},
-		"checkout moved":  func(r *runner) { r.head = "deadbeef" },
-		"checkout edited": func(r *runner) { r.dirty = " M manifests/ate-install/ate-api-server.yaml\n" },
+		"dirty build": func(r *runner) {
+			r.version = strings.Replace(r.version, "commit="+substrateinstall.PinnedCommit, "commit="+substrateinstall.PinnedCommit+"-dirty", 1)
+		},
+		"no commit":              func(r *runner) { r.version = "ate-setup version " + substrateinstall.PinnedVersion },
+		"two commits":            func(r *runner) { r.version += " commit=" + substrateinstall.PinnedCommit },
+		"commit not in the repo": func(r *runner) { r.resolved = "deadbeef" },
+		"link in the export": func(r *runner) {
+			r.tarEntries = []tar.Header{{Name: "evil", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}}
+		},
+		"path out of the export": func(r *runner) {
+			r.tarEntries = []tar.Header{{Name: "../evil", Typeflag: tar.TypeReg, Mode: 0o644}}
+		},
 	} {
+		tmp := t.TempDir()
 		i, r, _ := setup("37", true, nil)
+		i.TempDir = tmp
 		mutate(r)
 		g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrPin), name)
+		g.Expect(r.setupCalls()).To(BeEmpty(), name)
+		left, err := os.ReadDir(tmp)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(left).To(BeEmpty(), name+": the temporary directory is deleted")
+	}
+}
+
+func TestNeedsAKubeconfigAndAContext(t *testing.T) {
+	g := NewWithT(t)
+	for name, mutate := range map[string]func(*substrateinstall.Installer){
+		"no kubeconfig": func(i *substrateinstall.Installer) { i.Kubeconfig = "" },
+		"no context":    func(i *substrateinstall.Installer) { i.Context = "" },
+	} {
+		i, r, _ := setup("37", true, nil)
+		mutate(i)
+		g.Expect(i.Install(t.Context())).To(MatchError(ContainSubstring("kubeconfig and a context")), name)
 		g.Expect(r.calls).To(BeEmpty(), name)
 	}
 }
@@ -183,7 +319,7 @@ func TestEnsureRouterSPIFFEUsesTheConfiguredNamespace(t *testing.T) {
 	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed())
 	d, err := client.AppsV1().Deployments("substrate-prod").Get(t.Context(), "atenet-router", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(strings.Join(d.Spec.Template.Spec.Containers[0].Args, " ")).To(And(
+	g.Expect(strings.Join(d.Spec.Template.Spec.Containers[1].Args, " ")).To(And(
 		ContainSubstring("ns/substrate-prod/sa/atenet-client"), Not(ContainSubstring("ns/ate-system"))))
 }
 
@@ -217,7 +353,7 @@ func TestEnsureRouterSPIFFEIsIdempotent(t *testing.T) {
 		}
 		d, err := client.AppsV1().Deployments("ate-system").Get(t.Context(), "atenet-router", metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
-		got := strings.Join(d.Spec.Template.Spec.Containers[0].Args, " ")
+		got := strings.Join(d.Spec.Template.Spec.Containers[1].Args, " ")
 		g.Expect(strings.Count(got, preflight.SubstrateRouterSPIFFEID("ate-system"))).To(Equal(1), name)
 		if name == "other id" {
 			g.Expect(got).To(ContainSubstring("spiffe://cluster.local/ns/x/sa/y,"))
@@ -257,8 +393,29 @@ func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
 	i.Checker.Devices = i.Checker.IssuerProbe.(preflight.KubeSubstrateProber)
 	i.Checker.Config.Substrate.VMTier = true
 	_ = i.Install(t.Context()) // later checks fail: Substrate itself is not installed in the fake
-	g.Expect(r.calls).To(HaveLen(1), "the prerequisites passed, so ate-setup ran")
+	g.Expect(r.setupCalls()).To(HaveLen(1), "the prerequisites passed, so ate-setup ran")
 	ns, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(ns.Labels).To(HaveKeyWithValue("pod-security.kubernetes.io/enforce", "privileged"))
+}
+
+// The flag may sit in the container's command; a sidecar first in the list is not the router.
+func TestEnsureRouterSPIFFEReadsTheCommandAndPicksTheContainerByName(t *testing.T) {
+	g := NewWithT(t)
+	r := router()
+	r.Spec.Template.Spec.Containers[0].Args = []string{"--ingress-allowed-spiffe-ids=other"}
+	r.Spec.Template.Spec.Containers[1].Command = []string{"/atenet", "--ingress-allowed-spiffe-ids=spiffe://x"}
+	i, _, client := setup("37", true, []runtime.Object{r})
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed())
+	d, err := client.AppsV1().Deployments("ate-system").Get(t.Context(), "atenet-router", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(d.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"--ingress-allowed-spiffe-ids=other"}))
+	g.Expect(d.Spec.Template.Spec.Containers[1].Command[1]).To(Equal("--ingress-allowed-spiffe-ids=spiffe://x," + preflight.SubstrateRouterSPIFFEID("ate-system")))
+	g.Expect(d.Spec.Template.Spec.Containers[1].Args).To(BeEmpty())
+}
+
+func TestEnsureRouterSPIFFENamesTheDeploymentInErrors(t *testing.T) {
+	g := NewWithT(t)
+	i, _, _ := setup("37", true, nil)
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(MatchError(ContainSubstring("ate-system/atenet-router")))
 }

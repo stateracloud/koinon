@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
@@ -57,7 +58,9 @@ const (
 	// SubstrateDevicesProbeMarker starts the device probe's output line.
 	SubstrateDevicesProbeMarker = "koinon-devices-probe"
 
-	substrateInstallDoc = "install the pinned Substrate with the Koinon installer step (koinon-api substrate install)"
+	// substrateAPIServerContainer is the container of the api server Deployment that carries the release tag.
+	substrateAPIServerContainer = "ate-api-server"
+	substrateInstallDoc         = "install the pinned Substrate with the Koinon installer step (koinon-api substrate install)"
 )
 
 // SubstrateRouterSPIFFEID is the identity the router flag must allow: the atenet client service account
@@ -223,11 +226,37 @@ func (c Config) SubstrateOrDefault() SubstrateConfig {
 }
 
 // SubstratePrerequisites runs the checks that do not need Substrate: the Kubernetes version, the node
-// devices of the vm tier and the service-account issuer. The installer step runs them before it
-// installs anything, so a cluster that cannot run Substrate fails before it changes.
+// devices of the vm tier and the service-account issuer.
 func (c *Checker) SubstratePrerequisites(ctx context.Context) []Result {
+	return append(c.SubstrateStaticPrerequisites(ctx), c.SubstrateProbePrerequisites(ctx)...)
+}
+
+// SubstrateStaticPrerequisites runs the prerequisite checks that need no namespace and no pod: the
+// Kubernetes version and whether the service-account issuer can be read. The installer runs them first,
+// so a cluster that cannot run Substrate fails before it creates anything.
+func (c *Checker) SubstrateStaticPrerequisites(ctx context.Context) []Result {
 	c.defaultSubstrate()
 	results := []Result{c.checkKubernetesVersion(ctx)}
+	if c.Issuer != nil {
+		rctx, cancel := c.callCtx(ctx)
+		_, err := c.Issuer.Issuer(rctx)
+		cancel()
+		if err != nil {
+			results = append(results, Result{
+				Check: "Service-account issuer", Status: Fail,
+				Message: fmt.Sprintf("cannot read the issuer from the API server's discovery document: %v", err),
+				Fix:     "grant the preflight ServiceAccount the system:service-account-issuer-discovery ClusterRole",
+			})
+		}
+	}
+	return results
+}
+
+// SubstrateProbePrerequisites runs the prerequisite checks that start pods in Substrate's namespace: the
+// node devices of the vm tier and the service-account issuer probe.
+func (c *Checker) SubstrateProbePrerequisites(ctx context.Context) []Result {
+	c.defaultSubstrate()
+	var results []Result
 	if c.Config.Substrate.VMTier {
 		results = append(results, c.checkSubstrateDevices(ctx))
 	}
@@ -318,16 +347,18 @@ func (c *Checker) checkSubstrate(ctx context.Context) Result {
 		}
 	}
 	var image string
-	if cs := deploy.Spec.Template.Spec.Containers; len(cs) > 0 {
-		image = cs[0].Image
+	for _, ctr := range deploy.Spec.Template.Spec.Containers {
+		if ctr.Name == substrateAPIServerContainer {
+			image = ctr.Image
+		}
 	}
 	tag := imageTag(image)
 	switch {
 	case tag == "":
 		return Result{
-			Check: check, Status: Warn,
-			Message: fmt.Sprintf("api server image %q has no tag, so its version is unknown", image),
-			Fix:     "deploy the api server from a tagged release image",
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("container %s of %s/%s has image %q: no tag, so its version is unknown", substrateAPIServerContainer, sub.Namespace, sub.APIServerDeployment, image),
+			Fix:     "deploy the api server from a tagged release image: " + substrateInstallDoc,
 		}
 	case tag != SubstratePinnedVersion:
 		return Result{
@@ -719,6 +750,9 @@ func (p KubeSubstrateProber) run(ctx context.Context, want *corev1.Pod) (string,
 	ctx, cancel := context.WithTimeout(ctx, p.timeout())
 	defer cancel()
 	pods := p.Client.CoreV1().Pods(p.Namespace)
+	if err := p.deleteStale(ctx, want); err != nil {
+		return "", err
+	}
 	pod, err := pods.Create(ctx, want, metav1.CreateOptions{})
 	if err != nil {
 		return "", fmt.Errorf("create probe pod: %w", err)
@@ -749,6 +783,28 @@ func (p KubeSubstrateProber) run(ctx context.Context, want *corev1.Pod) (string,
 		return "", fmt.Errorf("read probe pod %s log: %w", name, err)
 	}
 	return log, nil
+}
+
+// deleteStale deletes the pods an earlier run left behind (a killed installer never ran its cleanup):
+// those with the component and the part-of label of the probe pod about to start. Without a part-of
+// label the probe cannot tell its own pods from others, so it deletes nothing.
+func (p KubeSubstrateProber) deleteStale(ctx context.Context, want *corev1.Pod) error {
+	const component, partOf = "app.kubernetes.io/component", "app.kubernetes.io/part-of"
+	if want.Labels[component] == "" || want.Labels[partOf] == "" {
+		return nil
+	}
+	sel := labels.SelectorFromSet(labels.Set{component: want.Labels[component], partOf: want.Labels[partOf]})
+	pods := p.Client.CoreV1().Pods(p.Namespace)
+	stale, err := pods.List(ctx, metav1.ListOptions{LabelSelector: sel.String()})
+	if err != nil {
+		return fmt.Errorf("list stale probe pods in %s: %w", p.Namespace, err)
+	}
+	for _, pod := range stale.Items {
+		if err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale probe pod %s/%s: %w", p.Namespace, pod.Name, err)
+		}
+	}
+	return nil
 }
 
 // eventReason is the newest warning event of the pod, for the timeout message.

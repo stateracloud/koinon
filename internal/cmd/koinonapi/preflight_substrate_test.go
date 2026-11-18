@@ -42,4 +42,22 @@ var _ = Describe("preflight --driver substrate", func() {
 		_, err = parse("--driver=substrate", "--netpol-probe=false")
 		Expect(err).To(MatchError(ContainSubstring("--substrate-probes needs --probe-image")))
 	})
+
+	Describe("substrate install", func() {
+		run := func(args ...string) error {
+			cmd := newSubstrateCommand()
+			cmd.SetArgs(append([]string{"install", "--substrate-source=/x", "--storage-bucket=b", "--probe-image=img"}, args...))
+			cmd.SilenceUsage, cmd.SilenceErrors = true, true
+			return cmd.Execute()
+		}
+
+		It("needs a kubeconfig and a context, never the ambient one", func() {
+			Expect(run("--kubeconfig=/k")).To(MatchError(ContainSubstring("--kubeconfig and --context")))
+			Expect(run("--context=lab")).To(MatchError(ContainSubstring("--kubeconfig and --context")))
+		})
+
+		It("refuses to run with the probes off", func() {
+			Expect(run("--kubeconfig=/k", "--context=lab", "--substrate-probes=false")).To(MatchError(ContainSubstring("--substrate-probes=false")))
+		})
+	})
 })
