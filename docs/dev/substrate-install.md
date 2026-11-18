@@ -37,7 +37,7 @@ corrects what is only right for a laptop. `--platform` chooses:
 | `gke` | no `--kind` (GCS) | GKE. `--gcp-project-id` and `--snapshot-transfer-gsa-name` go to `ate-setup` (it reads `PROJECT_ID` and `SNAPSHOT_TRANSFER_GSA_NAME` when you leave them out). |
 
 Without `--platform` the installer reads the nodes: `kind` when every node has a `kind://` providerID,
-else `generic`. It never detects `gke`: ask for it. `--kind` still works and means `--platform kind`; it is
+else `generic` (with a warning when every node is a GKE node). It never detects `gke`: ask for it. `--kind` still works and means `--platform kind`; it is
 deprecated.
 
 ### What `generic` corrects
@@ -64,6 +64,16 @@ half-fitting edit. The corrections:
    it. A Secret that lacks a key is an error that names the Secret; the installer never rewrites it and never
    prints a key.
 5. atelet logs at `info` (the kind overlay sets `debug`) and has no local-registry replacement.
+
+The kind route also brings its observability and sizing: an `otel-system` namespace with an OpenTelemetry collector
+and Prometheus, `OTEL_TRACES_SAMPLER=parentbased_always_on` on the api server, and a CPU request of 250m and
+limit of 2 on PostgreSQL. `generic` keeps them. With `--setup-csi nfs`, `ate-setup` checks the kernel of the
+installer host (`/proc/filesystems`), not that of the nodes. The root credentials of rustfs come from the Secret
+on every start; the installer cannot tell that a recreated Secret no longer matches data written with older keys.
+
+Volume claims are immutable once created. Before anything is created, the installer refuses a changed class or a
+smaller size for the existing `rustfs-data` claim, and any changed size or class of the PostgreSQL volume. The
+bucket-init Job deletes itself 5 minutes after it finishes, so a run with another bucket creates a new Job.
 
 `ate-setup --kind` starts every deploy with `docker info`. On `generic` the installer puts a small `docker`
 script first in the `PATH` of `ate-setup` that answers that one call and fails any other docker call with a

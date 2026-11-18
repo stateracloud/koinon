@@ -11,9 +11,11 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
@@ -408,4 +410,59 @@ func TestGenericCleanupCommandDeletesTheKindOverlay(t *testing.T) {
 	err := i.Install(t.Context())
 	g.Expect(err).To(MatchError(ContainSubstring("delete ate-system --no-dev-env --kind --namespace='ate-system'")))
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(r.built)) })
+}
+
+func TestExistingVolumesThatWouldChangeAreRefused(t *testing.T) {
+	g := NewWithT(t)
+	class := "old"
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "rustfs-data", Namespace: "ate-system"},
+		Spec: corev1.PersistentVolumeClaimSpec{StorageClassName: &class, Resources: corev1.VolumeResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+		}},
+	}
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "postgres", Namespace: "ate-system"},
+		Spec: appsv1.StatefulSetSpec{VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{Spec: corev1.PersistentVolumeClaimSpec{
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+		}}}},
+	}
+	run := func(p substrateinstall.Profile, objs ...runtime.Object) preflight.Result {
+		i, _, _ := setup("37", true, objs)
+		i.Profile = p
+		return i.CheckExistingVolumes(t.Context())[0]
+	}
+	g.Expect(run(genericProfile()).Status).To(Equal(preflight.Pass), "a first install has nothing to conflict with")
+	g.Expect(run(genericProfile(), pvc).Status).To(Equal(preflight.Pass))
+	p := genericProfile()
+	p.RustFSStorageClass, p.RustFSStorageSize = "new", "5Gi"
+	r := run(p, pvc)
+	g.Expect(r.Status).To(Equal(preflight.Fail))
+	g.Expect(r.Message).To(And(ContainSubstring("class old, not new"), ContainSubstring("cannot shrink")))
+	r = run(genericProfile(), sts)
+	g.Expect(r.Status).To(Equal(preflight.Fail))
+	g.Expect(r.Message).To(ContainSubstring("postgres has a 1Gi volume, not 20Gi"))
+	p = genericProfile()
+	p.PostgresStorageSize = "1Gi"
+	g.Expect(run(p, sts).Status).To(Equal(preflight.Pass))
+}
+
+func TestBucketNamesThatS3RefusesAreRefused(t *testing.T) {
+	g := NewWithT(t)
+	for _, b := range []string{"a..b", "192.168.1.1", "ab"} {
+		p := genericProfile()
+		p.StorageBucket = b
+		g.Expect(p.Validate()).To(HaveOccurred(), b)
+	}
+}
+
+func TestWarnsWhenEveryNodeIsGKEAndNoPlatformWasGiven(t *testing.T) {
+	g := NewWithT(t)
+	i, r, _ := setup("37", true, []runtime.Object{kindNode("a", "gce://p/z/a"), defaultClass("x")})
+	i.Profile.Platform = ""
+	r.tarFiles = pinnedKindFiles()
+	var out strings.Builder
+	i.Out = &out
+	_ = i.Install(t.Context())
+	g.Expect(out.String()).To(ContainSubstring("Set --platform gke for GCS"))
 }

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -71,7 +72,7 @@ var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 // validateGeneric checks what only the generic platform needs. The bucket name goes to a container
 // environment variable, not into a script, but S3 bucket rules keep a typo out of the object store.
 func (p Profile) validateGeneric() error {
-	if !bucketName.MatchString(p.StorageBucket) {
+	if !bucketName.MatchString(p.StorageBucket) || strings.Contains(p.StorageBucket, "..") || net.ParseIP(p.StorageBucket) != nil {
 		return fmt.Errorf("substrate profile: the storage bucket %q is not an S3 bucket name (3 to 63 characters: lower-case letters, digits, dots and hyphens)", p.StorageBucket)
 	}
 	for _, o := range []option{{"--rustfs-storage-size", p.RustFSStorageSize}, {"--postgres-storage-size", p.PostgresStorageSize}} {
@@ -176,7 +177,8 @@ func (p Profile) genericPatches(ns string) []koinonPatch {
 		{"koinon-rustfs-bucket-init.yaml", map[string]any{
 			"apiVersion": "batch/v1", "kind": "Job",
 			"metadata": map[string]any{"name": "rustfs-bucket-init", "namespace": ns},
-			"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{
+			// The Job template is immutable: a finished Job goes away, so a run with another bucket or other keys creates a new one.
+			"spec": map[string]any{"ttlSecondsAfterFinished": 300, "template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{
 				"name": "create-bucket", "env": append(objectStoreEnv(), map[string]any{"name": "BUCKET", "value": p.StorageBucket}),
 				"command": []any{"/bin/sh", "-c", bucketScript},
 			}}}}},
@@ -387,4 +389,39 @@ func (i *Installer) CheckStorage(ctx context.Context) []preflight.Result {
 		}}
 	}
 	return []preflight.Result{{Check: check, Status: preflight.Pass, Message: fmt.Sprintf("found: %s", strings.Join(names, ", "))}}
+}
+
+// CheckExistingVolumes refuses a change that Kubernetes would reject halfway through the install: the
+// class of an existing rustfs-data claim, a smaller size for it, and the size or class of the PostgreSQL
+// volume claim template (immutable on a StatefulSet). It reads only and runs before anything is created.
+func (i *Installer) CheckExistingVolumes(ctx context.Context) []preflight.Result {
+	const check = "Existing volumes"
+	ns := i.Checker.Config.SubstrateOrDefault().Namespace
+	var problems []string
+	if pvc, err := i.Kube.CoreV1().PersistentVolumeClaims(ns).Get(ctx, "rustfs-data", metav1.GetOptions{}); err == nil {
+		if c := i.Profile.RustFSStorageClass; c != "" && pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != c {
+			problems = append(problems, fmt.Sprintf("claim rustfs-data has class %s, not %s", *pvc.Spec.StorageClassName, c))
+		}
+		want := resource.MustParse(i.Profile.rustFSSize())
+		if have, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok && want.Cmp(have) < 0 {
+			problems = append(problems, fmt.Sprintf("claim rustfs-data is %s, and a claim cannot shrink to %s", have.String(), want.String()))
+		}
+	}
+	if sts, err := i.Kube.AppsV1().StatefulSets(ns).Get(ctx, "postgres", metav1.GetOptions{}); err == nil && len(sts.Spec.VolumeClaimTemplates) > 0 {
+		t := sts.Spec.VolumeClaimTemplates[0]
+		want := resource.MustParse(i.Profile.postgresSize())
+		if have, ok := t.Spec.Resources.Requests[corev1.ResourceStorage]; ok && want.Cmp(have) != 0 {
+			problems = append(problems, fmt.Sprintf("StatefulSet postgres has a %s volume, not %s (its volume claim template cannot change)", have.String(), want.String()))
+		}
+		if c := i.Profile.PostgresStorageClass; c != "" && t.Spec.StorageClassName != nil && *t.Spec.StorageClassName != c {
+			problems = append(problems, fmt.Sprintf("StatefulSet postgres has class %s, not %s", *t.Spec.StorageClassName, c))
+		}
+	}
+	if len(problems) == 0 {
+		return []preflight.Result{{Check: check, Status: preflight.Pass, Message: "no existing volume conflicts with the options"}}
+	}
+	return []preflight.Result{{
+		Check: check, Status: preflight.Fail, Message: strings.Join(problems, "; "),
+		Fix: "use the options of the first install, or remove the install (ate-setup delete ate-system) and its volumes first",
+	}}
 }

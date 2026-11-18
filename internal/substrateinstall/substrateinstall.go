@@ -433,10 +433,21 @@ func (i *Installer) Install(ctx context.Context) error {
 			setup.Cleanup()
 		}
 	}()
+	var setupEnv []string
+	if platform == PlatformGeneric {
+		// File work only, so a pin that no longer fits fails before anything is created.
+		if err := i.Profile.ApplyGenericOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
+			return err
+		}
+		if setupEnv, err = WriteDockerShim(filepath.Join(setup.Root(), "shim"), os.Getenv("PATH")); err != nil {
+			return fmt.Errorf("write the docker shim: %w", err)
+		}
+	}
 	// Checks that need no namespace come first: a cluster that cannot run Substrate fails with nothing created.
 	static := i.Checker.SubstrateStaticPrerequisites(ctx)
 	if platform == PlatformGeneric {
 		static = append(static, i.CheckStorage(ctx)...)
+		static = append(static, i.CheckExistingVolumes(ctx)...)
 	}
 	if failed := preflight.Write(i.Out, static); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
@@ -469,16 +480,11 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
-	profile.Platform = platform
-	var setupEnv []string
 	if platform == PlatformGeneric {
-		if err := profile.ApplyGenericOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
-			return err
-		}
-		if setupEnv, err = WriteDockerShim(filepath.Join(setup.Root(), "shim"), os.Getenv("PATH")); err != nil {
-			return fmt.Errorf("write the docker shim: %w", err)
-		}
 		if err := i.EnsureRustFSCredentials(ctx); err != nil {
+			if created {
+				i.removeNamespace(ctx)
+			}
 			return err
 		}
 	}
@@ -525,6 +531,9 @@ func (i *Installer) resolvePlatform(ctx context.Context) (Platform, error) {
 	p, err := i.DetectPlatform(ctx)
 	if err != nil {
 		return "", err
+	}
+	if p == PlatformGeneric && i.allProviders(ctx, "gce://") {
+		_, _ = fmt.Fprintln(i.Out, "warning: every node is a GKE node, and no --platform was given: the install uses the generic platform (an in-cluster object store). Set --platform gke for GCS.")
 	}
 	_, _ = fmt.Fprintf(i.Out, "platform %s (detected from the nodes; set --platform to choose)\n", p)
 	return p, nil
@@ -706,4 +715,18 @@ func orDuration(d, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// allProviders reports whether every node has a providerID that starts with prefix.
+func (i *Installer) allProviders(ctx context.Context, prefix string) bool {
+	nodes, err := i.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil || len(nodes.Items) == 0 {
+		return false
+	}
+	for _, n := range nodes.Items {
+		if !strings.HasPrefix(n.Spec.ProviderID, prefix) {
+			return false
+		}
+	}
+	return true
 }
