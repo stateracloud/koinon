@@ -224,7 +224,7 @@ message CreateServerRequest {
   // legs).
   ServerClass class = 8;
   // ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
-  // system roots. Certificates only, at most 256 KiB.
+  // system roots. Certificates only, at most 64 KiB.
   string ca_bundle = 9;
 }
 

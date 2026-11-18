@@ -520,7 +520,7 @@ export type CreateServerRequest = Message<"koinon.mcpserver.v1alpha1.CreateServe
 
   /**
    * ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
-   * system roots. Certificates only, at most 256 KiB.
+   * system roots. Certificates only, at most 64 KiB.
    *
    * @generated from field: string ca_bundle = 9;
    */

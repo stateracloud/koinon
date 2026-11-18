@@ -2516,7 +2516,7 @@ Allowance is a server an agent may use, optionally narrowed to some of its tools
 | credential_prefix | 6 | `string` | singular |  | credential_prefix precedes the secret in the header value, for example "Bearer ". |
 | credential_value | 7 | `string` | singular |  |  |
 | class | 8 | `koinon.mcpserver.v1alpha1.ServerClass` | singular |  | class is what the server exposes; leaving it out is the unclassified default (kind "other", both legs). |
-| ca_bundle | 9 | `string` | singular |  | ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the system roots. Certificates only, at most 256 KiB. |
+| ca_bundle | 9 | `string` | singular |  | ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the system roots. Certificates only, at most 64 KiB. |
 
 ### Message CreateServerResponse
 

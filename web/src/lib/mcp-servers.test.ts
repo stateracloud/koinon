@@ -93,6 +93,10 @@ describe('the CA certificate of a server', () => {
     expect(base.caBundle).toBe('')
     expect(buildCreateRequest({ ...base, name: 'wiki', url: 'https://mcp.example.com/mcp', caBundle: `${pem}\n` })).toMatchObject({ caBundle: pem })
   })
+  it('is at most 64 KiB', () => {
+    const big = `${pem}\n`.repeat(Math.ceil((64 << 10) / (pem.length + 1)) + 1)
+    expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: big }).caBundle).toMatch(/64 KiB/)
+  })
   it('needs an https URL and certificates only', () => {
     expect(formErrors({ ...base, url: 'https://mcp.example.com/mcp', caBundle: pem }).caBundle).toBeUndefined()
     expect(formErrors({ ...base, url: 'http://mcp.example.com/mcp', caBundle: pem }).caBundle).toMatch(/https/)

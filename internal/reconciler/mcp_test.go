@@ -417,6 +417,29 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(string(sec.Data[strings.TrimPrefix(t.CAFile, "/secrets/providers/")])).To(Equal(string(ca.CA)))
 	})
 
+	It("leaves out a server whose CA bundle would take the Secret over the budget, and still applies the others (#278)", func(ctx SpecContext) {
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		bundle := strings.Repeat(string(ca.CA), 60000/len(ca.CA))
+		Expect(len(bundle)).To(BeNumerically("<=", mcpservers.MaxCABundleBytes))
+		actor := audit.System("koinon-test:spec")
+		for i := 0; i < 5; i++ { // 5 x ~60 KB is over the 256 KiB budget
+			s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: fmt.Sprintf("big%d", i), URL: fmt.Sprintf("https://big%d.example.test/mcp", i), CABundle: bundle})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, s.ID) })
+		}
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring("the CA bundles of all servers are over 256 KiB in total")))
+		served := 0
+		for i := 0; i < 5; i++ {
+			if _, ok := targetOf(mg.last(), fmt.Sprintf("%s-big%d", slug, i)); ok {
+				served++
+			}
+		}
+		Expect(served).To(Equal(4))
+	})
+
 	It("does not serve a stored credentialed server whose URL is not https, and still applies the others (ADR 0120)", func(ctx SpecContext) {
 		bad := server(ctx, org, "cleartext", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
 		server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})

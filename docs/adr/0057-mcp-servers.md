@@ -330,7 +330,7 @@ Status: accepted (the maintainer's decision on #278).
   server, and the reconciler leaves such a row out of the gateway state, so a row from before the rule is
   not served with its credential in the clear.
 - **A private CA is per server.** The server record has an optional `caBundle`: PEM certificates (at most
-  256 KiB), allowed only with an https URL. The gateway trusts it for that server only, and the system
+  64 KiB), allowed only with an https URL. The gateway trusts it for that server only, and the system
   roots stay in place for every other server. There is no install-wide CA value. In agentgateway
   v1.6 and later the backend TLS `root` replaces the system roots for the target it is set on, so it is
   emitted only for a target that has a bundle. The bundle reaches the gateway as a file in the provider keys

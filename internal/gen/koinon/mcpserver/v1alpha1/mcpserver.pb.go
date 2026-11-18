@@ -898,7 +898,7 @@ type CreateServerRequest struct {
 	// legs).
 	Class *ServerClass `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
 	// ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
-	// system roots. Certificates only, at most 256 KiB.
+	// system roots. Certificates only, at most 64 KiB.
 	CaBundle      string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

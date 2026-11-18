@@ -36,7 +36,14 @@ import (
 type servedMCP struct {
 	servers []gatewayplan.MCPServer
 	files   map[string][]byte
+	bytes   int // bytes of CA bundles in files, against maxMCPCABytes
 }
+
+// maxMCPCABytes bounds the CA bundles of all servers in the provider-keys Secret, which serves every
+// org and holds about 1 MiB. While a change settles, the old and the new file both stay, so the
+// budget is a quarter of the Secret. A server over it is left out, so one org cannot make the Secret
+// too long for the others.
+const maxMCPCABytes = 256 << 10
 
 // loadMCP reads every org's enabled servers and their tools. A server that cannot be served (its URL
 // breaks the policy, its credential cannot be opened, its credential header or prefix holds a '$'
@@ -96,9 +103,14 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
+				if out.bytes+len(row.CaBundle) > maxMCPCABytes {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of all servers are over %d KiB in total", org.Slug, row.Name, maxMCPCABytes>>10))
+					continue
+				}
 				sum := sha256.Sum256([]byte(row.CaBundle))
 				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				out.files[s.CAFile] = []byte(row.CaBundle)
+				out.bytes += len(row.CaBundle)
 			}
 			tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org.ID, ServerID: row.ID})
 			if err != nil {

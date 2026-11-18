@@ -245,6 +245,7 @@ export function caBundleError(f: ServerFormState): string | undefined {
   const bundle = f.caBundle.trim()
   if (bundle === '') return undefined
   if (!/^https:\/\//i.test(f.url.trim())) return 'A CA certificate needs an https URL.'
+  if (new TextEncoder().encode(bundle).length > 64 << 10) return 'The CA certificates are larger than 64 KiB.'
   if (/-----BEGIN (?!CERTIFICATE-----)[A-Z ]*-----/.test(bundle) || !/-----BEGIN CERTIFICATE-----/.test(bundle)) {
     return 'Paste PEM certificates only: each starts with -----BEGIN CERTIFICATE-----. Never paste a private key.'
   }

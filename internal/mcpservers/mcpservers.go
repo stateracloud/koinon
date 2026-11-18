@@ -427,11 +427,19 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	return nil
 }
 
+// MaxCABundleBytes bounds a server's CA bundle. Every bundle goes into the one Secret that serves all
+// orgs, so the cap is far lower than the code-host one (codehost.MaxCABundleBytes): a few
+// certificates need a few KiB.
+const MaxCABundleBytes = 64 << 10
+
 // ValidateCABundle checks a server's CA bundle: empty (the system roots), or PEM certificates only
 // on an https URL (a CA verifies a TLS certificate, and an http URL has none).
 func ValidateCABundle(rawURL, bundle string) error {
 	if bundle == "" {
 		return nil
+	}
+	if len(bundle) > MaxCABundleBytes {
+		return invalid("the CA bundle is larger than %d KiB", MaxCABundleBytes>>10)
 	}
 	if u, err := url.Parse(rawURL); err != nil || u.Scheme != "https" {
 		return invalid("a CA bundle needs an https url")

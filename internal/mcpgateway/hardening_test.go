@@ -5,9 +5,11 @@ package mcpgateway_test
 import (
 	"bytes"
 	"context"
+	"encoding/pem"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -268,6 +270,36 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(gateway.CredentialSafeURL("https:mcp")).To(BeFalse()) // no host: the route closes
 		Expect(gateway.CredentialSafeURL("https://t.example/mcp")).To(BeTrue())
+	})
+
+	It("verifies a target with its own CA bundle only, and every other target with the system roots (#278)", func(ctx SpecContext) {
+		tlsUp := httptest.NewTLSServer(fakeUpstream("private", &upstreamLog{}).Config.Handler)
+		DeferCleanup(tlsUp.Close)
+		caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsUp.Certificate().Raw}))
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		DeferCleanup(gw.Drain)
+		front := httptest.NewServer(gw.Handler())
+		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
+		key := mustKey(agent)
+		grant := func(n string) gateway.ToolGrant { return gateway.ToolGrant{Target: n, All: true} }
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+			MCP: []gateway.MCPTarget{
+				{Name: "private", Org: "acme", URL: tlsUp.URL + "/mcp", CAFile: writeFile("ca.crt", caPEM)},
+				{Name: "plain", Org: "acme", URL: tlsUp.URL + "/mcp"},
+				{Name: "nofile", Org: "acme", URL: tlsUp.URL + "/mcp", CAFile: filepath.Join(GinkgoT().TempDir(), "missing.crt")},
+				{Name: "junk", Org: "acme", URL: tlsUp.URL + "/mcp", CAFile: writeFile("junk.crt", "not a certificate")},
+			},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {grant("private"), grant("plain"), grant("nofile"), grant("junk")}},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front.URL, key.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "private_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse())
+		for _, name := range []string{"plain", "nofile", "junk"} {
+			res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: name + "_read_item", Arguments: map[string]any{"text": "x"}})
+			Expect(err != nil || res.IsError).To(BeTrue(), "%s must not connect", name)
+		}
 	})
 
 	It("logs a dropped target with a fixed reason and no URL", func(ctx SpecContext) {

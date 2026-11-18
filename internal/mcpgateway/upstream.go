@@ -4,8 +4,13 @@ package mcpgateway
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -155,6 +160,12 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	if t.CAFile != "" {
+		var err error
+		if base, err = caTransport(base, t.CAFile); err != nil {
+			return nil, err
+		}
+	}
 	hc := &http.Client{
 		Transport: &credentialTransport{base: base, target: t, agent: key.agent, src: g.o.Credentials},
 		Timeout:   0,
@@ -208,6 +219,33 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		return nil, context.DeadlineExceeded
 	}
 	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop, gt: gt}, nil
+}
+
+// caTransport returns a copy of base that verifies the target with the PEM bundle at caFile only,
+// as agentgateway's backendTLS.root does: the bundle replaces the system roots, and it applies to
+// this target alone. A missing or unparsable file, or a base that is not an *http.Transport, fails
+// closed: the call is never made with other roots.
+func caTransport(base http.RoundTripper, caFile string) (http.RoundTripper, error) {
+	bt, ok := base.(*http.Transport)
+	if !ok {
+		return nil, errors.New("mcpgateway: a target with a CA bundle needs an *http.Transport")
+	}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("mcpgateway: read the CA bundle: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, errors.New("mcpgateway: the CA bundle holds no PEM certificate")
+	}
+	c := bt.Clone()
+	cfg := c.TLSClientConfig
+	if cfg == nil {
+		cfg = &tls.Config{}
+	}
+	cfg.RootCAs, cfg.MinVersion = pool, tls.VersionTLS12
+	c.TLSClientConfig = cfg
+	return c, nil
 }
 
 // evict drops the upstream session of key, so the next call connects again.

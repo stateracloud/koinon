@@ -11,7 +11,7 @@
 -- +goose Up
 
 ALTER TABLE mcp_servers
-    ADD COLUMN ca_bundle text NOT NULL DEFAULT '' CHECK (length(ca_bundle) <= 262144);
+    ADD COLUMN ca_bundle text NOT NULL DEFAULT '' CHECK (length(ca_bundle) <= 65536);
 
 DROP TRIGGER mcp_servers_notify_reconciler ON mcp_servers;
 CREATE TRIGGER mcp_servers_notify_reconciler

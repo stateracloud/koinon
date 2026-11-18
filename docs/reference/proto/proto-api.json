@@ -10484,7 +10484,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the\nsystem roots. Certificates only, at most 256 KiB."
+              "description": "ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the\nsystem roots. Certificates only, at most 64 KiB."
             }
           ]
         },
