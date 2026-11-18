@@ -45,7 +45,10 @@ decisions of 2026-11-18 add three constraints:
 These invariants hold for every driver and every tier. A driver is OpenShell during the dual-driver
 window, Agent Substrate with a microVM, or Agent Substrate with gVisor. A new driver or tier must pass
 the same contract and escape suites before it ships. A tier or driver may add controls. It must not
-remove or weaken one, and no setting, flag or values file turns one off.
+remove or weaken one, and no setting, flag or values file turns one off. The one exception is the
+NetworkPolicy second fence of 2.4, which keeps its chart switch. The OpenShell driver meets items 1.2,
+1.3 and the egress-layer part of 2.1 only through the transition profile of section 7, until the
+ADR 0119 phase 1 gateway routes for OpenShell exist.
 
 ### 1. No credential inside the guest
 
@@ -76,8 +79,12 @@ remove or weaken one, and no setting, flag or values file turns one off.
 3. During the dual-driver window the OpenShell driver keeps `enforcement: enforce` on every L7 endpoint
    it renders. That is a driver fence on top of the gateway rule. It does not replace it.
 4. A plain `networking.k8s.io/v1` NetworkPolicy on the sandbox or worker namespaces is a second fence.
-   It is on by default and allows egress only to the egress layer, the control plane, the object store
-   and DNS. No CNI-specific feature is used. The preflight fails the `vm` and `hardened` tiers on a
+   It is on by default and allows egress only to the egress layer, the Koinon control plane (the API and
+   gateway Services, never the Kubernetes API server or the kubelet), the object store and DNS. The chart
+   keeps its switch (`sandboxNetworkPolicy.enabled`, ADR 0045 amendment 2026-11-11) for clusters whose
+   CNI cannot enforce NetworkPolicy. This fence is exempt from the rule that no setting turns a control
+   off, because the first fence (2.1) and the guest controls (section 4) do not depend on it. Turning it
+   off is reported by the preflight and in the audit log. No CNI-specific feature is used. The preflight fails the `vm` and `hardened` tiers on a
    cluster without a NetworkPolicy engine.
 5. Egress hosts and registry rules are gateway routes ([0080](0080-tool-set-matches-egress-and-escape-hosts.md)).
    An org's grant is one record that the gateway reads. Neither driver has a second list.
@@ -172,9 +179,16 @@ The values that ADRs 0045 and 0048 rendered stay in force for the OpenShell driv
 `enforcement: enforce` on every endpoint; no secrets in `SandboxSpec.environment` or template env;
 no `allow_uninspected_credentials`; `workspace_mode: managed`; `stable_placeholder: true` for every
 credential Koinon rotates; Landlock `hard_requirement`; OpenShell telemetry off; Kata guest seccomp
-enabled; the runtime class follows the tier (`kata` for `vm`); the default-deny NetworkPolicy of
-section 2.4. They are a profile of this ADR, not separate decisions. They go when ADR 0119 phase 5
-removes the driver. Decision 4 and 5 of 0048's execution layer (flavor image contract, ACP over exec
+enabled; the runtime class follows the tier (`kata` for `vm`); the deny-all NetworkPolicy, which keeps
+the deny-all shape with no allow rules, a stricter form of 2.4. They are a profile of this ADR, not separate decisions.
+
+Transition exceptions: today the OpenShell driver injects a gateway key, not the short-lived
+actor token of 1.2, and credentials live in OpenShell provider records with the supervisor swapping
+the placeholder inside the sandbox pod, which counts as its egress layer for 1.3 and 2.1 (this is why
+`stable_placeholder: true` stays). Exit condition: the ADR 0119 phase 1 gateway routes for OpenShell
+(forge and registry routes at the Koinon gateway) and the actor token; after that the driver meets
+section 1 in full, and a change is checked against 1.2 and 1.3 as written. The profile goes when
+ADR 0119 phase 5 removes the driver. Decision 4 and 5 of 0048's execution layer (flavor image contract, ACP over exec
 stdin) are not hardening rules and stay with 0048 until the driver work (#1087, #1094) replaces them.
 
 ### 8. Proof
