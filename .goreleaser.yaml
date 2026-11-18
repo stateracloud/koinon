@@ -47,11 +47,16 @@ builds:
     binary: koinon-agentd
     main: ./cmd/koinon-agentd
     flags: [-trimpath]
+  - <<: *build
+    id: koinon-gateway
+    binary: koinon-gateway
+    main: ./cmd/koinon-gateway
+    flags: [-trimpath]
 
 # Image names have no leading v: the tag v0.1.0 gives ghcr.io/stateracloud/koinon/api:0.1.0, the
 # chart's appVersion. `latest` only moves for final releases (.Prerelease is empty for them).
 # KOINON_IMAGE_REGISTRY is the registry path the images go under (<registry>/api, /reconciler,
-# /agentd). The release workflow sets it from github.repository (the packages belong to the
+# /agentd, /gateway). The release workflow sets it from github.repository (the packages belong to the
 # repository that builds them, #167); the default is for local dry runs and for a throwaway
 # registry (hack/mirror-release.sh is tested that way).
 # The harness image is built by the release workflow's harness job (hack/release-harness.sh), not here.
@@ -83,6 +88,10 @@ kos:
     id: koinon-agentd
     build: koinon-agentd
     repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/agentd"]
+  - <<: *ko
+    id: koinon-gateway
+    build: koinon-gateway
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/gateway"]
 
 # Signing and attestations are not done here: the release workflow's `sign` job does them with
 # cosign, from dist/digests.txt and dist/sbom, only when RELEASE_SIGNING is 'true' (ADR 0049).
