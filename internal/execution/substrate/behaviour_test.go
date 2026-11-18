@@ -113,6 +113,34 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(bytes.Equal(got, []byte(body))).To(BeTrue(), "the bytes are the same, in order")
 		}, SpecTimeout(30*time.Second))
 
+		It("keeps an idle stream alive across a long suspend and one failed reopen", func(ctx SpecContext) {
+			dd, c := newDriver(substrate.Config{
+				PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, StreamStall: 100 * time.Millisecond,
+			})
+			ready(ctx, dd, "sb")
+			p, err := dd.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+
+			time.Sleep(50 * time.Millisecond) // idle: the stream is open and delivers nothing
+			_, err = dd.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			time.Sleep(300 * time.Millisecond) // longer than StreamStall
+			c.FailNextOutputStreams(ws, "sb", 1)
+			_, err = dd.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = io.WriteString(p.Stdin(), "after\n")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Stdin().Close()).To(Succeed())
+			got, err := io.ReadAll(p.Stdout())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).To(Equal("after\n"))
+			code, err := p.Wait()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(BeZero())
+		}, SpecTimeout(15*time.Second))
+
 		It("does not resume a suspended sandbox to run a command", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			_, err := d.StopSandbox(ctx, ws, "sb")

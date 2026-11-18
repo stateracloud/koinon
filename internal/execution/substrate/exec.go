@@ -185,10 +185,18 @@ func (p *proc) pump() {
 		}
 		// Wait for a running actor and open the gate's registration in one step, so a suspend
 		// that starts now cancels this stream instead of racing it.
+		waitStart := time.Now()
 		sctx, cancel, err := p.d.enterWait(p.ctx, "Exec", p.k)
 		if err != nil {
 			p.finish(0, err)
 			return
+		}
+		openedAt := time.Now()
+		// Only quick, consecutive failures count as a stall. Time spent waiting for a suspended
+		// actor is not one, so the clock starts again after a long wait.
+		settled := 4 * p.d.cfg.PollInterval
+		if openedAt.Sub(waitStart) >= settled {
+			stallSince = time.Time{}
 		}
 		stream, err := p.d.process.StreamProcessOutput(route(sctx, p.k), &ateenvv1alpha.StreamProcessOutputRequest{
 			ProcessId: p.id, StdoutOffset: stdoutOff, StderrOffset: stderrOff, Follow: true,
@@ -233,7 +241,9 @@ func (p *proc) pump() {
 		}
 		// A break: the actor was suspended, or the connection dropped. Read again from the offsets,
 		// once the actor runs. A stream that fails over and over without a byte is a failure.
-		if progress {
+		if progress || time.Since(openedAt) >= settled {
+			// A stream that stayed up (idle between prompts) was not failing; a drop after it is a
+			// new break, not a continuation of the last one.
 			stallSince = time.Time{}
 		} else if stallSince.IsZero() {
 			stallSince = time.Now()

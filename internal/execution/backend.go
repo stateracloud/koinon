@@ -336,6 +336,10 @@ const (
 	PhaseSuspended    Phase = "Suspended"
 )
 
+// IsStopped reports whether the phase is a stopped one that keeps the sandbox state: PhaseStopped,
+// or PhaseSuspended on a driver whose only stopped state is a suspended one (see StopSandbox).
+func (p Phase) IsStopped() bool { return p == PhaseStopped || p == PhaseSuspended }
+
 // ExecRequest is a command to run in a sandbox.
 type ExecRequest struct {
 	// Command is the executable and its arguments; it is not parsed by a shell.

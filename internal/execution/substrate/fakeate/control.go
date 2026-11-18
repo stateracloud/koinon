@@ -30,6 +30,7 @@ type actor struct {
 	nextPID int
 
 	smu     sync.Mutex
+	failOut int // the next output streams that fail at once with Unavailable
 	streams map[int]context.CancelFunc
 	nextSID int
 }

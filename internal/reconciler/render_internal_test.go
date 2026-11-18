@@ -132,3 +132,21 @@ func TestSandboxResourcesAgentOverrideWinsOverTemplate(t *testing.T) {
 		t.Errorf("without an override the template applies, got %+v", got)
 	}
 }
+
+// A driver whose only stopped state is a suspended one (Agent Substrate) is a stopped sandbox to the
+// reconciler: it must not render as an error, and the reconciler's stopped paths must accept it.
+func TestSuspendedPhaseIsAStoppedSandbox(t *testing.T) {
+	for _, p := range []execution.Phase{execution.PhaseStopped, execution.PhaseSuspended} {
+		if got := sandboxState(p); got != store.SandboxStateStopped {
+			t.Errorf("sandboxState(%s) = %s, want %s", p, got, store.SandboxStateStopped)
+		}
+		if !p.IsStopped() {
+			t.Errorf("%s.IsStopped() = false", p)
+		}
+	}
+	for _, p := range []execution.Phase{execution.PhaseReady, execution.PhaseStopping, execution.PhaseError} {
+		if p.IsStopped() {
+			t.Errorf("%s.IsStopped() = true", p)
+		}
+	}
+}

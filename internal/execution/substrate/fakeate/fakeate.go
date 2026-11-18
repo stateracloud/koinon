@@ -212,6 +212,19 @@ func (c *Cluster) DropStreams(atespace, name string) {
 	}
 }
 
+// FailNextOutputStreams makes the next n output streams of an actor fail at once with Unavailable,
+// as a guest daemon that is not listening yet does after a resume.
+func (c *Cluster) FailNextOutputStreams(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failOut = n
+		a.smu.Unlock()
+	}
+}
+
 // TamperTag changes what the control API reports about a tag's stored snapshot, as a swapped
 // object would.
 func (c *Cluster) TamperTag(atespace, name string) {

@@ -294,6 +294,15 @@ func (g *guestServer) StreamProcessOutput(r *ateenvv1alpha.StreamProcessOutputRe
 	if err != nil {
 		return err
 	}
+	a.smu.Lock()
+	fail := a.failOut > 0
+	if fail {
+		a.failOut--
+	}
+	a.smu.Unlock()
+	if fail {
+		return status.Error(codes.Unavailable, "the guest daemon is not listening yet")
+	}
 	p, err := g.proc(a, r.GetProcessId())
 	if err != nil {
 		return err
