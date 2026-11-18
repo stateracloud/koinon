@@ -42,7 +42,7 @@ func (t *guardTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	}
 	c := &guardConn{
 		inner: inner, guard: t.guard, target: t.target, agent: t.agent,
-		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]pendingCall{}, owed: map[string]struct{}{},
+		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]pendingCall{}, owed: map[string]bool{},
 		workers: make(chan struct{}, maxInboundWorkers), notes: make(chan jsonrpc.Message, maxQueuedNotes),
 	}
 	t.conn.Store(c)
@@ -80,7 +80,7 @@ type guardConn struct {
 
 	mu      sync.Mutex
 	pending map[string]pendingCall // request ID -> the call the gateway sent
-	owed    map[string]struct{}    // server requests the SDK has not yet answered
+	owed    map[string]bool        // server requests the SDK has not yet answered; true while its reply is written
 }
 
 // pendingCall is a call the gateway sent: its method and the context of the call, which its
@@ -181,9 +181,19 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 		if m.Error != nil {
 			kind = KindError
 		}
+		// The request keeps its place in the bound until the reply write ends. The timer cannot
+		// release it while the write runs.
+		ok := idKey(m.ID)
 		c.mu.Lock()
-		delete(c.owed, idKey(m.ID))
+		if _, held := c.owed[ok]; held {
+			c.owed[ok] = true
+		}
 		c.mu.Unlock()
+		defer func() {
+			c.mu.Lock()
+			delete(c.owed, ok)
+			c.mu.Unlock()
+		}()
 		// The SDK writes the reply with a context that has no deadline: a target that stalls the
 		// reply must not hold the connection.
 		wctx, cancel := context.WithTimeout(ctx, unsolicitedTimeout)
@@ -397,11 +407,13 @@ func (c *guardConn) serverRequest(ctx context.Context, m *jsonrpc.Request) (json
 			c.mu.Unlock()
 			return refuse(refusedCode, "refused: too many requests wait for a reply", "")
 		}
-		c.owed[k] = struct{}{}
+		c.owed[k] = false
 		c.mu.Unlock()
 		time.AfterFunc(unsolicitedTimeout, func() {
 			c.mu.Lock()
-			delete(c.owed, k)
+			if writing, ok := c.owed[k]; ok && !writing {
+				delete(c.owed, k)
+			}
 			c.mu.Unlock()
 		})
 		return m, true
