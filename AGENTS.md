@@ -15,8 +15,9 @@ Instructions for coding agents working on Koinon. Humans: [CONTRIBUTING.md](CONT
 - No CNI-specific features (no Cilium dependency).
 - Don't weaken the execution hardening defaults of ADR 0120 (default-deny egress and enforced L7 rules on every
   inspected or credentialed route, in every tier; Landlock and seccomp in the guest where the tier supports them) or
-  the isolation tiers of ADR 0075 (a microVM per sandbox for the `vm` tier). Until #1094 removes the OpenShell
-  driver, its profile in ADR 0120 section 7 also holds (`enforcement: enforce` in every tier).
+  the isolation tiers of ADR 0075 (the `vm` tier requires a microVM per sandbox: a separate guest kernel under hardware
+  virtualisation with guest seccomp on; Kata is the default runtime, not a requirement). Until #1094 removes the
+  OpenShell driver, its profile in ADR 0120 section 7 also holds (`enforcement: enforce` in every tier).
 
 ## Rules for a folder
 
