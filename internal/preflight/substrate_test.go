@@ -251,7 +251,7 @@ var _ = Describe("Substrate checks", func() {
 				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("from a pod in namespace ate-system"),
 				ContainSubstring("invalid bearer token"), ContainSubstring("IPv6 unique-local address"),
 			))
-			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("--expected-jwt-issuer"), ContainSubstring("not a supported install")))
+			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("not a supported install")))
 		})
 
 		It("fails, not warns, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
@@ -262,15 +262,25 @@ var _ = Describe("Substrate checks", func() {
 			Expect(r.Message).To(ContainSubstring("invalid bearer token"))
 		})
 
-		It("passes with the in-cluster issuer and shows the cluster's own issuer string as information", func(ctx SpecContext) {
+		It("fails when the override names an issuer the discovery document does not, as Kubernetes always names its first issuer", func(ctx SpecContext) {
 			c := healthySubstrate()
 			c.issuer = fakeIssuer{issuer: "https://[fdae:1::1]:10001"}
 			c.config.Substrate.ExpectedIssuer = "https://kubernetes.default.svc"
+			c.probe = &fakeIssuerProbe{res: IssuerResult{TokenIssuer: "https://[fdae:1::1]:10001", Detail: `discovery document: issuer "https://[fdae:1::1]:10001" differs from "https://kubernetes.default.svc"`}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(And(ContainSubstring("differs"), ContainSubstring("discovery document names https://[fdae:1::1]:10001")))
+			Expect(r.Fix).To(ContainSubstring("first --service-account-issuer to https://kubernetes.default.svc"))
+		})
+
+		It("passes when the discovery issuer is the in-cluster issuer", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.issuer = fakeIssuer{issuer: "https://kubernetes.default.svc"}
 			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://kubernetes.default.svc", Detail: "ok"}}
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Pass), r.Message)
 			Expect(c.probe.probed).To(Equal("https://kubernetes.default.svc"))
-			Expect(r.Message).To(And(ContainSubstring("discovery document names https://[fdae:1::1]:10001"), ContainSubstring("carry iss https://kubernetes.default.svc")))
+			Expect(r.Message).To(ContainSubstring("carry iss https://kubernetes.default.svc"))
 		})
 
 		It("fails when the tokens of pods carry another issuer than Substrate would trust", func(ctx SpecContext) {

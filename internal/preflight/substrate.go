@@ -553,16 +553,16 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		}
 		return Result{
 			Check: check, Status: Fail, Message: msg + info + tokenInfo,
-			Fix: "pass --expected-jwt-issuer https://kubernetes.default.svc when the API server's tokens carry that issuer (Substrate then reads discovery from the in-cluster API server with the pod's token); " +
-				"otherwise set the API server's first --service-account-issuer to https://kubernetes.default.svc or to a URL that pods reach " +
-				"(on Talos: cluster.apiServer.extraArgs service-account-issuer). A sidecar that fakes the issuer is not a supported install",
+			Fix: "set the API server's first --service-account-issuer to https://kubernetes.default.svc (Substrate then reads discovery from the in-cluster API server with the pod's token), " +
+				"or to a URL that pods reach with a certificate from the system roots (on Talos: cluster.apiServer.extraArgs service-account-issuer). " +
+				"Kubernetes signs tokens and names the discovery issuer from that first value, so --expected-jwt-issuer cannot replace it. A sidecar that fakes the issuer is not a supported install",
 		}
 	}
 	if res.TokenIssuer != "" && res.TokenIssuer != issuer {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, ns, res.TokenIssuer),
-			Fix: "pass --expected-jwt-issuer " + res.TokenIssuer + " when pods reach it, or make the API server sign tokens with the issuer Substrate trusts " +
+			Fix: "pass --expected-jwt-issuer " + res.TokenIssuer + " (the value ate-setup would otherwise take from discovery), or make the API server sign tokens with the issuer Substrate trusts " +
 				"(the first --service-account-issuer; later ones are only accepted for validation)",
 		}
 	}
@@ -576,7 +576,7 @@ const issuerDiscoveryPath = ".well-known/openid-configuration"
 // issuer is the in-cluster one.
 const (
 	IssuerCAFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	IssuerTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	IssuerTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // G101: a path, not a credential
 )
 
 // inClusterIssuers are the issuers for which ate-setup configures ate-api-server with the pod's own CA and
@@ -640,7 +640,7 @@ func ProbeIssuerWith(ctx context.Context, issuer string, timeout time.Duration, 
 // tokenIssuerFromFile reads the iss claim of a JWT file without verifying it: the probe only compares the
 // string. It returns "" when the file or the claim is missing.
 func tokenIssuerFromFile(file string) string {
-	raw, err := os.ReadFile(file)
+	raw, err := os.ReadFile(file) //nolint:gosec // G304: the pod's own token path
 	if err != nil {
 		return ""
 	}

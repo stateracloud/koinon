@@ -127,12 +127,15 @@ information. The check fails when:
 
 Supported fixes, in this order:
 
-1. The tokens already carry `https://kubernetes.default.svc` (the API server lists it first in
-   `--service-account-issuer`): pass `--expected-jwt-issuer https://kubernetes.default.svc`. Substrate then
-   reads discovery from the in-cluster API server with the pod's token. Pods need no route to anything else.
-2. Otherwise set the API server's first `--service-account-issuer` to `https://kubernetes.default.svc`, or to a
-   URL that pods reach with a certificate from the system roots. On Talos, set `cluster.apiServer.extraArgs`.
-   Later `--service-account-issuer` values are only accepted for validation, not used to sign.
+1. Set the API server's first `--service-account-issuer` to `https://kubernetes.default.svc`. Substrate then
+   reads discovery from the in-cluster API server with the pod's token, and pods need no route to anything else.
+   On Talos, set `cluster.apiServer.extraArgs`. Later `--service-account-issuer` values are only accepted for
+   validation, not used to sign.
+2. Or set it to a URL that pods reach with a certificate from the system roots.
+
+Kubernetes signs tokens with the first issuer and writes the same value as `issuer` in the discovery document, so
+`--expected-jwt-issuer` cannot turn an unroutable issuer into a reachable one. It is only an override that must
+equal the `iss` of the cluster's tokens.
 
 The API server serves the discovery document and the JWKS to every service account through the
 `system:service-account-issuer-discovery` ClusterRoleBinding. A sidecar that serves a copy of the discovery

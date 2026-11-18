@@ -88,7 +88,7 @@ func newSubstrateCommand() *cobra.Command {
 	f.StringVar(&profile.PostgresStorageClass, "postgres-storage-class", "", "StorageClass of the bundled PostgreSQL volume (ate-setup --ateapi-postgres-storage-class); needed on a cluster without a default StorageClass")
 	f.StringVar(&profile.SetupCSI, "setup-csi", "", "ate-setup --setup-csi: also install a CSI driver (nfs, hostpath, both or none; default none)")
 	f.StringVar(&profile.ExpectedJWTIssuer, "expected-jwt-issuer", "", "service-account issuer Substrate's api server trusts (ate-setup --ateapi-expected-jwt-issuer); default is the issuer in the API server's discovery document. "+
-		"Set https://kubernetes.default.svc when the tokens carry that issuer but the discovery document names an address pods cannot reach")
+		"Only an override: it must equal the iss of the cluster's tokens and does not make an unroutable issuer reachable")
 	f.BoolVar(&profile.Kind, "kind", false, "target a local kind cluster (ate-setup --kind)")
 	mustRequire(install, "substrate-source")
 	mustRequire(install, "kubeconfig")
