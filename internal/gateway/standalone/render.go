@@ -49,6 +49,11 @@ type Options struct {
 	// processor on the MCP section, failureMode failClosed (ADR 0091). Empty refuses every call to
 	// an org's MCP server at the gateway.
 	GuardURL string
+	// MCPUpstreamCAFile is a PEM bundle, as the gateway pod sees the file, that verifies the
+	// certificate of every https MCP target (backendTLS.root, agentgateway v1.7.0 schema/config.md).
+	// Empty uses the system roots. It is for a private CA, so an https server of an internal
+	// network can hold a credential (ADR 0120: no credential over cleartext).
+	MCPUpstreamCAFile string
 }
 
 // OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
@@ -137,6 +142,9 @@ func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
 	}
 	if err := s.Validate(); err != nil {
 		return nil, "", err
+	}
+	if o.MCPUpstreamCAFile != "" && !strings.HasPrefix(o.MCPUpstreamCAFile, "/") {
+		return nil, "", errors.New("standalone: Options.MCPUpstreamCAFile must be an absolute path")
 	}
 	if len(s.Limits) > 0 && o.DatabaseURL == "" {
 		return nil, "", errors.New("standalone: limits need Options.DatabaseURL (agentgateway keeps budgets in a database)")
@@ -571,7 +579,13 @@ type mcpEndpoint struct {
 }
 
 type targetPolicies struct {
-	BackendAuth backendAuth `yaml:"backendAuth"`
+	BackendAuth *backendAuth `yaml:"backendAuth,omitempty"`
+	BackendTLS  *backendTLS  `yaml:"backendTLS,omitempty"`
+}
+
+// backendTLS is the TLS policy of a target (agentgateway v1.7.0 BackendPolicies.backendTLS).
+type backendTLS struct {
+	Root string `yaml:"root"`
 }
 
 // backendAuth injects a static credential read from a file when the config loads (agentgateway
@@ -776,10 +790,16 @@ func build(s gateway.State, o Options) document {
 				mt.Condition = `apiKey.org == ` + strconv.Quote(t.Org)
 			}
 			if t.CredentialFile != "" {
-				mt.Policies = &targetPolicies{BackendAuth: backendAuth{Credentials: []backendCredential{{
+				mt.Policies = &targetPolicies{BackendAuth: &backendAuth{Credentials: []backendCredential{{
 					Key:      backendKey{File: t.CredentialFile},
 					Location: keyLocation{Header: headerLocation{Name: t.CredentialHeader, Prefix: t.CredentialPrefix}},
 				}}}}
+			}
+			if o.MCPUpstreamCAFile != "" && strings.HasPrefix(t.URL, "https://") {
+				if mt.Policies == nil {
+					mt.Policies = &targetPolicies{}
+				}
+				mt.Policies.BackendTLS = &backendTLS{Root: o.MCPUpstreamCAFile}
 			}
 			doc.MCP.Targets = append(doc.MCP.Targets, mt)
 		}

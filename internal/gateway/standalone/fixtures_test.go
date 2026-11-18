@@ -133,5 +133,7 @@ func fixtures() []fixture {
 		{name: "mcp-servers", state: mcpServers},
 		{name: "model-formats", state: formats},
 		{name: "budgets-precision", state: budgets, options: standalone.Options{DatabaseURL: "sqlite:///data/agentgateway.db?mode=rwc"}},
+		// A private CA for https MCP servers: only the https targets name it.
+		{name: "mcp-upstream-ca", state: mcpServers, options: standalone.Options{MCPUpstreamCAFile: "/secrets/mcp-ca/ca.crt"}},
 	}
 }

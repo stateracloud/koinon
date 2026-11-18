@@ -96,6 +96,7 @@ var configKeys = map[string]string{
 	"github-tools-url":                     "githubTools.url",
 	"mcp-ask-url":                          "mcpAsk.url",
 	"mcp-guard-url":                        "mcpGuard.url",
+	"mcp-upstream-ca-file":                 "gateway.mcpUpstreamCaFile",
 	"koinon-tools-url":                     "koinonTools.url",
 	"recovery-policy":                      "recovery.policy",
 	"recovery-binding":                     "recovery.binding",
@@ -259,6 +260,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.mcpGuardURL, "mcp-guard-url", "", "koinon-api's MCP leak guard as agentgateway reaches it, http://host:port (ADR 0091); empty makes the gateway refuse every call to an org's MCP server")
+	fs.StringVar(&c.mcpUpstreamCAFile, "mcp-upstream-ca-file", "", "PEM bundle, as the standalone gateway pod sees it, that verifies the certificate of every https MCP server (a private CA); empty uses the system roots")
 	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
 	fs.StringVar(&c.koinonToolsURL, "koinon-tools-url", "", "URL of Koinon's own agent tools (ask_user) MCP server as agentgateway reaches it; empty offers no ask_user")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
