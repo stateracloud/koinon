@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -263,5 +264,35 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(err).NotTo(HaveOccurred()) // the route closes; the config applies
 		_, err = gw.ApplyMCP(ctx, cfg("https:mcp"))
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("closes only the unsafe target and still applies a key revocation", func(ctx SpecContext) {
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		DeferCleanup(gw.Drain)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", gw.Handler())
+		front := httptest.NewServer(mux)
+		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
+		k1, k2 := mustKey(agent), mustKey(agent)
+		cfg := func(keys ...gateway.Key) gateway.MCPConfig {
+			return gateway.MCPConfig{Keys: keys, MCPState: gateway.MCPState{
+				MCP:   []gateway.MCPTarget{{Name: "bad", Org: "acme", URL: "http://example.com/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/dev/null"}},
+				Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {{Target: "bad", All: true}}},
+			}}
+		}
+		_, err := gw.ApplyMCP(ctx, cfg(k1.Key, k2.Key))
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front.URL, k1.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "bad_read"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeTrue()) // the route is closed
+		_, err = gw.ApplyMCP(ctx, cfg(k2.Key))
+		Expect(err).NotTo(HaveOccurred())
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, front.URL+"/mcp", strings.NewReader("{}"))
+		req.Header.Set("Authorization", "Bearer "+k1.Material)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized)) // the revoked key is refused
 	})
 })

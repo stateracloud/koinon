@@ -202,6 +202,9 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		// The deadline or the caller ended the stream as the handshake finished: do not pool it.
 		_ = s.Close()
 		stop()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, context.DeadlineExceeded
 	}
 	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop, gt: gt}, nil

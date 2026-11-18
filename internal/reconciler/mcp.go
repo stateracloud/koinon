@@ -80,6 +80,10 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
+				if !gateway.CredentialSafeURL(row.Url) {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has a credential and its URL is not https", org.Slug, row.Name))
+					continue
+				}
 				sum := sha256.Sum256(row.Credential)
 				s.File = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				s.CredentialHeader, s.CredentialPrefix = row.CredentialHeader.String, row.CredentialPrefix

@@ -181,10 +181,17 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 		if m.Error != nil {
 			kind = KindError
 		}
-		if v := c.guard.Inspect(ctx, c.message(ToUpstream, kind, "", m)); v.Refuse {
-			return c.inner.Write(ctx, errorResponse(m.ID, refusedCode, v.Reason))
+		c.mu.Lock()
+		delete(c.owed, idKey(m.ID))
+		c.mu.Unlock()
+		// The SDK writes the reply with a context that has no deadline: a target that stalls the
+		// reply must not hold the connection.
+		wctx, cancel := context.WithTimeout(ctx, unsolicitedTimeout)
+		defer cancel()
+		if v := c.guard.Inspect(wctx, c.message(ToUpstream, kind, "", m)); v.Refuse {
+			return c.inner.Write(wctx, errorResponse(m.ID, refusedCode, v.Reason))
 		}
-		return c.inner.Write(ctx, msg)
+		return c.inner.Write(wctx, msg)
 	}
 	return c.inner.Write(ctx, msg)
 }
@@ -196,7 +203,19 @@ func (c *guardConn) track(ctx context.Context, m *jsonrpc.Request, kind Kind) {
 	defer c.mu.Unlock()
 	switch {
 	case kind == KindRequest:
-		c.pending[idKey(m.ID)] = pendingCall{method: m.Method, ctx: ctx}
+		k := idKey(m.ID)
+		c.pending[k] = pendingCall{method: m.Method, ctx: ctx}
+		// The entry must not outlive a caller that gave up, whether or not a cancellation reaches
+		// the target. A late response is still judged for a short grace time, then the entry goes.
+		context.AfterFunc(ctx, func() {
+			time.AfterFunc(unsolicitedTimeout, func() {
+				c.mu.Lock()
+				if cur, ok := c.pending[k]; ok && cur.ctx == ctx {
+					delete(c.pending, k)
+				}
+				c.mu.Unlock()
+			})
+		})
 	case m.Method == "notifications/cancelled":
 		var p struct {
 			RequestID any `json:"requestId"`
@@ -370,6 +389,21 @@ func (c *guardConn) serverRequest(ctx context.Context, m *jsonrpc.Request) (json
 		if v := c.guard.Inspect(ctx, gm); v.Refuse {
 			return refuse(refusedCode, v.Reason, "")
 		}
+		// The SDK writes the reply later. Until it does, the request counts against a bound, so a
+		// target cannot pile up unanswered requests; the count drops at the reply or at a timeout.
+		k := idKey(m.ID)
+		c.mu.Lock()
+		if len(c.owed) >= maxInboundWorkers {
+			c.mu.Unlock()
+			return refuse(refusedCode, "refused: too many requests wait for a reply", "")
+		}
+		c.owed[k] = struct{}{}
+		c.mu.Unlock()
+		time.AfterFunc(unsolicitedTimeout, func() {
+			c.mu.Lock()
+			delete(c.owed, k)
+			c.mu.Unlock()
+		})
 		return m, true
 	}
 	return refuse(jsonrpc.CodeMethodNotFound, "refused: the method "+m.Method+" is not allowed", ViolationUnknownRequest)
