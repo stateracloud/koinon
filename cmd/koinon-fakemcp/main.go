@@ -68,7 +68,12 @@ func main() {
 	useTLS := flag.Bool("tls", false, "serve HTTPS with a certificate generated at start (the CA is at GET /_fake/ca)")
 	tlsHosts := flag.String("tls-hosts", "localhost,127.0.0.1", "comma-separated host names and IPs of the generated certificate")
 	caFile := flag.String("ca-file", "", "with -tls: write the generated certificate (the CA to trust) to this file")
+	httpAddr := flag.String("http-addr", "", "with -tls: also serve plain HTTP on this address (for a server that needs no credential, such as the OAuth case)")
 	flag.Parse()
+	if *httpAddr != "" && !*useTLS {
+		slog.Error("-http-addr needs -tls (without it, -addr already serves plain HTTP)")
+		os.Exit(2)
+	}
 	if *caFile != "" && !*useTLS {
 		slog.Error("-ca-file needs -tls")
 		os.Exit(2)
@@ -77,13 +82,13 @@ func main() {
 	if *useTLS {
 		hosts = strings.Split(*tlsHosts, ",")
 	}
-	if err := run(*addr, *header, *value, *useTLS, hosts, *caFile); err != nil {
+	if err := run(*addr, *httpAddr, *header, *value, *useTLS, hosts, *caFile); err != nil {
 		slog.Error("koinon-fakemcp failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, header, value string, useTLS bool, tlsHosts []string, caFile string) error {
+func run(addr, httpAddr, header, value string, useTLS bool, tlsHosts []string, caFile string) error {
 	recs := &log{}
 	srv := mcp.NewServer(&mcp.Implementation{Name: project.Name + "-fakemcp", Version: project.Version}, nil)
 	type args struct {
@@ -129,7 +134,7 @@ func run(addr, header, value string, useTLS bool, tlsHosts []string, caFile stri
 	// A server that wants per-user OAuth, as the MCP authorization specification describes it: a 401
 	// whose WWW-Authenticate names the protected resource metadata.
 	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://fakemcp/.well-known/oauth-protected-resource"`)
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://fakemcp/.well-known/oauth-protected-resource"`)
 		http.Error(w, "sign in", http.StatusUnauthorized)
 	})
 	mux.HandleFunc("GET /_fake/requests", func(w http.ResponseWriter, _ *http.Request) {
@@ -167,7 +172,22 @@ func run(addr, header, value string, useTLS bool, tlsHosts []string, caFile stri
 		defer cancel()
 		_ = hs.Shutdown(sctx)
 	}()
-	slog.Info("serving the fake MCP server", "addr", addr, "tls", useTLS)
+	if httpAddr != "" {
+		plain := &http.Server{Addr: httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = plain.Shutdown(sctx)
+		}()
+		go func() {
+			if err := plain.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("plain HTTP listener failed", "err", err)
+				stop()
+			}
+		}()
+	}
+	slog.Info("serving the fake MCP server", "addr", addr, "tls", useTLS, "httpAddr", httpAddr)
 	serve := hs.ListenAndServe
 	if useTLS {
 		serve = func() error { return hs.ListenAndServeTLS("", "") }

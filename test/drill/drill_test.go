@@ -243,6 +243,14 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 	_, err = kube.KubectlStdin(ctx, string(b), "apply", "-f", "-")
 	must(err, "copy the client certificate")
 
+	// The CA of the fake MCP server (it serves https, ADR 0120), before the gateway pod needs the Secret.
+	caPEM, err := kube.Kubectl(ctx, "get", "--raw", drill.FakeMCPCAPath(top.FakesNamespace))
+	must(err, "read the fake MCP server's CA")
+	caSecret, err := drill.MCPUpstreamCASecretManifest(in.Namespace, runID, caPEM)
+	must(err, "marshal the CA Secret")
+	_, err = kube.KubectlStdin(ctx, caSecret, "apply", "-f", "-")
+	must(err, "create the MCP upstream CA Secret")
+
 	// Home checkpoints (phase 2): the Secret of the object store's endpoint and fake keys, before the chart needs it.
 	_, err = kube.KubectlStdin(ctx, drill.CheckpointSecretManifest(in.Namespace, runID, top.FakesNamespace), "apply", "-f", "-")
 	must(err, "create the checkpoint storage Secret")

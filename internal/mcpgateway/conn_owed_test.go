@@ -91,3 +91,31 @@ func TestOverloadedEndsOnlyForAResponse(t *testing.T) {
 		t.Fatal("the pending record must be removed")
 	}
 }
+
+// A reply for an ID that is not owed leaves the owed entries alone: a late reply to a request that the
+// timer already released must not remove a newer request.
+func TestReplyForUnowedIDKeepsOwedEntries(t *testing.T) {
+	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]bool{}, pending: map[string]pendingCall{}}
+	ctx := context.Background()
+	if _, ok := c.serverRequest(ctx, ping(1)); !ok {
+		t.Fatal("request 1 was not admitted")
+	}
+	if err := c.Write(ctx, &jsonrpc.Response{ID: ping(2).ID, Result: []byte("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	n := len(c.owed)
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("a reply for an unowed ID changed the owed entries: %d left, want 1", n)
+	}
+	if err := c.Write(ctx, &jsonrpc.Response{ID: ping(1).ID, Result: []byte("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	n = len(c.owed)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("the reply of the owed request left %d entries, want 0", n)
+	}
+}

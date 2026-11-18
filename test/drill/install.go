@@ -3,6 +3,7 @@
 package drill
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -40,9 +41,30 @@ func FakeModelURL(fakesNS string) string {
 	return fmt.Sprintf("http://fakemodel.%s.svc:8080/v1", fakesNS)
 }
 
-// FakeMCPURL is the URL the seed registers the fake MCP server under.
+// FakeMCPURL is the URL the seed registers the fake MCP server under. It is https: the server has a
+// credential, and ADR 0120 sends a credential only over https.
 func FakeMCPURL(fakesNS string) string {
-	return fmt.Sprintf("http://fakemcp.%s.svc:8080/mcp", fakesNS)
+	return fmt.Sprintf("https://fakemcp.%s.svc:8080/mcp", fakesNS)
+}
+
+// MCPUpstreamCASecret is the Secret, in each install's namespace, that holds the CA of the fake MCP server
+// (the base values, test/e2e/kind/koinon-values.yaml, mount it: gateway.standalone.mcpUpstreamCA).
+const MCPUpstreamCASecret = "mcp-upstream-ca" //nolint:gosec // the name of a Secret, not a credential
+
+// FakeMCPCAPath is the API server path of the fake MCP server's CA: the server makes it at start and
+// serves it at /_fake/ca. kubectl get --raw reads it through the Service proxy (the "https:" prefix).
+func FakeMCPCAPath(fakesNS string) string {
+	return fmt.Sprintf("/api/v1/namespaces/%s/services/https:fakemcp:8080/proxy/_fake/ca", fakesNS)
+}
+
+// MCPUpstreamCASecretManifest is the Secret that holds the CA (a public certificate) in an install's namespace.
+func MCPUpstreamCASecretManifest(ns, runID, caPEM string) (string, error) {
+	b, err := json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata":   map[string]any{"name": MCPUpstreamCASecret, "namespace": ns, "labels": map[string]string{RunLabel: runID}},
+		"stringData": map[string]string{"ca.crt": caPEM},
+	})
+	return string(b), err
 }
 
 // Fake MCP server credential: the header the gateway injects and its (obviously fake) value.
@@ -333,11 +355,11 @@ spec:
         - name: fakemcp
           image: %[4]s
           imagePullPolicy: IfNotPresent
-          args: ["-addr", ":8080", "-header", "%[5]s", "-value", "%[6]s"]
+          args: ["-addr", ":8080", "-header", "%[5]s", "-value", "%[6]s", "-tls", "-tls-hosts", "fakemcp.%[1]s.svc,fakemcp.%[1]s.svc.cluster.local,fakemcp"]
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: http, scheme: HTTPS}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false

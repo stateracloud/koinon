@@ -114,10 +114,11 @@ spec:
           imagePullPolicy: Always
           # HTTPS with a CA made at start (ADR 0120: Koinon sends a credential only over HTTPS). run.sh reads the
           # CA from /_fake/ca and gives it to the gateway in the Secret mcp-upstream-ca. No key is in the tree.
-          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token", "-tls",
+          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token", "-tls", "-http-addr", ":8081",
                  "-tls-hosts", "fakemcp.koinon-e2e-fakes.svc,fakemcp.koinon-e2e-fakes.svc.cluster.local,fakemcp.koinon-e2e-fakes,fakemcp,localhost,127.0.0.1"]
           ports:
             - {name: http, containerPort: 8080}
+            - {name: plain, containerPort: 8081}
           readinessProbe:
             httpGet: {path: /healthz, port: http, scheme: HTTPS}
           securityContext:
@@ -135,3 +136,5 @@ spec:
   selector: {app: fakemcp}
   ports:
     - {name: http, port: 8080, targetPort: http}
+    # Plain HTTP, for the server that asks for OAuth (it has no credential, so ADR 0120 allows http).
+    - {name: plain, port: 8081, targetPort: plain}

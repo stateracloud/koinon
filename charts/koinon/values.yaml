@@ -340,7 +340,8 @@ gateway:
     # A private CA for https MCP servers (ADR 0120: a server with a credential must use https). secretName
     # names a Secret in this namespace that holds a PEM bundle under `key`; the gateway pod mounts it and
     # verifies the certificate of every https MCP server with it, instead of the system roots. It is
-    # used for MCP upstream TLS only, never for model providers. Empty keeps the system roots.
+    # used for MCP upstream TLS only, never for model providers. Empty keeps the system roots. The bundle replaces the system roots, so it
+    # must also hold the root of every public https MCP server the install uses.
     # Not for gateway.mode=kubernetes (frozen, ADR 0097): the chart refuses that combination.
     mcpUpstreamCA:
       secretName: ""

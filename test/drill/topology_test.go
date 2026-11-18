@@ -175,13 +175,17 @@ func TestTheFakeMCPServerIsAnInputAndItsHostIsAllowed(t *testing.T) {
 		t.Fatalf("a topology without fakeMcpImage must be refused, got %v", err)
 	}
 	m := drill.FakeMCPManifest("koinon-drill-fakes-a1b2c3", "a1b2c3", "localhost:5001/koinon-fakemcp:e2e")
-	for _, want := range []string{"name: fakemcp", drill.FakeMCPKey, drill.RunLabel + `: "a1b2c3"`} {
+	for _, want := range []string{"name: fakemcp", drill.FakeMCPKey, drill.RunLabel + `: "a1b2c3"`, `"-tls"`, "scheme: HTTPS"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("the fake MCP manifest lacks %q", want)
 		}
 	}
-	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
-		t.Error("the fake MCP URL names the Service in the fakes namespace")
+	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "https://fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
+		t.Error("the fake MCP URL is https and names the Service in the fakes namespace")
+	}
+	sec, err := drill.MCPUpstreamCASecretManifest("koinon-a", "a1b2c3", "-----BEGIN CERTIFICATE-----")
+	if err != nil || !strings.Contains(sec, `"name":"mcp-upstream-ca"`) || !strings.Contains(sec, `"ca.crt"`) {
+		t.Errorf("the CA Secret manifest is wrong: %v %s", err, sec)
 	}
 }
 

@@ -185,15 +185,20 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 		// release it while the write runs.
 		ok := idKey(m.ID)
 		c.mu.Lock()
-		if _, held := c.owed[ok]; held {
+		_, held := c.owed[ok]
+		if held {
 			c.owed[ok] = true
 		}
 		c.mu.Unlock()
-		defer func() {
-			c.mu.Lock()
-			delete(c.owed, ok)
-			c.mu.Unlock()
-		}()
+		if held {
+			// Only a request that was owed leaves the bound. A late reply to a request the timer
+			// already released must not remove a newer request that reuses the ID.
+			defer func() {
+				c.mu.Lock()
+				delete(c.owed, ok)
+				c.mu.Unlock()
+			}()
+		}
 		// The SDK writes the reply with a context that has no deadline: a target that stalls the
 		// reply must not hold the connection.
 		wctx, cancel := context.WithTimeout(ctx, unsolicitedTimeout)

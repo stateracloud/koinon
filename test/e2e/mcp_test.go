@@ -89,7 +89,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL (a kubectl bound to the e2e cluster's context)")
 
 	By("a server that asks each user to sign in is refused")
-	code, body := admin(ctx, http.MethodPost, "/mcp-servers", `{"name":"oauthy","url":"https://fakemcp.koinon-e2e-fakes.svc:8080/oauth-mcp"}`)
+	code, body := admin(ctx, http.MethodPost, "/mcp-servers", `{"name":"oauthy","url":"http://fakemcp.koinon-e2e-fakes.svc:8081/oauth-mcp"}`)
 	Expect(code).To(Equal(http.StatusBadRequest), string(body))
 	Expect(string(body)).To(ContainSubstring("OAuth"))
 
