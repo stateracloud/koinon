@@ -270,6 +270,7 @@ var _ = Describe("Substrate checks", func() {
 			p := preflight.SafeIssuerPatch("", "https://old.example")
 			Expect(p).To(And(ContainSubstring("accepted:"), ContainSubstring("--api-audiences=")))
 			Expect(strings.Count(p, "issuerURL")).To(Equal(1))
+			Expect(p).To(And(ContainSubstring("keep every entry"), ContainSubstring("--api-audiences"), ContainSubstring("accepted.audiences")))
 			Expect(preflight.SafeIssuerPatch("https://kubernetes.default.svc")).To(BeEmpty())
 			Expect(preflight.SafeIssuerPatch("")).To(BeEmpty())
 		})

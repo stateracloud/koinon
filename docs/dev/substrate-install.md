@@ -181,6 +181,10 @@ kubeadm, the kube-apiserver flags (the first `--service-account-issuer` signs):
 --api-audiences=https://kubernetes.default.svc,<old issuer>
 ```
 
+Read the audiences the cluster accepts now (`--api-audiences`, or `accepted.audiences`) first and keep every
+existing entry in the list: the lists above show only the two issuers, and dropping another audience makes the
+API server refuse the tokens that carry it.
+
 Cost: one API server restart. Tokens issued before the change stay valid until they expire.
 
 With the issuer `https://kubernetes.default.svc` the installer writes the `ate-api-authentication` ConfigMap

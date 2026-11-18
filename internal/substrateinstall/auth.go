@@ -70,23 +70,40 @@ func (i *Installer) EnsureAPIAuthentication(ctx context.Context, issuer string) 
 			return false, fmt.Errorf("parse %s of ConfigMap %s/%s: %w", authConfigKey, ns, authConfigMap, err)
 		}
 	}
-	found := false
+	// Reconcile the entry that already uses this issuer, whatever its name: Substrate's validator rejects two
+	// providers with one issuer. Else the entry named kubernetes. Else add one.
+	idx := -1
 	for n, p := range cfg.JWTProviders {
-		if p["name"] != kubernetesProvider {
-			continue
+		if p["issuer"] == issuer {
+			idx = n
+			break
 		}
-		found = true
-		if p["issuer"] == issuer && p["certificateAuthorityFile"] == preflight.IssuerCAFile && p["discoveryTokenFile"] == preflight.IssuerTokenFile {
-			return false, nil
+	}
+	if idx < 0 {
+		for n, p := range cfg.JWTProviders {
+			if p["name"] == kubernetesProvider {
+				idx = n
+				break
+			}
 		}
-		// Keep the entry's audiences (an operator may have added one); an empty list is invalid, so it gets the default.
-		if a, ok := p["audiences"].([]any); ok && len(a) > 0 {
+	}
+	if idx < 0 {
+		cfg.JWTProviders = append([]map[string]any{want}, cfg.JWTProviders...)
+	} else {
+		p := cfg.JWTProviders[idx]
+		a, _ := p["audiences"].([]any)
+		if p["issuer"] == issuer && p["certificateAuthorityFile"] == preflight.IssuerCAFile && p["discoveryTokenFile"] == preflight.IssuerTokenFile && len(a) > 0 {
+			// Already right. The ConfigMap may still have been written by a run whose restart failed.
+			return i.restartIfStale(ctx, ns, cm.Data[authConfigKey])
+		}
+		// Keep the entry's name and audiences (an operator may have added one); an empty list is invalid, so it gets the default.
+		if n, ok := p["name"].(string); ok && n != "" {
+			want["name"] = n
+		}
+		if len(a) > 0 {
 			want["audiences"] = a
 		}
-		cfg.JWTProviders[n] = want
-	}
-	if !found {
-		cfg.JWTProviders = append([]map[string]any{want}, cfg.JWTProviders...)
+		cfg.JWTProviders[idx] = want
 	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -127,6 +144,22 @@ func (i *Installer) restartAPIServer(ctx context.Context, ns, data string) error
 		return fmt.Errorf("restart Deployment %s/%s: %w", ns, apiServerName, err)
 	}
 	return nil
+}
+
+// restartIfStale rolls the api server when its pod template does not carry the hash of data: a rerun after a
+// write whose restart failed finds the ConfigMap right and the Deployment still on the old config.
+func (i *Installer) restartIfStale(ctx context.Context, ns, data string) (bool, error) {
+	d, err := i.Kube.AppsV1().Deployments(ns).Get(ctx, apiServerName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Deployment %s/%s: %w", ns, apiServerName, err)
+	}
+	if d.Spec.Template.Annotations[authRestartAnnotation] == fmt.Sprintf("%x", sha256.Sum256([]byte(data))) {
+		return false, nil
+	}
+	return true, i.restartAPIServer(ctx, ns, data)
 }
 
 func stampAuthConfig(d *appsv1.Deployment, data string) {

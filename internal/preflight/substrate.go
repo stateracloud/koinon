@@ -631,6 +631,7 @@ func SafeIssuerPatch(oldIssuer ...string) string {
 		return ""
 	}
 	return fmt.Sprintf(`. The safe change keeps the old issuer and both audiences, so tokens that exist stay valid, and costs one API server restart.
+Before you apply it, read the audiences the cluster accepts now (--api-audiences, or accepted.audiences) and keep every entry in the list: the lists below show only the two issuers. Dropping one, such as an audience another system uses, makes the API server refuse its tokens.
 Talos and Omni (a cluster config patch):
 ---
 apiVersion: v1alpha1
@@ -648,7 +649,7 @@ kubeadm (the kube-apiserver flags; the first --service-account-issuer signs):
   --service-account-issuer=%[1]s
   --service-account-issuer=%[2]s
   --api-audiences=%[1]s,%[2]s
-Do not set the new issuer alone: the API server then rejects every token with the old audience`, in, old)
+Do not set the new issuer alone: the API server then rejects every token with the old audience. Keep any other audience the cluster accepts now`, in, old)
 }
 
 // issuerDiscoveryPath is the discovery path the probe fetches under the issuer.
