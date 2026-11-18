@@ -12,7 +12,7 @@ creates, reads and deletes one short-lived unprivileged pod in the release names
 NetworkPolicy probe two such pods (koinon-api's image, the default runtime) and one NetworkPolicy
 that selects only its own server pod, all deleted when it ends.
 */ -}}
-{{- if .Values.preflight.enabled }}
+{{- if and .Values.preflight.enabled (ne (.Values.execution.driver | default "openshell") "substrate") }}
 {{- include "koinon.validate" . }}
 {{- $name := include "koinon.componentName" (list . "preflight") }}
 {{- $clusterName := printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}

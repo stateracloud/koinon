@@ -18,6 +18,8 @@ package there.
     `1c08a7a578afd896373511a83beb242aec1425c0`). The worker, atelet and object-store protos are not
     needed by a client.
 
+`hack/generate.sh` generates from a copy of `ateapi.proto` in which the `MethodOptions` extension `method` moves from number 50000 to 51000: OpenShell's `authorization` extension has 50000, and two Go packages that register one extension number panic at init, so no binary could link both drivers (#1088). The option is descriptor metadata of Substrate's server, not wire data. Drop the patch when one of the two is renumbered upstream.
+
 `buf.gen.substrate.yaml` replaces the upstream `go_package` options with `M` options. The files are
 not part of the buf workspace in `buf.yaml`, so `buf lint` and `buf breaking` check only Koinon's
 own protos.

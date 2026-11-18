@@ -56,6 +56,13 @@ func newRootCommandWith(run func(context.Context, config) error, list func(conte
 // configKeys maps a flag to its key in the chart's config.yaml (charts/koinon/templates/config.yaml).
 // A flag that is not here is not in the file.
 var configKeys = map[string]string{
+	"execution-driver":                     "execution.driver",
+	"substrate-control-address":            "execution.substrate.controlAddress",
+	"substrate-router-address":             "execution.substrate.routerAddress",
+	"substrate-ca-file":                    "execution.substrate.caFile",
+	"substrate-server-name":                "execution.substrate.serverName",
+	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
+	"substrate-token-file":                 "execution.substrate.tokenFile",
 	"openshell-address":                    "openshell.address",
 	"openshell-tls-dir":                    "openshell.tls",
 	"runtime-class":                        "openshell.runtimeClassName",
@@ -103,7 +110,7 @@ var configKeys = map[string]string{
 
 // requiredFlags are the settings the reconciler cannot start without, from any source.
 var requiredFlags = []string{
-	"database-url", "namespace", "openshell-address", "gateway-url", "kek-dir", "provider-keys-secret", "provider-keys-dir",
+	"database-url", "namespace", "gateway-url", "kek-dir", "provider-keys-secret", "provider-keys-dir",
 }
 
 func newServeCommand(v *viper.Viper, run func(context.Context, config) error) *cobra.Command {
@@ -140,6 +147,22 @@ func newServeCommand(v *viper.Viper, run func(context.Context, config) error) *c
 func (c *config) finish(v *viper.Viper) error {
 	// An empty value (the chart renders an unset one that way) takes the default.
 	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
+	// An empty value (the chart renders an unset one that way) takes the default driver.
+	orDefault(&c.execution.Driver, cli.DriverOpenShell)
+	c.execution.OpenShell = cli.OpenShell{Address: c.openshellAddress, TLSDir: c.openshellTLSDir}
+	c.execution.Owner = c.installMark
+	if err := c.execution.Validate(c.openshellAddress); err != nil {
+		return err
+	}
+	if c.execution.IsSubstrate() {
+		// These three act on OpenShell's workspace namespaces and pods, which Substrate does not make
+		// (the actor state replaces the observer, ADR 0119).
+		for flag, on := range map[string]bool{"--sandbox-observer": c.sandboxObserver, "--sandbox-network-policy": c.sandboxNetworkPolicy, "--sandbox-limit-range": c.sandboxLimitRange} {
+			if on {
+				return fmt.Errorf("%s acts on OpenShell's namespaces and needs --execution-driver=openshell", flag)
+			}
+		}
+	}
 	orDefault(&c.gatewayClass, "agentgateway")
 	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	if c.gatewayMode == project.GatewayKubernetes {
@@ -204,7 +227,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.namespace, "namespace", "", "Koinon's namespace, for agent key Secrets (default $POD_NAMESPACE)")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	fs.StringVar(&c.logLevel, "log-level", "info", "debug, info, warn or error")
-	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
+	c.execution.Flags(fs)
+	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port (--execution-driver=openshell)")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.installMark, "install-mark", "", "this install's random mark (the chart's koinon-install-mark Secret), which labels the OpenShell objects it makes; empty turns the ownership checks off")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")

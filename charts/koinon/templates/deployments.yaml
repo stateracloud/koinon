@@ -165,6 +165,9 @@ spec:
             {{- end }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
+            {{- with include "koinon.substrateVolumeMount" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- else }}
             {{- with include "koinon.apiSecretVolumeMounts" $ | trim }}
             {{- . | nindent 12 }}
@@ -196,6 +199,9 @@ spec:
         {{- end }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
+        {{- with include "koinon.substrateVolume" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- else }}
         {{- with include "koinon.apiSecretVolumes" $ | trim }}
         {{- . | nindent 8 }}
