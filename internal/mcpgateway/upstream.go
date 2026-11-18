@@ -39,6 +39,7 @@ type upstream struct {
 	cfg     gateway.MCPTarget
 	session *mcp.ClientSession
 	stop    context.CancelFunc // ends the stream context of the session
+	gt      *guardTransport    // its liveness tells that the connection is lost
 
 	mu       sync.Mutex
 	lastUsed time.Time
@@ -99,7 +100,7 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return nil, errDraining
 	}
-	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && u.cfg == t && u.acquire() {
+	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg == t && u.acquire() {
 		g.mu.Unlock()
 		return u, nil
 	}
@@ -180,14 +181,15 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		case <-sctx.Done():
 		}
 	}()
-	s, err := client.Connect(sctx, &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}, nil)
+	gt := &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}
+	s, err := client.Connect(sctx, gt, nil)
 	if err != nil {
 		timer.Stop()
 		stop()
 		return nil, err
 	}
 	timer.Stop()
-	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop}, nil
+	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop, gt: gt}, nil
 }
 
 // evict drops the upstream session of key, so the next call connects again.

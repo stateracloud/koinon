@@ -8,6 +8,8 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,6 +24,14 @@ type guardTransport struct {
 	guard  Guard
 	target string
 	agent  gateway.AgentRef
+
+	conn atomic.Pointer[guardConn] // the connection Connect made, for the liveness check
+}
+
+// dead reports that the connection is known to be lost, so a call is not sent on it.
+func (t *guardTransport) dead() bool {
+	c := t.conn.Load()
+	return c != nil && c.lost.Load()
 }
 
 // Connect implements mcp.Transport.
@@ -32,11 +42,14 @@ func (t *guardTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	}
 	c := &guardConn{
 		inner: inner, guard: t.guard, target: t.target, agent: t.agent,
-		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]string{},
+		in: make(chan readResult, 16), done: make(chan struct{}), pending: map[string]pendingCall{},
+		workers: make(chan struct{}, maxInboundWorkers), notes: make(chan jsonrpc.Message, maxQueuedNotes),
 	}
+	t.conn.Store(c)
 	// The connect context may end when Connect returns; the pump lives as long as the connection.
 	c.life, c.stop = context.WithCancel(context.WithoutCancel(ctx))
 	go c.pump()
+	go c.noteLoop()
 	return c, nil
 }
 
@@ -60,9 +73,28 @@ type guardConn struct {
 	done chan struct{}
 	once sync.Once
 
+	lost    atomic.Bool   // the read side failed or the connection closed
+	workers chan struct{} // admission for the goroutines that handle responses and server requests
+	notes   chan jsonrpc.Message
+	wg      sync.WaitGroup // the workers in flight, so a read error never overtakes a response
+
 	mu      sync.Mutex
-	pending map[string]string // request ID -> method, for the calls the gateway sent
+	pending map[string]pendingCall // request ID -> the call the gateway sent
 }
+
+// pendingCall is a call the gateway sent: its method and the context of the call, which its
+// response is judged under.
+type pendingCall struct {
+	method string
+	ctx    context.Context //nolint:containedctx // the call's own context, kept until its response
+}
+
+const (
+	maxInboundWorkers = 64
+	maxQueuedNotes    = 64
+	// unsolicitedTimeout bounds the guard on a message that answers no call of ours.
+	unsolicitedTimeout = 30 * time.Second
+)
 
 // SessionID implements mcp.Connection.
 func (c *guardConn) SessionID() string { return c.inner.SessionID() }
@@ -81,7 +113,7 @@ func (c *guardConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 
 // Close implements mcp.Connection.
 func (c *guardConn) Close() error {
-	c.once.Do(func() { close(c.done); c.stop() })
+	c.once.Do(func() { c.lost.Store(true); close(c.done); c.stop() })
 	return c.inner.Close()
 }
 
@@ -141,7 +173,7 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 			}
 			return nil
 		}
-		c.track(m, kind)
+		c.track(ctx, m, kind)
 		return c.inner.Write(ctx, msg)
 	case *jsonrpc.Response:
 		kind := KindResult
@@ -158,12 +190,12 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 
 // track keeps the pending map right: a call adds its ID, a cancellation removes it, so a call that
 // the target never answers does not stay in the map.
-func (c *guardConn) track(m *jsonrpc.Request, kind Kind) {
+func (c *guardConn) track(ctx context.Context, m *jsonrpc.Request, kind Kind) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch {
 	case kind == KindRequest:
-		c.pending[idKey(m.ID)] = m.Method
+		c.pending[idKey(m.ID)] = pendingCall{method: m.Method, ctx: ctx}
 	case m.Method == "notifications/cancelled":
 		var p struct {
 			RequestID any `json:"requestId"`
@@ -182,22 +214,91 @@ func (c *guardConn) pump() {
 	for {
 		msg, err := c.inner.Read(ctx)
 		if err != nil {
-			c.deliver(readResult{err: err})
+			c.lost.Store(true)
+			// Deliver what is in flight first: a read error must not overtake a response already read.
+			go func() {
+				c.wg.Wait()
+				c.deliver(readResult{err: err})
+			}()
 			return
 		}
-		// The guard may block (an ask held for a person). A response or a server request is handled
-		// on its own goroutine, so one held message does not stop the others on this connection.
+		// The guard may block (an ask held for a person), so the reader never runs it. A notification
+		// goes to one queue, which keeps its order. A response or a server request gets a goroutine
+		// from a bounded set; when the set is full the message fails closed.
 		if m, ok := msg.(*jsonrpc.Request); ok && !m.ID.IsValid() {
-			if out, ok := c.inbound(ctx, msg); ok {
-				c.deliver(readResult{msg: out})
+			select {
+			case c.notes <- msg:
+			default: // the queue is full: drop the notification
 			}
 			continue
 		}
+		select {
+		case c.workers <- struct{}{}:
+			c.wg.Add(1)
+			go func() {
+				defer func() { <-c.workers; c.wg.Done() }()
+				c.handle(msg)
+			}()
+		default:
+			c.overloaded(msg)
+		}
+	}
+}
+
+// handle runs the guard on a response or a server request and passes the result on.
+func (c *guardConn) handle(msg jsonrpc.Message) {
+	ctx, cancel := c.contextFor(msg)
+	defer cancel()
+	if out, ok := c.inbound(ctx, msg); ok {
+		c.deliver(readResult{msg: out})
+	}
+}
+
+// contextFor returns the context a message is judged under: the call's own context for a response,
+// a bounded one for anything that answers no call of ours.
+func (c *guardConn) contextFor(msg jsonrpc.Message) (context.Context, context.CancelFunc) {
+	if m, ok := msg.(*jsonrpc.Response); ok {
+		c.mu.Lock()
+		p, found := c.pending[idKey(m.ID)]
+		c.mu.Unlock()
+		if found && p.ctx != nil {
+			return p.ctx, func() {}
+		}
+	}
+	return context.WithTimeout(c.life, unsolicitedTimeout)
+}
+
+// overloaded answers a message the connection has no room to inspect. A response becomes an error
+// for its call; a server request is refused to the target.
+func (c *guardConn) overloaded(msg jsonrpc.Message) {
+	switch m := msg.(type) {
+	case *jsonrpc.Response:
+		c.mu.Lock()
+		delete(c.pending, idKey(m.ID))
+		c.mu.Unlock()
+		go c.deliver(readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")})
+	case *jsonrpc.Request:
 		go func() {
+			ctx, cancel := context.WithTimeout(c.life, unsolicitedTimeout)
+			defer cancel()
+			_ = c.inner.Write(ctx, errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded"))
+		}()
+	}
+}
+
+// noteLoop inspects notifications one at a time, in the order they came.
+func (c *guardConn) noteLoop() {
+	for {
+		select {
+		case msg := <-c.notes:
+			ctx, cancel := context.WithTimeout(c.life, unsolicitedTimeout)
 			if out, ok := c.inbound(ctx, msg); ok {
 				c.deliver(readResult{msg: out})
 			}
-		}()
+			cancel()
+		case <-c.done:
+			return
+		}
 	}
 }
 
@@ -215,7 +316,7 @@ func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message) (jsonrpc.M
 		return c.serverRequest(ctx, m)
 	case *jsonrpc.Response:
 		c.mu.Lock()
-		method := c.pending[idKey(m.ID)]
+		method := c.pending[idKey(m.ID)].method
 		delete(c.pending, idKey(m.ID))
 		c.mu.Unlock()
 		kind := KindResult

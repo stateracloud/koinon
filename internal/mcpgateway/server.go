@@ -257,25 +257,16 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 
 	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
 	defer cancel()
+	// One attempt. A call that may have reached the target is never sent again: a write could run
+	// twice. A session known to be lost is replaced before the call, in session().
 	var res *mcp.CallToolResult
-	var err error
-	for attempt := range 2 {
-		var u *upstream
-		if u, err = g.session(cctx, t, agent); err != nil {
-			break
-		}
+	u, err := g.session(cctx, t, agent)
+	if err == nil {
 		res, err = u.session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: p.Arguments})
 		u.release()
-		if err == nil {
-			break
-		}
 		var je *jsonrpc.Error
-		if errors.As(err, &je) || cctx.Err() != nil {
-			break // the target or the guard answered, or the deadline passed: the session is fine
-		}
-		g.evict(u)
-		if attempt == 1 || !isReplayable(err) {
-			break
+		if err != nil && !errors.As(err, &je) && cctx.Err() == nil {
+			g.evict(u) // a lost connection: the next call connects again
 		}
 	}
 	switch {
@@ -295,7 +286,3 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	finish(OutcomeUpstreamError)
 	return refusedResult("the MCP server did not answer")
 }
-
-// isReplayable says a failed call may run again on a fresh session. Only a call that never reached
-// the target is replayed; a lost connection mid-call could repeat a write, so it is not.
-func isReplayable(err error) bool { return errors.Is(err, mcp.ErrConnectionClosed) }
