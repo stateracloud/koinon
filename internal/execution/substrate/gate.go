@@ -133,15 +133,24 @@ func (d *Driver) enter(ctx context.Context, op string, k key) (context.Context, 
 	return cctx, func() { end(); d.forget(k) }, nil
 }
 
-// enterWait is enter for a caller that outlives a suspend (the output stream, stdin): it waits
-// until the actor runs and the gate is open, then registers.
+// enterWait is enter for a caller that outlives a suspend (the output stream, stdin): while the
+// gate is closed or the actor does not run, it waits, then tries again.
+//
+// The proof that the actor runs must come after the registration, as in enter. A RUNNING read
+// before the registration can be stale: a whole suspend (pause, SuspendActor, unpause) can run
+// between the read and begin, and the open gate then admits a router request for a suspended
+// actor, which resumes it. After the registration, a suspend that starts cancels the read and the call.
 func (d *Driver) enterWait(ctx context.Context, op string, k key) (context.Context, func(), error) {
 	for {
+		cctx, end, err := d.enter(ctx, op, k)
+		if err == nil {
+			return cctx, end, nil
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, nil, cerr
+		}
 		if err := d.waitRunning(ctx, op, k); err != nil {
 			return nil, nil, err
-		}
-		if cctx, end, ok := d.gate(k).begin(ctx); ok {
-			return cctx, func() { end(); d.forget(k) }, nil
 		}
 	}
 }

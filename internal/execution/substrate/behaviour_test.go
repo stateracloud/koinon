@@ -4,6 +4,7 @@ package substrate_test
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -230,6 +231,37 @@ var _ = Describe("the Substrate driver", func() {
 			}
 			close(stop)
 			Eventually(wrote).WithTimeout(10 * time.Second).Should(BeClosed())
+			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
+		}, SpecTimeout(30*time.Second))
+
+		It("sends no stdin write on a RUNNING state that a whole suspend made stale", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			// One line through cat: the output stream is open, so the next GetActor is the write's.
+			_, err = io.WriteString(p.Stdin(), "first\n")
+			Expect(err).NotTo(HaveOccurred())
+			out := bufio.NewReader(p.Stdout())
+			Expect(out.ReadString('\n')).To(Equal("first\n"))
+			go func() { _, _ = io.Copy(io.Discard, out) }()
+
+			// The write reads RUNNING, and the reply arrives only after a whole suspend: pause,
+			// SuspendActor and unpause. The open gate must not let the write through on that read.
+			held, release := cl.HoldNextGetActor(ws, "sb")
+			DeferCleanup(release)
+			wrote := make(chan error, 1)
+			go func() { _, err := io.WriteString(p.Stdin(), "x\n"); wrote <- err }()
+			Eventually(held).WithTimeout(5 * time.Second).Should(BeClosed())
+			_, err = d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			release()
+			Consistently(wrote).WithTimeout(100*time.Millisecond).ShouldNot(Receive(), "the write waits for the resume")
+			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
+
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(wrote).WithTimeout(5 * time.Second).Should(Receive(BeNil()))
 			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
 		}, SpecTimeout(30*time.Second))
 

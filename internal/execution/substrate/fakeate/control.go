@@ -214,17 +214,29 @@ func (c *Cluster) bootLocked(k key, a *actor) {
 	})
 }
 
-func (s *controlServer) GetActor(_ context.Context, r *ateapiv1.GetActorRequest) (*ateapiv1.Actor, error) {
+func (s *controlServer) GetActor(ctx context.Context, r *ateapiv1.GetActorRequest) (*ateapiv1.Actor, error) {
 	c := s.c
 	c.count("GetActor")
 	k := key{r.GetActor().GetAtespace(), r.GetActor().GetName()}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	a, ok := c.actors[k]
 	if !ok {
+		c.mu.Unlock()
 		return nil, notFound("actor", k.name)
 	}
-	return a.pb(), nil
+	pb := a.pb()
+	h := c.holds[k]
+	delete(c.holds, k)
+	c.mu.Unlock()
+	if h != nil { // the state is read; the reply waits (HoldNextGetActor)
+		close(h.held)
+		select {
+		case <-h.release:
+		case <-ctx.Done():
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+	}
+	return pb, nil
 }
 
 func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActorRequest) (*ateapiv1.SuspendActorResponse, error) {

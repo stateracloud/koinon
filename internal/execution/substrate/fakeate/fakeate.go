@@ -48,6 +48,7 @@ type Cluster struct {
 	tags      map[key]*ateapiv1.Tag
 	resumes   map[key]int
 	calls     map[string]int
+	holds     map[key]*getHold
 
 	ctl, rtr         *grpc.Server
 	ctlLis, routerLn *bufconn.Listener
@@ -62,6 +63,7 @@ func New() *Cluster {
 		tags:      map[key]*ateapiv1.Tag{},
 		resumes:   map[key]int{},
 		calls:     map[string]int{},
+		holds:     map[key]*getHold{},
 	}
 }
 
@@ -130,6 +132,21 @@ func (c *Cluster) RouterResumes(atespace, actor string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.resumes[key{atespace, actor}]
+}
+
+// getHold holds back the reply of one GetActor.
+type getHold struct{ held, release chan struct{} }
+
+// HoldNextGetActor makes the next GetActor of an actor read the state and then hold its reply until
+// release is called, as a slow reply does: the caller gets a state that may be stale by then. held
+// closes once the state is read. release may be called more than once.
+func (c *Cluster) HoldNextGetActor(atespace, name string) (held <-chan struct{}, release func()) {
+	h := &getHold{held: make(chan struct{}), release: make(chan struct{})}
+	c.mu.Lock()
+	c.holds[key{atespace, name}] = h
+	c.mu.Unlock()
+	var once sync.Once
+	return h.held, func() { once.Do(func() { close(h.release) }) }
 }
 
 // Calls is how many times the control or guest method (for example "SuspendActor") was called.
