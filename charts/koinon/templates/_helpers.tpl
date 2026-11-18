@@ -441,6 +441,54 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- required "openshell.address is required: set it to the OpenShell gateway's host:port, for example openshell.openshell.svc:8080" .Values.openshell.address -}}
 {{- end }}
 
+{{- define "koinon.substrate" -}}
+{{- eq (.Values.execution.driver | default "openshell") "substrate" -}}
+{{- end }}
+
+{{/* The namespaces whose pods may reach the gateway's model port: OpenShell's sandbox namespaces, or with the substrate driver the namespace atenet runs in. */}}
+{{- define "koinon.sandboxClientNamespaceSelector" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+{{- toYaml .Values.execution.substrate.gatewayClientNamespaceSelector -}}
+{{- else -}}
+{{- toYaml .Values.sandboxPolicy.namespaceSelector -}}
+{{- end -}}
+{{- end }}
+
+{{- define "koinon.substrateTokenDir" -}}
+/var/run/koinon/substrate
+{{- end }}
+
+{{/* ateapi's token and CA for the components that call Agent Substrate (execution.driver=substrate). */}}
+{{- define "koinon.substrateVolumeMount" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-token
+  mountPath: {{ include "koinon.substrateTokenDir" . }}
+  readOnly: true
+{{- if .Values.execution.substrate.caSecret }}
+- name: substrate-ca
+  mountPath: /etc/koinon/substrate-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "koinon.substrateVolume" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-token
+  projected:
+    sources:
+      - serviceAccountToken:
+          audience: {{ required "execution.substrate.tokenAudience is required with execution.driver=substrate" .Values.execution.substrate.tokenAudience | quote }}
+          expirationSeconds: 3600
+          path: token
+{{- if .Values.execution.substrate.caSecret }}
+- name: substrate-ca
+  secret:
+    secretName: {{ .Values.execution.substrate.caSecret }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{/* OpenShell client certificate for components that call the OpenShell gateway. */}}
 {{- define "koinon.openshellVolumeMount" -}}
 {{- if .Values.openshell.clientTLSSecret -}}
@@ -969,10 +1017,29 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if and .Values.httpRoute.enabled .Values.httpRoute.hostnames (not .Values.publicUrl) (contains "*" (first .Values.httpRoute.hostnames)) }}
 {{- fail "the first httpRoute hostname is a wildcard, so it cannot be the public URL: set publicUrl" }}
 {{- end }}
-{{- if and (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
+{{- if not (has (.Values.execution.driver | default "openshell") (list "openshell" "substrate")) }}
+{{- fail (printf "execution.driver %q: want openshell or substrate" .Values.execution.driver) }}
+{{- end }}
+{{- if eq (include "koinon.substrate" .) "true" }}
+{{- if or (not .Values.execution.substrate.controlAddress) (not .Values.execution.substrate.routerAddress) }}
+{{- fail "execution.substrate.controlAddress and execution.substrate.routerAddress are required with execution.driver=substrate" }}
+{{- end }}
+{{- if not .Values.execution.substrate.tokenAudience }}
+{{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
+{{- end }}
+{{- if not .Values.execution.substrate.allowUnhardened }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)" }}
+{{- end }}
+{{- range $k := list "sandboxObserver" "sandboxNetworkPolicy" "sandboxLimitRange" }}
+{{- if (index $.Values $k).enabled }}
+{{- fail (printf "%s.enabled acts on OpenShell's namespaces and pods: set it to false with execution.driver=substrate" $k) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (ne (include "koinon.substrate" .) "true") (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
 {{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}
 {{- end }}
-{{- if and .Values.openshell.clientTLSSecret .Values.openshell.insecure }}
+{{- if and (ne (include "koinon.substrate" .) "true") .Values.openshell.clientTLSSecret .Values.openshell.insecure }}
 {{- fail "openshell.clientTLSSecret and openshell.insecure=true contradict each other: set the Secret for mTLS, or insecure=true for plaintext, not both" }}
 {{- end }}
 {{- if and .Values.oidc.enabled (not .Values.oidc.redirectUrl) (not (include "koinon.publicUrl" .)) }}
@@ -1018,11 +1085,32 @@ it carries no credentials.
   valueFrom:
     fieldRef:
       fieldPath: metadata.name
+{{- if eq (include "koinon.substrate" .) "true" }}
+- name: KOINON_EXECUTION_DRIVER
+  value: substrate
+- name: KOINON_SUBSTRATE_CONTROL_ADDRESS
+  value: {{ .Values.execution.substrate.controlAddress | quote }}
+- name: KOINON_SUBSTRATE_ROUTER_ADDRESS
+  value: {{ .Values.execution.substrate.routerAddress | quote }}
+- name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
+  value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
+- name: KOINON_SUBSTRATE_TOKEN_FILE
+  value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
+{{- if .Values.execution.substrate.caSecret }}
+- name: KOINON_SUBSTRATE_CA_FILE
+  value: /etc/koinon/substrate-ca/ca.crt
+{{- end }}
+{{- with .Values.execution.substrate.serverName }}
+- name: KOINON_SUBSTRATE_SERVER_NAME
+  value: {{ . | quote }}
+{{- end }}
+{{- else }}
 - name: KOINON_OPENSHELL_ADDRESS
   value: {{ include "koinon.openshellAddress" . | quote }}
 {{- if .Values.openshell.clientTLSSecret }}
 - name: KOINON_OPENSHELL_TLS_DIR
   value: /etc/koinon/openshell-tls
+{{- end }}
 {{- end }}
 {{- $gatewayURL := .Values.agentd.gatewayURL }}
 {{- if not $gatewayURL }}

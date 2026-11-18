@@ -100,19 +100,19 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 
-	backend, err := cli.OpenShell{Address: cfg.openshellAddress, TLSDir: cfg.openshellTLSDir}.Dial()
+	// The OpenShell backend owns what it makes (issue 461): objects carry this install's mark, and an
+	// object that carries another install's is never adopted, changed or deleted. The mark is a random
+	// value the chart keeps in a Secret, not in Postgres, so a restored database does not share it.
+	if cfg.installMark == "" && !cfg.execution.IsSubstrate() {
+		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
+	}
+	conn, err := cfg.execution.Dial()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = backend.Close() }()
-	// The backend owns what it makes (issue 461): objects carry this install's mark, and an object
-	// that carries another install's is never adopted, changed or deleted. The mark is a random
-	// value the chart keeps in a Secret, not in Postgres, so a restored database does not share it.
-	if cfg.installMark == "" {
-		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
-	} else {
-		backend.WithOwner(execution.OwnerID(cfg.installMark))
-	}
+	defer func() { _ = conn.Close() }()
+	backend := conn.Backend
+	log.Info("execution driver", "driver", cfg.execution.Driver)
 
 	driver, err := newGatewayDriver(cfg, kube, log)
 	if err != nil {
@@ -185,6 +185,7 @@ func serve(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	audit.RegisterMetrics(reg)
 	reg.MustRegister(kekMetrics.Collectors()...)
+	reg.MustRegister(conn.Collectors...)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
 	}

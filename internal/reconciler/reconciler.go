@@ -1513,7 +1513,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			} else if !ok {
 				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
 			}
-			if sb, err = r.backend.StopSandbox(ctx, ws, names.Sandbox); err != nil {
+			if sb, err = r.stopSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
@@ -1536,6 +1536,27 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// stopSandbox stops a sandbox and returns the phase the backend reports afterwards. The reply of
+// the stop call is not the last word: on Agent Substrate any request through the router resumes a
+// suspended actor, and one that was already on the wire when the stop began can land after it (ADR
+// 0119, "Router resume": SuspendSandbox guarantees the actor was suspended when it returned, and the
+// caller re-observes the phase). So the phase is read again, and a sandbox that was woken is recorded
+// as the running one it is. The next pass sees a running sandbox with nothing to do and stops it
+// again: one stop per pass, never a loop inside one.
+// A failed re-read is not an error: the stop worked and the next pass observes.
+func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (execution.Sandbox, error) {
+	sb, err := r.backend.StopSandbox(ctx, ws, name)
+	if err != nil || !sb.Phase.IsStopped() {
+		return sb, err
+	}
+	seen, err := r.backend.GetSandbox(ctx, ws, name)
+	if err != nil || seen.Phase.IsStopped() {
+		return sb, nil
+	}
+	r.log.Info("a stopped sandbox is running again (a late request woke it); the next pass stops it", "workspace", ws, "sandbox", name, "phase", string(seen.Phase))
+	return seen, nil
 }
 
 // holdForCreationRate takes one of the org's sandbox creations per minute (issue #27, ADR 0066
@@ -1730,7 +1751,7 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		return err
 	}
 	if sb.Phase == execution.PhaseReady {
-		if sb, err = r.backend.StopSandbox(ctx, w.sb.Workspace, w.sb.SandboxName); err != nil {
+		if sb, err = r.stopSandbox(ctx, w.sb.Workspace, w.sb.SandboxName); err != nil {
 			return err
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
@@ -1812,7 +1833,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		return err
 	case r.cfg.HomeRetention == RetentionRetain:
 		if sb.Phase == execution.PhaseReady {
-			if sb, err = r.backend.StopSandbox(ctx, ws, name); err != nil {
+			if sb, err = r.stopSandbox(ctx, ws, name); err != nil {
 				return err
 			}
 		}

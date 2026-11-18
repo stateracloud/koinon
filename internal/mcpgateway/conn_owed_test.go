@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // blockedConn is an mcp.Connection whose Write waits until release is closed.
@@ -40,7 +41,7 @@ func ping(id int64) *jsonrpc.Request {
 // A server request keeps its place in the bound until its reply write ends.
 func TestOwedStaysUntilReplyWriteEnds(t *testing.T) {
 	inner := &blockedConn{release: make(chan struct{}), started: make(chan struct{}, 1), id: ping(0).ID}
-	c := &guardConn{inner: inner, guard: AllowGuard{}, owed: map[string]bool{}, pending: map[string]pendingCall{}}
+	c := &guardConn{inner: inner, guard: AllowGuard{}, owed: map[string]*owedEntry{}, pending: map[string]pendingCall{}}
 	ctx := context.Background()
 	for i := range int64(maxInboundWorkers) {
 		if _, ok := c.serverRequest(ctx, ping(i)); !ok {
@@ -95,7 +96,7 @@ func TestOverloadedEndsOnlyForAResponse(t *testing.T) {
 // A reply for an ID that is not owed leaves the owed entries alone: a late reply to a request that the
 // timer already released must not remove a newer request.
 func TestReplyForUnowedIDKeepsOwedEntries(t *testing.T) {
-	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]bool{}, pending: map[string]pendingCall{}}
+	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]*owedEntry{}, pending: map[string]pendingCall{}}
 	ctx := context.Background()
 	if _, ok := c.serverRequest(ctx, ping(1)); !ok {
 		t.Fatal("request 1 was not admitted")
@@ -117,5 +118,79 @@ func TestReplyForUnowedIDKeepsOwedEntries(t *testing.T) {
 	c.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("the reply of the owed request left %d entries, want 0", n)
+	}
+}
+
+// The timer of a request that was answered must not remove a newer request that reuses its ID.
+func TestStaleOwedTimerKeepsNewerEntry(t *testing.T) {
+	c := &guardConn{inner: &blockedConn{id: ping(99).ID}, guard: AllowGuard{}, owed: map[string]*owedEntry{}, pending: map[string]pendingCall{}, timeout: 600 * time.Millisecond}
+	ctx := context.Background()
+	if _, ok := c.serverRequest(ctx, ping(1)); !ok {
+		t.Fatal("request 1 was not admitted")
+	}
+	if err := c.Write(ctx, &jsonrpc.Response{ID: ping(1).ID, Result: []byte("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if _, ok := c.serverRequest(ctx, ping(1)); !ok { // a new request with the same ID
+		t.Fatal("the new request was not admitted")
+	}
+	time.Sleep(450 * time.Millisecond) // the timer of the first request (600 ms) has fired, the second (900 ms) has not
+	c.mu.Lock()
+	n := len(c.owed)
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("the stale timer removed the newer entry: %d left, want 1", n)
+	}
+}
+
+// The guard has CallTimeout for a response, a server request and a notification, not a fixed 30 s.
+func TestInboundLimitIsTheCallTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		timeout time.Duration
+		want    time.Duration
+	}{{2 * time.Minute, 2 * time.Minute}, {5 * time.Second, 5 * time.Second}, {0, unsolicitedTimeout}} {
+		c := &guardConn{life: context.Background(), timeout: tc.timeout, pending: map[string]pendingCall{}}
+		for name, msg := range map[string]jsonrpc.Message{
+			"server request": ping(1),
+			"response":       &jsonrpc.Response{ID: ping(2).ID, Result: []byte("{}")},
+		} {
+			ctx, cancel, _ := c.contextFor(msg)
+			dl, ok := ctx.Deadline()
+			cancel()
+			if !ok {
+				t.Fatalf("%s: no deadline", name)
+			}
+			if got := time.Until(dl); got > tc.want || got < tc.want-2*time.Second {
+				t.Fatalf("%s: limit %v, want about %v", name, got, tc.want)
+			}
+		}
+	}
+}
+
+// A full notification queue drops the notification, and the drop is counted.
+func TestFullNotificationQueueIsCounted(t *testing.T) {
+	m := NewMetrics(nil)
+	c := &guardConn{notes: make(chan jsonrpc.Message, 1), metrics: m}
+	n := &jsonrpc.Request{Method: "notifications/message"}
+	c.enqueueNote(n)
+	c.enqueueNote(n)
+	c.enqueueNote(n)
+	if got := testutil.ToFloat64(m.NotesDropped); got != 2 {
+		t.Fatalf("dropped %v notifications, want 2", got)
+	}
+}
+
+// A pooled session does not judge a message under the snapshot of the request that connected it.
+func TestPooledSessionContextDropsRequestSnapshot(t *testing.T) {
+	g := New(Options{})
+	old := &snapshot{rev: "old"}
+	g.snap.Store(&snapshot{rev: "now"})
+	reqCtx := context.WithValue(context.Background(), reqKey{}, old)
+	if got := g.snapOf(reqCtx).rev; got != "old" {
+		t.Fatalf("the request itself must see its snapshot, got %q", got)
+	}
+	if got := g.snapOf(detach(reqCtx)).rev; got != "now" {
+		t.Fatalf("a pooled session kept the snapshot of the request that connected it: %q", got)
 	}
 }

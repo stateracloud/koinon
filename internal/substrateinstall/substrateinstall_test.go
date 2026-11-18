@@ -138,8 +138,9 @@ func (i issuer) Issuer(context.Context) (string, error) { return i.url, nil }
 
 type probe struct{ reachable bool }
 
-func (p probe) ProbeIssuer(context.Context, string) (preflight.IssuerResult, error) {
-	return preflight.IssuerResult{Reachable: p.reachable, Detail: "x"}, nil
+// ProbeIssuer answers as a cluster whose tokens carry the probed issuer.
+func (p probe) ProbeIssuer(_ context.Context, iss string) (preflight.IssuerResult, error) {
+	return preflight.IssuerResult{Reachable: p.reachable, TokenIssuer: iss, Detail: "x"}, nil
 }
 
 func crd(name string, established bool) *unstructured.Unstructured {
@@ -256,7 +257,9 @@ func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
 		ContainSubstring("deploy ate-system"), ContainSubstring("--storage-bucket-name=snapshots"),
 		ContainSubstring("--image-tag="+substrateinstall.PinnedVersion),
 		ContainSubstring("--kubeconfig=/etc/kube/config"), ContainSubstring("--context=lab"),
-		ContainSubstring("--ingress-allowed-spiffe-ids="+preflight.SubstrateRouterSPIFFEID("ate-system"))))
+		ContainSubstring("--ingress-allowed-spiffe-ids="+preflight.SubstrateRouterSPIFFEID("ate-system")),
+		// The probed discovery issuer goes to ate-setup as a flag, so an EXPECTED_JWT_ISSUER in the environment cannot replace it.
+		ContainSubstring("--ateapi-expected-jwt-issuer=https://issuer.example.com")))
 	// ate-setup ran in the exported tree, and the tree is removed afterwards.
 	g.Expect(r.existed).To(BeTrue())
 	g.Expect(filepath.Base(r.ranIn)).To(Equal("src"))
@@ -416,6 +419,28 @@ func TestEnsureRouterSPIFFEIsIdempotent(t *testing.T) {
 	}
 }
 
+// The options a real cluster needs reach ate-setup under the names the pinned ate-setup defines
+// (cmd/ate-setup/internal/config/setting.go and cmd/ate-setup/internal/cmd/deploy.go at v1.0.0).
+func TestProfilePassesTheClusterOptions(t *testing.T) {
+	g := NewWithT(t)
+	plain := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("ate-system")
+	for _, a := range plain {
+		g.Expect(a).NotTo(Or(HavePrefix("--ateapi-"), HavePrefix("--setup-csi"), Equal("--kind")))
+	}
+	args := substrateinstall.Profile{
+		StorageBucket: "b", PostgresStorageClass: "local-path", SetupCSI: "none",
+		ExpectedJWTIssuer: "https://kubernetes.default.svc", Kind: true,
+	}.SetupArgs("ate-system")
+	g.Expect(args).To(ContainElements("--ateapi-postgres-storage-class=local-path", "--setup-csi=none",
+		"--ateapi-expected-jwt-issuer=https://kubernetes.default.svc", "--kind"))
+	g.Expect(substrateinstall.Profile{StorageBucket: "b", SetupCSI: "ceph"}.Validate()).To(MatchError(ContainSubstring("unknown CSI driver")))
+	g.Expect(substrateinstall.Profile{StorageBucket: "b", ExpectedJWTIssuer: "http://x"}.Validate()).To(MatchError(ContainSubstring("https URL")))
+	// An empty query still changes the discovery URL: the suffix would land after the "?".
+	g.Expect(substrateinstall.Profile{StorageBucket: "b", ExpectedJWTIssuer: "https://issuer.example?"}.Validate()).To(MatchError(ContainSubstring("without query")))
+	g.Expect(substrateinstall.Profile{StorageBucket: "b", SetupCSI: "both", ExpectedJWTIssuer: "https://kubernetes.default.svc"}.Validate()).To(Succeed())
+	g.Expect(substrateinstall.Profile{StorageBucket: "b", ExpectedJWTIssuer: "https://issuer.example/tenant"}.Validate()).To(Succeed())
+}
+
 func TestProfileNamesWhatIsMissing(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(substrateinstall.Profile{}.Validate()).To(MatchError(ContainSubstring("storage bucket")))
@@ -442,7 +467,7 @@ func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
 	i.Checker.IssuerProbe = preflight.KubeSubstrateProber{
 		Client: client, Namespace: "ate-system", NamePrefix: "t", Image: "img", PollInterval: time.Millisecond, Timeout: time.Second,
 		Logs: func(context.Context, string, string) (string, error) {
-			return preflight.IssuerResult{Reachable: true, Detail: "ok"}.String() + "\n" + preflight.SubstrateDevicesProbeMarker + "\n", nil
+			return preflight.IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "ok"}.String() + "\n" + preflight.SubstrateDevicesProbeMarker + "\n", nil
 		},
 	}
 	i.Checker.Devices = i.Checker.IssuerProbe.(preflight.KubeSubstrateProber)
@@ -451,7 +476,9 @@ func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
 	g.Expect(r.setupCalls()).To(HaveLen(1), "the prerequisites passed, so ate-setup ran")
 	ns, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(ns.Labels).To(HaveKeyWithValue("pod-security.kubernetes.io/enforce", "privileged"))
+	for _, mode := range []string{"enforce", "warn", "audit"} {
+		g.Expect(ns.Labels).To(HaveKeyWithValue("pod-security.kubernetes.io/"+mode, "privileged"))
+	}
 }
 
 // The flag may sit in the container's command; a sidecar first in the list is not the router.

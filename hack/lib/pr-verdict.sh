@@ -76,7 +76,7 @@ def prv_pr_event: ((.event // "") | IN("", "pull_request", "pull_request_target"
 # it would otherwise be the newest e2e-kind run and hide the real run's quickstart.
 def prv_ignored: (.display_title // "") == "e2e-kind (label ignored)";
 def prv_live($runs; $draft): [$runs[] | select(prv_pr_event) | select(prv_ignored | not) | select($draft or (.display_title != "ci (draft)"))];
-def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt]) | .id | tostring);
+def prv_cur($live): $live | group_by(.path) | map(max_by([.created_at, .run_attempt, .id]) | .id | tostring);
 # $req: names the caller asked for explicitly (pr-wait --require). Such a name is judged on its newest run of any event
 # (created_at, then run_attempt, per workflow path), so a failed workflow_dispatch run of it (hack/e2e-remote.sh) is read,
 # not hidden behind an older pull_request run. Every other name keeps the rule above: events outside the PR never decide.
@@ -93,7 +93,7 @@ def prv_drop($runs; $draft; $req):
         ([$any[] | select((.id | tostring) == $a.id)] | first // null) as $r
         | if $r == null then . else
             .["\($a.n)\t\($r.path)"] = ([(.["\($a.n)\t\($r.path)"] // null), $r] | map(select(. != null))
-              | max_by([.created_at, .run_attempt])) end)) as $win
+              | max_by([.created_at, .run_attempt, .id])) end)) as $win
     | map(if prv_is_status then .
         else prv_rid as $id | prv_name as $n
           | if $id != null and ($known | index($id)) != null and ($req | index($n)) != null then

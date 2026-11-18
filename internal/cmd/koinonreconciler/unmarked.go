@@ -25,6 +25,7 @@ import (
 // `kubectl exec deploy/<reconciler> -- koinon-reconciler unmarked list` needs nothing more.
 type unmarkedConfig struct {
 	databaseURL      string
+	executionDriver  string
 	openshellAddress string
 	openshellTLSDir  string
 	installMark      string
@@ -69,6 +70,10 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 			"Run it in the reconciler pod, which has the settings: kubectl exec deploy/<release>-reconciler -- koinon-reconciler unmarked list",
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			if c.executionDriver == cli.DriverSubstrate {
+				return fmt.Errorf("unmarked list is OpenShell-only (install marks and unmarked objects are OpenShell's); "+
+					"it does not run with execution.driver=%s", cli.DriverSubstrate)
+			}
 			if err := cmd.ValidateRequiredFlags(); err != nil {
 				return err
 			}
@@ -85,11 +90,13 @@ func newUnmarkedCommand(v *viper.Viper, list func(context.Context, unmarkedConfi
 	}
 	fs := ls.Flags()
 	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string (default $DATABASE_URL)")
+	fs.StringVar(&c.executionDriver, "execution-driver", "", "the install's execution driver (from the config file); the command is OpenShell-only")
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.installMark, "install-mark", "", "this install's random mark (the chart's koinon-install-mark Secret)")
 	fs.BoolVar(&c.json, "json", false, "print a JSON array of {workspace, kind, name, reason} instead of text")
 	cli.EnvAlias(ls, "database-url", "DATABASE_URL")
+	cli.ConfigKey(ls, "execution-driver", configKeys["execution-driver"])
 	cli.ConfigKey(ls, "openshell-address", configKeys["openshell-address"])
 	cli.ConfigKey(ls, "openshell-tls-dir", configKeys["openshell-tls-dir"])
 	for _, n := range []string{"database-url", "openshell-address", "install-mark"} {

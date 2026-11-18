@@ -541,6 +541,26 @@
         "resources": {"$ref": "#/definitions/resources"}
       }
     },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": {"enum": ["openshell", "substrate"]},
+        "substrate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controlAddress": {"type": "string"},
+            "routerAddress": {"type": "string"},
+            "caSecret": {"type": "string"},
+            "serverName": {"type": "string"},
+            "tokenAudience": {"type": "string"},
+            "allowUnhardened": {"type": "boolean"},
+            "gatewayClientNamespaceSelector": {"type": "object"}
+          }
+        }
+      }
+    },
     "openshell": {
       "type": "object",
       "additionalProperties": false,

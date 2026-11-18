@@ -85,6 +85,13 @@ var _ = Describe("koinon-reconciler unmarked list", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("refuses under the substrate driver: it is OpenShell-only", func() {
+		env := podEnv()
+		env["KOINON_EXECUTION_DRIVER"] = "substrate"
+		_, _, err := run([]string{"unmarked", "list"}, env)
+		Expect(err).To(MatchError(And(ContainSubstring("OpenShell-only"), ContainSubstring("substrate"))))
+	})
+
 	It("is part of the command tree the chart contract test builds", func() {
 		root := NewRootCommand()
 		cmd, _, err := root.Find([]string{"unmarked", "list"})

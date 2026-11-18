@@ -476,6 +476,38 @@ func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c
 				panic(fmt.Sprintf("%s: ConfigMap %s (volume %s): %v; the pod would not start", owner, v.ConfigMap.Name, v.Name, err))
 			}
 			files = volumeFiles(data, v.ConfigMap.Items, v.ConfigMap.DefaultMode)
+		case v.Projected != nil:
+			// A projected volume merges its sources into one directory: a serviceAccountToken
+			// source is a token the API server issues for the pod's ServiceAccount, the others
+			// are as their own volume kinds.
+			files = map[string]volumeFile{}
+			mode := int64(0o644)
+			if v.Projected.DefaultMode != nil {
+				mode = int64(*v.Projected.DefaultMode)
+			}
+			for _, src := range v.Projected.Sources {
+				switch {
+				case src.ServiceAccountToken != nil:
+					sa := ps.ServiceAccountName
+					if sa == "" {
+						sa = "default"
+					}
+					files[src.ServiceAccountToken.Path] = volumeFile{[]byte(r.cl.Token(ctx, sa)), mode}
+				case src.Secret != nil:
+					sec := r.cl.Secret(ctx, src.Secret.Name)
+					data := map[string][]byte{}
+					if sec != nil {
+						data = sec.Data
+					} else if src.Secret.Optional == nil || !*src.Secret.Optional {
+						panic(fmt.Sprintf("%s: Secret %s (volume %s) does not exist and is not optional; the pod would not start", owner, src.Secret.Name, v.Name))
+					}
+					for k, f := range volumeFiles(data, src.Secret.Items, v.Projected.DefaultMode) {
+						files[k] = f
+					}
+				default:
+					panic(fmt.Sprintf("%s: projected volume %s has a source this suite does not model; add it to runner.volumes", owner, v.Name))
+				}
+			}
 		default:
 			panic(fmt.Sprintf("%s: volume %s has a source this suite does not model; add it to runner.volumes", owner, v.Name))
 		}

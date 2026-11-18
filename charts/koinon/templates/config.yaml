@@ -43,8 +43,21 @@ data:
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers
       {{- end }}
+    execution:
+      driver: {{ .Values.execution.driver }}
+      {{- if eq (include "koinon.substrate" .) "true" }}
+      substrate:
+        controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
+        routerAddress: {{ .Values.execution.substrate.routerAddress | quote }}
+        allowUnhardened: {{ .Values.execution.substrate.allowUnhardened | default false }}
+        tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
+        {{- if .Values.execution.substrate.caSecret }}
+        caFile: /etc/koinon/substrate-ca/ca.crt
+        {{- end }}
+        serverName: {{ .Values.execution.substrate.serverName | quote }}
+      {{- end }}
     openshell:
-      address: {{ include "koinon.openshellAddress" . | quote }}
+      address: {{ if eq (include "koinon.substrate" .) "true" }}""{{ else }}{{ include "koinon.openshellAddress" . | quote }}{{ end }}
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
       gatewayId: {{ .Values.openshell.gatewayId | quote }}

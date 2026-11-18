@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Agent Substrate as the execution layer (ADR 0119, execution.driver): the reconciler and agentd start
+# with the substrate flags, the projected ateapi token and no OpenShell address. The OpenShell-only
+# features are off; the install preflight Job is not rendered (koinon-api substrate install ran it).
+execution:
+  driver: substrate
+  substrate:
+    controlAddress: api.ate-system.svc.cluster.local:443
+    routerAddress: atenet-router.ate-system.svc.cluster.local:80
+    tokenAudience: ateapi
+    allowUnhardened: true
+sandboxObserver:
+  enabled: false
+sandboxNetworkPolicy:
+  enabled: false
+sandboxLimitRange:
+  enabled: false
+gateway:
+  mode: standalone
+postgres:
+  cnpg:
+    instances: 1

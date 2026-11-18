@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
@@ -28,6 +29,9 @@ type config struct {
 	kubeconfig  string
 	logLevel    string
 
+	// execution selects the driver (execution.driver) and reaches Substrate; the OpenShell address
+	// and TLS directory below fill its OpenShell half.
+	execution        cli.Execution
 	openshellAddress string
 	openshellTLSDir  string
 	installMark      string
