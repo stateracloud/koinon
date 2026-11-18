@@ -63,6 +63,14 @@ the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted an
 reduced to the allowlist. When the drop works, the bounding set is shrunk before it (while root),
 and the allowlist is restored as effective, inheritable and ambient for the non-root user.
 
+## gVisor tiers
+
+On the hardened and dev tiers (gVisor) Landlock stays `best_effort`: the kernel may not offer it. The
+compensating control is a read-only root filesystem. Driver requirement for #1088: mount the root
+read-only, with only `/sandbox` and `/tmp` writable, so writes to `/etc`, `/usr` and `/var` stay
+blocked. When Landlock is unavailable the launcher logs one warning that names the read-only root as
+the control (ADR 0120 section 4, item 3: the `vm` tier fails closed, another tier records the gap).
+
 ## Open items
 
 Tracked on #1087 until the maintainer files separate issues:
@@ -70,11 +78,10 @@ Tracked on #1087 until the maintainer files separate issues:
 1. Flavor images carry the launcher only; the guest server joins them with #1088, which also
    applies the exec prefix.
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
-3. gVisor tier without Landlock: the policy mode for Landlock on gVisor is a decision pending. ADR 0120
-   section 4 says the `vm` tier fails closed and another tier records the gap.
-4. Non-root payload user: needs an upstream Substrate option for the payload uid/gid or capabilities
-   (or another design). The launcher drops when the capability exists and otherwise continues as
-   root (`best_effort`).
+3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
+4. Non-root payload user: waits for an upstream Substrate payload uid/gid option (Koinon issue to be
+   filed). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
+   every other control applied; `require` still fails closed.
 
 ## Tests
 

@@ -241,7 +241,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		if l.Mode == ModeRequire {
 			return errors.New("guest launcher: landlock required but the kernel does not provide it")
 		}
-		log.Warn("guest launcher: landlock unavailable in this kernel (landlock_create_ruleset failed), filesystem rules NOT applied")
+		log.Warn("guest launcher: landlock unavailable in this kernel (landlock_create_ruleset failed), filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)")
 		return nil
 	}
 	var rules []landlock.Rule
@@ -263,7 +263,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		if l.Mode == ModeRequire {
 			return fmt.Errorf("guest launcher: landlock: %w", err)
 		}
-		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied", "error", err.Error())
+		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)", "error", err.Error())
 		return nil
 	}
 	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite)

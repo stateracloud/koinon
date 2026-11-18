@@ -53,7 +53,7 @@ exec prefix, not the ENTRYPOINT: the driver runs the harness over the in-guest P
 substrate-driver Exec of a harness (the ACP launch in particular) is
 `koinon-guest-launcher --policy /etc/koinon/guest-launcher/policy.json -- <EntryScript> ...`, carried
 as `harness.Descriptor.LauncherPrefix`. The image ENTRYPOINT is a default only and does not harden a
-ProcessService exec; OpenShell paths ignore the prefix. This lifts "flavor images carry no Koinon binary" of the amendment above for the substrate
+ProcessService exec; OpenShell paths ignore the prefix. On the gVisor tiers Landlock stays best effort and the driver must mount the root filesystem read-only, with only /sandbox and /tmp writable (#1088). This lifts "flavor images carry no Koinon binary" of the amendment above for the substrate
 driver only; the OpenShell image has no Koinon binary. The Substrate guest server joins the same
 overlay when the driver takes it (#1088).
 
