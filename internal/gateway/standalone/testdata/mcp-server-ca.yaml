@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"3c956495d9906e46"'
+      koinon.config: '"b8fe5f3d840ebd80"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -44,7 +44,7 @@ llm:
             agent: acme/repo-helper
             org: acme
           allowedModels: []
-        - keyHash: sha256:efc5bad0906cc36a93946aba4e332dd0bdc7a63bd2b9e6023b5daadf50d09905
+        - keyHash: sha256:816e4e7e79af1769aec0a9038ea69471a3f3ceb5ac82c5099f0d734cca534de8
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -88,7 +88,7 @@ mcp:
         - kind: expression
           methods:
             tools/call: full
-          condition: mcp.tool.target in ["acme-legacy", "acme-wiki", "globex-search"]
+          condition: mcp.tool.target in ["acme-legacy", "acme-scratch", "acme-wiki", "globex-search"]
           reject: 'refused: the MCP leak guard is not configured on this installation'
     transformations:
       request:
@@ -106,6 +106,13 @@ mcp:
       condition: apiKey.org == "acme"
       sse:
         host: https://legacy.example.com/sse
+    - name: acme-scratch
+      condition: apiKey.org == "acme"
+      mcp:
+        host: https://scratch.example.com/mcp
+      policies:
+        backendTLS:
+          insecure: true
     - name: acme-wiki
       condition: apiKey.org == "acme"
       mcp:

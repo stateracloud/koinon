@@ -575,11 +575,14 @@ type targetPolicies struct {
 	BackendTLS  *backendTLS  `yaml:"backendTLS,omitempty"`
 }
 
-// backendTLS is the TLS policy of one target (agentgateway v1.7.0 BackendPolicies.backendTLS). Its root
-// REPLACES the system roots for that target (agentgateway src/http/backendtls.rs), so it is set only on
-// a target whose server record names a CA, and never shared: another target keeps the system roots.
+// backendTLS is the TLS policy of one target (agentgateway v1.7.0 BackendPolicies.backendTLS,
+// crates/agentgateway/src/http/backendtls.rs LocalBackendTLS). Its root REPLACES the system roots for
+// that target, so it is set only on a target whose server record names a CA, and never shared: another
+// target keeps the system roots. insecure installs a verifier that accepts any certificate (NoVerifier,
+// backendtls.rs, the `else if self.insecure` branch); it is the target's insecureSkipVerify.
 type backendTLS struct {
-	Root string `yaml:"root"`
+	Root     string `yaml:"root,omitempty"`
+	Insecure bool   `yaml:"insecure,omitempty"`
 }
 
 // backendAuth injects a static credential read from a file when the config loads (agentgateway
@@ -790,11 +793,11 @@ func build(s gateway.State, o Options) document {
 				}}}}
 			}
 			// State.Validate has checked that a CA file goes with an https URL (parsed scheme).
-			if t.CAFile != "" {
+			if t.CAFile != "" || t.InsecureSkipVerify {
 				if mt.Policies == nil {
 					mt.Policies = &targetPolicies{}
 				}
-				mt.Policies.BackendTLS = &backendTLS{Root: t.CAFile}
+				mt.Policies.BackendTLS = &backendTLS{Root: t.CAFile, Insecure: t.InsecureSkipVerify}
 			}
 			doc.MCP.Targets = append(doc.MCP.Targets, mt)
 		}

@@ -158,11 +158,12 @@ type LedgerBudgets interface {
 	LedgerEnforcesBudgets() bool
 }
 
-// MCPTargetCA is implemented by a driver that cannot render a per-target TLS root for an MCP target
-// (the Kubernetes driver: the CRD path is frozen for MCP, ADR 0097 decision 4). A caller leaves a
-// server with a CA bundle out of the state and reports it on that server, because a driver that
-// refused the whole state for one target would hold back every other org's change. A driver that
-// does not implement it renders per-target roots.
+// MCPTargetCA is implemented by a driver that cannot render a per-target TLS policy for an MCP target:
+// a TLS root of its own or a skipped certificate check (the Kubernetes driver: the CRD path is frozen
+// for MCP, ADR 0097 decision 4). A caller leaves a server with a CA bundle or with insecureSkipVerify
+// out of the state and reports it on that server, because a driver that refused the whole state for
+// one target would hold back every other org's change. A driver that does not implement it renders
+// per-target TLS policy.
 type MCPTargetCA interface {
 	RendersMCPTargetCA() bool
 }
@@ -515,9 +516,13 @@ type MCPTarget struct {
 	CredentialPrefix string
 	CredentialFile   string
 	// CAFile is the path, inside the gateway, of a PEM bundle that verifies the target's TLS
-	// certificate in place of the system roots (a private CA). It belongs to this target only and
-	// needs an https URL. Empty uses the system roots. Public: it holds certificates only.
+	// certificate in place of the public roots (only this CA is trusted for this target, as curl
+	// --cacert). It belongs to this target only and needs an https URL. Empty uses the public roots.
+	// Public: it holds certificates only.
 	CAFile string
+	// InsecureSkipVerify turns the target's certificate check off (as curl -k): TLS is used, the
+	// server's identity is not verified. It needs an https URL and excludes CAFile.
+	InsecureSkipVerify bool
 }
 
 // ToolGrant allows an agent to see and call some tools of one MCP target.
@@ -932,6 +937,14 @@ func (s MCPState) validate() []error {
 			// The scheme is parsed, which lower-cases it: a raw prefix test would miss "HTTPS://".
 			if u, err := url.Parse(t.URL); err != nil || strings.ToLower(u.Scheme) != "https" {
 				errs = append(errs, fmt.Errorf("mcp target %q: a CA file needs an https URL", t.Name))
+			}
+		}
+		if t.InsecureSkipVerify {
+			if t.CAFile != "" {
+				errs = append(errs, fmt.Errorf("mcp target %q: a CA file and insecureSkipVerify exclude each other", t.Name))
+			}
+			if u, err := url.Parse(t.URL); err != nil || strings.ToLower(u.Scheme) != "https" {
+				errs = append(errs, fmt.Errorf("mcp target %q: insecureSkipVerify needs an https URL", t.Name))
 			}
 		}
 		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {

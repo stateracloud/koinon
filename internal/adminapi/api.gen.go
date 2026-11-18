@@ -833,7 +833,7 @@ type McpServer struct {
 	// AdminDisabled Present while an admin holds the target off (the outward switch). Absent means enabled.
 	AdminDisabled *OutwardAdminDisabled `json:"adminDisabled,omitempty"`
 
-	// CaBundle PEM certificates of the private CA that signs this server's certificate. Public; trusted for this server only. Absent for the system roots.
+	// CaBundle PEM certificates of the one CA that signs this server's certificate. Only this CA is trusted for this server (it replaces the public roots, as curl --cacert does). Public. Absent for the public roots.
 	CaBundle *string `json:"caBundle,omitempty"`
 
 	// CodeHostConnectionId The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
@@ -862,6 +862,9 @@ type McpServer struct {
 	HealthSince  *time.Time         `json:"healthSince,omitempty"`
 	Id           openapi_types.UUID `json:"id"`
 
+	// InsecureSkipVerify Present and true when the server's certificate is NOT verified (as curl -k). TLS is used, but the server's identity is not checked and its credential can be sent to an impostor. https only; never with caBundle.
+	InsecureSkipVerify *bool `json:"insecureSkipVerify,omitempty"`
+
 	// Kind What the server is for. `other` is the default.
 	Kind            McpServerKind `json:"kind"`
 	ManagedBySecret *string       `json:"managedBySecret,omitempty"`
@@ -886,7 +889,7 @@ type McpServerTransport string
 
 // McpServerCreate defines model for McpServerCreate.
 type McpServerCreate struct {
-	// CaBundle PEM certificates of the private CA that signs the server's certificate (an https url only, certificates only, at most 256 KiB). Omit for the system roots.
+	// CaBundle PEM certificates of the one CA that signs the server's certificate (an https url only, certificates only, at most 64 KiB). Only this CA is trusted for this server; it replaces the public roots. Omit for the public roots. Refused together with insecureSkipVerify.
 	CaBundle *string `json:"caBundle,omitempty"`
 
 	// CredentialHeader Defaults to Authorization when a credential value is given.
@@ -903,6 +906,9 @@ type McpServerCreate struct {
 	// may carry both; empty carries none. A server nobody classified carries both. Where a call
 	// goes is not a server leg: it is the sink class of each tool.
 	DataClass *McpDataClass `json:"dataClass,omitempty"`
+
+	// InsecureSkipVerify Turns the certificate check off for this server (as curl -k). https only. Refused together with caBundle. Default false.
+	InsecureSkipVerify *bool `json:"insecureSkipVerify,omitempty"`
 
 	// Kind What the server is for. `other` is the default.
 	Kind *McpServerKind `json:"kind,omitempty"`
@@ -943,16 +949,19 @@ type McpServerList struct {
 
 // McpServerUpdate defines model for McpServerUpdate.
 type McpServerUpdate struct {
-	// CaBundle Replaces the server's CA bundle; an empty string goes back to the system roots. Leave out to keep it.
+	// CaBundle Replaces the server's CA bundle; an empty string goes back to the public roots. Leave out to keep it.
 	CaBundle         *string `json:"caBundle,omitempty"`
 	CredentialHeader *string `json:"credentialHeader,omitempty"`
 	CredentialPrefix *string `json:"credentialPrefix,omitempty"`
 
 	// CredentialValue Replaces the secret. Leave out to keep it while changing the header or prefix.
-	CredentialValue  *string                   `json:"credentialValue,omitempty"`
-	RemoveCredential *bool                     `json:"removeCredential,omitempty"`
-	Transport        *McpServerUpdateTransport `json:"transport,omitempty"`
-	Url              *string                   `json:"url,omitempty"`
+	CredentialValue *string `json:"credentialValue,omitempty"`
+
+	// InsecureSkipVerify Turns the certificate check off (true) or on (false). Leave out to keep it. https only; refused together with a caBundle.
+	InsecureSkipVerify *bool                     `json:"insecureSkipVerify,omitempty"`
+	RemoveCredential   *bool                     `json:"removeCredential,omitempty"`
+	Transport          *McpServerUpdateTransport `json:"transport,omitempty"`
+	Url                *string                   `json:"url,omitempty"`
 }
 
 // McpServerUpdateTransport defines model for McpServerUpdate.Transport.

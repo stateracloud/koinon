@@ -92,6 +92,8 @@ func fixtures() []fixture {
 	mcpServerCA := gateway.State{MCP: []gateway.MCPTarget{
 		{Name: "acme-wiki", Org: "acme", URL: "https://mcp.wiki.example.com/mcp", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/secrets/upstream/mcp_wiki", CAFile: "/secrets/upstream/mcp_ca.crt"},
 		{Name: "acme-legacy", Org: "acme", URL: "https://legacy.example.com/sse", SSE: true},
+		// A target that skips the certificate check (#278): backendTLS.insecure, on this target alone.
+		{Name: "acme-scratch", Org: "acme", URL: "https://scratch.example.com/mcp", InsecureSkipVerify: true},
 		{Name: "globex-search", Org: "globex", URL: "https://search.example.org/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/secrets/upstream/mcp_search"},
 	}}
 	mcpServerCA.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))

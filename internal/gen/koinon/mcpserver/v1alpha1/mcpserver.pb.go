@@ -177,11 +177,16 @@ type Server struct {
 	// admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
 	// not called, probed or offered to runs. Unset otherwise.
 	AdminDisabled *v1alpha1.AdminDisabled `protobuf:"bytes,24,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`
-	// ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the
-	// system roots. It is public (certificates only) and trusted for this server alone.
-	CaBundle      string `protobuf:"bytes,25,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is
+	// trusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the
+	// public roots. It is public (certificates only).
+	CaBundle string `protobuf:"bytes,25,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but
+	// the server's identity is not checked and its credential can be sent to an impostor. https only; never
+	// set together with ca_bundle.
+	InsecureSkipVerify bool `protobuf:"varint,26,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Server) Reset() {
@@ -387,6 +392,13 @@ func (x *Server) GetCaBundle() string {
 		return x.CaBundle
 	}
 	return ""
+}
+
+func (x *Server) GetInsecureSkipVerify() bool {
+	if x != nil {
+		return x.InsecureSkipVerify
+	}
+	return false
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
@@ -897,11 +909,15 @@ type CreateServerRequest struct {
 	// class is what the server exposes; leaving it out is the unclassified default (kind "other", both
 	// legs).
 	Class *ServerClass `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
-	// ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
-	// system roots. Certificates only, at most 64 KiB.
-	CaBundle      string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// ca_bundle is a PEM bundle of the one CA that signs the server's certificate; only this CA is trusted
+	// for this server (it replaces the public roots). Empty uses the public roots. Certificates only, at
+	// most 64 KiB.
+	CaBundle string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// insecure_skip_verify turns the certificate check off for this server (as curl -k). https only;
+	// refused together with ca_bundle.
+	InsecureSkipVerify bool `protobuf:"varint,10,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CreateServerRequest) Reset() {
@@ -997,6 +1013,13 @@ func (x *CreateServerRequest) GetCaBundle() string {
 	return ""
 }
 
+func (x *CreateServerRequest) GetInsecureSkipVerify() bool {
+	if x != nil {
+		return x.InsecureSkipVerify
+	}
+	return false
+}
+
 type CreateServerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
@@ -1054,10 +1077,12 @@ type UpdateServerRequest struct {
 	CredentialPrefix *string `protobuf:"bytes,6,opt,name=credential_prefix,json=credentialPrefix,proto3,oneof" json:"credential_prefix,omitempty"`
 	CredentialValue  *string `protobuf:"bytes,7,opt,name=credential_value,json=credentialValue,proto3,oneof" json:"credential_value,omitempty"`
 	RemoveCredential bool    `protobuf:"varint,8,opt,name=remove_credential,json=removeCredential,proto3" json:"remove_credential,omitempty"`
-	// ca_bundle replaces the server's CA bundle; set to "" to go back to the system roots. Unset keeps it.
-	CaBundle      *string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3,oneof" json:"ca_bundle,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// ca_bundle replaces the server's CA bundle; set to "" to go back to the public roots. Unset keeps it.
+	CaBundle *string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3,oneof" json:"ca_bundle,omitempty"`
+	// insecure_skip_verify turns the certificate check off (true) or on (false). Unset keeps it.
+	InsecureSkipVerify *bool `protobuf:"varint,10,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3,oneof" json:"insecure_skip_verify,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *UpdateServerRequest) Reset() {
@@ -1151,6 +1176,13 @@ func (x *UpdateServerRequest) GetCaBundle() string {
 		return *x.CaBundle
 	}
 	return ""
+}
+
+func (x *UpdateServerRequest) GetInsecureSkipVerify() bool {
+	if x != nil && x.InsecureSkipVerify != nil {
+		return *x.InsecureSkipVerify
+	}
+	return false
 }
 
 type UpdateServerResponse struct {
@@ -2138,7 +2170,7 @@ var File_koinon_mcpserver_v1alpha1_mcpserver_proto protoreflect.FileDescriptor
 
 const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
-	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\xcc\b\n" +
+	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\xfe\b\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2168,7 +2200,8 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x17code_host_connection_id\x18\x16 \x01(\tR\x14codeHostConnectionId\x12H\n" +
 	"\x12credential_lost_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12M\n" +
 	"\x0eadmin_disabled\x18\x18 \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\x12\x1b\n" +
-	"\tca_bundle\x18\x19 \x01(\tR\bcaBundle\"w\n" +
+	"\tca_bundle\x18\x19 \x01(\tR\bcaBundle\x120\n" +
+	"\x14insecure_skip_verify\x18\x1a \x01(\bR\x12insecureSkipVerify\"w\n" +
 	"\vServerClass\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
@@ -2212,7 +2245,7 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12ListServersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x13ListServersResponse\x12;\n" +
-	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\xd5\x02\n" +
+	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\x87\x03\n" +
 	"\x13CreateServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2222,9 +2255,11 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x11credential_prefix\x18\x06 \x01(\tR\x10credentialPrefix\x12.\n" +
 	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01R\x0fcredentialValue\x12<\n" +
 	"\x05class\x18\b \x01(\v2&.koinon.mcpserver.v1alpha1.ServerClassR\x05class\x12\x1b\n" +
-	"\tca_bundle\x18\t \x01(\tR\bcaBundle\"Q\n" +
+	"\tca_bundle\x18\t \x01(\tR\bcaBundle\x120\n" +
+	"\x14insecure_skip_verify\x18\n" +
+	" \x01(\bR\x12insecureSkipVerify\"Q\n" +
 	"\x14CreateServerResponse\x129\n" +
-	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\xd0\x03\n" +
+	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\xa0\x04\n" +
 	"\x13UpdateServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x15\n" +
@@ -2234,7 +2269,9 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x11credential_prefix\x18\x06 \x01(\tH\x03R\x10credentialPrefix\x88\x01\x01\x123\n" +
 	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01H\x04R\x0fcredentialValue\x88\x01\x01\x12+\n" +
 	"\x11remove_credential\x18\b \x01(\bR\x10removeCredential\x12 \n" +
-	"\tca_bundle\x18\t \x01(\tH\x05R\bcaBundle\x88\x01\x01B\x06\n" +
+	"\tca_bundle\x18\t \x01(\tH\x05R\bcaBundle\x88\x01\x01\x125\n" +
+	"\x14insecure_skip_verify\x18\n" +
+	" \x01(\bH\x06R\x12insecureSkipVerify\x88\x01\x01B\x06\n" +
 	"\x04_urlB\f\n" +
 	"\n" +
 	"_transportB\x14\n" +
@@ -2242,7 +2279,8 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12_credential_prefixB\x13\n" +
 	"\x11_credential_valueB\f\n" +
 	"\n" +
-	"_ca_bundle\"Q\n" +
+	"_ca_bundleB\x17\n" +
+	"\x15_insecure_skip_verify\"Q\n" +
 	"\x14UpdateServerResponse\x129\n" +
 	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\x89\x01\n" +
 	"\x15SetServerClassRequest\x12\x15\n" +

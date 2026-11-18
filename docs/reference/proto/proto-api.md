@@ -2246,6 +2246,7 @@ where the target's own CA bundle (public certificates) is mounted, empty for the
 | credential_prefix | 6 | `string` | singular |  |  |
 | credential_file | 7 | `string` | singular |  |  |
 | ca_file | 8 | `string` | singular |  |  |
+| insecure_skip_verify | 9 | `bool` | singular |  |  |
 
 ### Message Model
 
@@ -2516,7 +2517,8 @@ Allowance is a server an agent may use, optionally narrowed to some of its tools
 | credential_prefix | 6 | `string` | singular |  | credential_prefix precedes the secret in the header value, for example "Bearer ". |
 | credential_value | 7 | `string` | singular |  |  |
 | class | 8 | `koinon.mcpserver.v1alpha1.ServerClass` | singular |  | class is what the server exposes; leaving it out is the unclassified default (kind "other", both legs). |
-| ca_bundle | 9 | `string` | singular |  | ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the system roots. Certificates only, at most 64 KiB. |
+| ca_bundle | 9 | `string` | singular |  | ca_bundle is a PEM bundle of the one CA that signs the server's certificate; only this CA is trusted for this server (it replaces the public roots). Empty uses the public roots. Certificates only, at most 64 KiB. |
+| insecure_skip_verify | 10 | `bool` | singular |  | insecure_skip_verify turns the certificate check off for this server (as curl -k). https only; refused together with ca_bundle. |
 
 ### Message CreateServerResponse
 
@@ -2603,7 +2605,8 @@ Server is a remote MCP server of the org. It never holds the credential.
 | code_host_connection_id | 22 | `string` | singular |  | code_host_connection_id is the org's code-host connection the server acts through, empty for none. The code-host sink class of its tools is looked up in that connection's repository list only; a server without one is external-high. A changed URL clears it. |
 | credential_lost_at | 23 | `google.protobuf.Timestamp` | singular |  | credential_lost_at is set when the credential was lost with the key that encrypted it (`koinon-api keys forget`, ADR 0085 decision 13): the server is not served until the credential is entered again; has_credential is false and credential_header and credential_prefix are kept, so only the value is asked for. Unset otherwise. |
 | admin_disabled | 24 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
-| ca_bundle | 25 | `string` | singular |  | ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the system roots. It is public (certificates only) and trusted for this server alone. |
+| ca_bundle | 25 | `string` | singular |  | ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is trusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the public roots. It is public (certificates only). |
+| insecure_skip_verify | 26 | `bool` | singular |  | insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but the server's identity is not checked and its credential can be sent to an impostor. https only; never set together with ca_bundle. |
 
 ### Message ServerClass
 
@@ -2736,7 +2739,8 @@ ToolSink is what a tool declares about its calls (ADR 0091 decision 2).
 | credential_prefix | 6 | `string` | optional |  |  |
 | credential_value | 7 | `string` | optional |  |  |
 | remove_credential | 8 | `bool` | singular |  |  |
-| ca_bundle | 9 | `string` | optional |  | ca_bundle replaces the server's CA bundle; set to "" to go back to the system roots. Unset keeps it. |
+| ca_bundle | 9 | `string` | optional |  | ca_bundle replaces the server's CA bundle; set to "" to go back to the public roots. Unset keeps it. |
+| insecure_skip_verify | 10 | `bool` | optional |  | insecure_skip_verify turns the certificate check off (true) or on (false). Unset keeps it. |
 
 ### Message UpdateServerResponse
 

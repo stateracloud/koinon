@@ -45,6 +45,10 @@ func toMcpServer(m mcpservers.Server) McpServer {
 		return &s
 	}
 	out.CredentialHeader, out.CredentialPrefix, out.CaBundle = str(m.CredentialHeader), str(m.CredentialPrefix), str(m.CABundle)
+	if m.InsecureSkipVerify {
+		t := true
+		out.InsecureSkipVerify = &t
+	}
 	out.DisabledReason, out.ManagedBySecret, out.HealthReason = str(m.DisabledReason), str(m.ManagedBySecret), str(m.HealthReason)
 	if m.Removed {
 		t := true
@@ -112,7 +116,7 @@ func (s *Server) CreateMcpServer(ctx context.Context, req CreateMcpServerRequest
 	in := mcpservers.Input{
 		Name: req.Body.Name, URL: req.Body.Url, CredentialHeader: deref(req.Body.CredentialHeader),
 		CredentialPrefix: deref(req.Body.CredentialPrefix), CredentialValue: deref(req.Body.CredentialValue),
-		CABundle: deref(req.Body.CaBundle),
+		CABundle: deref(req.Body.CaBundle), InsecureSkipVerify: req.Body.InsecureSkipVerify != nil && *req.Body.InsecureSkipVerify,
 	}
 	if req.Body.Transport != nil {
 		in.Transport = string(*req.Body.Transport)
@@ -158,7 +162,7 @@ func (s *Server) UpdateMcpServer(ctx context.Context, req UpdateMcpServerRequest
 	}
 	p, actor := s.actor(ctx)
 	b := req.Body
-	patch := mcpservers.Patch{URL: b.Url, CABundle: b.CaBundle, RemoveCredential: b.RemoveCredential != nil && *b.RemoveCredential}
+	patch := mcpservers.Patch{URL: b.Url, CABundle: b.CaBundle, InsecureSkipVerify: b.InsecureSkipVerify, RemoveCredential: b.RemoveCredential != nil && *b.RemoveCredential}
 	if b.Transport != nil {
 		t := string(*b.Transport)
 		patch.Transport = &t

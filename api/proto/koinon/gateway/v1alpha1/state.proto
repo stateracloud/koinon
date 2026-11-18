@@ -170,6 +170,7 @@ message MCPTarget {
   string credential_prefix = 6;
   string credential_file = 7;
   string ca_file = 8;
+  bool insecure_skip_verify = 9;
 }
 
 message AgentTools {

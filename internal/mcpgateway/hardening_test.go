@@ -272,6 +272,34 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(gateway.CredentialSafeURL("https://t.example/mcp")).To(BeTrue())
 	})
 
+	It("skips certificate verification for the target that asks for it and for no other (#278)", func(ctx SpecContext) {
+		tlsUp := httptest.NewTLSServer(fakeUpstream("scratch", &upstreamLog{}).Config.Handler)
+		DeferCleanup(tlsUp.Close)
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}})
+		DeferCleanup(gw.Drain)
+		front := httptest.NewServer(gw.Handler())
+		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
+		key := mustKey(agent)
+		grant := func(n string) gateway.ToolGrant { return gateway.ToolGrant{Target: n, All: true} }
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
+			MCP: []gateway.MCPTarget{
+				{Name: "scratch", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true},
+				{Name: "plain", Org: "acme", URL: tlsUp.URL + "/mcp"},
+				{Name: "both", Org: "acme", URL: tlsUp.URL + "/mcp", InsecureSkipVerify: true, CAFile: writeFile("both.crt", "not a certificate")},
+			},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {grant("scratch"), grant("plain"), grant("both")}},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front.URL, key.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "scratch_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse())
+		for _, name := range []string{"plain", "both"} {
+			res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: name + "_read_item", Arguments: map[string]any{"text": "x"}})
+			Expect(err != nil || res.IsError).To(BeTrue(), "%s must not connect", name)
+		}
+	})
+
 	It("verifies a target with its own CA bundle only, and every other target with the system roots (#278)", func(ctx SpecContext) {
 		tlsUp := httptest.NewTLSServer(fakeUpstream("private", &upstreamLog{}).Config.Handler)
 		DeferCleanup(tlsUp.Close)

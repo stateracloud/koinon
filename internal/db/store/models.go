@@ -2338,6 +2338,7 @@ type McpServer struct {
 	AdminDisabledUnderBy   pgtype.Text
 	AdminDisabledUnderNote pgtype.Text
 	CaBundle               string
+	InsecureSkipVerify     bool
 }
 
 type McpTool struct {

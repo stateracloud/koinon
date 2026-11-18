@@ -72,7 +72,7 @@ model endpoint and name your copy under `values:` in your local.yaml. Then regis
 `rt1-searxng-mcp` a bearer credential: the token in the Secrets above. Koinon sends a credential only over
 https (ADR 0120; plain http is allowed only for a loopback address). Serve each credentialed fixture over
 https and, when its certificate comes from a private CA, paste that CA's PEM certificate into the server's
-CA certificate field (`caBundle`; trusted for that server only).
+CA certificate field (`caBundle`; only that CA is trusted for that server, replacing the public roots).
 
 ### 2. The model provider and a cost guard
 

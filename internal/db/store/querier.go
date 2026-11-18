@@ -1199,6 +1199,9 @@ type Querier interface {
 	// reset changed the hash after the old password was checked. Lock order: the credential, then the
 	// sessions (as the reset does).
 	LockLocalCredentialUpdate(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	// Serializes the saves that add CA bundle bytes, so the global total checked below cannot be passed by
+	// two orgs saving at the same moment. Held until the transaction ends.
+	LockMCPCABudget(ctx context.Context) error
 	// Serializes the stores of several replicas for the rest of the transaction.
 	LockOpenRouterCatalog(ctx context.Context) error
 	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
@@ -1632,6 +1635,10 @@ type Querier interface {
 	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
 	// The same sums for one home generation of an agent, over every run that was in it.
 	SumGenerationEvidenceOutbound(ctx context.Context, arg SumGenerationEvidenceOutboundParams) ([]SumGenerationEvidenceOutboundRow, error)
+	// The CA bundle bytes of every server of every org that is not removed, except one server (the one
+	// being saved; the zero UUID for a new server). The reconciler serves a subset of these, so the sum
+	// is an upper bound of what it puts in the gateway Secret.
+	SumMCPCABundleBytes(ctx context.Context, exceptID pgtype.UUID) (int64, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// The bytes that left the org for each external sink: the payload of every external call the guard
@@ -1674,7 +1681,7 @@ type Querier interface {
 	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
 	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)
-	// A change of the URL, transport, CA bundle or credential starts health over: the new settings are unproven.
+	// A change of the URL, transport, CA bundle, certificate check or credential starts health over: the new settings are unproven.
 	// credential is written only when @set_credential is true (the patch sets or removes it). The caller
 	// read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
 	// envelope since, so writing back the envelope that was read would undo it. credential_header and

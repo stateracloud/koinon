@@ -154,3 +154,40 @@ func TestParseMCPServerCABundle(t *testing.T) {
 		}
 	}
 }
+
+// TestParseMCPServerInsecureSkipVerify covers the optional insecureSkipVerify key of an mcp-server Secret (#278).
+func TestParseMCPServerInsecureSkipVerify(t *testing.T) {
+	set, err := faketls.Make("koinon test CA", []string{"mcp.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := func(url, insecure, bundle string) *corev1.Secret {
+		data := map[string][]byte{"name": []byte("wiki"), "url": []byte(url)}
+		if insecure != "" {
+			data[declarative.KeyInsecureSkipVerify] = []byte(insecure)
+		}
+		if bundle != "" {
+			data[declarative.KeyCABundle] = []byte(bundle)
+		}
+		return &corev1.Secret{Data: data}
+	}
+	d, err := declarative.ParseMCPServer(sec("https://mcp.example.com/mcp", "true", ""), "v")
+	if err != nil || !d.InsecureSkipVerify {
+		t.Fatalf("true on https: %v %v", err, d.InsecureSkipVerify)
+	}
+	for _, v := range []string{"", "false"} {
+		d, err = declarative.ParseMCPServer(sec("https://mcp.example.com/mcp", v, ""), "v")
+		if err != nil || d.InsecureSkipVerify {
+			t.Fatalf("%q: want verification on, got %v %v", v, err, d.InsecureSkipVerify)
+		}
+	}
+	for name, s := range map[string]*corev1.Secret{
+		"http url":      sec("http://mcp.example.com/mcp", "true", ""),
+		"not a boolean": sec("https://mcp.example.com/mcp", "yes", ""),
+		"with a CA":     sec("https://mcp.example.com/mcp", "true", string(set.CA)),
+	} {
+		if _, err := declarative.ParseMCPServer(s, "v"); err == nil || !strings.Contains(err.Error(), declarative.KeyInsecureSkipVerify) {
+			t.Errorf("%s: want an error naming %s, got %v", name, declarative.KeyInsecureSkipVerify, err)
+		}
+	}
+}

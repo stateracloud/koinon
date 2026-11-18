@@ -210,8 +210,10 @@ export type ServerFormState = {
   /** Create only: what the server exposes. An edit leaves the class to its own control. */
   kind: string
   legs: string[]
-  /** PEM certificates of the private CA that signs the server's certificate; empty for the system roots. */
+  /** PEM certificates of the one CA that signs the server's certificate; only this CA is trusted for the server. Empty for the public roots. */
   caBundle: string
+  /** Do not verify the server's certificate (like curl -k). https only; never with a CA certificate. */
+  insecureSkipVerify: boolean
 }
 
 /** initialMode is the credential mode a stored credential's header and prefix correspond to. */
@@ -237,6 +239,7 @@ export function initialForm(s?: Server): ServerFormState {
     kind: s?.kind || defaultKind,
     legs: s ? [...s.dataClass] : [...defaultLegs],
     caBundle: s?.caBundle ?? '',
+    insecureSkipVerify: s?.insecureSkipVerify ?? false,
   }
 }
 
@@ -249,6 +252,14 @@ export function caBundleError(f: ServerFormState): string | undefined {
   if (/-----BEGIN (?!CERTIFICATE-----)[A-Z ]*-----/.test(bundle) || !/-----BEGIN CERTIFICATE-----/.test(bundle)) {
     return 'Paste PEM certificates only: each starts with -----BEGIN CERTIFICATE-----. Never paste a private key.'
   }
+  return undefined
+}
+
+/** Skipping verification needs an https URL and excludes a CA certificate. The API checks it again. */
+export function insecureError(f: ServerFormState): string | undefined {
+  if (!f.insecureSkipVerify) return undefined
+  if (f.caBundle.trim() !== '') return 'Choose a CA certificate or skip verification, not both.'
+  if (!/^https:\/\//i.test(f.url.trim())) return 'Skipping verification needs an https URL.'
   return undefined
 }
 
@@ -270,6 +281,7 @@ export function formErrors(f: ServerFormState, server?: Server) {
     header: headerError(f),
     value: valueError(f, !!server?.hasCredential && initialMode(server) === f.mode),
     caBundle: caBundleError(f),
+    insecureSkipVerify: insecureError(f),
   }
 }
 
@@ -281,6 +293,7 @@ export type CreateServerInput = {
   credentialPrefix: string
   credentialValue: string
   caBundle: string
+  insecureSkipVerify: boolean
   class: { kind: string; dataClass: string[] }
 }
 
@@ -300,6 +313,7 @@ export function buildCreateRequest(f: ServerFormState): CreateServerInput {
     credentialPrefix: withSecret ? c.prefix : '',
     credentialValue: withSecret ? f.value : '',
     caBundle: f.caBundle.trim(),
+    insecureSkipVerify: f.insecureSkipVerify,
     class: { kind: f.kind, dataClass: [...f.legs] },
   }
 }
@@ -311,8 +325,10 @@ export type UpdateServerInput = {
   credentialPrefix?: string
   credentialValue?: string
   removeCredential?: boolean
-  /** The new CA bundle; an empty string goes back to the system roots. */
+  /** The new CA bundle; an empty string goes back to the public roots. */
   caBundle?: string
+  /** Turn the certificate check off (true) or back on (false). */
+  insecureSkipVerify?: boolean
 }
 
 /** buildUpdateRequest sends only what changed; a stored secret stays unless a new one is typed or removal is asked for. */
@@ -321,6 +337,7 @@ export function buildUpdateRequest(s: Server, f: ServerFormState): UpdateServerI
   if (f.url.trim() !== s.url) out.url = f.url.trim()
   if (f.transport !== s.transport) out.transport = f.transport
   if (f.caBundle.trim() !== s.caBundle.trim()) out.caBundle = f.caBundle.trim()
+  if (f.insecureSkipVerify !== s.insecureSkipVerify) out.insecureSkipVerify = f.insecureSkipVerify
   if (f.removeCredential || f.mode === 'none') {
     if (hadCredential(s)) out.removeCredential = true
     return out
@@ -339,7 +356,7 @@ export function buildUpdateRequest(s: Server, f: ServerFormState): UpdateServerI
 
 /** serverErrorField says which form field a server's refusal is about, so the message sits next to it. */
 export function serverErrorField(message: string): 'name' | 'url' | 'credential' | 'ca' | undefined {
-  if (/\bca\b|caBundle|certificate/i.test(message)) return 'ca'
+  if (/\bca\b|caBundle|certificate|insecureSkipVerify/i.test(message)) return 'ca'
   if (/oauth|\burls?\b|address|loopback|private|scheme|https?:|\bhost\b|resolve/i.test(message)) return 'url'
   if (/\bname\b/i.test(message)) return 'name'
   if (/credential|header|secret|token/i.test(message)) return 'credential'

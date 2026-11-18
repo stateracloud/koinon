@@ -194,6 +194,121 @@ var _ = Describe("Service", func() {
 			)
 		})
 
+		Describe("a server that skips certificate verification (#278)", func() {
+			insecure := true
+			It("is kept, shown, audited and handed to the preflight", func(ctx SpecContext) {
+				var seen bool
+				svc.WithPreflight(func(_ context.Context, p mcpservers.PreflightRequest) error { seen = p.InsecureSkipVerify; return nil })
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "scratch", URL: "https://scratch.example.test/mcp", InsecureSkipVerify: true})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.InsecureSkipVerify).To(BeTrue())
+				Expect(seen).To(BeTrue(), "the add-time check skips verification, too")
+				Expect(string(events(ctx, "mcp_server.create")[0].Summary)).To(ContainSubstring(`"insecureSkipVerify": true`))
+				got, err := svc.Get(ctx, org, s.ID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.InsecureSkipVerify).To(BeTrue())
+				list, err := svc.List(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(list[0].InsecureSkipVerify).To(BeTrue())
+			})
+			It("is off by default, turned on and off by an update, and checked again by the preflight", func(ctx SpecContext) {
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "scratch", URL: "https://scratch.example.test/mcp"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.InsecureSkipVerify).To(BeFalse())
+				calls := 0
+				svc.WithPreflight(func(context.Context, mcpservers.PreflightRequest) error { calls++; return nil })
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{InsecureSkipVerify: &insecure})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.InsecureSkipVerify).To(BeTrue())
+				Expect(calls).To(Equal(1))
+				u := "https://scratch2.example.test/mcp"
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.InsecureSkipVerify).To(BeTrue(), "a patch that leaves it out keeps it")
+				off := false
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{InsecureSkipVerify: &off})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.InsecureSkipVerify).To(BeFalse())
+			})
+			It("is refused with a CA bundle, on http, and when an update would produce either", func(ctx SpecContext) {
+				set, err := faketls.Make("koinon test CA", []string{"scratch.example.test"})
+				Expect(err).NotTo(HaveOccurred())
+				ca := string(set.CA)
+				var inv *mcpservers.InvalidError
+				_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "a", URL: "https://scratch.example.test/mcp", CABundle: ca, InsecureSkipVerify: true})
+				Expect(err).To(BeAssignableToTypeOf(inv))
+				Expect(err.Error()).To(ContainSubstring("cannot both be set"))
+				_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "b", URL: "http://scratch.example.test/mcp", InsecureSkipVerify: true})
+				Expect(err).To(BeAssignableToTypeOf(inv))
+				Expect(err.Error()).To(ContainSubstring("https url"))
+
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "c", URL: "https://scratch.example.test/mcp", InsecureSkipVerify: true})
+				Expect(err).NotTo(HaveOccurred())
+				http := "http://scratch.example.test/mcp"
+				_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &http})
+				Expect(err).To(HaveOccurred())
+				_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{CABundle: &ca})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("cannot both be set"))
+				off := false
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{CABundle: &ca, InsecureSkipVerify: &off})
+				Expect(err).NotTo(HaveOccurred(), "one update may swap skipping for a CA")
+				Expect(s.CABundle).To(Equal(ca))
+				Expect(s.InsecureSkipVerify).To(BeFalse())
+			})
+			It("cannot be stored with a bundle or on http even by a writer that skips the service (the table checks)", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				_, err := pool.Exec(ctx, `UPDATE mcp_servers SET insecure_skip_verify = true, ca_bundle = 'x' WHERE id = $1`, s.ID)
+				Expect(err).To(MatchError(ContainSubstring("mcp_servers_tls_trust_exclusive")))
+				_, err = pool.Exec(ctx, `UPDATE mcp_servers SET insecure_skip_verify = true, url = 'http://mcp.example.com/mcp' WHERE id = $1`, s.ID)
+				Expect(err).To(MatchError(ContainSubstring("mcp_servers_insecure_needs_https")))
+			})
+		})
+
+		Describe("the CA bundle budgets (#278)", func() {
+			// A bundle of about 60 KiB: one certificate repeated, which is still PEM certificates only.
+			big := func() string {
+				GinkgoHelper()
+				set, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+				Expect(err).NotTo(HaveOccurred())
+				return strings.Repeat(string(set.CA), (60<<10)/len(set.CA))
+			}
+			It("refuses a save that takes all orgs over the global cap, so an accepted save is always served", func(ctx SpecContext) {
+				b := big()
+				Expect(len(b)).To(BeNumerically("<", mcpservers.MaxCABundleBytes))
+				// Two orgs, each at about 120 KiB of their 128 KiB budget: 240 of the 256 KiB global cap.
+				for _, o := range []pgtype.UUID{org, func() pgtype.UUID { o, _, _ := pgtest.NewOrg(ctx, pool); return o }()} {
+					for _, name := range []string{"one", "two"} {
+						_, err := svc.Create(ctx, o, actor, user, mcpservers.Input{Name: name, URL: "https://" + name + ".example.test/mcp", CABundle: b})
+						Expect(err).NotTo(HaveOccurred())
+					}
+				}
+				third, _, _ := pgtest.NewOrg(ctx, pool)
+				_, err := svc.Create(ctx, third, actor, user, mcpservers.Input{Name: "three", URL: "https://three.example.test/mcp", CABundle: b})
+				Expect(err).To(MatchError(ContainSubstring("all servers on this installation")))
+				one, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+				Expect(err).NotTo(HaveOccurred())
+				small := strings.Repeat(string(one.CA), 10) // about 7 KiB still fits
+				_, err = svc.Create(ctx, third, actor, user, mcpservers.Input{Name: "three", URL: "https://three.example.test/mcp", CABundle: small})
+				Expect(err).NotTo(HaveOccurred())
+				By("an update that does not add bytes is not refused by the global cap")
+				list, err := svc.List(ctx, org)
+				Expect(err).NotTo(HaveOccurred())
+				u := "https://one-b.example.test/mcp"
+				_, err = svc.Update(ctx, org, actor, list[0].ID, mcpservers.Patch{URL: &u})
+				Expect(err).NotTo(HaveOccurred())
+			})
+			It("refuses a save that takes the org over its own budget", func(ctx SpecContext) {
+				b := big()
+				for _, name := range []string{"one", "two"} {
+					_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: name, URL: "https://" + name + ".example.test/mcp", CABundle: b})
+					Expect(err).NotTo(HaveOccurred())
+				}
+				_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "three", URL: "https://three.example.test/mcp", CABundle: b})
+				Expect(err).To(MatchError(ContainSubstring("this org's servers")))
+			})
+		})
+
 		It("refuses a credential on a URL that is not https, as the gateway would drop it (ADR 0120)", func(ctx SpecContext) {
 			_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "http://x.example.com/mcp", CredentialValue: "not-a-real-token"})
 			Expect(err).To(MatchError(ContainSubstring("must be https")))
@@ -384,9 +499,32 @@ var _ = Describe("Service", func() {
 			_, err = svc.ApplyDeclared(ctx, org, d)
 			Expect(err).NotTo(HaveOccurred())
 			list, _ = svc.List(ctx, org)
-			Expect(list[0].CABundle).To(BeEmpty(), "a Secret without caBundle goes back to the system roots")
+			Expect(list[0].CABundle).To(BeEmpty(), "a Secret without caBundle goes back to the public roots")
 			d.URL, d.CABundle = "http://decl.example.com/mcp", string(set.CA)
 			d.CredentialHeader, d.CredentialValue = "", ""
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).To(MatchError(ContainSubstring("https")))
+		})
+		It("keeps insecureSkipVerify of the Secret, refuses it with a caBundle or on http", func(ctx SpecContext) {
+			d := decl("s1", "uid/1", "wiki")
+			d.InsecureSkipVerify = true
+			_, err := svc.ApplyDeclared(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, _ := svc.List(ctx, org)
+			Expect(list[0].InsecureSkipVerify).To(BeTrue())
+			d = decl("s1", "uid/2", "wiki")
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, _ = svc.List(ctx, org)
+			Expect(list[0].InsecureSkipVerify).To(BeFalse(), "a Secret without the key goes back to verifying")
+			set, err := faketls.Make("koinon test CA", []string{"decl.example.com"})
+			Expect(err).NotTo(HaveOccurred())
+			d = decl("s1", "uid/3", "wiki")
+			d.InsecureSkipVerify, d.CABundle = true, string(set.CA)
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).To(MatchError(ContainSubstring("cannot both be set")))
+			d = decl("s1", "uid/4", "wiki")
+			d.InsecureSkipVerify, d.URL, d.CredentialHeader, d.CredentialValue = true, "http://decl.example.com/mcp", "", ""
 			_, err = svc.ApplyDeclared(ctx, org, d)
 			Expect(err).To(MatchError(ContainSubstring("https")))
 		})

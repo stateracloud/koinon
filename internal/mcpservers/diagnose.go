@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/catalog"
-	"github.com/stateracloud/koinon/internal/codehost"
 )
 
 // OAuthMessage is what an admin reads when a server needs per-user OAuth, which v0.1 does not do.
@@ -42,7 +41,7 @@ type Diagnosis struct {
 
 // CertificateMessage is what an admin reads when the server's certificate does not verify.
 const CertificateMessage = "the server's TLS certificate does not verify; if it is signed by a private CA, " +
-	"put that CA's PEM certificate in the server's CA bundle field (caBundle)"
+	"put that CA's PEM certificate in the server's CA bundle field (caBundle); only that CA is then trusted for this server"
 
 // Diagnose sends one request to the server named by p, directly from this process, and says what came
 // back. It is for the add-time OAuth check only, and it carries NO credential: the server is not
@@ -54,10 +53,14 @@ const CertificateMessage = "the server's TLS certificate does not verify; if it 
 func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest) Diagnosis {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	// The system roots plus the server's own bundle (only this server trusts it); TLS 1.2 at least.
+	// The system roots, or ONLY the server's own CA bundle when it has one (it replaces the public roots,
+	// as curl --cacert does); TLS 1.2 at least. insecureSkipVerify (curl -k) checks no certificate.
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if p.CABundle != "" {
-		pool, err := codehost.CertPool(p.CABundle)
+	switch {
+	case p.InsecureSkipVerify:
+		tlsConfig.InsecureSkipVerify = true
+	case p.CABundle != "":
+		pool, err := certPoolOf(p.CABundle)
 		if err != nil {
 			return Diagnosis{Reason: "the CA bundle is not usable"}
 		}
@@ -113,6 +116,15 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 		d.Reason = fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
 	}
 	return d
+}
+
+// certPoolOf is a pool of exactly the certificates in the PEM bundle, without the system roots.
+func certPoolOf(bundle string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(bundle)) {
+		return nil, errors.New("the bundle holds no PEM certificate")
+	}
+	return pool, nil
 }
 
 // certificateProblem says err is the server's certificate failing verification. The typed errors are

@@ -4,6 +4,7 @@ package mcpservers_test
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
@@ -146,5 +147,42 @@ var _ = Describe("Diagnose over TLS with a private CA", func() {
 		d := mcpservers.Diagnose(context.Background(), policy, req(srv, "not a pem"))
 		Expect(d.Reachable).To(BeFalse())
 		Expect(d.Reason).To(ContainSubstring("CA bundle"))
+	})
+})
+
+var _ = Describe("Diagnose trust (#278)", func() {
+	tlsServer := func() (*httptest.Server, catalog.URLPolicy, string) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+		DeferCleanup(srv.Close)
+		u, _ := url.Parse(srv.URL)
+		bundle := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+		return srv, catalog.URLPolicy{AllowedHosts: []string{u.Host}}, bundle
+	}
+
+	It("trusts ONLY the bundle when one is set: the pool holds the bundle's certificates and no system root", func() {
+		_, _, bundle := tlsServer()
+		pool, err := mcpservers.CertPoolOf(bundle)
+		Expect(err).NotTo(HaveOccurred())
+		only := x509.NewCertPool()
+		Expect(only.AppendCertsFromPEM([]byte(bundle))).To(BeTrue())
+		Expect(pool.Equal(only)).To(BeTrue(), "the bundle replaces the public roots")
+		system, err := x509.SystemCertPool()
+		Expect(err).NotTo(HaveOccurred())
+		withSystem := system.Clone()
+		Expect(withSystem.AppendCertsFromPEM([]byte(bundle))).To(BeTrue())
+		if !withSystem.Equal(only) { // a machine with no system roots makes the two pools equal
+			Expect(pool.Equal(withSystem)).To(BeFalse())
+		}
+	})
+
+	It("skips certificate verification when asked, and only then", func() {
+		srv, policy, _ := tlsServer()
+		r := mcpservers.PreflightRequest{URL: srv.URL + "/mcp", Transport: mcpservers.TransportStreamableHTTP}
+		d := mcpservers.Diagnose(context.Background(), policy, r)
+		Expect(d.BadCertificate).To(BeTrue(), "the default verifies")
+		r.InsecureSkipVerify = true
+		d = mcpservers.Diagnose(context.Background(), policy, r)
+		Expect(d.Reachable).To(BeTrue(), d.Reason)
+		Expect(d.BadCertificate).To(BeFalse())
 	})
 })

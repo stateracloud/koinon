@@ -160,9 +160,18 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if t.CAFile != "" {
+	switch {
+	case t.CAFile != "" && t.InsecureSkipVerify:
+		// State validation refuses this pair; fail closed if one slips through.
+		return nil, errors.New("mcpgateway: a target cannot have both a CA bundle and skipped verification")
+	case t.CAFile != "":
 		var err error
 		if base, err = caTransport(base, t.CAFile); err != nil {
+			return nil, err
+		}
+	case t.InsecureSkipVerify:
+		var err error
+		if base, err = insecureTransport(base); err != nil {
 			return nil, err
 		}
 	}
@@ -244,6 +253,23 @@ func caTransport(base http.RoundTripper, caFile string) (http.RoundTripper, erro
 		cfg = &tls.Config{}
 	}
 	cfg.RootCAs, cfg.MinVersion = pool, tls.VersionTLS12
+	c.TLSClientConfig = cfg
+	return c, nil
+}
+
+// insecureTransport returns a copy of base that does not verify the target's certificate (the server
+// record's insecureSkipVerify, as curl -k). It applies to this target alone: the copy is not shared.
+func insecureTransport(base http.RoundTripper) (http.RoundTripper, error) {
+	bt, ok := base.(*http.Transport)
+	if !ok {
+		return nil, errors.New("mcpgateway: a target with skipped verification needs an *http.Transport")
+	}
+	c := bt.Clone()
+	cfg := c.TLSClientConfig
+	if cfg == nil {
+		cfg = &tls.Config{}
+	}
+	cfg.InsecureSkipVerify, cfg.MinVersion = true, tls.VersionTLS12
 	c.TLSClientConfig = cfg
 	return c, nil
 }

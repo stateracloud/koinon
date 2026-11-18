@@ -595,6 +595,24 @@ var _ = Describe("MCP servers", func() {
 		}
 	})
 
+	It("carries a server's skipped verification to its target and to no other", func() {
+		in := mcpInput()
+		in.MCP[0].InsecureSkipVerify = true
+		in.Allowances = allow
+		p := newPlanner(time.Minute)
+		pl := settle(p.Begin(in), nil, nil, lk)
+		var wiki, other bool
+		for _, t := range pl.State.MCP {
+			if t.Name == "acme-wiki" {
+				wiki = t.InsecureSkipVerify
+			} else {
+				other = other || t.InsecureSkipVerify
+			}
+		}
+		Expect(wiki).To(BeTrue())
+		Expect(other).To(BeFalse(), "another target keeps verifying")
+	})
+
 	It("leaves a server out while its new CA bundle settles, and serves it with the previous bundle", func() {
 		withCA := func(file string) gatewayplan.Input {
 			in := mcpInput()

@@ -1121,17 +1121,18 @@ func (x *MCPState) GetTools() []*AgentTools {
 // the gateway, not the credential; credential_header and credential_prefix say how it is sent. ca_file is
 // where the target's own CA bundle (public certificates) is mounted, empty for the system roots.
 type MCPTarget struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Url              string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
-	Sse              bool                   `protobuf:"varint,3,opt,name=sse,proto3" json:"sse,omitempty"`
-	Org              string                 `protobuf:"bytes,4,opt,name=org,proto3" json:"org,omitempty"`
-	CredentialHeader string                 `protobuf:"bytes,5,opt,name=credential_header,json=credentialHeader,proto3" json:"credential_header,omitempty"`
-	CredentialPrefix string                 `protobuf:"bytes,6,opt,name=credential_prefix,json=credentialPrefix,proto3" json:"credential_prefix,omitempty"`
-	CredentialFile   string                 `protobuf:"bytes,7,opt,name=credential_file,json=credentialFile,proto3" json:"credential_file,omitempty"`
-	CaFile           string                 `protobuf:"bytes,8,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Url                string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Sse                bool                   `protobuf:"varint,3,opt,name=sse,proto3" json:"sse,omitempty"`
+	Org                string                 `protobuf:"bytes,4,opt,name=org,proto3" json:"org,omitempty"`
+	CredentialHeader   string                 `protobuf:"bytes,5,opt,name=credential_header,json=credentialHeader,proto3" json:"credential_header,omitempty"`
+	CredentialPrefix   string                 `protobuf:"bytes,6,opt,name=credential_prefix,json=credentialPrefix,proto3" json:"credential_prefix,omitempty"`
+	CredentialFile     string                 `protobuf:"bytes,7,opt,name=credential_file,json=credentialFile,proto3" json:"credential_file,omitempty"`
+	CaFile             string                 `protobuf:"bytes,8,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`
+	InsecureSkipVerify bool                   `protobuf:"varint,9,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MCPTarget) Reset() {
@@ -1218,6 +1219,13 @@ func (x *MCPTarget) GetCaFile() string {
 		return x.CaFile
 	}
 	return ""
+}
+
+func (x *MCPTarget) GetInsecureSkipVerify() bool {
+	if x != nil {
+		return x.InsecureSkipVerify
+	}
+	return false
 }
 
 type AgentTools struct {
@@ -1418,7 +1426,7 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x06models\x18\x02 \x03(\tR\x06models\"\x83\x01\n" +
 	"\bMCPState\x12<\n" +
 	"\atargets\x18\x01 \x03(\v2\".koinon.gateway.v1alpha1.MCPTargetR\atargets\x129\n" +
-	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xf1\x01\n" +
+	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xa3\x02\n" +
 	"\tMCPTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x10\n" +
@@ -1427,7 +1435,8 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x11credential_header\x18\x05 \x01(\tR\x10credentialHeader\x12+\n" +
 	"\x11credential_prefix\x18\x06 \x01(\tR\x10credentialPrefix\x12'\n" +
 	"\x0fcredential_file\x18\a \x01(\tR\x0ecredentialFile\x12\x17\n" +
-	"\aca_file\x18\b \x01(\tR\x06caFile\"\x81\x01\n" +
+	"\aca_file\x18\b \x01(\tR\x06caFile\x120\n" +
+	"\x14insecure_skip_verify\x18\t \x01(\bR\x12insecureSkipVerify\"\x81\x01\n" +
 	"\n" +
 	"AgentTools\x127\n" +
 	"\x05agent\x18\x01 \x01(\v2!.koinon.gateway.v1alpha1.AgentRefR\x05agent\x12:\n" +

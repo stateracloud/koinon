@@ -36,15 +36,8 @@ import (
 type servedMCP struct {
 	servers []gatewayplan.MCPServer
 	files   map[string][]byte
-	bytes   int // bytes of CA bundles in files, against maxMCPCABytes
+	bytes   int // bytes of CA bundles in files, against mcpservers.MaxGlobalCABundleBytes
 }
-
-// maxMCPCABytes bounds the CA bundles of all servers in the provider-keys Secret, which serves every
-// org and holds about 1 MiB. While a change settles, the old and the new file both stay, so the
-// budget is a quarter of the Secret. Each org also has its own budget (mcpservers.MaxOrgCABundleBytes,
-// checked when a bundle is saved), so one org cannot use up the share of the others; a server over
-// the global cap is left out and reported.
-const maxMCPCABytes = 256 << 10
 
 // loadMCP reads every org's enabled servers and their tools. A server that cannot be served (its URL
 // breaks the policy, its credential cannot be opened, its credential header or prefix holds a '$'
@@ -86,7 +79,11 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 			s := gatewayplan.MCPServer{
 				Org: gatewayplan.Org{ID: org.ID, Slug: org.Slug}, ID: row.ID, Name: row.Name, URL: row.Url,
 				SSE: row.Transport == store.McpTransportSse, Unhealthy: row.Health == store.McpHealthUnhealthy,
+				InsecureSkipVerify: row.InsecureSkipVerify,
 			}
+			// Every check runs before any file is written: a server that is left out must leave no
+			// credential (or CA bundle) in the Secret.
+			var credential string
 			if len(row.Credential) > 0 {
 				cred, err := mcpservers.OpenCredential(r.cfg.Keys, org.ID, row.ID, row.Credential)
 				if err != nil {
@@ -97,32 +94,43 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
+				credential = cred
 				sum := sha256.Sum256(row.Credential)
 				s.File = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				s.CredentialHeader, s.CredentialPrefix = row.CredentialHeader.String, row.CredentialPrefix
-				out.files[s.File] = []byte(cred)
 			}
-			if row.CaBundle != "" {
-				// The bundle is public: it goes in the same Secret as a credential file, named by its
-				// content, so a changed bundle is a new file and settles like a new credential.
-				if err := mcpservers.ValidateCABundle(row.Url, row.CaBundle); err != nil {
+			if row.CaBundle != "" || row.InsecureSkipVerify {
+				if err := mcpservers.ValidateTLSTrust(row.Url, row.CaBundle, row.InsecureSkipVerify); err != nil {
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
 				if !rendersCA {
-					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has a CA bundle, which gateway.mode=kubernetes cannot render; use gateway.mode=standalone", org.Slug, row.Name))
+					what := "a CA bundle"
+					if row.InsecureSkipVerify {
+						what = "insecureSkipVerify"
+					}
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has %s, which gateway.mode=kubernetes cannot render; use gateway.mode=standalone", org.Slug, row.Name, what))
 					continue
 				}
+			}
+			if row.CaBundle != "" {
+				// The bundle is public: it goes in the same Secret as a credential file, named by its
+				// content, so a changed bundle is a new file and settles like a new credential.
 				if orgBytes+len(row.CaBundle) > mcpservers.MaxOrgCABundleBytes {
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of the org's servers are over %d KiB in total", org.Slug, row.Name, mcpservers.MaxOrgCABundleBytes>>10))
 					continue
 				}
-				if out.bytes+len(row.CaBundle) > maxMCPCABytes {
-					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of all servers are over %d KiB in total", org.Slug, row.Name, maxMCPCABytes>>10))
+				if out.bytes+len(row.CaBundle) > mcpservers.MaxGlobalCABundleBytes {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of all servers are over %d KiB in total", org.Slug, row.Name, mcpservers.MaxGlobalCABundleBytes>>10))
 					continue
 				}
 				sum := sha256.Sum256([]byte(row.CaBundle))
 				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
+			}
+			if s.File != "" {
+				out.files[s.File] = []byte(credential)
+			}
+			if s.CAFile != "" {
 				out.files[s.CAFile] = []byte(row.CaBundle)
 				out.bytes += len(row.CaBundle)
 				orgBytes += len(row.CaBundle)

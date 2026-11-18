@@ -132,7 +132,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           aria-describedby={describe('server-ca', err('caBundle') && 'server-ca-error', refused('ca') && 'server-ca-refused')}
         />
         <p id="server-ca-help" className="text-muted-foreground text-xs">
-          For a server behind a private certificate authority. Koinon trusts this CA for this server only, besides the usual public ones. Certificates only, never a key.
+          For a server behind a private certificate authority. Only this CA is trusted for this server; leave empty to use the public roots. Certificates only, never a key.
         </p>
         {err('caBundle') && (
           <p id="server-ca-error" className="text-destructive text-xs">
@@ -142,6 +142,32 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
         {refused('ca') && (
           <p id="server-ca-refused" role="alert" className="text-destructive text-xs">
             {refused('ca')}
+          </p>
+        )}
+      </div>
+      <div className="grid gap-1.5">
+        <div className="flex items-center gap-2">
+          <input
+            id="server-insecure"
+            type="checkbox"
+            checked={f.insecureSkipVerify}
+            onChange={(e) => set({ insecureSkipVerify: e.target.checked })}
+            aria-invalid={!!err('insecureSkipVerify')}
+            aria-describedby={describe('server-insecure', err('insecureSkipVerify') && 'server-insecure-error')}
+          />
+          <Label htmlFor="server-insecure">Skip certificate verification (insecure)</Label>
+        </div>
+        <p id="server-insecure-help" className="text-muted-foreground text-xs">
+          Like curl -k. The connection is encrypted, but the server&apos;s identity is not checked. Use it for a test server only.
+        </p>
+        {f.insecureSkipVerify && (
+          <p role="alert" className="text-destructive text-xs">
+            Warning: with verification off, Koinon cannot tell this server from an impostor, and the server&apos;s credential can be sent to an impostor.
+          </p>
+        )}
+        {err('insecureSkipVerify') && (
+          <p id="server-insecure-error" className="text-destructive text-xs">
+            {err('insecureSkipVerify')}
           </p>
         )}
       </div>

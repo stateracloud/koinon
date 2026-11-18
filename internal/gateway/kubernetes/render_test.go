@@ -148,6 +148,13 @@ var _ = Describe("Render", func() {
 		Expect(err).To(MatchError(And(ContainSubstring("acme-private"), ContainSubstring("CA bundle"), ContainSubstring("standalone"))))
 	})
 
+	It("refuses a target that skips certificate verification, which this mode cannot render (#278)", func() {
+		s := fullState()
+		s.MCP = append(s.MCP, gateway.MCPTarget{Name: "acme-scratch", Org: "acme", URL: "https://scratch.example.com/mcp", InsecureSkipVerify: true})
+		_, err := gwk8s.Render(s, opts())
+		Expect(err).To(MatchError(And(ContainSubstring("acme-scratch"), ContainSubstring("skips certificate verification"), ContainSubstring("standalone"))))
+	})
+
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 

@@ -9337,6 +9337,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 9,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -10484,7 +10493,16 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the\nsystem roots. Certificates only, at most 64 KiB."
+              "description": "ca_bundle is a PEM bundle of the one CA that signs the server's certificate; only this CA is trusted\nfor this server (it replaces the public roots). Empty uses the public roots. Certificates only, at\nmost 64 KiB."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 10,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify turns the certificate check off for this server (as curl -k). https only;\nrefused together with ca_bundle."
             }
           ]
         },
@@ -10897,7 +10915,16 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the\nsystem roots. It is public (certificates only) and trusted for this server alone."
+              "description": "ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is\ntrusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the\npublic roots. It is public (certificates only)."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 26,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but\nthe server's identity is not checked and its credential can be sent to an impostor. https only; never\nset together with ca_bundle."
             }
           ]
         },
@@ -11554,7 +11581,16 @@
               "label": "optional",
               "oneof": "",
               "deprecated": false,
-              "description": "ca_bundle replaces the server's CA bundle; set to \"\" to go back to the system roots. Unset keeps it."
+              "description": "ca_bundle replaces the server's CA bundle; set to \"\" to go back to the public roots. Unset keeps it."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 10,
+              "type": "bool",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "insecure_skip_verify turns the certificate check off (true) or on (false). Unset keeps it."
             }
           ]
         },

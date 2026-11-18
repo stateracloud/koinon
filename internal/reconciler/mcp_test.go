@@ -466,6 +466,59 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(ok).To(BeFalse())
 	})
 
+	It("leaves a server that is not served with no credential file in the Secret (#278)", func(ctx SpecContext) {
+		mg.noTargetCA = true
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{
+			Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA),
+			CredentialValue: "koinon_test_not-a-real-token", CredentialPrefix: "Bearer ",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("private not served")))
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		for k := range sec.Data {
+			Expect(k).NotTo(ContainSubstring(private.ID), "a server that is left out leaves no file")
+		}
+		var served int
+		for k := range sec.Data {
+			if strings.HasPrefix(k, "mcp-") {
+				served++
+			}
+		}
+		Expect(served).To(BeNumerically(">=", 1), "the served server's credential file is there")
+	})
+
+	It("renders skipped verification on the target that asks for it and on no other, and leaves it out where the gateway cannot (#278)", func(ctx SpecContext) {
+		actor := audit.System("koinon-test:spec")
+		scratch, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "scratch", URL: "https://scratch.example.test/mcp", InsecureSkipVerify: true})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, scratch.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		t, ok := targetOf(mg.last(), slug+"-scratch")
+		Expect(ok).To(BeTrue())
+		Expect(t.InsecureSkipVerify).To(BeTrue())
+		Expect(t.CAFile).To(BeEmpty())
+		other, ok := targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		Expect(other.InsecureSkipVerify).To(BeFalse())
+
+		mg.noTargetCA = true
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring(slug + "/scratch not served: it has insecureSkipVerify, which gateway.mode=kubernetes cannot render")))
+		_, ok = targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-scratch")
+		Expect(ok).To(BeFalse())
+	})
+
 	It("does not serve a stored credentialed server whose URL is not https, and still applies the others (ADR 0120)", func(ctx SpecContext) {
 		bad := server(ctx, org, "cleartext", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
 		server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})

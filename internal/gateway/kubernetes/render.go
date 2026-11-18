@@ -185,6 +185,9 @@ func Render(s gateway.State, o Options) (Rendered, error) {
 		}
 	}
 	for _, t := range s.MCP {
+		if t.InsecureSkipVerify {
+			return Rendered{}, fmt.Errorf("kubernetes: mcp target %s skips certificate verification, which the kubernetes gateway mode cannot render; use gateway.mode=standalone", t.Name)
+		}
 		if t.CAFile != "" {
 			// Kubernetes mode is frozen for MCP (ADR 0097 decision 4); the CRD's per-target TLS root is not
 			// rendered here. Refuse instead of serving the server with the system roots, which would fail

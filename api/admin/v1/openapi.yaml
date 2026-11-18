@@ -1507,7 +1507,10 @@ components:
         credentialPrefix: {type: string, example: "Bearer "}
         caBundle:
           type: string
-          description: PEM certificates of the private CA that signs this server's certificate. Public; trusted for this server only. Absent for the system roots.
+          description: PEM certificates of the one CA that signs this server's certificate. Only this CA is trusted for this server (it replaces the public roots, as curl --cacert does). Public. Absent for the public roots.
+        insecureSkipVerify:
+          type: boolean
+          description: Present and true when the server's certificate is NOT verified (as curl -k). TLS is used, but the server's identity is not checked and its credential can be sent to an impostor. https only; never with caBundle.
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret: {type: string}
         disabledReason: {type: string}
@@ -1740,7 +1743,10 @@ components:
           description: The secret. Omit for a server that needs none.
         caBundle:
           type: string
-          description: PEM certificates of the private CA that signs the server's certificate (an https url only, certificates only, at most 256 KiB). Omit for the system roots.
+          description: PEM certificates of the one CA that signs the server's certificate (an https url only, certificates only, at most 64 KiB). Only this CA is trusted for this server; it replaces the public roots. Omit for the public roots. Refused together with insecureSkipVerify.
+        insecureSkipVerify:
+          type: boolean
+          description: Turns the certificate check off for this server (as curl -k). https only. Refused together with caBundle. Default false.
         kind: {$ref: "#/components/schemas/McpServerKind"}
         dataClass: {$ref: "#/components/schemas/McpDataClass"}
     McpServerUpdate:
@@ -1756,7 +1762,10 @@ components:
         removeCredential: {type: boolean}
         caBundle:
           type: string
-          description: Replaces the server's CA bundle; an empty string goes back to the system roots. Leave out to keep it.
+          description: Replaces the server's CA bundle; an empty string goes back to the public roots. Leave out to keep it.
+        insecureSkipVerify:
+          type: boolean
+          description: Turns the certificate check off (true) or on (false). Leave out to keep it. https only; refused together with a caBundle.
     McpTool:
       type: object
       required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt, sink]

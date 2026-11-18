@@ -118,7 +118,9 @@ type MCPServer struct {
 	// The bundle is public, and it is delivered like a credential file so the pod has it before the
 	// target that needs it is served.
 	CAFile string
-	Tools  []MCPTool
+	// InsecureSkipVerify turns the server's certificate check off (https only, never with a CAFile).
+	InsecureSkipVerify bool
+	Tools              []MCPTool
 }
 
 // Allowed is one agent's allowance of an MCP server.
@@ -797,7 +799,7 @@ func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) []Probe
 		if s.CAFile != "" {
 			nextCA[k] = s.CAFile
 		}
-		sigs[k] = fmt.Sprintf("%s\x00%t\x00%s\x00%s\x00%s\x00%s", s.URL, s.SSE, s.CredentialHeader, s.CredentialPrefix, s.File, s.CAFile)
+		sigs[k] = fmt.Sprintf("%s\x00%t\x00%s\x00%s\x00%s\x00%s\x00%t", s.URL, s.SSE, s.CredentialHeader, s.CredentialPrefix, s.File, s.CAFile, s.InsecureSkipVerify)
 		if old, ok := p.appliedMCPSig[k]; !ok || old != sigs[k] {
 			changed[k] = true
 		}
@@ -844,6 +846,7 @@ func (p *Planner) mcpTarget(s *MCPServer) gateway.MCPTarget {
 	if s.CAFile != "" {
 		t.CAFile = path.Join(p.cfg.KeyDir, s.CAFile)
 	}
+	t.InsecureSkipVerify = s.InsecureSkipVerify
 	return t
 }
 
