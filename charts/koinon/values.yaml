@@ -363,9 +363,14 @@ gateway:
       # Two replicas at least: the pods keep no state, so a rollout or a node drain loses nothing.
       replicas: 2
       port: 8080
-      # On SIGTERM a pod refuses new requests, then lets calls in flight finish for up to this long.
-      # terminationGracePeriodSeconds is this plus 30.
+      # On SIGTERM readiness turns 503 at once and the pod keeps serving for the shutdown delay, so the
+      # Service and clients stop sending to it. Then it refuses new requests and lets calls in flight
+      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
+      shutdownDelaySeconds: 5
       drainTimeoutSeconds: 30
+      # Until the guard slice the gateway drops every org MCP target, so koinon-api's approved calls to
+      # org MCP servers fail through it. The switch is refused unless this is true.
+      acceptOrgTargetsDropped: false
       podDisruptionBudget:
         maxUnavailable: 1
       resources:

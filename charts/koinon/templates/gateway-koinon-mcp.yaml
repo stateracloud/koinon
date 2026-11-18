@@ -10,8 +10,13 @@ revision applied, so a rollout never takes the old pods away before the new ones
 
 Secret custody (ADR 0097 decision 5, ADR 0120): the pod has no database login, no key-encryption key and
 no Kubernetes API access (no token is mounted). It reads the credential files of the MCP targets from the
-provider-keys Secret, at the path agentgateway reads them from, and nothing else. Decrypting org
-credentials in the gateway comes with the guard and the database role, in a later slice.
+provider-keys Secret, at the path agentgateway reads them from. That Secret also holds the LLM provider
+keys the reconciler opens, so the pod can read them: this is a known gap. The fix is a separate Secret for
+the MCP credential files, written by the reconciler (a later slice, with the guard and the database role;
+see the PR text). Decrypting org credentials in the gateway comes in that slice too.
+
+Until the guard slice, the gateway drops every org target (fail closed), so koinon-api's approved calls
+to org MCP servers fail through it. For that reason the switch needs gateway.mcp.koinon.acceptOrgTargetsDropped.
 */ -}}
 {{- if include "koinon.mcpKoinon" . }}
 {{- if ne .Values.gateway.mode "standalone" }}
@@ -20,6 +25,10 @@ credentials in the gateway comes with the guard and the database role, in a late
 {{- $name := include "koinon.componentName" (list . "mcp-gateway") }}
 {{- $m := .Values.gateway.mcp.koinon }}
 {{- $drain := int $m.drainTimeoutSeconds }}
+{{- $delay := int $m.shutdownDelaySeconds }}
+{{- if not $m.acceptOrgTargetsDropped }}
+{{- fail "gateway.mcp.driver=koinon serves platform targets only until the guard slice (ADR 0097 step 2, issue #278): it drops org MCP targets, so approved calls to org MCP servers fail. Set gateway.mcp.koinon.acceptOrgTargetsDropped=true to accept that" }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -61,8 +70,9 @@ spec:
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: false
       enableServiceLinks: false
-      # The drain deadline, then 30 seconds for the process to exit.
-      terminationGracePeriodSeconds: {{ add $drain 30 }}
+      # The shutdown delay (readiness is 503 while the pod still serves), the drain deadline, then 30
+      # seconds for the process to exit.
+      terminationGracePeriodSeconds: {{ add $delay $drain 30 }}
       {{- with include "koinon.imagePullSecrets" . }}
       {{- . | nindent 6 }}
       {{- end }}
@@ -85,6 +95,7 @@ spec:
             - --metrics-addr=:15020
             - --state-url=http://{{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
             - --state-token-file={{ include "koinon.otlpTokenDir" . }}/token
+            - --shutdown-delay={{ $delay }}s
             - --drain-timeout={{ $drain }}s
           env:
             - name: POD_NAME

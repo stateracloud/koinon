@@ -381,7 +381,9 @@
                 },
                 "replicas": {"type": "integer", "minimum": 2},
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "shutdownDelaySeconds": {"type": "integer", "minimum": 0},
                 "drainTimeoutSeconds": {"type": "integer", "minimum": 1},
+                "acceptOrgTargetsDropped": {"type": "boolean"},
                 "podDisruptionBudget": {
                   "type": "object",
                   "additionalProperties": false,

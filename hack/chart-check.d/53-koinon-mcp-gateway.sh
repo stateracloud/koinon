@@ -4,7 +4,7 @@
 # Chart assertions: koinon-gateway, the MCP path (ADR 0097 step 2, issue #278).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-mcp=(--set gateway.mcp.driver=koinon)
+mcp=(--set gateway.mcp.driver=koinon --set gateway.mcp.koinon.acceptOrgTargetsDropped=true)
 mcp_only=(--show-only templates/gateway-koinon-mcp.yaml)
 
 # Default: agentgateway serves MCP, and nothing of koinon-gateway renders (the fallback is the default).
@@ -24,10 +24,11 @@ if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=
   fail "koinon-gateway accepts one replica"
 fi
 
-# Drain: the pod grace period is the drain timeout plus 30 seconds, and the process gets the timeout.
-has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 60$' "${mcp[@]}" "${mcp_only[@]}"
+# Drain: the pod grace period is the shutdown delay, the drain timeout and 30 seconds, and the process gets the timeout.
+has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 65$' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway is told the drain timeout" '--drain-timeout=30s$' "${mcp[@]}" "${mcp_only[@]}"
-has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 90$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=60 "${mcp_only[@]}"
+has "koinon-gateway is told the shutdown delay" '--shutdown-delay=5s$' "${mcp[@]}" "${mcp_only[@]}"
+has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 95$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=60 "${mcp_only[@]}"
 has "koinon-gateway readiness is /readyz" 'path: /readyz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway liveness is /healthz" 'path: /healthz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway has a PodDisruptionBudget" '^kind: PodDisruptionBudget$' "${mcp[@]}" "${mcp_only[@]}"
@@ -53,6 +54,11 @@ has "koinon-gateway runs non-root with a read-only root" 'readOnlyRootFilesystem
 has "the State stream port admits koinon-gateway" 'component: mcp-gateway$' "${mcp[@]}" --show-only templates/networkpolicy.yaml
 lacks "the State stream port admits koinon-gateway only when selected" 'component: mcp-gateway$' --show-only templates/networkpolicy.yaml
 has "koinon-gateway egress carves out the private ranges" '10.0.0.0/8' "${mcp[@]}" --show-only templates/networkpolicy.yaml
+
+# The switch is refused until the operator accepts that org targets are dropped (until the guard slice).
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" --set gateway.mcp.driver=koinon >/dev/null 2>&1; then
+  fail "gateway.mcp.driver=koinon renders without acceptOrgTargetsDropped"
+fi
 
 # The switch needs standalone mode: kubernetes mode is frozen.
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mode=kubernetes >/dev/null 2>&1; then

@@ -71,6 +71,7 @@ var _ = Describe("koinon-gateway's startup", func() {
 			Expect(cli.Check(NewRootCommand(), []string{"--state-url", bad, "--state-token-file", tokenFile}, nil)).NotTo(Succeed(), bad)
 		}
 		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--drain-timeout", "0s"}, nil)).NotTo(Succeed())
+		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--shutdown-delay", "-1s"}, nil)).NotTo(Succeed())
 	})
 
 	It("refuses an empty or missing token file before it serves anything", func() {

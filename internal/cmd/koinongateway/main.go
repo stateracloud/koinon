@@ -53,6 +53,8 @@ type config struct {
 	podName        string
 
 	drain time.Duration
+	// shutdownDelay is how long the gateway keeps serving after SIGTERM, with /readyz at 503.
+	shutdownDelay time.Duration
 }
 
 func (c *config) flags(fs *pflag.FlagSet) {
@@ -64,6 +66,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.stateTokenFile, "state-token-file", "",
 		"file with the gateway's bearer token for that listener (the OTLP token Secret, key token, mounted read-only); read on every request, so a rotation needs no restart")
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
+	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
+		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
 	fs.DurationVar(&c.drain, "drain-timeout", 30*time.Second,
 		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long")
 }
@@ -79,6 +83,9 @@ func (c *config) validate() error {
 	}
 	if c.listenAddr == "" {
 		return errors.New("--listen-addr must not be empty")
+	}
+	if c.shutdownDelay < 0 {
+		return errors.New("--shutdown-delay must not be negative")
 	}
 	if c.drain <= 0 {
 		return errors.New("--drain-timeout must be positive")
@@ -202,6 +209,10 @@ func run(ctx context.Context, cfg config) error {
 		return nil
 	case <-ctx.Done():
 	}
+	// Endpoint removal lags behind SIGTERM: /readyz is 503 already, and the gateway keeps serving
+	// until the Service and the clients have stopped sending requests here.
+	log.Info("shutdown delay before the drain", "delay", cfg.shutdownDelay.String())
+	time.Sleep(cfg.shutdownDelay)
 	// Drain: new requests get 503 and the pool retires; a call in flight finishes first.
 	log.Info("draining koinon-gateway", "timeout", cfg.drain.String())
 	gw.Drain()
