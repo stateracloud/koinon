@@ -264,6 +264,8 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(err).NotTo(HaveOccurred()) // the route closes; the config applies
 		_, err = gw.ApplyMCP(ctx, cfg("https:mcp"))
 		Expect(err).NotTo(HaveOccurred())
+		Expect(gateway.CredentialSafeURL("https:mcp")).To(BeFalse()) // no host: the route closes
+		Expect(gateway.CredentialSafeURL("https://t.example/mcp")).To(BeTrue())
 	})
 
 	It("closes only the unsafe target and still applies a key revocation", func(ctx SpecContext) {
