@@ -98,7 +98,7 @@ func healthySubstrate() *substrateCluster {
 	c := &substrateCluster{
 		minor:  "37",
 		issuer: fakeIssuer{issuer: "https://issuer.example.com"},
-		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, Detail: "HTTP 200 OK"}},
+		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "HTTP 200 OK"}},
 	}
 	c.kube = []runtime.Object{
 		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.0", nil, 1),
@@ -264,6 +264,32 @@ var _ = Describe("Substrate checks", func() {
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(ContainSubstring("invalid bearer token"))
+			Expect(r.Fix).To(ContainSubstring("system roots"))
+
+			// The in-cluster issuer is verified with the mounted CA alone: the fix names that CA, not the system roots.
+			c.issuer = fakeIssuer{issuer: "https://kubernetes.default.svc"}
+			r = find(c.run(ctx), "Service-account issuer")
+			Expect(r.Fix).To(And(ContainSubstring(preflight.IssuerCAFile), ContainSubstring("serving certificate"), ContainSubstring("kubernetes.default.svc")))
+			Expect(r.Fix).NotTo(ContainSubstring("system roots"))
+		})
+
+		It("fails when the probe cannot read the iss claim of its token, as it cannot tell whether Substrate accepts the tokens", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, Detail: "ok"}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Fail))
+			Expect(r.Message).To(ContainSubstring("could not read the iss claim"))
+		})
+
+		It("probes the override without the discovery document, as ate-setup does not read it then", func(ctx SpecContext) {
+			c := healthySubstrate()
+			c.issuer = fakeIssuer{err: errors.New("forbidden")}
+			c.config.Substrate.ExpectedIssuer = "https://kubernetes.default.svc"
+			c.probe = &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://kubernetes.default.svc", Detail: "ok"}}
+			r := find(c.run(ctx), "Service-account issuer")
+			Expect(r.Status).To(Equal(preflight.Pass), r.Message)
+			Expect(r.Message).To(ContainSubstring("could not be read: forbidden"))
+			Expect(c.probe.probed).To(Equal("https://kubernetes.default.svc"))
 		})
 
 		It("fails when the override names an issuer the discovery document does not, as Kubernetes always names its first issuer", func(ctx SpecContext) {
@@ -372,6 +398,52 @@ var _ = Describe("Substrate checks", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(errors.Is(err, preflight.ErrDevicesMissing)).To(BeFalse())
 		Expect(err.Error()).To(ContainSubstring("not found"))
+	})
+
+	Describe("device probe warnings", func() {
+		warning := func(name, reason, msg string, at time.Time) *corev1.Event {
+			return &corev1.Event{
+				ObjectMeta:     metav1.ObjectMeta{Name: name, Namespace: "ate-system"},
+				InvolvedObject: corev1.ObjectReference{Name: "fresh"}, Type: corev1.EventTypeWarning,
+				Reason: reason, Message: msg, LastTimestamp: metav1.NewTime(at),
+			}
+		}
+		prober := func(failed bool, events ...runtime.Object) preflight.KubeSubstrateProber {
+			client := fake.NewClientset(events...)
+			client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				pod := a.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+				pod.Name = "fresh"
+				if failed {
+					pod.Status.Phase, pod.Status.Reason = corev1.PodFailed, "DeadlineExceeded"
+				}
+				return false, nil, nil
+			})
+			return preflight.KubeSubstrateProber{Client: client, Namespace: "ate-system", NamePrefix: "x", Image: "img", Timeout: 50 * time.Millisecond, PollInterval: time.Millisecond}
+		}
+		now := time.Now()
+
+		It("does not call a FailedMount of another volume a missing device", func(ctx SpecContext) {
+			p := prober(false, warning("e", "FailedMount", `MountVolume.SetUp failed for volume "webhook-ca": configmap "ca" not found`, now))
+			err := p.ProbeDevices(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, preflight.ErrDevicesMissing)).To(BeFalse())
+			Expect(err.Error()).To(ContainSubstring("webhook-ca"))
+		})
+
+		It("reads the warnings of a pod that failed before its container started", func(ctx SpecContext) {
+			p := prober(true, warning("e", "FailedMount", "hostPath type check failed: /dev/kvm is not a character device", now))
+			err := p.ProbeDevices(ctx)
+			Expect(err).To(MatchError(preflight.ErrDevicesMissing))
+			Expect(err.Error()).To(And(ContainSubstring("failed before its container started"), ContainSubstring("/dev/kvm")))
+		})
+
+		It("takes the newest warning by when it last occurred, not by list order", func(ctx SpecContext) {
+			p := prober(false,
+				warning("a-new", "FailedMount", "hostPath type check failed: /dev/kvm is not a character device", now),
+				warning("b-old", "FailedScheduling", "0/3 nodes are available", now.Add(-time.Minute)),
+			)
+			Expect(p.ProbeDevices(ctx)).To(MatchError(preflight.ErrDevicesMissing))
+		})
 	})
 
 	It("puts only the device probe on the worker nodes", func() {

@@ -248,10 +248,7 @@ func (c *Checker) SubstrateStaticPrerequisites(ctx context.Context) []Result {
 	c.defaultSubstrate()
 	results := []Result{c.checkKubernetesVersion(ctx)}
 	if c.Issuer != nil {
-		rctx, cancel := c.callCtx(ctx)
-		_, err := c.Issuer.Issuer(rctx)
-		cancel()
-		if err != nil {
+		if _, _, err := c.substrateIssuer(ctx); err != nil {
 			results = append(results, Result{
 				Check: "Service-account issuer", Status: Fail,
 				Message: fmt.Sprintf("cannot read the issuer from the API server's discovery document: %v", err),
@@ -506,27 +503,48 @@ func (c *Checker) checkSubstrateDevices(ctx context.Context) Result {
 	return Result{Check: check, Status: Pass, Message: "one node mounted " + strings.Join(SubstrateDevices, ", ") + " (only that node is probed)"}
 }
 
+// SubstrateIssuer is the issuer Substrate's api server will trust: the configured override when set, else
+// the issuer of the API server's discovery document. It fails only when it needs the discovery document and
+// cannot read it.
+func (c *Checker) SubstrateIssuer(ctx context.Context) (string, error) {
+	c.defaultSubstrate()
+	issuer, _, err := c.substrateIssuer(ctx)
+	return issuer, err
+}
+
+// substrateIssuer is SubstrateIssuer with a note for the check message: what the discovery document names
+// when the override differs from it, or why it could not be read.
+func (c *Checker) substrateIssuer(ctx context.Context) (issuer, info string, err error) {
+	rctx, cancel := c.callCtx(ctx)
+	discovered, err := c.Issuer.Issuer(rctx)
+	cancel()
+	exp := c.Config.Substrate.ExpectedIssuer
+	switch {
+	case exp == "":
+		return discovered, "", err
+	case err != nil:
+		return exp, fmt.Sprintf(" (the API server's discovery document could not be read: %s)", truncate(err.Error(), 150)), nil
+	case discovered != exp:
+		return exp, fmt.Sprintf(" (the API server's discovery document names %s)", discovered), nil
+	}
+	return exp, "", nil
+}
+
 func (c *Checker) checkIssuer(ctx context.Context) Result {
 	const check = "Service-account issuer"
 	if c.Issuer == nil || c.IssuerProbe == nil {
 		return Result{Check: check, Status: Warn, Message: "the issuer probe is disabled; whether Substrate can validate service-account tokens is not checked"}
 	}
-	rctx, cancel := c.callCtx(ctx)
-	discovered, err := c.Issuer.Issuer(rctx)
-	cancel()
+	// The issuer Substrate's api server trusts is the one ate-setup writes: --ateapi-expected-jwt-issuer when
+	// given, else the discovery document's issuer (cmd/ate-setup/internal/steps/create.go jwtIssuer). With
+	// the override ate-setup does not read the discovery document, so here it is only information.
+	issuer, info, err := c.substrateIssuer(ctx)
 	if err != nil {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("cannot read the issuer from the API server's discovery document: %v", err),
 			Fix:     "grant the preflight ServiceAccount the system:service-account-issuer-discovery ClusterRole",
 		}
-	}
-	// The issuer Substrate's api server trusts is the one ate-setup writes: --ateapi-expected-jwt-issuer when
-	// given, else the discovery document's issuer (cmd/ate-setup/internal/steps/create.go jwtIssuer).
-	issuer, info := discovered, ""
-	if exp := c.Config.Substrate.ExpectedIssuer; exp != "" {
-		issuer = exp
-		info = fmt.Sprintf(" (the API server's discovery document names %s)", discovered)
 	}
 	ns := c.Config.Substrate.Namespace
 	res, err := c.IssuerProbe.ProbeIssuer(ctx, issuer)
@@ -538,10 +556,15 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		tokenInfo = fmt.Sprintf("; the tokens of pods carry iss %s", res.TokenIssuer)
 	}
 	if res.Reachable && res.Unverified {
+		fix := "serve the issuer with a certificate signed by a CA in the system roots of the Substrate image (Substrate trusts only those for an issuer outside the cluster)"
+		if slices.Contains(inClusterIssuers, issuer) {
+			fix = "for the in-cluster issuer Substrate trusts only the pod's mounted " + IssuerCAFile + ": check that this is the cluster CA " +
+				"and that the API server's serving certificate is signed by it and names " + strings.TrimPrefix(issuer, "https://")
+		}
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("a pod in %s reaches %s, but only without verifying its TLS certificate (%s); Substrate's api server verifies it and would fail with \"invalid bearer token\"", ns, issuer, res.Detail),
-			Fix:     "serve the issuer with a certificate signed by a CA in the system roots of the Substrate image (Substrate trusts only those for an issuer outside the cluster)",
+			Fix:     fix,
 		}
 	}
 	if !res.Reachable {
@@ -561,7 +584,15 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 				"Kubernetes signs tokens and names the discovery issuer from that first value, so --expected-jwt-issuer cannot replace it. A sidecar that fakes the issuer is not a supported install",
 		}
 	}
-	if res.TokenIssuer != "" && res.TokenIssuer != issuer {
+	if res.TokenIssuer == "" {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s, but the probe could not read the iss claim of its service-account token, "+
+				"so it cannot tell whether Substrate would accept the tokens (Substrate rejects a token whose iss differs from the issuer)", ns, issuer, info),
+			Fix: "run the probe with a koinon-api image of this release (an older image does not report the token issuer), and check that pods in " + ns + " get a projected service-account token",
+		}
+	}
+	if res.TokenIssuer != issuer {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, ns, res.TokenIssuer),
@@ -608,8 +639,8 @@ var inClusterIssuers = []string{"https://kubernetes.default.svc", "https://kuber
 // it. Naming it in Substrate alone, on a cluster whose own issuer is an address pods cannot reach (an Omni or
 // Talos IPv6 address), fails both checks. The probe reports the iss claim of its own token so the caller can
 // compare it. The issuer counts as reachable only
-// when both fetches answer 2xx. When only an unverified connection works, the result is reachable and
-// Unverified. The HTTP status goes into Detail.
+// when both fetches answer HTTP 200 and the JWKS holds a key Substrate can use. When only an unverified
+// connection works, the result is reachable and Unverified. The HTTP status goes into Detail.
 func ProbeIssuerFromPod(ctx context.Context, issuer string, timeout time.Duration) IssuerResult {
 	return ProbeIssuerWith(ctx, issuer, timeout, IssuerProbeFiles{
 		CAFile: IssuerCAFile, TokenFile: IssuerTokenFile,
@@ -633,9 +664,11 @@ func ProbeIssuerWith(ctx context.Context, issuer string, timeout time.Duration, 
 		return IssuerResult{Detail: "not a URL"}
 	}
 	tokenIssuer := tokenIssuerFromFile(files.TokenFile)
-	res := fetchIssuer(ctx, issuer, timeout, files, issuerTLS(files, true))
+	res := fetchIssuer(ctx, issuer, timeout, files, true)
 	if !res.Reachable && (strings.Contains(res.Detail, "certificate") || strings.Contains(res.Detail, "x509")) {
-		if unv := fetchIssuer(ctx, issuer, timeout, files, issuerTLS(files, false)); unv.Reachable {
+		// The diagnostic retry sends no token: the server it reaches is not authenticated. An in-cluster issuer
+		// that needs the token then answers 401, which still proves only that it is unreachable when verified.
+		if unv := fetchIssuer(ctx, issuer, timeout, files, false); unv.Reachable {
 			unv.Unverified = true
 			unv.Detail = "TLS verification failed: " + truncate(res.Detail, 150)
 			res = unv
@@ -692,25 +725,42 @@ func issuerScoped(target, issuer string) bool {
 	return ip == "" || t.EscapedPath() == ip || strings.HasPrefix(t.EscapedPath(), ip+"/")
 }
 
-func fetchIssuer(ctx context.Context, issuer string, timeout time.Duration, files IssuerProbeFiles, tlsCfg *tls.Config) IssuerResult {
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext:     (&net.Dialer{Timeout: timeout}).DialContext,
-			TLSClientConfig: tlsCfg,
-		},
+// issuerTokenTransport adds the pod's token to each request that issuerScoped allows, as Substrate's
+// issuerDiscoveryTransport does. It decides per request, so a redirect gets the token only when its own URL
+// is in scope: the client never copies an Authorization header the first request did not carry.
+type issuerTokenTransport struct {
+	base              http.RoundTripper
+	issuer, tokenFile string
+}
+
+func (t issuerTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !issuerScoped(req.URL.String(), t.issuer) {
+		return t.base.RoundTrip(req)
 	}
+	tok, err := os.ReadFile(t.tokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("read the pod's service-account token: %w", err)
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+	return t.base.RoundTrip(req)
+}
+
+// fetchIssuer fetches discovery and JWKS as Substrate does. verify selects the TLS check Substrate makes;
+// without it any certificate is accepted and no token is sent.
+func fetchIssuer(ctx context.Context, issuer string, timeout time.Duration, files IssuerProbeFiles, verify bool) IssuerResult {
+	var transport http.RoundTripper = &http.Transport{
+		DialContext:     (&net.Dialer{Timeout: timeout}).DialContext,
+		TLSClientConfig: issuerTLS(files, verify),
+	}
+	if files.InCluster && verify {
+		transport = issuerTokenTransport{base: transport, issuer: issuer, tokenFile: files.TokenFile}
+	}
+	client := &http.Client{Timeout: timeout, Transport: transport}
 	get := func(target string) (int, []byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
 		if err != nil {
 			return 0, nil, err
-		}
-		if files.InCluster && issuerScoped(target, issuer) {
-			tok, err := os.ReadFile(files.TokenFile)
-			if err != nil {
-				return 0, nil, fmt.Errorf("read the pod's service-account token: %w", err)
-			}
-			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -729,7 +779,8 @@ func fetchIssuer(ctx context.Context, issuer string, timeout time.Duration, file
 	if err != nil {
 		return IssuerResult{Detail: truncate(err.Error(), 200)}
 	}
-	if code/100 != 2 {
+	// Substrate's fetchJSON accepts HTTP 200 only.
+	if code != http.StatusOK {
 		return IssuerResult{Detail: fmt.Sprintf("discovery document: HTTP %d", code)}
 	}
 	var doc struct {
@@ -742,14 +793,52 @@ func fetchIssuer(ctx context.Context, issuer string, timeout time.Duration, file
 	if doc.Issuer != issuer {
 		return IssuerResult{Detail: fmt.Sprintf("discovery document: issuer %q differs from %q", truncate(doc.Issuer, 100), issuer)}
 	}
-	jcode, _, err := get(doc.JWKSURI)
+	jcode, jbody, err := get(doc.JWKSURI)
 	if err != nil {
 		return IssuerResult{Detail: "jwks_uri " + truncate(doc.JWKSURI, 100) + ": " + truncate(err.Error(), 200)}
 	}
-	if jcode/100 != 2 {
+	if jcode != http.StatusOK {
 		return IssuerResult{Detail: fmt.Sprintf("jwks_uri %s: HTTP %d", truncate(doc.JWKSURI, 100), jcode)}
 	}
-	return IssuerResult{Reachable: true, Detail: fmt.Sprintf("discovery HTTP %d, jwks HTTP %d", code, jcode)}
+	n, err := usableJWKs(jbody)
+	if err != nil {
+		return IssuerResult{Detail: fmt.Sprintf("jwks_uri %s: %v", truncate(doc.JWKSURI, 100), err)}
+	}
+	return IssuerResult{Reachable: true, Detail: fmt.Sprintf("discovery HTTP %d, jwks HTTP %d with %d usable keys", code, jcode, n)}
+}
+
+// usableJWKs counts the keys of a JWKS that Substrate's parseJWK accepts (internal/oidcjwt/oidcjwt.go): a kid
+// and an RSA key with n and e, or an EC key on P-256, P-384 or P-521 with x and y. Substrate fails on a set
+// without one. The probe checks the fields, not the key material.
+func usableJWKs(body []byte) (int, error) {
+	var set struct {
+		Keys []struct {
+			KID string `json:"kid"`
+			KTY string `json:"kty"`
+			N   string `json:"n"`
+			E   string `json:"e"`
+			CRV string `json:"crv"`
+			X   string `json:"x"`
+			Y   string `json:"y"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &set); err != nil {
+		return 0, errors.New("not a JSON JWKS")
+	}
+	n := 0
+	for _, k := range set.Keys {
+		switch {
+		case k.KID == "":
+		case k.KTY == "RSA" && k.N != "" && k.E != "":
+			n++
+		case k.KTY == "EC" && slices.Contains([]string{"P-256", "P-384", "P-521"}, k.CRV) && k.X != "" && k.Y != "":
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("no usable key in the JWKS (%d keys)", len(set.Keys))
+	}
+	return n, nil
 }
 
 // ParseIssuerProbeOutput reads the probe line from the probe pod's log.
@@ -888,7 +977,7 @@ func (p KubeSubstrateProber) ProbeIssuer(ctx context.Context, issuer string) (Is
 func (p KubeSubstrateProber) ProbeDevices(ctx context.Context) error {
 	log, err := p.run(ctx, p.DevicesPod())
 	var notStarted *podNotStartedError
-	if errors.As(err, &notStarted) && notStarted.reason == "FailedMount" {
+	if errors.As(err, &notStarted) && notStarted.reason == "FailedMount" && namesDevice(notStarted.eventMessage) {
 		return fmt.Errorf("%w: %w", ErrDevicesMissing, err)
 	}
 	if err != nil {
@@ -923,13 +1012,17 @@ func (p KubeSubstrateProber) run(ctx context.Context, want *corev1.Pod) (string,
 	for pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
 		select {
 		case <-ctx.Done():
-			reason, event := p.warningEvent(name)
-			return "", &podNotStartedError{reason: reason, msg: fmt.Sprintf("probe pod %s still %s after %s%s%s", name, pod.Status.Phase, p.timeout(), waitingReason(pod), event)}
+			return "", p.notStarted(pod, fmt.Sprintf("still %s after %s", pod.Status.Phase, p.timeout()))
 		case <-time.After(interval):
 		}
 		if pod, err = pods.Get(ctx, name, metav1.GetOptions{}); err != nil {
 			return "", fmt.Errorf("read probe pod %s: %w", name, err)
 		}
+	}
+	// ActiveDeadlineSeconds can fail the pod before its container ever ran (a hostPath the kubelet refuses):
+	// then there is no log, and the warning events tell why.
+	if pod.Status.Phase == corev1.PodFailed && !containerRan(pod) {
+		return "", p.notStarted(pod, fmt.Sprintf("failed before its container started (%s)", pod.Status.Reason))
 	}
 	readLogs := p.Logs
 	if readLogs == nil {
@@ -964,30 +1057,80 @@ func (p KubeSubstrateProber) deleteStale(ctx context.Context, want *corev1.Pod) 
 	return nil
 }
 
-// podNotStartedError is a probe pod that did not finish in time; reason is the Reason of its newest warning event.
-type podNotStartedError struct{ reason, msg string }
+// podNotStartedError is a probe pod whose container did not run to the end; reason and eventMessage are the
+// Reason and the Message of its newest warning event.
+type podNotStartedError struct{ reason, eventMessage, msg string }
 
 func (e *podNotStartedError) Error() string { return e.msg }
 
-// warningEvent is the Reason and the " (event ...)" text of the newest warning event of the pod, for the timeout message.
-func (p KubeSubstrateProber) warningEvent(pod string) (reason, text string) {
+// notStarted is the podNotStartedError of pod, with its newest warning event.
+func (p KubeSubstrateProber) notStarted(pod *corev1.Pod, what string) *podNotStartedError {
+	e := &podNotStartedError{msg: fmt.Sprintf("probe pod %s %s%s", pod.Name, what, waitingReason(pod))}
+	if ev := p.newestWarning(pod); ev != nil {
+		e.reason, e.eventMessage = ev.Reason, ev.Message
+		e.msg += fmt.Sprintf(" (event %s: %s)", ev.Reason, truncate(ev.Message, 200))
+	}
+	return e
+}
+
+// containerRan says whether the probe container started at all (it has or had a running or terminated state).
+func containerRan(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil || cs.LastTerminationState.Terminated != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// namesDevice says whether a FailedMount message is about one of SubstrateDevices (the kubelet's hostPath
+// type check names the path), not about another volume an admission webhook may have added.
+func namesDevice(msg string) bool {
+	for _, dev := range SubstrateDevices {
+		if strings.Contains(msg, dev) {
+			return true
+		}
+	}
+	return false
+}
+
+// newestWarning is the newest warning event of the pod (by name, and by UID when both carry one), by the
+// time it last occurred; nil when there is none or the events cannot be read.
+func (p KubeSubstrateProber) newestWarning(pod *corev1.Pod) *corev1.Event {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	evs, err := p.Client.CoreV1().Events(p.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return "", ""
+		return nil
 	}
-	var msg string
-	for _, e := range evs.Items {
-		if e.InvolvedObject.Name == pod && e.Type == corev1.EventTypeWarning {
-			reason = e.Reason
-			msg = fmt.Sprintf("%s: %s", e.Reason, truncate(e.Message, 200))
+	var newest *corev1.Event
+	for i := range evs.Items {
+		e := &evs.Items[i]
+		if e.InvolvedObject.Name != pod.Name || e.Type != corev1.EventTypeWarning {
+			continue
+		}
+		if pod.UID != "" && e.InvolvedObject.UID != "" && e.InvolvedObject.UID != pod.UID {
+			continue
+		}
+		if newest == nil || !eventTime(e).Before(eventTime(newest)) {
+			newest = e
 		}
 	}
-	if msg == "" {
-		return "", ""
+	return newest
+}
+
+// eventTime is when an event last occurred: its series' last observation, its LastTimestamp, its EventTime or
+// its FirstTimestamp, the first one set.
+func eventTime(e *corev1.Event) time.Time {
+	switch {
+	case e.Series != nil && !e.Series.LastObservedTime.IsZero():
+		return e.Series.LastObservedTime.Time
+	case !e.LastTimestamp.IsZero():
+		return e.LastTimestamp.Time
+	case !e.EventTime.IsZero():
+		return e.EventTime.Time
 	}
-	return reason, " (event " + msg + ")"
+	return e.FirstTimestamp.Time
 }
 
 func (p KubeSubstrateProber) podLogs(ctx context.Context, namespace, name string) (string, error) {
