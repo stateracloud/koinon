@@ -581,7 +581,8 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 				"or to a URL that pods reach with a certificate from the system roots (on Talos: cluster.apiServer.extraArgs service-account-issuer). " +
 				"Keep the old value as a second --service-account-issuer so tokens already issued stay valid, and when the discovery document's jwks_uri is not reachable from pods, " +
 				"set --service-account-jwks-uri to https://kubernetes.default.svc/openid/v1/jwks. " +
-				"Kubernetes signs tokens and names the discovery issuer from that first value, so --expected-jwt-issuer cannot replace it. A sidecar that fakes the issuer is not a supported install",
+				"Kubernetes signs tokens and names the discovery issuer from that first value, so --expected-jwt-issuer cannot replace it. A sidecar that fakes the issuer is not a supported install" +
+				SafeIssuerPatch(res.TokenIssuer, issuer),
 		}
 	}
 	if res.TokenIssuer == "" {
@@ -599,10 +600,56 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.0 fetches discovery from the issuer itself. " +
 				"Drop --expected-jwt-issuer (or set it to " + res.TokenIssuer + ") and run the check again: it then probes that URL. " +
 				"If pods cannot reach it, set the API server's first --service-account-issuer to https://kubernetes.default.svc or another URL pods reach " +
-				"(Kubernetes signs tokens with the first value; later ones are only accepted for validation)",
+				"(Kubernetes signs tokens with the first value; later ones are only accepted for validation)" +
+				SafeIssuerPatch(res.TokenIssuer, res.TokenIssuer),
 		}
 	}
 	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s%s", ns, issuer, info, tokenInfo)}
+}
+
+// SafeIssuerPatch is the cluster change that makes the in-cluster issuer usable without invalidating a
+// token that exists: the new issuer signs, the old issuer stays accepted, and both audiences stay accepted.
+// It names the Talos and Omni form and the kubeadm form, and the cost. oldIssuer is the issuer the cluster
+// uses now (the iss of its tokens when known, else the discovery document's issuer: pass both, the first
+// non-empty one is used). It returns "" when the cluster already uses the in-cluster issuer, as then the
+// change would do nothing. It never prints a patch that sets the issuer alone: that would make the API
+// server refuse every token that carries the old audience.
+//
+// Prior art: Sidero documents this patch for Substrate on Omni; Talos' APIAudiences is accepted.audiences
+// when set, else the issuer URL (internal/app/machined/pkg/controllers/k8s/service_account.go); Omni refuses
+// only issuer.privateKey in this document.
+func SafeIssuerPatch(oldIssuer ...string) string {
+	old := ""
+	for _, o := range oldIssuer {
+		if o != "" {
+			old = o
+			break
+		}
+	}
+	const in = "https://kubernetes.default.svc"
+	if old == "" || slices.Contains(inClusterIssuers, old) {
+		return ""
+	}
+	return fmt.Sprintf(`. The safe change keeps the old issuer and both audiences, so tokens that exist stay valid, and costs one API server restart.
+Before you apply it, read the audiences the cluster accepts now (--api-audiences, or accepted.audiences) and keep every entry in the list: the lists below show only the two issuers. Dropping one, such as an audience another system uses, makes the API server refuse its tokens.
+Talos and Omni (a cluster config patch):
+---
+apiVersion: v1alpha1
+kind: KubeServiceAccountConfig
+issuer:
+  issuerURL: %[1]s
+accepted:
+  issuers:
+    - %[2]s
+  audiences:
+    - %[1]s
+    - %[2]s
+---
+kubeadm (the kube-apiserver flags; the first --service-account-issuer signs):
+  --service-account-issuer=%[1]s
+  --service-account-issuer=%[2]s
+  --api-audiences=%[1]s,%[2]s
+Do not set the new issuer alone: the API server then rejects every token with the old audience. Keep any other audience the cluster accepts now`, in, old)
 }
 
 // issuerDiscoveryPath is the discovery path the probe fetches under the issuer.
@@ -1162,3 +1209,7 @@ func issuerTLS(files IssuerProbeFiles, verify bool) *tls.Config {
 	}
 	return cfg
 }
+
+// IsInClusterIssuer reports whether issuer is one for which ate-setup points ate-api-server at the pod's own
+// CA and token (an exact match, as its switch).
+func IsInClusterIssuer(issuer string) bool { return slices.Contains(inClusterIssuers, issuer) }

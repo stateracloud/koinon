@@ -385,7 +385,69 @@ func TestSetupFailureStopsTheStep(t *testing.T) {
 	g := NewWithT(t)
 	i, r, _ := setup("37", true, nil)
 	r.err = errors.New("exit status 1")
-	g.Expect(i.Install(t.Context())).To(MatchError(ContainSubstring("exit status 1")))
+	err := i.Install(t.Context())
+	g.Expect(err).To(MatchError(ContainSubstring("exit status 1")))
+	// No silent partial install: the error names the exact command that removes it, with the pinned binary.
+	g.Expect(err.Error()).To(And(
+		ContainSubstring("partial install"), ContainSubstring("delete ate-system --no-dev-env --namespace='ate-system'"),
+		ContainSubstring("--kubeconfig='/etc/kube/config' --context='lab'"), ContainSubstring(r.built)))
+	// The binary the command names still exists.
+	_, statErr := os.Stat(r.built)
+	g.Expect(statErr).NotTo(HaveOccurred())
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(r.built)) })
+}
+
+const inCluster = "https://kubernetes.default.svc"
+
+func authData(t *testing.T, i *substrateinstall.Installer) string {
+	t.Helper()
+	cm, err := i.Kube.CoreV1().ConfigMaps("ate-system").Get(t.Context(), "ate-api-authentication", metav1.GetOptions{})
+	NewWithT(t).Expect(err).NotTo(HaveOccurred())
+	return cm.Data["authentication.yaml"]
+}
+
+func TestWritesTheAuthenticationConfigForTheClusterOwnIssuer(t *testing.T) {
+	g := NewWithT(t)
+	i, _, client := setup("37", true, []runtime.Object{&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ate-api-server", Namespace: "ate-system"}}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	g.Expect(authData(t, i)).To(And(
+		ContainSubstring("name: kubernetes"), ContainSubstring("issuer: "+inCluster), ContainSubstring("api.ate-system.svc"),
+		ContainSubstring("certificateAuthorityFile: "+preflight.IssuerCAFile), ContainSubstring("discoveryTokenFile: "+preflight.IssuerTokenFile)))
+	d, _ := client.AppsV1().Deployments("ate-system").Get(t.Context(), "ate-api-server", metav1.GetOptions{})
+	g.Expect(d.Spec.Template.Annotations).To(HaveKey("koinon.dev/authentication-config-hash"), "the api server is rolled onto the new config")
+
+	// Again: nothing changes, so no restart.
+	before := d.Spec.Template.Annotations["koinon.dev/authentication-config-hash"]
+	changed, err = i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeFalse())
+	d, _ = client.AppsV1().Deployments("ate-system").Get(t.Context(), "ate-api-server", metav1.GetOptions{})
+	g.Expect(d.Spec.Template.Annotations["koinon.dev/authentication-config-hash"]).To(Equal(before))
+}
+
+func TestRepairsAnEntryWithoutTheFilesAndKeepsOtherProviders(t *testing.T) {
+	g := NewWithT(t)
+	old := "jwtProviders:\n- audiences: [extra.example]\n  issuer: " + inCluster + "\n  name: kubernetes\n- audiences: [x]\n  issuer: https://other.example\n  name: other\n"
+	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	g.Expect(authData(t, i)).To(And(
+		ContainSubstring("certificateAuthorityFile"), ContainSubstring("extra.example"), ContainSubstring("https://other.example")))
+}
+
+func TestLeavesTheAuthenticationConfigAloneForAnotherIssuer(t *testing.T) {
+	g := NewWithT(t)
+	i, _, client := setup("37", true, nil)
+	changed, err := i.EnsureAPIAuthentication(t.Context(), "https://issuer.example.com")
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeFalse())
+	_, getErr := client.CoreV1().ConfigMaps("ate-system").Get(t.Context(), "ate-api-authentication", metav1.GetOptions{})
+	g.Expect(apierrors.IsNotFound(getErr)).To(BeTrue())
 }
 
 func TestWaitCRDsTimesOutOnAnUnestablishedCRD(t *testing.T) {
@@ -500,4 +562,64 @@ func TestEnsureRouterSPIFFENamesTheDeploymentInErrors(t *testing.T) {
 	g := NewWithT(t)
 	i, _, _ := setup("37", true, nil)
 	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(MatchError(ContainSubstring("ate-system/atenet-router")))
+}
+
+func TestRepairFallsBackToTheDefaultAudienceWhenTheEntryHasNone(t *testing.T) {
+	g := NewWithT(t)
+	old := "jwtProviders:\n- audiences: []\n  issuer: https://other.example\n  name: kubernetes\n"
+	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	g.Expect(authData(t, i)).To(ContainSubstring("api.ate-system.svc"))
+}
+
+func TestReconcilesAProviderUnderAnotherNameWithTheSameIssuer(t *testing.T) {
+	g := NewWithT(t)
+	old := "jwtProviders:\n- audiences: [mine.example]\n  issuer: " + inCluster + "\n  name: cluster\n"
+	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	data := authData(t, i)
+	g.Expect(strings.Count(data, "issuer: "+inCluster)).To(Equal(1), "one provider per issuer")
+	g.Expect(data).To(And(ContainSubstring("name: cluster"), ContainSubstring("mine.example"), ContainSubstring("certificateAuthorityFile"), Not(ContainSubstring("name: kubernetes"))))
+}
+
+func TestRepairsEmptyAudiencesOnAnOtherwiseMatchingEntry(t *testing.T) {
+	g := NewWithT(t)
+	old := "jwtProviders:\n- audiences: []\n  certificateAuthorityFile: " + preflight.IssuerCAFile + "\n  discoveryTokenFile: " + preflight.IssuerTokenFile + "\n  issuer: " + inCluster + "\n  name: kubernetes\n"
+	i, _, _ := setup("37", true, []runtime.Object{&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ate-api-authentication", Namespace: "ate-system"}, Data: map[string]string{"authentication.yaml": old},
+	}})
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	g.Expect(authData(t, i)).To(ContainSubstring("api.ate-system.svc"))
+}
+
+func TestRestartsTheAPIServerWhenAMatchingConfigWasNeverRolled(t *testing.T) {
+	g := NewWithT(t)
+	i, _, client := setup("37", true, []runtime.Object{&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ate-api-server", Namespace: "ate-system"}}})
+	_, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	// A first run wrote the ConfigMap but its restart failed: the Deployment carries no (or an old) hash.
+	d, _ := client.AppsV1().Deployments("ate-system").Get(t.Context(), "ate-api-server", metav1.GetOptions{})
+	d.Spec.Template.Annotations = map[string]string{"koinon.dev/authentication-config-hash": "stale"}
+	_, err = client.AppsV1().Deployments("ate-system").Update(t.Context(), d, metav1.UpdateOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	changed, err := i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	d, _ = client.AppsV1().Deployments("ate-system").Get(t.Context(), "ate-api-server", metav1.GetOptions{})
+	g.Expect(d.Spec.Template.Annotations["koinon.dev/authentication-config-hash"]).NotTo(Equal("stale"))
+
+	changed, err = i.EnsureAPIAuthentication(t.Context(), inCluster)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeFalse(), "rolled now, so a rerun does nothing")
 }
