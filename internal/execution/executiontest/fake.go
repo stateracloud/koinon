@@ -203,10 +203,19 @@ func (f *Fake) Exec(ctx context.Context, workspace, sandbox string, req executio
 		_, err := io.Copy(outW, inR)
 		p.mu.Lock()
 		p.err = err
+		p.exited = true
 		p.mu.Unlock()
 		_ = outW.Close()
 		close(p.done)
 	}()
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+		go func() {
+			<-p.done
+			cancel()
+		}()
+	}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -225,6 +234,7 @@ type fakeProcess struct {
 	mu       sync.Mutex
 	err      error
 	closed   bool
+	exited   bool // the command ended; set before stdout closes
 }
 
 func (p *fakeProcess) Stdin() io.WriteCloser { return p.stdin }
@@ -247,9 +257,7 @@ func (p *fakeProcess) Wait() (int, error) {
 // command that has already exited.
 func (p *fakeProcess) Close() error {
 	p.mu.Lock()
-	select {
-	case <-p.done:
-	default:
+	if !p.exited {
 		p.closed = true
 	}
 	p.mu.Unlock()
