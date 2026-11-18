@@ -26,7 +26,7 @@ Options for a real cluster, passed to `ate-setup` under the names the pinned `at
 | `--postgres-storage-class <name>` | `--ateapi-postgres-storage-class` | The cluster has no default StorageClass: the bundled Postgres claim stays Pending without it. |
 | `--setup-csi nfs\|hostpath\|both\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`; `hostpath` and `both` are for kind only, so use `nfs` on another cluster). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
-| `--kind` | `--kind` | The cluster is a local kind cluster. |
+| `--kind` | `--kind` | The cluster is a local kind cluster. The installer reads the nodes first and refuses `--kind` unless every node has a `kind://` providerID, before it creates anything: the kind overlays, host-architecture images and hostPath volumes break a real cluster. |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
 `ate-setup` call, and it never acts on the ambient current context. `--substrate-probes=false` is refused:
@@ -149,6 +149,52 @@ line 618) and every token is rejected as "unexpected issuer" (line 277).
 The API server serves the discovery document and the JWKS to every service account through the
 `system:service-account-issuer-discovery` ClusterRoleBinding. A sidecar that serves a copy of the discovery
 document on the issuer address is not a supported install.
+
+### The Omni and Talos case: the safe patch
+
+When the check fails because the cluster's own issuer is not reachable from a pod, its Fix text prints the
+exact change (`preflight.SafeIssuerPatch`). It never prints a patch that sets the new issuer alone: the API
+server would then refuse every token that carries the old audience, including the ones Omni and the
+cluster's own parts hold. The change keeps the old issuer and both audiences (Talos `APIAudiences` is
+`accepted.audiences` when set, else the issuer URL).
+
+Talos and Omni, a cluster config patch (Omni refuses only `issuer.privateKey` in this document):
+
+```yaml
+apiVersion: v1alpha1
+kind: KubeServiceAccountConfig
+issuer:
+  issuerURL: https://kubernetes.default.svc
+accepted:
+  issuers:
+    - <old issuer>
+  audiences:
+    - https://kubernetes.default.svc
+    - <old issuer>
+```
+
+kubeadm, the kube-apiserver flags (the first `--service-account-issuer` signs):
+
+```text
+--service-account-issuer=https://kubernetes.default.svc
+--service-account-issuer=<old issuer>
+--api-audiences=https://kubernetes.default.svc,<old issuer>
+```
+
+Read the audiences the cluster accepts now (`--api-audiences`, or `accepted.audiences`) first and keep every
+existing entry in the list: the lists above show only the two issuers, and dropping another audience makes the
+API server refuse the tokens that carry it.
+
+Cost: one API server restart. Tokens issued before the change stay valid until they expire.
+
+With the issuer `https://kubernetes.default.svc` the installer writes the `ate-api-authentication` ConfigMap
+entry itself after `ate-setup` (`kubernetes` provider with the pod's `ca.crt` and `token`, as `kubernetesJWTProvider`
+does) and restarts the api server when it changed it, so the result does not depend on how `ate-setup` ran.
+This is interim: it goes when the pinned Substrate writes the entry for every install path
+([#1108](https://github.com/stateracloud/koinon/issues/1108)).
+
+When `ate-setup` fails, the installer keeps the pinned build and prints the exact `ate-setup delete ate-system`
+command that removes the partial install.
 
 ## Verified and unverified
 
