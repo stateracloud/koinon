@@ -75,11 +75,18 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if cred.Header == "" {
 		return t.base.RoundTrip(req)
 	}
-	// Never send the credential to another host than the target's, even after a redirect.
+	// Never send the credential to another host than the target's, even after a redirect, and
+	// never in clear text.
 	if u, perr := url.Parse(t.target.URL); perr != nil || u.Host != req.URL.Host {
 		return nil, errors.New("mcpgateway: refused to send a credential to another host")
+	}
+	if !credentialSafeURL(req.URL.String()) {
+		return nil, errors.New("mcpgateway: refused to send a credential over a URL that is not https")
 	}
 	req = req.Clone(req.Context())
 	req.Header.Set(cred.Header, cred.Value)
 	return t.base.RoundTrip(req)
 }
+
+// credentialSafeURL says a credential may travel to raw (see gateway.CredentialSafeURL).
+func credentialSafeURL(raw string) bool { return gateway.CredentialSafeURL(raw) }

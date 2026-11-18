@@ -103,8 +103,15 @@ type snapshot struct {
 var ErrInvalidConfig = errors.New("mcpgateway: invalid config")
 
 // ApplyMCP implements gateway.MCPGateway. It is idempotent and returns once the new config is live.
-// A rejected config leaves the previous one serving.
-func (g *Gateway) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.Revision, error) {
+// A rejected config leaves the previous one serving. A target that can never be served safely (a
+// credential on a URL that is not https) is left out, which closes its route; the rest applies.
+func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Revision, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err // the apply deadline passed: keep the config that serves
+	}
+	if err := c.Validate(); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
 	s := &snapshot{
 		keys:    map[string]gateway.Key{},
 		targets: map[string]gateway.MCPTarget{},
@@ -126,15 +133,42 @@ func (g *Gateway) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.Revi
 		if t.URL == "" {
 			return "", fmt.Errorf("%w: target %q has no URL", ErrInvalidConfig, t.Name)
 		}
+		if isAllowGuard(g.o.Guard) && t.Org != "" {
+			return "", fmt.Errorf("%w: target %q is an org target and needs a real guard", ErrInvalidConfig, t.Name)
+		}
+		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
+			// The route closes: the target is left out, and the rest of the config applies. A key
+			// revocation must never wait on an unrelated target (ADR 0120). The log line names the
+			// target and a fixed reason; it carries no org, agent or user ID and no URL.
+			g.o.Logger.Warn("mcp target dropped", "target", t.Name, "reason", "credential_needs_https")
+			continue
+		}
 		s.targets[t.Name] = t
 	}
 	for a, gs := range c.Tools {
-		s.grants[a] = slices.Clone(gs)
+		cp := make([]gateway.ToolGrant, len(gs))
+		for i, gr := range gs {
+			cp[i] = gr
+			cp[i].Tools = slices.Clone(gr.Tools)
+		}
+		s.grants[a] = cp
 	}
 	s.rev = revisionOf(c)
+	if err := ctx.Err(); err != nil { // the deadline passed: the old config keeps serving
+		return "", err
+	}
 	old := g.snap.Swap(s)
 	g.evictChanged(old, s)
 	return s.rev, nil
+}
+
+// isAllowGuard reports the pass-all guard, by value or by pointer.
+func isAllowGuard(g Guard) bool {
+	switch g.(type) {
+	case AllowGuard, *AllowGuard:
+		return true
+	}
+	return false
 }
 
 // revisionOf derives the revision from the content, so equal configs give equal revisions.

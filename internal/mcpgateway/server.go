@@ -20,9 +20,23 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
-var errDraining = errors.New("mcpgateway: draining")
+var (
+	errDraining      = errors.New("mcpgateway: draining")
+	errConfigChanged = errors.New("mcpgateway: the target config changed")
+)
 
 type agentKey struct{}
+
+// reqKey carries the snapshot that authenticated a request, so the grants of one request come from
+// the same configuration as its key.
+type reqKey struct{}
+
+func (g *Gateway) snapOf(ctx context.Context) *snapshot {
+	if s, ok := ctx.Value(reqKey{}).(*snapshot); ok {
+		return s
+	}
+	return g.snap.Load()
+}
 
 // Handler serves agents: the MCP endpoint, Streamable HTTP in the SDK's stateless mode. An agent
 // authenticates with its gateway key as a bearer token. Mount it at /mcp.
@@ -50,13 +64,15 @@ func (g *Gateway) Handler() http.Handler {
 			refuse(w, http.StatusUnauthorized, "refused: no gateway key")
 			return
 		}
-		key, ok := g.snap.Load().authenticate(strings.TrimSpace(token))
+		snap := g.snap.Load()
+		key, ok := snap.authenticate(strings.TrimSpace(token))
 		if !ok {
 			refuse(w, http.StatusUnauthorized, "refused: unknown gateway key")
 			return
 		}
 		// The agent's request headers stop here: the upstream requests are built by the SDK client.
-		mcpHandler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentKey{}, key.Agent)))
+		rctx := context.WithValue(context.WithValue(r.Context(), agentKey{}, key.Agent), reqKey{}, snap)
+		mcpHandler.ServeHTTP(w, r.WithContext(rctx))
 	})
 }
 
@@ -112,7 +128,7 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 // listTools fans out to every target the agent may use and merges the granted tools. A target that
 // fails is left out: one dead server must not hide the others.
 func (g *Gateway) listTools(ctx context.Context, agent gateway.AgentRef) *mcp.ListToolsResult {
-	s := g.snap.Load()
+	s := g.snapOf(ctx)
 	out := &mcp.ListToolsResult{Tools: []*mcp.Tool{}}
 	var (
 		mu sync.Mutex
@@ -221,9 +237,10 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		}
 	}
 
-	s := g.snap.Load()
+	s := g.snapOf(ctx)
+	// The row and the span carry names only after the grant check: a caller's text is never recorded.
+	row.Target, row.Tool, row.CredKind = "unknown", "unknown", CredentialNone
 	target, tool, ok := splitToolName(p.Name)
-	row.Target, row.Tool, row.CredKind = target, tool, CredentialNone
 	if !ok {
 		finish(OutcomeRefusedGrant)
 		return refusedResult("refused: no such tool")
@@ -233,6 +250,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		finish(OutcomeRefusedGrant)
 		return refusedResult("refused: the tool is not granted to this agent")
 	}
+	row.Target, row.Tool = target, tool
 	t := s.targets[target]
 	if c, err := g.o.Credentials.Credential(ctx, t, agent); err == nil {
 		row.CredKind = c.Kind
@@ -242,25 +260,17 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 
 	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
 	defer cancel()
+	// One attempt. A call is never sent again: a lost session error can reach every call on a shared
+	// session, so it does not prove that this call ran nothing, and a write could run twice. The
+	// session is evicted, and the next call connects again.
+	u, err := g.session(cctx, t, agent)
 	var res *mcp.CallToolResult
-	var err error
-	for attempt := range 2 {
-		var u *upstream
-		if u, err = g.session(cctx, t, agent); err != nil {
-			break
-		}
+	if err == nil {
 		res, err = u.session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: p.Arguments})
 		u.release()
-		if err == nil {
-			break
-		}
 		var je *jsonrpc.Error
-		if errors.As(err, &je) || cctx.Err() != nil {
-			break // the target or the guard answered, or the deadline passed: the session is fine
-		}
-		g.evict(u)
-		if attempt == 1 || !isReplayable(err) {
-			break
+		if err != nil && !errors.As(err, &je) && cctx.Err() == nil {
+			g.evict(u) // a lost connection: the next call connects again
 		}
 	}
 	switch {
@@ -280,7 +290,3 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	finish(OutcomeUpstreamError)
 	return refusedResult("the MCP server did not answer")
 }
-
-// isReplayable says a failed call may run again on a fresh session. Only a call that never reached
-// the target is replayed; a lost connection mid-call could repeat a write, so it is not.
-func isReplayable(err error) bool { return errors.Is(err, mcp.ErrConnectionClosed) }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,6 +39,8 @@ type upstream struct {
 	key     poolKey
 	cfg     gateway.MCPTarget
 	session *mcp.ClientSession
+	stop    context.CancelFunc // ends the stream context of the session
+	gt      *guardTransport    // its liveness tells that the connection is lost
 
 	mu       sync.Mutex
 	lastUsed time.Time
@@ -53,6 +56,7 @@ func (u *upstream) retire() {
 	u.mu.Unlock()
 	if closeNow {
 		_ = u.session.Close()
+		u.stop()
 	}
 }
 
@@ -65,6 +69,7 @@ func (u *upstream) release() {
 	u.mu.Unlock()
 	if closeNow {
 		_ = u.session.Close()
+		u.stop()
 	}
 }
 
@@ -96,9 +101,15 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return nil, errDraining
 	}
-	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && u.cfg == t && u.acquire() {
+	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg == t && u.acquire() {
 		g.mu.Unlock()
 		return u, nil
+	}
+	// A request that carries an old snapshot must not evict the session of the current config, nor
+	// connect to a target an apply changed or removed.
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+		g.mu.Unlock()
+		return nil, errConfigChanged
 	}
 	stale := g.pool[key]
 	delete(g.pool, key)
@@ -117,14 +128,25 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		u.retire()
 		return nil, errDraining
 	}
-	if cur, ok := g.pool[key]; ok && cur.acquire() { // another request connected first
+	u.refs = 1
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+		// The config changed while this session connected. Serve this one call on it, never pool it.
+		u.retired = true
 		g.mu.Unlock()
+		return u, nil
+	}
+	if cur, ok := g.pool[key]; ok && cur.cfg == t && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
+		g.mu.Unlock()
+		u.refs, u.retired = 0, true
 		u.retire()
 		return cur, nil
 	}
+	displaced := g.pool[key]
 	g.pool[key] = u
-	u.refs = 1
 	g.mu.Unlock()
+	if displaced != nil {
+		displaced.retire() // outside the lock: Close can wait on the network
+	}
 	return u, nil
 }
 
@@ -152,13 +174,40 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	// ADR 0097 decision 5 has the gateway answer roots/list with one fixed folder. Roots are
 	// deprecated from MCP 2026-07-28 but work for twelve more months; sampling stays unadvertised.
 	client.AddRoots(&mcp.Root{URI: RootURI, Name: "workspace"}) //nolint:staticcheck // see above
-	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
-	defer cancel()
-	s, err := client.Connect(cctx, &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}, nil)
+	// The handshake has a deadline; the stream of a legacy SSE target must outlive it. The stream
+	// context ends when the session retires, or when the handshake fails.
+	var handed atomic.Bool
+	sctx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	timer := time.AfterFunc(g.o.CallTimeout, stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			// The caller gave up before the handshake ended.
+			if handed.Load() || !timer.Stop() {
+				return
+			}
+			stop()
+		case <-sctx.Done():
+		}
+	}()
+	gt := &guardTransport{inner: inner, guard: g.o.Guard, target: t.Name, agent: key.agent}
+	s, err := client.Connect(sctx, gt, nil)
 	if err != nil {
+		timer.Stop()
+		stop()
 		return nil, err
 	}
-	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now()}, nil
+	handed.Store(true)
+	if !timer.Stop() || sctx.Err() != nil || ctx.Err() != nil {
+		// The deadline or the caller ended the stream as the handshake finished: do not pool it.
+		_ = s.Close()
+		stop()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, context.DeadlineExceeded
+	}
+	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now(), stop: stop, gt: gt}, nil
 }
 
 // evict drops the upstream session of key, so the next call connects again.
