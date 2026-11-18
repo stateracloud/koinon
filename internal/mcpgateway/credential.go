@@ -4,7 +4,9 @@ package mcpgateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -15,6 +17,8 @@ import (
 const (
 	CredentialNone   = "none"
 	CredentialStatic = "static"
+	// CredentialError is the kind of a call whose credential could not be read.
+	CredentialError = "error"
 )
 
 // Credential is what the gateway sends to one target for one agent. It exists only between the
@@ -70,6 +74,10 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	if cred.Header == "" {
 		return t.base.RoundTrip(req)
+	}
+	// Never send the credential to another host than the target's, even after a redirect.
+	if u, perr := url.Parse(t.target.URL); perr != nil || u.Host != req.URL.Host {
+		return nil, errors.New("mcpgateway: refused to send a credential to another host")
 	}
 	req = req.Clone(req.Context())
 	req.Header.Set(cred.Header, cred.Value)

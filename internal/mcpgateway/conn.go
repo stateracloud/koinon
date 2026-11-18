@@ -141,11 +141,7 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 			}
 			return nil
 		}
-		if kind == KindRequest {
-			c.mu.Lock()
-			c.pending[idKey(m.ID)] = m.Method
-			c.mu.Unlock()
-		}
+		c.track(m, kind)
 		return c.inner.Write(ctx, msg)
 	case *jsonrpc.Response:
 		kind := KindResult
@@ -160,6 +156,26 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 	return c.inner.Write(ctx, msg)
 }
 
+// track keeps the pending map right: a call adds its ID, a cancellation removes it, so a call that
+// the target never answers does not stay in the map.
+func (c *guardConn) track(m *jsonrpc.Request, kind Kind) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case kind == KindRequest:
+		c.pending[idKey(m.ID)] = m.Method
+	case m.Method == "notifications/cancelled":
+		var p struct {
+			RequestID any `json:"requestId"`
+		}
+		if json.Unmarshal(m.Params, &p) == nil && p.RequestID != nil {
+			if id, err := jsonrpc.MakeID(p.RequestID); err == nil {
+				delete(c.pending, idKey(id))
+			}
+		}
+	}
+}
+
 // pump reads the target and applies the guard to each message before the SDK sees it.
 func (c *guardConn) pump() {
 	ctx := c.life
@@ -169,9 +185,19 @@ func (c *guardConn) pump() {
 			c.deliver(readResult{err: err})
 			return
 		}
-		if out, ok := c.inbound(ctx, msg); ok {
-			c.deliver(readResult{msg: out})
+		// The guard may block (an ask held for a person). A response or a server request is handled
+		// on its own goroutine, so one held message does not stop the others on this connection.
+		if m, ok := msg.(*jsonrpc.Request); ok && !m.ID.IsValid() {
+			if out, ok := c.inbound(ctx, msg); ok {
+				c.deliver(readResult{msg: out})
+			}
+			continue
 		}
+		go func() {
+			if out, ok := c.inbound(ctx, msg); ok {
+				c.deliver(readResult{msg: out})
+			}
+		}()
 	}
 }
 
@@ -204,6 +230,11 @@ func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message) (jsonrpc.M
 		}
 		if v := c.guard.Inspect(ctx, gm); v.Refuse {
 			return errorResponse(m.ID, refusedCode, v.Reason), true
+		}
+		var we *jsonrpc.Error
+		if errors.As(m.Error, &we) && we.Code == refusedCode {
+			// Only the gateway makes this code. A target must not forge a guard refusal.
+			return errorResponse(m.ID, jsonrpc.CodeInternalError, "upstream error"), true
 		}
 		return m, true
 	}

@@ -207,8 +207,8 @@ func (s *snapshot) allowedTools(agent gateway.AgentRef, target string) (tools ma
 	return tools, all, ok
 }
 
-// Drain makes the gateway refuse new requests with 503 and close every upstream session. A replica
-// calls it at shutdown, after its listener stopped accepting (graceful drain, ADR 0097).
+// Drain makes the gateway refuse new requests with 503 and retire every upstream session. A call in
+// flight finishes first; each session closes when its last call ends (graceful drain, ADR 0097).
 func (g *Gateway) Drain() {
 	g.mu.Lock()
 	g.drain = true
@@ -216,7 +216,7 @@ func (g *Gateway) Drain() {
 	g.pool = map[poolKey]*upstream{}
 	g.mu.Unlock()
 	for _, u := range pool {
-		u.close()
+		u.retire()
 	}
 }
 

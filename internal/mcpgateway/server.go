@@ -167,9 +167,13 @@ func (g *Gateway) targetTools(ctx context.Context, t gateway.MCPTarget, agent ga
 			lastErr = nil
 		}
 		if lastErr == nil {
+			u.release()
 			return tools, nil
 		}
-		g.evict(u)
+		u.release()
+		if ctx.Err() == nil {
+			g.evict(u)
+		}
 	}
 	return nil, lastErr
 }
@@ -232,6 +236,8 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	t := s.targets[target]
 	if c, err := g.o.Credentials.Credential(ctx, t, agent); err == nil {
 		row.CredKind = c.Kind
+	} else {
+		row.CredKind = CredentialError
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
@@ -244,12 +250,13 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 			break
 		}
 		res, err = u.session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: p.Arguments})
+		u.release()
 		if err == nil {
 			break
 		}
 		var je *jsonrpc.Error
-		if errors.As(err, &je) {
-			break // the target or the guard answered: the session is fine
+		if errors.As(err, &je) || cctx.Err() != nil {
+			break // the target or the guard answered, or the deadline passed: the session is fine
 		}
 		g.evict(u)
 		if attempt == 1 || !isReplayable(err) {

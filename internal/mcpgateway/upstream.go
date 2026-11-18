@@ -41,23 +41,53 @@ type upstream struct {
 
 	mu       sync.Mutex
 	lastUsed time.Time
+	refs     int  // calls in flight
+	retired  bool // no new call may use it; it closes when refs reaches 0
 }
 
-func (u *upstream) close() { _ = u.session.Close() }
-
-func (u *upstream) touch() {
+// retire closes the session now, or when the last call that uses it ends.
+func (u *upstream) retire() {
 	u.mu.Lock()
-	u.lastUsed = time.Now()
+	u.retired = true
+	closeNow := u.refs == 0
 	u.mu.Unlock()
+	if closeNow {
+		_ = u.session.Close()
+	}
+}
+
+// release ends one use of the session.
+func (u *upstream) release() {
+	u.mu.Lock()
+	u.refs--
+	u.lastUsed = time.Now()
+	closeNow := u.retired && u.refs == 0
+	u.mu.Unlock()
+	if closeNow {
+		_ = u.session.Close()
+	}
+}
+
+// acquire takes one use of the session, or reports false when it is retired.
+func (u *upstream) acquire() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.retired {
+		return false
+	}
+	u.refs++
+	u.lastUsed = time.Now()
+	return true
 }
 
 func (u *upstream) idle(ttl time.Duration) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return time.Since(u.lastUsed) > ttl
+	return u.refs == 0 && time.Since(u.lastUsed) > ttl
 }
 
 // session returns the live upstream session for (target, agent), connecting when there is none. The
+// caller must call release on it. The
 // client advertises no sampling and no elicitation, and answers roots/list with RootURI.
 func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) (*upstream, error) {
 	key := poolKey{target: t.Name, agent: agent}
@@ -66,16 +96,15 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return nil, errDraining
 	}
-	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && u.cfg == t {
+	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && u.cfg == t && u.acquire() {
 		g.mu.Unlock()
-		u.touch()
 		return u, nil
 	}
 	stale := g.pool[key]
 	delete(g.pool, key)
 	g.mu.Unlock()
 	if stale != nil {
-		stale.close()
+		stale.retire()
 	}
 
 	u, err := g.connect(ctx, key, t)
@@ -83,21 +112,32 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		return nil, err
 	}
 	g.mu.Lock()
-	if cur, ok := g.pool[key]; ok { // another request connected first
+	if g.drain {
 		g.mu.Unlock()
-		u.close()
-		cur.touch()
+		u.retire()
+		return nil, errDraining
+	}
+	if cur, ok := g.pool[key]; ok && cur.acquire() { // another request connected first
+		g.mu.Unlock()
+		u.retire()
 		return cur, nil
 	}
 	g.pool[key] = u
+	u.refs = 1
 	g.mu.Unlock()
 	return u, nil
 }
 
 func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
+	base := g.o.HTTPClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
 	hc := &http.Client{
-		Transport: &credentialTransport{base: g.o.HTTPClient.Transport, target: t, agent: key.agent, src: g.o.Credentials},
+		Transport: &credentialTransport{base: base, target: t, agent: key.agent, src: g.o.Credentials},
 		Timeout:   0,
+		// A target must not redirect the gateway: the credential stays with the target's host.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	var inner mcp.Transport = &mcp.StreamableClientTransport{
 		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1,
@@ -118,19 +158,18 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	if err != nil {
 		return nil, err
 	}
-	u := &upstream{key: key, cfg: t, session: s}
-	u.touch()
-	return u, nil
+	return &upstream{key: key, cfg: t, session: s, lastUsed: time.Now()}, nil
 }
 
 // evict drops the upstream session of key, so the next call connects again.
+// Calls in flight on it finish first.
 func (g *Gateway) evict(u *upstream) {
 	g.mu.Lock()
 	if g.pool[u.key] == u {
 		delete(g.pool, u.key)
 	}
 	g.mu.Unlock()
-	u.close()
+	u.retire()
 }
 
 // evictChanged closes the sessions whose target is gone or changed in the new snapshot.
@@ -145,7 +184,7 @@ func (g *Gateway) evictChanged(old, cur *snapshot) {
 	}
 	g.mu.Unlock()
 	for _, u := range gone {
-		u.close()
+		u.retire()
 	}
 	_ = old
 }
@@ -162,7 +201,7 @@ func (g *Gateway) Sweep() {
 	}
 	g.mu.Unlock()
 	for _, u := range idle {
-		u.close()
+		u.retire()
 	}
 }
 
