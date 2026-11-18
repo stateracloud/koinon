@@ -22,6 +22,9 @@ func TestSubstrate(t *testing.T) {
 
 const ws = "org-acme"
 
+// noContentDigest makes newDriver leave Config.ContentDigest nil, for the specs of the fail-closed rule.
+var noContentDigest bool
+
 // newDriver starts a fake Substrate and returns a driver on it, with the workspace made.
 func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	cl := fakeate.New()
@@ -33,6 +36,10 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	c := substrate.Config{PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second}
 	if len(cfg) > 0 {
 		c = cfg[0]
+	}
+	if c.ContentDigest == nil && !noContentDigest {
+		// The fake has no object store: the object's content is its address.
+		c.ContentDigest = func(_ context.Context, uri string) (string, error) { return "fake-" + uri, nil }
 	}
 	d := substrate.New(control, router, c)
 	_, err = d.EnsureWorkspace(context.Background(), ws, nil)

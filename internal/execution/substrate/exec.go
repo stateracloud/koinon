@@ -37,9 +37,6 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	if len(req.Command) == 0 {
 		return nil, fail(op, execution.ErrInvalid, "command is empty")
 	}
-	if err := d.requireRunning(ctx, op, k); err != nil {
-		return nil, err
-	}
 	start := &ateenvv1alpha.StartProcessRequest{Command: req.Command, Cwd: req.Workdir, Stdin: true}
 	if req.LoginShell {
 		// A login shell sources the user's profile; "$@" passes the command through unparsed.
@@ -48,7 +45,12 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	if req.Timeout > 0 {
 		start.Timeout = durationpb.New(req.Timeout)
 	}
-	started, err := d.startProcess(ctx, op, k, start)
+	sctx, end, err := d.enter(ctx, op, k)
+	if err != nil {
+		return nil, err
+	}
+	started, err := d.startProcess(sctx, op, k, start)
+	end()
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +101,6 @@ type proc struct {
 	in *stdin
 
 	mu     sync.Mutex
-	stream context.CancelFunc // cancels the current output stream
 	closed bool
 
 	done chan struct{}
@@ -128,20 +129,6 @@ func (p *proc) Close() error {
 	_ = p.pr.CloseWithError(io.ErrClosedPipe) // unblocks a pump that waits on a slow reader
 	<-p.done
 	return nil
-}
-
-func (p *proc) dropStream() {
-	p.mu.Lock()
-	if p.stream != nil {
-		p.stream()
-	}
-	p.mu.Unlock()
-}
-
-func (p *proc) setStream(c context.CancelFunc) {
-	p.mu.Lock()
-	p.stream = c
-	p.mu.Unlock()
 }
 
 // finish records the result once, ends stdout and releases the process.
@@ -174,9 +161,11 @@ func (p *proc) finish(code int, err error) {
 func (p *proc) kill() {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), 2*time.Second)
 	defer cancel()
-	if p.d.requireRunning(ctx, "Exec", p.k) != nil {
+	ctx, end, err := p.d.enter(ctx, "Exec", p.k)
+	if err != nil {
 		return
 	}
+	defer end()
 	_, _ = p.d.process.SignalProcess(route(ctx, p.k), &ateenvv1alpha.SignalProcessRequest{
 		ProcessId: p.id, Signal: ateenvv1alpha.Signal_SIGNAL_KILL,
 	})
@@ -188,23 +177,19 @@ func (p *proc) pump() {
 	var (
 		stdoutOff, stderrOff int64
 		stallSince           time.Time
-		first                = true
 	)
 	for {
 		if err := p.ctx.Err(); err != nil {
 			p.finish(0, err)
 			return
 		}
-		if !first {
-			if err := p.d.waitRunning(p.ctx, "Exec", p.k); err != nil {
-				p.finish(0, err)
-				return
-			}
+		// Wait for a running actor and open the gate's registration in one step, so a suspend
+		// that starts now cancels this stream instead of racing it.
+		sctx, cancel, err := p.d.enterWait(p.ctx, "Exec", p.k)
+		if err != nil {
+			p.finish(0, err)
+			return
 		}
-		first = false
-
-		sctx, cancel := context.WithCancel(p.ctx)
-		p.setStream(cancel)
 		stream, err := p.d.process.StreamProcessOutput(route(sctx, p.k), &ateenvv1alpha.StreamProcessOutputRequest{
 			ProcessId: p.id, StdoutOffset: stdoutOff, StderrOffset: stderrOff, Follow: true,
 		})
@@ -307,10 +292,12 @@ func (s *stdin) Close() error {
 
 func (s *stdin) send(req *ateenvv1alpha.WriteProcessInputRequest, want int64) error {
 	p := s.p
-	if err := p.d.waitRunning(p.ctx, "Exec", p.k); err != nil {
+	ctx, end, err := p.d.enterWait(p.ctx, "Exec", p.k)
+	if err != nil {
 		return err
 	}
-	stream, err := p.d.process.WriteProcessInput(route(p.ctx, p.k))
+	defer end()
+	stream, err := p.d.process.WriteProcessInput(route(ctx, p.k))
 	if err != nil {
 		return execution.GRPCError("Exec", err)
 	}

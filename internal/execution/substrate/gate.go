@@ -23,9 +23,13 @@ type gate struct {
 	paused int
 	wake   chan struct{} // closed and replaced whenever paused changes
 	procs  map[*proc]struct{}
+	next   uint64
+	active map[uint64]context.CancelFunc // every router call in flight, cancelled by pause
 }
 
-func newGate() *gate { return &gate{wake: make(chan struct{}), procs: map[*proc]struct{}{}} }
+func newGate() *gate {
+	return &gate{wake: make(chan struct{}), procs: map[*proc]struct{}{}, active: map[uint64]context.CancelFunc{}}
+}
 
 func (d *Driver) gate(k key) *gate {
 	d.mu.Lock()
@@ -44,7 +48,7 @@ func (d *Driver) forget(k key) {
 	defer d.mu.Unlock()
 	if g, ok := d.gates[k]; ok {
 		g.mu.Lock()
-		idle := len(g.procs) == 0 && g.paused == 0
+		idle := len(g.procs) == 0 && g.paused == 0 && len(g.active) == 0
 		g.mu.Unlock()
 		if idle {
 			delete(d.gates, k)
@@ -52,18 +56,64 @@ func (d *Driver) forget(k key) {
 	}
 }
 
-// pause closes the gate and drops the live streams. Calls nest.
+// pause closes the gate and cancels every router call in flight. Calls nest.
 func (g *gate) pause() {
 	g.mu.Lock()
 	g.paused++
-	procs := make([]*proc, 0, len(g.procs))
-	for p := range g.procs {
-		procs = append(procs, p)
+	for id, cancel := range g.active {
+		cancel()
+		delete(g.active, id)
 	}
 	g.broadcast()
 	g.mu.Unlock()
-	for _, p := range procs {
-		p.dropStream()
+}
+
+// begin registers one router call. The check of the gate and the registration happen under one
+// lock, so a pause either sees the call and cancels it, or the call sees the pause and does not
+// start: no call can slip between the two. The returned end must be called once the call is over.
+func (g *gate) begin(parent context.Context) (ctx context.Context, end func(), ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.paused > 0 {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithCancel(parent)
+	g.next++
+	id := g.next
+	g.active[id] = cancel
+	return ctx, func() {
+		g.mu.Lock()
+		delete(g.active, id)
+		g.mu.Unlock()
+		cancel()
+	}, true
+}
+
+// enter starts a router call that must not wait for a suspended actor (Exec, Upload and their
+// helpers): it fails when the gate is closed or the actor does not run. The caller calls end.
+func (d *Driver) enter(ctx context.Context, op string, k key) (context.Context, func(), error) {
+	cctx, end, ok := d.gate(k).begin(ctx)
+	if !ok {
+		return nil, nil, fail(op, execution.ErrFailedPrecondition, "sandbox %s is being suspended or deleted", k)
+	}
+	if err := d.requireRunning(cctx, op, k); err != nil {
+		end()
+		return nil, nil, err
+	}
+	return cctx, end, nil
+}
+
+// enterWait is enter for a caller that outlives a suspend (the output stream, stdin): it waits
+// until the actor runs and the gate is open, then registers.
+func (d *Driver) enterWait(ctx context.Context, op string, k key) (context.Context, func(), error) {
+	g := d.gate(k)
+	for {
+		if err := d.waitRunning(ctx, op, k); err != nil {
+			return nil, nil, err
+		}
+		if cctx, end, ok := g.begin(ctx); ok {
+			return cctx, end, nil
+		}
 	}
 }
 

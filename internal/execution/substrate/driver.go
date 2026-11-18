@@ -64,10 +64,12 @@ type Config struct {
 	// (disk and memory from the first release).
 	SnapshotFidelity ateapiv1.SnapshotFidelity
 	// ContentDigest returns a digest ("<hex>") of the bytes behind a snapshot's object-store
-	// address. When set, it is part of every snapshot digest, so a restore also refuses a snapshot
-	// whose content changed. When nil the digest covers what the control API reports about the
-	// snapshot (its identity, fidelity, template and address) but not the object's bytes; ADR 0119 D5
-	// asks for the content digest, and the object-store reader that provides it is a later slice.
+	// address. It is part of every snapshot digest, so a restore refuses a snapshot whose content
+	// changed behind the same address (upstream T-25; ADR 0119 D5). It is required for snapshots:
+	// when it is nil, SnapshotSandbox and RestoreSandbox fail closed with [execution.ErrUnsupported],
+	// because a digest over the control API's metadata alone would restore a changed object without
+	// error. The production object-store reader that fills it is a later slice (Part of #1082); the
+	// driver is wired into the reconciler only after it exists, so no install runs snapshots without it.
 	ContentDigest func(ctx context.Context, objectURI string) (string, error)
 }
 
@@ -166,9 +168,8 @@ func (d *Driver) EnsureWorkspace(ctx context.Context, name string, _ map[string]
 // so a driver that dropped them would run a sandbox with less fencing than the caller asked for.
 func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execution.SandboxSpec) (execution.Sandbox, error) {
 	const op = "CreateSandbox"
-	if len(spec.Providers) > 0 || len(spec.Policy.Network) > 0 {
-		return execution.Sandbox{}, fail(op, execution.ErrUnsupported,
-			"the Substrate driver has no provider records or network rules: egress belongs to the gateway (ADR 0097, ADR 0119)")
+	if err := checkSpec(op, spec); err != nil {
+		return execution.Sandbox{}, err
 	}
 	tmpl, err := renderTemplate(workspace, spec, d.cfg)
 	if err != nil {
@@ -191,6 +192,23 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
 	return sandboxFrom(workspace, actor), nil
+}
+
+// checkSpec refuses what the driver cannot carry out. Provider records and network rules belong to
+// the gateway (ADR 0097). Filesystem paths belong to the guest launcher's Landlock configuration
+// (ADR 0119, #1087), which this driver does not render yet: a driver that dropped them would run
+// the sandbox without the fencing the caller asked for, and ADR 0045 makes Landlock a hard
+// requirement.
+func checkSpec(op string, spec execution.SandboxSpec) error {
+	if len(spec.Providers) > 0 || len(spec.Policy.Network) > 0 {
+		return fail(op, execution.ErrUnsupported,
+			"the Substrate driver has no provider records or network rules: egress belongs to the gateway (ADR 0097, ADR 0119)")
+	}
+	if fs := spec.Policy.Filesystem; fs.IncludeWorkdir || len(fs.ReadOnly) > 0 || len(fs.ReadWrite) > 0 {
+		return fail(op, execution.ErrUnsupported,
+			"the Substrate driver cannot carry a filesystem policy until the guest launcher config does (ADR 0045, ADR 0119, #1087)")
+	}
+	return nil
 }
 
 // GetSandbox implements execution.Compute.

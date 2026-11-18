@@ -33,10 +33,13 @@ const digestVersion = "koinon-substrate-snapshot/v1"
 // driver puts none in a template.
 //
 // The digest is Koinon's own record, because Substrate gives none before restore (upstream T-25):
-// see [Config.ContentDigest] for what it covers.
+// it covers the object's bytes through [Config.ContentDigest], and the call fails closed without it.
 func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (execution.Snapshot, error) {
 	const op = "SnapshotSandbox"
 	k := key{workspace, name}
+	if err := d.requireContentDigest(op); err != nil {
+		return execution.Snapshot{}, err
+	}
 	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
 		return execution.Snapshot{}, execution.GRPCError(op, err)
@@ -103,8 +106,14 @@ func (d *Driver) tag(ctx context.Context, workspace, source string) (*ateapiv1.T
 // the template holds no environment variable, so the clone shares no secret with its source.
 func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap execution.SnapshotRef, spec execution.SandboxSpec) (execution.Sandbox, error) {
 	const op = "RestoreSandbox"
+	if err := d.requireContentDigest(op); err != nil {
+		return execution.Sandbox{}, err
+	}
 	if spec.Name == "" {
 		return execution.Sandbox{}, fail(op, execution.ErrInvalid, "sandbox name is empty")
+	}
+	if err := checkSpec(op, spec); err != nil {
+		return execution.Sandbox{}, err
 	}
 	tag, err := d.control.GetTag(ctx, &ateapiv1.GetTagRequest{Tag: ref(workspace, snap.ID)})
 	if err != nil {
@@ -157,8 +166,18 @@ func (d *Driver) templateByUID(ctx context.Context, workspace, uid string) (stri
 	}
 }
 
+// requireContentDigest fails closed when no object-content digest is configured: see
+// [Config.ContentDigest].
+func (d *Driver) requireContentDigest(op string) error {
+	if d.cfg.ContentDigest == nil {
+		return fail(op, execution.ErrUnsupported,
+			"snapshots need Config.ContentDigest: a digest over metadata alone would restore a changed object (ADR 0119 D5)")
+	}
+	return nil
+}
+
 // digest is "sha256:<hex>" over the text that identifies a snapshot: where it lives, what it was
-// taken from and, when [Config.ContentDigest] is set, what its object holds. Anything the control
+// taken from and what its object holds ([Config.ContentDigest]). Anything the control
 // API reports differently on a later read (a swapped object address, another generation or
 // fidelity, a re-pointed tag) changes it.
 func (d *Driver) digest(ctx context.Context, tag *ateapiv1.Tag) (string, error) {
@@ -169,13 +188,11 @@ func (d *Driver) digest(ctx context.Context, tag *ateapiv1.Tag) (string, error) 
 		digestVersion, tag.GetMetadata().GetAtespace(), tag.GetMetadata().GetName(), tag.GetMetadata().GetUid(),
 		tag.GetSourceActor().GetName(), s.GetUuid(), s.GetGeneration(), s.GetFidelity(),
 		tag.GetStatus().GetActorTemplateUid(), uri)
-	if d.cfg.ContentDigest != nil {
-		c, err := d.cfg.ContentDigest(ctx, uri)
-		if err != nil {
-			return "", err
-		}
-		_, _ = fmt.Fprintf(h, "content=%s\n", c)
+	c, err := d.cfg.ContentDigest(ctx, uri)
+	if err != nil {
+		return "", err
 	}
+	_, _ = fmt.Fprintf(h, "content=%s\n", c)
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 

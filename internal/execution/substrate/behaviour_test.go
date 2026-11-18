@@ -124,6 +124,58 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
 		})
 
+		It("sends no router request while a suspend overlaps an upload or a stdin write", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			// An upload whose reader stalls after the first chunk: the stream is open during the suspend.
+			release := make(chan struct{})
+			started := make(chan struct{})
+			upErr := make(chan error, 1)
+			go func() {
+				upErr <- d.Upload(ctx, ws, "sb", "/sandbox", &stallReader{first: bytes.Repeat([]byte("x"), 1024), started: started, release: release})
+			}()
+			Eventually(started).WithTimeout(5 * time.Second).Should(BeClosed())
+			_, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			close(release)
+			Eventually(upErr).WithTimeout(5 * time.Second).Should(Receive(HaveOccurred()))
+			Expect(cl.RouterResumes(ws, "sb")).To(BeZero(), "the suspend cancelled the upload stream")
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+
+			// A writer that never stops, over repeated suspends and resumes.
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			go func() { _, _ = io.Copy(io.Discard, p.Stdout()) }()
+			stop := make(chan struct{})
+			wrote := make(chan struct{})
+			go func() {
+				defer close(wrote)
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						_, _ = p.Stdin().Write([]byte("line\n"))
+					}
+				}
+			}()
+			for range 5 {
+				_, err := d.SuspendSandbox(ctx, ws, "sb")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
+				_, err = d.ResumeSandbox(ctx, ws, "sb")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			close(stop)
+			Eventually(wrote).WithTimeout(10 * time.Second).Should(BeClosed())
+			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
+		}, SpecTimeout(30*time.Second))
+
 		It("reports the exit code and stderr of a command", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			var stderr bytes.Buffer
@@ -192,6 +244,30 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
 		})
 
+		It("refuses a filesystem policy it cannot carry, on create and on restore", func(ctx SpecContext) {
+			for _, fs := range []execution.FilesystemPolicy{
+				{IncludeWorkdir: true}, {ReadOnly: []string{"/usr"}}, {ReadWrite: []string{"/sandbox"}},
+			} {
+				s := spec("x")
+				s.Policy.Filesystem = fs
+				_, err := d.CreateSandbox(ctx, ws, s)
+				Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
+			}
+			ready(ctx, d, "src")
+			snap, err := d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			s := spec("copy")
+			s.Policy.Filesystem.ReadWrite = []string{"/sandbox"}
+			_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, s)
+			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
+			s = spec("copy")
+			s.Providers = []string{"p"}
+			_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, s)
+			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
+			_, err = d.GetSandbox(ctx, ws, "copy")
+			Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "nothing was created: %v", err)
+		})
+
 		It("rejects a quantity that is not one", func(ctx SpecContext) {
 			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: "img", MemoryLimit: "lots"})
 			Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
@@ -245,6 +321,18 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
 			_, err = dd.GetSandbox(ctx, ws, "copy")
 			Expect(errors.Is(err, execution.ErrNotFound)).To(BeTrue(), "nothing was created: %v", err)
+		})
+
+		It("fails closed without a content digest, and does not suspend the sandbox first", func(ctx SpecContext) {
+			noContentDigest = true
+			DeferCleanup(func() { noContentDigest = false })
+			dd, c := newDriver()
+			ready(ctx, dd, "src")
+			_, err := dd.SnapshotSandbox(ctx, ws, "src")
+			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
+			Expect(c.State(ws, "src")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			_, err = dd.RestoreSandbox(ctx, ws, execution.SnapshotRef{ID: "t", Digest: "sha256:00"}, spec("copy"))
+			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
 		})
 
 		It("adds the content digest to the snapshot digest when one is configured", func(ctx SpecContext) {
@@ -308,3 +396,21 @@ var _ = Describe("the Substrate driver", func() {
 type failing struct{ err error }
 
 func (f failing) Read([]byte) (int, error) { return 0, f.err }
+
+// stallReader gives one chunk, then blocks until released and ends the stream.
+type stallReader struct {
+	first   []byte
+	started chan struct{}
+	release chan struct{}
+	done    bool
+}
+
+func (r *stallReader) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		close(r.started)
+		return copy(p, r.first), nil
+	}
+	<-r.release
+	return 0, io.EOF
+}

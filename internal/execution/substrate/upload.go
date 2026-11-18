@@ -51,9 +51,7 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 	defer func() { // best effort, and only while the actor runs: a request would resume it
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if d.requireRunning(cctx, op, k) == nil {
-			_, _, _ = d.runOnce(cctx, op, k, []string{"rm", "-f", tmp})
-		}
+		_, _, _ = d.runOnce(cctx, op, k, []string{"rm", "-f", tmp}) // refused when the actor is not running
 	}()
 
 	if err := d.writeFile(ctx, op, k, tmp, archive); err != nil {
@@ -76,8 +74,12 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 
 // writeFile streams r into a file in the guest.
 func (d *Driver) writeFile(ctx context.Context, op string, k key, path string, r io.Reader) error {
-	wctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	wctx, end, err := d.enter(ctx, op, k)
+	if err != nil {
+		return err
+	}
+	defer end()
+	cancel := end // aborts without end-of-file
 	var stream ateenvv1alpha.FileSystemService_WriteFileClient
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
 	delay := d.cfg.PollInterval
@@ -139,6 +141,11 @@ func (d *Driver) writeFile(ctx context.Context, op string, k key, path string, r
 // runOnce runs a command in the guest without stdin and waits for it. It returns the exit code and
 // the start of its standard error. It does not re-subscribe: it is for the short commands of Upload.
 func (d *Driver) runOnce(ctx context.Context, op string, k key, argv []string) (int, string, error) {
+	ctx, end, err := d.enter(ctx, op, k)
+	if err != nil {
+		return 0, "", err
+	}
+	defer end()
 	p, err := d.startProcess(ctx, op, k, &ateenvv1alpha.StartProcessRequest{Command: argv})
 	if err != nil {
 		return 0, "", err
