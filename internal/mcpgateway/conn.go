@@ -270,7 +270,16 @@ func (c *guardConn) pump() {
 				c.handle(msg)
 			}()
 		default:
-			c.overloaded(msg)
+			if err := c.overloaded(msg); err != nil {
+				// A response has no room: the connection ends. Calls in flight finish first, then
+				// every later call fails at once and the pool replaces the session.
+				c.lost.Store(true)
+				go func() {
+					c.wg.Wait()
+					c.deliver(readResult{err: err})
+				}()
+				return
+			}
 		}
 	}
 }
@@ -305,24 +314,19 @@ func (c *guardConn) contextFor(msg jsonrpc.Message) (context.Context, context.Ca
 	return ctx, cancel, p
 }
 
-// overloaded answers a message the connection has no room to inspect. A response becomes an error
-// for its call; a server request is refused to the target.
-func (c *guardConn) overloaded(msg jsonrpc.Message) {
-	switch m := msg.(type) {
-	case *jsonrpc.Response:
-		c.mu.Lock()
-		delete(c.pending, idKey(m.ID))
-		c.mu.Unlock()
-		// No goroutine: a hostile target must not grow one per message. The error goes in at once, or
-		// the response is dropped and its call ends at its own deadline.
-		select {
-		case c.in <- readResult{msg: errorResponse(m.ID, jsonrpc.CodeInternalError, "gateway overloaded")}:
-		default:
-		}
-	case *jsonrpc.Request:
-		// Dropped, with no answer: the target times out. A write here would let a hostile target make
-		// the gateway open one outbound request per message.
+// overloaded handles a message the connection has no room to inspect. A server request is dropped:
+// the target times out, and a write here would let a hostile target make the gateway open one
+// outbound request per message. A response cannot be dropped, because its call would wait to its
+// deadline: it returns an error that ends the connection.
+func (c *guardConn) overloaded(msg jsonrpc.Message) error {
+	m, ok := msg.(*jsonrpc.Response)
+	if !ok {
+		return nil
 	}
+	c.mu.Lock()
+	delete(c.pending, idKey(m.ID))
+	c.mu.Unlock()
+	return errors.New("mcpgateway: the target sent more replies than the gateway can inspect")
 }
 
 // noteLoop inspects notifications one at a time, in the order they came.

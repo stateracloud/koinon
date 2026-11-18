@@ -72,3 +72,22 @@ func TestOwedStaysUntilReplyWriteEnds(t *testing.T) {
 		t.Fatal("the place was not freed after the write")
 	}
 }
+
+// A response with no room to inspect ends the connection; a server request is dropped.
+func TestOverloadedEndsOnlyForAResponse(t *testing.T) {
+	c := &guardConn{pending: map[string]pendingCall{}}
+	id, err := jsonrpc.MakeID(float64(7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.pending[idKey(id)] = pendingCall{method: "tools/call"}
+	if err := c.overloaded(&jsonrpc.Request{ID: id, Method: "ping"}); err != nil {
+		t.Fatalf("a request must be dropped, got %v", err)
+	}
+	if err := c.overloaded(&jsonrpc.Response{ID: id}); err == nil {
+		t.Fatal("a response must end the connection")
+	}
+	if len(c.pending) != 0 {
+		t.Fatal("the pending record must be removed")
+	}
+}
