@@ -426,8 +426,8 @@ func (i *Installer) Install(ctx context.Context) error {
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, i.Out); err != nil {
 		keepBuild = true
-		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again:\n  %s\nThe build directory %s stays so that command can run; delete it after the cleanup.",
-			PinnedVersion, err, cleanupCommand(setup, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context), setup.Root())
+		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again (the build directory %s stays so that command can run; delete it after the cleanup):\n  %s",
+			PinnedVersion, err, setup.Root(), cleanupCommand(setup, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
 	}
 	if _, err := i.EnsureAPIAuthentication(ctx, profile.ExpectedJWTIssuer); err != nil {
 		return err
