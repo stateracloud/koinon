@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,8 +51,6 @@ const (
 	// SubstrateRouterSPIFFEFlag is the router flag that lets atenet's client reach the router (phase 0
 	// proof P-B: without it, gateway-only egress does not work).
 	SubstrateRouterSPIFFEFlag = "--ingress-allowed-spiffe-ids"
-	// SubstrateRouterSPIFFEID is the identity the flag must allow.
-	SubstrateRouterSPIFFEID = "spiffe://cluster.local/ns/ate-system/sa/atenet-client"
 
 	// SubstrateIssuerProbeMarker starts the issuer probe's output line.
 	SubstrateIssuerProbeMarker = "koinon-issuer-probe"
@@ -63,12 +60,14 @@ const (
 	substrateInstallDoc = "install the pinned Substrate with the Koinon installer step (koinon-api substrate install)"
 )
 
-// substrateVersion matches the supported Substrate releases: v1.x carries the compatibility promise
-// of v1.0.0 (ADR 0119); Koinon tests the pinned release, and a later patch of the line passes.
-var substrateVersion = regexp.MustCompile(`^v1\.[0-9]+\.[0-9]+$`)
+// SubstrateRouterSPIFFEID is the identity the router flag must allow: the atenet client service account
+// in Substrate's namespace (Substrate v1.0.0 docs/get-started/quickstart.md).
+func SubstrateRouterSPIFFEID(namespace string) string {
+	return "spiffe://cluster.local/ns/" + namespace + "/sa/atenet-client"
+}
 
-// SubstrateCRDs are the CRDs the preflight requires (plural.group). The first is verified against
-// v1.0.0 (ADR 0119, upstream verification); the others are the objects D7 names.
+// SubstrateCRDs are the CRDs the preflight requires (plural.group), verified against the Substrate
+// v1.0.0 manifests and the koinon-lab install.
 var SubstrateCRDs = []string{
 	"sandboxconfigs." + SubstrateCRDGroup,
 	"workerpools." + SubstrateCRDGroup,
@@ -104,7 +103,7 @@ func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 		s.APIServerDeployment = "ate-api-server"
 	}
 	if s.RouterDeployment == "" {
-		s.RouterDeployment = "ate-router"
+		s.RouterDeployment = "atenet-router"
 	}
 	return s
 }
@@ -330,10 +329,10 @@ func (c *Checker) checkSubstrate(ctx context.Context) Result {
 			Message: fmt.Sprintf("api server image %q has no tag, so its version is unknown", image),
 			Fix:     "deploy the api server from a tagged release image",
 		}
-	case !substrateVersion.MatchString(tag):
+	case tag != SubstratePinnedVersion:
 		return Result{
 			Check: check, Status: Fail,
-			Message: fmt.Sprintf("api server version %s is not supported; Koinon supports Substrate v1.x", tag),
+			Message: fmt.Sprintf("api server version %s is not the pinned release %s (ADR 0119 D4)", tag, SubstratePinnedVersion),
 			Fix:     substrateInstallDoc,
 		}
 	}
@@ -356,17 +355,18 @@ func (c *Checker) checkSubstrateRouter(ctx context.Context) Result {
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("Deployment %s/%s", sub.Namespace, sub.RouterDeployment), err)
 	}
+	id := SubstrateRouterSPIFFEID(sub.Namespace)
 	for _, ctr := range deploy.Spec.Template.Spec.Containers {
 		for _, arg := range slices.Concat(ctr.Command, ctr.Args) {
-			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok && slices.Contains(strings.Split(v, ","), SubstrateRouterSPIFFEID) {
-				return Result{Check: check, Status: Pass, Message: "router allows " + SubstrateRouterSPIFFEID}
+			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok && slices.Contains(strings.Split(v, ","), id) {
+				return Result{Check: check, Status: Pass, Message: "router allows " + id}
 			}
 		}
 	}
 	return Result{
 		Check: check, Status: Fail,
-		Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B)", SubstrateRouterSPIFFEID),
-		Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, SubstrateRouterSPIFFEID),
+		Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B)", id),
+		Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, id),
 	}
 }
 
@@ -414,24 +414,32 @@ func (c *Checker) checkWorkerPool(ctx context.Context, check, namespace, name st
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("WorkerPool %s/%s", namespace, name), err)
 	}
-	conds, _, _ := unstructured.NestedSlice(pool.Object, "status", "conditions")
-	for _, cond := range conds {
-		if m, ok := cond.(map[string]any); ok && m["type"] == "Ready" {
-			if m["status"] == "True" {
-				return Result{Check: check, Status: Pass, Message: fmt.Sprintf("WorkerPool %s/%s ready", namespace, name)}
-			}
-			return Result{
-				Check: check, Status: Fail,
-				Message: fmt.Sprintf("WorkerPool %s/%s is not ready: %v", namespace, name, m["message"]),
-				Fix:     "check the worker pods and the atelet logs in namespace " + namespace,
+	// Substrate v1.0.0 has no top-level conditions on a WorkerPool: status carries replicas and
+	// readyReplicas, and each sandbox class a Resolved condition (api/infra/k8s/ate/v1).
+	want, _, _ := unstructured.NestedInt64(pool.Object, "spec", "replicas")
+	have, found, _ := unstructured.NestedInt64(pool.Object, "status", "readyReplicas")
+	if !found || have < 1 || have < want {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("WorkerPool %s/%s has %d of %d workers ready", namespace, name, have, want),
+			Fix:     "check the worker pods and the atelet logs in namespace " + namespace,
+		}
+	}
+	classes, _, _ := unstructured.NestedSlice(pool.Object, "status", "sandboxClasses")
+	for _, class := range classes {
+		m, _ := class.(map[string]any)
+		conds, _, _ := unstructured.NestedSlice(m, "conditions")
+		for _, cond := range conds {
+			if cm, ok := cond.(map[string]any); ok && cm["type"] == "Resolved" && cm["status"] != "True" {
+				return Result{
+					Check: check, Status: Fail,
+					Message: fmt.Sprintf("WorkerPool %s/%s: sandbox class %v does not resolve: %v", namespace, name, m["name"], cm["message"]),
+					Fix:     "check the SandboxConfig the class names (kubectl get sandboxconfigs.ate.dev)",
+				}
 			}
 		}
 	}
-	return Result{
-		Check: check, Status: Fail,
-		Message: fmt.Sprintf("WorkerPool %s/%s reports no Ready condition", namespace, name),
-		Fix:     "wait for Substrate's controller to reconcile it, then check the controller logs in namespace " + namespace,
-	}
+	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("WorkerPool %s/%s ready (%d of %d workers)", namespace, name, have, want)}
 }
 
 func (c *Checker) checkSubstrateDevices(ctx context.Context) Result {
@@ -471,7 +479,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 	}
 	if res.Reachable && res.Unverified {
 		return Result{
-			Check: check, Status: Warn,
+			Check: check, Status: Fail,
 			Message: fmt.Sprintf("a pod in %s reaches %s, but only without verifying its TLS certificate (%s); Substrate's api server verifies it and would fail with \"invalid bearer token\"", c.Config.Substrate.Namespace, issuer, res.Detail),
 			Fix:     "serve the issuer with a certificate signed by the cluster CA (kube-root-ca.crt) or a CA the Substrate pods trust",
 		}

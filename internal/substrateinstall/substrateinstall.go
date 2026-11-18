@@ -4,8 +4,9 @@
 // Substrate is a pinned cluster prerequisite, not part of the chart: its namespaces are fixed, so it is a
 // cluster singleton, and its set-up is imperative (a CA, a Postgres schema, CRDs and then objects that
 // need those CRDs), which a chart cannot render deterministically. The step does four things in order:
-// it runs the prerequisite preflight (Kubernetes version, node devices, service-account issuer) and stops
-// before it changes anything when one fails; it runs the pinned ate-setup with the Koinon profile; it waits
+// it checks that ate-setup and its source checkout are the pinned release and runs the prerequisite
+// preflight (Kubernetes version, node devices, service-account issuer), stopping before it changes
+// anything when one fails; it runs ate-setup deploy ate-system with the Koinon profile; it waits
 // until the CRDs are Established, because applying a SandboxConfig right after the CRDs raced with the
 // API server's discovery in the lab ("no matches for kind"); and it makes sure the router allows the
 // atenet client identity. The install checks of the preflight run last.
@@ -31,61 +32,67 @@ import (
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
-// PinnedVersion is the Substrate release this Koinon release installs and tests. The preflight accepts
-// a later v1.x release (the compatibility promise of v1.0.0) that an operator brought along.
-const PinnedVersion = "v1.0.0"
+// PinnedVersion and PinnedCommit are the Substrate release this Koinon release installs. The pin lives in
+// internal/preflight (substratepin.go, ADR 0119 D4) so the preflight and the installer cannot differ.
+const (
+	PinnedVersion = preflight.SubstratePinnedVersion
+	PinnedCommit  = preflight.SubstratePinnedCommit
+)
 
 var crdGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 
 // Profile is the Koinon profile of ate-setup: what comes from Koinon's values.
 type Profile struct {
-	// ObjectStoreEndpoint, ObjectStoreBucket and ObjectStoreSecret locate the S3-compatible object store
-	// for snapshots. The Secret holds the credential; the installer never reads it.
-	ObjectStoreEndpoint string
-	ObjectStoreBucket   string
-	ObjectStoreSecret   string
-	// DatabaseSecret is the Secret with the connection string of ateapi's Postgres database (Koinon's
-	// database mode provides it).
-	DatabaseSecret string
+	// StorageBucket is the object-storage bucket for snapshots (ate-setup --storage-bucket-name).
+	StorageBucket string
+	// SandboxClasses is ate-setup --sandbox-classes; empty keeps the default (gvisor,microvm).
+	SandboxClasses string
+	// ImageRepo is the registry path of the release images; empty means the pinned public path.
+	ImageRepo string
 }
 
 // Validate says what the profile lacks.
 func (p Profile) Validate() error {
-	var missing []string
-	for _, f := range []struct{ name, v string }{
-		{"object store endpoint", p.ObjectStoreEndpoint},
-		{"object store bucket", p.ObjectStoreBucket},
-		{"object store secret", p.ObjectStoreSecret},
-		{"database secret", p.DatabaseSecret},
-	} {
-		if f.v == "" {
-			missing = append(missing, f.name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("substrate profile lacks %s", strings.Join(missing, ", "))
+	if p.StorageBucket == "" {
+		return errors.New("substrate profile lacks the storage bucket")
 	}
 	return nil
 }
 
-// SetupArgs are the arguments of ate-setup for the Koinon profile: kind-free install, S3 object store
-// and Postgres from Koinon's values, and no bundled Prometheus or OpenTelemetry (ADR 0119 D4).
-func (p Profile) SetupArgs() []string {
-	return []string{
-		"install",
-		"--object-store=s3",
-		"--object-store-endpoint=" + p.ObjectStoreEndpoint,
-		"--object-store-bucket=" + p.ObjectStoreBucket,
-		"--object-store-secret=" + p.ObjectStoreSecret,
-		"--database-secret=" + p.DatabaseSecret,
-		"--with-prometheus=false",
-		"--with-otel=false",
+// egressProviderFlag selects the bundled Kubernetes Secrets provider of the egress gateway; ate-setup
+// requires one provider form for deploy ate-system.
+const egressProviderFlag = `--credential-provider={"name":"k8s.io"}`
+
+// SetupArgs are the arguments of the pinned ate-setup for the Koinon profile, with pre-built release
+// images of the pinned tag (never a build from source), the router allow-list for the atenet client of
+// the given namespace, and no developer settings.
+func (p Profile) SetupArgs(namespace string) []string {
+	repo := p.ImageRepo
+	if repo == "" {
+		repo = preflight.SubstratePinnedImageRepo
 	}
+	args := []string{
+		"deploy", "ate-system",
+		"--no-dev-env",
+		"--namespace=" + namespace,
+		"--storage-bucket-name=" + p.StorageBucket,
+		egressProviderFlag,
+		"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID(namespace),
+		"--image-repo=" + repo,
+		"--image-tag=" + PinnedVersion,
+	}
+	if p.SandboxClasses != "" {
+		args = append(args, "--sandbox-classes="+p.SandboxClasses)
+	}
+	return args
 }
 
-// Runner runs the pinned ate-setup binary.
+// Runner runs commands: ate-setup in the source checkout, and the read-only probes of the pin check.
 type Runner interface {
-	Run(ctx context.Context, name string, args []string, out io.Writer) error
+	// Run runs name in dir (empty is the current directory), writing its output to out.
+	Run(ctx context.Context, dir, name string, args []string, out io.Writer) error
+	// Output runs name in dir and returns its standard output.
+	Output(ctx context.Context, dir, name string, args []string) (string, error)
 }
 
 // Installer is the installer step.
@@ -95,10 +102,15 @@ type Installer struct {
 	// Checker runs the preflight; its Config.Substrate is the driver's configuration.
 	Checker *preflight.Checker
 	Runner  Runner
-	// SetupBinary is the path of the pinned ate-setup (a verified download of PinnedVersion).
+	// SetupBinary is the path of ate-setup built from SourceDir, and SourceDir a clean checkout of the
+	// release tag: Substrate releases ship no ate-setup binary and ate-setup reads the manifests there.
 	SetupBinary string
-	Profile     Profile
-	Out         io.Writer
+	SourceDir   string
+	// Kubeconfig and Context are passed to ate-setup; both may be empty (in-cluster or default rules).
+	Kubeconfig string
+	Context    string
+	Profile    Profile
+	Out        io.Writer
 	// PollInterval and WaitTimeout bound the wait for the CRDs (defaults 2s and 2m).
 	PollInterval time.Duration
 	WaitTimeout  time.Duration
@@ -107,10 +119,47 @@ type Installer struct {
 // ErrPrerequisites is returned when the prerequisite preflight fails: nothing was installed.
 var ErrPrerequisites = errors.New("substrate prerequisites failed")
 
+// ErrPin is returned when the ate-setup binary or the source checkout is not the pinned release.
+var ErrPin = errors.New("not the pinned Substrate release")
+
+// VerifyPin refuses a binary or a checkout that is not the pinned release: ate-setup must report the
+// pinned version and commit, and SourceDir must be a clean checkout of the pinned commit (its manifests
+// are what ate-setup applies). Substrate publishes no ate-setup binary, so there is no digest to compare.
+func (i *Installer) VerifyPin(ctx context.Context) error {
+	ver, err := i.Runner.Output(ctx, "", i.SetupBinary, []string{"--version"})
+	if err != nil {
+		return fmt.Errorf("%w: %s --version: %v", ErrPin, i.SetupBinary, err)
+	}
+	if !strings.Contains(ver, "Version="+PinnedVersion+" ") || !strings.Contains(ver, "commit="+PinnedCommit) {
+		return fmt.Errorf("%w: ate-setup reports %q, want %s at commit %s", ErrPin, strings.TrimSpace(ver), PinnedVersion, PinnedCommit)
+	}
+	head, err := i.Runner.Output(ctx, i.SourceDir, "git", []string{"rev-parse", "HEAD"})
+	if err != nil {
+		return fmt.Errorf("%w: git rev-parse in %s: %v", ErrPin, i.SourceDir, err)
+	}
+	if strings.TrimSpace(head) != PinnedCommit {
+		return fmt.Errorf("%w: %s is at %s, want %s", ErrPin, i.SourceDir, strings.TrimSpace(head), PinnedCommit)
+	}
+	dirty, err := i.Runner.Output(ctx, i.SourceDir, "git", []string{"status", "--porcelain"})
+	if err != nil {
+		return fmt.Errorf("%w: git status in %s: %v", ErrPin, i.SourceDir, err)
+	}
+	if strings.TrimSpace(dirty) != "" {
+		return fmt.Errorf("%w: %s has uncommitted changes", ErrPin, i.SourceDir)
+	}
+	return nil
+}
+
 // Install runs the step. It is safe to run again: ate-setup is idempotent for the pinned release and the
-// router change is made only when it is missing.
+// router change is made only when it is missing. The pin is checked before anything changes.
+//
+// The final preflight runs without the NetworkPolicy probe: the release namespace may not exist yet (the
+// chart creates it), and the installer creates nothing there. The chart's own preflight runs that probe.
 func (i *Installer) Install(ctx context.Context) error {
 	if err := i.Profile.Validate(); err != nil {
+		return err
+	}
+	if err := i.VerifyPin(ctx); err != nil {
 		return err
 	}
 	if err := i.EnsureNamespace(ctx); err != nil {
@@ -119,7 +168,14 @@ func (i *Installer) Install(ctx context.Context) error {
 	if failed := preflight.Write(i.Out, i.Checker.SubstratePrerequisites(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
-	if err := i.Runner.Run(ctx, i.SetupBinary, i.Profile.SetupArgs(), i.Out); err != nil {
+	args := i.Profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace)
+	if i.Kubeconfig != "" {
+		args = append(args, "--kubeconfig="+i.Kubeconfig)
+	}
+	if i.Context != "" {
+		args = append(args, "--context="+i.Context)
+	}
+	if err := i.Runner.Run(ctx, i.SourceDir, i.SetupBinary, args, i.Out); err != nil {
 		return fmt.Errorf("ate-setup %s: %w", PinnedVersion, err)
 	}
 	if err := i.WaitCRDs(ctx); err != nil {
@@ -214,20 +270,21 @@ func (i *Installer) EnsureRouterSPIFFE(ctx context.Context) error {
 	}
 	ctr := &d.Spec.Template.Spec.Containers[0]
 	const prefix = preflight.SubstrateRouterSPIFFEFlag + "="
+	id := preflight.SubstrateRouterSPIFFEID(sub.Namespace)
 	for n, arg := range ctr.Args {
 		v, ok := strings.CutPrefix(arg, prefix)
 		if !ok {
 			continue
 		}
 		ids := strings.Split(v, ",")
-		if slices.Contains(ids, preflight.SubstrateRouterSPIFFEID) {
+		if slices.Contains(ids, id) {
 			return nil
 		}
-		ctr.Args[n] = prefix + strings.Join(append(ids, preflight.SubstrateRouterSPIFFEID), ",")
+		ctr.Args[n] = prefix + strings.Join(append(ids, id), ",")
 		_, err = deployments.Update(ctx, d, metav1.UpdateOptions{})
 		return err
 	}
-	ctr.Args = append(ctr.Args, prefix+preflight.SubstrateRouterSPIFFEID)
+	ctr.Args = append(ctr.Args, prefix+id)
 	_, err = deployments.Update(ctx, d, metav1.UpdateOptions{})
 	return err
 }

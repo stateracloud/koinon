@@ -119,8 +119,8 @@ func (c *preflightConfig) validate() error {
 		}
 		c.check.Substrate = &sub
 		c.seccompProbe = false // the guest seccomp probe is Kata's (ADR 0048); the launcher reports its own controls (ADR 0120)
-		if c.substrateProbes && (c.probeImage == "" || c.namespace == "") {
-			return errors.New("--substrate-probes needs --probe-image and --namespace (or POD_NAMESPACE)")
+		if c.substrateProbes && c.probeImage == "" {
+			return errors.New("--substrate-probes needs --probe-image")
 		}
 	default:
 		return fmt.Errorf("--driver %q: want openshell or substrate", c.driver)

@@ -65,7 +65,7 @@ func TestIssuerProbeNeedsA2xxDocumentAndJWKS(t *testing.T) {
 }
 
 // The test server's certificate is signed by no CA the probe trusts: the answer is reachable but
-// unverified, which the checker reports as a warning, never a pass.
+// unverified, which the checker reports as a failure (Substrate rejects the tokens), never a pass.
 func TestIssuerProbeFlagsAnUntrustedCertificate(t *testing.T) {
 	g := NewWithT(t)
 	srv := issuerServer(true, http.StatusOK, http.StatusOK, "")

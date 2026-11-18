@@ -22,7 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
-var workerPoolGVR = schema.GroupVersionResource{Group: "ate.dev", Version: "v1alpha1", Resource: "workerpools"}
+var workerPoolGVR = schema.GroupVersionResource{Group: "ate.dev", Version: "v1", Resource: "workerpools"}
 
 type fakeIssuer struct {
 	issuer string
@@ -48,16 +48,22 @@ type fakeDevices struct{ err error }
 func (f fakeDevices) ProbeDevices(context.Context) error { return f.err }
 
 func substrateCRD(name string) *unstructured.Unstructured {
-	return crd(name, "v1alpha1")
+	return crd(name, "v1")
 }
 
+// workerPool is a WorkerPool of Substrate v1.0.0: status carries replicas and readyReplicas, not conditions.
+// ready is "True" (all workers ready), "False" (none) or "" (no status yet).
 func workerPool(name string, ready string) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "ate.dev/v1alpha1", "kind": "WorkerPool",
+		"apiVersion": "ate.dev/v1", "kind": "WorkerPool",
 		"metadata": map[string]any{"name": name, "namespace": "ate-system"},
+		"spec":     map[string]any{"replicas": int64(2)},
 	}}
-	if ready != "" {
-		pool.Object["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": ready, "message": "no workers"}}}
+	switch ready {
+	case "True":
+		pool.Object["status"] = map[string]any{"replicas": int64(2), "readyReplicas": int64(2)}
+	case "False":
+		pool.Object["status"] = map[string]any{"replicas": int64(2), "readyReplicas": int64(0)}
 	}
 	return pool
 }
@@ -90,7 +96,7 @@ func healthySubstrate() *substrateCluster {
 	}
 	c.kube = []runtime.Object{
 		deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1),
-		deployment("ate-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID}, 1),
+		deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
 	}
 	for _, name := range preflight.SubstrateCRDs {
 		c.dynamic = append(c.dynamic, substrateCRD(name))
@@ -149,7 +155,7 @@ var _ = Describe("Substrate checks", func() {
 		Expect(r.Fix).To(ContainSubstring("substrate install"))
 	})
 
-	It("fails when the CRDs exist but the api server does not, is not ready or is v2", func(ctx SpecContext) {
+	It("fails when the CRDs exist but the api server does not, is not ready or is not the pinned release", func(ctx SpecContext) {
 		c := healthySubstrate()
 		c.kube = c.kube[1:]
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("not found"))
@@ -157,22 +163,34 @@ var _ = Describe("Substrate checks", func() {
 		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 0)
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("no ready replica"))
 		c = healthySubstrate()
-		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v2.0.0", nil, 1)
-		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v2.0.0 is not supported"))
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
+		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.1 is not the pinned release v1.0.0"))
 	})
 
 	It("fails when the router does not allow the atenet client", func(ctx SpecContext) {
 		c := healthySubstrate()
-		c.kube[1] = deployment("ate-router", "example.com/ate/router:v1.0.0", nil, 1)
+		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.0", nil, 1)
 		r := find(c.run(ctx), "Substrate router")
 		Expect(r.Status).To(Equal(preflight.Fail))
 		Expect(r.Fix).To(ContainSubstring("--ingress-allowed-spiffe-ids="))
 	})
 
+	It("pins the router allow-list to the configured Substrate namespace", func(ctx SpecContext) {
+		c := healthySubstrate()
+		Expect(find(c.run(ctx), "Substrate router").Message).To(ContainSubstring("ns/ate-system/sa/atenet-client"))
+		c.config.Substrate.Namespace = "substrate-prod"
+		moved := deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1)
+		moved.Namespace = "substrate-prod"
+		c.kube = append(c.kube, moved)
+		r := find(c.run(ctx), "Substrate router")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Fix).To(ContainSubstring("ns/substrate-prod/sa/atenet-client"))
+	})
+
 	It("fails on a worker pool that is missing or not ready", func(ctx SpecContext) {
 		c := healthySubstrate()
 		c.dynamic[len(c.dynamic)-1] = workerPool("vm-pool", "False")
-		Expect(find(c.run(ctx), "Substrate worker pool").Message).To(ContainSubstring("not ready"))
+		Expect(find(c.run(ctx), "Substrate worker pool").Message).To(ContainSubstring("0 of 2 workers ready"))
 		c.dynamic = c.dynamic[:len(c.dynamic)-1]
 		Expect(find(c.run(ctx), "Substrate worker pool").Message).To(ContainSubstring("not found"))
 	})
@@ -201,11 +219,11 @@ var _ = Describe("Substrate checks", func() {
 			Expect(r.Fix).To(And(ContainSubstring("service-account-issuer"), ContainSubstring("discovery-URL override"), ContainSubstring("not a supported install")))
 		})
 
-		It("warns, not passes, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
+		It("fails, not warns, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
 			c := healthySubstrate()
 			c.probe = fakeIssuerProbe{res: IssuerResult{Reachable: true, Unverified: true, Detail: "TLS verification failed"}}
 			r := find(c.run(ctx), "Service-account issuer")
-			Expect(r.Status).To(Equal(preflight.Warn))
+			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(ContainSubstring("invalid bearer token"))
 		})
 
