@@ -40,8 +40,20 @@ The Substrate v1.0.0 guest gives payloads root with only `CAP_KILL`, `CAP_NET_BI
 is `best_effort`: the launcher logs "user drop failed, continuing as the current user" and applies
 every other control. `user.mode: require` fails closed. Closing the gap needs an upstream Substrate
 option for the payload uid/gid or capabilities, or a different design. As root the payload also keeps
-the guest's bounding set (no `CAP_SETPCAP` to shrink it); the permitted and effective sets are
-reduced to the allowlist.
+the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted and effective sets are
+reduced to the allowlist. When the drop works, the bounding set is shrunk before it (while root),
+and the allowlist is restored as effective, inheritable and ambient for the non-root user.
+
+## What this change does not close
+
+#1087 does not close on this change alone (it says `Part of #1087`). Remaining, each tracked on
+#1087 until the maintainer files separate issues:
+
+1. Flavor images carry the launcher only; the guest server joins them with #1088.
+2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
+3. A non-root payload user in the real guest needs an upstream Substrate option for the payload
+   uid/gid or capabilities (or another design). The launcher drops when the capability exists and
+   otherwise continues as root (`best_effort`).
 
 ## Tests
 

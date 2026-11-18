@@ -76,7 +76,7 @@ func main() {
 
 	st, _ := os.ReadFile("/proc/self/status")
 	for _, l := range strings.Split(string(st), "\n") {
-		if strings.HasPrefix(l, "CapEff:") || strings.HasPrefix(l, "NoNewPrivs:") {
+		if strings.HasPrefix(l, "CapEff:") || strings.HasPrefix(l, "CapBnd:") || strings.HasPrefix(l, "CapPrm:") || strings.HasPrefix(l, "CapAmb:") || strings.HasPrefix(l, "NoNewPrivs:") {
 			fmt.Println("status", strings.Join(strings.Fields(l), " "))
 		}
 	}

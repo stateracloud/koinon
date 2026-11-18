@@ -65,6 +65,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for name, doc := range map[string][]byte{
 			"policy.json":           policy,
 			"user-best-effort.json": []byte(`{"landlock":{"mode":"off"},"user":{"mode":"best_effort","uid":1000,"gid":1000}}`),
+			"user-caps.json":        []byte(`{"capabilities":{"allow":["CAP_NET_BIND_SERVICE"]},"landlock":{"mode":"off"},"seccomp":{"mode":"off"},"user":{"mode":"require","uid":1000,"gid":1000}}`),
 			"user-require.json":     []byte(`{"landlock":{"mode":"off"},"user":{"mode":"require","uid":1000,"gid":1000}}`),
 		} {
 			Expect(tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(doc))})).To(Succeed())
@@ -144,6 +145,17 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 			out, code := run("/launcher", "--policy", "/user-best-effort.json", "--", "/bin/probe")
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("uid 1000"))
+		})
+
+		It("keeps exactly the allowlist in the bounding, permitted, effective and ambient sets after the drop", func() {
+			out, code := run("/launcher", "--policy", "/user-caps.json", "--", "/bin/probe")
+			Expect(code).To(Equal(0), out)
+			Expect(out).To(ContainSubstring("uid 1000"))
+			// CAP_NET_BIND_SERVICE is capability 10: 0x400.
+			for _, f := range []string{"CapBnd", "CapPrm", "CapEff", "CapAmb"} {
+				Expect(out).To(MatchRegexp(`status `+f+`: 0+400\b`), f+"\n"+out)
+			}
+			Expect(out).NotTo(ContainSubstring("could not be raised"))
 		})
 
 		It("continues as root with a clear log line when the guest lacks CAP_SETUID", func() {

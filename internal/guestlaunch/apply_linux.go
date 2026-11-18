@@ -44,10 +44,13 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 	}
 	log.Info("guest launcher: no_new_privs set")
 
+	// The bounding set is shrunk first, while the process is still root with CAP_SETPCAP: after the
+	// user drop the effective set is empty and PR_CAPBSET_DROP would fail.
+	boundingDropped := dropBoundingSet(p.Capabilities.Allow)
 	if err := dropUser(p.User, log); err != nil {
 		return err
 	}
-	if err := applyCapabilities(p.Capabilities.Allow, p.User, log); err != nil {
+	if err := applyCapabilities(p.Capabilities.Allow, p.User, boundingDropped, log); err != nil {
 		return err
 	}
 	if err := applyLandlock(p.Landlock, log); err != nil {
@@ -130,58 +133,87 @@ func lastCap() int {
 	return n
 }
 
-// applyCapabilities keeps only the allowlisted capabilities. The bounding set is dropped first
-// (it needs CAP_SETPCAP; a guest without it keeps the bounding set it was given, which is logged),
-// then permitted, effective and inheritable are reduced to the allowlist, and for a non-root user
-// the allowlist is raised as ambient so it survives the exec.
-func applyCapabilities(allow []string, u UserPolicy, log *slog.Logger) error {
-	var keep [2]uint32
+func capMask(allow []string) (keep [2]uint32) {
 	for _, n := range allow {
 		c, _ := capNumber(n)
 		keep[c/32] |= 1 << (uint(c) % 32)
 	}
-	has := func(c int) bool { return keep[c/32]&(1<<(uint(c)%32)) != 0 }
+	return keep
+}
+
+// dropBoundingSet removes every capability outside the allowlist from the bounding set. It needs
+// CAP_SETPCAP in the effective set and returns false (nothing dropped) when the process lacks it,
+// as in a guest that gives payloads only a few capabilities.
+func dropBoundingSet(allow []string) bool {
+	keep := capMask(allow)
+	var data [2]unix.CapUserData
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	if err := unix.Capget(&hdr, &data[0]); err != nil || data[0].Effective&(1<<unix.CAP_SETPCAP) == 0 {
+		return false
+	}
+	for c := 0; c <= lastCap(); c++ {
+		if keep[c/32]&(1<<(uint(c)%32)) != 0 {
+			continue
+		}
+		if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
+			return false
+		}
+	}
+	return true
+}
+
+// applyCapabilities reduces permitted, effective and inheritable to the allowlist (the bounding
+// set was dropped earlier). After a user drop the kernel has cleared the effective set but kept
+// the permitted set (PR_SET_KEEPCAPS), so the allowlist is restored as effective and inheritable
+// and, for a non-root user, raised as ambient so it survives the exec. A capability the payload
+// does not hold cannot be raised: that is logged, and it fails the launch in require mode.
+func applyCapabilities(allow []string, u UserPolicy, boundingDropped bool, log *slog.Logger) error {
+	keep := capMask(allow)
 
 	var data [2]unix.CapUserData
 	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
 	if err := unix.Capget(&hdr, &data[0]); err != nil {
 		return fmt.Errorf("guest launcher: capget: %w", err)
 	}
-	canSetpcap := data[0].Effective&(1<<unix.CAP_SETPCAP) != 0
-
-	boundingDropped := true
-	if canSetpcap {
-		for c := 0; c <= lastCap(); c++ {
-			if has(c) {
-				continue
-			}
-			if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
-				return fmt.Errorf("guest launcher: drop bounding capability %d: %w", c, err)
-			}
-		}
-	} else {
-		boundingDropped = false
-	}
 	// Clear ambient first; raise the allowlist again below when it applies.
 	_ = unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0)
 
+	nonRoot := os.Geteuid() != 0
 	for i := range data {
 		data[i].Permitted &= keep[i]
-		data[i].Effective &= keep[i]
-		data[i].Inheritable &= keep[i]
+		if nonRoot {
+			// Effective was cleared by the uid change; the permitted allowlist is made effective
+			// again, and inheritable carries it so the ambient raise below is allowed.
+			data[i].Effective = data[i].Permitted
+			data[i].Inheritable = (data[i].Inheritable | data[i].Permitted) & keep[i]
+		} else {
+			data[i].Effective &= keep[i]
+			data[i].Inheritable &= keep[i]
+		}
 	}
 	if err := unix.Capset(&hdr, &data[0]); err != nil {
 		return fmt.Errorf("guest launcher: capset: %w", err)
 	}
-	if u.Mode != ModeOff && os.Geteuid() != 0 {
+	if u.Mode != ModeOff && nonRoot {
+		var failed []string
 		for c := 0; c <= lastCap(); c++ {
-			if has(c) {
-				_ = unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(c), 0, 0)
+			if keep[c/32]&(1<<(uint(c)%32)) == 0 {
+				continue
 			}
+			if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(c), 0, 0); err != nil {
+				failed = append(failed, fmt.Sprintf("%d: %v", c, err))
+			}
+		}
+		if len(failed) > 0 {
+			if u.Mode == ModeRequire {
+				return fmt.Errorf("guest launcher: ambient capability raise failed for the non-root user: %s", strings.Join(failed, "; "))
+			}
+			log.Warn("guest launcher: allowlisted capabilities could not be raised as ambient; the non-root payload will not hold them",
+				"failed", failed)
 		}
 	}
 	if !boundingDropped {
-		log.Warn("guest launcher: no CAP_SETPCAP, the bounding set is kept as the guest gave it; permitted, effective and inheritable are reduced to the allowlist",
+		log.Warn("guest launcher: could not shrink the bounding set (no CAP_SETPCAP); permitted, effective and inheritable are reduced to the allowlist",
 			"allow", allow)
 	} else {
 		log.Info("guest launcher: capabilities reduced to the allowlist", "allow", allow)
