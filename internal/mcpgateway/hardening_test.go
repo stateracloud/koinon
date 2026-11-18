@@ -194,7 +194,7 @@ var _ = Describe("a hostile or odd target", func() {
 		}
 	})
 
-	It("sends a call again once when the target lost the session, and treats a pointer pass-all guard as no guard", func(ctx SpecContext) {
+	It("never sends a call again when the target lost the session, and treats a pointer pass-all guard as no guard", func(ctx SpecContext) {
 		newHandler := func() http.Handler {
 			return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 				s := mcp.NewServer(&mcp.Implementation{Name: "x", Version: "0"}, nil)
@@ -229,7 +229,10 @@ var _ = Describe("a hostile or odd target", func() {
 		cur.Store(&h2)
 		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "t_read"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.IsError).To(BeFalse())
+		Expect(res.IsError).To(BeTrue()) // not sent again: it may have run
+		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "t_read"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse()) // the session was replaced
 
 		ptr := mcpgateway.New(mcpgateway.Options{Guard: &mcpgateway.AllowGuard{}})
 		_, err = ptr.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{key.Key}, MCPState: gateway.MCPState{
