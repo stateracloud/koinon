@@ -311,7 +311,9 @@ about 6 minutes, and the four microVM assets matched their sha256 pins.
   verifies (#1088): it stops new router calls, waits for the calls in flight (cancels output streams,
   lets short writes end, bounded), suspends, then reads the state; a request that was already on the
   wire can land late and resume the actor, so the driver suspends again, a bounded number of times,
-  and else fails. Cancelling a call does not stop a request on the wire, and nothing waits for a guest ack.
+  and else fails. `SuspendSandbox` guarantees the actor was suspended when it returned and that no new router call
+  starts while paused; it does not stop a pre-pause request from waking the actor later, and the caller
+  re-observes the phase. Cancelling a call does not stop a request on the wire, and nothing waits for a guest ack.
 
 The maintainer read this result and accepted the ADR on 2026-11-18. The "resume under 500 ms" claim is
 now measured: API resume p50 0.49 s.
