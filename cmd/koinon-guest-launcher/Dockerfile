@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Substrate overlay of a Koinon harness image (ADR 0119, ADR 0015 and 0016 as amended, issue #1087):
-# the harness image with koinon-guest-launcher and its policy added, and the launcher as the
-# entrypoint wrapper. Only the substrate driver uses this image. The OpenShell driver (the default)
+# the harness image with koinon-guest-launcher and its policy added. The contract is an exec prefix
+# (harness.Descriptor.LauncherPrefix): the substrate driver runs the harness over the guest's
+# ProcessService, so the ENTRYPOINT below is a default only and does not harden those execs. Only the substrate driver uses this image. The OpenShell driver (the default)
 # keeps the plain harness image and its exec path, so nothing changes for it.
 #
 # Build: make harness-substrate-opencode. The launcher binary comes from the build context

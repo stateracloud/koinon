@@ -35,6 +35,26 @@ func TestTableMatchesTemplates(t *testing.T) {
 	}
 }
 
+// The substrate driver wraps every harness Exec in the guest launcher; the prefix must end in "--"
+// so the launcher takes the rest as the payload, and its policy path must match the image.
+func TestLauncherPrefixShape(t *testing.T) {
+	for _, d := range harness.All() {
+		p := d.LauncherPrefix
+		if len(p) < 2 || p[0] != "/usr/local/bin/koinon-guest-launcher" || p[len(p)-1] != "--" {
+			t.Errorf("harness %q: LauncherPrefix %v must start with the launcher and end with --", d.Name, p)
+		}
+		hasPolicy := false
+		for i, a := range p {
+			if a == "--policy" && i+1 < len(p) && p[i+1] == "/etc/koinon/guest-launcher/policy.json" {
+				hasPolicy = true
+			}
+		}
+		if !hasPolicy {
+			t.Errorf("harness %q: LauncherPrefix %v lacks the image policy", d.Name, p)
+		}
+	}
+}
+
 func TestOpenCodeDeclaresItsTools(t *testing.T) {
 	d, ok := harness.Lookup("opencode")
 	if !ok {

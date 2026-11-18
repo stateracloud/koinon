@@ -91,10 +91,15 @@ common tools are not changed here.
 
 On the substrate driver a flavor image is the harness image plus the Koinon guest launcher
 (`cmd/koinon-guest-launcher`, built `CGO_ENABLED=0`) and its policy, not an OpenShell base image
-with a supervisor. The launcher is the entrypoint wrapper: it applies `no_new_privs`, a capability
+with a supervisor. The launcher wraps every harness Exec: it applies `no_new_privs`, a capability
 allowlist, Landlock filesystem rules and a seccomp deny filter inside the guest, then execs the
 agent. The policy file `/etc/koinon/guest-launcher/policy.json` holds paths, mode switches and a
-user, never a credential. Tools that an agent installs (ADR 0113) still land in its home inside the
+user, never a credential. Substrate has no exec in its control API; the driver runs the harness over the
+in-guest ProcessService, so the process is a child of the guest server and the image ENTRYPOINT does
+not wrap it. The contract is therefore an exec prefix: every substrate-driver Exec of a harness
+(the ACP launch in particular) is `koinon-guest-launcher --policy /etc/koinon/guest-launcher/policy.json -- <EntryScript> ...`
+(`harness.Descriptor.LauncherPrefix`). The image ENTRYPOINT stays only as a default; on its own it does
+not harden a ProcessService exec. The controls follow ADR 0120 section 4. Tools that an agent installs (ADR 0113) still land in its home inside the
 guest. The OpenShell driver, the default, keeps the plain image and its exec path unchanged.
 
 ## Links

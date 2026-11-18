@@ -6,6 +6,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +27,7 @@ import (
 // that the control group (no launcher) shows each attempt open, and every block in the launcher
 // run is the launcher's own.
 var _ = Describe("the launcher in a container", Label("docker"), Ordered, func() {
-	const image = "koinon-guestlaunch-test:local"
+	var image string // unique per run: parallel runs and leftovers never share a tag
 	var dir string
 	var runWith func(flags []string, argv ...string) (string, int)
 
@@ -39,6 +41,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 	BeforeAll(func() {
 		testenv.Require(testenv.Docker, testenv.Binary("docker"), testenv.Binary("go"))
+		image = fmt.Sprintf("koinon-guestlaunch-test:%d-%08x", os.Getpid(), rand.Uint32())
 		dir = GinkgoT().TempDir()
 		build("./cmd/koinon-guest-launcher", "launcher")
 		build("./internal/guestlaunch/testdata/probe", "probe")

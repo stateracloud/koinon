@@ -30,6 +30,13 @@ type Descriptor struct {
 	// stdin and stdout (the harness contract, ADR 0035, 0048; harnesses/<harness>/README.md). All
 	// take the same arguments.
 	EntryScript string
+	// LauncherPrefix is the command prefix the substrate driver puts in front of every Exec of
+	// the harness, the ACP launch included: the Koinon guest launcher, its policy, then "--" and
+	// the real command (ADR 0119, 0120 section 4; docs/dev/guest-launcher.md). Substrate has no
+	// exec in its control API and the driver runs the harness through the in-guest ProcessService,
+	// so the process is a child of the guest server and the image ENTRYPOINT never wraps it.
+	// OpenShell paths ignore this field.
+	LauncherPrefix []string
 	// ReadyCommand is the ACP command the harness announces once Koinon's MCP tools are
 	// registered, or "" when it announces none.
 	//
@@ -121,9 +128,14 @@ type Descriptor struct {
 
 var table = []Descriptor{
 	{
-		Name:         OpenCode,
-		Proto:        templatev1alpha1.Flavor_FLAVOR_OPENCODE,
-		EntryScript:  "/usr/local/bin/koinon-opencode",
+		Name:        OpenCode,
+		Proto:       templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+		EntryScript: "/usr/local/bin/koinon-opencode",
+		LauncherPrefix: []string{
+			"/usr/local/bin/koinon-guest-launcher",
+			"--policy", "/etc/koinon/guest-launcher/policy.json",
+			"--",
+		},
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
 		// koinon speaks chat completions (@ai-sdk/openai-compatible), koinon-anthropic the Messages
 		// API (@ai-sdk/anthropic); both are in harnesses/opencode/etc/koinon/opencode/opencode.jsonc.

@@ -48,8 +48,12 @@ _(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carr
 
 **Amendment ([0119](0119-agent-substrate-execution-layer.md), issue #1087).** On the substrate
 driver the harness image gains the guest launcher (`make harness-substrate-opencode`: the image of
-`make harness-opencode` plus `/usr/local/bin/koinon-guest-launcher` and its policy, as the entrypoint
-wrapper). This lifts "flavor images carry no Koinon binary" of the amendment above for the substrate
+`make harness-opencode` plus `/usr/local/bin/koinon-guest-launcher` and its policy). The launcher is an
+exec prefix, not the ENTRYPOINT: the driver runs the harness over the in-guest ProcessService, so every
+substrate-driver Exec of a harness (the ACP launch in particular) is
+`koinon-guest-launcher --policy /etc/koinon/guest-launcher/policy.json -- <EntryScript> ...`, carried
+as `harness.Descriptor.LauncherPrefix`. The image ENTRYPOINT is a default only and does not harden a
+ProcessService exec; OpenShell paths ignore the prefix. This lifts "flavor images carry no Koinon binary" of the amendment above for the substrate
 driver only; the OpenShell image has no Koinon binary. The Substrate guest server joins the same
 overlay when the driver takes it (#1088).
 
