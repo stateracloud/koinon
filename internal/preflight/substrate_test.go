@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -256,6 +257,21 @@ var _ = Describe("Substrate checks", func() {
 				ContainSubstring("service-account-issuer"), ContainSubstring("cannot replace it"), ContainSubstring("not a supported install"),
 			))
 			Expect(r.Fix).NotTo(ContainSubstring("--expected-jwt-issuer https://kubernetes.default.svc"))
+			// The exact safe patch: new issuer signs, old issuer and both audiences stay accepted.
+			Expect(r.Fix).To(And(
+				ContainSubstring("kind: KubeServiceAccountConfig"),
+				ContainSubstring("  issuerURL: https://kubernetes.default.svc\naccepted:\n  issuers:\n    - https://[fdae:1::1]:10001\n  audiences:\n    - https://kubernetes.default.svc\n    - https://[fdae:1::1]:10001"),
+				ContainSubstring("--service-account-issuer=https://kubernetes.default.svc\n  --service-account-issuer=https://[fdae:1::1]:10001\n  --api-audiences=https://kubernetes.default.svc,https://[fdae:1::1]:10001"),
+				ContainSubstring("one API server restart"),
+			))
+		})
+
+		It("never prints the issuer-only patch and prints none when the cluster already uses the in-cluster issuer", func() {
+			p := preflight.SafeIssuerPatch("", "https://old.example")
+			Expect(p).To(And(ContainSubstring("accepted:"), ContainSubstring("--api-audiences=")))
+			Expect(strings.Count(p, "issuerURL")).To(Equal(1))
+			Expect(preflight.SafeIssuerPatch("https://kubernetes.default.svc")).To(BeEmpty())
+			Expect(preflight.SafeIssuerPatch("")).To(BeEmpty())
 		})
 
 		It("fails, not warns, when the issuer is reachable only without TLS verification", func(ctx SpecContext) {
