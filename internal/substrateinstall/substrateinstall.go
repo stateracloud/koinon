@@ -128,21 +128,21 @@ var ErrPin = errors.New("not the pinned Substrate release")
 func (i *Installer) VerifyPin(ctx context.Context) error {
 	ver, err := i.Runner.Output(ctx, "", i.SetupBinary, []string{"--version"})
 	if err != nil {
-		return fmt.Errorf("%w: %s --version: %v", ErrPin, i.SetupBinary, err)
+		return fmt.Errorf("%w: %s --version: %w", ErrPin, i.SetupBinary, err)
 	}
 	if !strings.Contains(ver, "Version="+PinnedVersion+" ") || !strings.Contains(ver, "commit="+PinnedCommit) {
 		return fmt.Errorf("%w: ate-setup reports %q, want %s at commit %s", ErrPin, strings.TrimSpace(ver), PinnedVersion, PinnedCommit)
 	}
 	head, err := i.Runner.Output(ctx, i.SourceDir, "git", []string{"rev-parse", "HEAD"})
 	if err != nil {
-		return fmt.Errorf("%w: git rev-parse in %s: %v", ErrPin, i.SourceDir, err)
+		return fmt.Errorf("%w: git rev-parse in %s: %w", ErrPin, i.SourceDir, err)
 	}
 	if strings.TrimSpace(head) != PinnedCommit {
 		return fmt.Errorf("%w: %s is at %s, want %s", ErrPin, i.SourceDir, strings.TrimSpace(head), PinnedCommit)
 	}
 	dirty, err := i.Runner.Output(ctx, i.SourceDir, "git", []string{"status", "--porcelain"})
 	if err != nil {
-		return fmt.Errorf("%w: git status in %s: %v", ErrPin, i.SourceDir, err)
+		return fmt.Errorf("%w: git status in %s: %w", ErrPin, i.SourceDir, err)
 	}
 	if strings.TrimSpace(dirty) != "" {
 		return fmt.Errorf("%w: %s has uncommitted changes", ErrPin, i.SourceDir)

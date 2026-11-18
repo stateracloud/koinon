@@ -787,7 +787,7 @@ func (p KubeSubstrateProber) podLogs(ctx context.Context, namespace, name string
 func issuerTLS(verify bool) *tls.Config {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if !verify {
-		cfg.InsecureSkipVerify = true //nolint:gosec // only to classify a failed verification
+		cfg.InsecureSkipVerify = true
 		return cfg
 	}
 	pool, err := x509.SystemCertPool()
