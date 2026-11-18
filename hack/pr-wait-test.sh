@@ -528,9 +528,12 @@ run 7 --checks --timeout 1s --interval 1
 expect "#133: a completed newest run with no jobs fails, naming the run" 1 "FAILED ci: run 72 ended (startup_failure) with no jobs"
 # a run cancelled by the concurrency group of a newer run created in the same second: the higher run id is the newest
 # (PR 1110: e2e-kind runs 44348969148 cancelled, 44348970909 in progress); the cancelled one is not a failure
-seq_set "$(rdh "$o_go")"
+# run 73 is listed first so the old last-wins selector would pick the cancelled 72; run 73 owns the green row
+t_c72=$(cr_ci go CANCELLED 72 2026-11-01T10:04:00Z)
+t_g73=$(cr_ci go SUCCESS 73 2026-11-01T10:04:00Z)
+seq_set "$(rdh "$t_c72,$t_g73")"
 printf 'go\n' >"$FAKE_DIR/rules"
-wfruns "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z 1 completed cancelled)" "$(wfrun 73 ci.yml ci 2026-11-01T10:04:00Z 1 in_progress)"
+wfruns "$(wfrun 73 ci.yml ci 2026-11-01T10:04:00Z)" "$(wfrun 72 ci.yml ci 2026-11-01T10:04:00Z 1 completed cancelled)"
 run 7 --checks --timeout 1s --interval 1
 expect "a run cancelled by a newer run of the same second is not a failure" 0 "checks 1/1 green"
 # a successful run of another workflow with no check run in the rollup (a workflow_dispatch on the head)
