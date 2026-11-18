@@ -141,6 +141,35 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(code).To(BeZero())
 		}, SpecTimeout(15*time.Second))
 
+		It("ends Wait when ctx is cancelled and nobody reads stdout", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			pctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			p, err := d.Exec(pctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = io.WriteString(p.Stdin(), "nobody reads this\n")
+			Expect(err).NotTo(HaveOccurred())
+			time.Sleep(100 * time.Millisecond) // the pump now waits in its stdout write
+			cancel()
+			waited := make(chan error, 1)
+			go func() { _, err := p.Wait(); waited <- err }()
+			var werr error
+			Eventually(waited).WithTimeout(5 * time.Second).Should(Receive(&werr))
+			Expect(errors.Is(werr, context.Canceled)).To(BeTrue(), "got %v", werr)
+			Expect(p.Stdin().Close()).To(Succeed(), "the command ended, so closing stdin is no error")
+		}, SpecTimeout(15*time.Second))
+
+		It("closes stdin without error while the command exits", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			for range 50 {
+				p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(p.Stdin().Close()).To(Succeed())
+				_, err = p.Wait()
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}, SpecTimeout(30*time.Second))
+
 		It("does not resume a suspended sandbox to run a command", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			_, err := d.StopSandbox(ctx, ws, "sb")
@@ -345,6 +374,36 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sb.Phase).To(Equal(execution.PhaseReady))
 			Expect(cl.RouterResumes(ws, "src")).To(BeZero())
+		})
+
+		It("resumes on a retry a sandbox that an earlier snapshot could not resume", func(ctx SpecContext) {
+			ready(ctx, d, "src")
+			cl.FailNextResumes(ws, "src", 1)
+			_, err := d.SnapshotSandbox(ctx, ws, "src")
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			sb, err := d.GetSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
+
+			_, err = d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			sb, err = d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
+		})
+
+		It("leaves a sandbox suspended that was suspended before the snapshot", func(ctx SpecContext) {
+			ready(ctx, d, "src")
+			cl.FailNextResumes(ws, "src", 1)
+			_, err := d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).To(HaveOccurred())
+			_, err = d.SuspendSandbox(ctx, ws, "src") // the caller now wants it suspended
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := d.GetSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
 		})
 
 		It("restores into a template of its source and a different identity", func(ctx SpecContext) {

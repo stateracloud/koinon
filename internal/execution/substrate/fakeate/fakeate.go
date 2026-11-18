@@ -239,6 +239,19 @@ func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
 	}
 }
 
+// FailNextResumes makes the next n ResumeActor calls for an actor fail with Unavailable and leave
+// it as it was.
+func (c *Cluster) FailNextResumes(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failRes = n
+		a.smu.Unlock()
+	}
+}
+
 // TamperTag changes what the control API reports about a tag's stored snapshot, as a swapped
 // object would.
 func (c *Cluster) TamperTag(atespace, name string) {

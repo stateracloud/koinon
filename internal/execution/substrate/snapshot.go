@@ -52,14 +52,20 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 			return execution.Snapshot{}, err
 		}
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
+		// An earlier snapshot of a running sandbox could not resume it: this one owes the resume.
+		wasRunning = d.isOwed(k)
 	default:
 		return execution.Snapshot{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not ready or suspended", k, phaseOf(actor))
 	}
 
 	tag, tagErr := d.tag(ctx, workspace, name)
 	if wasRunning { // resume even when the tag failed: the sandbox keeps running
-		if _, rerr := d.resume(context.WithoutCancel(ctx), op, workspace, name); rerr != nil && tagErr == nil {
-			return execution.Snapshot{}, rerr
+		if _, rerr := d.resume(context.WithoutCancel(ctx), op, workspace, name); rerr != nil {
+			// Remember the debt: a retry finds the actor suspended and must still resume it.
+			d.setOwed(k, true)
+			if tagErr == nil {
+				return execution.Snapshot{}, rerr
+			}
 		}
 	}
 	if tagErr != nil {

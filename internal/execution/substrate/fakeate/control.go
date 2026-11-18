@@ -32,6 +32,7 @@ type actor struct {
 	smu       sync.Mutex
 	failOut   int // the next output streams that fail at once with Unavailable
 	failWrite int // the next WriteFile streams that end with Unavailable when the client closes
+	failRes   int // the next ResumeActor calls that fail with Unavailable
 	streams   map[int]context.CancelFunc
 	nextSID   int
 }
@@ -273,6 +274,15 @@ func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRe
 	a, ok := c.actors[k]
 	if !ok {
 		return nil, notFound("actor", k.name)
+	}
+	a.smu.Lock()
+	failRes := a.failRes > 0
+	if failRes {
+		a.failRes--
+	}
+	a.smu.Unlock()
+	if failRes {
+		return nil, status.Errorf(codes.Unavailable, "actor %q: resume failed", k.name)
 	}
 	resumed := false
 	switch a.state {

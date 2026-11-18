@@ -99,6 +99,9 @@ type Driver struct {
 
 	mu    sync.Mutex
 	gates map[key]*gate
+	// owed holds the actors that SnapshotSandbox suspended and could not resume. A retry of the
+	// snapshot resumes them, because the seam says the sandbox keeps running.
+	owed map[key]bool
 }
 
 // The driver implements the compute half and both optional capabilities. It has no Egress half.
@@ -122,7 +125,25 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		files:   ateenvv1alpha.NewFileSystemServiceClient(router),
 		cfg:     cfg.withDefaults(),
 		gates:   map[key]*gate{},
+		owed:    map[key]bool{},
 	}
+}
+
+// setOwed records whether a snapshot owes k a resume.
+func (d *Driver) setOwed(k key, owed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if owed {
+		d.owed[k] = true
+	} else {
+		delete(d.owed, k)
+	}
+}
+
+func (d *Driver) isOwed(k key) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.owed[k]
 }
 
 // Close releases the connections that Dial opened. It does nothing for a driver from New.
@@ -232,7 +253,7 @@ func (d *Driver) StartSandbox(ctx context.Context, workspace, name string) (exec
 // memory. Substrate has no stop that discards memory, so a stopped sandbox is observed as
 // [execution.PhaseSuspended].
 func (d *Driver) StopSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
-	return d.suspend(ctx, "StopSandbox", workspace, name)
+	return d.suspendWanted(ctx, "StopSandbox", workspace, name)
 }
 
 // DeleteSandbox implements execution.Compute. Substrate terminates a running actor's workload
@@ -255,6 +276,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	case isCode(err, codeNotFound):
 		unpause()
 		d.forget(k)
+		d.setOwed(k, false)
 		return execution.DeleteAbsent, nil
 	case err != nil:
 		return "", execution.GRPCError(op, err)
@@ -263,6 +285,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	// still registered drops it when it ends.
 	unpause()
 	d.forget(k)
+	d.setOwed(k, false)
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}
@@ -273,7 +296,16 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 // actor, because any request through the router would resume it again, then suspends it with
 // synchronous durability, so that a return means the snapshot is saved.
 func (d *Driver) SuspendSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
-	return d.suspend(ctx, "SuspendSandbox", workspace, name)
+	return d.suspendWanted(ctx, "SuspendSandbox", workspace, name)
+}
+
+// suspendWanted is a suspend that a caller asked for: after it, no snapshot owes the actor a resume.
+func (d *Driver) suspendWanted(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
+	sb, err := d.suspend(ctx, op, workspace, name)
+	if err == nil {
+		d.setOwed(key{workspace, name}, false)
+	}
+	return sb, err
 }
 
 // ResumeSandbox implements execution.Suspender.
@@ -299,6 +331,7 @@ func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execut
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
+	d.setOwed(key{workspace, name}, false)
 	return sandboxFrom(workspace, resp.GetActor()), nil
 }
 

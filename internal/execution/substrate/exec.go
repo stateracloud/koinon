@@ -59,6 +59,10 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	pr, pw := io.Pipe()
 	p := &proc{d: d, k: k, id: started.GetProcessId(), stderr: req.Stderr, ctx: pctx, cancel: cancel, pr: pr, pw: pw, done: make(chan struct{})}
 	p.in = &stdin{p: p}
+	// A cancelled ctx ends stdout: closing the write side also unblocks a pump that waits in
+	// pw.Write on a reader that stopped reading. After a normal exit pw is closed already, and the
+	// first close wins, so the reader still sees EOF.
+	context.AfterFunc(pctx, func() { _ = pw.CloseWithError(context.Cause(pctx)) })
 	d.addProc(k, p)
 	go p.pump()
 	return p, nil
@@ -152,8 +156,10 @@ func (p *proc) finish(code int, err error) {
 	}
 	p.code, p.err = code, err
 	p.d.removeProc(p.k, p)
-	p.cancel()
+	// done closes before ctx is cancelled, so a stdin call that fails on the cancelled ctx finds
+	// the process ended (see stdin.Close).
 	close(p.done)
+	p.cancel()
 }
 
 // kill ends the guest process of a command that is abandoned, but only when the actor runs: a
@@ -211,6 +217,9 @@ func (p *proc) pump() {
 			case *ateenvv1alpha.ProcessOutput_Stdout:
 				if _, werr := p.pw.Write(o.Stdout); werr != nil {
 					cancel()
+					if cerr := p.ctx.Err(); cerr != nil {
+						werr = cerr // the write ended because ctx did
+					}
 					p.finish(0, werr)
 					return
 				}
@@ -296,6 +305,13 @@ func (s *stdin) Close() error {
 	err := s.send(&ateenvv1alpha.WriteProcessInputRequest{ProcessId: s.p.id, Close: true}, 0)
 	if errors.Is(err, execution.ErrFailedPrecondition) {
 		return nil
+	}
+	if err != nil {
+		select {
+		case <-s.p.done:
+			return nil // the command ended while the close was on its way
+		default:
+		}
 	}
 	return err
 }
