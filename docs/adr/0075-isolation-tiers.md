@@ -383,6 +383,11 @@ maintainer decided on 2026-11-17 to drop the Kata requirement.
 - **Kata stays the default and the golden path.** The chart default (`openshell.runtimeClassName:
   kata`, `sandboxPolicy.runtimeClasses`) does not change. AKS Pod Sandboxing and GKE Sandbox `microvm`
   stay listed.
+- **A qualified runtime with its own RuntimeClass is admissible.** Decision 2's "a RuntimeClass of one of
+  these" is read as "a RuntimeClass of a runtime that meets the definition above". The class is
+  admitted by naming it in `sandboxPolicy.runtimeClasses` (the values schema already allows any
+  DNS-style name, see the 2026-11-01 amendment) after the runtime's own escape-suite run; the chart
+  default list does not change.
 - **A runtime without a RuntimeClass** (one that starts the VMM itself) needs its own decision on how
   admission scopes it, because decision 2's "a RuntimeClass of one of these" and ADR 0045 decision 6
   do not apply to it. That decision comes with the runtime's own issue; this amendment only removes
