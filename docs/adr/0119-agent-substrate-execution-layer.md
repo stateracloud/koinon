@@ -307,8 +307,11 @@ about 6 minutes, and the four microVM assets matched their sha256 pins.
   payloads as root with only CAP_KILL, NET_BIND_SERVICE and AUDIT_WRITE, and no CAP_SETUID or CAP_SETGID,
   so the launcher cannot drop to a non-root user. This is an open item for #1087 (an upstream request). The
   gVisor class has not run yet.
-- **Router resume.** Any traffic through the router resumes a suspended actor, so pollers must stop before
-  suspend (#1088).
+- **Router resume.** Any traffic through the router resumes a suspended actor. The driver drains and
+  verifies (#1088): it stops new router calls, waits for the calls in flight (cancels output streams,
+  lets short writes end, bounded), suspends, then reads the state; a request that was already on the
+  wire can land late and resume the actor, so the driver suspends again, a bounded number of times,
+  and else fails. Cancelling a call does not stop a request on the wire, and nothing waits for a guest ack.
 
 The maintainer read this result and accepted the ADR on 2026-11-18. The "resume under 500 ms" claim is
 now measured: API resume p50 0.49 s.

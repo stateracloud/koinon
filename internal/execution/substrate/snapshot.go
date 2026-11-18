@@ -25,8 +25,9 @@ const digestVersion = "koinon-substrate-snapshot/v1"
 // SnapshotSandbox implements execution.Snapshotter.
 //
 // Substrate tags only a suspended actor ("tag the external snapshot a suspended actor holds"), so a
-// running sandbox is suspended with synchronous durability, tagged, and resumed. The driver's own
-// streams stop before the suspend and read again after the resume (see Exec), and the sandbox is
+// running sandbox is suspended with synchronous durability, tagged, and resumed. The suspend drains
+// the driver's own router calls and verifies the actor stayed suspended (see suspend); the output
+// streams read again after the resume (see Exec), and the sandbox is
 // back to running when the call returns, as the seam says. With memory fidelity (D5, the default)
 // the snapshot holds the whole guest, so a clone of it holds whatever the guest held: the guest
 // must hold no credential, which ADR 0119 makes an invariant of the image and the launcher, and the

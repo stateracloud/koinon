@@ -21,8 +21,9 @@
 //
 // Two behaviours of Substrate shape the code, both proven in the phase 0 lab run (ADR 0119,
 // Verification): any request that reaches the router resumes a suspended actor, so the driver sends
-// guest traffic only after it has read the actor as running from the control API, and stops its own
-// streams before it suspends; and a process's output is a spool that a client can read again from a
+// guest traffic only after it has read the actor as running from the control API, and before it
+// suspends it drains its own calls and then verifies that the actor stayed suspended (see suspend);
+// and a process's output is a spool that a client can read again from a
 // byte offset, which is how a stream survives a suspend and resume without a lost line.
 package substrate
 
@@ -31,9 +32,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -71,6 +74,13 @@ type Config struct {
 	// error. The production object-store reader that fills it is a later slice (Part of #1082); the
 	// driver is wired into the reconciler only after it exists, so no install runs snapshots without it.
 	ContentDigest func(ctx context.Context, objectURI string) (string, error)
+	// DrainTimeout bounds each of the two waits of a suspend for the router calls that started
+	// before it: first for the short calls (stdin writes, uploads) to end by themselves, then,
+	// after they are cancelled, for them to return. It also bounds the wait for an actor that a
+	// late request resumed to settle before the driver suspends it again. Default 10 s.
+	DrainTimeout time.Duration
+	// Logger gets one line per suspend that a late router request undid. Nil uses slog.Default().
+	Logger *slog.Logger
 }
 
 func (c Config) withDefaults() Config {
@@ -85,6 +95,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SnapshotFidelity == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED {
 		c.SnapshotFidelity = ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY
+	}
+	if c.DrainTimeout <= 0 {
+		c.DrainTimeout = 10 * time.Second
+	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
 	}
 	return c
 }
@@ -102,6 +118,8 @@ type Driver struct {
 	// owed holds the actors that SnapshotSandbox suspended and could not resume. A retry of the
 	// snapshot resumes them, because the seam says the sandbox keeps running.
 	owed map[key]bool
+
+	resuspends *prometheus.CounterVec
 }
 
 // The driver implements the compute half and both optional capabilities. It has no Egress half.
@@ -120,13 +138,35 @@ func (k key) String() string { return k.atespace + "/" + k.actor }
 // router. The caller owns both.
 func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 	return &Driver{
-		control: ateapiv1.NewControlClient(control),
-		process: ateenvv1alpha.NewProcessServiceClient(router),
-		files:   ateenvv1alpha.NewFileSystemServiceClient(router),
-		cfg:     cfg.withDefaults(),
-		gates:   map[key]*gate{},
-		owed:    map[key]bool{},
+		control:    ateapiv1.NewControlClient(control),
+		process:    ateenvv1alpha.NewProcessServiceClient(router),
+		files:      ateenvv1alpha.NewFileSystemServiceClient(router),
+		cfg:        cfg.withDefaults(),
+		gates:      map[key]*gate{},
+		owed:       map[key]bool{},
+		resuspends: newResuspends(),
 	}
+}
+
+// Suspend outcomes, the only values of the outcome label of koinon_substrate_resuspends_total.
+const (
+	resuspendRetried = "retried" // a late router request resumed the actor; the driver suspended it again
+	resuspendFailed  = "failed"  // the actor kept being resumed; the suspend returned an error
+)
+
+func newResuspends() *prometheus.CounterVec {
+	v := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "koinon_substrate_resuspends_total",
+		Help: "Suspends that found the actor resumed again by a late router request, by outcome (retried or failed). No sandbox labels: ADR 0023.",
+	}, []string{"outcome"})
+	v.WithLabelValues(resuspendRetried)
+	v.WithLabelValues(resuspendFailed)
+	return v
+}
+
+// Collectors returns the driver's own metrics, for the caller to register.
+func (d *Driver) Collectors() []prometheus.Collector {
+	return []prometheus.Collector{d.resuspends}
 }
 
 // setOwed records whether a snapshot owes k a resume.
@@ -263,6 +303,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	const op = "DeleteSandbox"
 	k := key{workspace, name}
 	g := d.pauseGate(k) // no guest traffic while the actor goes away
+	g.cancelAll()       // nothing to keep: the actor's work ends with it
 	paused := true
 	unpause := func() {
 		if paused {
@@ -292,9 +333,10 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	return execution.DeleteCompleted, nil
 }
 
-// SuspendSandbox implements execution.Suspender. It first stops the driver's own streams to the
-// actor, because any request through the router would resume it again, then suspends it with
-// synchronous durability, so that a return means the snapshot is saved.
+// SuspendSandbox implements execution.Suspender. It first drains the driver's own router calls to
+// the actor, because any request through the router would resume it again, then suspends it with
+// synchronous durability, so that a return means the snapshot is saved, and verifies that it stayed
+// suspended (see suspend).
 func (d *Driver) SuspendSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
 	return d.suspendWanted(ctx, "SuspendSandbox", workspace, name)
 }
@@ -313,17 +355,76 @@ func (d *Driver) ResumeSandbox(ctx context.Context, workspace, name string) (exe
 	return d.resume(ctx, "ResumeSandbox", workspace, name)
 }
 
+// suspendRetries is how many times suspend suspends an actor again that a late router request resumed.
+const suspendRetries = 3
+
+// suspend suspends an actor in three steps: drain, suspend, verify.
+//
+//  1. Drain: pause the gate, so no new router call starts; cancel the output streams; wait for
+//     the short calls in flight to end (cancelled after DrainTimeout) and for every cancelled call
+//     to return on the client side. Nothing waits for the guest to acknowledge.
+//  2. SuspendActor, with synchronous durability.
+//  3. Verify: read the actor. A request that left before the pause can still reach the router after
+//     SuspendActor, and the router resumes the actor for it (ADR 0119, Verification). If the actor
+//     is resuming or running, wait for it to settle and suspend it again, up to suspendRetries
+//     times; then fail. suspend never reports a suspended actor that is not.
 func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
-	g := d.pauseGate(key{workspace, name})
+	k := key{workspace, name}
+	g := d.pauseGate(k)
 	defer g.unpause()
-	resp, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
-		Actor:   ref(workspace, name),
-		Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
-	})
-	if err != nil {
-		return execution.Sandbox{}, execution.GRPCError(op, err)
+	if err := g.drain(ctx, d.cfg.DrainTimeout); err != nil {
+		return execution.Sandbox{}, fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
 	}
-	return sandboxFrom(workspace, resp.GetActor()), nil
+	for attempt := 0; ; attempt++ {
+		if _, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
+			Actor:   ref(workspace, name),
+			Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
+		}); err != nil {
+			return execution.Sandbox{}, execution.GRPCError(op, err)
+		}
+		actor, err := d.settled(ctx, op, k)
+		if err != nil {
+			return execution.Sandbox{}, err
+		}
+		switch actor.GetStatus().GetState() {
+		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
+			return sandboxFrom(workspace, actor), nil
+		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		default:
+			return execution.Sandbox{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after suspend", k, phaseOf(actor))
+		}
+		if attempt == suspendRetries {
+			d.resuspends.WithLabelValues(resuspendFailed).Inc()
+			d.cfg.Logger.Warn("substrate: sandbox resumed again after every suspend; giving up",
+				"op", op, "sandbox", k.String(), "suspends", attempt+1)
+			return execution.Sandbox{}, fail(op, execution.ErrUnavailable,
+				"sandbox %s was resumed by a router request after each of %d suspends", k, attempt+1)
+		}
+		d.resuspends.WithLabelValues(resuspendRetried).Inc()
+		d.cfg.Logger.Info("substrate: a late router request resumed the sandbox; suspending it again",
+			"op", op, "sandbox", k.String(), "attempt", attempt+1)
+	}
+}
+
+// settled reads the actor until it is not in a transition (resuming or suspending), bounded by
+// DrainTimeout. It reads the control API only, which never resumes the actor.
+func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.cfg.DrainTimeout)
+	defer cancel()
+	for {
+		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
+		if err != nil {
+			return nil, execution.GRPCError(op, err)
+		}
+		switch actor.GetStatus().GetState() {
+		case ateapiv1.ActorState_ACTOR_STATE_RESUMING, ateapiv1.ActorState_ACTOR_STATE_SUSPENDING:
+		default:
+			return actor, nil
+		}
+		if err := sleep(ctx, d.cfg.PollInterval); err != nil {
+			return nil, fail(op, execution.ErrUnavailable, "sandbox %s did not settle after suspend: %v", k, err)
+		}
+	}
 }
 
 func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {

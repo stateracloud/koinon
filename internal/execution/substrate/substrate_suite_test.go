@@ -33,7 +33,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	DeferCleanup(cl.Stop)
 	DeferCleanup(control.Close)
 	DeferCleanup(router.Close)
-	c := substrate.Config{PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second}
+	c := substrate.Config{PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond}
 	if len(cfg) > 0 {
 		c = cfg[0]
 	}

@@ -182,9 +182,10 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
 		})
 
-		It("sends no router request while a suspend overlaps an upload or a stdin write", func(ctx SpecContext) {
+		It("reports suspended only when the sandbox is, while a suspend overlaps an upload or a stdin write", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
-			// An upload whose reader stalls after the first chunk: the stream is open during the suspend.
+			// An upload whose reader stalls after the first chunk: the stream is open during the suspend,
+			// so the drain waits DrainTimeout for it and then cancels it.
 			release := make(chan struct{})
 			started := make(chan struct{})
 			upErr := make(chan error, 1)
@@ -192,17 +193,19 @@ var _ = Describe("the Substrate driver", func() {
 				upErr <- d.Upload(ctx, ws, "sb", "/sandbox", &stallReader{first: bytes.Repeat([]byte("x"), 1024), started: started, release: release})
 			}()
 			Eventually(started).WithTimeout(5 * time.Second).Should(BeClosed())
-			_, err := d.SuspendSandbox(ctx, ws, "sb")
+			sb, err := d.SuspendSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
 			close(release)
 			Eventually(upErr).WithTimeout(5 * time.Second).Should(Receive(HaveOccurred()))
-			Expect(cl.RouterResumes(ws, "sb")).To(BeZero(), "the suspend cancelled the upload stream")
 			_, err = d.ResumeSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
 			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
 			Expect(err).NotTo(HaveOccurred())
 
-			// A writer that never stops, over repeated suspends and resumes.
+			// A writer that never stops, over repeated suspends and resumes. A request that left
+			// before a pause may still land after SuspendActor (timing); what the driver guarantees is
+			// that it reports suspended only after it read the actor as suspended.
 			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(p.Close)
@@ -221,9 +224,9 @@ var _ = Describe("the Substrate driver", func() {
 				}
 			}()
 			for range 5 {
-				_, err := d.SuspendSandbox(ctx, ws, "sb")
+				sb, err := d.SuspendSandbox(ctx, ws, "sb")
 				Expect(err).NotTo(HaveOccurred())
-				Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
+				Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
 				_, err = d.ResumeSandbox(ctx, ws, "sb")
 				Expect(err).NotTo(HaveOccurred())
 				_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
@@ -231,8 +234,94 @@ var _ = Describe("the Substrate driver", func() {
 			}
 			close(stop)
 			Eventually(wrote).WithTimeout(10 * time.Second).Should(BeClosed())
-			Expect(cl.RouterResumes(ws, "sb")).To(BeZero())
 		}, SpecTimeout(30*time.Second))
+
+		It("starts no router call once a suspend has closed the gate", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			go func() { _, _ = io.Copy(io.Discard, p.Stdout()) }()
+			stop := make(chan struct{})
+			wrote := make(chan struct{})
+			go func() {
+				defer close(wrote)
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						_, _ = p.Stdin().Write([]byte("line\n"))
+					}
+				}
+			}()
+			DeferCleanup(func() { close(stop); Eventually(wrote).WithTimeout(10 * time.Second).Should(BeClosed()) })
+			Eventually(func() int { return cl.Calls("WriteProcessInput") }).WithTimeout(5 * time.Second).Should(BeNumerically(">", 3))
+
+			unpause := d.PauseGate(ws, "sb")
+			admitted := d.RouterCallsStarted(ws, "sb") // stable from here: no begin succeeds on a paused gate
+			_, err = d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(errors.Is(err, execution.ErrFailedPrecondition)).To(BeTrue(), "got %v", err)
+			err = d.Upload(ctx, ws, "sb", "/sandbox", bytes.NewReader(nil))
+			Expect(errors.Is(err, execution.ErrFailedPrecondition)).To(BeTrue(), "got %v", err)
+			Consistently(func() uint64 { return d.RouterCallsStarted(ws, "sb") }).
+				WithTimeout(200*time.Millisecond).Should(Equal(admitted), "the writer and the output stream wait")
+			unpause()
+
+			before := cl.Calls("WriteProcessInput")
+			Eventually(func() int { return cl.Calls("WriteProcessInput") }).WithTimeout(5*time.Second).
+				Should(BeNumerically(">", before+1), "the writer goes on once the gate opens")
+		}, SpecTimeout(30*time.Second))
+
+		It("suspends again when a request sent before the pause lands after SuspendActor", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			// The output stream's first request stops on the wire; the pause cancels the client side,
+			// and the request lands only once SuspendActor has suspended the actor, and resumes it.
+			held := cl.DelayNextRouterRequest(ws, "sb", "StreamProcessOutput")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			Eventually(held).WithTimeout(5 * time.Second).Should(BeClosed())
+
+			sb, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
+			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			Expect(cl.RouterResumes(ws, "sb")).To(Equal(1), "the late request landed and resumed the actor")
+			Expect(cl.Calls("SuspendActor")).To(Equal(2))
+			Expect(d.Resuspends("retried")).To(Equal(1.0))
+			Expect(d.Resuspends("failed")).To(BeZero())
+
+			// The process outlives it all: resume and send one line through cat.
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = io.WriteString(p.Stdin(), "after\n")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bufio.NewReader(p.Stdout()).ReadString('\n')).To(Equal("after\n"))
+		}, SpecTimeout(30*time.Second))
+
+		It("suspends again a bounded number of times, then fails rather than report suspended", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.ResumeAfterSuspends(ws, "sb", 2)
+			sb, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
+			Expect(cl.Calls("SuspendActor")).To(Equal(3))
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+
+			cl.ResumeAfterSuspends(ws, "sb", 1000) // a router request that never stops
+			_, err = d.SuspendSandbox(ctx, ws, "sb")
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			Expect(cl.Calls("SuspendActor")).To(Equal(3+4), "one suspend and three more")
+			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(d.Resuspends("retried")).To(Equal(2.0 + 3.0))
+			Expect(d.Resuspends("failed")).To(Equal(1.0))
+		})
 
 		It("sends no stdin write on a RUNNING state that a whole suspend made stale", func(ctx SpecContext) {
 			ready(ctx, d, "sb")

@@ -49,6 +49,8 @@ type Cluster struct {
 	resumes   map[key]int
 	calls     map[string]int
 	holds     map[key]*getHold
+	delays    map[key]*delay
+	stop      chan struct{}
 
 	ctl, rtr         *grpc.Server
 	ctlLis, routerLn *bufconn.Listener
@@ -64,6 +66,8 @@ func New() *Cluster {
 		resumes:   map[key]int{},
 		calls:     map[string]int{},
 		holds:     map[key]*getHold{},
+		delays:    map[key]*delay{},
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -95,6 +99,13 @@ func (c *Cluster) Start() (control, router *grpc.ClientConn, err error) {
 
 // Stop stops both servers, ending open streams.
 func (c *Cluster) Stop() {
+	c.mu.Lock()
+	select {
+	case <-c.stop:
+	default:
+		close(c.stop)
+	}
+	c.mu.Unlock()
 	if c.ctl != nil {
 		c.ctl.Stop()
 	}
@@ -147,6 +158,38 @@ func (c *Cluster) HoldNextGetActor(atespace, name string) (held <-chan struct{},
 	c.mu.Unlock()
 	var once sync.Once
 	return h.held, func() { once.Do(func() { close(h.release) }) }
+}
+
+// delay holds back one guest request on its way to the router (DelayNextRouterRequest).
+type delay struct {
+	method                string
+	taken                 bool
+	held, release, landed chan struct{}
+}
+
+// DelayNextRouterRequest makes the next guest request of method (for example
+// "StreamProcessOutput") for an actor stop on its way to the router, as a request that is on the
+// wire does: the client's cancel does not stop it. held closes once the request is held. The next
+// SuspendActor of the actor lets it land once the actor is suspended, and returns only after it
+// landed: the request then resumes the actor, as the real router does, though SuspendActor's reply
+// says suspended. This is the late request a suspend must verify against.
+func (c *Cluster) DelayNextRouterRequest(atespace, name, method string) (held <-chan struct{}) {
+	d := &delay{method: method, held: make(chan struct{}), release: make(chan struct{}), landed: make(chan struct{})}
+	c.mu.Lock()
+	c.delays[key{atespace, name}] = d
+	c.mu.Unlock()
+	return d.held
+}
+
+// ResumeAfterSuspends makes each of the next n SuspendActor calls of an actor find it resumed by a
+// late router request right after it suspended it: the reply says suspended, the actor runs, and
+// RouterResumes counts it.
+func (c *Cluster) ResumeAfterSuspends(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a, ok := c.actors[key{atespace, name}]; ok {
+		a.lateResumes = n
+	}
 }
 
 // Calls is how many times the control or guest method (for example "SuspendActor") was called.

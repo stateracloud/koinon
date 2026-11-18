@@ -23,6 +23,8 @@ type actor struct {
 	state     ateapiv1.ActorState
 	crash     string
 	snapshots []*ateapiv1.Snapshot
+	// lateResumes is how many more suspends a late router request undoes (ResumeAfterSuspends).
+	lateResumes int
 
 	// the guest: it survives a suspend, as the memory of a snapshotted VM does
 	procs   map[string]*fproc
@@ -272,8 +274,23 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 		return nil, status.Errorf(codes.FailedPrecondition, "actor %q is %s", k.name, st)
 	}
 	out := a.pb()
+	if a.lateResumes > 0 && a.state == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		a.lateResumes--
+		c.resumes[k]++
+		a.state = ateapiv1.ActorState_ACTOR_STATE_RUNNING
+	}
+	dl := c.delays[k]
+	if dl != nil && dl.taken {
+		delete(c.delays, k)
+	} else {
+		dl = nil
+	}
 	c.mu.Unlock()
 	a.dropStreams() // the guest connection ends with the VM's pause
+	if dl != nil {  // a request that was on the wire lands now, on the suspended actor
+		close(dl.release)
+		<-dl.landed
+	}
 	return &ateapiv1.SuspendActorResponse{Actor: out}, nil
 }
 

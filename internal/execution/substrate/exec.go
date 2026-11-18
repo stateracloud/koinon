@@ -192,7 +192,7 @@ func (p *proc) pump() {
 		// Wait for a running actor and open the gate's registration in one step, so a suspend
 		// that starts now cancels this stream instead of racing it.
 		waitStart := time.Now()
-		sctx, cancel, err := p.d.enterWait(p.ctx, "Exec", p.k)
+		sctx, cancel, err := p.d.enterWait(p.ctx, "Exec", p.k, streamCall)
 		if err != nil {
 			p.finish(0, err)
 			return
@@ -318,7 +318,7 @@ func (s *stdin) Close() error {
 
 func (s *stdin) send(req *ateenvv1alpha.WriteProcessInputRequest, want int64) error {
 	p := s.p
-	ctx, end, err := p.d.enterWait(p.ctx, "Exec", p.k)
+	ctx, end, err := p.d.enterWait(p.ctx, "Exec", p.k, shortCall)
 	if err != nil {
 		return err
 	}

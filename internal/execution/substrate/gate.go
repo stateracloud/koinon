@@ -16,20 +16,39 @@ import (
 
 // gate is the driver's record of one actor's guest traffic. Any request through the router resumes
 // a suspended actor (ADR 0119, Verification), so before the driver suspends or deletes an actor it
-// pauses the gate: that cancels the streams the driver holds to the guest and holds back every
-// reconnect until the gate opens and the control API says the actor runs.
+// pauses the gate: no new router call starts until the gate opens and the control API says the
+// actor runs, and the output streams the driver holds to the guest are cancelled. A suspend then
+// drains the calls that started before the pause (see drain) and verifies the state afterwards,
+// because a request that was already on its way can still reach the router late.
 type gate struct {
 	mu     sync.Mutex
 	paused int
 	wake   chan struct{} // closed and replaced whenever paused changes
 	procs  map[*proc]struct{}
 	next   uint64
-	active map[uint64]context.CancelFunc // every router call in flight, cancelled by pause
-	dead   bool                          // dropped from the driver's map: users fetch the gate again
+	active map[uint64]call // every router call in flight, until its end runs
+	idle   chan struct{}   // closed when active becomes empty; nil while nobody waits for that
+	dead   bool            // dropped from the driver's map: users fetch the gate again
+}
+
+// callKind says how a pause treats a router call that is in flight.
+type callKind int
+
+const (
+	// shortCall is a call that ends by itself (a stdin write, an upload, a process start or signal):
+	// a suspend waits for it, so that its work is not lost, and cancels it only after DrainTimeout.
+	shortCall callKind = iota
+	// streamCall is an output stream that ends only with the process: a pause cancels it at once.
+	streamCall
+)
+
+type call struct {
+	cancel context.CancelFunc
+	kind   callKind
 }
 
 func newGate() *gate {
-	return &gate{wake: make(chan struct{}), procs: map[*proc]struct{}{}, active: map[uint64]context.CancelFunc{}}
+	return &gate{wake: make(chan struct{}), procs: map[*proc]struct{}{}, active: map[uint64]call{}}
 }
 
 func (d *Driver) gate(k key) *gate {
@@ -72,8 +91,8 @@ func (d *Driver) pauseGate(k key) *gate {
 	}
 }
 
-// pause closes the gate and cancels every router call in flight. Calls nest. It reports false
-// when the gate was dropped meanwhile.
+// pause closes the gate and cancels the output streams in flight. Short calls go on: drain waits
+// for them. Calls nest. It reports false when the gate was dropped meanwhile.
 func (g *gate) pause() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -81,18 +100,29 @@ func (g *gate) pause() bool {
 		return false
 	}
 	g.paused++
-	for id, cancel := range g.active {
-		cancel()
-		delete(g.active, id)
+	for _, c := range g.active {
+		if c.kind == streamCall {
+			c.cancel()
+		}
 	}
 	g.broadcast()
 	return true
 }
 
+// cancelAll cancels every router call in flight. Each stays registered until its end runs.
+func (g *gate) cancelAll() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, c := range g.active {
+		c.cancel()
+	}
+}
+
 // begin registers one router call. The check of the gate and the registration happen under one
-// lock, so a pause either sees the call and cancels it, or the call sees the pause and does not
-// start: no call can slip between the two. The returned end must be called once the call is over.
-func (g *gate) begin(parent context.Context) (ctx context.Context, end func(), ok bool) {
+// lock, so a pause either sees the call (and cancels or drains it), or the call sees the pause and
+// does not start: no call can slip between the two. The returned end must be called once the call
+// is over: the client side of it has returned.
+func (g *gate) begin(parent context.Context, kind callKind) (ctx context.Context, end func(), ok bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.paused > 0 || g.dead {
@@ -101,24 +131,75 @@ func (g *gate) begin(parent context.Context) (ctx context.Context, end func(), o
 	ctx, cancel := context.WithCancel(parent)
 	g.next++
 	id := g.next
-	g.active[id] = cancel
+	g.active[id] = call{cancel: cancel, kind: kind}
 	return ctx, func() {
 		g.mu.Lock()
 		delete(g.active, id)
+		if len(g.active) == 0 && g.idle != nil {
+			close(g.idle)
+			g.idle = nil
+		}
 		g.mu.Unlock()
 		cancel()
 	}, true
 }
 
-// enter starts a router call that must not wait for a suspended actor (Exec, Upload and their
+// idleChan returns a channel that is closed once no router call is in flight, or nil when none is.
+func (g *gate) idleChan() <-chan struct{} {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.active) == 0 {
+		return nil
+	}
+	if g.idle == nil {
+		g.idle = make(chan struct{})
+	}
+	return g.idle
+}
+
+// drain waits, on a paused gate, until the client side of every router call that started before the
+// pause has returned: first up to timeout for the short calls to end by themselves, then, after it
+// cancels what is left, up to timeout again for those to return. It does not wait for the guest:
+// a request that left before its cancel can still reach the router after drain, which is why
+// suspend verifies the state. It fails only when ctx ends.
+func (g *gate) drain(ctx context.Context, timeout time.Duration) error {
+	wait := func() (bool, error) {
+		idle := g.idleChan()
+		if idle == nil {
+			return true, nil
+		}
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		select {
+		case <-idle:
+			return true, nil
+		case <-t.C:
+			return false, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	if done, err := wait(); done || err != nil {
+		return err
+	}
+	g.cancelAll()
+	_, err := wait()
+	return err
+}
+
+// enter starts a short router call that must not wait for a suspended actor (Exec, Upload and their
 // helpers): it fails when the gate is closed or the actor does not run. The caller calls end.
 func (d *Driver) enter(ctx context.Context, op string, k key) (context.Context, func(), error) {
+	return d.enterKind(ctx, op, k, shortCall)
+}
+
+func (d *Driver) enterKind(ctx context.Context, op string, k key, kind callKind) (context.Context, func(), error) {
 	var cctx context.Context
 	var end func()
 	ok := false
 	for {
 		g := d.gate(k)
-		if cctx, end, ok = g.begin(ctx); ok || !g.isDead() {
+		if cctx, end, ok = g.begin(ctx, kind); ok || !g.isDead() {
 			break
 		}
 	}
@@ -139,10 +220,11 @@ func (d *Driver) enter(ctx context.Context, op string, k key) (context.Context, 
 // The proof that the actor runs must come after the registration, as in enter. A RUNNING read
 // before the registration can be stale: a whole suspend (pause, SuspendActor, unpause) can run
 // between the read and begin, and the open gate then admits a router request for a suspended
-// actor, which resumes it. After the registration, a suspend that starts cancels the read and the call.
-func (d *Driver) enterWait(ctx context.Context, op string, k key) (context.Context, func(), error) {
+// actor, which resumes it. After the registration, a suspend that starts drains or cancels the
+// read and the call.
+func (d *Driver) enterWait(ctx context.Context, op string, k key, kind callKind) (context.Context, func(), error) {
 	for {
-		cctx, end, err := d.enter(ctx, op, k)
+		cctx, end, err := d.enterKind(ctx, op, k, kind)
 		if err == nil {
 			return cctx, end, nil
 		}

@@ -85,6 +85,22 @@ func (g *guestServer) target(ctx context.Context, method string) (*actor, error)
 	as, name, _ := strings.Cut(v[0], "/")
 	k := key{as, name}
 	g.c.mu.Lock()
+	dl := g.c.delays[k]
+	if dl != nil && !dl.taken && dl.method == method {
+		dl.taken = true
+	} else {
+		dl = nil
+	}
+	g.c.mu.Unlock()
+	if dl != nil { // on the wire: the client's cancel does not stop it (DelayNextRouterRequest)
+		close(dl.held)
+		select {
+		case <-dl.release:
+		case <-g.c.stop:
+		}
+		defer close(dl.landed) // after the state below is applied
+	}
+	g.c.mu.Lock()
 	defer g.c.mu.Unlock()
 	a, ok := g.c.actors[k]
 	if !ok {
