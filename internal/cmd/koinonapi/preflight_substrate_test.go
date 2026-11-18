@@ -64,5 +64,22 @@ var _ = Describe("preflight --driver substrate", func() {
 			Expect(run("--kubeconfig=/k", "--context=lab", "--substrate-expected-issuer=https://kubernetes.default.svc")).
 				To(MatchError(ContainSubstring("--expected-jwt-issuer")))
 		})
+
+		It("takes --platform generic, gke or kind, and refuses another value", func() {
+			Expect(run("--kubeconfig=/k", "--context=lab", "--platform=talos")).To(MatchError(ContainSubstring(`unknown platform "talos" (valid: generic, gke, kind)`)))
+			for _, p := range []string{"generic", "gke", "kind"} {
+				// A valid platform passes the flag checks; the run then stops at the kubeconfig that does not exist.
+				err := run("--kubeconfig=/nonexistent", "--context=lab", "--platform="+p)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).NotTo(ContainSubstring("platform"))
+			}
+		})
+
+		It("keeps --kind as a deprecated alias of --platform kind and refuses a conflict", func() {
+			err := run("--kubeconfig=/nonexistent", "--context=lab", "--kind")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).NotTo(ContainSubstring("platform"))
+			Expect(run("--kubeconfig=/k", "--context=lab", "--kind", "--platform=generic")).To(MatchError(ContainSubstring("--kind means --platform kind and conflicts with --platform generic")))
+		})
 	})
 })

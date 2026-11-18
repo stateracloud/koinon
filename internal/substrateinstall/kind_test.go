@@ -21,25 +21,25 @@ func kindNode(name, providerID string) *corev1.Node {
 func TestKindIsRefusedOnAClusterThatIsNotKindBeforeAnythingIsInstalled(t *testing.T) {
 	g := NewWithT(t)
 	i, r, client := setup("37", true, []runtime.Object{kindNode("n1", "kind://docker/lab/lab-control-plane"), kindNode("n2", "talos://omni/abc")})
-	i.Profile.Kind = true
+	i.Profile.Platform = substrateinstall.PlatformKind
 	err := i.Install(t.Context())
 	g.Expect(err).To(MatchError(substrateinstall.ErrNotKind))
-	g.Expect(err.Error()).To(And(ContainSubstring("n2"), ContainSubstring("without --kind"), ContainSubstring("nothing was installed")))
+	g.Expect(err.Error()).To(And(ContainSubstring("n2"), ContainSubstring("--platform generic"), ContainSubstring("nothing was installed")))
 	g.Expect(r.calls).To(BeEmpty(), "nothing was exported, built or run")
 	_, getErr := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
 	g.Expect(apierrors.IsNotFound(getErr)).To(BeTrue(), "no namespace was created")
 
 	// A cluster without nodes is not proven to be kind either.
 	i, _, _ = setup("37", true, nil)
-	i.Profile.Kind = true
+	i.Profile.Platform = substrateinstall.PlatformKind
 	g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrNotKind))
 }
 
 func TestKindIsAcceptedOnKindNodesAndIgnoredWithoutTheFlag(t *testing.T) {
 	g := NewWithT(t)
 	i, _, _ := setup("37", true, []runtime.Object{kindNode("n1", "kind://docker/lab/lab-control-plane")})
-	i.Profile.Kind = true
+	i.Profile.Platform = substrateinstall.PlatformKind
 	g.Expect(i.CheckKind(t.Context())).To(Succeed())
 	i, _, _ = setup("37", true, []runtime.Object{kindNode("n1", "talos://omni/abc")})
-	g.Expect(i.CheckKind(t.Context())).To(Succeed(), "without --kind the nodes are not read")
+	g.Expect(i.CheckKind(t.Context())).To(Succeed(), "on another platform the nodes are not read")
 }

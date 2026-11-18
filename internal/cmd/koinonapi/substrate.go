@@ -19,21 +19,21 @@ import (
 // operator's ambient kubeconfig.
 type execRunner struct{ env []string }
 
-func (r execRunner) command(ctx context.Context, dir, name string, args []string) *exec.Cmd {
+func (r execRunner) command(ctx context.Context, dir, name string, args, env []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is git, go or the binary the installer built
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), r.env...)
+	cmd.Env = append(append(os.Environ(), r.env...), env...)
 	return cmd
 }
 
-func (r execRunner) Run(ctx context.Context, dir, name string, args []string, out io.Writer) error {
-	cmd := r.command(ctx, dir, name, args)
+func (r execRunner) Run(ctx context.Context, dir, name string, args, env []string, out io.Writer) error {
+	cmd := r.command(ctx, dir, name, args, env)
 	cmd.Stdout, cmd.Stderr = out, out
 	return cmd.Run()
 }
 
 func (r execRunner) Output(ctx context.Context, dir, name string, args []string) (string, error) {
-	out, err := r.command(ctx, dir, name, args).Output()
+	out, err := r.command(ctx, dir, name, args, nil).Output()
 	return string(out), err
 }
 
@@ -43,6 +43,9 @@ func newSubstrateCommand() *cobra.Command {
 		c       preflightConfig
 		profile substrateinstall.Profile
 		source  string
+		// platform is the value of --platform; kind is the deprecated --kind.
+		platform string
+		kind     bool
 	)
 	cmd := &cobra.Command{Use: "substrate", Short: "Install Agent Substrate, Koinon's execution layer (ADR 0119)"}
 	install := &cobra.Command{
@@ -69,6 +72,17 @@ func newSubstrateCommand() *cobra.Command {
 				// The install writes the issuer ate-setup trusts; a second flag for the probe alone could disagree with it.
 				return errors.New("substrate install takes the issuer from --expected-jwt-issuer: --substrate-expected-issuer is only for preflight")
 			}
+			if kind {
+				if platform != "" && platform != string(substrateinstall.PlatformKind) {
+					return errors.New("--kind means --platform kind and conflicts with --platform " + platform)
+				}
+				platform = string(substrateinstall.PlatformKind)
+			}
+			p, err := substrateinstall.ParsePlatform(platform)
+			if err != nil {
+				return err
+			}
+			profile.Platform = p
 			return c.validate()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -93,7 +107,15 @@ func newSubstrateCommand() *cobra.Command {
 	f.StringVar(&profile.SetupCSI, "setup-csi", "", "ate-setup --setup-csi: also install a CSI driver (nfs, hostpath, both or none; default none)")
 	f.StringVar(&profile.ExpectedJWTIssuer, "expected-jwt-issuer", "", "service-account issuer Substrate's api server trusts (ate-setup --ateapi-expected-jwt-issuer); default is the issuer in the API server's discovery document. "+
 		"Only an override: it must equal the iss of the cluster's tokens and does not make an unroutable issuer reachable")
-	f.BoolVar(&profile.Kind, "kind", false, "target a local kind cluster (ate-setup --kind)")
+	f.StringVar(&platform, "platform", "", "kind of cluster: generic (any Kubernetes cluster: an in-cluster object store, gvisor sandboxes, no docker on this host), gke (GCS and a Google service account) or kind (a local kind cluster). "+
+		"Default: kind when every node is a kind node, else generic; gke is never detected")
+	f.BoolVar(&kind, "kind", false, "deprecated: use --platform kind")
+	_ = f.MarkDeprecated("kind", "use --platform kind")
+	f.StringVar(&profile.RustFSStorageClass, "rustfs-storage-class", "", "generic platform: StorageClass of the volume of the in-cluster object store (default: the cluster default class)")
+	f.StringVar(&profile.RustFSStorageSize, "rustfs-storage-size", "", "generic platform: size of the object-store volume (default "+substrateinstall.DefaultRustFSStorageSize+")")
+	f.StringVar(&profile.PostgresStorageSize, "postgres-storage-size", "", "generic platform: size of the bundled PostgreSQL volume (default "+substrateinstall.DefaultPostgresStorageSize+"); its class is --postgres-storage-class")
+	f.StringVar(&profile.GCPProjectID, "gcp-project-id", "", "gke platform: Google Cloud project (ate-setup --gcp-project-id); default PROJECT_ID of the environment")
+	f.StringVar(&profile.SnapshotTransferGSAName, "snapshot-transfer-gsa-name", "", "gke platform: Google service account that snapshot transfers run as (ate-setup --snapshot-transfer-gsa-name); default SNAPSHOT_TRANSFER_GSA_NAME of the environment")
 	mustRequire(install, "substrate-source")
 	mustRequire(install, "kubeconfig")
 	mustRequire(install, "context")

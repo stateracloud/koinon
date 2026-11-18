@@ -68,8 +68,19 @@ type Profile struct {
 	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
 	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
-	// Kind is ate-setup --kind: target a local kind cluster (kind overlays, host-architecture images).
-	Kind bool
+	// Platform is the kind of cluster. Empty means detect it from the nodes: kind or generic, never gke.
+	Platform Platform
+	// RustFSStorageClass, RustFSStorageSize and PostgresStorageSize size the in-cluster object store and the
+	// bundled PostgreSQL on the generic platform. Empty class means the cluster default StorageClass; empty
+	// sizes mean DefaultRustFSStorageSize and DefaultPostgresStorageSize. They are refused on other platforms.
+	RustFSStorageClass  string
+	RustFSStorageSize   string
+	PostgresStorageSize string
+	// GCPProjectID and SnapshotTransferGSAName are ate-setup --gcp-project-id and --snapshot-transfer-gsa-name
+	// for the gke platform. Empty leaves them to the environment of ate-setup (PROJECT_ID,
+	// SNAPSHOT_TRANSFER_GSA_NAME). They are refused on other platforms.
+	GCPProjectID            string
+	SnapshotTransferGSAName string
 }
 
 // csiDrivers are the values of ate-setup --setup-csi (cmd/ate-setup/internal/steps/csi.go ValidateCSIDriver).
@@ -82,6 +93,9 @@ func (p Profile) Validate() error {
 	}
 	if p.SetupCSI != "" && !slices.Contains(csiDrivers, p.SetupCSI) {
 		return fmt.Errorf("substrate profile: unknown CSI driver %q (valid: %s)", p.SetupCSI, strings.Join(csiDrivers, ", "))
+	}
+	if err := p.validatePlatform(); err != nil {
+		return err
 	}
 	if p.ExpectedJWTIssuer != "" {
 		if u, err := url.Parse(p.ExpectedJWTIssuer); err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
@@ -116,7 +130,7 @@ func (p Profile) SetupArgs(namespace string) []string {
 		"--image-repo=" + repo,
 		"--image-tag=" + PinnedVersion,
 	}
-	if p.SandboxClasses != "" {
+	if p.SandboxClasses != "" && p.Platform != PlatformGeneric {
 		args = append(args, "--sandbox-classes="+p.SandboxClasses)
 	}
 	if p.PostgresStorageClass != "" {
@@ -128,16 +142,30 @@ func (p Profile) SetupArgs(namespace string) []string {
 	if p.ExpectedJWTIssuer != "" {
 		args = append(args, "--ateapi-expected-jwt-issuer="+p.ExpectedJWTIssuer)
 	}
-	if p.Kind {
+	switch p.Platform {
+	case PlatformKind:
 		args = append(args, "--kind")
+	case PlatformGeneric:
+		// ate-setup's kind route installs an in-cluster object store and leaves out the GKE-only mounts. The
+		// microVM class is left out: its asset staging needs docker on the installer host and cluster nodes of the
+		// host's architecture (generic.go).
+		args = append(args, "--kind", "--sandbox-classes="+genericSandboxClasses)
+	case PlatformGKE:
+		if p.GCPProjectID != "" {
+			args = append(args, "--gcp-project-id="+p.GCPProjectID)
+		}
+		if p.SnapshotTransferGSAName != "" {
+			args = append(args, "--snapshot-transfer-gsa-name="+p.SnapshotTransferGSAName)
+		}
 	}
 	return args
 }
 
 // Runner runs commands: ate-setup in the source checkout, and the read-only probes of the pin check.
 type Runner interface {
-	// Run runs name in dir (empty is the current directory), writing its output to out.
-	Run(ctx context.Context, dir, name string, args []string, out io.Writer) error
+	// Run runs name in dir (empty is the current directory) with env added to the environment of the child,
+	// writing its output to out.
+	Run(ctx context.Context, dir, name string, args, env []string, out io.Writer) error
 	// Output runs name in dir and returns its standard output.
 	Output(ctx context.Context, dir, name string, args []string) (string, error)
 }
@@ -227,7 +255,7 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 	// of the source runs in git archive and no replace ref substitutes the pinned objects.
 	repo := filepath.Join(tmp, "repo.git")
 	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
-	if err := i.Runner.Run(ctx, "", "git", clone, i.Out); err != nil {
+	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
 		return fail(fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err))
 	}
 	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
@@ -238,7 +266,7 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 		return fail(fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got)))
 	}
 	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), i.Out); err != nil {
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
 		return fail(fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err))
 	}
 	if err := extractTar(archive, b.dir); err != nil {
@@ -247,7 +275,7 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 	const versionPkg = "go.ate.dev/substrate/internal/version"
 	ldflags := "-X " + versionPkg + ".Version=" + PinnedVersion + " -X " + versionPkg + ".Commit=" + PinnedCommit
 	build := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", b.binary, "./cmd/ate-setup"}
-	if err := i.Runner.Run(ctx, b.dir, "go", build, i.Out); err != nil {
+	if err := i.Runner.Run(ctx, b.dir, "go", build, nil, i.Out); err != nil {
 		return fail(fmt.Errorf("build ate-setup %s: %w", PinnedVersion, err))
 	}
 	ver, err := i.Runner.Output(ctx, "", b.binary, []string{"--version"})
@@ -376,8 +404,23 @@ func (i *Installer) Install(ctx context.Context) error {
 	if i.Kubeconfig == "" || i.Context == "" {
 		return errors.New("the installer needs a kubeconfig and a context: it does not act on the ambient current context")
 	}
+	platform, err := i.resolvePlatform(ctx)
+	if err != nil {
+		return err
+	}
+	// From here the platform is known: every later step reads it from the profile.
+	i.Profile.Platform = platform
+	if err := i.Profile.Validate(); err != nil {
+		return err
+	}
 	if err := i.CheckKind(ctx); err != nil {
 		return err
+	}
+	if platform == PlatformGeneric {
+		// Only the gvisor class is installed, so the node devices of the vm tier are not needed.
+		sub.VMTier = false
+		i.Checker.Config.Substrate = &sub
+		_, _ = fmt.Fprintln(i.Out, "platform generic: the vm tier (microVM) is not installed; the sandbox class is gvisor")
 	}
 	setup, err := i.BuildSetup(ctx)
 	if err != nil {
@@ -391,7 +434,11 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 	}()
 	// Checks that need no namespace come first: a cluster that cannot run Substrate fails with nothing created.
-	if failed := preflight.Write(i.Out, i.Checker.SubstrateStaticPrerequisites(ctx)); failed > 0 {
+	static := i.Checker.SubstrateStaticPrerequisites(ctx)
+	if platform == PlatformGeneric {
+		static = append(static, i.CheckStorage(ctx)...)
+	}
+	if failed := preflight.Write(i.Out, static); failed > 0 {
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
 	// One issuer for the probe and for ate-setup, passed to ate-setup explicitly: there a flag wins over an
@@ -422,12 +469,25 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
 	}
+	profile.Platform = platform
+	var setupEnv []string
+	if platform == PlatformGeneric {
+		if err := profile.ApplyGenericOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
+			return err
+		}
+		if setupEnv, err = WriteDockerShim(filepath.Join(setup.Root(), "shim"), os.Getenv("PATH")); err != nil {
+			return fmt.Errorf("write the docker shim: %w", err)
+		}
+		if err := i.EnsureRustFSCredentials(ctx); err != nil {
+			return err
+		}
+	}
 	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
-	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, i.Out); err != nil {
+	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, setupEnv, i.Out); err != nil {
 		keepBuild = true
 		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again (the build directory %s stays so that command can run; delete it after the cleanup):\n  %s",
-			PinnedVersion, err, setup.Root(), cleanupCommand(setup, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
+			PinnedVersion, err, setup.Root(), cleanupCommand(setup, platform, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
 	}
 	if _, err := i.EnsureAPIAuthentication(ctx, profile.ExpectedJWTIssuer); err != nil {
 		return err
@@ -446,9 +506,28 @@ func (i *Installer) Install(ctx context.Context) error {
 
 // cleanupCommand is the command that removes what ate-setup deploy ate-system created (ate-setup delete
 // ate-system). It runs from the exported tree, as ate-setup reads manifests from it.
-func cleanupCommand(b *Build, namespace, kubeconfig, kctx string) string {
-	return fmt.Sprintf("cd %s && %s delete ate-system %s --namespace=%s --kubeconfig=%s --context=%s",
-		shellQuote(b.Dir()), shellQuote(b.Binary()), noDevEnvFlag, shellQuote(namespace), shellQuote(kubeconfig), shellQuote(kctx))
+// The kind and generic platforms delete with --kind: ate-setup then deletes the objects of the kind overlay,
+// which on the generic platform is the overlay the installer corrected in this tree.
+func cleanupCommand(b *Build, platform Platform, namespace, kubeconfig, kctx string) string {
+	kind := ""
+	if platform == PlatformKind || platform == PlatformGeneric {
+		kind = " --kind"
+	}
+	return fmt.Sprintf("cd %s && %s delete ate-system %s%s --namespace=%s --kubeconfig=%s --context=%s",
+		shellQuote(b.Dir()), shellQuote(b.Binary()), noDevEnvFlag, kind, shellQuote(namespace), shellQuote(kubeconfig), shellQuote(kctx))
+}
+
+// resolvePlatform is the platform of the profile, or the detected one when the profile has none.
+func (i *Installer) resolvePlatform(ctx context.Context) (Platform, error) {
+	if i.Profile.Platform != "" {
+		return i.Profile.Platform, nil
+	}
+	p, err := i.DetectPlatform(ctx)
+	if err != nil {
+		return "", err
+	}
+	_, _ = fmt.Fprintf(i.Out, "platform %s (detected from the nodes; set --platform to choose)\n", p)
+	return p, nil
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

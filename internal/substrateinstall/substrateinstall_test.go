@@ -38,12 +38,17 @@ var crdGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version:
 // would write and the binary that "go build" would build, and reports what the test sets.
 type runner struct {
 	calls [][]string
+	envs  [][]string
 	err   error
 	// What the probes report: the ate-setup --version line, and what the repository resolves the pinned commit to.
 	version, resolved string
 	// tarEntries are the export's entries; nil is one file.
 	tarEntries []tar.Header
-	dirs       []string
+	// tarFiles, when set, are the files of the export with their content.
+	tarFiles map[string]string
+	// onSetup is called with the directory ate-setup runs in.
+	onSetup func(dir string)
+	dirs    []string
 	// ranIn is the directory ate-setup ran in, and existed is whether it existed then.
 	ranIn   string
 	existed bool
@@ -53,8 +58,9 @@ type runner struct {
 	cloneErr error
 }
 
-func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Writer) error {
+func (r *runner) Run(_ context.Context, dir, name string, args, env []string, _ io.Writer) error {
 	r.calls = append(r.calls, append([]string{name}, args...))
+	r.envs = append(r.envs, env)
 	r.dirs = append(r.dirs, dir)
 	switch {
 	case name == "git":
@@ -63,6 +69,9 @@ func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Wr
 		}
 		for _, a := range args {
 			if out, ok := strings.CutPrefix(a, "--output="); ok {
+				if r.tarFiles != nil {
+					return writeFilesTar(out, r.tarFiles)
+				}
 				return writeTar(out, r.tarEntries)
 			}
 		}
@@ -75,6 +84,9 @@ func (r *runner) Run(_ context.Context, dir, name string, args []string, _ io.Wr
 		}
 	case strings.HasSuffix(name, "ate-setup"):
 		r.ranIn = dir
+		if r.onSetup != nil {
+			r.onSetup(dir)
+		}
 		_, err := os.Stat(dir)
 		r.existed = err == nil
 	}
@@ -188,7 +200,7 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 	return &substrateinstall.Installer{
 		Kube: client, Dynamic: dyn, Checker: checker, Runner: r, SourceRepo: "/src/substrate",
 		Kubeconfig: "/etc/kube/config", Context: "lab",
-		Profile:      substrateinstall.Profile{StorageBucket: "snapshots"},
+		Profile:      substrateinstall.Profile{StorageBucket: "snapshots", Platform: substrateinstall.PlatformGKE},
 		Out:          io.Discard,
 		PollInterval: time.Millisecond, WaitTimeout: 50 * time.Millisecond,
 	}, r, client
@@ -491,7 +503,7 @@ func TestProfilePassesTheClusterOptions(t *testing.T) {
 	}
 	args := substrateinstall.Profile{
 		StorageBucket: "b", PostgresStorageClass: "local-path", SetupCSI: "none",
-		ExpectedJWTIssuer: "https://kubernetes.default.svc", Kind: true,
+		ExpectedJWTIssuer: "https://kubernetes.default.svc", Platform: substrateinstall.PlatformKind,
 	}.SetupArgs("ate-system")
 	g.Expect(args).To(ContainElements("--ateapi-postgres-storage-class=local-path", "--setup-csi=none",
 		"--ateapi-expected-jwt-issuer=https://kubernetes.default.svc", "--kind"))
