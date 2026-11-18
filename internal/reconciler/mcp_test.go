@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -392,6 +393,44 @@ var _ = Describe("Org MCP servers", func() {
 		Entry("a header", "credential_header", "X-Api-$HOME", "credential header"),
 		Entry("a prefix", "credential_prefix", "Bearer ${HOME} ", "credential prefix"),
 	)
+
+	It("delivers a server's CA bundle as a file of its own target, and no other target names one (#278)", func(ctx SpecContext) {
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		t, ok := targetOf(st, slug+"-private")
+		Expect(ok).To(BeTrue())
+		Expect(t.CAFile).To(HavePrefix("/secrets/providers/mcpca-" + private.ID + "-"))
+		other, ok := targetOf(st, slug+"-plain")
+		Expect(ok).To(BeTrue())
+		Expect(other.CAFile).To(BeEmpty(), "a bundle replaces the system roots, so it must not reach another target")
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(sec.Data[strings.TrimPrefix(t.CAFile, "/secrets/providers/")])).To(Equal(string(ca.CA)))
+	})
+
+	It("does not serve a stored credentialed server whose URL is not https, and still applies the others (ADR 0120)", func(ctx SpecContext) {
+		bad := server(ctx, org, "cleartext", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		// A row from before the rule: the service refuses to write it now.
+		_, err := pool.Exec(ctx, `UPDATE mcp_servers SET url = 'http://mcp.example.com/cleartext' WHERE id = $1`, bad.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring(slug + "/cleartext not served: it has a credential and its URL is not https")))
+		_, ok := targetOf(mg.last(), slug+"-wiki")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-cleartext")
+		Expect(ok).To(BeFalse())
+	})
 
 	It("reserves the approval target names too: one org's server cannot take another's -ask name", func(ctx SpecContext) {
 		// Org "x8a-b" with the server "ask" would be the target x8a-b-ask, the approval target of org

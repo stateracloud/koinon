@@ -112,16 +112,26 @@ spec:
         - name: fakemcp
           image: localhost:5001/koinon-fakemcp:e2e
           imagePullPolicy: Always
-          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token"]
+          # HTTPS (ADR 0120: Koinon sends a credential only over HTTPS). run.sh makes one CA and certificate per
+          # run (cmd/koinon-faketls) and gives them as the Secret fakemcp-tls, so a restart of this pod keeps the
+          # same CA. The CA is the server record's caBundle. No key is in the tree.
+          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token", "-http-addr", ":8081",
+                 "-tls-cert-file", "/tls/tls.crt", "-tls-key-file", "/tls/tls.key"]
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
+            - {name: plain, containerPort: 8081}
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: http, scheme: HTTPS}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
+      volumes:
+        - name: tls
+          secret: {secretName: fakemcp-tls}
 ---
 apiVersion: v1
 kind: Service
@@ -132,3 +142,5 @@ spec:
   selector: {app: fakemcp}
   ports:
     - {name: http, port: 8080, targetPort: http}
+    # Plain HTTP, for the server that asks for OAuth (it has no credential, so ADR 0120 allows http).
+    - {name: plain, port: 8081, targetPort: plain}

@@ -49,7 +49,9 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -198,6 +200,9 @@ type Server struct {
 	Source           string `json:"source"`
 	ManagedBySecret  string `json:"managedBySecret,omitempty"`
 	DisabledReason   string `json:"disabledReason,omitempty"`
+	// CABundle is the PEM bundle of the private CA that signs the server's certificate, "" for the
+	// system roots. It is public (certificates only) and trusted for this server alone.
+	CABundle string `json:"caBundle,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
 	Removed bool `json:"removed,omitempty"`
 	// CredentialLostAt is set when the credential was lost with the KEK that encrypted it (keys
@@ -279,6 +284,8 @@ type Preflight func(ctx context.Context, p PreflightRequest) error
 type PreflightRequest struct {
 	URL       string
 	Transport string
+	// CABundle is the server's own CA bundle (PEM), "" for the system roots.
+	CABundle string
 }
 
 // New returns a Service. keys may be nil; servers with a credential then cannot be written.
@@ -341,7 +348,8 @@ func toServer(r store.McpServer) Server {
 		ID: r.ID.String(), Name: r.Name, URL: r.Url, Transport: string(r.Transport),
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
-		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
+		CABundle: r.CaBundle,
+		Removed:  r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,
@@ -362,7 +370,7 @@ func toTool(t store.McpTool) Tool {
 func serverSummary(r store.McpServer) map[string]any {
 	return map[string]any{
 		"name": r.Name, "url": r.Url, "transport": string(r.Transport), "hasCredential": len(r.Credential) > 0,
-		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source),
+		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source), "hasCABundle": r.CaBundle != "",
 		"kind": declarationOf(r).Kind, "dataClass": declarationOf(r).Legs,
 	}
 }
@@ -403,6 +411,9 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return err
 	}
 	if header != "" {
+		if !gateway.CredentialSafeURL(rawURL) {
+			return invalid("url must be https when the server has a credential (http is allowed only on a loopback address)")
+		}
 		if !headerPattern.MatchString(header) {
 			return invalid("credential header must be an HTTP header name")
 		}
@@ -412,6 +423,21 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	}
 	if !prefixPattern.MatchString(prefix) {
 		return invalid("credential prefix must be at most 32 printable ASCII characters, for example \"Bearer \"")
+	}
+	return nil
+}
+
+// ValidateCABundle checks a server's CA bundle: empty (the system roots), or PEM certificates only
+// on an https URL (a CA verifies a TLS certificate, and an http URL has none).
+func ValidateCABundle(rawURL, bundle string) error {
+	if bundle == "" {
+		return nil
+	}
+	if u, err := url.Parse(rawURL); err != nil || u.Scheme != "https" {
+		return invalid("a CA bundle needs an https url")
+	}
+	if err := codehost.ValidateCABundle(bundle); err != nil {
+		return invalid("%s", err.Error())
 	}
 	return nil
 }
@@ -490,6 +516,8 @@ type Input struct {
 	CredentialValue  string
 	// Class is what the server exposes. Nil is DefaultDeclaration: not yet classified.
 	Class *Declaration
+	// CABundle is the PEM bundle of the CA that signs the server's certificate; "" uses the system roots.
+	CABundle string
 }
 
 // Patch changes a server; nil fields stay.
@@ -499,6 +527,8 @@ type Patch struct {
 	// Credential replaces the credential; RemoveCredential removes it. Setting both is invalid.
 	Credential       *CredentialPatch
 	RemoveCredential bool
+	// CABundle replaces the server's CA bundle; "" goes back to the system roots. Nil keeps it.
+	CABundle *string
 }
 
 // CredentialPatch replaces the header, prefix or secret. Value nil keeps the stored secret.
@@ -552,6 +582,9 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return Server{}, err
 	}
+	if err := ValidateCABundle(in.URL, in.CABundle); err != nil {
+		return Server{}, err
+	}
 	if in.Class != nil {
 		d, err := in.Class.Normalize()
 		if err != nil {
@@ -562,7 +595,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Server{}, err
 	}
-	if err := s.runPreflight(ctx, in.URL, in.Transport); err != nil {
+	if err := s.runPreflight(ctx, in.URL, in.Transport, in.CABundle); err != nil {
 		return Server{}, err
 	}
 	id, err := newID()
@@ -579,7 +612,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		p := store.CreateMCPServerParams{
 			OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 			CredentialHeader: header, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
-			Source: store.ConfigSourceUi, CreatedBy: creator,
+			Source: store.ConfigSourceUi, CreatedBy: creator, CaBundle: in.CABundle,
 		}
 		createClass(&p, in.Class)
 		if in.Class != nil {
@@ -613,14 +646,14 @@ func prefixIf(prefix string, has bool) string {
 	return prefix
 }
 
-func (s *Service) runPreflight(ctx context.Context, rawURL, transport string) error {
+func (s *Service) runPreflight(ctx context.Context, rawURL, transport, caBundle string) error {
 	if err := s.hold.Err(); err != nil {
 		return err
 	}
 	if s.preflight == nil {
 		return nil
 	}
-	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport})
+	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport, CABundle: caBundle})
 }
 
 // Update changes a server entered by a person.
@@ -648,6 +681,10 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if patch.Transport != nil {
 			transport = *patch.Transport
 		}
+		caBundle := cur.CaBundle
+		if patch.CABundle != nil {
+			caBundle = *patch.CABundle
+		}
 		header, prefix, cred := cur.CredentialHeader.String, cur.CredentialPrefix, cur.Credential
 		value := ""
 		switch {
@@ -671,16 +708,19 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err := ValidateRemote(u, transport, header, prefix); err != nil {
 			return err
 		}
+		if err := ValidateCABundle(u, caBundle); err != nil {
+			return err
+		}
 		if err := s.policy.Check(ctx, u); err != nil {
 			return err
 		}
-		if u != cur.Url || transport != string(cur.Transport) {
-			if err := s.runPreflight(ctx, u, transport); err != nil {
+		if u != cur.Url || transport != string(cur.Transport) || caBundle != cur.CaBundle {
+			if err := s.runPreflight(ctx, u, transport, caBundle); err != nil {
 				return err
 			}
 		}
 		out, err = q.UpdateMCPServer(ctx, store.UpdateMCPServerParams{
-			OrgID: org, ID: sid, Url: u, Transport: store.McpTransport(transport),
+			OrgID: org, ID: sid, Url: u, Transport: store.McpTransport(transport), CaBundle: caBundle,
 			CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0),
 			// The envelope is rewritten only when this patch replaces or removes it. cur was read
 			// without a lock, and a concurrent `keys rewrap` or `reencrypt` may have replaced the

@@ -4,6 +4,8 @@ package e2e_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -26,7 +28,9 @@ import (
 )
 
 const (
-	fakeMCPURL = "http://fakemcp.koinon-e2e-fakes.svc:8080/mcp"
+	// The fake serves HTTPS (ADR 0120: Koinon sends a credential only over HTTPS). The server record carries
+	// its CA (caBundle), which the gateway trusts for that server only.
+	fakeMCPURL = "https://fakemcp.koinon-e2e-fakes.svc:8080/mcp"
 	fakeMCPKey = "not-a-real-token"
 )
 
@@ -40,11 +44,34 @@ type fakeMCPRecord struct {
 	Args                string `json:"args"`
 }
 
+// fakeMCPClient is the client for the fake MCP server's /_fake endpoints. It trusts the CA the fake made
+// at start (KOINON_E2E_FAKEMCP_CA, a public certificate that run.sh saved), and nothing else.
+func fakeMCPClient() *http.Client {
+	GinkgoHelper()
+	caFile := os.Getenv("KOINON_E2E_FAKEMCP_CA")
+	Expect(caFile).NotTo(BeEmpty(), "KOINON_E2E_FAKEMCP_CA")
+	pem, err := os.ReadFile(caFile)
+	Expect(err).NotTo(HaveOccurred())
+	pool := x509.NewCertPool()
+	Expect(pool.AppendCertsFromPEM(pem)).To(BeTrue(), "the fake MCP CA file holds no certificate")
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+}
+
+// fakeMCPCA is the PEM of the CA that signed the fake MCP server's certificate: the server record's caBundle.
+func fakeMCPCA() string {
+	GinkgoHelper()
+	caFile := os.Getenv("KOINON_E2E_FAKEMCP_CA")
+	Expect(caFile).NotTo(BeEmpty(), "KOINON_E2E_FAKEMCP_CA")
+	pem, err := os.ReadFile(caFile)
+	Expect(err).NotTo(HaveOccurred())
+	return string(pem)
+}
+
 func fakeMCPRequests(ctx context.Context, base string) []fakeMCPRecord {
 	GinkgoHelper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/_fake/requests", nil)
 	Expect(err).NotTo(HaveOccurred())
-	res, err := http.DefaultClient.Do(req)
+	res, err := fakeMCPClient().Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = res.Body.Close() }()
 	var out []fakeMCPRecord
@@ -72,13 +99,13 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL (a kubectl bound to the e2e cluster's context)")
 
 	By("a server that asks each user to sign in is refused")
-	code, body := admin(ctx, http.MethodPost, "/mcp-servers", `{"name":"oauthy","url":"http://fakemcp.koinon-e2e-fakes.svc:8080/oauth-mcp"}`)
+	code, body := admin(ctx, http.MethodPost, "/mcp-servers", `{"name":"oauthy","url":"http://fakemcp.koinon-e2e-fakes.svc:8081/oauth-mcp"}`)
 	Expect(code).To(Equal(http.StatusBadRequest), string(body))
 	Expect(string(body)).To(ContainSubstring("OAuth"))
 
 	By("a server with a credential is added")
 	code, body = admin(ctx, http.MethodPost, "/mcp-servers",
-		fmt.Sprintf(`{"name":"tracker","url":%q,"credentialHeader":"X-Api-Key","credentialValue":%q}`, fakeMCPURL, fakeMCPKey))
+		fmt.Sprintf(`{"name":"tracker","url":%q,"credentialHeader":"X-Api-Key","credentialValue":%q,"caBundle":%q}`, fakeMCPURL, fakeMCPKey, fakeMCPCA()))
 	Expect(code).To(Equal(http.StatusCreated), string(body))
 	var srv struct {
 		ID            string `json:"id"`
@@ -126,7 +153,8 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	anonymous := 0
 	for _, r := range recs {
 		if r.Agent == "" {
-			// koinon-api's add-time OAuth check: direct, and it carries no credential.
+			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
+			// it carries no credential. The API probes with the system roots, so it cannot reach the HTTPS port.
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
 			anonymous++
 			continue
@@ -299,6 +327,7 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 			"KOINON_ESCAPE_MCP_PORT=8080",
 			fmt.Sprintf("KOINON_ESCAPE_MCP_KEY=%s", key),
 			"KOINON_ESCAPE_MCP_RECEIVER_URL="+fake,
+			"KOINON_ESCAPE_MCP_RECEIVER_CA="+os.Getenv("KOINON_E2E_FAKEMCP_CA"),
 			"KOINON_REQUIRE=escape-mcp-gateway",
 		)
 		cmd.Stdout, cmd.Stderr = GinkgoWriter, GinkgoWriter

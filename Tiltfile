@@ -159,7 +159,20 @@ if KIND:
     k8s_resource(new_name='fakes-namespace', objects=['koinon-e2e-fakes:namespace'], labels=['fakes'])
     k8s_resource('fakemodel', resource_deps=['fakes-namespace'], labels=['fakes'])
     k8s_resource('fakegithub', resource_deps=['fakes-namespace'], labels=['fakes'])
-    k8s_resource('fakemcp', resource_deps=['fakes-namespace'], labels=['fakes'])
+    # The fake MCP server serves HTTPS (ADR 0120: a credential goes only over HTTPS) with a throw-away CA
+    # and certificate made here, once, into the Secret fakemcp-tls. When you register the fake as an MCP
+    # server, paste the CA (.tilt-fakemcp-tls/ca.crt) into the server's CA certificate field (caBundle).
+    local_resource(
+        'fakemcp-tls',
+        'mkdir -p .tilt-fakemcp-tls && ' +
+        'go run ./cmd/koinon-faketls -dir .tilt-fakemcp-tls -hosts fakemcp.koinon-e2e-fakes.svc,fakemcp.koinon-e2e-fakes.svc.cluster.local,fakemcp,localhost,127.0.0.1 && ' +
+        'kubectl --context %s -n koinon-e2e-fakes create secret generic fakemcp-tls ' % ctx +
+        '--from-file=tls.crt=.tilt-fakemcp-tls/tls.crt --from-file=tls.key=.tilt-fakemcp-tls/tls.key --dry-run=client -o yaml | ' +
+        'kubectl --context %s apply -f -' % ctx,
+        resource_deps=['fakes-namespace'],
+        labels=['fakes'],
+    )
+    k8s_resource('fakemcp', resource_deps=['fakes-namespace', 'fakemcp-tls'], labels=['fakes'])
 
 # The chart is rendered with `helm template`, which is deterministic (the chart has no lookup and
 # renders no password). Hooks are not run by `helm template | kubectl apply`, so the ensure-secrets

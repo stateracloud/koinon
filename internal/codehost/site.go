@@ -62,10 +62,7 @@ func (s Site) Pool() (*x509.CertPool, error) {
 // CertPool parses a PEM bundle into the system roots plus its certificates. It fails when the
 // bundle holds no certificate, or anything else than PEM certificates.
 func CertPool(bundle string) (*x509.CertPool, error) {
-	if len(bundle) > MaxCABundleBytes {
-		return nil, fmt.Errorf("the CA bundle is larger than %d KiB", MaxCABundleBytes>>10)
-	}
-	if err := checkPEM(bundle); err != nil {
+	if err := ValidateCABundle(bundle); err != nil {
 		return nil, err
 	}
 	pool, err := x509.SystemCertPool()
@@ -76,6 +73,15 @@ func CertPool(bundle string) (*x509.CertPool, error) {
 		return nil, errors.New("the CA bundle holds no PEM certificate")
 	}
 	return pool, nil
+}
+
+// ValidateCABundle checks the size and the PEM of a CA bundle: it holds certificates only, at least
+// one. It is the check a record applies when it stores a bundle; CertPool applies it, too.
+func ValidateCABundle(bundle string) error {
+	if len(bundle) > MaxCABundleBytes {
+		return fmt.Errorf("the CA bundle is larger than %d KiB", MaxCABundleBytes>>10)
+	}
+	return checkPEM(bundle)
 }
 
 // checkPEM rejects a bundle with a block that is not a certificate, which could be a private key

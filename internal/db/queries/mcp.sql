@@ -9,14 +9,14 @@
 -- name: CreateMCPServer :one
 INSERT INTO mcp_servers (org_id, id, name, url, transport, credential_header, credential_prefix, credential,
                          source, managed_by_secret, declared_version, disabled_reason, created_by,
-                         kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id)
+                         kind, exposes_untrusted_input, exposes_private_data, code_host_connection_id, ca_bundle)
 -- A NULL kind or leg is the column default (kind other, both legs: not yet classified).
 VALUES (@org_id, @id, @name, @url, @transport, sqlc.narg(credential_header), @credential_prefix, sqlc.narg(credential),
         @source, sqlc.narg(managed_by_secret), sqlc.narg(declared_version), sqlc.narg(disabled_reason), sqlc.narg(created_by),
         COALESCE(sqlc.narg(kind)::mcp_server_kind, 'other'),
         COALESCE(sqlc.narg(exposes_untrusted_input)::boolean, true),
         COALESCE(sqlc.narg(exposes_private_data)::boolean, true),
-        sqlc.narg(code_host_connection_id))
+        sqlc.narg(code_host_connection_id), @ca_bundle)
 RETURNING *;
 
 -- name: SetMCPServerDataClass :one
@@ -54,7 +54,7 @@ WHERE org_id = @org_id
 ORDER BY name, source, id;
 
 -- name: UpdateMCPServer :one
--- A change of the URL, transport or credential starts health over: the new settings are unproven.
+-- A change of the URL, transport, CA bundle or credential starts health over: the new settings are unproven.
 -- credential is written only when @set_credential is true (the patch sets or removes it). The caller
 -- read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
 -- envelope since, so writing back the envelope that was read would undo it. credential_header and
@@ -64,7 +64,7 @@ ORDER BY name, source, id;
 -- the credential ends a lost one (#85): the trigger credential_lost_clear covers a stored credential,
 -- this a removed one.
 UPDATE mcp_servers
-SET url = @url, transport = @transport,
+SET url = @url, transport = @transport, ca_bundle = @ca_bundle,
     credential_lost_at = CASE WHEN @set_credential::boolean THEN NULL ELSE credential_lost_at END,
     credential_header = CASE WHEN @set_credential_meta::boolean THEN sqlc.narg(credential_header) ELSE credential_header END,
     credential_prefix = CASE WHEN @set_credential_meta::boolean THEN @credential_prefix ELSE credential_prefix END,
@@ -83,7 +83,7 @@ RETURNING *;
 
 -- name: UpdateDeclaredMCPServer :one
 UPDATE mcp_servers
-SET url = @url, transport = @transport, credential_header = sqlc.narg(credential_header),
+SET url = @url, transport = @transport, ca_bundle = @ca_bundle, credential_header = sqlc.narg(credential_header),
     credential_prefix = @credential_prefix, credential = sqlc.narg(credential),
     declared_version = @declared_version, removed_at = NULL, disabled_reason = NULL, credential_lost_at = NULL,
     -- A new URL is a different server: its data class goes back to the cautious default (kind other,

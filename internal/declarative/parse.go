@@ -70,7 +70,7 @@ const (
 	KeyInstallationID = "installationId"
 	KeyPrivateKey     = "privateKey"
 	KeyBaseURL        = "baseUrl"    // GitHub: optional, a GitHub Enterprise Server host. Gitea: required, https://host[:port][/path]
-	KeyCABundle       = "caBundle"   // optional: the public CA bundle of that host
+	KeyCABundle       = "caBundle"   // optional: the public CA bundle of that host (a connection, or an mcp-server Secret with an https url)
 	KeyReadToken      = "readToken"  // Gitea: the bot's read token
 	KeyWriteToken     = "writeToken" // Gitea: the bot's write token
 	KeyCIDirs         = "ciDirs"     // optional: directories that run CI on the host, one per line or comma-separated
@@ -183,6 +183,7 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 	d := mcpservers.Declared{
 		SecretName: sec.Name, Version: version, Name: get(KeyName), URL: get(KeyURL), Transport: get(KeyTransport),
 		CredentialHeader: get(KeyCredentialHeader), CredentialValue: get(KeyCredential),
+		CABundle: get(KeyCABundle),
 	}
 	if d.Transport == "" {
 		d.Transport = mcpservers.TransportStreamableHTTP
@@ -211,6 +212,8 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 			errs = append(errs, err)
 		} else if err := mcpservers.ValidateRemote(d.URL, d.Transport, header, d.CredentialPrefix); err != nil {
 			errs = append(errs, err)
+		} else if err := mcpservers.ValidateCABundle(d.URL, d.CABundle); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle, err))
 		}
 	}
 	return d, errors.Join(errs...)

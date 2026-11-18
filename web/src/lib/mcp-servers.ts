@@ -210,6 +210,8 @@ export type ServerFormState = {
   /** Create only: what the server exposes. An edit leaves the class to its own control. */
   kind: string
   legs: string[]
+  /** PEM certificates of the private CA that signs the server's certificate; empty for the system roots. */
+  caBundle: string
 }
 
 /** initialMode is the credential mode a stored credential's header and prefix correspond to. */
@@ -234,7 +236,19 @@ export function initialForm(s?: Server): ServerFormState {
     removeCredential: false,
     kind: s?.kind || defaultKind,
     legs: s ? [...s.dataClass] : [...defaultLegs],
+    caBundle: s?.caBundle ?? '',
   }
+}
+
+/** The CA bundle holds certificates only, on an https URL. The API checks it again; this saves a round trip. */
+export function caBundleError(f: ServerFormState): string | undefined {
+  const bundle = f.caBundle.trim()
+  if (bundle === '') return undefined
+  if (!/^https:\/\//i.test(f.url.trim())) return 'A CA certificate needs an https URL.'
+  if (/-----BEGIN (?!CERTIFICATE-----)[A-Z ]*-----/.test(bundle) || !/-----BEGIN CERTIFICATE-----/.test(bundle)) {
+    return 'Paste PEM certificates only: each starts with -----BEGIN CERTIFICATE-----. Never paste a private key.'
+  }
+  return undefined
 }
 
 export function headerError(f: ServerFormState): string | undefined {
@@ -254,6 +268,7 @@ export function formErrors(f: ServerFormState, server?: Server) {
     url: serverUrlError(f.url),
     header: headerError(f),
     value: valueError(f, !!server?.hasCredential && initialMode(server) === f.mode),
+    caBundle: caBundleError(f),
   }
 }
 
@@ -264,6 +279,7 @@ export type CreateServerInput = {
   credentialHeader: string
   credentialPrefix: string
   credentialValue: string
+  caBundle: string
   class: { kind: string; dataClass: string[] }
 }
 
@@ -282,6 +298,7 @@ export function buildCreateRequest(f: ServerFormState): CreateServerInput {
     credentialHeader: withSecret ? c.header : '',
     credentialPrefix: withSecret ? c.prefix : '',
     credentialValue: withSecret ? f.value : '',
+    caBundle: f.caBundle.trim(),
     class: { kind: f.kind, dataClass: [...f.legs] },
   }
 }
@@ -293,6 +310,8 @@ export type UpdateServerInput = {
   credentialPrefix?: string
   credentialValue?: string
   removeCredential?: boolean
+  /** The new CA bundle; an empty string goes back to the system roots. */
+  caBundle?: string
 }
 
 /** buildUpdateRequest sends only what changed; a stored secret stays unless a new one is typed or removal is asked for. */
@@ -300,6 +319,7 @@ export function buildUpdateRequest(s: Server, f: ServerFormState): UpdateServerI
   const out: UpdateServerInput = {}
   if (f.url.trim() !== s.url) out.url = f.url.trim()
   if (f.transport !== s.transport) out.transport = f.transport
+  if (f.caBundle.trim() !== s.caBundle.trim()) out.caBundle = f.caBundle.trim()
   if (f.removeCredential || f.mode === 'none') {
     if (hadCredential(s)) out.removeCredential = true
     return out
@@ -317,7 +337,8 @@ export function buildUpdateRequest(s: Server, f: ServerFormState): UpdateServerI
 }
 
 /** serverErrorField says which form field a server's refusal is about, so the message sits next to it. */
-export function serverErrorField(message: string): 'name' | 'url' | 'credential' | undefined {
+export function serverErrorField(message: string): 'name' | 'url' | 'credential' | 'ca' | undefined {
+  if (/\bca\b|caBundle|certificate/i.test(message)) return 'ca'
   if (/oauth|\burls?\b|address|loopback|private|scheme|https?:|\bhost\b|resolve/i.test(message)) return 'url'
   if (/\bname\b/i.test(message)) return 'name'
   if (/credential|header|secret|token/i.test(message)) return 'credential'

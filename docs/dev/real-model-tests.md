@@ -69,7 +69,10 @@ containing `values: [hack/dev/values-rt1.example.yaml]` and restart `tilt up`: t
 hosts plus the fake model server. On a remote cluster, copy it, replace the fake model entry with your
 model endpoint and name your copy under `values:` in your local.yaml. Then register each as an MCP server
 ([MCP servers](https://koinon.stateracloud.com/docs/operate/mcp-servers/)). Give `rt1-fakecicost` and
-`rt1-searxng-mcp` a bearer credential: the token in the Secrets above.
+`rt1-searxng-mcp` a bearer credential: the token in the Secrets above. Koinon sends a credential only over
+https (ADR 0120; plain http is allowed only for a loopback address). Serve each credentialed fixture over
+https and, when its certificate comes from a private CA, paste that CA's PEM certificate into the server's
+CA certificate field (`caBundle`; trusted for that server only).
 
 ### 2. The model provider and a cost guard
 

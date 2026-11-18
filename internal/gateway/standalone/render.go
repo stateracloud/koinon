@@ -571,7 +571,15 @@ type mcpEndpoint struct {
 }
 
 type targetPolicies struct {
-	BackendAuth backendAuth `yaml:"backendAuth"`
+	BackendAuth *backendAuth `yaml:"backendAuth,omitempty"`
+	BackendTLS  *backendTLS  `yaml:"backendTLS,omitempty"`
+}
+
+// backendTLS is the TLS policy of one target (agentgateway v1.7.0 BackendPolicies.backendTLS). Its root
+// REPLACES the system roots for that target (agentgateway src/http/backendtls.rs), so it is set only on
+// a target whose server record names a CA, and never shared: another target keeps the system roots.
+type backendTLS struct {
+	Root string `yaml:"root"`
 }
 
 // backendAuth injects a static credential read from a file when the config loads (agentgateway
@@ -776,10 +784,17 @@ func build(s gateway.State, o Options) document {
 				mt.Condition = `apiKey.org == ` + strconv.Quote(t.Org)
 			}
 			if t.CredentialFile != "" {
-				mt.Policies = &targetPolicies{BackendAuth: backendAuth{Credentials: []backendCredential{{
+				mt.Policies = &targetPolicies{BackendAuth: &backendAuth{Credentials: []backendCredential{{
 					Key:      backendKey{File: t.CredentialFile},
 					Location: keyLocation{Header: headerLocation{Name: t.CredentialHeader, Prefix: t.CredentialPrefix}},
 				}}}}
+			}
+			// State.Validate has checked that a CA file goes with an https URL (parsed scheme).
+			if t.CAFile != "" {
+				if mt.Policies == nil {
+					mt.Policies = &targetPolicies{}
+				}
+				mt.Policies.BackendTLS = &backendTLS{Root: t.CAFile}
 			}
 			doc.MCP.Targets = append(doc.MCP.Targets, mt)
 		}

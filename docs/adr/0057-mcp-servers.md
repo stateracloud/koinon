@@ -321,6 +321,27 @@ This changes two points of the 2026-10-30 amendment.
 The leak guard (ADR 0091) is unaffected, except in one respect: a tool result's string that is itself a
 JSON document is now decoded before its text is fingerprinted, up to three levels deep (#684).
 
+## Amendment 2026-11-18: a credentialed server uses https, and trusts its own CA (#278)
+
+Status: accepted (the maintainer's decision on #278).
+
+- **https rule.** A server with a credential must have an https URL (ADR 0120). Plain http stays allowed
+  for a loopback address (`gateway.CredentialSafeURL`). The API refuses the rest when you add or change the
+  server, and the reconciler leaves such a row out of the gateway state, so a row from before the rule is
+  not served with its credential in the clear.
+- **A private CA is per server.** The server record has an optional `caBundle`: PEM certificates (at most
+  256 KiB), allowed only with an https URL. The gateway trusts it for that server only, and the system
+  roots stay in place for every other server. There is no install-wide CA value. In agentgateway
+  v1.6 and later the backend TLS `root` replaces the system roots for the target it is set on, so it is
+  emitted only for a target that has a bundle. The bundle reaches the gateway as a file in the provider keys
+  Secret, in the same way as a credential file, and a new file waits for the kubelet to sync it (the
+  settle rule of the gateway plan) before the target uses it.
+- **Add-time check.** The API's own probe uses the same bundle. A certificate that does not verify gives an
+  error that says to put the CA in `caBundle`.
+- **Declared servers** read the key `caBundle` from the labelled Secret.
+- The `kubernetes` gateway mode cannot render a per-target CA, so it refuses a target that has one; use
+  `gateway.mode=standalone`.
+
 ## Upstream verification
 
 Checked 2026-10-23 against agentgateway v1.6.0 and the MCP Registry; see the research report. The

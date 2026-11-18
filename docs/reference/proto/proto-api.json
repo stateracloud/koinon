@@ -9263,7 +9263,7 @@
           "name": "MCPTarget",
           "fullName": "koinon.gateway.v1alpha1.MCPTarget",
           "file": "koinon/gateway/v1alpha1/state.proto",
-          "description": "MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in\nthe gateway, not the credential; credential_header and credential_prefix say how it is sent.",
+          "description": "MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in\nthe gateway, not the credential; credential_header and credential_prefix say how it is sent. ca_file is\nwhere the target's own CA bundle (public certificates) is mounted, empty for the system roots.",
           "deprecated": false,
           "fields": [
             {
@@ -9323,6 +9323,15 @@
             {
               "name": "credential_file",
               "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_file",
+              "number": 8,
               "type": "string",
               "label": "singular",
               "oneof": "",
@@ -10467,6 +10476,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "class is what the server exposes; leaving it out is the unclassified default (kind \"other\", both\nlegs)."
+            },
+            {
+              "name": "ca_bundle",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the\nsystem roots. Certificates only, at most 256 KiB."
             }
           ]
         },
@@ -10871,6 +10889,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is\nnot called, probed or offered to runs. Unset otherwise."
+            },
+            {
+              "name": "ca_bundle",
+              "number": 25,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the\nsystem roots. It is public (certificates only) and trusted for this server alone."
             }
           ]
         },
@@ -11519,6 +11546,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "ca_bundle",
+              "number": 9,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle replaces the server's CA bundle; set to \"\" to go back to the system roots. Unset keeps it."
             }
           ]
         },

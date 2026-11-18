@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -504,6 +505,10 @@ type MCPTarget struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialFile   string
+	// CAFile is the path, inside the gateway, of a PEM bundle that verifies the target's TLS
+	// certificate in place of the system roots (a private CA). It belongs to this target only and
+	// needs an https URL. Empty uses the system roots. Public: it holds certificates only.
+	CAFile string
 }
 
 // ToolGrant allows an agent to see and call some tools of one MCP target.
@@ -910,6 +915,15 @@ func (s MCPState) validate() []error {
 		}
 		if t.CredentialFile != "" && !keyPath.MatchString(t.CredentialFile) {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential file path", t.Name))
+		}
+		if t.CAFile != "" {
+			if !keyPath.MatchString(t.CAFile) {
+				errs = append(errs, fmt.Errorf("mcp target %q: invalid CA file path", t.Name))
+			}
+			// The scheme is parsed, which lower-cases it: a raw prefix test would miss "HTTPS://".
+			if u, err := url.Parse(t.URL); err != nil || strings.ToLower(u.Scheme) != "https" {
+				errs = append(errs, fmt.Errorf("mcp target %q: a CA file needs an https URL", t.Name))
+			}
 		}
 		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))

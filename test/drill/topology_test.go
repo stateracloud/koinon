@@ -174,13 +174,17 @@ func TestTheFakeMCPServerIsAnInputAndItsHostIsAllowed(t *testing.T) {
 	if err := top.Validate(); err == nil || !strings.Contains(err.Error(), "fakeMcpImage") {
 		t.Fatalf("a topology without fakeMcpImage must be refused, got %v", err)
 	}
-	m := drill.FakeMCPManifest("koinon-drill-fakes-a1b2c3", "a1b2c3", "localhost:5001/koinon-fakemcp:e2e")
+	set, err := drill.FakeMCPTLS("koinon-drill-fakes-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := drill.FakeMCPManifest("koinon-drill-fakes-a1b2c3", "a1b2c3", "localhost:5001/koinon-fakemcp:e2e", set)
 	for _, want := range []string{"name: fakemcp", drill.FakeMCPKey, drill.RunLabel + `: "a1b2c3"`} {
 		if !strings.Contains(m, want) {
 			t.Errorf("the fake MCP manifest lacks %q", want)
 		}
 	}
-	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
+	if !strings.Contains(drill.FakeMCPURL("koinon-drill-fakes-a1b2c3"), "https://fakemcp.koinon-drill-fakes-a1b2c3.svc:8080/mcp") {
 		t.Error("the fake MCP URL names the Service in the fakes namespace")
 	}
 }

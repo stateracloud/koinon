@@ -27,6 +27,8 @@ type Declared struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialValue  string
+	// CABundle is the Secret's caBundle key: PEM certificates that sign the server's certificate.
+	CABundle string
 	// Disabled is the Secret's disabled key. It is applied in the transaction of the upsert, so a new
 	// server declared disabled is never visible enabled (ADR 0110 decision 5).
 	Disabled bool
@@ -36,12 +38,15 @@ type Declared struct {
 // changed. A declared server wins a name collision: the UI server of the same name is disabled
 // until the declared one goes. A name declared by another Secret is an error.
 func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared) (changed bool, err error) {
-	in := Input{Name: d.Name, URL: d.URL, Transport: d.Transport, CredentialHeader: d.CredentialHeader, CredentialPrefix: d.CredentialPrefix, CredentialValue: d.CredentialValue}
+	in := Input{Name: d.Name, URL: d.URL, Transport: d.Transport, CredentialHeader: d.CredentialHeader, CredentialPrefix: d.CredentialPrefix, CredentialValue: d.CredentialValue, CABundle: d.CABundle}
 	normalize(&in)
 	if err := ValidateName(in.Name); err != nil {
 		return false, err
 	}
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
+		return false, err
+	}
+	if err := ValidateCABundle(in.URL, in.CABundle); err != nil {
 		return false, err
 	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
@@ -77,7 +82,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 		}
 		// A new server or a new address is one the prober will dial: a held install applies neither
 		// (the importer skips this Secret and goes on; ADR 0107). A change of credential alone dials nothing.
-		if cur == nil || cur.Url != in.URL || string(cur.Transport) != in.Transport {
+		if cur == nil || cur.Url != in.URL || string(cur.Transport) != in.Transport || cur.CaBundle != in.CABundle {
 			if err := s.hold.Err(); err != nil {
 				return err
 			}
@@ -101,7 +106,8 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 			row, err = q.CreateMCPServer(ctx, store.CreateMCPServerParams{
 				OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 				CredentialHeader: pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
-				Source: store.ConfigSourceSecret, ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
+				CaBundle: in.CABundle,
+				Source:   store.ConfigSourceSecret, ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
 				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
 			})
 			if err != nil {
@@ -114,7 +120,7 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 				return err
 			}
 			row, err = q.UpdateDeclaredMCPServer(ctx, store.UpdateDeclaredMCPServerParams{
-				OrgID: org, ID: id, Url: in.URL, Transport: store.McpTransport(in.Transport),
+				OrgID: org, ID: id, Url: in.URL, Transport: store.McpTransport(in.Transport), CaBundle: in.CABundle,
 				CredentialHeader: pgtype.Text{String: in.CredentialHeader, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
 				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
 			})

@@ -66,6 +66,10 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 				continue
 			}
+			if row.CredentialHeader.Valid && !gateway.CredentialSafeURL(row.Url) {
+				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has a credential and its URL is not https", org.Slug, row.Name))
+				continue
+			}
 			s := gatewayplan.MCPServer{
 				Org: gatewayplan.Org{ID: org.ID, Slug: org.Slug}, ID: row.ID, Name: row.Name, URL: row.Url,
 				SSE: row.Transport == store.McpTransportSse, Unhealthy: row.Health == store.McpHealthUnhealthy,
@@ -84,6 +88,17 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				s.File = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				s.CredentialHeader, s.CredentialPrefix = row.CredentialHeader.String, row.CredentialPrefix
 				out.files[s.File] = []byte(cred)
+			}
+			if row.CaBundle != "" {
+				// The bundle is public: it goes in the same Secret as a credential file, named by its
+				// content, so a changed bundle is a new file and settles like a new credential.
+				if err := mcpservers.ValidateCABundle(row.Url, row.CaBundle); err != nil {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
+					continue
+				}
+				sum := sha256.Sum256([]byte(row.CaBundle))
+				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
+				out.files[s.CAFile] = []byte(row.CaBundle)
 			}
 			tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org.ID, ServerID: row.ID})
 			if err != nil {

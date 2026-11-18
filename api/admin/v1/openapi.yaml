@@ -1505,6 +1505,9 @@ components:
           $ref: "#/components/schemas/OutwardAdminDisabled"
         credentialHeader: {type: string, example: Authorization}
         credentialPrefix: {type: string, example: "Bearer "}
+        caBundle:
+          type: string
+          description: PEM certificates of the private CA that signs this server's certificate. Public; trusted for this server only. Absent for the system roots.
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret: {type: string}
         disabledReason: {type: string}
@@ -1735,6 +1738,9 @@ components:
         credentialValue:
           type: string
           description: The secret. Omit for a server that needs none.
+        caBundle:
+          type: string
+          description: PEM certificates of the private CA that signs the server's certificate (an https url only, certificates only, at most 256 KiB). Omit for the system roots.
         kind: {$ref: "#/components/schemas/McpServerKind"}
         dataClass: {$ref: "#/components/schemas/McpDataClass"}
     McpServerUpdate:
@@ -1748,6 +1754,9 @@ components:
           type: string
           description: Replaces the secret. Leave out to keep it while changing the header or prefix.
         removeCredential: {type: boolean}
+        caBundle:
+          type: string
+          description: Replaces the server's CA bundle; an empty string goes back to the system roots. Leave out to keep it.
     McpTool:
       type: object
       required: [serverId, name, description, readOnlyHint, tier, contentHash, descriptionOriginalLength, descriptionCapped, descriptionCleaned, present, firstSeenAt, lastSeenAt, sink]

@@ -113,8 +113,12 @@ type MCPServer struct {
 	// Unhealthy servers give no tools to any agent.
 	Unhealthy bool
 	// File is the credential's data key in the provider keys Secret, "" for a server without one.
-	File  string
-	Tools []MCPTool
+	File string
+	// CAFile is the data key of the server's own CA bundle in the same Secret, "" for the system roots.
+	// The bundle is public, and it is delivered like a credential file so the pod has it before the
+	// target that needs it is served.
+	CAFile string
+	Tools  []MCPTool
 }
 
 // Allowed is one agent's allowance of an MCP server.
@@ -234,6 +238,8 @@ type Planner struct {
 	// MCP servers.
 	appliedFile    map[string]string
 	appliedMCPFile map[string]string
+	// appliedMCPCA is the same for a server's CA bundle file.
+	appliedMCPCA map[string]string
 	// appliedMCPSig is what each served MCP server was last applied as (its URL, transport and
 	// credential file); a server whose signature is new or changed is probed at once (old issue 226).
 	appliedMCPSig map[string]string
@@ -706,18 +712,31 @@ func (p *Planner) settleMCP(servers []*MCPServer, files map[string][]byte, settl
 	defer p.mu.Unlock()
 	var out []*MCPServer
 	for _, s := range servers {
-		if s.File == "" || !settling[s.File] {
+		credSettling := s.File != "" && settling[s.File]
+		caSettling := s.CAFile != "" && settling[s.CAFile]
+		if !credSettling && !caSettling {
 			out = append(out, s)
 			continue
 		}
-		if prev := p.appliedMCPFile[uuidKey(s.ID)]; prev != "" {
-			s.File = prev
-			keep[prev] = true
-			out = append(out, s)
-			p.log.Info("a new MCP server credential is still reaching the gateway; serving with the previous one", "org", s.Org.Slug, "server", s.Name)
+		// Each file still reaching the pod needs a previously applied one to fall back on; without it
+		// the server is not served yet (a target with a new CA but the old file would fail its handshake,
+		// and a target with a new credential but none must not be served unauthenticated).
+		k := uuidKey(s.ID)
+		prevFile, prevCA := p.appliedMCPFile[k], p.appliedMCPCA[k]
+		if (credSettling && prevFile == "") || (caSettling && prevCA == "") {
+			p.log.Info("a new MCP server credential or CA bundle is still reaching the gateway; the server is not served until it has", "org", s.Org.Slug, "server", s.Name)
 			continue
 		}
-		p.log.Info("a new MCP server credential is still reaching the gateway; the server is not served until it has", "org", s.Org.Slug, "server", s.Name)
+		if credSettling {
+			s.File = prevFile
+			keep[prevFile] = true
+		}
+		if caSettling {
+			s.CAFile = prevCA
+			keep[prevCA] = true
+		}
+		out = append(out, s)
+		p.log.Info("a new MCP server credential or CA bundle is still reaching the gateway; serving with the previous one", "org", s.Org.Slug, "server", s.Name)
 	}
 	return out, keep
 }
@@ -767,6 +786,7 @@ func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) []Probe
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	next := map[string]string{}
+	nextCA := map[string]string{}
 	sigs := map[string]string{}
 	changed := map[string]bool{}
 	for _, s := range servers {
@@ -774,12 +794,16 @@ func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) []Probe
 		if s.File != "" {
 			next[k] = s.File
 		}
-		sigs[k] = fmt.Sprintf("%s\x00%t\x00%s\x00%s\x00%s", s.URL, s.SSE, s.CredentialHeader, s.CredentialPrefix, s.File)
+		if s.CAFile != "" {
+			nextCA[k] = s.CAFile
+		}
+		sigs[k] = fmt.Sprintf("%s\x00%t\x00%s\x00%s\x00%s\x00%s", s.URL, s.SSE, s.CredentialHeader, s.CredentialPrefix, s.File, s.CAFile)
 		if old, ok := p.appliedMCPSig[k]; !ok || old != sigs[k] {
 			changed[k] = true
 		}
 	}
 	p.appliedMCPFile = next
+	p.appliedMCPCA = nextCA
 	p.appliedMCPSig = sigs
 	p.probes = probes
 	var fresh []Probe
@@ -816,6 +840,9 @@ func (p *Planner) mcpTarget(s *MCPServer) gateway.MCPTarget {
 		t.CredentialHeader = s.CredentialHeader
 		t.CredentialPrefix = s.CredentialPrefix
 		t.CredentialFile = path.Join(p.cfg.KeyDir, s.File)
+	}
+	if s.CAFile != "" {
+		t.CAFile = path.Join(p.cfg.KeyDir, s.CAFile)
 	}
 	return t
 }

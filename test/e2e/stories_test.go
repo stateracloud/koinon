@@ -234,7 +234,7 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 		By("a server with a credential is added through the Connect client")
 		created, err := c.McpServers.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{
 			OrgId: org, Name: "stories-tracker", Url: fakeURL,
-			CredentialHeader: "X-Api-Key", CredentialValue: fakeMCPKey,
+			CredentialHeader: "X-Api-Key", CredentialValue: fakeMCPKey, CaBundle: fakeMCPCA(),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		srv := created.GetServer()

@@ -312,6 +312,33 @@ describe('Servers page', () => {
     expect(document.body.textContent).not.toContain('not-a-real-token')
   })
 
+  it('adds a server with a private CA certificate', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'
+    await userEvent.type(within(form).getByLabelText('Name'), 'private')
+    await userEvent.type(within(form).getByLabelText('URL'), 'https://mcp.internal.example/mcp')
+    await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
+    await userEvent.paste(pem)
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await waitFor(() => expect(calls.creates).toHaveLength(1))
+    expect(calls.creates[0]).toMatchObject({ name: 'private', url: 'https://mcp.internal.example/mcp', caBundle: pem })
+  })
+
+  it('refuses a CA certificate on an http URL before it sends anything', async () => {
+    const calls = setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
+    const form = screen.getByRole('form', { name: 'Add server' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'private')
+    await userEvent.type(within(form).getByLabelText('URL'), 'http://mcp.internal.example/mcp')
+    await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
+    await userEvent.paste('-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    expect(await within(form).findByText('A CA certificate needs an https URL.')).toBeInTheDocument()
+    expect(calls.creates).toHaveLength(0)
+  })
+
   it('shows the OAuth refusal at the URL field and keeps the form', async () => {
     const msg = 'this server asks each user to sign in with OAuth, which Koinon does not support yet; use a server that takes a token'
     setup({ failCreate: msg })

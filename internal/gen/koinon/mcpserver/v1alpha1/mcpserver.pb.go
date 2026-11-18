@@ -177,6 +177,9 @@ type Server struct {
 	// admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
 	// not called, probed or offered to runs. Unset otherwise.
 	AdminDisabled *v1alpha1.AdminDisabled `protobuf:"bytes,24,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`
+	// ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the
+	// system roots. It is public (certificates only) and trusted for this server alone.
+	CaBundle      string `protobuf:"bytes,25,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -377,6 +380,13 @@ func (x *Server) GetAdminDisabled() *v1alpha1.AdminDisabled {
 		return x.AdminDisabled
 	}
 	return nil
+}
+
+func (x *Server) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
@@ -886,7 +896,10 @@ type CreateServerRequest struct {
 	CredentialValue  string `protobuf:"bytes,7,opt,name=credential_value,json=credentialValue,proto3" json:"credential_value,omitempty"`
 	// class is what the server exposes; leaving it out is the unclassified default (kind "other", both
 	// legs).
-	Class         *ServerClass `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
+	Class *ServerClass `protobuf:"bytes,8,opt,name=class,proto3" json:"class,omitempty"`
+	// ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
+	// system roots. Certificates only, at most 256 KiB.
+	CaBundle      string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -977,6 +990,13 @@ func (x *CreateServerRequest) GetClass() *ServerClass {
 	return nil
 }
 
+func (x *CreateServerRequest) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
+}
+
 type CreateServerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
@@ -1034,8 +1054,10 @@ type UpdateServerRequest struct {
 	CredentialPrefix *string `protobuf:"bytes,6,opt,name=credential_prefix,json=credentialPrefix,proto3,oneof" json:"credential_prefix,omitempty"`
 	CredentialValue  *string `protobuf:"bytes,7,opt,name=credential_value,json=credentialValue,proto3,oneof" json:"credential_value,omitempty"`
 	RemoveCredential bool    `protobuf:"varint,8,opt,name=remove_credential,json=removeCredential,proto3" json:"remove_credential,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// ca_bundle replaces the server's CA bundle; set to "" to go back to the system roots. Unset keeps it.
+	CaBundle      *string `protobuf:"bytes,9,opt,name=ca_bundle,json=caBundle,proto3,oneof" json:"ca_bundle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateServerRequest) Reset() {
@@ -1122,6 +1144,13 @@ func (x *UpdateServerRequest) GetRemoveCredential() bool {
 		return x.RemoveCredential
 	}
 	return false
+}
+
+func (x *UpdateServerRequest) GetCaBundle() string {
+	if x != nil && x.CaBundle != nil {
+		return *x.CaBundle
+	}
+	return ""
 }
 
 type UpdateServerResponse struct {
@@ -2109,7 +2138,7 @@ var File_koinon_mcpserver_v1alpha1_mcpserver_proto protoreflect.FileDescriptor
 
 const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\n" +
-	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\xaf\b\n" +
+	")koinon/mcpserver/v1alpha1/mcpserver.proto\x12\x19koinon.mcpserver.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%koinon/outward/v1alpha1/outward.proto\"\xcc\b\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2138,7 +2167,8 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"data_class\x18\x15 \x03(\tR\tdataClass\x125\n" +
 	"\x17code_host_connection_id\x18\x16 \x01(\tR\x14codeHostConnectionId\x12H\n" +
 	"\x12credential_lost_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10credentialLostAt\x12M\n" +
-	"\x0eadmin_disabled\x18\x18 \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\"w\n" +
+	"\x0eadmin_disabled\x18\x18 \x01(\v2&.koinon.outward.v1alpha1.AdminDisabledR\radminDisabled\x12\x1b\n" +
+	"\tca_bundle\x18\x19 \x01(\tR\bcaBundle\"w\n" +
 	"\vServerClass\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
@@ -2182,7 +2212,7 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x12ListServersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x13ListServersResponse\x12;\n" +
-	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\xb8\x02\n" +
+	"\aservers\x18\x01 \x03(\v2!.koinon.mcpserver.v1alpha1.ServerR\aservers\"\xd5\x02\n" +
 	"\x13CreateServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -2191,9 +2221,10 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x11credential_header\x18\x05 \x01(\tR\x10credentialHeader\x12+\n" +
 	"\x11credential_prefix\x18\x06 \x01(\tR\x10credentialPrefix\x12.\n" +
 	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01R\x0fcredentialValue\x12<\n" +
-	"\x05class\x18\b \x01(\v2&.koinon.mcpserver.v1alpha1.ServerClassR\x05class\"Q\n" +
+	"\x05class\x18\b \x01(\v2&.koinon.mcpserver.v1alpha1.ServerClassR\x05class\x12\x1b\n" +
+	"\tca_bundle\x18\t \x01(\tR\bcaBundle\"Q\n" +
 	"\x14CreateServerResponse\x129\n" +
-	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\xa0\x03\n" +
+	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\xd0\x03\n" +
 	"\x13UpdateServerRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x15\n" +
@@ -2202,13 +2233,16 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x11credential_header\x18\x05 \x01(\tH\x02R\x10credentialHeader\x88\x01\x01\x120\n" +
 	"\x11credential_prefix\x18\x06 \x01(\tH\x03R\x10credentialPrefix\x88\x01\x01\x123\n" +
 	"\x10credential_value\x18\a \x01(\tB\x03\x80\x01\x01H\x04R\x0fcredentialValue\x88\x01\x01\x12+\n" +
-	"\x11remove_credential\x18\b \x01(\bR\x10removeCredentialB\x06\n" +
+	"\x11remove_credential\x18\b \x01(\bR\x10removeCredential\x12 \n" +
+	"\tca_bundle\x18\t \x01(\tH\x05R\bcaBundle\x88\x01\x01B\x06\n" +
 	"\x04_urlB\f\n" +
 	"\n" +
 	"_transportB\x14\n" +
 	"\x12_credential_headerB\x14\n" +
 	"\x12_credential_prefixB\x13\n" +
-	"\x11_credential_value\"Q\n" +
+	"\x11_credential_valueB\f\n" +
+	"\n" +
+	"_ca_bundle\"Q\n" +
 	"\x14UpdateServerResponse\x129\n" +
 	"\x06server\x18\x01 \x01(\v2!.koinon.mcpserver.v1alpha1.ServerR\x06server\"\x89\x01\n" +
 	"\x15SetServerClassRequest\x12\x15\n" +

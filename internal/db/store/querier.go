@@ -1674,7 +1674,7 @@ type Querier interface {
 	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
 	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)
-	// A change of the URL, transport or credential starts health over: the new settings are unproven.
+	// A change of the URL, transport, CA bundle or credential starts health over: the new settings are unproven.
 	// credential is written only when @set_credential is true (the patch sets or removes it). The caller
 	// read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
 	// envelope since, so writing back the envelope that was read would undo it. credential_header and

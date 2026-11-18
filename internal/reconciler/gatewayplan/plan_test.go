@@ -594,6 +594,49 @@ var _ = Describe("MCP servers", func() {
 			Expect(t.Name).NotTo(Equal("acme-wiki"))
 		}
 	})
+
+	It("leaves a server out while its new CA bundle settles, and serves it with the previous bundle", func() {
+		withCA := func(file string) gatewayplan.Input {
+			in := mcpInput()
+			in.MCP[0].CAFile = file
+			in.MCPFiles[file] = []byte("-----BEGIN CERTIFICATE-----\nnot-a-real-certificate\n-----END CERTIFICATE-----\n")
+			in.Allowances = allow
+			return in
+		}
+		caOf := func(pl *gatewayplan.Plan) (string, bool) {
+			for _, t := range pl.State.MCP {
+				if t.Name == "acme-wiki" {
+					return t.CAFile, true
+				}
+			}
+			return "", false
+		}
+		p := newPlanner(time.Minute)
+		old := withCA("mcpca-wiki-f1")
+		old.Now = t0.Add(-time.Hour)
+		pl := settle(p.Begin(old), nil, nil, lk)
+		ca, served := caOf(pl)
+		Expect(served).To(BeTrue())
+		Expect(ca).To(Equal(path.Join(keyDir, "mcpca-wiki-f1")))
+		pl.Applied(gatewayplan.ApplyResult{})
+
+		pl = settle(p.Begin(withCA("mcpca-wiki-f2")), []string{"mcpca-wiki-f2"}, nil, lk)
+		ca, served = caOf(pl)
+		Expect(served).To(BeTrue())
+		Expect(ca).To(Equal(path.Join(keyDir, "mcpca-wiki-f1")), "the previous bundle serves until the new one reached the pod")
+		Expect(pl.Keep).To(And(HaveKey("mcpca-wiki-f1"), HaveKey("mcpca-wiki-f2")))
+
+		fresh := newPlanner(time.Minute)
+		_, served = caOf(settle(fresh.Begin(withCA("mcpca-wiki-f2")), []string{"mcpca-wiki-f2"}, nil, lk))
+		Expect(served).To(BeFalse(), "with no previous bundle the server is not served: its handshake would fail")
+
+		// Settled: the new bundle is used.
+		in := withCA("mcpca-wiki-f2")
+		in.Now = t0.Add(2 * time.Minute)
+		ca, served = caOf(settle(p.Begin(in), nil, nil, lk))
+		Expect(served).To(BeTrue())
+		Expect(ca).To(Equal(path.Join(keyDir, "mcpca-wiki-f2")))
+	})
 })
 
 var _ = Describe("Rendered state", func() {

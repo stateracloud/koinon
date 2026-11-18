@@ -212,6 +212,15 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
 fi
 
 step "fakes ($FAKES)"
+# The fake MCP server serves HTTPS (ADR 0120: a credential goes only over HTTPS). One throw-away CA and
+# certificate per run, given to the fake as a Secret; the e2e suite registers the CA on each server record
+# (caBundle), so the gateway trusts it for that server only. Nothing here is kept or in the tree.
+FAKETLS="$OUT/faketls"
+(cd "$root" && go run ./cmd/koinon-faketls -dir "$FAKETLS" \
+  -hosts "fakemcp.$FAKES.svc,fakemcp.$FAKES.svc.cluster.local,fakemcp.$FAKES,fakemcp,localhost,127.0.0.1")
+"${K[@]}" get ns "$FAKES" >/dev/null 2>&1 || "${K[@]}" create ns "$FAKES"
+"${K[@]}" -n "$FAKES" create secret generic fakemcp-tls --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
+  --dry-run=client -o yaml | "${K[@]}" apply -f -
 sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
 "${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
@@ -284,7 +293,8 @@ go)
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
-    KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_URL="https://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
     KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
     KOINON_E2E_PASSWORD="$password" \

@@ -54,7 +54,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),
-		Kind:          m.Kind, DataClass: m.DataClass, CodeHostConnectionId: m.CodeHostConnectionID,
+		Kind:          m.Kind, DataClass: m.DataClass, CodeHostConnectionId: m.CodeHostConnectionID, CaBundle: m.CABundle,
 	}
 }
 
@@ -124,7 +124,7 @@ func (s *Server) CreateServer(ctx context.Context, req *mcpserverv1alpha1.Create
 	}
 	in := mcpservers.Input{
 		Name: req.GetName(), URL: req.GetUrl(), Transport: req.GetTransport(), CredentialHeader: req.GetCredentialHeader(),
-		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(),
+		CredentialPrefix: req.GetCredentialPrefix(), CredentialValue: req.GetCredentialValue(), CABundle: req.GetCaBundle(),
 	}
 	if cl := req.GetClass(); cl != nil {
 		in.Class = &mcpservers.Declaration{Kind: cl.GetKind(), Legs: cl.GetDataClass(), CodeHostConnection: cl.GetCodeHostConnectionId()}
@@ -146,7 +146,7 @@ func (s *Server) UpdateServer(ctx context.Context, req *mcpserverv1alpha1.Update
 	if err != nil {
 		return nil, err
 	}
-	patch := mcpservers.Patch{URL: req.Url, Transport: req.Transport, RemoveCredential: req.GetRemoveCredential()}
+	patch := mcpservers.Patch{URL: req.Url, Transport: req.Transport, CABundle: req.CaBundle, RemoveCredential: req.GetRemoveCredential()}
 	if req.CredentialHeader != nil || req.CredentialPrefix != nil || req.CredentialValue != nil {
 		patch.Credential = &mcpservers.CredentialPatch{Header: req.GetCredentialHeader(), Prefix: req.GetCredentialPrefix(), Value: req.CredentialValue}
 	}

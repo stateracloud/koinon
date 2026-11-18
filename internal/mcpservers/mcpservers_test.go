@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -134,6 +135,71 @@ var _ = Describe("Service", func() {
 			Entry("a reserved credential header", mcpservers.Input{Name: "wiki", URL: "https://x.example.com/mcp", CredentialHeader: "Host", CredentialValue: "x"}, "cannot carry a credential"),
 			Entry("an invalid header name", mcpservers.Input{Name: "wiki", URL: "https://x.example.com/mcp", CredentialHeader: "Bad Header", CredentialValue: "x"}, "HTTP header name"),
 		)
+
+		Describe("a CA bundle of its own (#278)", func() {
+			bundle := func() string {
+				GinkgoHelper()
+				set, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+				Expect(err).NotTo(HaveOccurred())
+				return string(set.CA)
+			}
+			It("is kept on the server, shown, audited as a flag and handed to the preflight", func(ctx SpecContext) {
+				var seen string
+				svc.WithPreflight(func(_ context.Context, p mcpservers.PreflightRequest) error { seen = p.CABundle; return nil })
+				ca := bundle()
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: ca})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.CABundle).To(Equal(ca))
+				Expect(seen).To(Equal(ca), "the add-time check trusts the server's own CA")
+				Expect(string(events(ctx, "mcp_server.create")[0].Summary)).To(ContainSubstring(`"hasCABundle": true`))
+				Expect(string(events(ctx, "mcp_server.create")[0].Summary)).NotTo(ContainSubstring("BEGIN CERTIFICATE"))
+				got, err := svc.Get(ctx, org, s.ID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.CABundle).To(Equal(ca))
+			})
+			It("is replaced or removed by an update, and kept when the patch leaves it out", func(ctx SpecContext) {
+				ca := bundle()
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: ca})
+				Expect(err).NotTo(HaveOccurred())
+				u := "https://private2.example.test/mcp"
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.CABundle).To(Equal(ca))
+				none := ""
+				s, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{CABundle: &none})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(s.CABundle).To(BeEmpty())
+			})
+			It("runs the preflight again when only the bundle changes", func(ctx SpecContext) {
+				s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp"})
+				Expect(err).NotTo(HaveOccurred())
+				calls := 0
+				svc.WithPreflight(func(context.Context, mcpservers.PreflightRequest) error { calls++; return nil })
+				ca := bundle()
+				_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{CABundle: &ca})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(calls).To(Equal(1))
+			})
+			DescribeTable("refuses",
+				func(ctx SpecContext, raw, ca, want string) {
+					_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: raw, CABundle: ca})
+					var inv *mcpservers.InvalidError
+					Expect(err).To(BeAssignableToTypeOf(inv))
+					Expect(err.Error()).To(ContainSubstring(want))
+				},
+				Entry("a bundle on an http URL", "http://private.example.test/mcp", "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", "https url"),
+				Entry("text that is not PEM", "https://private.example.test/mcp", "not a certificate", "no PEM certificate"),
+				Entry("a private key", "https://private.example.test/mcp", "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n", "only CERTIFICATE blocks"),
+				Entry("a bundle over the size cap", "https://private.example.test/mcp", strings.Repeat("a", 256<<10+1), "larger than"),
+			)
+		})
+
+		It("refuses a credential on a URL that is not https, as the gateway would drop it (ADR 0120)", func(ctx SpecContext) {
+			_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "http://x.example.com/mcp", CredentialValue: "not-a-real-token"})
+			Expect(err).To(MatchError(ContainSubstring("must be https")))
+			_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "http://x.example.com/mcp"})
+			Expect(err).NotTo(HaveOccurred(), "a server with no credential may use http")
+		})
 
 		It("lets the preflight refuse a server, for example one that needs per-user OAuth", func(ctx SpecContext) {
 			svc.WithPreflight(func(context.Context, mcpservers.PreflightRequest) error {
@@ -304,6 +370,25 @@ var _ = Describe("Service", func() {
 			list, _ := svc.List(ctx, org)
 			Expect(list[0].CredentialLostAt).To(BeNil())
 			Expect(list[0].HasCredential).To(BeTrue())
+		})
+		It("keeps the caBundle of the Secret and changes it with a new version", func(ctx SpecContext) {
+			set, err := faketls.Make("koinon test CA", []string{"decl.example.com"})
+			Expect(err).NotTo(HaveOccurred())
+			d := decl("s1", "uid/1", "wiki")
+			d.CABundle = string(set.CA)
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, _ := svc.List(ctx, org)
+			Expect(list[0].CABundle).To(Equal(string(set.CA)))
+			d = decl("s1", "uid/2", "wiki")
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+			list, _ = svc.List(ctx, org)
+			Expect(list[0].CABundle).To(BeEmpty(), "a Secret without caBundle goes back to the system roots")
+			d.URL, d.CABundle = "http://decl.example.com/mcp", string(set.CA)
+			d.CredentialHeader, d.CredentialValue = "", ""
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).To(MatchError(ContainSubstring("https")))
 		})
 		It("is read-only, wins a name collision and disables the UI server", func(ctx SpecContext) {
 			ui := create(ctx, "wiki", "")
@@ -605,6 +690,18 @@ var _ = Describe("Service", func() {
 			}
 		}
 
+		It("wakes it when a server's CA bundle changes (the gateway target changes with it)", func(ctx SpecContext) {
+			s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
+			set, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+			Expect(err).NotTo(HaveOccurred())
+			ca := string(set.CA)
+			_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{CABundle: &ca})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(woken(ctx, time.Second)).To(BeTrue(), "ca bundle")
+		})
+
 		It("wakes it when a server is created, its credential or URL changes, and it is deleted", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "not-a-real-token")
 			Expect(woken(ctx, time.Second)).To(BeTrue(), "create")
@@ -771,4 +868,10 @@ var _ = DescribeTable("ValidateRemote refuses '$'",
 var _ = It("ValidateRemote accepts a server without '$'", func() {
 	Expect(mcpservers.ValidateRemote("https://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "Token ")).To(Succeed())
 	Expect(mcpservers.ValidateRemote("https://mcp.example.com/%24mcp", mcpservers.TransportSSE, "", "")).To(Succeed())
+})
+
+var _ = It("ValidateRemote refuses a credential on a URL that is not https", func() {
+	Expect(mcpservers.ValidateRemote("http://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "")).NotTo(Succeed())
+	Expect(mcpservers.ValidateRemote("http://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "", "")).To(Succeed())
+	Expect(mcpservers.ValidateRemote("http://127.0.0.1:8080/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "")).To(Succeed())
 })

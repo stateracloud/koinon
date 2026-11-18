@@ -141,6 +141,13 @@ var _ = Describe("Render", func() {
 		}
 	})
 
+	It("refuses a target with a CA bundle, which this mode cannot render (#278)", func() {
+		s := fullState()
+		s.MCP = append(s.MCP, gateway.MCPTarget{Name: "acme-private", Org: "acme", URL: "https://mcp.private.example.com/mcp", CAFile: "/secrets/upstream/mcp_ca.crt"})
+		_, err := gwk8s.Render(s, opts())
+		Expect(err).To(MatchError(And(ContainSubstring("acme-private"), ContainSubstring("CA bundle"), ContainSubstring("standalone"))))
+	})
+
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 

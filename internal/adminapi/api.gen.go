@@ -833,6 +833,9 @@ type McpServer struct {
 	// AdminDisabled Present while an admin holds the target off (the outward switch). Absent means enabled.
 	AdminDisabled *OutwardAdminDisabled `json:"adminDisabled,omitempty"`
 
+	// CaBundle PEM certificates of the private CA that signs this server's certificate. Public; trusted for this server only. Absent for the system roots.
+	CaBundle *string `json:"caBundle,omitempty"`
+
 	// CodeHostConnectionId The org's code-host connection the server acts through. Absent for none, which makes a code-host tool of the server external-high.
 	CodeHostConnectionId *openapi_types.UUID `json:"codeHostConnectionId,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
@@ -883,6 +886,9 @@ type McpServerTransport string
 
 // McpServerCreate defines model for McpServerCreate.
 type McpServerCreate struct {
+	// CaBundle PEM certificates of the private CA that signs the server's certificate (an https url only, certificates only, at most 256 KiB). Omit for the system roots.
+	CaBundle *string `json:"caBundle,omitempty"`
+
 	// CredentialHeader Defaults to Authorization when a credential value is given.
 	CredentialHeader *string `json:"credentialHeader,omitempty"`
 
@@ -937,6 +943,8 @@ type McpServerList struct {
 
 // McpServerUpdate defines model for McpServerUpdate.
 type McpServerUpdate struct {
+	// CaBundle Replaces the server's CA bundle; an empty string goes back to the system roots. Leave out to keep it.
+	CaBundle         *string `json:"caBundle,omitempty"`
 	CredentialHeader *string `json:"credentialHeader,omitempty"`
 	CredentialPrefix *string `json:"credentialPrefix,omitempty"`
 

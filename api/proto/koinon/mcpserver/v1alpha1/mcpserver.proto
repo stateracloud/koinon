@@ -119,6 +119,9 @@ message Server {
   // admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is
   // not called, probed or offered to runs. Unset otherwise.
   koinon.outward.v1alpha1.AdminDisabled admin_disabled = 24;
+  // ca_bundle is the PEM bundle of the private CA that signs this server's certificate, empty for the
+  // system roots. It is public (certificates only) and trusted for this server alone.
+  string ca_bundle = 25;
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
@@ -220,6 +223,9 @@ message CreateServerRequest {
   // class is what the server exposes; leaving it out is the unclassified default (kind "other", both
   // legs).
   ServerClass class = 8;
+  // ca_bundle is a PEM bundle of the private CA that signs the server's certificate; empty uses the
+  // system roots. Certificates only, at most 256 KiB.
+  string ca_bundle = 9;
 }
 
 message CreateServerResponse {
@@ -238,6 +244,8 @@ message UpdateServerRequest {
   optional string credential_prefix = 6;
   optional string credential_value = 7 [debug_redact = true];
   bool remove_credential = 8;
+  // ca_bundle replaces the server's CA bundle; set to "" to go back to the system roots. Unset keeps it.
+  optional string ca_bundle = 9;
 }
 
 message UpdateServerResponse {
