@@ -93,10 +93,8 @@ type config struct {
 	githubToolsURL string
 	mcpAskURL      string
 	mcpGuardURL    string
-	// mcpUpstreamCAFile is the standalone gateway pod's path of a CA bundle for https MCP servers.
-	mcpUpstreamCAFile string
-	koinonToolsURL    string
-	githubAPIURL      string
+	koinonToolsURL string
+	githubAPIURL   string
 }
 
 // gatewayEndpoint parses the agentgateway URL into the host and port the provider profile

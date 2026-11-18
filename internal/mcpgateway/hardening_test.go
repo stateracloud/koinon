@@ -3,7 +3,9 @@
 package mcpgateway_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,6 +268,20 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(gateway.CredentialSafeURL("https:mcp")).To(BeFalse()) // no host: the route closes
 		Expect(gateway.CredentialSafeURL("https://t.example/mcp")).To(BeTrue())
+	})
+
+	It("logs a dropped target with a fixed reason and no URL", func(ctx SpecContext) {
+		var buf bytes.Buffer
+		gw := mcpgateway.New(mcpgateway.Options{Guard: &recordingGuard{}, Logger: slog.New(slog.NewTextHandler(&buf, nil))})
+		DeferCleanup(gw.Drain)
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{MCPState: gateway.MCPState{MCP: []gateway.MCPTarget{
+			{Name: "bad", Org: "acme", URL: "HTTP://example.com/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/dev/null"},
+		}}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(buf.String()).To(ContainSubstring("mcp target dropped"))
+		Expect(buf.String()).To(ContainSubstring("credential_needs_https"))
+		Expect(buf.String()).NotTo(ContainSubstring("example.com"))
+		Expect(buf.String()).NotTo(ContainSubstring("acme"))
 	})
 
 	It("closes only the unsafe target and still applies a key revocation", func(ctx SpecContext) {

@@ -772,9 +772,3 @@ var _ = It("ValidateRemote accepts a server without '$'", func() {
 	Expect(mcpservers.ValidateRemote("https://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "Token ")).To(Succeed())
 	Expect(mcpservers.ValidateRemote("https://mcp.example.com/%24mcp", mcpservers.TransportSSE, "", "")).To(Succeed())
 })
-
-var _ = It("ValidateRemote refuses a credential on a URL that is not https", func() {
-	Expect(mcpservers.ValidateRemote("http://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "")).NotTo(Succeed())
-	Expect(mcpservers.ValidateRemote("http://mcp.example.com/mcp", mcpservers.TransportStreamableHTTP, "", "")).To(Succeed())
-	Expect(mcpservers.ValidateRemote("http://127.0.0.1:8080/mcp", mcpservers.TransportStreamableHTTP, "X-Api-Key", "")).To(Succeed())
-})

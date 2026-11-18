@@ -138,7 +138,9 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		}
 		if t.CredentialHeader != "" && !credentialSafeURL(t.URL) {
 			// The route closes: the target is left out, and the rest of the config applies. A key
-			// revocation must never wait on an unrelated target (ADR 0120).
+			// revocation must never wait on an unrelated target (ADR 0120). The log line names the
+			// target and a fixed reason; it carries no org, agent or user ID and no URL.
+			g.o.Logger.Warn("mcp target dropped", "target", t.Name, "reason", "credential_needs_https")
 			continue
 		}
 		s.targets[t.Name] = t

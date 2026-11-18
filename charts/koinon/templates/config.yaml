@@ -30,16 +30,7 @@ data:
       # The reconciler writes the opened provider keys into this Secret; the gateway mounts it.
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers
-      {{- with .Values.gateway.standalone.mcpUpstreamCA }}
-      {{- if .secretName }}
-      # A private CA for https MCP servers, mounted from the Secret in the gateway pod.
-      mcpUpstreamCaFile: /secrets/mcp-ca/{{ .key }}
-      {{- end }}
-      {{- end }}
       {{- else }}
-      {{- if .Values.gateway.standalone.mcpUpstreamCA.secretName }}
-      {{- fail "gateway.standalone.mcpUpstreamCA needs gateway.mode=standalone (kubernetes mode is frozen, ADR 0097)" }}
-      {{- end }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.
       name: {{ include "koinon.componentName" (list . "gateway") }}
       gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}

@@ -345,14 +345,6 @@
               "additionalProperties": false,
               "properties": {"existingSecret": {"type": "string"}}
             },
-            "mcpUpstreamCA": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "secretName": {"type": "string"},
-                "key": {"type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$"}
-              }
-            },
             "persistence": {
               "type": "object",
               "additionalProperties": false,

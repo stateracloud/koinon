@@ -3,12 +3,9 @@
 package escape_test
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -139,16 +136,7 @@ func receiverCalls(ctx SpecContext, base string) []exfilRecord {
 	GinkgoHelper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/_fake/requests", nil)
 	Expect(err).NotTo(HaveOccurred())
-	client := http.DefaultClient
-	// The receiver serves HTTPS when the install sends a credential to it (ADR 0120); the CA is a public certificate.
-	if caFile := envOr("KOINON_ESCAPE_MCP_RECEIVER_CA", ""); caFile != "" {
-		pem, err := os.ReadFile(caFile)
-		Expect(err).NotTo(HaveOccurred())
-		pool := x509.NewCertPool()
-		Expect(pool.AppendCertsFromPEM(pem)).To(BeTrue(), "the receiver CA file holds no certificate")
-		client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
-	}
-	res, err := client.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = res.Body.Close() }()
 	var all []exfilRecord

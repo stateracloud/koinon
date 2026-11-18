@@ -8,5 +8,3 @@ eeb1369f4fce29db9c39b7acfdfcb773fcdafb32:web/e2e/settings.spec.ts:generic-api-ke
 5ad6b799d889690f68b06534436212e0d0d6082d:internal/leakguard/evasion_test.go:jwt:323
 # An env entry built from a variable named key in the leakguard exfil e2e (no credential); the next commit builds it with Sprintf.
 68580d89ecfb095423d3c9fe100c61e532762345:test/e2e/mcp_test.go:generic-api-key:300
-# A rendered CEL agent rule in the mcp-upstream-ca golden file (same as the mcp-servers golden); not a secret.
-f4c673c5a2c884e04f391920753477dd7bc9f252:internal/gateway/standalone/testdata/mcp-upstream-ca.yaml:generic-api-key:96

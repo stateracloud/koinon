@@ -378,13 +378,10 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 	if cfg.mcpGuardURL == "" {
 		log.Warn("no --mcp-guard-url: the gateway refuses every call to an org's MCP server (the leak guard fails closed)")
 	}
-	if cfg.mcpUpstreamCAFile != "" && cfg.gatewayMode != project.GatewayStandalone {
-		return nil, errors.New("--mcp-upstream-ca-file needs the standalone gateway: kubernetes mode is frozen (ADR 0097 decision 4)")
-	}
 	switch cfg.gatewayMode {
 	case project.GatewayStandalone:
 		driver := &standalone.Driver{
-			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL, GuardURL: cfg.mcpGuardURL, MCPUpstreamCAFile: cfg.mcpUpstreamCAFile},
+			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL, GuardURL: cfg.mcpGuardURL},
 			Deliverer: standalone.ConfigMapDeliverer{
 				Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
 				OwnerDeployment: cfg.gatewayDeployment,

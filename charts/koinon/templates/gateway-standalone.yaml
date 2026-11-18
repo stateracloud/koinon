@@ -168,12 +168,6 @@ spec:
             # The bearer token of koinon-api's OTLP listener, which agentgateway sends with its
             # access log. A file, so it stays out of the config ConfigMap.
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
-            {{- if $gw.mcpUpstreamCA.secretName }}
-            # A private CA that verifies https MCP servers (backendTLS.root of their targets).
-            - name: mcp-ca
-              mountPath: /secrets/mcp-ca
-              readOnly: true
-            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -189,12 +183,6 @@ spec:
             secretName: {{ include "koinon.gatewayProvidersName" . }}
             defaultMode: 0444
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
-        {{- if $gw.mcpUpstreamCA.secretName }}
-        - name: mcp-ca
-          secret:
-            secretName: {{ $gw.mcpUpstreamCA.secretName }}
-            defaultMode: 0444
-        {{- end }}
       {{- with $gw.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

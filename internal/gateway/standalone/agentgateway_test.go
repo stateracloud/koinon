@@ -5,16 +5,9 @@ package standalone_test
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -310,15 +303,11 @@ var _ = Describe("golden files", func() {
 		otlp := GinkgoT().TempDir()
 		Expect(os.Chmod(otlp, 0o755)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(otlp, "token"), []byte("koinon_test_not-a-real-token"), 0o644)).To(Succeed())
-		// The CA bundle of the mcp-upstream-ca fixture: validation reads the file.
-		caDir := GinkgoT().TempDir()
-		Expect(os.Chmod(caDir, 0o755)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(caDir, "ca.crt"), testCAPEM(), 0o644)).To(Succeed())
 		for _, f := range fixtures() {
 			ctr, err := testcontainers.Run(ctx, agentgatewayimage.Ref(),
 				testcontainers.WithCmd("--validate-only", "-f", "/cfg/"+f.name+".yaml"),
 				testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro", otlp+":/secrets/otlp:ro", caDir+":/secrets/mcp-ca:ro")
+					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro", otlp+":/secrets/otlp:ro")
 				}),
 				testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForExit()),
 			)
@@ -408,17 +397,3 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		Expect(seen).To(HaveKeyWithValue("unpinned", "2099-01-01"), "v1.7 forwards the client's version when nothing pins it")
 	}, SpecTimeout(3*time.Minute))
 })
-
-// testCAPEM is a throwaway self-signed CA certificate; it has no key anywhere.
-func testCAPEM() []byte {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	Expect(err).NotTo(HaveOccurred())
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "koinon test ca"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	Expect(err).NotTo(HaveOccurred())
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-}
