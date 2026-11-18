@@ -115,6 +115,8 @@ expect "go generate chartsmoke" api/admin/v1/oapi-codegen.yaml  # oapi-codegen -
 expect "go generate chartsmoke" internal/adminapi/api.gen.go    # oapi-codegen output (checked for drift)
 expect "go generate" third_party/openshell/proto/openshell.proto # buf.gen.openshell.yaml input
 expect "go generate" buf.gen.openshell.yaml                      # buf generate --template
+expect "go generate" third_party/substrate/proto/ateapi.proto   # buf.gen.substrate.yaml input
+expect "go generate" buf.gen.substrate.yaml                      # buf generate --template
 expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agentgateway.yaml input
 expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
 expect "go generate chartsmoke harnesses" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)

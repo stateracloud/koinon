@@ -2,7 +2,13 @@
 
 package execution
 
-import "errors"
+import (
+	"context"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 // Error kinds. Backend errors match one of these with errors.Is; the backend's own error
 // (for OpenShell, the gRPC status) stays reachable through errors.As.
@@ -53,4 +59,48 @@ func (e *Error) Unwrap() []error {
 		return []error{e.Err}
 	}
 	return []error{e.Kind, e.Err}
+}
+
+// GRPCError maps a gRPC error to an *Error for the operation op, so that every driver reports the
+// same kinds for the same status codes. It returns nil for a nil error. Context errors keep
+// matching context.Canceled and context.DeadlineExceeded. The status stays reachable through
+// errors.As.
+func GRPCError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var kind error
+	switch status.Code(err) {
+	case codes.NotFound:
+		kind = ErrNotFound
+	case codes.AlreadyExists:
+		kind = ErrAlreadyExists
+	case codes.Aborted:
+		kind = ErrConflict
+	case codes.InvalidArgument, codes.OutOfRange:
+		kind = ErrInvalid
+	case codes.FailedPrecondition:
+		kind = ErrFailedPrecondition
+	case codes.PermissionDenied, codes.Unauthenticated:
+		kind = ErrPermissionDenied
+	case codes.Unavailable, codes.ResourceExhausted:
+		kind = ErrUnavailable
+	case codes.Unimplemented:
+		kind = ErrUnsupported
+	case codes.Canceled:
+		kind = context.Canceled
+	case codes.DeadlineExceeded:
+		kind = context.DeadlineExceeded
+	}
+	if kind == nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			kind = context.Canceled
+		case errors.Is(err, context.DeadlineExceeded):
+			kind = context.DeadlineExceeded
+		case errors.Is(err, ErrStreamClosed):
+			kind = ErrStreamClosed
+		}
+	}
+	return &Error{Op: op, Kind: kind, Err: err}
 }
