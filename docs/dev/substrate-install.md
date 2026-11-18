@@ -24,7 +24,7 @@ Options for a real cluster, passed to `ate-setup` under the names the pinned `at
 | `koinon-api substrate install` | `ate-setup` | When you need it |
 | --- | --- | --- |
 | `--postgres-storage-class <name>` | `--ateapi-postgres-storage-class` | The cluster has no default StorageClass: the bundled Postgres claim stays Pending without it. |
-| `--setup-csi nfs\|hostpath\|both\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`; `hostpath` is for kind only). |
+| `--setup-csi nfs\|hostpath\|both\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`; `hostpath` and `both` are for kind only, so use `nfs` on another cluster). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
 | `--kind` | `--kind` | The cluster is a local kind cluster. |
 
@@ -131,6 +131,9 @@ Supported fixes, in this order:
    reads discovery from the in-cluster API server with the pod's token, and pods need no route to anything else.
    On Talos, set `cluster.apiServer.extraArgs`. Later `--service-account-issuer` values are only accepted for
    validation, not used to sign: keep the old value as the second one so tokens already issued stay valid.
+   The issuers do not keep the audience: without `--api-audiences` Kubernetes accepts only the first issuer as
+   audience, so existing tokens with the old default audience fail. Set `--api-audiences` to the new and the old
+   issuer during the change. Substrate still accepts only tokens whose `iss` is the issuer it trusts.
    When the discovery document's `jwks_uri` is not reachable from pods, also set `--service-account-jwks-uri`
    to `https://kubernetes.default.svc/openid/v1/jwks`.
 2. Or set it to a URL that pods reach with a certificate from the system roots.
