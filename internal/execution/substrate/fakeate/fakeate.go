@@ -49,6 +49,7 @@ type Cluster struct {
 	resumes   map[key]int
 	calls     map[string]int
 	holds     map[key]*getHold
+	tagHolds  map[key]*getHold
 	delays    map[key]*delay
 	stop      chan struct{}
 
@@ -66,6 +67,7 @@ func New() *Cluster {
 		resumes:   map[key]int{},
 		calls:     map[string]int{},
 		holds:     map[key]*getHold{},
+		tagHolds:  map[key]*getHold{},
 		delays:    map[key]*delay{},
 		stop:      make(chan struct{}),
 	}
@@ -158,6 +160,28 @@ func (c *Cluster) HoldNextGetActor(atespace, name string) (held <-chan struct{},
 	c.mu.Unlock()
 	var once sync.Once
 	return h.held, func() { once.Do(func() { close(h.release) }) }
+}
+
+// HoldNextCreateTag makes the next CreateTag of a source actor wait before it tags, until release
+// is called. held closes once the call arrived. release may be called more than once.
+func (c *Cluster) HoldNextCreateTag(atespace, source string) (held <-chan struct{}, release func()) {
+	h := &getHold{held: make(chan struct{}), release: make(chan struct{})}
+	c.mu.Lock()
+	c.tagHolds[key{atespace, source}] = h
+	c.mu.Unlock()
+	var once sync.Once
+	return h.held, func() { once.Do(func() { close(h.release) }) }
+}
+
+// FailGetActorsAfterSuspend makes the n GetActor calls of an actor that follow its next
+// SuspendActor fail with Unavailable, as a control plane does that restarts right after the suspend.
+// The suspend itself takes effect.
+func (c *Cluster) FailGetActorsAfterSuspend(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a, ok := c.actors[key{atespace, name}]; ok {
+		a.failGetsAfterSuspend = n
+	}
 }
 
 // delay holds back one guest request on its way to the router (DelayNextRouterRequest).

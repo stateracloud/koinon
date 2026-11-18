@@ -343,7 +343,7 @@ func (d *Driver) SuspendSandbox(ctx context.Context, workspace, name string) (ex
 
 // suspendWanted is a suspend that a caller asked for: after it, no snapshot owes the actor a resume.
 func (d *Driver) suspendWanted(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
-	sb, err := d.suspend(ctx, op, workspace, name)
+	sb, _, err := d.suspend(ctx, op, workspace, name)
 	if err == nil {
 		d.setOwed(key{workspace, name}, false)
 	}
@@ -368,36 +368,40 @@ const suspendRetries = 3
 //     SuspendActor, and the router resumes the actor for it (ADR 0119, Verification). If the actor
 //     is resuming or running, wait for it to settle and suspend it again, up to suspendRetries
 //     times; then fail. suspend never reports a suspended actor that is not.
-func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
+//
+// sent reports whether a SuspendActor was sent: after it, a failed suspend can leave the actor
+// suspended, and a caller that wants it running must resume it.
+func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb execution.Sandbox, sent bool, err error) {
 	k := key{workspace, name}
 	g := d.pauseGate(k)
 	defer g.unpause()
 	if err := g.drain(ctx, d.cfg.DrainTimeout); err != nil {
-		return execution.Sandbox{}, fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
+		return execution.Sandbox{}, false, fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
 	}
 	for attempt := 0; ; attempt++ {
+		sent = true // an error reply does not prove that the suspend did not happen
 		if _, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
 			Actor:   ref(workspace, name),
 			Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
 		}); err != nil {
-			return execution.Sandbox{}, execution.GRPCError(op, err)
+			return execution.Sandbox{}, sent, execution.GRPCError(op, err)
 		}
 		actor, err := d.settled(ctx, op, k)
 		if err != nil {
-			return execution.Sandbox{}, err
+			return execution.Sandbox{}, sent, err
 		}
 		switch actor.GetStatus().GetState() {
 		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
-			return sandboxFrom(workspace, actor), nil
+			return sandboxFrom(workspace, actor), sent, nil
 		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		default:
-			return execution.Sandbox{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after suspend", k, phaseOf(actor))
+			return execution.Sandbox{}, sent, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after suspend", k, phaseOf(actor))
 		}
 		if attempt == suspendRetries {
 			d.resuspends.WithLabelValues(resuspendFailed).Inc()
 			d.cfg.Logger.Warn("substrate: sandbox resumed again after every suspend; giving up",
 				"op", op, "sandbox", k.String(), "suspends", attempt+1)
-			return execution.Sandbox{}, fail(op, execution.ErrUnavailable,
+			return execution.Sandbox{}, sent, fail(op, execution.ErrUnavailable,
 				"sandbox %s was resumed by a router request after each of %d suspends", k, attempt+1)
 		}
 		d.resuspends.WithLabelValues(resuspendRetried).Inc()
@@ -407,13 +411,17 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (execu
 }
 
 // settled reads the actor until it is not in a transition (resuming or suspending), bounded by
-// DrainTimeout. It reads the control API only, which never resumes the actor.
+// DrainTimeout. It reads the control API only, which never resumes the actor. When the bound ends,
+// during a read or between two, it fails with ErrUnavailable.
 func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.cfg.DrainTimeout)
 	defer cancel()
 	for {
 		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fail(op, execution.ErrUnavailable, "sandbox %s did not settle after suspend: %v", k, err)
+			}
 			return nil, execution.GRPCError(op, err)
 		}
 		switch actor.GetStatus().GetState() {

@@ -25,6 +25,10 @@ type actor struct {
 	snapshots []*ateapiv1.Snapshot
 	// lateResumes is how many more suspends a late router request undoes (ResumeAfterSuspends).
 	lateResumes int
+	// failGetsAfterSuspend arms failGets at the next SuspendActor (FailGetActorsAfterSuspend).
+	failGetsAfterSuspend int
+	// failGets is how many more GetActor calls fail with Unavailable.
+	failGets int
 
 	// the guest: it survives a suspend, as the memory of a snapshotted VM does
 	procs   map[string]*fproc
@@ -226,6 +230,11 @@ func (s *controlServer) GetActor(ctx context.Context, r *ateapiv1.GetActorReques
 		c.mu.Unlock()
 		return nil, notFound("actor", k.name)
 	}
+	if a.failGets > 0 {
+		a.failGets--
+		c.mu.Unlock()
+		return nil, status.Errorf(codes.Unavailable, "actor %q: read failed", k.name)
+	}
 	pb := a.pb()
 	h := c.holds[k]
 	delete(c.holds, k)
@@ -274,6 +283,7 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 		return nil, status.Errorf(codes.FailedPrecondition, "actor %q is %s", k.name, st)
 	}
 	out := a.pb()
+	a.failGets, a.failGetsAfterSuspend = a.failGetsAfterSuspend, 0
 	if a.lateResumes > 0 && a.state == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
 		a.lateResumes--
 		c.resumes[k]++
@@ -358,9 +368,18 @@ func (s *controlServer) CreateTag(_ context.Context, r *ateapiv1.CreateTagReques
 	c.count("CreateTag")
 	in := r.GetTag()
 	k := key{in.GetMetadata().GetAtespace(), in.GetMetadata().GetName()}
+	sk := key{k.atespace, in.GetSourceActor().GetName()}
+	c.mu.Lock()
+	h := c.tagHolds[sk]
+	delete(c.tagHolds, sk)
+	c.mu.Unlock()
+	if h != nil { // the reply and the tag wait (HoldNextCreateTag)
+		close(h.held)
+		<-h.release
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	src, ok := c.actors[key{k.atespace, in.GetSourceActor().GetName()}]
+	src, ok := c.actors[sk]
 	if !ok {
 		return nil, notFound("actor", in.GetSourceActor().GetName())
 	}

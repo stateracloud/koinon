@@ -222,7 +222,12 @@ func (d *Driver) enterKind(ctx context.Context, op string, k key, kind callKind)
 // between the read and begin, and the open gate then admits a router request for a suspended
 // actor, which resumes it. After the registration, a suspend that starts drains or cancels the
 // read and the call.
+//
+// When the two reads disagree round after round (the state flaps between them), the rounds back
+// off as waitRunning does: the first retry is at once, the next after PollInterval, doubling up to
+// eight times PollInterval.
 func (d *Driver) enterWait(ctx context.Context, op string, k key, kind callKind) (context.Context, func(), error) {
+	var delay time.Duration
 	for {
 		cctx, end, err := d.enterKind(ctx, op, k, kind)
 		if err == nil {
@@ -234,6 +239,12 @@ func (d *Driver) enterWait(ctx context.Context, op string, k key, kind callKind)
 		if err := d.waitRunning(ctx, op, k); err != nil {
 			return nil, nil, err
 		}
+		if delay > 0 {
+			if err := sleep(ctx, delay); err != nil {
+				return nil, nil, err
+			}
+		}
+		delay = min(max(2*delay, d.cfg.PollInterval), 8*d.cfg.PollInterval)
 	}
 }
 

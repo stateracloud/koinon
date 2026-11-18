@@ -41,6 +41,18 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 	if err := d.requireContentDigest(op); err != nil {
 		return execution.Snapshot{}, err
 	}
+	// The gate stays closed from before the suspend until the sandbox is resumed: a router request
+	// in between would resume the actor before CreateTag, which tags only a suspended one. Pauses
+	// nest, so suspend's own pause and unpause leave it closed.
+	g := d.pauseGate(k)
+	paused := true
+	unpause := func() {
+		if paused {
+			paused = false
+			g.unpause()
+		}
+	}
+	defer unpause()
 	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
 		return execution.Snapshot{}, execution.GRPCError(op, err)
@@ -49,7 +61,10 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 	switch actor.GetStatus().GetState() {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		wasRunning = true
-		if _, err := d.suspend(ctx, op, workspace, name); err != nil {
+		if _, sent, err := d.suspend(ctx, op, workspace, name); err != nil {
+			if sent { // the suspend may have taken effect: the sandbox must keep running
+				d.resumeOwed(ctx, op, k)
+			}
 			return execution.Snapshot{}, err
 		}
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
@@ -69,6 +84,7 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 			}
 		}
 	}
+	unpause()
 	if tagErr != nil {
 		return execution.Snapshot{}, tagErr
 	}
@@ -82,6 +98,19 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 		return execution.Snapshot{}, execution.GRPCError(op, err)
 	}
 	return snapshotFrom(workspace, tag, digest), nil
+}
+
+// resumeOwed records that a snapshot owes k a resume and makes one attempt to pay it, bounded by
+// DrainTimeout and not ended by ctx: a snapshot that fails after its suspend was sent leaves the
+// sandbox running, or leaves the debt for the next snapshot, which finds the actor suspended.
+func (d *Driver) resumeOwed(ctx context.Context, op string, k key) {
+	d.setOwed(k, true)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.DrainTimeout)
+	defer cancel()
+	if _, err := d.resume(rctx, op, k.atespace, k.actor); err != nil { // a success clears the debt
+		d.cfg.Logger.Warn("substrate: could not resume the sandbox after a failed snapshot; the next snapshot resumes it",
+			"op", op, "sandbox", k.String(), "err", err)
+	}
 }
 
 func (d *Driver) tag(ctx context.Context, workspace, source string) (*ateapiv1.Tag, error) {

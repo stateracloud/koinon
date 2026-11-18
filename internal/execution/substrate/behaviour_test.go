@@ -323,6 +323,17 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(d.Resuspends("failed")).To(Equal(1.0))
 		})
 
+		It("fails with ErrUnavailable when the state read after SuspendActor outlasts DrainTimeout", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			// The read in settled is held past its bound: the error is the one of a state that did
+			// not settle, whether the bound ends during a read or between two.
+			_, release := cl.HoldNextGetActor(ws, "sb")
+			DeferCleanup(release)
+			_, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			Expect(err.Error()).To(ContainSubstring("did not settle"))
+		}, SpecTimeout(10*time.Second))
+
 		It("sends no stdin write on a RUNNING state that a whole suspend made stale", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
@@ -512,6 +523,53 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sb.Phase).To(Equal(execution.PhaseReady))
 		})
+
+		It("leaves the sandbox running when the suspend fails after SuspendActor", func(ctx SpecContext) {
+			ready(ctx, d, "src")
+			cl.FailGetActorsAfterSuspend(ws, "src", 1) // settled fails: the actor is suspended
+			_, err := d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).To(HaveOccurred())
+			Expect(cl.Calls("SuspendActor")).To(Equal(1))
+			sb, err := d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred(), "the snapshot resumed the sandbox it suspended")
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
+			Expect(cl.RouterResumes(ws, "src")).To(BeZero())
+		}, SpecTimeout(10*time.Second))
+
+		It("resumes on the next snapshot when the suspend and the resume after it both failed", func(ctx SpecContext) {
+			ready(ctx, d, "src")
+			cl.FailGetActorsAfterSuspend(ws, "src", 1)
+			cl.FailNextResumes(ws, "src", 1)
+			_, err := d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).To(HaveOccurred())
+			Expect(cl.State(ws, "src")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+
+			_, err = d.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
+		}, SpecTimeout(10*time.Second))
+
+		It("keeps the gate closed from the suspend until the resume", func(ctx SpecContext) {
+			ready(ctx, d, "src")
+			held, release := cl.HoldNextCreateTag(ws, "src")
+			DeferCleanup(release)
+			done := make(chan error, 1)
+			go func() { _, err := d.SnapshotSandbox(ctx, ws, "src"); done <- err }()
+			Eventually(held).WithTimeout(5 * time.Second).Should(BeClosed())
+			// The actor is suspended and not yet tagged: no router call may start now.
+			_, err := d.Exec(ctx, ws, "src", execution.ExecRequest{Command: []string{"true"}})
+			Expect(errors.Is(err, execution.ErrFailedPrecondition)).To(BeTrue(), "got %v", err)
+			Expect(err.Error()).To(ContainSubstring("being suspended"), "the gate, not the state read, refused it")
+			release()
+			Eventually(done).WithTimeout(5 * time.Second).Should(Receive(BeNil()))
+			_, err = d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			p, err := d.Exec(ctx, ws, "src", execution.ExecRequest{Command: []string{"true"}})
+			Expect(err).NotTo(HaveOccurred(), "the gate opens once the sandbox runs again")
+			Expect(p.Close()).To(Succeed())
+		}, SpecTimeout(30*time.Second))
 
 		It("leaves a sandbox suspended that was suspended before the snapshot", func(ctx SpecContext) {
 			ready(ctx, d, "src")
