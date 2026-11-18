@@ -72,7 +72,7 @@ func BuildSeccomp(s SeccompPolicy) (filter []bpf.Instruction, skipped []string, 
 	}
 	var clone3Nr uint32
 	if clone3, ok := info.SyscallNames["clone3"]; ok {
-		clone3Nr = uint32(clone3)
+		clone3Nr = uint32(clone3) //nolint:gosec // a syscall number, small and non-negative
 	}
 	return append(archPrefix(info, clone3Nr), insts...), skipped, nil
 }

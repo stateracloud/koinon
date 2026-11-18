@@ -90,9 +90,11 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	runWith = func(flags []string, argv ...string) (string, int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		args := append([]string{"run", "--rm", "--network=none", "--user=0",
+		args := append([]string{
+			"run", "--rm", "--network=none", "--user=0",
 			"--cap-add=SYS_ADMIN", "--cap-add=SYS_PTRACE",
-			"--security-opt=seccomp=unconfined", "--security-opt=apparmor=unconfined"}, flags...)
+			"--security-opt=seccomp=unconfined", "--security-opt=apparmor=unconfined",
+		}, flags...)
 		args = append(append(args, image), argv...)
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		out, err := cmd.CombinedOutput()
