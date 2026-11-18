@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -155,6 +156,17 @@ func (e *ConfigRejectedError) Is(target error) bool { return target == ErrConfig
 // positive amount is not enforced by anything between two ledger passes.
 type LedgerBudgets interface {
 	LedgerEnforcesBudgets() bool
+}
+
+// MCPTargetCA is implemented by a driver that cannot render a per-target TLS policy for an MCP target:
+// a TLS root of its own or a skipped certificate check (the Kubernetes driver: the CRD path is frozen
+// for MCP, ADR 0097 decision 4). koinon-api refuses a save that sets either when gateway.mode is
+// kubernetes (mcpservers.Service.WithoutTargetTLS). The reconciler, as a guard for a row saved
+// earlier, leaves such a server out of the state and reports it on that server, because a driver that
+// refused the whole state for one target would hold back every other org's change. A driver that does not implement it renders
+// per-target TLS policy.
+type MCPTargetCA interface {
+	RendersMCPTargetCA() bool
 }
 
 // Revision identifies an applied configuration. Drivers derive it from the
@@ -504,6 +516,14 @@ type MCPTarget struct {
 	CredentialHeader string
 	CredentialPrefix string
 	CredentialFile   string
+	// CAFile is the path, inside the gateway, of a PEM bundle that verifies the target's TLS
+	// certificate in place of the public roots (only this CA is trusted for this target, as curl
+	// --cacert). It belongs to this target only and needs an https URL. Empty uses the public roots.
+	// Public: it holds certificates only.
+	CAFile string
+	// InsecureSkipVerify turns the target's certificate check off (as curl -k): TLS is used, the
+	// server's identity is not verified. It needs an https URL and excludes CAFile.
+	InsecureSkipVerify bool
 }
 
 // ToolGrant allows an agent to see and call some tools of one MCP target.
@@ -910,6 +930,23 @@ func (s MCPState) validate() []error {
 		}
 		if t.CredentialFile != "" && !keyPath.MatchString(t.CredentialFile) {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential file path", t.Name))
+		}
+		if t.CAFile != "" {
+			if !keyPath.MatchString(t.CAFile) {
+				errs = append(errs, fmt.Errorf("mcp target %q: invalid CA file path", t.Name))
+			}
+			// The scheme is parsed, which lower-cases it: a raw prefix test would miss "HTTPS://".
+			if u, err := url.Parse(t.URL); err != nil || strings.ToLower(u.Scheme) != "https" {
+				errs = append(errs, fmt.Errorf("mcp target %q: a CA file needs an https URL", t.Name))
+			}
+		}
+		if t.InsecureSkipVerify {
+			if t.CAFile != "" {
+				errs = append(errs, fmt.Errorf("mcp target %q: a CA file and insecureSkipVerify exclude each other", t.Name))
+			}
+			if u, err := url.Parse(t.URL); err != nil || strings.ToLower(u.Scheme) != "https" {
+				errs = append(errs, fmt.Errorf("mcp target %q: insecureSkipVerify needs an https URL", t.Name))
+			}
 		}
 		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))

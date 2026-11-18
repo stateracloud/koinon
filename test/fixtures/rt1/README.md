@@ -254,6 +254,8 @@ To let agents use them, the gateway must be allowed to reach the four hosts
 `egress.allowedInternalHosts` and `networkPolicy.gatewayEgressTo` (ports 8000 and 8080 in
 `koinon-fixtures`), then register each as an MCP server (<https://koinon.stateracloud.com/docs/operate/mcp-servers/>).
 For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agentgateway injects the header.
+A server with a credential must use an https URL (ADR 0120; http is allowed only for a loopback address),
+so put these two behind https; for a private CA, set the server's CA certificate (`caBundle`).
 
 ## Building images
 

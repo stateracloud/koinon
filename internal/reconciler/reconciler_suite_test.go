@@ -189,6 +189,8 @@ type fakeModelGateway struct {
 	entered chan struct{}
 	// ledgerBudgets makes the fake report that only a limit of zero binds (Kubernetes mode).
 	ledgerBudgets bool
+	// noTargetCA makes the fake report that it cannot render a per-target CA (Kubernetes mode).
+	noTargetCA bool
 	// onApply, when set, sees each state as the gateway receives it, before it is recorded.
 	onApply func(gateway.State)
 	// cancelAt is when an Apply saw its context cancelled; applyAt are the starts of every Apply.
@@ -262,6 +264,9 @@ func (f *fakeModelGateway) Apply(ctx context.Context, s gateway.State) (gateway.
 
 // LedgerEnforcesBudgets makes the fake a Kubernetes-mode gateway when ledgerBudgets is set.
 func (f *fakeModelGateway) LedgerEnforcesBudgets() bool { return f.ledgerBudgets }
+
+// RendersMCPTargetCA implements gateway.MCPTargetCA.
+func (f *fakeModelGateway) RendersMCPTargetCA() bool { return !f.noTargetCA }
 
 func (f *fakeModelGateway) Usage() gateway.UsageReader { return gateway.NoUsage{} }
 

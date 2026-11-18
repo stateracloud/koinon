@@ -4,6 +4,8 @@ package mcpservers
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +33,15 @@ type Diagnosis struct {
 	NeedsOAuth bool
 	// Reason is a short, secret-free explanation of a failure; empty when the server answered 2xx.
 	Reason string
+	// BadCertificate says the TLS handshake ended because the server's certificate does not verify
+	// (an unknown CA, a name that does not match, an expired or otherwise invalid certificate), not
+	// because the server is down. Reason then names the CA bundle field.
+	BadCertificate bool
 }
+
+// CertificateMessage is what an admin reads when the server's certificate does not verify.
+const CertificateMessage = "the server's TLS certificate does not verify; if it is signed by a private CA, " +
+	"put that CA's PEM certificate in the server's CA bundle field (caBundle); only that CA is then trusted for this server"
 
 // Diagnose sends one request to the server named by p, directly from this process, and says what came
 // back. It is for the add-time OAuth check only, and it carries NO credential: the server is not
@@ -43,9 +53,23 @@ type Diagnosis struct {
 func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest) Diagnosis {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	// The system roots, or ONLY the server's own CA bundle when it has one (it replaces the public roots,
+	// as curl --cacert does); TLS 1.2 at least. insecureSkipVerify (curl -k) checks no certificate.
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	switch {
+	case p.InsecureSkipVerify:
+		tlsConfig.InsecureSkipVerify = true
+	case p.CABundle != "":
+		pool, err := certPoolOf(p.CABundle)
+		if err != nil {
+			return Diagnosis{Reason: "the CA bundle is not usable"}
+		}
+		tlsConfig.RootCAs = pool
+	}
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext:           policy.DialContext(&net.Dialer{Timeout: 5 * time.Second}),
+			TLSClientConfig:       tlsConfig,
 			ResponseHeaderTimeout: 6 * time.Second,
 			DisableKeepAlives:     true,
 		},
@@ -71,6 +95,9 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if certificateProblem(err) {
+			return Diagnosis{BadCertificate: true, Reason: CertificateMessage}
+		}
 		return Diagnosis{Reason: "could not connect: " + networkReason(err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -89,6 +116,26 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 		d.Reason = fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
 	}
 	return d
+}
+
+// certPoolOf is a pool of exactly the certificates in the PEM bundle, without the system roots.
+func certPoolOf(bundle string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(bundle)) {
+		return nil, errors.New("the bundle holds no PEM certificate")
+	}
+	return pool, nil
+}
+
+// certificateProblem says err is the server's certificate failing verification. The typed errors are
+// what crypto/tls returns (a *tls.CertificateVerificationError wraps them); a handshake that fails
+// for another reason, or a server that is down, is not one.
+func certificateProblem(err error) bool {
+	var unknown x509.UnknownAuthorityError
+	var host x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var verify *tls.CertificateVerificationError
+	return errors.As(err, &unknown) || errors.As(err, &host) || errors.As(err, &invalid) || errors.As(err, &verify)
 }
 
 // networkReason names a connection failure without quoting addresses or anything a server sent.
@@ -110,13 +157,19 @@ func networkReason(err error) string {
 	return "network error"
 }
 
-// OAuthPreflight is a Preflight that refuses servers that need per-user OAuth. An unreachable server,
-// or one that rejects the credential, is not refused here: it may be declared before it runs, and the
+// OAuthPreflight is a Preflight that refuses servers that need per-user OAuth, and servers whose
+// certificate does not verify. An unreachable server, or one that rejects the credential, is not refused here: it may be declared before it runs, and the
 // prober reports its health.
 func OAuthPreflight(policy catalog.URLPolicy) Preflight {
 	return func(ctx context.Context, p PreflightRequest) error {
-		if d := Diagnose(ctx, policy, p); d.NeedsOAuth {
+		d := Diagnose(ctx, policy, p)
+		switch {
+		case d.NeedsOAuth:
 			return &InvalidError{Msg: OAuthMessage}
+		case d.BadCertificate:
+			// A certificate that does not verify is the admin's to fix now (a missing CA), and a
+			// server saved this way would never connect. A server that is only down stays open.
+			return &InvalidError{Msg: CertificateMessage}
 		}
 		return nil
 	}

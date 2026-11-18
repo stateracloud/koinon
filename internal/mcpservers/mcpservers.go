@@ -49,7 +49,9 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -198,6 +200,13 @@ type Server struct {
 	Source           string `json:"source"`
 	ManagedBySecret  string `json:"managedBySecret,omitempty"`
 	DisabledReason   string `json:"disabledReason,omitempty"`
+	// CABundle is the PEM bundle of the one CA that signs the server's certificate, "" for the public
+	// roots. Only this CA is trusted for this server (it replaces the public roots, as curl --cacert
+	// does). It is public (certificates only).
+	CABundle string `json:"caBundle,omitempty"`
+	// InsecureSkipVerify is set when the server's certificate is NOT verified (as curl -k): its identity
+	// is not checked and its credential can be sent to an impostor. Never with a CABundle; https only.
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
 	Removed bool `json:"removed,omitempty"`
 	// CredentialLostAt is set when the credential was lost with the KEK that encrypted it (keys
@@ -261,6 +270,24 @@ type Service struct {
 	policy    catalog.URLPolicy
 	preflight Preflight
 	hold      *restorehold.Guard
+	// noTargetTLS is set when the configured gateway cannot render a per-target TLS policy.
+	noTargetTLS bool
+}
+
+// WithoutTargetTLS says the configured gateway cannot render a server's own CA or a skipped
+// certificate check (gateway.mode=kubernetes, see gateway.MCPTargetCA). The service then refuses a
+// save that sets either, instead of accepting a server the reconciler would leave out.
+func (s *Service) WithoutTargetTLS() *Service {
+	s.noTargetTLS = true
+	return s
+}
+
+// checkTargetTLS refuses a CA bundle or insecureSkipVerify when the gateway cannot render it.
+func (s *Service) checkTargetTLS(caBundle string, insecure bool) error {
+	if s.noTargetTLS && (caBundle != "" || insecure) {
+		return invalid("this installation's gateway (gateway.mode=kubernetes) cannot trust a server's own CA or skip the certificate check, so caBundle and insecureSkipVerify are refused; use gateway.mode=standalone, or a server with a certificate from a public CA")
+	}
+	return nil
 }
 
 // WithRestoreHold makes the preflight (the only outward call of this service) refuse with
@@ -279,6 +306,11 @@ type Preflight func(ctx context.Context, p PreflightRequest) error
 type PreflightRequest struct {
 	URL       string
 	Transport string
+	// CABundle is the server's own CA bundle (PEM), "" for the public roots. When set it is the ONLY
+	// trust for this server.
+	CABundle string
+	// InsecureSkipVerify says the certificate is not verified.
+	InsecureSkipVerify bool
 }
 
 // New returns a Service. keys may be nil; servers with a credential then cannot be written.
@@ -341,6 +373,7 @@ func toServer(r store.McpServer) Server {
 		ID: r.ID.String(), Name: r.Name, URL: r.Url, Transport: string(r.Transport),
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
+		CABundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify,
 		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
@@ -362,7 +395,7 @@ func toTool(t store.McpTool) Tool {
 func serverSummary(r store.McpServer) map[string]any {
 	return map[string]any{
 		"name": r.Name, "url": r.Url, "transport": string(r.Transport), "hasCredential": len(r.Credential) > 0,
-		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source),
+		"credentialHeader": r.CredentialHeader.String, "source": string(r.Source), "hasCABundle": r.CaBundle != "", "insecureSkipVerify": r.InsecureSkipVerify,
 		"kind": declarationOf(r).Kind, "dataClass": declarationOf(r).Legs,
 	}
 }
@@ -403,6 +436,9 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 		return err
 	}
 	if header != "" {
+		if !gateway.CredentialSafeURL(rawURL) {
+			return invalid("url must be https when the server has a credential (http is allowed only on a loopback address)")
+		}
 		if !headerPattern.MatchString(header) {
 			return invalid("credential header must be an HTTP header name")
 		}
@@ -412,6 +448,100 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	}
 	if !prefixPattern.MatchString(prefix) {
 		return invalid("credential prefix must be at most 32 printable ASCII characters, for example \"Bearer \"")
+	}
+	return nil
+}
+
+// MaxCABundleBytes bounds a server's CA bundle. Every bundle goes into the one Secret that serves all
+// orgs, so the cap is far lower than the code-host one (codehost.MaxCABundleBytes): a few
+// certificates need a few KiB.
+const MaxCABundleBytes = 64 << 10
+
+// MaxOrgCABundleBytes bounds the CA bundles of all servers of one org. The reconciler keeps the
+// bundles of all orgs in one Secret with a global cap; a budget per org means one org cannot use up
+// the share of the others.
+const MaxOrgCABundleBytes = 128 << 10
+
+// MaxGlobalCABundleBytes bounds the CA bundles of all servers of all orgs: they share the one Secret
+// that serves every org and holds about 1 MiB. While a change settles the old and the new file both
+// stay, so the cap is a quarter of the Secret. A save that would take the total over it is refused, so
+// a bundle the API accepted is always one the reconciler serves (the reconciler enforces the same cap
+// as a guard, never as the first line).
+const MaxGlobalCABundleBytes = 256 << 10
+
+// checkCABudgets refuses a bundle that takes the org over MaxOrgCABundleBytes, or all orgs together
+// over MaxGlobalCABundleBytes. The advisory lock serializes the saves that add bundle bytes, so two orgs
+// cannot both pass the global check and then both commit. except is the server being saved (zero for a
+// new one): its stored bundle does not count.
+func checkCABudgets(ctx context.Context, q *store.Queries, org, except pgtype.UUID, bundle string) error {
+	if bundle == "" {
+		return nil
+	}
+	if err := q.LockMCPCABudget(ctx); err != nil {
+		return err
+	}
+	all, err := q.ListMCPServers(ctx, org)
+	if err != nil {
+		return err
+	}
+	if err := CheckOrgCABudget(all, except, bundle); err != nil {
+		return err
+	}
+	total, err := q.SumMCPCABundleBytes(ctx, except)
+	if err != nil {
+		return err
+	}
+	if total+int64(len(bundle)) > MaxGlobalCABundleBytes {
+		return invalid("the CA bundles of all servers on this installation are over %d KiB in total; remove or shorten one", MaxGlobalCABundleBytes>>10)
+	}
+	return nil
+}
+
+// CheckOrgCABudget refuses a bundle that takes the org's bundles over MaxOrgCABundleBytes. others are
+// the org's servers as stored; the server named by except (zero for a new one) is counted with its
+// new bundle instead of its stored one.
+func CheckOrgCABudget(others []store.McpServer, except pgtype.UUID, bundle string) error {
+	total := len(bundle)
+	for _, r := range others {
+		if r.ID != except && !r.RemovedAt.Valid {
+			total += len(r.CaBundle)
+		}
+	}
+	if total > MaxOrgCABundleBytes {
+		return invalid("the CA bundles of this org's servers are over %d KiB in total", MaxOrgCABundleBytes>>10)
+	}
+	return nil
+}
+
+// ValidateTLSTrust checks a server's TLS trust settings together: a CA bundle (see ValidateCABundle) or
+// insecureSkipVerify, never both, and insecureSkipVerify only on an https URL (an http URL has no
+// certificate to skip).
+func ValidateTLSTrust(rawURL, bundle string, insecure bool) error {
+	if insecure {
+		if bundle != "" {
+			return invalid("a CA bundle and insecureSkipVerify cannot both be set: a CA bundle makes the server trust only that CA, skipping verification trusts any certificate; choose one")
+		}
+		if u, err := url.Parse(rawURL); err != nil || strings.ToLower(u.Scheme) != "https" {
+			return invalid("insecureSkipVerify needs an https url")
+		}
+	}
+	return ValidateCABundle(rawURL, bundle)
+}
+
+// ValidateCABundle checks a server's CA bundle: empty (the public roots), or PEM certificates only
+// on an https URL (a CA verifies a TLS certificate, and an http URL has none).
+func ValidateCABundle(rawURL, bundle string) error {
+	if bundle == "" {
+		return nil
+	}
+	if len(bundle) > MaxCABundleBytes {
+		return invalid("the CA bundle is larger than %d KiB", MaxCABundleBytes>>10)
+	}
+	if u, err := url.Parse(rawURL); err != nil || u.Scheme != "https" {
+		return invalid("a CA bundle needs an https url")
+	}
+	if err := codehost.ValidateCABundle(bundle); err != nil {
+		return invalid("%s", err.Error())
 	}
 	return nil
 }
@@ -490,6 +620,11 @@ type Input struct {
 	CredentialValue  string
 	// Class is what the server exposes. Nil is DefaultDeclaration: not yet classified.
 	Class *Declaration
+	// CABundle is the PEM bundle of the CA that signs the server's certificate; "" uses the public roots.
+	// When set, only this CA is trusted for the server.
+	CABundle string
+	// InsecureSkipVerify turns the certificate check off (as curl -k). https only, never with CABundle.
+	InsecureSkipVerify bool
 }
 
 // Patch changes a server; nil fields stay.
@@ -499,6 +634,10 @@ type Patch struct {
 	// Credential replaces the credential; RemoveCredential removes it. Setting both is invalid.
 	Credential       *CredentialPatch
 	RemoveCredential bool
+	// CABundle replaces the server's CA bundle; "" goes back to the public roots. Nil keeps it.
+	CABundle *string
+	// InsecureSkipVerify turns the certificate check off (true) or on (false). Nil keeps it.
+	InsecureSkipVerify *bool
 }
 
 // CredentialPatch replaces the header, prefix or secret. Value nil keeps the stored secret.
@@ -552,6 +691,12 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return Server{}, err
 	}
+	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
+		return Server{}, err
+	}
+	if err := s.checkTargetTLS(in.CABundle, in.InsecureSkipVerify); err != nil {
+		return Server{}, err
+	}
 	if in.Class != nil {
 		d, err := in.Class.Normalize()
 		if err != nil {
@@ -562,7 +707,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Server{}, err
 	}
-	if err := s.runPreflight(ctx, in.URL, in.Transport); err != nil {
+	if err := s.runPreflight(ctx, in.URL, in.Transport, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return Server{}, err
 	}
 	id, err := newID()
@@ -579,7 +724,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		p := store.CreateMCPServerParams{
 			OrgID: org, ID: id, Name: in.Name, Url: in.URL, Transport: store.McpTransport(in.Transport),
 			CredentialHeader: header, CredentialPrefix: prefixIf(in.CredentialPrefix, len(cred) > 0), Credential: cred,
-			Source: store.ConfigSourceUi, CreatedBy: creator,
+			Source: store.ConfigSourceUi, CreatedBy: creator, CaBundle: in.CABundle, InsecureSkipVerify: in.InsecureSkipVerify,
 		}
 		createClass(&p, in.Class)
 		if in.Class != nil {
@@ -590,6 +735,9 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			if err := link.check(in.URL); err != nil {
 				return err
 			}
+		}
+		if err := checkCABudgets(ctx, q, org, pgtype.UUID{}, in.CABundle); err != nil {
+			return err
 		}
 		row, err = q.CreateMCPServer(ctx, p)
 		if err != nil {
@@ -613,14 +761,14 @@ func prefixIf(prefix string, has bool) string {
 	return prefix
 }
 
-func (s *Service) runPreflight(ctx context.Context, rawURL, transport string) error {
+func (s *Service) runPreflight(ctx context.Context, rawURL, transport, caBundle string, insecure bool) error {
 	if err := s.hold.Err(); err != nil {
 		return err
 	}
 	if s.preflight == nil {
 		return nil
 	}
-	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport})
+	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport, CABundle: caBundle, InsecureSkipVerify: insecure})
 }
 
 // Update changes a server entered by a person.
@@ -648,6 +796,14 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if patch.Transport != nil {
 			transport = *patch.Transport
 		}
+		caBundle := cur.CaBundle
+		if patch.CABundle != nil {
+			caBundle = *patch.CABundle
+		}
+		insecure := cur.InsecureSkipVerify
+		if patch.InsecureSkipVerify != nil {
+			insecure = *patch.InsecureSkipVerify
+		}
 		header, prefix, cred := cur.CredentialHeader.String, cur.CredentialPrefix, cur.Credential
 		value := ""
 		switch {
@@ -671,16 +827,29 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err := ValidateRemote(u, transport, header, prefix); err != nil {
 			return err
 		}
+		if err := ValidateTLSTrust(u, caBundle, insecure); err != nil {
+			return err
+		}
+		if err := s.checkTargetTLS(caBundle, insecure); err != nil {
+			return err
+		}
 		if err := s.policy.Check(ctx, u); err != nil {
 			return err
 		}
-		if u != cur.Url || transport != string(cur.Transport) {
-			if err := s.runPreflight(ctx, u, transport); err != nil {
+		if u != cur.Url || transport != string(cur.Transport) || caBundle != cur.CaBundle || insecure != cur.InsecureSkipVerify {
+			if err := s.runPreflight(ctx, u, transport, caBundle, insecure); err != nil {
+				return err
+			}
+		}
+		// After the preflight (up to 8 s of network): the budget check takes the global advisory
+		// lock, which must be held only for the writes.
+		if caBundle != "" && caBundle != cur.CaBundle {
+			if err := checkCABudgets(ctx, q, org, sid, caBundle); err != nil {
 				return err
 			}
 		}
 		out, err = q.UpdateMCPServer(ctx, store.UpdateMCPServerParams{
-			OrgID: org, ID: sid, Url: u, Transport: store.McpTransport(transport),
+			OrgID: org, ID: sid, Url: u, Transport: store.McpTransport(transport), CaBundle: caBundle, InsecureSkipVerify: insecure,
 			CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0),
 			// The envelope is rewritten only when this patch replaces or removes it. cur was read
 			// without a lock, and a concurrent `keys rewrap` or `reencrypt` may have replaced the

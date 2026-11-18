@@ -159,7 +159,8 @@ message MCPState {
 }
 
 // MCPTarget is an upstream MCP server. credential_file is where the target's credential is mounted in
-// the gateway, not the credential; credential_header and credential_prefix say how it is sent.
+// the gateway, not the credential; credential_header and credential_prefix say how it is sent. ca_file is
+// where the target's own CA bundle (public certificates) is mounted, empty for the system roots.
 message MCPTarget {
   string name = 1;
   string url = 2;
@@ -168,6 +169,8 @@ message MCPTarget {
   string credential_header = 5;
   string credential_prefix = 6;
   string credential_file = 7;
+  string ca_file = 8;
+  bool insecure_skip_verify = 9;
 }
 
 message AgentTools {

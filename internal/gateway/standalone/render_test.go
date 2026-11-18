@@ -38,6 +38,65 @@ var _ = Describe("Render", func() {
 		})
 	}
 
+	It("sets a TLS root on the target that names a CA bundle and on no other (#278)", func() {
+		var f fixture
+		for _, c := range fixtures() {
+			if c.name == "mcp-server-ca" {
+				f = c
+			}
+		}
+		got, _, err := standalone.Render(f.state, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc struct {
+			MCP struct {
+				Targets []struct {
+					Name     string `yaml:"name"`
+					Policies struct {
+						BackendTLS *struct {
+							Root     string `yaml:"root"`
+							Insecure bool   `yaml:"insecure"`
+						} `yaml:"backendTLS"`
+					} `yaml:"policies"`
+				} `yaml:"targets"`
+			} `yaml:"mcp"`
+		}
+		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
+		roots, insecure := map[string]string{}, map[string]bool{}
+		for _, t := range doc.MCP.Targets {
+			if t.Policies.BackendTLS != nil && t.Policies.BackendTLS.Root != "" {
+				roots[t.Name] = t.Policies.BackendTLS.Root
+			}
+			if t.Policies.BackendTLS != nil && t.Policies.BackendTLS.Insecure {
+				insecure[t.Name] = true
+			}
+		}
+		Expect(roots).To(Equal(map[string]string{"acme-wiki": "/secrets/upstream/mcp_ca.crt"}), "a root replaces the system roots, so it must not reach another target")
+		Expect(insecure).To(Equal(map[string]bool{"acme-scratch": true}), "skipped verification (backendTLS.insecure) must not reach another target")
+	})
+
+	It("refuses skipped verification on a URL that is not https, and together with a CA file", func() {
+		for _, raw := range []string{"http://mcp.example.com/mcp", "HTTP://mcp.example.com/mcp"} {
+			s := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: raw, InsecureSkipVerify: true}}}
+			_, _, err := standalone.Render(s, standalone.Options{})
+			Expect(err).To(MatchError(ContainSubstring("https")), raw)
+		}
+		s := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: "https://mcp.example.com/mcp", InsecureSkipVerify: true, CAFile: "/secrets/upstream/mcp_ca.crt"}}}
+		_, _, err := standalone.Render(s, standalone.Options{})
+		Expect(err).To(MatchError(ContainSubstring("exclude each other")))
+	})
+
+	It("refuses a CA file on a URL that is not https, whatever the case of the scheme", func() {
+		for _, raw := range []string{"http://mcp.example.com/mcp", "HTTP://mcp.example.com/mcp", "ftp://x"} {
+			s := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: raw, CAFile: "/secrets/upstream/mcp_ca.crt"}}}
+			_, _, err := standalone.Render(s, standalone.Options{})
+			Expect(err).To(MatchError(ContainSubstring("https")), raw)
+		}
+		s := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: "HTTPS://mcp.example.com/mcp", CAFile: "/secrets/upstream/mcp_ca.crt"}}}
+		got, _, err := standalone.Render(s, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(got)).To(ContainSubstring("root: /secrets/upstream/mcp_ca.crt"))
+	})
+
 	It("logs who answered, with no \"$\" the config loader would expand (ADR 0056 amendment 2026-10-29)", func() {
 		f := fixtures()[2]
 		got, _, err := standalone.Render(f.state, f.options)

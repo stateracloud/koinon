@@ -70,11 +70,16 @@ const (
 	KeyInstallationID = "installationId"
 	KeyPrivateKey     = "privateKey"
 	KeyBaseURL        = "baseUrl"    // GitHub: optional, a GitHub Enterprise Server host. Gitea: required, https://host[:port][/path]
-	KeyCABundle       = "caBundle"   // optional: the public CA bundle of that host
+	KeyCABundle       = "caBundle"   // optional: the public CA bundle of that host (a connection, or an mcp-server Secret with an https url); only this CA is trusted for the host
 	KeyReadToken      = "readToken"  // Gitea: the bot's read token
 	KeyWriteToken     = "writeToken" // Gitea: the bot's write token
 	KeyCIDirs         = "ciDirs"     // optional: directories that run CI on the host, one per line or comma-separated
 )
+
+// KeyInsecureSkipVerify is the optional key of an mcp-server Secret: "true" turns the server's
+// certificate check off (like curl -k): TLS is used but the server's identity is not verified. https
+// only, and never with caBundle.
+const KeyInsecureSkipVerify = "insecureSkipVerify"
 
 // KeyDisabled is the optional key of all three Secret types: "true" switches the declared items off
 // (the outward switch, ADR 0110 decision 5), "false" or absent leaves the switch to the admin. The UI
@@ -183,14 +188,22 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 	d := mcpservers.Declared{
 		SecretName: sec.Name, Version: version, Name: get(KeyName), URL: get(KeyURL), Transport: get(KeyTransport),
 		CredentialHeader: get(KeyCredentialHeader), CredentialValue: get(KeyCredential),
+		CABundle: get(KeyCABundle),
 	}
 	if d.Transport == "" {
 		d.Transport = mcpservers.TransportStreamableHTTP
 	}
+	var errs []error
+	switch get(KeyInsecureSkipVerify) {
+	case "", "false":
+	case "true":
+		d.InsecureSkipVerify = true
+	default:
+		errs = append(errs, fmt.Errorf("%s must be true or false", KeyInsecureSkipVerify))
+	}
 	if scheme := get(KeyCredentialScheme); scheme != "" {
 		d.CredentialPrefix = scheme + " "
 	}
-	var errs []error
 	for _, k := range []string{KeyName, KeyURL} {
 		if get(k) == "" {
 			errs = append(errs, fmt.Errorf("%s is required", k))
@@ -211,6 +224,8 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 			errs = append(errs, err)
 		} else if err := mcpservers.ValidateRemote(d.URL, d.Transport, header, d.CredentialPrefix); err != nil {
 			errs = append(errs, err)
+		} else if err := mcpservers.ValidateTLSTrust(d.URL, d.CABundle, d.InsecureSkipVerify); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle+"/"+KeyInsecureSkipVerify, err))
 		}
 	}
 	return d, errors.Join(errs...)

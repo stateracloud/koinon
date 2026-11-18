@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/sandboxres"
 )
 
@@ -23,6 +24,9 @@ type Settings struct {
 	GatewayMCPURL string
 	// GatewayURL is agentgateway's LLM listener, for the provider echo check.
 	GatewayURL string
+	// GatewayMode is the chart's gateway.mode. In kubernetes mode the gateway cannot render a
+	// per-server CA or a skipped certificate check, so the API refuses a save that sets either.
+	GatewayMode project.GatewayMode
 	// GitHubAPIURL is the base URL of the GitHub API.
 	GitHubAPIURL string
 	// WatchPoll is the backstop poll interval of WatchRun.

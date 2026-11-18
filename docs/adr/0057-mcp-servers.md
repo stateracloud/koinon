@@ -321,6 +321,50 @@ This changes two points of the 2026-10-30 amendment.
 The leak guard (ADR 0091) is unaffected, except in one respect: a tool result's string that is itself a
 JSON document is now decoded before its text is fingerprinted, up to three levels deep (#684).
 
+## Amendment 2026-11-18: a credentialed server uses https, and trusts its own CA (#278)
+
+Status: accepted (the maintainer's decision on #278).
+
+- **https rule.** A server with a credential must have an https URL (this amendment records the rule). Plain http stays allowed
+  for a loopback address (`gateway.CredentialSafeURL`). The API refuses the rest when you add or change the
+  server, and the reconciler leaves such a row out of the gateway state, so a row from before the rule is
+  not served with its credential in the clear.
+- **A private CA is per server, and replaces the public roots.** The server record has an optional
+  `caBundle`: PEM certificates (at most 64 KiB), allowed only with an https URL. It follows the standard
+  tool pattern (`curl --cacert`, kubectl `certificate-authority`, git `sslCAInfo`): when a server has a
+  bundle, ONLY that CA is trusted for that server; the public roots are not added. A server without a
+  bundle uses the public (system) roots. The bundle never widens trust for another server, and there is no
+  install-wide CA value. In agentgateway v1.6 and later the backend TLS `root` replaces the system roots
+  for the target it is set on, so it is emitted only for a target that has a bundle. Every layer agrees:
+  the gateway (`backendTLS.root`, and `caTransport` in the Koinon gateway), the add-time check
+  (`Diagnose` builds a pool of only the bundle), the web form text and the API text. The bundle reaches the gateway as a file in the provider keys
+  Secret, in the same way as a credential file, and a new file waits for the kubelet to sync it (the
+  settle rule of the gateway plan) before the target uses it.
+- **Skip verification, per server.** The server record has an optional `insecureSkipVerify` (default
+  false), like `curl -k` and kubectl `insecure-skip-tls-verify`: TLS is used, but the certificate is not
+  verified, so the server's identity is not checked and its credential can be sent to an impostor. It is
+  allowed only with an https URL, and it excludes `caBundle` (the API, the declared Secret and the table
+  reject both set). It reaches the gateway as `MCPTarget.InsecureSkipVerify`: agentgateway renders
+  `backendTLS.insecure: true` on that target only (agentgateway v1.7.0 `LocalBackendTLS.insecure`, which
+  installs a verifier that accepts any certificate), and the Koinon gateway sets `InsecureSkipVerify` on a
+  cloned transport for that target. The add-time check skips verification, too. The audit log records the
+  flag, and the server list and detail show that verification is off. The `kubernetes` gateway mode cannot
+  render it and leaves only that server out, as for a bundle. A web form checkbox carries a visible warning.
+- **Bundle budgets.** A bundle is at most 64 KiB, the bundles of one org at most 128 KiB, and the bundles
+  of all orgs at most 256 KiB (they share one Secret that serves every org; the cap is a quarter of the
+  Secret because an old and a new file both stay while a change settles). The API refuses a save that
+  would pass either cap (the global one under an advisory lock, so two orgs cannot both pass), so a save
+  the API accepted is always one the reconciler serves; the reconciler keeps the same caps as a guard.
+- **Add-time check.** The API's own probe uses the same bundle, and only that bundle. A certificate that does not verify gives an
+  error that says to put the CA in `caBundle`.
+- **Declared servers** read the keys `caBundle` and `insecureSkipVerify` (`true` or `false`) from the labelled Secret.
+- The `kubernetes` gateway mode cannot render a per-target CA or a skipped certificate check (ADR 0097
+  decision 4 freezes the CRD path for MCP). koinon-api knows the mode (`KOINON_GATEWAY_MODE`, set by the
+  chart) and refuses a save with `caBundle` or `insecureSkipVerify` in that mode, with a message that names
+  `gateway.mode=standalone`. That covers the API and declared Secrets. As guards the reconciler still leaves
+  out a row that has either (a row saved before the mode changed) and reports it on that server, and the
+  render refuses such a target.
+
 ## Upstream verification
 
 Checked 2026-10-23 against agentgateway v1.6.0 and the MCP Registry; see the research report. The

@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -392,6 +393,146 @@ var _ = Describe("Org MCP servers", func() {
 		Entry("a header", "credential_header", "X-Api-$HOME", "credential header"),
 		Entry("a prefix", "credential_prefix", "Bearer ${HOME} ", "credential prefix"),
 	)
+
+	It("delivers a server's CA bundle as a file of its own target, and no other target names one (#278)", func(ctx SpecContext) {
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		t, ok := targetOf(st, slug+"-private")
+		Expect(ok).To(BeTrue())
+		Expect(t.CAFile).To(HavePrefix("/secrets/providers/mcpca-" + private.ID + "-"))
+		other, ok := targetOf(st, slug+"-plain")
+		Expect(ok).To(BeTrue())
+		Expect(other.CAFile).To(BeEmpty(), "a bundle replaces the system roots, so it must not reach another target")
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(sec.Data[strings.TrimPrefix(t.CAFile, "/secrets/providers/")])).To(Equal(string(ca.CA)))
+	})
+
+	It("gives each org its own CA budget: one org at its limit is refused at save time and does not starve another org (#278)", func(ctx SpecContext) {
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		bundle := strings.Repeat(string(ca.CA), 60000/len(ca.CA))
+		Expect(len(bundle)).To(BeNumerically("<=", mcpservers.MaxCABundleBytes))
+		actor := audit.System("koinon-test:spec")
+		for i := 0; i < 2; i++ { // 2 x ~60 KB is this org's whole budget
+			s, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: fmt.Sprintf("big%d", i), URL: fmt.Sprintf("https://big%d.example.test/mcp", i), CABundle: bundle})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, s.ID) })
+		}
+		_, err = svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "big2", URL: "https://big2.example.test/mcp", CABundle: bundle})
+		Expect(err).To(MatchError(ContainSubstring("the CA bundles of this org's servers are over 128 KiB in total")))
+
+		other, otherUser := newOrgWithSlug(ctx, uniq("cab"))
+		DeferCleanup(func(ctx SpecContext) { _, _ = pool.Exec(ctx, `DELETE FROM mcp_servers WHERE org_id = $1`, other) })
+		osrv, err := svc.Create(ctx, other, actor, otherUser, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(osrv.CABundle).NotTo(BeEmpty())
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		for i := 0; i < 2; i++ {
+			_, ok := targetOf(mg.last(), fmt.Sprintf("%s-big%d", slug, i))
+			Expect(ok).To(BeTrue())
+		}
+		var otherSlug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, other).Scan(&otherSlug)).To(Succeed())
+		_, ok := targetOf(mg.last(), otherSlug+"-private")
+		Expect(ok).To(BeTrue(), "the other org's CA server is served")
+	})
+
+	It("leaves out a CA-bundled server when the gateway cannot render a per-target CA, and still applies the others (#278)", func(ctx SpecContext) {
+		mg.noTargetCA = true
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA)})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring(slug + "/private not served: it has a CA bundle, which gateway.mode=kubernetes cannot render")))
+		_, ok := targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-private")
+		Expect(ok).To(BeFalse())
+	})
+
+	It("leaves a server that is not served with no credential file in the Secret (#278)", func(ctx SpecContext) {
+		mg.noTargetCA = true
+		ca, err := faketls.Make("koinon test CA", []string{"private.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		actor := audit.System("koinon-test:spec")
+		private, err := svc.Create(ctx, org, actor, user, mcpservers.Input{
+			Name: "private", URL: "https://private.example.test/mcp", CABundle: string(ca.CA),
+			CredentialValue: "koinon_test_not-a-real-token", CredentialPrefix: "Bearer ",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, private.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("private not served")))
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		for k := range sec.Data {
+			Expect(k).NotTo(ContainSubstring(private.ID), "a server that is left out leaves no file")
+		}
+		var served int
+		for k := range sec.Data {
+			if strings.HasPrefix(k, "mcp-") {
+				served++
+			}
+		}
+		Expect(served).To(BeNumerically(">=", 1), "the served server's credential file is there")
+	})
+
+	It("renders skipped verification on the target that asks for it and on no other, and leaves it out where the gateway cannot (#278)", func(ctx SpecContext) {
+		actor := audit.System("koinon-test:spec")
+		scratch, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "scratch", URL: "https://scratch.example.test/mcp", InsecureSkipVerify: true})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = svc.Delete(ctx, org, actor, scratch.ID) })
+		server(ctx, org, "plain", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		t, ok := targetOf(mg.last(), slug+"-scratch")
+		Expect(ok).To(BeTrue())
+		Expect(t.InsecureSkipVerify).To(BeTrue())
+		Expect(t.CAFile).To(BeEmpty())
+		other, ok := targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		Expect(other.InsecureSkipVerify).To(BeFalse())
+
+		mg.noTargetCA = true
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring(slug + "/scratch not served: it has insecureSkipVerify, which gateway.mode=kubernetes cannot render")))
+		_, ok = targetOf(mg.last(), slug+"-plain")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-scratch")
+		Expect(ok).To(BeFalse())
+	})
+
+	It("does not serve a stored credentialed server whose URL is not https, and still applies the others (ADR 0120)", func(ctx SpecContext) {
+		bad := server(ctx, org, "cleartext", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		// A row from before the rule: the service refuses to write it now.
+		_, err := pool.Exec(ctx, `UPDATE mcp_servers SET url = 'http://mcp.example.com/cleartext' WHERE id = $1`, bad.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring(slug + "/cleartext not served: it has a credential and its URL is not https")))
+		_, ok := targetOf(mg.last(), slug+"-wiki")
+		Expect(ok).To(BeTrue())
+		_, ok = targetOf(mg.last(), slug+"-cleartext")
+		Expect(ok).To(BeFalse())
+	})
 
 	It("reserves the approval target names too: one org's server cannot take another's -ask name", func(ctx SpecContext) {
 		// Org "x8a-b" with the server "ask" would be the target x8a-b-ask, the approval target of org

@@ -36,6 +36,7 @@ import (
 type servedMCP struct {
 	servers []gatewayplan.MCPServer
 	files   map[string][]byte
+	bytes   int // bytes of CA bundles in files, against mcpservers.MaxGlobalCABundleBytes
 }
 
 // loadMCP reads every org's enabled servers and their tools. A server that cannot be served (its URL
@@ -46,7 +47,12 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 	out := servedMCP{files: map[string][]byte{}}
 	var errs []error
 	owner := map[string]string{}
+	rendersCA := true
+	if g, ok := r.gw.(gateway.MCPTargetCA); ok {
+		rendersCA = g.RendersMCPTargetCA()
+	}
 	for _, org := range orgs {
+		orgBytes := 0
 		rows, err := r.q.ListServedMCPServers(ctx, org.ID)
 		if err != nil {
 			return out, errs, fmt.Errorf("reconciler: list MCP servers of org %s: %w", org.Slug, err)
@@ -66,10 +72,18 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 				continue
 			}
+			if row.CredentialHeader.Valid && !gateway.CredentialSafeURL(row.Url) {
+				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has a credential and its URL is not https", org.Slug, row.Name))
+				continue
+			}
 			s := gatewayplan.MCPServer{
 				Org: gatewayplan.Org{ID: org.ID, Slug: org.Slug}, ID: row.ID, Name: row.Name, URL: row.Url,
 				SSE: row.Transport == store.McpTransportSse, Unhealthy: row.Health == store.McpHealthUnhealthy,
+				InsecureSkipVerify: row.InsecureSkipVerify,
 			}
+			// Every check runs before any file is written: a server that is left out must leave no
+			// credential (or CA bundle) in the Secret.
+			var credential string
 			if len(row.Credential) > 0 {
 				cred, err := mcpservers.OpenCredential(r.cfg.Keys, org.ID, row.ID, row.Credential)
 				if err != nil {
@@ -80,10 +94,46 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
+				credential = cred
 				sum := sha256.Sum256(row.Credential)
 				s.File = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 				s.CredentialHeader, s.CredentialPrefix = row.CredentialHeader.String, row.CredentialPrefix
-				out.files[s.File] = []byte(cred)
+			}
+			if row.CaBundle != "" || row.InsecureSkipVerify {
+				if err := mcpservers.ValidateTLSTrust(row.Url, row.CaBundle, row.InsecureSkipVerify); err != nil {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
+					continue
+				}
+				if !rendersCA {
+					what := "a CA bundle"
+					if row.InsecureSkipVerify {
+						what = "insecureSkipVerify"
+					}
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: it has %s, which gateway.mode=kubernetes cannot render; use gateway.mode=standalone", org.Slug, row.Name, what))
+					continue
+				}
+			}
+			if row.CaBundle != "" {
+				// The bundle is public: it goes in the same Secret as a credential file, named by its
+				// content, so a changed bundle is a new file and settles like a new credential.
+				if orgBytes+len(row.CaBundle) > mcpservers.MaxOrgCABundleBytes {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of the org's servers are over %d KiB in total", org.Slug, row.Name, mcpservers.MaxOrgCABundleBytes>>10))
+					continue
+				}
+				if out.bytes+len(row.CaBundle) > mcpservers.MaxGlobalCABundleBytes {
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: the CA bundles of all servers are over %d KiB in total", org.Slug, row.Name, mcpservers.MaxGlobalCABundleBytes>>10))
+					continue
+				}
+				sum := sha256.Sum256([]byte(row.CaBundle))
+				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
+			}
+			if s.File != "" {
+				out.files[s.File] = []byte(credential)
+			}
+			if s.CAFile != "" {
+				out.files[s.CAFile] = []byte(row.CaBundle)
+				out.bytes += len(row.CaBundle)
+				orgBytes += len(row.CaBundle)
 			}
 			tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org.ID, ServerID: row.ID})
 			if err != nil {

@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/faketls"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
@@ -60,6 +61,8 @@ func (s *side) name(component string) string { return s.in.Release + "-" + compo
 
 var (
 	src, dst side
+	// mcpTLS is the CA and certificate of this run's fake MCP server; the CA is the server record's caBundle.
+	mcpTLS faketls.Set
 	// done records which steps finished, so a check after a failed step says so instead of failing in a confusing way.
 	done = map[string]bool{}
 	// enqueued are the workflows the source had ENQUEUED when the backup began.
@@ -443,7 +446,9 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		must(err, "fake model rollout")
 
 		By("a fake MCP server: the seed's pending approval is an agent's call to its ask-tier write tool")
-		_, err = kube.KubectlStdin(ctx, drill.FakeMCPManifest(top.FakesNamespace, runID, top.FakeMCPImage), "apply", "-f", "-")
+		mcpTLS, err = drill.FakeMCPTLS(top.FakesNamespace)
+		must(err, "make the fake MCP server's certificate")
+		_, err = kube.KubectlStdin(ctx, drill.FakeMCPManifest(top.FakesNamespace, runID, top.FakeMCPImage, mcpTLS), "apply", "-f", "-")
 		must(err, "apply the fake MCP server")
 		_, err = kube.Kubectl(ctx, "-n", top.FakesNamespace, "rollout", "status", "deploy/fakemcp", "--timeout=3m")
 		must(err, "fake MCP rollout")
@@ -595,8 +600,8 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		}
 
 		By("a pending approval: a fake MCP server, an agent that may call its write tool, one task that parks")
-		code, body = admin(ctx, &src, http.MethodPost, "/mcp-servers", fmt.Sprintf(`{"name":"tracker","url":%q,"credentialHeader":%q,"credentialValue":%q}`,
-			drill.FakeMCPURL(top.FakesNamespace), drill.FakeMCPHeader, drill.FakeMCPKey))
+		code, body = admin(ctx, &src, http.MethodPost, "/mcp-servers", fmt.Sprintf(`{"name":"tracker","url":%q,"credentialHeader":%q,"credentialValue":%q,"caBundle":%q}`,
+			drill.FakeMCPURL(top.FakesNamespace), drill.FakeMCPHeader, drill.FakeMCPKey, string(mcpTLS.CA)))
 		Expect(code).To(Equal(http.StatusCreated), string(body))
 		var mcp struct{ ID string }
 		must(json.Unmarshal(body, &mcp), "the MCP server")

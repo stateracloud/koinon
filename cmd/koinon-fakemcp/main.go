@@ -3,15 +3,20 @@
 // Command koinon-fakemcp is a fake remote MCP server for tests and e2e (plan item MC1). It serves three
 // tools (read_item, write_item and the fetch-style fetch_url, which names a destination) over Streamable HTTP at /mcp, refuses requests without the expected credential header, and
 // records what it receives at /_fake/requests, so a test can check that the gateway injected the
-// credential and what identity it forwarded.
+// credential and what identity it forwarded. With -tls-cert-file and -tls-key-file it serves HTTPS
+// (ADR 0120: a credential goes only over HTTPS). It never makes a certificate itself: a test run makes
+// one CA and certificate (internal/faketls, cmd/koinon-faketls) and gives them as a Secret, so a restart
+// of the pod keeps the same CA and the server record that trusts it stays valid.
 package main
 
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,6 +27,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -60,14 +66,25 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	header := flag.String("header", "X-Api-Key", "the credential header")
 	value := flag.String("value", "not-a-real-token", "the credential header's expected value")
+	certFile := flag.String("tls-cert-file", "", "serve HTTPS with this PEM certificate (needs -tls-key-file)")
+	keyFile := flag.String("tls-key-file", "", "the PEM private key of -tls-cert-file")
+	httpAddr := flag.String("http-addr", "", "with TLS: also serve plain HTTP on this address (for a server that needs no credential, such as the OAuth case)")
 	flag.Parse()
-	if err := run(*addr, *header, *value); err != nil {
+	if (*certFile == "") != (*keyFile == "") {
+		slog.Error("-tls-cert-file and -tls-key-file go together")
+		os.Exit(2)
+	}
+	if *httpAddr != "" && *certFile == "" {
+		slog.Error("-http-addr needs TLS (without it, -addr already serves plain HTTP)")
+		os.Exit(2)
+	}
+	if err := run(*addr, *httpAddr, *header, *value, *certFile, *keyFile); err != nil {
 		slog.Error("koinon-fakemcp failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, header, value string) error {
+func run(addr, httpAddr, header, value, certFile, keyFile string) error {
 	recs := &log{}
 	srv := mcp.NewServer(&mcp.Implementation{Name: project.Name + "-fakemcp", Version: project.Version}, nil)
 	type args struct {
@@ -112,7 +129,12 @@ func run(addr, header, value string) error {
 	})
 	// A server that wants per-user OAuth, as the MCP authorization specification describes it: a 401
 	// whose WWW-Authenticate names the protected resource metadata.
-	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, _ *http.Request) {
+	// It records the request, so a test sees that the add-time OAuth check came without a credential.
+	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, r *http.Request) {
+		recs.add(record{
+			Time: time.Now(), Method: r.Method, Path: r.URL.Path, Authorized: r.Header.Get(header) == value,
+			Agent: r.Header.Get("X-Koinon-Agent"), ClientAuthorization: r.Header.Get("Authorization") != "",
+		})
 		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://fakemcp/.well-known/oauth-protected-resource"`)
 		http.Error(w, "sign in", http.StatusUnauthorized)
 	})
@@ -127,14 +149,43 @@ func run(addr, header, value string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	hs := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	useTLS := certFile != ""
+	if useTLS {
+		// ADR 0120: Koinon refuses a credential over cleartext, so a test that sends a credential to this
+		// server needs HTTPS. The certificate comes from the run's Secret (the key is never in the tree).
+		cert, err := faketls.Load(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("load the TLS certificate: %w", err)
+		}
+		hs.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = hs.Shutdown(sctx)
 	}()
-	slog.Info("serving the fake MCP server", "addr", addr)
-	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if httpAddr != "" {
+		plain := &http.Server{Addr: httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = plain.Shutdown(sctx)
+		}()
+		go func() {
+			if err := plain.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("plain HTTP listener failed", "err", err)
+				stop()
+			}
+		}()
+	}
+	slog.Info("serving the fake MCP server", "addr", addr, "tls", useTLS, "httpAddr", httpAddr)
+	serve := hs.ListenAndServe
+	if useTLS {
+		serve = func() error { return hs.ListenAndServeTLS("", "") }
+	}
+	if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
