@@ -74,6 +74,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/installbinding"
@@ -644,6 +645,13 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// The gateway's public key (ADR 0097 decision 12): koinon-api holds the active public key only, read
+	// from the table every reload interval. No caller seals a v2 envelope yet (slice 3); the key is held
+	// ready, and a row that fails its check is refused and logged.
+	gatewayKeys := &gatewaykeys.PublicKeys{}
+	safego.GoOrStop(bgCtx, slog.Default(), "gateway-public-key", stop, func(ctx context.Context) {
+		gatewayKeys.Run(ctx, pool, func(f string, a ...any) { slog.Warn(fmt.Sprintf(f, a...)) })
+	})
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
 	// Postgres, wrapped by the KEKs of a mounted Secret, which are wrapped in turn as
 	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
@@ -1159,6 +1167,15 @@ func grantGateway(ctx context.Context, db migrations.Execer) error {
 	}
 	if !granted {
 		slog.Info("the role " + migrations.GatewayRole + " does not exist, so it was granted nothing (the Koinon MCP gateway is off, or the role comes later)")
+	}
+	// The roles of the gateway key lifecycle (ADR 0097 decision 12). They exist only with the chart's
+	// gateway key switch; a missing one is skipped.
+	roles, err := migrations.GrantGatewayKeyRoles(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the gateway key roles: %w", err)
+	}
+	if len(roles) > 0 {
+		slog.Info("granted the gateway key roles their privileges", "roles", roles)
 	}
 	return nil
 }
