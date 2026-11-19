@@ -57,7 +57,7 @@ var _ = Describe("forge and registry routes", func() {
 	})
 
 	req := func(tok, authority, method, path, query string) route.Request {
-		return route.Request{Token: tok, Authority: authority, Method: method, Path: path, RawQuery: query}
+		return route.Request{Scheme: "https", Token: tok, Authority: authority, Method: method, Path: path, RawQuery: query}
 	}
 
 	Describe("allow", func() {
@@ -102,8 +102,39 @@ var _ = Describe("forge and registry routes", func() {
 			Entry("an encoded slash", "git.example.com", "GET", "/acme/app.git%2f..%2fother.git", "", route.ReasonBadRequest),
 			Entry("a double slash", "git.example.com", "GET", "/acme//app.git", "", route.ReasonBadRequest),
 			Entry("userinfo in the authority", "registry.npmjs.org@evil.example.net", "GET", "/", "", route.ReasonBadRequest),
+			Entry("a dot segment with a parameter", "git.example.com", "GET", "/acme/app.git/..;/other.git", "", route.ReasonBadRequest),
+			Entry("a port with trailing text", "git.example.com:443abc", "GET", "/acme/app.git", "", route.ReasonBadRequest),
+			Entry("a signed port", "git.example.com:+443", "GET", "/acme/app.git", "", route.ReasonBadRequest),
+			Entry("a non-ASCII host", "git.exampl\u00e9.com", "GET", "/acme/app.git", "", route.ReasonBadRequest),
 			Entry("an empty authority", "", "GET", "/", "", route.ReasonBadRequest),
 		)
+
+		It("refuses a request that is not https", func() {
+			r := req(token(acme), "registry.npmjs.org", "GET", "/left-pad", "")
+			for _, sch := range []string{"", "http"} {
+				r.Scheme = sch
+				d := gate.Check(r)
+				Expect(d.Allowed).To(BeFalse(), sch)
+				Expect(d.Reason).To(Equal(route.ReasonBadRequest))
+			}
+		})
+		It("sets the scheme from net/http: plain HTTP is refused", func() {
+			r := httptest.NewRequest(http.MethodGet, "http://registry.npmjs.org/left-pad", nil)
+			r.Header.Set(route.TokenHeader, token(acme))
+			Expect(gate.Check(route.FromHTTP(r)).Allowed).To(BeFalse())
+		})
+		It("prefers the org's route over a platform route, whatever the order", func() {
+			plat := route.Route{
+				Name: "plat", Class: route.ClassForge, Host: "git.example.com", Methods: []string{"GET"},
+				PathPrefixes: []string{"/acme"}, Credential: "forge-platform",
+			}
+			for _, rs := range [][]route.Route{{plat, forge}, {forge, plat}} {
+				t, err := route.Compile(rs)
+				Expect(err).NotTo(HaveOccurred())
+				d := route.NewGate(ver, t).Check(req(token(acme), "git.example.com", "GET", "/acme/app.git/info/refs", ""))
+				Expect(d.Route.Name).To(Equal("acme-forge"))
+			}
+		})
 
 		It("refuses another org's grant", func() {
 			d := gate.Check(req(token(actortoken.Actor{Org: "zed", Agent: "a"}), "git.example.com", "GET", "/acme/app.git/info/refs", ""))
@@ -172,6 +203,16 @@ var _ = Describe("forge and registry routes", func() {
 			b.Credential = a.Credential
 			_, err := route.Compile([]route.Route{a, b})
 			Expect(err).To(MatchError(ContainSubstring("one route class")))
+		})
+		It("refuses one credential used by two orgs", func() {
+			a, b := forge, forge
+			b.Name, b.Org = "evil-forge", "evil"
+			_, err := route.Compile([]route.Route{a, b})
+			Expect(err).To(MatchError(ContainSubstring("one org")))
+		})
+		It("refuses a host with a trailing dot and a path prefix with a parameter", func() {
+			Expect(bad(func(r *route.Route) { r.Host = "registry.npmjs.org." })).To(HaveOccurred())
+			Expect(bad(func(r *route.Route) { r.PathPrefixes = []string{"/a;b"} })).To(HaveOccurred())
 		})
 		It("allows one credential on two routes of one class", func() {
 			a, b := forge, forge

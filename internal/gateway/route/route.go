@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
@@ -114,7 +115,7 @@ func (r Route) validate() error {
 		return fmt.Errorf("route %q: no path rule", r.Name)
 	}
 	for _, p := range r.PathPrefixes {
-		if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "*?#%") || !canonical(p) {
+		if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "*?#%;") || !canonical(p) {
 			return fmt.Errorf("route %q: path prefix %q must be an absolute, canonical path with no wildcard", r.Name, p)
 		}
 	}
@@ -130,6 +131,8 @@ func validHost(h string) error {
 	switch {
 	case h == "":
 		return errors.New("no host")
+	case strings.HasSuffix(h, "."):
+		return fmt.Errorf("host %q must not end with a dot", h)
 	case h != strings.ToLower(h):
 		return fmt.Errorf("host %q must be lower case", h)
 	case strings.ContainsAny(h, "*?[]/:@ "):
@@ -163,7 +166,11 @@ type Table struct {
 // also refuses a credential that two route classes share, and two routes with one name.
 func Compile(routes []Route) (*Table, error) {
 	seen := map[string]bool{}
-	credClass := map[string]Class{}
+	type owner struct {
+		org   string
+		class Class
+	}
+	credOwner := map[string]owner{}
 	for _, r := range routes {
 		if err := r.validate(); err != nil {
 			return nil, err
@@ -173,10 +180,12 @@ func Compile(routes []Route) (*Table, error) {
 		}
 		seen[r.Name] = true
 		if r.Credential != "" {
-			if c, ok := credClass[r.Credential]; ok && c != r.Class {
-				return nil, fmt.Errorf("credential %q serves classes %q and %q: one credential serves one route class", r.Credential, c, r.Class)
+			if o, ok := credOwner[r.Credential]; ok && o.class != r.Class {
+				return nil, fmt.Errorf("credential %q serves classes %q and %q: one credential serves one route class", r.Credential, o.class, r.Class)
+			} else if ok && o.org != r.Org {
+				return nil, fmt.Errorf("credential %q is used by two orgs: a credential belongs to one org", r.Credential)
 			}
-			credClass[r.Credential] = r.Class
+			credOwner[r.Credential] = owner{org: r.Org, class: r.Class}
 		}
 	}
 	return &Table{routes: slices.Clone(routes)}, nil
@@ -193,6 +202,9 @@ func (t *Table) Routes() []Route {
 // Request is what the gate decides on. It does not depend on net/http, so both drivers and the tests
 // build it the same way.
 type Request struct {
+	// Scheme is the scheme of the request. Only "https" is served: a credential never goes over
+	// plain HTTP.
+	Scheme string
 	// Token is the actor identity token as the guest sent it.
 	Token string
 	// Authority is the Host of the request: host or host:port.
@@ -209,7 +221,12 @@ func FromHTTP(r *http.Request) Request {
 	if host == "" {
 		host = r.URL.Host
 	}
+	scheme := r.URL.Scheme
+	if scheme == "" && r.TLS != nil {
+		scheme = "https"
+	}
 	return Request{
+		Scheme:    scheme,
 		Token:     r.Header.Get(TokenHeader),
 		Authority: host,
 		Method:    r.Method,
@@ -260,6 +277,9 @@ func (g *Gate) Check(r Request) Decision {
 }
 
 func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
+	if r.Scheme != "https" {
+		return Decision{Reason: ReasonBadRequest}
+	}
 	host, port, ok := splitAuthority(r.Authority)
 	if !ok {
 		return Decision{Reason: ReasonBadRequest}
@@ -275,7 +295,19 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 	// reason keeps the most specific refusal among routes of the host, so a deny says why.
 	reason := ReasonNoRoute
 	rank := map[Reason]int{ReasonNoRoute: 0, ReasonOrgMismatch: 1, ReasonMethod: 2, ReasonPath: 3, ReasonQuery: 4}
+	// An org's own route wins over a platform route, so the order of the set never decides.
+	ordered := make([]Route, 0, len(t.routes))
 	for _, rt := range t.routes {
+		if rt.Org != "" {
+			ordered = append(ordered, rt)
+		}
+	}
+	for _, rt := range t.routes {
+		if rt.Org == "" {
+			ordered = append(ordered, rt)
+		}
+	}
+	for _, rt := range ordered {
 		if rt.Host != host || rt.port() != port {
 			continue
 		}
@@ -300,8 +332,14 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 }
 
 func splitAuthority(a string) (string, int, bool) {
-	a = strings.ToLower(strings.TrimSpace(a))
-	if a == "" || strings.ContainsAny(a, "/@ \\") {
+	for i := 0; i < len(a); i++ {
+		c := a[i]
+		if c >= 0x80 || c <= 0x20 || strings.IndexByte("/@\\", c) >= 0 {
+			return "", 0, false
+		}
+	}
+	a = strings.ToLower(a)
+	if a == "" {
 		return "", 0, false
 	}
 	host, ps, err := net.SplitHostPort(a)
@@ -311,8 +349,11 @@ func splitAuthority(a string) (string, int, bool) {
 		}
 		return strings.TrimSuffix(a, "."), 443, true
 	}
-	var port int
-	if _, err := fmt.Sscanf(ps, "%d", &port); err != nil || port < 1 || port > 65535 {
+	if len(ps) == 0 || len(ps) > 5 || strings.Trim(ps, "0123456789") != "" {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(ps)
+	if err != nil || port < 1 || port > 65535 {
 		return "", 0, false
 	}
 	return strings.TrimSuffix(host, "."), port, true
@@ -327,7 +368,7 @@ func cleanPath(raw string) (string, bool) {
 	}
 	low := strings.ToLower(raw)
 	if strings.Contains(low, "%2f") || strings.Contains(low, "%5c") || strings.Contains(low, "%00") ||
-		strings.Contains(low, "%2e") || strings.ContainsAny(raw, "\\\x00") {
+		strings.Contains(low, "%2e") || strings.ContainsAny(raw, "\\\x00;") {
 		return "", false
 	}
 	if !canonical(raw) {
