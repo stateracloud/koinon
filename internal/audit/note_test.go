@@ -136,3 +136,19 @@ func TestPublicKeyWithPlusInBase64RoundTrips(t *testing.T) {
 		t.Fatal("no test key had a plus sign in its base64")
 	}
 }
+
+func TestVerifyNoteRefusesAnotherOrigin(t *testing.T) {
+	a := audit.NoteOrigin("11111111-1111-1111-1111-111111111111")
+	b := audit.NoteOrigin("22222222-2222-2222-2222-222222222222")
+	k := testKey(t, a, 1)
+	// A signer that holds key A cannot sign for origin B: Sign refuses, so build the note by hand
+	// is not possible; the verifier check is what matters when a rogue signer skips Sign.
+	raw, err := k.Sign(testNote(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := bytes.Replace(raw, []byte(a), []byte(b), 1)
+	if _, _, err := audit.VerifyNote(other, []audit.PublicKey{k.Public()}); err == nil {
+		t.Fatal("a note of another origin verified")
+	}
+}

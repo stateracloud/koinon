@@ -216,7 +216,7 @@ type NoteSignature struct {
 // VerifyNote parses a note and checks it against the keys the verifier knows (a key is known when its
 // name and key ID both match a signature line). It returns the note and the key that signed it. Any
 // number of keys may be known: a rotated key stays valid for the checkpoints it signed. A signature line
-// of an unknown key is ignored; a line of a known key that does not verify fails the note.
+// of an unknown key is ignored; a key signs only a note whose origin is the name of that key; a line of a known key that does not verify fails the note.
 func VerifyNote(raw []byte, known []PublicKey) (Note, PublicKey, error) {
 	n, sigs, err := ParseNote(raw)
 	if err != nil {
@@ -226,6 +226,9 @@ func VerifyNote(raw []byte, known []PublicKey) (Note, PublicKey, error) {
 		for _, k := range known {
 			if k.Name != s.Name || !bytes.Equal(k.keyHash(), s.keyHash) {
 				continue
+			}
+			if n.Origin != k.Name {
+				return Note{}, PublicKey{}, fmt.Errorf("%w: the note origin %q is not the name of key %s", ErrNoteBadSignature, n.Origin, k.ID())
 			}
 			if !ed25519.Verify(k.Key, []byte(s.text), s.sig) {
 				return Note{}, PublicKey{}, fmt.Errorf("%w (key %s)", ErrNoteBadSignature, k.ID())

@@ -732,7 +732,7 @@ RFC 3161 timestamp are a later step.
 - **What is signed.** The anchor row of the install chain: its `chain_seq` and hash. It is not the
   install head at signing time, because the checkpoint event is itself a later row. One checkpoint
   follows each anchor. A tick that finds an anchor with no checkpoint signs it, so a missed tick is
-  made good on the next one. The note layout is the one above. The key name is the origin, so a
+  is fixed by the next one. The note layout is the one above. The key name is the origin, so a
   note names the install it speaks for, and the key hash is the first 4 bytes of
   `sha256(name, "\n", 0x01, public key)` as in C2SP signed-note. The public key is kept as one
   line, `<name>+<key id>+<base64 of 0x01 and the key>` (the C2SP vkey form).
@@ -760,7 +760,7 @@ RFC 3161 timestamp are a later step.
   `koinon-api` pod.
 - **Operator steps** (the long form is in `koinon-docs`, ADR 0108).
   - *Keep outside the cluster:* each public key when it is new (`audit public-keys`), and the newest
-    note and an export of the install chain at a rhythm you choose. A key you only read from the
+    note and an export of the install chain on a schedule you choose. A key you only read from the
     database later proves nothing against someone who can rewrite the database.
   - *Back up the Secret?* Only if you want the same key after a restore. Verification needs the
     public key only. If the Secret is lost, the next checkpoint makes a new key. That is a rotation (below).
@@ -769,7 +769,8 @@ RFC 3161 timestamp are a later step.
 - **Limits.** "Only `koinon-api` can read the key" holds for mounts and for Role rules that name the
   Secret. It does not hold for the RBAC `get` verb: the reconciler has `get` on Secrets of its
   namespace for the Secrets it makes (its writes are fenced by a ValidatingAdmissionPolicy, its reads
-  are not, because admission does not see a read). A change that closes this, for example a
+  are not, because admission does not see a read). The pre-upgrade hook `restore-release-check` has
+  `list` on Secrets of the namespace, and a list returns the data. RBAC cannot limit `list` by name. A change that closes this, for example a
   separate namespace for the key or a reconciler Role limited by name, is a follow-up. A compromised
   `koinon-api` can still sign a false checkpoint for the future. A checkpoint held outside the
   cluster still fixes every chain up to its `chain_seq`.

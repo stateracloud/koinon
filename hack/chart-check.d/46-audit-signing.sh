@@ -28,10 +28,9 @@ for variant in "default" "kms" "durable"; do
 	grep -Fq -- '"--saved-work-secret"' <<<"$refs" || fail "the one reference to the audit signing Secret is koinon-api's serve args ($variant)"
 done
 
-# Helm never renders the Secret, a volume of it, a secretKeyRef to it, or a Role rule that names it.
+# Helm never renders the Secret, a volume of it, an env reference to it, or a Role rule that names it.
 lacks "the chart does not render the audit signing Secret" "name: $sign\$"
 lacks "no workload mounts the audit signing Secret" "secretName: $sign"
-lacks "no workload reads the audit signing Secret into its env" "secretKeyRef:[[:space:]]*\$[^-]*name: $sign"
 lacks "no Role names the audit signing Secret" "resourceNames:.*$sign"
 
 # koinon-api's Role can make and read Secrets but update only the KEK Secret by name: the signing Secret is

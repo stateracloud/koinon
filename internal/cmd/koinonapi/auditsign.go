@@ -20,7 +20,7 @@ const auditSigningSeedKey = "seed"
 // koinon-api reads (through the Kubernetes API; no other workload mounts it, and the chart gives no other
 // Role a rule that names it). The Secret is created on the first use and never overwritten, and the first
 // creation is recorded as keys.generated like the other keys koinon-api makes. A Secret deleted on purpose
-// (rotation, docs/ops/audit-checkpoints.md) is made again on the next use, with a new key; the new
+// (rotation, ADR 0100, signed checkpoints) is made again on the next use, with a new key; the new
 // public key is then published by the checkpoint job as audit.signing_key.added.
 type kubeSigningKeys struct {
 	kube      kubernetes.Interface

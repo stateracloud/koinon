@@ -112,7 +112,15 @@ func readCheckpoint(path string, keyArgs []string, out io.Writer) (audit.Note, e
 	if len(keyArgs) == 0 {
 		return audit.Note{}, errors.New("--checkpoint needs at least one --public-key: a note proves nothing without the key kept off the cluster")
 	}
-	raw, err := os.ReadFile(path) //nolint:gosec // the operator names the file to check
+	if path == "-" {
+		return audit.Note{}, errors.New("--checkpoint needs a file path: standard input is not supported")
+	}
+	f, err := os.Open(path) //nolint:gosec // the operator names the file to check
+	if err != nil {
+		return audit.Note{}, fmt.Errorf("--checkpoint: %w", err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 1<<20))
+	_ = f.Close()
 	if err != nil {
 		return audit.Note{}, fmt.Errorf("--checkpoint: %w", err)
 	}
@@ -137,6 +145,8 @@ func loadPublicKeys(arg string) ([]audit.PublicKey, error) {
 	text := arg
 	if b, err := os.ReadFile(arg); err == nil { //nolint:gosec // the operator names the key file
 		text = string(b)
+	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(arg, "+") {
+		return nil, err
 	}
 	var out []audit.PublicKey
 	for _, l := range strings.Split(text, "\n") {
