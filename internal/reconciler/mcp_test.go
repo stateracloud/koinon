@@ -134,6 +134,37 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(string(sec.Data[strings.TrimPrefix(t.CredentialFile, "/secrets/providers/")])).To(Equal("not-a-real-token"))
 	})
 
+	It("writes MCP credentials to their own Secret, away from the provider keys, when one is configured (#278 S4b)", func(ctx SpecContext) {
+		const mcpSecret = "koinon-gateway-mcp-keys"
+		osg := fakegateway.New()
+		cc, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+		rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:  prices.NewResolver(pricing.Embedded()),
+			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}, Keys: ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+			ProviderKeyDir: "/secrets/providers",
+			MCPKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: mcpSecret},
+			MCPKeyDir:      "/secrets/mcp", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		s := server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+
+		Expect(rr.ReconcileAll(ctx)).To(Succeed())
+
+		t, ok := targetOf(mg.last(), slug+"-wiki")
+		Expect(ok).To(BeTrue())
+		Expect(t.CredentialFile).To(HavePrefix("/secrets/mcp/mcp-" + s.ID + "-"))
+		file := strings.TrimPrefix(t.CredentialFile, "/secrets/mcp/")
+		mcpSec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpSecret, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(mcpSec.Data[file])).To(Equal("koinon_test_not-a-real-token"))
+		if prov, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{}); err == nil {
+			Expect(prov.Data).NotTo(HaveKey(file), "the provider keys Secret holds no MCP credential")
+		}
+	})
+
 	It("grants an agent the auto tools directly, the ask tools through the approval proxy, and no never tools", func(ctx SpecContext) {
 		s := server(ctx, org, "wiki", "", map[string]string{"read": "auto", "list": "auto", "write": "ask", "drop": "never"})
 		a := newAgent(ctx, org, user)

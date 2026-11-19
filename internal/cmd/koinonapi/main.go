@@ -29,6 +29,7 @@
 package koinonapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -208,6 +209,10 @@ type config struct {
 	// providers and MCP servers may name.
 	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
 	gatewayMCPURL string
+	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. An agent reaches MCP
+	// through agentgateway until the follow-up that moves it (ADR 0097), so the check must use the URL the agent
+	// uses, which is not always the URL of approved calls. Empty: the check uses gatewayMCPURL.
+	gatewayMCPCheckURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
 	// gatewayMode is the chart's gateway.mode (standalone or kubernetes).
@@ -337,6 +342,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
+	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
 			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
@@ -967,8 +973,8 @@ func serve(ctx context.Context, cfg config) error {
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
 		// The live check of an agent's MCP tools (old issue 488): koinon-api reads the agent's gateway key
 		// and lists the tools as the agent; koinon-agentd gets names only, never the key.
-		if cfg.gatewayMCPURL != "" {
-			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: cfg.gatewayMCPURL, Key: keyFn})
+		if checkURL := cmp.Or(cfg.gatewayMCPCheckURL, cfg.gatewayMCPURL); checkURL != "" {
+			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: checkURL, Key: keyFn})
 		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.

@@ -62,7 +62,6 @@ const secretPage = "Quarterly retention plan for the Northwind accounts: the ren
 	"flags Brightwater Logistics, Okafor Textiles and the three Baltic distributors as at risk. " +
 	"Do not share the per-account margins outside the finance group."
 
-// escapeAll writes every character of s as a JSON \u escape.
 // restrictedPool is a pool on the same database whose every connection runs as koinon_gateway, after
 // the grants of migrations.GrantGateway. It is what the gateway process has in production.
 func restrictedPool(ctx context.Context, admin *pgxpool.Pool) *pgxpool.Pool {
@@ -86,6 +85,7 @@ func restrictedPool(ctx context.Context, admin *pgxpool.Pool) *pgxpool.Pool {
 // sqlDB is a database/sql handle on the same database as p, for the helpers that take a migrations.Execer.
 func sqlDB(p *pgxpool.Pool) *sql.DB { return stdlib.OpenDBFromPool(p) }
 
+// escapeAll writes every character of s as a JSON \u escape.
 func escapeAll(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -94,11 +94,12 @@ func escapeAll(s string) string {
 	return b.String()
 }
 
-// stubDecider records what reaches it and answers with a fixed outcome.
+// roundTrip is an http.RoundTripper made of a function.
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// stubDecider records what reaches it and answers with a fixed outcome.
 type stubDecider struct {
 	got []mcpguard.Pending
 	out mcpguard.Outcome
