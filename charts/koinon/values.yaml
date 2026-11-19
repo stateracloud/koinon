@@ -679,6 +679,71 @@ execution:
     gatewayClientNamespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: ate-system
+    # Substrate's namespace: the worker policies, the worker NetworkPolicy and the WorkerPool live
+    # here. It must exist (koinon-api substrate install creates it) and holds nothing but Substrate
+    # (ADR 0120 section 6.2).
+    namespace: ate-system
+    # Admission of worker pods (ADR 0120 section 6; native ValidatingAdmissionPolicy, never Kyverno).
+    # Pods in the Substrate namespace: only the identities below create them, images are pinned by
+    # digest, no hostNetwork, hostPath only from allowedHostPaths, no ephemeral containers, and
+    # nobody execs, attaches or port-forwards into them.
+    workerPolicy:
+      enabled: true
+      validationActions: [Deny]
+      # Identities that may create worker pods and change their spec. Empty means the Substrate
+      # controller, system:serviceaccount:<namespace>:ate-controller.
+      controllerIdentities: []
+      # Kubernetes' own workload controllers. They create the pods of Substrate's control plane
+      # (ate-api-server, atenet-router, atelet, the object store and the database) from Deployments,
+      # DaemonSets and StatefulSets that the installer identity wrote. They pass the identity rule
+      # and, until Substrate publishes its images by digest, the digest rule (digestExemptIdentities).
+      platformControllers:
+        - system:serviceaccount:kube-system:replicaset-controller
+        - system:serviceaccount:kube-system:daemon-set-controller
+        - system:serviceaccount:kube-system:statefulset-controller
+        - system:serviceaccount:kube-system:job-controller
+        - system:serviceaccount:kube-system:cronjob-controller
+        - system:kube-controller-manager
+      # Identities whose pods may use a tag instead of a digest. Default: platformControllers.
+      # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
+      # then set this to [] (the chart check pins the default).
+      digestExemptIdentities: []
+      # hostPath volumes allowed in the namespace: the device nodes of the vm tier (ADR 0075). Add
+      # the credential-provider paths only when a platform needs them (GKE).
+      allowedHostPaths:
+        - /dev/kvm
+        - /dev/net/tun
+        - /dev/vhost-vsock
+        - /dev/vhost-net
+      # Identities that may write WorkerPool, SandboxConfig and CSIDriverConfig objects (the
+      # installer: ate-setup and `helm upgrade`). Empty renders no guard for those kinds: set it on
+      # every real install.
+      installerIdentities: []
+    # NetworkPolicy of the Substrate namespace: default-deny for pods that no rule below names, and
+    # only the allowed peers. No CNI-specific feature.
+    workerNetworkPolicy:
+      enabled: true
+      # Pods the policy covers. Empty selects every pod in the namespace.
+      podSelector: {}
+      # CIDRs of the Kubernetes API server (the endpoint `kubectl get endpoints kubernetes` shows).
+      # Empty adds no API server rule.
+      apiServerCIDRs: []
+      # Extra egress rules, in networking.k8s.io/v1 form, for an object store or database outside
+      # the cluster.
+      extraEgress: []
+    # The default WorkerPool (ate.dev/v1): one shared pool per tier (D6). Off until Substrate's
+    # WorkerPool spec is verified on a cluster (issue #1089 question): the preflight needs a pool
+    # per tier either way, and ate-setup creates none.
+    workerPool:
+      enabled: false
+      name: koinon-vm
+      replicas: 1
+      sandboxClasses: [microvm]
+      nodeSelector: {}
+      tolerations: []
+      # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
+      # does not know.
+      spec: {}
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:

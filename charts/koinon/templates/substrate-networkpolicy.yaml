@@ -1,0 +1,58 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+NetworkPolicy for Substrate's namespace (execution.driver=substrate; ADR 0120 section 2, issue 1089).
+Standard networking.k8s.io/v1 only (no CNI-specific resource). The pods of the namespace may talk to
+each other, resolve names, and reach Koinon's own namespace (the gateway and ateapi's callers); the
+Kubernetes API server only when workerNetworkPolicy.apiServerCIDRs names it; nothing else leaves the
+namespace unless workerNetworkPolicy.extraEgress says so. Ingress comes from the namespace itself and
+from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7
+rules, not through this policy. A CNI that does not enforce NetworkPolicy ignores all of it (the
+preflight's NetworkPolicy probe reports it).
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
+{{- $s := .Values.execution.substrate }}
+{{- $np := $s.workerNetworkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-workers
+  namespace: {{ $s.namespace | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    {{- toYaml ($np.podSelector | default dict) | nindent 4 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+  egress:
+    - to:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+{{- if $np.apiServerCIDRs }}
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+{{- end }}
+{{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}

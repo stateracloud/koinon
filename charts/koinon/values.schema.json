@@ -631,7 +631,44 @@
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
-            "gatewayClientNamespaceSelector": {"type": "object"}
+            "gatewayClientNamespaceSelector": {"type": "object"},
+            "namespace": {"$ref": "#/definitions/nonEmpty"},
+            "workerPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "validationActions": {"type": "array", "items": {"enum": ["Deny", "Warn", "Audit"]}},
+                "controllerIdentities": {"type": "array", "items": {"type": "string"}},
+                "platformControllers": {"type": "array", "items": {"type": "string"}},
+                "digestExemptIdentities": {"type": "array", "items": {"type": "string"}},
+                "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
+                "installerIdentities": {"type": "array", "items": {"type": "string"}}
+              }
+            },
+            "workerNetworkPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "podSelector": {"type": "object"},
+                "apiServerCIDRs": {"type": "array", "items": {"type": "string"}},
+                "extraEgress": {"type": "array", "items": {"type": "object"}}
+              }
+            },
+            "workerPool": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "name": {"$ref": "#/definitions/nonEmpty"},
+                "replicas": {"type": "integer", "minimum": 1},
+                "sandboxClasses": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                "nodeSelector": {"type": "object"},
+                "tolerations": {"type": "array", "items": {"type": "object"}},
+                "spec": {"type": "object"}
+              }
+            }
           }
         }
       }

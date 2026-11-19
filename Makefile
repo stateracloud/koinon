@@ -217,7 +217,7 @@ envtest-assets: ## Download (or find) the envtest API server binaries and print 
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
-		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
+		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest,substrate-policy} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
 .PHONY: test-chart-smoke
 test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go)

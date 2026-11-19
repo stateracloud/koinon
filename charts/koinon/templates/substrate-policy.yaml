@@ -1,0 +1,154 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Native ValidatingAdmissionPolicies for Substrate's namespace (ADR 0120 section 6, issue 1089;
+NEVER Kyverno, no CNI-specific feature). Worker pods run privileged (D7), so this namespace holds
+nothing else and these rules are what fences them. Rules key on the requesting identity, which a
+pod's creator cannot choose.
+- pods: only the Substrate controller and Kubernetes' own workload controllers (the Deployments,
+  DaemonSets and StatefulSets of Substrate's control plane) create pods or change their spec. Every
+  image of every container and init container is pinned by digest (the platform controllers' pods
+  are exempt until Substrate publishes by digest: execution.substrate.workerPolicy.digestExemptIdentities).
+  No hostNetwork. hostPath only from workerPolicy.allowedHostPaths, on every volume. No ephemeral
+  containers, for any identity, the controller included;
+- CONNECT: pods/exec, attach, portforward and proxy are denied to every identity with no exemption (a
+  process started that way is outside the guest launcher's and gateway's controls). Break-glass is not
+  an exemption: a cluster admin suspends the binding, which shows in the audit log and as GitOps drift.
+  It is its own policy because an options object has no spec or metadata;
+- objects: WorkerPool, SandboxConfig and CSIDriverConfig are written only by the installer identities
+  (workerPolicy.installerIdentities) and by Kubernetes' namespace deletion. Rendered only when that
+  list is set.
+A CEL error denies under failurePolicy Fail.
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPolicy.enabled }}
+{{- $s := .Values.execution.substrate }}
+{{- $w := $s.workerPolicy }}
+{{- $ns := $s.namespace }}
+{{- $base := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
+{{- $pods := printf "%s-worker-pods" $base }}
+{{- $connect := printf "%s-worker-connect" $base }}
+{{- $objects := printf "%s-worker-objects" $base }}
+{{- $controllers := $w.controllerIdentities }}
+{{- if not $controllers }}{{- $controllers = list (printf "system:serviceaccount:%s:ate-controller" $ns) }}{{- end }}
+{{- $trusted := concat $controllers $w.platformControllers }}
+{{- $tagOK := $w.digestExemptIdentities }}
+{{- if not $tagOK }}{{- $tagOK = $w.platformControllers }}{{- end }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $pods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers, pods/resize]
+  variables:
+    - name: allContainers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in %s" (toJson $trusted) | quote }}
+    - name: tagAllowed
+      expression: {{ printf "request.userInfo.username in %s" (toJson $tagOK) | quote }}
+    - name: volumes
+      expression: "has(object.spec.volumes) ? object.spec.volumes : []"
+  validations:
+    - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
+      message: ephemeral containers are not allowed in the Substrate namespace
+    - expression: "request.operation != 'CREATE' || variables.trusted"
+      messageExpression: "'only the Substrate controller and Kubernetes workload controllers may create pods in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec"
+      messageExpression: "'only the Substrate controller may change a pod spec in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: hostNetwork is not allowed in the Substrate namespace
+    - expression: {{ printf "variables.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)" (toJson $w.allowedHostPaths) | quote }}
+      message: {{ printf "hostPath is allowed only for %s in the Substrate namespace" (join ", " $w.allowedHostPaths) | quote }}
+    - expression: "variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
+      message: images in the Substrate namespace must be pinned by digest (name@sha256:<64 hex digits>)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $pods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $pods }}
+  validationActions: {{ toJson $w.validationActions }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $connect }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CONNECT]
+        resources: [pods/exec, pods/attach, pods/portforward, pods/proxy]
+  validations:
+    - expression: "false"
+      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in the Substrate namespace (requested by ' + request.userInfo.username + ')'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $connect }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $connect }}
+  validationActions: {{ toJson $w.validationActions }}
+  # No objectSelector: a CONNECT request's object is an options object without metadata.
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+{{- if $w.installerIdentities }}
+{{- /* Kubernetes' own controllers delete the objects with their namespace. */}}
+{{- $writers := concat $w.installerIdentities (list "system:serviceaccount:kube-system:namespace-controller" "system:serviceaccount:kube-system:generic-garbage-collector" "system:kube-controller-manager") }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $objects }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [ate.dev]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [workerpools, sandboxconfigs, csidriverconfigs]
+  validations:
+    - expression: {{ printf "request.userInfo.username in %s" (toJson $writers) | quote }}
+      messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $objects }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $objects }}
+  validationActions: {{ toJson $w.validationActions }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
+{{- end }}
+{{- end }}
