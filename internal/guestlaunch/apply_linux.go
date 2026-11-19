@@ -293,7 +293,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 			}
 			return fmt.Errorf("guest launcher: landlock required but the kernel ABI is %d, version %d is needed", abi, minLandlockABI)
 		}
-		log.Warn("guest launcher: landlock unavailable or too old in this kernel, filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)", "kernel_abi", abi)
+		log.Warn("guest launcher: landlock unavailable or too old in this kernel, filesystem rules NOT applied; the gVisor tiers have a writable root by decision (issue #1150), so this gap is open and is recorded here", "kernel_abi", abi)
 		return nil
 	}
 	var rules []landlock.Rule
@@ -331,7 +331,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		if l.Mode == ModeRequire {
 			return fmt.Errorf("guest launcher: landlock: %w", err)
 		}
-		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied; the control is the read-only root filesystem the driver mounts (only /sandbox and /tmp writable)", "error", err.Error())
+		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied; the gVisor tiers have a writable root by decision (issue #1150), so this gap is open and is recorded here", "error", err.Error())
 		return nil
 	}
 	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite, "devices", l.Devices)

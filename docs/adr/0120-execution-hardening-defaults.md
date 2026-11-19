@@ -111,6 +111,11 @@ ADR 0119 phase 1 gateway routes for OpenShell exist.
 3. "Where the tier supports them" has one meaning: the guest kernel offers the feature. The launcher
    reports which controls it applied. If the `vm` tier cannot apply one, the sandbox does not start.
    For another tier the launcher records the gap in the audit log and in a platform-admin warning.
+   The gVisor tiers have a writable root filesystem by decision (2026-11-19): Substrate v1.0.0 sets the
+   root of an actor container writable, and a read-only root breaks `MEMORY` snapshots. Koinon carries no
+   Substrate patch. So where Landlock is not available on these tiers, nothing limits writes to the root.
+   Issue [#1150](https://github.com/stateracloud/koinon/issues/1150) tracks this; each Substrate update
+   reviews it. The earlier read-only root requirement of 2026-11-18 is withdrawn.
 4. Whenever the driver passes a seccomp profile to the guest, the preflight checks that the profile
    works in the guest. A probe that must fail with `EPERM` (for example `keyctl`) is the check. For
    OpenShell on Kata this keeps the old guest-seccomp check of 0048 (warn, do not block). For the

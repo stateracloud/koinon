@@ -1089,7 +1089,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the guest image does not yet carry the guest launcher (issue #1088 slice f). The gVisor tiers keep a writable root (issue #1150)" }}
 {{- end }}
 {{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
 {{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
