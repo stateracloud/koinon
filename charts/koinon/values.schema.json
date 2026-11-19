@@ -603,6 +603,29 @@
         "opencode": {"$ref": "#/definitions/harness"}
       }
     },
+    "runEvidence": {
+      "description": "Run-evidence export Job (#966, ADR 0121).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "export": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "org": {"type": "string"},
+            "run": {"type": "string"},
+            "out": {"type": "string"},
+            "s3": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"existingSecret": {"type": "string"}}
+            },
+            "resources": {"type": "object"}
+          }
+        }
+      }
+    },
     "harnessPrepull": {
       "description": "Pre-pull the harness images on the Kata nodes (plan item LT1).",
       "type": "object",

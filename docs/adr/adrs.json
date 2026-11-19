@@ -576,7 +576,8 @@
       "0097",
       "0098",
       "0107",
-      "0110"
+      "0110",
+      "0121"
     ]
   },
   {
@@ -1478,7 +1479,8 @@
       "0096",
       "0100",
       "0112",
-      "0114"
+      "0114",
+      "0121"
     ]
   },
   {
@@ -1509,7 +1511,8 @@
     "related_by": [
       "0071",
       "0073",
-      "0091"
+      "0091",
+      "0121"
     ]
   },
   {
@@ -3096,7 +3099,8 @@
       "0107"
     ],
     "related_by": [
-      "0111"
+      "0111",
+      "0121"
     ]
   },
   {
@@ -3426,6 +3430,30 @@
       "0080",
       "0110",
       "0119"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0121",
+    "file": "0121-run-evidence-export-job.md",
+    "title": "Run-evidence export as a chart Job",
+    "status": "proposed",
+    "date": "2026-11-19",
+    "area": "install-operations",
+    "tags": [
+      "audit",
+      "kubernetes",
+      "secrets"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0056",
+      "0057",
+      "0109"
     ],
     "related_by": []
   }

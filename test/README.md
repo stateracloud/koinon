@@ -26,7 +26,7 @@ End-to-end tests (kind), harness contract tests and the sandbox escape suite (AD
     `make dev-kind-up` installs on kind-koinon-dev. It builds the probe image from `hack/spike/probe` (or pulls `$PROBE_PULL_REPO:<hack/probe-tag.sh>`, which the e2e does),
     loads it into the node, port-forwards the gateway and reads the client certificate from its
     Secret, so it needs no registry and no home lab (Docker, kind, kubectl, jq). kind runs
-    sandboxes under runc: the Kata guest case and the cases that need extra fixtures (the model
+    sandboxes under runc: the microVM guest case and the cases that need extra fixtures (the model
     gateway stand-in, the live admission case) skip with their reasons. About 2.5 minutes; 20 cases
     pass, 4 skip. The kind e2e runs the same cases (except the Gitea ones) against the chart
     install, where the chart's sandbox admission policy is live and the live admission case runs

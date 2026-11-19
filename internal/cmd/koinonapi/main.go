@@ -1078,9 +1078,12 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		// koinon_api's membership in the role: CNPG adds the managed role's inRoles on its own schedule,
 		// possibly after this hook succeeds. That is harmless: koinon-api retries every install write
 		// the database refuses (retryInstallWrite) until the membership lands (ADR 0100 decision 1.1a).
-		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
+		if err := grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
 			return migrations.GrantInstallAuditWriter(ctx, db)
-		})
+		}); err != nil {
+			return err
+		}
+		return grantGateway(waitCtx, db)
 	}
 
 	// On an external database nothing creates the install audit writer role later, so the chart
@@ -1123,6 +1126,9 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 			"on an external database create it (" + project.InstallAuditDocURL + ") and run koinon-api migrate again. " +
 			"Until then koinon-api writes no install audit event")
 	}
+	if err := grantGateway(ctx, db); err != nil {
+		return err
+	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).
@@ -1130,6 +1136,20 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())
+}
+
+// grantGateway gives koinon-gateway's database role its privileges (ADR 0097 decision 5). The role
+// exists only when the chart's gateway switch is on, so a missing role is not an error: nothing
+// connects as it, and the next migrate or --grants-only run grants it once it exists.
+func grantGateway(ctx context.Context, db migrations.Execer) error {
+	granted, err := migrations.GrantGateway(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the gateway role: %w", err)
+	}
+	if !granted {
+		slog.Info("the role " + migrations.GatewayRole + " does not exist, so it was granted nothing (the Koinon MCP gateway is off, or the role comes later)")
+	}
+	return nil
 }
 
 // grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as

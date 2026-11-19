@@ -81,6 +81,37 @@ func (q *Queries) InsertGatewayStateRevision(ctx context.Context, arg InsertGate
 	return revision, err
 }
 
+const insertMCPCallLog = `-- name: InsertMCPCallLog :exec
+INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertMCPCallLogParams struct {
+	OrgSlug        string
+	Agent          string
+	Target         string
+	Tool           string
+	Outcome        string
+	Verdict        string
+	CredentialKind string
+	DurationMs     int32
+}
+
+// One row per tool call the gateway served. No arguments, results or token values (ADR 0097).
+func (q *Queries) InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogParams) error {
+	_, err := q.db.Exec(ctx, insertMCPCallLog,
+		arg.OrgSlug,
+		arg.Agent,
+		arg.Target,
+		arg.Tool,
+		arg.Outcome,
+		arg.Verdict,
+		arg.CredentialKind,
+		arg.DurationMs,
+	)
+	return err
+}
+
 const lockGatewayStatePublish = `-- name: LockGatewayStatePublish :exec
 
 SELECT pg_advisory_xact_lock(hashtextextended('koinon.gateway_state_revisions', 0))

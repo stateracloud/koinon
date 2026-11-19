@@ -42,8 +42,8 @@
 # re-points the gateway of the OpenShell install at a CA ConfigMap by helm upgrade, which would drift the
 # chart install; the Gitea cases run in `make test-escape-kind`.
 #
-# kind runs sandboxes under runc, so the Kata guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
-# and a Kata node, the maintainer's release gate). Cases that need other fixtures skip with their
+# kind runs sandboxes under runc, so the microVM guest case skips (it needs KOINON_ESCAPE_HOST_KERNEL
+# and a microVM node, the maintainer's release gate). Cases that need other fixtures skip with their
 # reason; the rest run. Every kubectl call names the kind context and nothing else is touched.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
