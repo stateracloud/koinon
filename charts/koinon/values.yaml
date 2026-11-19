@@ -874,6 +874,9 @@ networkPolicy:
   #     ports: [{port: 11434}]
   # List the same hosts in egress.allowedInternalHosts so providers and MCP servers may name them. The
   # rule covers every upstream the gateway calls: model providers and remote MCP servers.
+  # With postgres.mode=external and gateway.mcp.driver=koinon, koinon-gateway reads its database login
+  # through this list too (its egress has no other route to the database). The list then also reaches
+  # agentgateway and the model gateway, so keep the database rule to the database port and address.
   gatewayEgressTo: []
 
 # Prometheus metrics of koinon-api, koinon-reconciler and koinon-agentd (ADR 0023, amendment

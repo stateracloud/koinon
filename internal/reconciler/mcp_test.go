@@ -18,6 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -150,6 +151,12 @@ var _ = Describe("Org MCP servers", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		s := server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		// An install from before the split: the provider keys Secret still holds an MCP file.
+		_, err = kube.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace, Labels: map[string]string{"koinon.dev/managed-by": "koinon-reconciler"}},
+			Data:       map[string][]byte{"mcp-legacy-00000000": []byte("koinon_test_not-a-real-token")},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
 		Expect(rr.ReconcileAll(ctx)).To(Succeed())
 
@@ -160,9 +167,10 @@ var _ = Describe("Org MCP servers", func() {
 		mcpSec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpSecret, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(mcpSec.Data[file])).To(Equal("koinon_test_not-a-real-token"))
-		if prov, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{}); err == nil {
-			Expect(prov.Data).NotTo(HaveKey(file), "the provider keys Secret holds no MCP credential")
-		}
+		prov, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(prov.Data).NotTo(HaveKey(file), "the provider keys Secret holds no MCP credential")
+		Expect(prov.Data).NotTo(HaveKey("mcp-legacy-00000000"), "the pass removes the legacy MCP file from the provider keys Secret")
 	})
 
 	It("grants an agent the auto tools directly, the ask tools through the approval proxy, and no never tools", func(ctx SpecContext) {

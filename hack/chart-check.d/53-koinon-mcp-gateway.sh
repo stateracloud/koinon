@@ -114,6 +114,10 @@ tools_ing=$(awk '/- port: tools/{f=1} f&&/- ports:|^---/{if(NR>1&&c++>0)exit} f{
 grep -q 'component: mcp-gateway$' <<<"$tools_ing" || fail "the tools port of koinon-api does not admit koinon-gateway"
 if grep -q 'component: mcp-gateway$' <<<"$(awk '/- port: guard/{f=1} f&&n++<12' <<<"$api_np")"; then fail "the guard port of koinon-api admits koinon-gateway"; fi
 
+# The post-upgrade grants hook waits for the gateway role when the driver is on, and only then.
+has "the grants hook waits for the gateway role" '"--wait-gateway-role"' "${mcp[@]}" --set postgres.mode=cnpg --show-only templates/install-audit-grants.yaml
+lacks "the grants hook does not wait for the gateway role by default" 'wait-gateway-role' --set postgres.mode=cnpg --show-only templates/install-audit-grants.yaml
+
 # The switch needs standalone mode: kubernetes mode is frozen.
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mode=kubernetes >/dev/null 2>&1; then
   fail "gateway.mcp.driver=koinon renders with gateway.mode=kubernetes"

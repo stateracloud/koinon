@@ -1063,6 +1063,8 @@ type migrateOptions struct {
 	// of warning. The chart passes it on an external database, where no hook will create the role
 	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
 	requireWriter bool
+	// waitGateway makes --grants-only wait for the gateway group role too (gateway.mcp.driver=koinon).
+	waitGateway bool
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -1088,6 +1090,9 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 			return migrations.GrantInstallAuditWriter(ctx, db)
 		}); err != nil {
 			return err
+		}
+		if o.waitGateway {
+			return waitGrantGateway(waitCtx, wait, 2*time.Second, db)
 		}
 		return grantGateway(waitCtx, db)
 	}
@@ -1156,6 +1161,28 @@ func grantGateway(ctx context.Context, db migrations.Execer) error {
 		slog.Info("the role " + migrations.GatewayRole + " does not exist, so it was granted nothing (the Koinon MCP gateway is off, or the role comes later)")
 	}
 	return nil
+}
+
+// waitGrantGateway calls GrantGateway every poll until the role exists and is granted, for as long as ctx
+// lasts. A new CloudNativePG managed role appears only after the Cluster update, so one call can find
+// nothing to grant on an upgrade.
+func waitGrantGateway(ctx context.Context, wait, poll time.Duration, db migrations.Execer) error {
+	for {
+		granted, err := migrations.GrantGateway(ctx, db)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("grant the gateway role: %w", err)
+		case granted:
+			slog.Info("granted the gateway role its privileges", "role", migrations.GatewayRole)
+			return nil
+		}
+		slog.Info("waiting for the gateway role", "role", migrations.GatewayRole)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the role %s did not appear within %s: the CloudNativePG Cluster has not reconciled its managed roles", migrations.GatewayRole, wait)
+		case <-time.After(poll):
+		}
+	}
 }
 
 // grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as
