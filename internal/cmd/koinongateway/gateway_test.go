@@ -5,24 +5,31 @@ package koinongateway
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 func TestKoinonGateway(t *testing.T) {
@@ -78,7 +85,7 @@ var _ = Describe("koinon-gateway's startup", func() {
 		empty := filepath.Join(GinkgoT().TempDir(), "empty")
 		Expect(os.WriteFile(empty, []byte("\n"), 0o600)).To(Succeed())
 		for _, f := range []string{empty, filepath.Join(GinkgoT().TempDir(), "absent")} {
-			err := run(context.Background(), config{stateURL: stateURL, stateTokenFile: f, listenAddr: "127.0.0.1:0", drain: time.Second})
+			err := run(context.Background(), config{mcpPath: true, stateURL: stateURL, stateTokenFile: f, listenAddr: "127.0.0.1:0", drain: time.Second})
 			Expect(err).To(HaveOccurred())
 		}
 	})
@@ -159,7 +166,7 @@ var _ = Describe("koinon-gateway, served", func() {
 		tokenFile := filepath.Join(GinkgoT().TempDir(), "token")
 		Expect(os.WriteFile(tokenFile, []byte(fakeStreamToken+"\n"), 0o600)).To(Succeed())
 		cfg := config{
-			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile,
+			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile, mcpPath: true,
 			podName: "koinon-gateway-0", drain: 5 * time.Second, shutdownDelay: 600 * time.Millisecond,
 		}
 		ctx, term := context.WithCancel(context.Background())
@@ -203,6 +210,87 @@ var _ = Describe("koinon-gateway, served", func() {
 		Eventually(done, 10*time.Second).Should(Receive(BeNil()))
 		_, err = sess.ListTools(specCtx, nil)
 		Expect(err).To(HaveOccurred(), "a request after the drain is refused")
+	}, SpecTimeout(40*time.Second))
+})
+
+var _ = Describe("koinon-gateway, model path", func() {
+	It("serves a model call, taps its usage and exports the record to koinon-api", func(specCtx SpecContext) {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":5}}`))
+		}))
+		DeferCleanup(up.Close)
+		agent := gateway.AgentRef{Org: "acme", Name: "repo-helper"}
+		u := staterev.Snapshot(gateway.State{
+			Keys: []gateway.Key{{ID: "k1", Agent: agent, Hash: gateway.HashKey(fakeKey)}},
+			ModelState: gateway.ModelState{Providers: []gateway.Provider{{Org: "acme", Name: "p", Type: "custom", BaseURL: up.URL + "/v1",
+				Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}}}}},
+		})
+		u.Revision = 3
+		store := &memStore{cur: u}
+
+		var got atomic.Int64
+		logs := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != agentgateway.LogsPath || r.Header.Get("Authorization") != "Bearer "+fakeStreamToken {
+				http.Error(w, "no", http.StatusUnauthorized)
+				return
+			}
+			b, _ := io.ReadAll(r.Body)
+			var req collogspb.ExportLogsServiceRequest
+			Expect(proto.Unmarshal(b, &req)).To(Succeed())
+			recs, _, _ := agentgateway.Decode(&req)
+			for _, rec := range recs {
+				if rec.KeyID == "k1" && rec.InputTokens == 11 && rec.OutputTokens == 5 {
+					got.Add(1)
+				}
+			}
+		})
+		auth := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+fakeStreamToken {
+					http.Error(w, "no", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
+		ss, err := stateserver.New(stateserver.Config{Store: store, Auth: auth, PollInterval: 50 * time.Millisecond})
+		Expect(err).NotTo(HaveOccurred())
+		srvCtx, stopSrv := context.WithCancel(context.Background())
+		DeferCleanup(stopSrv)
+		go ss.Run(srvCtx)
+		api := httptest.NewServer(ss.Mount()(logs))
+		DeferCleanup(api.Close)
+
+		tokenFile := filepath.Join(GinkgoT().TempDir(), "token")
+		Expect(os.WriteFile(tokenFile, []byte(fakeStreamToken+"\n"), 0o600)).To(Succeed())
+		cfg := config{
+			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile, modelPath: true, mcpPath: false,
+			podName: "koinon-gateway-1", drain: 5 * time.Second, shutdownDelay: 50 * time.Millisecond,
+		}
+		ctx, term := context.WithCancel(context.Background())
+		DeferCleanup(term)
+		done := make(chan error, 1)
+		go func() { done <- run(ctx, cfg) }()
+		Eventually(func() int {
+			resp, err := http.Get("http://" + cfg.healthAddr + "/readyz")
+			if err != nil {
+				return 0
+			}
+			_ = resp.Body.Close()
+			return resp.StatusCode
+		}, 10*time.Second, 50*time.Millisecond).Should(Equal(http.StatusOK))
+
+		req, _ := http.NewRequestWithContext(specCtx, http.MethodPost, "http://"+cfg.listenAddr+"/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[]}`))
+		req.Header.Set("Authorization", "Bearer "+fakeKey)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Eventually(got.Load, 10*time.Second, 50*time.Millisecond).Should(Equal(int64(1)), "the usage record reaches koinon-api")
+
+		term()
+		Eventually(done, 10*time.Second).Should(Receive(BeNil()))
 	}, SpecTimeout(40*time.Second))
 })
 
