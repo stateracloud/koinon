@@ -113,6 +113,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Upgrade from last release | planned, #83, #519 | - | - | - | from v0.3 | from v0.3 | - | long | from v0.3 |
 | VM tier (Kata) | lab only | - | - | - | - | - | yes | n/a | no |
 | Real model | `docs/dev/real-model-tests.md` | outside CI | outside CI | outside CI | outside CI | outside CI | by hand | n/a | no |
+| Gateway load | `docs/dev/load-tests.md` (`make load-gateway`) | outside CI | outside CI | outside CI | outside CI | outside CI | by hand, in the cloud | n/a | no |
 
 ### Required checks (Q)
 
