@@ -494,6 +494,7 @@ tool_repo() {
 	GOFUMPT) echo "mvdan/gofumpt" ;;
 	CRANE) echo "google/go-containerregistry" ;;
 	BUILDX) echo "docker/buildx" ;;
+	ATE_ENV) echo "agent-substrate/env" ;; # a commit pin: dated by the commit's date
 	esac
 }
 while IFS=$'\t' read -r file line; do
@@ -501,9 +502,17 @@ while IFS=$'\t' read -r file line; do
 		tool=${BASH_REMATCH[1]}
 		ver=${BASH_REMATCH[2]}
 		repo=$(tool_repo "$tool")
-		if [[ -n $repo ]]; then
+		if [[ $tool == ATE_ENV_BASE ]]; then
+			# A base image, not a release: the tag and the digest of the index (ATE_ENV_BASE_SHA256_AMD64) date it.
+			dg=$(sed -nE 's/^ATE_ENV_BASE_SHA256_AMD64=([0-9a-f]{64})$/\1/p' hack/versions.env)
+			if [[ -n $dg ]]; then
+				once "image bash:$ver@sha256:$dg" && check_image "bash:$ver@sha256:$dg"
+			else
+				report "$tool $ver (no ATE_ENV_BASE_SHA256_AMD64 in hack/versions.env)" unknown "$file"
+			fi
+		elif [[ -n $repo ]]; then
 			prefix=v
-			[[ $ver == v* ]] && prefix=
+			[[ $ver == v* || $ver =~ ^[0-9a-f]{40}$ ]] && prefix=
 			once "pin $repo $prefix$ver" && check_github "$repo" "$prefix$ver"
 		else
 			# Fail closed: a tool whose release cannot be dated would skip the cooldown (ADR 0079).

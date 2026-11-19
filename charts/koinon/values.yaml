@@ -694,6 +694,12 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
+    # The guest server image that runs in every actor (`ate-env-guest`, built by the release workflow's
+    # env-guest job from github.com/agent-substrate/env; upstream publishes none). Empty means
+    # <image.registry>/ate-env-guest:<appVersion>. A digest reference (name@sha256:...) is allowed and
+    # is the one to pin. The release's env-guest job prints the digest. The driver reads this value in #1088;
+    # nothing in the chart reads it yet.
+    guestImage: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
     # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
     # a class that is not here cannot run one. With substrate, set this or defaultTier.

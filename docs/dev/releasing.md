@@ -13,6 +13,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 | --- | --- |
 | `api` (with the web UI), `reconciler`, `agentd`, `gateway` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
 | `harnesses/opencode`, the OpenCode harness (ADR 0059) | `ghcr.io/stateracloud/koinon/sandbox:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
+| `ate-env-guest`, the Substrate guest server (ADR 0119), built from `github.com/agent-substrate/env` at `ATE_ENV_VERSION` in `hack/versions.env` | `ghcr.io/stateracloud/koinon/ate-env-guest:<version>`, linux/amd64, ko SPDX SBOM. Upstream publishes no image. The chart value is `execution.substrate.guestImage` |
 | Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
 
@@ -213,12 +214,12 @@ the repository variable `RELEASE_SIGNING` is `true` (default: unset, off). Keyle
 image names and digests to the public Rekor log (ADR 0049), which is fine now that the packages are
 public (owner decision 2026-11-12).
 
-The `sign` job runs after `release` and `harness` and is the only job with `id-token: write`. It gets
+The `sign` job runs after `release`, `harness` and `env-guest` and is the only job with `id-token: write`. It gets
 `dist/digests.txt` and the SPDX SBOMs from the release job as an uploaded artifact (`hack/release-refs.sh`
 turns the digests into image references), signs every image by digest and the pushed chart artifact,
 and attaches each Go image's SBOM as a cosign attestation (`cosign attest --type spdxjson`). The
 harness image is signed by the digest the `harness` job reports; its SBOM is BuildKit's attestation,
-pushed with the image. Verify as shown under [Verify with no login](#verify-with-no-login).
+pushed with the image. The `ate-env-guest` image is signed by the digest the `env-guest` job reports, and ko's SPDX SBOM from that job is attached as a cosign attestation. Verify as shown under [Verify with no login](#verify-with-no-login).
 
 Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again with
 `gh variable delete RELEASE_SIGNING`.
@@ -272,7 +273,7 @@ Run these on a machine with no `docker login ghcr.io` and no `gh auth` (for exam
 
 ```sh
 V=0.1.0-rc.N
-for p in api reconciler agentd gateway sandbox; do
+for p in api reconciler agentd gateway sandbox ate-env-guest; do
   docker pull ghcr.io/stateracloud/koinon/$p:$V
   cosign verify ghcr.io/stateracloud/koinon/$p:$V \
     --certificate-identity-regexp '^https://github.com/stateracloud/koinon/\.github/workflows/release\.yml@refs/tags/v' \

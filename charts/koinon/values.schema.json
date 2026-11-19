@@ -654,6 +654,7 @@
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
+            "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
             "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},
             "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},

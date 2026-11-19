@@ -57,6 +57,8 @@ var _ = Describe("ParsePolicy", func() {
 		},
 		Entry("unknown field", `{"seccomp":{"mod":"off"}}`, "unknown field"),
 		Entry("unknown mode", `{"seccomp":{"mode":"warn"}}`, "must be require, best_effort or off"),
+		Entry("seccomp off", `{"seccomp":{"mode":"off"}}`, "seccomp mode \"off\" is refused"),
+		Entry("seccomp best_effort", `{"seccomp":{"mode":"best_effort"}}`, "seccomp mode \"best_effort\" is refused"),
 		Entry("unknown capability", `{"capabilities":{"allow":["CAP_NOPE"]}}`, "unknown capability"),
 		Entry("relative path", `{"landlock":{"read_write":["tmp"]}}`, "not absolute"),
 		Entry("unknown deny name", `{"seccomp":{"deny":["ptrace","not_a_syscall"]}}`, "unknown syscall"),
