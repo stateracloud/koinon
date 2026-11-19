@@ -294,6 +294,23 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		})))
 	})
 
+	It("denies a Secret in a projected volume and in the environment", func(ctx SpecContext) {
+		denied(create(ctx, replicaSetController, workerNamespace, worker("projected-secret", func(p *corev1.Pod) {
+			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "s", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}},
+			}}})
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("env-secret", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "X", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}, Key: "k"}}}}
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("envfrom-secret", func(p *corev1.Pod) {
+			p.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}}
+		})))
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("env-plain", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "X", Value: "y"}}
+		}))).To(Succeed())
+	})
+
 	It("denies hostPort and Unconfined seccomp or AppArmor profiles", func(ctx SpecContext) {
 		denied(create(ctx, replicaSetController, workerNamespace, worker("hostport", func(p *corev1.Pod) {
 			p.Spec.Containers[0].Ports = []corev1.ContainerPort{{ContainerPort: 8080, HostPort: 8080}}

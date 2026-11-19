@@ -98,6 +98,10 @@ spec:
       message: volumes in the worker namespace must be hostPath, emptyDir, configMap, downwardAPI or projected (no PVC, CSI, ephemeral, NFS or other network volume)
     - expression: "variables.volumes.all(v, !has(v.projected) || !has(v.projected.sources) || v.projected.sources.all(src, !has(src.serviceAccountToken)))"
       message: a projected serviceAccountToken volume is not allowed in the worker namespace (the worker has no Kubernetes client)
+    - expression: "variables.volumes.all(v, !has(v.projected) || !has(v.projected.sources) || v.projected.sources.all(src, has(src.configMap) || has(src.downwardAPI) || has(src.clusterTrustBundle) || has(src.podCertificate)))"
+      message: a projected volume in the worker namespace may hold only configMap, downwardAPI, clusterTrustBundle and podCertificate sources (no Secret)
+    - expression: "variables.allContainers.all(c, (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) && (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef))))"
+      message: a Secret in the environment of a worker container is not allowed (no secrets in sandboxes)
     - expression: "!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken"
       message: automountServiceAccountToken must not be true in the worker namespace
     - expression: "variables.allContainers.all(c, !has(c.securityContext) || ((!has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(c.securityContext.procMount) || c.securityContext.procMount != 'Unmasked')))"

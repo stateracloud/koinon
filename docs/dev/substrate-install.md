@@ -342,6 +342,12 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - atelet needs no internet egress when the gVisor tarball comes from the cluster object store (an
   `s3://` SandboxConfig; ADR 0120 section 6.7, not yet proven; the staging is issue #1157). After the policies apply, restart every
   DaemonSet in `ate-system`, so that its pods pass the new rules.
+- Known limit (open, needs a decision from main): the preflight and install probe pods are bare pods with tag images
+  and, for the device probe, hostPath devices. The control-plane policy refuses them once the chart is installed.
+  Run `koinon-api substrate install` and the probes before `helm install`, or add a probe-identity rule.
+- The node agent rule accepts the per-controller `daemon-set-controller` ServiceAccount only. A cluster that runs
+  `kube-controller-manager` without `--use-service-account-credentials` must set `workerPolicy.podCreators` and
+  adjust the node agent rule to match.
 - `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
   the same, add the gateway's SPIFFE ID to that list.
 

@@ -68,6 +68,8 @@ grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected servic
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods" || fail "added capabilities must be limited to the ceiling"
 grep -Fq '@sha256:[a-f0-9]{64}' <<<"$wpods" || fail "worker images must be pinned by digest"
+grep -Fq 'has(src.clusterTrustBundle)' <<<"$wpods" || fail "projected sources in worker pods must be an allowlist without Secret"
+grep -Fq 'secretKeyRef' <<<"$wpods" || fail "worker pods must not take a Secret in env"
 grep -Fq 'hostPort' <<<"$wpods" || fail "worker pods must not use hostPort"
 grep -Fq "!= 'Unconfined'" <<<"$wpods" || fail "worker pods must not run Unconfined seccomp or AppArmor"
 creatorline=$(grep -A1 -E 'name: creator' <<<"$cpods" | tail -1)
