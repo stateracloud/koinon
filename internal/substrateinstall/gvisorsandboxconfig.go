@@ -121,3 +121,26 @@ func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket strin
 	}
 	return true, nil
 }
+
+// gvisorOrderWarning returns a warning when `gvisor-default` is as new as or newer than the Koinon config.
+// Substrate picks the newest class default, so then the pools would use gs://gvisor again. This happens after
+// ate-setup is cleaned up and run again while the Koinon config stays. The fix is to delete the Koinon
+// SandboxConfig and run the installer again: the version name and the assets stay the same.
+func gvisorOrderWarning(ctx context.Context, dyn dynamic.Interface) string {
+	client := dyn.Resource(sandboxConfigGVR)
+	ours, err := client.Get(ctx, GVisorSandboxConfigName, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	theirs, err := client.Get(ctx, "gvisor-default", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	if theirs.GetCreationTimestamp().Time.Before(ours.GetCreationTimestamp().Time) {
+		return ""
+	}
+	if theirs.GetAnnotations()[sandboxClassDefaultAnnotation] != "true" {
+		return ""
+	}
+	return fmt.Sprintf("warning: SandboxConfig gvisor-default is newer than %s, so Substrate may use gs://gvisor again. Delete SandboxConfig %s and run the installer again", GVisorSandboxConfigName, GVisorSandboxConfigName)
+}

@@ -314,6 +314,18 @@ What the installer does:
    architecture. A new release adds a version and keeps the old ones, because a snapshot restores its memory only on
    the version it was taken with. A version that exists with other assets is an error, never a rewrite.
 
+Limits:
+
+- Substrate picks the newest class default. If `ate-setup` is cleaned up and run again, `gvisor-default` is
+  newer and wins. The installer then prints a warning. Delete SandboxConfig `koinon-gvisor` and run the installer
+  again.
+- On a cluster that already has snapshots on an older `gvisor-default` version, the pools move to
+  `koinon-gvisor`, which has only the pinned release. Actors with snapshots on the older version cannot restore
+  their memory. New installs are not affected.
+- On the `kind` platform the bucket must exist. The platform creates only its own snapshot bucket, so a
+  different `--storage-bucket` fails with a message that names the bucket.
+- One tarball download has a limit of 20 minutes.
+
 The pinned release and its checksums are in `hack/versions.env` (`GVISOR_VERSION`, `GVISOR_SHA256_AMD64`,
 `GVISOR_SHA256_ARM64`) and in `internal/substrateinstall/gvisorpin.go`. A test compares the two. The
 release is the one of version `v7` of `gvisor-default` in the pinned Substrate.

@@ -63,6 +63,9 @@ func (s minioStore) Digest(ctx context.Context, key string) (string, bool, error
 		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
 			return "", false, nil
 		}
+		if minio.ToErrorResponse(err).Code == "NoSuchBucket" {
+			return "", false, fmt.Errorf("the bucket %q does not exist in the cluster object store (the platform creates only its own snapshot bucket): %w", s.bucket, err)
+		}
 		return "", false, err
 	}
 	return hex.EncodeToString(h.Sum(nil)), true, nil
@@ -78,7 +81,11 @@ func (s minioStore) Put(ctx context.Context, key string, r io.Reader, size int64
 type httpFetcher struct{ client *http.Client }
 
 // NewHTTPFetcher returns the default AssetFetcher.
-func NewHTTPFetcher() AssetFetcher { return httpFetcher{client: &http.Client{}} }
+func NewHTTPFetcher() AssetFetcher {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = time.Minute
+	return httpFetcher{client: &http.Client{Transport: t}}
+}
 
 func (f httpFetcher) Open(ctx context.Context, rawURL string) (io.ReadCloser, error) {
 	u, err := url.Parse(rawURL)

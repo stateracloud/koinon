@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // ErrDigestMismatch is returned when bytes do not have the pinned SHA-256: a download from the mirror, or an
@@ -25,6 +26,9 @@ const gvisorAssetPrefix = "gvisor-assets"
 
 // maxGVisorBytes bounds a download: the tarballs are about 60 MB.
 const maxGVisorBytes = 1 << 30
+
+// gvisorDownloadTimeout bounds the download and the upload of one tarball.
+const gvisorDownloadTimeout = 20 * time.Minute
 
 // AssetStore is the cluster object store, seen as the installer needs it. The installer owns the
 // credentials: they come from the cluster and never reach a sandbox.
@@ -96,6 +100,9 @@ func StageGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, mirr
 }
 
 func uploadGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, url string, a gvisorArch, key string) error {
+	// A stalled mirror must not hang the installer: one download gets a fixed time.
+	ctx, cancel := context.WithTimeout(ctx, gvisorDownloadTimeout)
+	defer cancel()
 	src, err := fetch.Open(ctx, url)
 	if err != nil {
 		return fmt.Errorf("fetch the gvisor tarball for %s from %s: %w. Use --gvisor-mirror for a mirror the cluster host can reach", a.goArch, redactURL(url), err)
@@ -176,6 +183,9 @@ func (i *Installer) EnsureGVisorAssets(ctx context.Context) error {
 	}
 	if changed {
 		_, _ = fmt.Fprintf(i.Out, "SandboxConfig %s: applied with the s3:// tarballs of gvisor %s\n", GVisorSandboxConfigName, GVisorRelease)
+	}
+	if warn := gvisorOrderWarning(ctx, i.Dynamic); warn != "" {
+		_, _ = fmt.Fprintln(i.Out, warn)
 	}
 	return nil
 }
