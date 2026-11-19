@@ -171,5 +171,6 @@ var _ = Describe("agentgateway under load", Label("load"), Ordered, func() {
 		results = append(results, res)
 		Expect(res.Errors).To(BeNumerically(">", 0), "the restart is seen by the callers")
 		Expect(res.LastError).To(BeNumerically("<", res.Duration-5*time.Second), "calls succeed again after the restart")
+		Expect(res.Stall).To(BeNumerically("<", 20*time.Second), "the outage ends")
 	}, SpecTimeout(10*time.Minute))
 })

@@ -79,7 +79,7 @@ cd "$repo"
 			grep -v ' INFO ' || true
 		echo
 	done
-} | tee "$out/run.log" | sed -n '/^| driver/,/^$/p;/^## /p;/^--- FAIL/p;/^FAIL/p' | tee "$out/report.md"
+} | tee "$out/run.log" | sed -n '/^| driver/,/^[^|]/{/^|/p};/^## /p;/^--- FAIL/p;/^FAIL/p' | tee "$out/report.md"
 if grep -q '^FAIL\|^--- FAIL' "$out/run.log"; then
 	echo "load-gateway: a suite failed; see $out/run.log" >&2
 	exit 1

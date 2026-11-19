@@ -22,13 +22,13 @@ want to know what it costs in latency and throughput. Or you record a new baseli
 | `direct` (no gateway) | The fake MCP server alone. A gateway's overhead is its numbers minus these. |
 | `tools/call` | N sessions each call one tool in a loop (closed loop). N is 1, 16, 64 and 256. |
 | `stream 20x500ms` | 64 calls at once, each held open for 10 s with 20 progress notifications. |
-| `drain after SIGTERM` (koinon-gateway) | Calls of 1 s run while the process gets SIGTERM. The gateway must serve for `--shutdown-delay`, then refuse. `firstError` must come after the delay. |
-| `restart under load` (agentgateway) | Calls of 1 s run while the container is stopped (SIGTERM) and started again. `firstError` to `lastError` is the outage window. |
+| `drain after SIGTERM` (koinon-gateway) | Calls of 1 s run while the process gets SIGTERM. The gateway must serve for `--shutdown-delay`, then refuse. No call that started before the delay ends may fail, so `firstError` must come after the delay. |
+| `restart under load` (agentgateway) | Calls of 1 s run while the container is stopped (SIGTERM) and started again. `stall` (the longest time with no successful call) is the outage; `firstError` and `lastError` are when failed calls started. |
 
 A worker that gets an error closes its session and opens a new one for its next call, as a client does.
 The open is part of that call's time and its error. A failed call is not in the latency numbers.
 
-The `tools/call` runs have a 2 s warm-up that is not counted (the stream, drain and restart runs have none). The numbers are: calls, errors, error rate, calls per
+The `tools/call` runs have a 2 s warm-up that is not counted (the stream, drain and restart runs have none). The numbers are: calls (successful ones), errors, error rate (errors over calls plus errors), calls per
 second (successful calls over the run length), and p50, p95, p99 and max latency (nearest rank).
 
 Not in the suite yet:
@@ -105,8 +105,8 @@ progress notifications yet. The calls themselves finish with no error.
 
 Disturbance runs (32 workers, calls of 1 s):
 
-- `koinon-gateway` drain: the first error comes after `--shutdown-delay`. The drain is correct.
-- agentgateway restart: the outage window is about 0.1 s (first error 4.0 s, last error 4.1 s).
+- `koinon-gateway` drain: the first failed call starts at 6.0 s, which is the SIGTERM (4 s) plus `--shutdown-delay` (2 s). No call that started earlier failed. The drain is correct.
+- agentgateway restart: callers wait for the new process. Failed calls started at 4.0 s to 4.1 s (the stop), and no call succeeded for 2.1 s (the outage, measured by `stall`, in a solo run of this scenario).
 
 How to read this:
 
@@ -115,6 +115,5 @@ How to read this:
 - At 1 to 64 sessions neither gateway has errors. agentgateway is faster than `koinon-gateway` at every
   level. At 256 sessions agentgateway has 3.6 times the throughput of `koinon-gateway`, which also drops
   calls.
-- A stream run is longer than its duration (calls that start before the end finish after it), so its
-  calls/s is a little high. Read its latency and its notification count.
+- A stream run is three rounds of 64 calls of 10 s. calls/s divides by the real length of the run.
 - Not measured yet: the model path (waits for #279) and budget overshoot.

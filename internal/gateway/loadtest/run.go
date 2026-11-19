@@ -47,6 +47,8 @@ type Spec struct {
 	// (a replica restart or a drain, for example). The run waits for it to return.
 	During      func(ctx context.Context) error
 	DuringAfter time.Duration
+	// CallTimeout ends a call that hangs and counts it as an error. Zero means 2 minutes.
+	CallTimeout time.Duration
 }
 
 // Result is what one run measured. Latencies are those of the calls that succeeded.
@@ -64,14 +66,17 @@ type Result struct {
 	P95        time.Duration `json:"p95Ns"`
 	P99        time.Duration `json:"p99Ns"`
 	Max        time.Duration `json:"maxNs"`
-	// FirstError and LastError are the offsets into the measured part of the first and last failed
-	// call; both are zero when no call failed. Their difference is the outage window of a restart.
+	// FirstError and LastError are the offsets into the measured part at which the first and the last
+	// failed call started; both are zero when no call failed.
 	FirstError time.Duration `json:"firstErrorNs,omitempty"`
 	LastError  time.Duration `json:"lastErrorNs,omitempty"`
 	// ErrorKinds counts the failed calls by the first words of the error.
 	ErrorKinds map[string]int64 `json:"errorKinds,omitempty"`
 	// Notes holds numbers a scenario measures besides these (progress notifications received).
 	Notes map[string]float64 `json:"notes,omitempty"`
+	// Stall is the longest time in the measured part in which no call of any worker succeeded. A
+	// restart shows here even when callers wait for the gateway and fail no call.
+	Stall time.Duration `json:"stallNs,omitempty"`
 }
 
 // ErrorRate is the share of calls that failed, 0 to 1.
@@ -112,10 +117,12 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 		workers = append(workers, w)
 	}
 
+	timeout := cmp.Or(spec.CallTimeout, 2*time.Minute)
 	start := time.Now().Add(spec.Warmup)
 	end := start.Add(spec.Duration)
 	type sample struct {
 		lat   []time.Duration
+		done  []time.Duration // offsets at which successful calls ended
 		errs  int64
 		first time.Duration
 		last  time.Duration
@@ -134,7 +141,9 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 				if !t0.Before(end) {
 					return
 				}
-				err := w.Op(ctx)
+				callCtx, cancel := context.WithTimeout(ctx, timeout)
+				err := w.Op(callCtx)
+				cancel()
 				t1 := time.Now()
 				if t0.Before(start) {
 					continue // warmup
@@ -143,7 +152,7 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 					if ctx.Err() != nil {
 						return
 					}
-					off := t1.Sub(start)
+					off := t0.Sub(start) // when the failed call started
 					if s.errs == 0 {
 						s.first = off
 					}
@@ -159,6 +168,7 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 					continue
 				}
 				s.lat = append(s.lat, t1.Sub(t0))
+				s.done = append(s.done, t1.Sub(start))
 			}
 		}()
 	}
@@ -180,9 +190,10 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 	wg.Wait()
 
 	res := Result{Scenario: spec.Name, Concurrency: spec.Concurrency, Duration: spec.Duration, ErrorKinds: map[string]int64{}}
-	var all []time.Duration
+	var all, done []time.Duration
 	for _, s := range samples {
 		all = append(all, s.lat...)
+		done = append(done, s.done...)
 		res.Errors += s.errs
 		for k, n := range s.kinds {
 			res.ErrorKinds[k] += n
@@ -199,7 +210,21 @@ func Run(ctx context.Context, spec Spec) (Result, error) {
 	}
 	slices.Sort(all)
 	res.Calls = int64(len(all))
-	res.Throughput = float64(len(all)) / spec.Duration.Seconds()
+	slices.Sort(done)
+	elapsed := spec.Duration
+	prev := time.Duration(0)
+	for _, d := range done {
+		res.Stall = max(res.Stall, d-prev)
+		prev = d
+	}
+	if n := len(done); n > 0 {
+		// Calls that started before the end can finish after it (a long stream), so count the real length.
+		elapsed = max(elapsed, done[n-1])
+		res.Stall = max(res.Stall, spec.Duration-done[n-1])
+	} else {
+		res.Stall = spec.Duration
+	}
+	res.Throughput = float64(len(all)) / elapsed.Seconds()
 	if len(all) > 0 {
 		res.Min, res.Max = all[0], all[len(all)-1]
 		res.P50, res.P95, res.P99 = Percentile(all, 50), Percentile(all, 95), Percentile(all, 99)
@@ -243,7 +268,10 @@ func notes(r Result) string {
 		parts = append(parts, fmt.Sprintf("progress %.0f of %.0f", r.Notes["progressReceived"], exp))
 	}
 	if r.Errors > 0 {
-		parts = append(parts, fmt.Sprintf("errors from %.1f s to %.1f s", r.FirstError.Seconds(), r.LastError.Seconds()))
+		parts = append(parts, fmt.Sprintf("failed calls started %.1f s to %.1f s", r.FirstError.Seconds(), r.LastError.Seconds()))
+	}
+	if r.Stall >= time.Second {
+		parts = append(parts, fmt.Sprintf("no call succeeded for %.1f s", r.Stall.Seconds()))
 	}
 	return strings.Join(parts, "; ")
 }
