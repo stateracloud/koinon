@@ -432,12 +432,19 @@ func ValidateRemote(rawURL, transport, header, prefix string) error {
 	if transport != TransportStreamableHTTP && transport != TransportSSE {
 		return invalid("transport must be %q or %q", TransportStreamableHTTP, TransportSSE)
 	}
+	return ValidateCredentialFields(rawURL, header, prefix, "server")
+}
+
+// ValidateCredentialFields checks the credential header and prefix against the URL they are sent to. what
+// names the resource in the messages ("server", "remote agent"). The remote agents (ADR 0123 decision 9)
+// use it too, so one rule covers the credential of both.
+func ValidateCredentialFields(rawURL, header, prefix, what string) error {
 	if err := CheckCredentialLoader(header, prefix); err != nil {
 		return err
 	}
 	if header != "" {
 		if !gateway.CredentialSafeURL(rawURL) {
-			return invalid("url must be https when the server has a credential (http is allowed only on a loopback address)")
+			return invalid("url must be https when the %s has a credential (http is allowed only on a loopback address)", what)
 		}
 		if !headerPattern.MatchString(header) {
 			return invalid("credential header must be an HTTP header name")

@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -50,12 +51,13 @@ type domain struct {
 	executeAllowed func(ctx context.Context, org, id pgtype.UUID)
 	approvals      *approvals.Service
 
-	tokens  *tokens.Service
-	catalog *catalog.Service
-	mcp     *mcpservers.Service
-	echo    *modelcheck.Service
-	traces  *tracedest.Service
-	scope   *scopesync.Syncer
+	tokens       *tokens.Service
+	catalog      *catalog.Service
+	mcp          *mcpservers.Service
+	remoteAgents *remoteagents.Service
+	echo         *modelcheck.Service
+	traces       *tracedest.Service
+	scope        *scopesync.Syncer
 }
 
 // buildDomain is the wiring serve had in line: hold guard, egress policy, code hosts, approvals,
@@ -118,6 +120,10 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	if set.GatewayMode == project.GatewayKubernetes {
 		// The Kubernetes driver cannot render a per-target TLS policy (gateway.MCPTargetCA).
 		d.mcp.WithoutTargetTLS()
+	}
+	d.remoteAgents = remoteagents.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy).WithRestoreHold(d.hold)
+	if set.GatewayMode == project.GatewayKubernetes {
+		d.remoteAgents.WithoutTargetTLS()
 	}
 	// The provider echo check sends one request through the gateway with the org's model-check key,
 	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes

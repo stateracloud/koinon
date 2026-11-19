@@ -68,6 +68,9 @@ type Profile struct {
 	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
 	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
+	// GVisorMirror is the base URL of an operator mirror of the gVisor release (layout in GVisorDefaultMirror);
+	// empty means the public gVisor bucket. Only the installer host reads it, never a sandbox or a node.
+	GVisorMirror string
 	// Platform is the kind of cluster. Empty means detect it from the nodes: kind or generic, never gke.
 	Platform Platform
 	// RustFSStorageClass, RustFSStorageSize and PostgresStorageSize size the in-cluster object store and the
@@ -207,6 +210,10 @@ type Installer struct {
 	// PollInterval and WaitTimeout bound the wait for the CRDs (defaults 2s and 2m).
 	PollInterval time.Duration
 	WaitTimeout  time.Duration
+	// GVisorStore and GVisorFetcher are for the tests. Nil means the cluster object store reached through a
+	// port-forward to its rustfs pod, and a plain HTTP GET (gvisorstore.go).
+	GVisorStore   func(ctx context.Context) (AssetStore, func(), error)
+	GVisorFetcher AssetFetcher
 }
 
 // ErrPrerequisites is returned when the prerequisite preflight fails: nothing was installed.
@@ -527,6 +534,9 @@ func (i *Installer) Install(ctx context.Context) error {
 		return err
 	}
 	if err := i.EnsureRouterSPIFFE(ctx); err != nil {
+		return err
+	}
+	if err := i.EnsureGVisorAssets(ctx); err != nil {
 		return err
 	}
 	if failed := preflight.Write(i.Out, i.Checker.Run(ctx)); failed > 0 {

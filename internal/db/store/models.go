@@ -1837,6 +1837,12 @@ type AgentMcpServer struct {
 	Tools    []string
 }
 
+type AgentRemoteAgent struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	RemoteAgentID pgtype.UUID
+}
+
 type AgentRunLimit struct {
 	OrgID            pgtype.UUID
 	AgentID          pgtype.UUID
@@ -2815,6 +2821,33 @@ type RecoveryRequest struct {
 	Requester    string
 	SealedResult string
 	CreatedAt    pgtype.Timestamptz
+}
+
+type RemoteAgent struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	Name                string
+	CardUrl             string
+	CredentialHeader    pgtype.Text
+	CredentialPrefix    string
+	Credential          []byte
+	CredentialLostAt    pgtype.Timestamptz
+	CaBundle            string
+	InsecureSkipVerify  bool
+	CardHash            string
+	Card                string
+	ObservedCardHash    pgtype.Text
+	ObservedCard        pgtype.Text
+	CardCheckedAt       pgtype.Timestamptz
+	Health              McpHealth
+	HealthReason        pgtype.Text
+	HealthCheckedAt     pgtype.Timestamptz
+	HealthSince         pgtype.Timestamptz
+	ConsecutiveFailures int32
+	DisabledReason      pgtype.Text
+	CreatedBy           pgtype.UUID
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
 }
 
 type RestoreAcceptedRemoval struct {

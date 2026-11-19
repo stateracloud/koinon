@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/stateracloud/koinon/internal/a2aout"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -31,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
@@ -210,6 +212,13 @@ var _ = Describe("koinon-api keys forget", func() {
 			Name: pgtest.Uniq("m"), URL: "https://mcp.example.com/mcp", CredentialPrefix: "Bearer ", CredentialValue: "fake-mcp-token",
 		})
 		Expect(err).NotTo(HaveOccurred())
+		ra, err := remoteagents.New(pool, r, nil).WithURLPolicy(catalog.URLPolicy{Namespace: ns}).
+			WithFetcher(func(context.Context, remoteagents.FetchRequest, catalog.URLPolicy) (*a2aout.Card, error) {
+				return &a2aout.Card{Hash: strings.Repeat("a", 64), JSON: "{}"}, nil
+			}).Create(ctx, org, audit.User(user), user, remoteagents.Input{
+			Name: pgtest.Uniq("r"), CardURL: "https://agent.example.com", CredentialPrefix: "Bearer ", CredentialValue: "fake-agent-token",
+		})
+		Expect(err).NotTo(HaveOccurred())
 		connID := pgtype.UUID{Bytes: [16]byte{1, 2, 3}, Valid: true}
 		env, err := connections.SealFields(r, org, connID, map[string][]byte{connections.GitHubPrivateKeyField: []byte("pem")})
 		Expect(err).NotTo(HaveOccurred())
@@ -251,13 +260,13 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = pw.Current(ctx, org, agent3) // epoch 0 now, epoch 1 under the next KEK below
 		Expect(err).NotTo(HaveOccurred())
-		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11}))
+		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 12}))
 
 		rotateAndLose(ctx)
 		pw.Keys = ring(ctx)
 		e3, _, err := pw.NewEpoch(ctx, org, agent3, checkpoint.ReasonKeyLost, checkpoint.DefaultRetain)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 11, nextKEK: 1}))
+		Expect(usage(ctx)).To(Equal(map[string]int{lostKEK: 12, nextKEK: 1}))
 		// agent2's r2/ holds a repository this database has no password for (started after a dump
 		// it was restored from): koinon-agentd found it and raised the floor (#262).
 		_, err = pool.Exec(ctx, `UPDATE home_repositories SET next_epoch_at_least = 3 WHERE org_id = $1 AND agent_id = $2`, org, agent2)
@@ -266,7 +275,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		tool.Yes = true // no terminal: --yes is what lets it run
 		Expect(tool.Forget(ctx, lostKEK)).To(Succeed())
 		Expect(out.String()).To(And(
-			ContainSubstring("Forgot KEK "+lostKEK+": 11 value(s) marked lost in 2 org(s)."),
+			ContainSubstring("Forgot KEK "+lostKEK+": 12 value(s) marked lost in 2 org(s)."),
 			ContainSubstring("2 agent(s) start a new home repository"),
 			ContainSubstring("platform's trace destination lost its credentials"),
 		))
@@ -284,6 +293,7 @@ var _ = Describe("koinon-api keys forget", func() {
 		Expect(lost("trace_destinations", "org_id = $1 AND id = $2", org, dest)).To(BeTrue())
 		Expect(lost("platform_trace_destination", "true")).To(BeTrue())
 		Expect(lost("mcp_servers", "org_id = $1 AND name = $2", org, mcp.Name)).To(BeTrue())
+		Expect(lost("remote_agents", "org_id = $1 AND id = $2", org, ra.ID)).To(BeTrue())
 		var prefix string
 		var header *string
 		Expect(pool.QueryRow(ctx, `SELECT credential_prefix, credential_header FROM mcp_servers WHERE org_id = $1 AND name = $2`, org, mcp.Name).Scan(&prefix, &header)).To(Succeed())

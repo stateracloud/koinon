@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
@@ -46,42 +47,44 @@ var fixtureHash = sync.OnceValues(func() (string, error) { return auth.HashPassw
 
 // client is a logged-in user with typed clients for every service.
 type client struct {
-	b           *browser
-	userID      string
-	agents      agentv1alpha1connect.AgentServiceClient
-	tickets     ticketv1alpha1connect.TicketServiceClient
-	tasks       taskv1alpha1connect.TaskServiceClient
-	runs        runv1alpha1connect.RunServiceClient
-	templates   templatev1alpha1connect.TemplateServiceClient
-	conns       connectionv1alpha1connect.ConnectionServiceClient
-	approvals   approvalv1alpha1connect.ApprovalServiceClient
-	tokens      tokenv1alpha1connect.TokenServiceClient
-	providers   providerv1alpha1connect.ProviderServiceClient
-	mcps        mcpserverv1alpha1connect.McpServerServiceClient
-	questions   questionv1alpha1connect.QuestionServiceClient
-	leakguard   leakguardv1alpha1connect.LeakGuardServiceClient
-	orgsettings orgsettingsv1alpha1connect.OrgSettingsServiceClient
-	outward     outwardv1alpha1connect.OutwardServiceClient
+	b            *browser
+	userID       string
+	agents       agentv1alpha1connect.AgentServiceClient
+	tickets      ticketv1alpha1connect.TicketServiceClient
+	tasks        taskv1alpha1connect.TaskServiceClient
+	runs         runv1alpha1connect.RunServiceClient
+	templates    templatev1alpha1connect.TemplateServiceClient
+	conns        connectionv1alpha1connect.ConnectionServiceClient
+	approvals    approvalv1alpha1connect.ApprovalServiceClient
+	tokens       tokenv1alpha1connect.TokenServiceClient
+	providers    providerv1alpha1connect.ProviderServiceClient
+	mcps         mcpserverv1alpha1connect.McpServerServiceClient
+	remoteAgents remoteagentv1alpha1connect.RemoteAgentServiceClient
+	questions    questionv1alpha1connect.QuestionServiceClient
+	leakguard    leakguardv1alpha1connect.LeakGuardServiceClient
+	orgsettings  orgsettingsv1alpha1connect.OrgSettingsServiceClient
+	outward      outwardv1alpha1connect.OutwardServiceClient
 }
 
 func newClient(b *browser) *client {
 	cc := connect.NewClient(connecthttp.NewTransport(b.http, b.e.srv.URL))
 	return &client{
-		b:           b,
-		agents:      agentv1alpha1connect.NewAgentServiceClient(cc),
-		tickets:     ticketv1alpha1connect.NewTicketServiceClient(cc),
-		tasks:       taskv1alpha1connect.NewTaskServiceClient(cc),
-		runs:        runv1alpha1connect.NewRunServiceClient(cc),
-		templates:   templatev1alpha1connect.NewTemplateServiceClient(cc),
-		conns:       connectionv1alpha1connect.NewConnectionServiceClient(cc),
-		approvals:   approvalv1alpha1connect.NewApprovalServiceClient(cc),
-		tokens:      tokenv1alpha1connect.NewTokenServiceClient(cc),
-		providers:   providerv1alpha1connect.NewProviderServiceClient(cc),
-		mcps:        mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
-		questions:   questionv1alpha1connect.NewQuestionServiceClient(cc),
-		leakguard:   leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
-		orgsettings: orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
-		outward:     outwardv1alpha1connect.NewOutwardServiceClient(cc),
+		b:            b,
+		agents:       agentv1alpha1connect.NewAgentServiceClient(cc),
+		tickets:      ticketv1alpha1connect.NewTicketServiceClient(cc),
+		tasks:        taskv1alpha1connect.NewTaskServiceClient(cc),
+		runs:         runv1alpha1connect.NewRunServiceClient(cc),
+		templates:    templatev1alpha1connect.NewTemplateServiceClient(cc),
+		conns:        connectionv1alpha1connect.NewConnectionServiceClient(cc),
+		approvals:    approvalv1alpha1connect.NewApprovalServiceClient(cc),
+		tokens:       tokenv1alpha1connect.NewTokenServiceClient(cc),
+		providers:    providerv1alpha1connect.NewProviderServiceClient(cc),
+		mcps:         mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
+		remoteAgents: remoteagentv1alpha1connect.NewRemoteAgentServiceClient(cc),
+		questions:    questionv1alpha1connect.NewQuestionServiceClient(cc),
+		leakguard:    leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
+		orgsettings:  orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
+		outward:      outwardv1alpha1connect.NewOutwardServiceClient(cc),
 	}
 }
 
@@ -277,6 +280,8 @@ type orgFixture struct {
 	provider, model, modelName string
 	// mcpServer is a remote MCP server of the org, with the tool "search"; mcpTool is its name.
 	mcpServer, mcpTool string
+	// remoteAgent is a remote agent of the org, with a pinned card and an observed one.
+	remoteAgent, remoteAgentCardHash string
 	// traceDest is a trace destination of the org.
 	traceDest string
 	// trustedHost is on the org's fetch-trusted list; the org's match threshold is 30.

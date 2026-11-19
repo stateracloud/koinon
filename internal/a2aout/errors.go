@@ -13,6 +13,12 @@ var (
 	ErrEgressDenied = errors.New("a2aout: the egress policy denies the target")
 	// ErrCard is an agent card that cannot be read or used.
 	ErrCard = errors.New("a2aout: agent card")
+	// ErrCardChanged is a card whose hash is not the pin. The agent changed its card since an admin read
+	// it. An admin reads the new card and accepts it (ADR 0123 decision 11). The text names nothing of the
+	// card.
+	ErrCardChanged = errors.New("a2aout: the agent card changed since it was pinned")
+	// ErrCardUnpinned is a client built with no card hash: the pin is required.
+	ErrCardUnpinned = errors.New("a2aout: the agent card is not pinned")
 	// ErrCardHost is a card with no JSON-RPC interface on the host of the target.
 	ErrCardHost = errors.New("a2aout: agent card names another host")
 	// ErrBadRequest is a request the client refuses before it sends it.
