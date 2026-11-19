@@ -285,7 +285,9 @@ if [[ -n ${UPGRADE_FROM:-} ]]; then
   # The upgrade e2e replaces the install and the driver passes: it installs N-1 itself, seeds it, upgrades to this build.
   step "upgrade e2e from $UPGRADE_FROM (upgrade.sh)"
   OUT="$OUT" CLUSTER="$CLUSTER" FAKES="$FAKES" API_PORT="$API_PORT" GH_PORT="$GH_PORT" MCP_PORT="$MCP_PORT" MODEL_PORT="$MODEL_PORT" \
-    "$here/upgrade.sh" 2>&1 | tee "$OUT/upgrade.log"
+    "$here/upgrade.sh" 2>&1 | tee "$OUT/upgrade.log" || rc=$?
+  if [[ ${rc:-0} == 77 ]]; then echo "upgrade e2e skipped (a prerequisite went away during the run)"; status=0; exit 0; fi
+  [[ ${rc:-0} == 0 ]] || exit "$rc"
   done_step "Upgrade e2e: install N-1, seed, helm upgrade, converge, a new run"
   status=0
   printf '%s\n' "${summary[@]}"

@@ -44,7 +44,7 @@ var _ = Describe("the upgrade from the previous release", Ordered, Label("upgrad
 		Expect(upgradecheck.Empty(before, "agents", "tasks", "runs", "sandboxes")).To(BeEmpty())
 	})
 
-	It("keeps the install, its keys, its agents, tasks, runs and sandbox homes", func() {
+	It("keeps the install, its keys, its agents, tasks, runs and sandboxes, and the sandboxes are back in their state", func() {
 		Expect(upgradecheck.Compare(before, after)).To(BeEmpty())
 	})
 

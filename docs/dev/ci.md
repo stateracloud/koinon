@@ -305,9 +305,9 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 `UPGRADE_FROM=<release tag> make test-e2e-kind` (for example `UPGRADE_FROM=v0.1.0-rc.27`, `SUITE=go`) runs
 `test/e2e/upgrade.sh` instead of the quickstart pass. The script installs that release from its published chart and
 images, seeds it with that tag's own quickstart driver (built from a git worktree of the tag, so no client of this build
-talks to the older server), takes a snapshot of the database, runs `helm upgrade` to this build with the same values,
+talks to the older server), takes a snapshot of the database, runs `helm upgrade` to this build with the same values (home checkpoints are off in the e2e values, so the test does not cover them),
 and takes a second snapshot. The spec `test/e2e/upgrade_test.go` (label `upgrade`) judges the two with the rules of
-`test/e2e/upgradecheck`: same install ID and keys, no lost agent, task, run, sandbox or home checkpoint, the schema not
+`test/e2e/upgradecheck`: same install ID and keys, no lost agent, task, run or sandbox, each sandbox reconciled back to its state (the install of #508 had every pod running and no sandbox converged), the schema not
 behind, every Deployment available. Then the run-1 story suite (`UPGRADE_STORIES=0` leaves it out) starts new runs on
 the upgraded install. The check is not a required job: it is for the release drill and for a person who fixes an upgrade
 bug. Before v0.3 there is no upgrade promise (ADR 0099), so a red result is information, not a broken promise.

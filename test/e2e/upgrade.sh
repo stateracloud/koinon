@@ -50,7 +50,7 @@ check() {
     command -v "$tool" >/dev/null || { echo "SKIP: $tool is not installed"; return 77; }
   done
   git -C "$root" rev-parse -q --verify "refs/tags/$V^{commit}" >/dev/null 2>&1 ||
-    git -C "$root" fetch --quiet --depth=1 origin "refs/tags/$V:refs/tags/$V" 2>"$work/git.err" ||
+    git -C "$root" fetch --quiet --no-tags origin "refs/tags/$V:refs/tags/$V" 2>"$work/git.err" ||
     { echo "SKIP: tag $V is not in this clone and cannot be fetched: $(head -c 300 "$work/git.err")"; return 77; }
   # kind/up.sh pulls the Agent Sandbox and network-policy images from registry.k8s.io (some lane VMs cannot reach it).
   curl -sS -m 15 -o /dev/null "https://registry.k8s.io/v2/" 2>"$work/curl.err" ||
@@ -59,8 +59,8 @@ check() {
     { echo "SKIP: cannot pull the chart $CHART_REF at $V: $(head -c 300 "$work/helm.out")"; return 77; }
   # The images the chart runs at $V come from IMAGE_REGISTRY. One probe: if the API image cannot be read here, the
   # install of N-1 would hang in ImagePullBackOff, which is not a result about the upgrade.
-  if err=$(docker manifest inspect "$IMAGE_REGISTRY/api:${UPGRADE_IMAGE_TAG:-$V}" 2>&1 >/dev/null); then :; else
-    echo "SKIP: cannot read $IMAGE_REGISTRY/api:${UPGRADE_IMAGE_TAG:-$V}: $(head -c 300 <<<"$err")"; return 77
+  if err=$(docker manifest inspect "$IMAGE_REGISTRY/api:${UPGRADE_IMAGE_TAG:-${V#v}}" 2>&1 >/dev/null); then :; else
+    echo "SKIP: cannot read $IMAGE_REGISTRY/api:${UPGRADE_IMAGE_TAG:-${V#v}}: $(head -c 300 <<<"$err")"; return 77
   fi
   echo "ok: tag, chart and images of $V are reachable"
 }
@@ -112,8 +112,14 @@ collect() {
     echo "count.$name=$(sql "SELECT count(*) FROM $table")"
     echo "ids.$name=$(sql "SELECT coalesce(string_agg($col::text, ',' ORDER BY $col::text), '') FROM $table")"
   done
+  # The sandboxes with their state: after an upgrade each must come back to the state it had (a reconcile that fails
+  # on an existing object, issue 508, leaves them behind with every pod running).
+  echo "sandbox_states=$(sql "SELECT coalesce(string_agg(sandbox_name || ':' || state::text, ',' ORDER BY sandbox_name), '') FROM agent_sandboxes")"
   # The keys: ID, state, fingerprint (no key material).
-  "${K[@]}" -n "$NS" exec "deploy/$REL-api" -- koinon-api keys status | awk 'NF >= 5 && $2 ~ /^(active|retained|MISSING)$/ { print "kek=" $1, $2, $NF }'
+  local keys
+  keys=$("${K[@]}" -n "$NS" exec "deploy/$REL-api" -- koinon-api keys status | awk 'NF >= 5 && $2 ~ /^(active|retained|MISSING)$/ { print "kek=" $1, $2, $NF }')
+  [[ -n $keys ]] || fail "keys status lists no KEK: the format changed, and the key check would prove nothing"
+  echo "$keys"
 }
 
 declare -A fwd_pid
@@ -133,7 +139,10 @@ helm pull "$CHART_REF" --version "$V" --untar --untardir "$work/prev-chart" >/de
 # The tag's own values file, pointed at the published images: no local registry, no e2e tag (the chart's tag is its appVersion).
 sed -e "s#registry: localhost:5001#registry: $IMAGE_REGISTRY#" -e '/^  tag: e2e$/d' -e 's#pullPolicy: Always#pullPolicy: IfNotPresent#' \
   "$work/prev/test/e2e/kind/koinon-values.yaml" >"$work/values-prev.yaml"
-[[ -z ${UPGRADE_IMAGE_TAG:-} ]] || sed -i "/^  registry:/a\\  tag: \"$UPGRADE_IMAGE_TAG\"" "$work/values-prev.yaml"
+if [[ -n ${UPGRADE_IMAGE_TAG:-} ]]; then
+  sed "s#^  registry: .*#&\\
+  tag: \"$UPGRADE_IMAGE_TAG\"#" "$work/values-prev.yaml" >"$work/values-prev.tmp" && mv "$work/values-prev.tmp" "$work/values-prev.yaml"
+fi
 grep -q "registry: $IMAGE_REGISTRY" "$work/values-prev.yaml" || fail "the values file of $V has no image registry line to point at $IMAGE_REGISTRY"
 (cd "$work/prev" && go test -c -o "$OUT/bin/e2e-prev.test" ./test/e2e/) || fail "the quickstart driver of $V does not build"
 
@@ -176,10 +185,18 @@ for d in $("${K[@]}" -n "$NS" get deploy -l "app.kubernetes.io/instance=$REL" -o
 done
 # The API pod is new: the old port-forward points at a pod that is gone.
 kill "${fwd_pid[api]}" 2>/dev/null || true
+wait "${fwd_pid[api]}" 2>/dev/null || true
 forward api "$REL-api" "$API_PORT" "$NS"
 
-step "snapshot after the upgrade"
+step "snapshot after the upgrade (the sandboxes must reconcile back to their state first)"
+want=$(grep '^sandbox_states=' "$work/state.before")
+for _ in $(seq 1 60); do
+  [[ $(collect | grep '^sandbox_states=') == "$want" ]] && break
+  sleep 5
+done
 collect | tee "$work/state.after"
+[[ $(grep '^sandbox_states=' "$work/state.after") == "$want" ]] ||
+  fail "the sandboxes did not return to their state within 5 minutes: before ${want#sandbox_states=}, after $(sed -n 's/^sandbox_states=//p' "$work/state.after")"
 
 step "judge: the upgrade spec (label upgrade)"
 (cd "$root/test/e2e" && KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
