@@ -419,6 +419,10 @@ func (g *Guard) check(ctx context.Context, call Call, f *decisionFacts) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
+	if tool.Valid && tool.ApprovedHash.Valid && tool.ReviewReason.Valid {
+		// The sync saw other text than the approved text. The gateway also leaves the tool out of its list.
+		return refuse(ReasonToolChanged, "refused by the leak guard: the tool changed since an admin approved it; an admin must review it again"), nil
+	}
 	if resultLegs(c.server, decl).Any() {
 		f.opens = &c
 	}

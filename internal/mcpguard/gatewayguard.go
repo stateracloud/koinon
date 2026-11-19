@@ -24,8 +24,8 @@ import (
 //     the Guard has no Approve function; the gateway has none in this slice, so it fails closed.
 //   - Inspect sees every raw message. A tools/call result or error records its legs and fingerprints
 //     (Guard.CheckResult); a message of a kind the guard has no reading for, and a reply it cannot match
-//     to a call, takes both legs on the session (Guard.CheckUnseen, #254). The results of initialize,
-//     tools/list and ping, and the notifications the gateway does not forward, set no leg: the
+//     to a call, takes both legs on the session (Guard.CheckUnseen, #254). The results of initialize
+//     and ping, and the notifications the gateway does not forward, set no leg: the
 //     agentgateway path never showed them to the guard either.
 //   - Violation taints the session of a server that ignored what the gateway advertised.
 //   - Loaded is an error until Load has reached the database: the gateway closes every route
@@ -120,7 +120,15 @@ func (a *GatewayGuard) Inspect(ctx context.Context, m mcpgateway.Message) mcpgat
 			}
 			err := a.g.CheckResult(ctx, Result{Target: m.Target, Agent: agent, Tool: m.Tool, Result: result})
 			return a.verdict(err, "result", m)
-		case "initialize", "tools/list", "ping":
+		case "tools/list":
+			// What a list brings into the session is decided by CheckToolList, on the list the gateway
+			// serves. A result that is not a list at all is one the guard cannot read: both legs, and the
+			// list is not served either (fail closed, #1132).
+			if m.Kind == mcpgateway.KindResult && !readableToolList(resultOf(m.Raw)) {
+				return a.unseen(ctx, agent, m)
+			}
+			return mcpgateway.Verdict{}
+		case "initialize", "ping":
 			return mcpgateway.Verdict{}
 		}
 		// No request of ours is behind it, or a method the guard does not read.
