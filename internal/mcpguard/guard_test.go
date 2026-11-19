@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -377,6 +378,62 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(can("mcp_call_log", "INSERT")).To(BeTrue())
 		Expect(can("mcp_call_log", "SELECT")).To(BeFalse())
 		Expect(can("mcp_call_log", "UPDATE")).To(BeFalse())
+	})
+
+	It("grants the gateway role named columns of mcp_servers and connections, never the sealed credential columns (#278)", func(ctx SpecContext) {
+		restricted := restrictedPool(ctx, pool)
+		// An earlier version granted whole-table SELECT. Granting again must take it away.
+		_, err := pool.Exec(ctx, `GRANT SELECT ON mcp_servers, connections TO `+migrations.GatewayRole)
+		Expect(err).NotTo(HaveOccurred())
+		ok, err := migrations.GrantGateway(ctx, sqlDB(pool))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+
+		// For every column of both tables: readable exactly when it is on the list the guard needs. A column
+		// added later is not readable until someone names it, so this fails for a role that reads more.
+		for table, want := range map[string][]string{
+			"mcp_servers": migrations.GatewayMCPServerColumns,
+			"connections": migrations.GatewayConnectionColumns,
+		} {
+			rows, err := pool.Query(ctx, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`, table)
+			Expect(err).NotTo(HaveOccurred())
+			var all []string
+			for rows.Next() {
+				var c string
+				Expect(rows.Scan(&c)).To(Succeed())
+				all = append(all, c)
+			}
+			Expect(rows.Err()).NotTo(HaveOccurred())
+			rows.Close()
+			Expect(all).To(ContainElements(want), table)
+			var readable []string
+			for _, c := range all {
+				var can bool
+				Expect(pool.QueryRow(ctx, `SELECT has_column_privilege($1, $2, $3, 'SELECT')`, migrations.GatewayRole, table, c).Scan(&can)).To(Succeed())
+				if can {
+					readable = append(readable, c)
+				}
+			}
+			Expect(readable).To(ConsistOf(want), table)
+		}
+
+		// The sealed columns are refused by the database itself, also in a query that names them or selects *.
+		for _, q := range []string{
+			`SELECT credential FROM mcp_servers`,
+			`SELECT * FROM mcp_servers`,
+			`SELECT secret_envelope FROM connections`,
+			`SELECT * FROM connections`,
+		} {
+			_, err := restricted.Exec(ctx, q)
+			var pgErr *pgconn.PgError
+			Expect(errors.As(err, &pgErr)).To(BeTrue(), q)
+			Expect(pgErr.Code).To(Equal("42501"), q)
+		}
+		// The columns the guard needs are readable.
+		_, err = restricted.Exec(ctx, `SELECT `+strings.Join(migrations.GatewayMCPServerColumns, ", ")+` FROM mcp_servers`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = restricted.Exec(ctx, `SELECT `+strings.Join(migrations.GatewayConnectionColumns, ", ")+` FROM connections`)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("serves an org target through the real gateway with the real guard: a private result, then a leak refused, and a call-log row each (#278)", func(ctx SpecContext) {
@@ -1628,8 +1685,8 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			// canary is private text of the fake kind: obviously not a secret, longer than the threshold.
 			const canary = "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close"
 
-			// sentOut is what the guard let out: the stored decision rows with a pass on an external-low sink.
 			type sentRow struct{ payload, charged, before int }
+			// sentOut is what the guard let out: the stored decision rows with a pass on an external-low sink.
 			sentOut := func(ctx SpecContext) (rows []sentRow) {
 				GinkgoHelper()
 				r, err := pool.Query(ctx, `SELECT payload_bytes, charged_bytes, cap_used_before FROM leak_guard_decisions
