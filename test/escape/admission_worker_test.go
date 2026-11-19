@@ -51,6 +51,7 @@ var (
 )
 
 // The digest of an image that exists only in these specs.
+const otherDigest = "registry.invalid/koinon-escape/other@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 const workerDigest = "registry.invalid/koinon-escape/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 // The ValidatingAdmissionPolicies of the Substrate driver's two namespaces (ADR 0120 section 6),
@@ -75,13 +76,25 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 	)
 
 	isTrue := true
+	// The shape that Substrate sets on the worker container (workerpool_apply.go:377-468): the gVisor class by default.
+	gvisorCaps := []corev1.Capability{"NET_ADMIN", "SYS_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "FOWNER", "CHOWN", "NET_RAW", "SETFCAP"}
+	microvmCaps := []corev1.Capability{"NET_ADMIN", "SYS_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "FOWNER", "CHOWN", "MKNOD", "SETFCAP", "FSETID", "SETPCAP"}
+	shape := func(add []corev1.Capability) *corev1.SecurityContext {
+		root, no := int64(0), false
+		return &corev1.SecurityContext{
+			RunAsUser: &root, RunAsGroup: &root, Privileged: &no, AllowPrivilegeEscalation: &no,
+			Capabilities:    &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: add},
+			SeccompProfile:  &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
+			AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined},
+		}
+	}
 	worker := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: name, OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "rs", UID: "11111111-1111-1111-1111-111111111111", Controller: &isTrue,
 			}}},
 			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "worker", Image: workerDigest}},
+				Containers: []corev1.Container{{Name: "worker", Image: workerDigest, SecurityContext: shape(gvisorCaps)}},
 				Volumes: []corev1.Volume{{Name: "kvm", VolumeSource: corev1.VolumeSource{
 					HostPath: &corev1.HostPathVolumeSource{Path: workerHostPathOK},
 				}}},
@@ -154,6 +167,8 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 
 		// The pod the update and connect cases act on exists before the policies do.
 		_, err = admin.CoreV1().Pods(workerNamespace).Create(ctx, worker(existing), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = admin.CoreV1().Pods(controlNamespace).Create(ctx, worker(existing), metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		for _, p := range policies {
@@ -274,20 +289,64 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("automount-unset"))).To(Succeed())
 	})
 
-	It("limits added capabilities to the ceiling", func(ctx SpecContext) {
-		caps := func(add ...corev1.Capability) func(*corev1.Pod) {
-			return func(p *corev1.Pod) {
-				p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: add}}
-			}
+	It("allows added capabilities and Unconfined profiles only in the exact shape of the worker container", func(ctx SpecContext) {
+		sc := func(f func(*corev1.SecurityContext)) func(*corev1.Pod) {
+			return func(p *corev1.Pod) { f(p.Spec.Containers[0].SecurityContext) }
 		}
-		Expect(create(ctx, replicaSetController, workerNamespace, worker("caps-ok", caps("SYS_ADMIN", "NET_ADMIN")))).To(Succeed())
-		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-ptrace", caps("SYS_ADMIN", "SYS_PTRACE"))))
-		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-all", caps("ALL"))))
+		// Both classes of Substrate v1.0.0.
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-gvisor"))).To(Succeed())
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-microvm", sc(func(c *corev1.SecurityContext) {
+			c.Capabilities.Add = microvmCaps
+		})))).To(Succeed())
+		// One capability more or less than the class, and the old ceiling alone.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-more", sc(func(c *corev1.SecurityContext) {
+			c.Capabilities.Add = append(append([]corev1.Capability{}, gvisorCaps...), "SYS_PTRACE")
+		}))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-less", sc(func(c *corev1.SecurityContext) {
+			c.Capabilities.Add = gvisorCaps[:len(gvisorCaps)-1]
+		}))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-ceiling-only", sc(func(c *corev1.SecurityContext) {
+			c.Capabilities.Add = []corev1.Capability{"SYS_ADMIN", "NET_ADMIN"}
+		}))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-all", sc(func(c *corev1.SecurityContext) {
+			c.Capabilities.Add = []corev1.Capability{"ALL"}
+		}))))
+		// The rest of the shape.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("no-drop", sc(func(c *corev1.SecurityContext) { c.Capabilities.Drop = nil }))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("escalation", sc(func(c *corev1.SecurityContext) {
+			yes := true
+			c.AllowPrivilegeEscalation = &yes
+		}))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("not-root", sc(func(c *corev1.SecurityContext) {
+			uid := int64(1000)
+			c.RunAsUser = &uid
+		}))))
+		// A worker container with no security context has no shape.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("bare", func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext = nil })))
+		// Another container gets no capability and no Unconfined profile, whatever its image.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("sidecar-caps", func(p *corev1.Pod) {
+			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: workerDigest, SecurityContext: shape(gvisorCaps)})
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("sidecar-unconfined", func(p *corev1.Pod) {
+			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: workerDigest, SecurityContext: &corev1.SecurityContext{
+				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
+			}})
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("other-image-caps", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Image = otherDigest
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("renamed-worker", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Name = "not-the-worker"
+		})))
 		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-init", func(p *corev1.Pod) {
 			p.Spec.InitContainers = []corev1.Container{{Name: "init", Image: workerDigest, SecurityContext: &corev1.SecurityContext{
 				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_MODULE"}},
 			}}}
 		})))
+		// Another container with no capability is fine.
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("sidecar-plain", func(p *corev1.Pod) {
+			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: otherDigest})
+		}))).To(Succeed())
 	})
 
 	It("denies a privileged container and an unmasked /proc", func(ctx SpecContext) {
@@ -299,7 +358,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		denied(create(ctx, replicaSetController, workerNamespace, worker("proc-unmasked", func(p *corev1.Pod) {
 			noHostUsers := false
 			p.Spec.HostUsers = &noHostUsers
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{ProcMount: &unmasked}
+			p.Spec.Containers[0].SecurityContext.ProcMount = &unmasked
 		})))
 		denied(create(ctx, replicaSetController, workerNamespace, worker("privileged-init", func(p *corev1.Pod) {
 			p.Spec.InitContainers = []corev1.Container{{Name: "init", Image: workerDigest, SecurityContext: &corev1.SecurityContext{Privileged: &yes}}}
@@ -323,18 +382,20 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}))).To(Succeed())
 	})
 
-	It("denies hostPort and Unconfined seccomp or AppArmor profiles", func(ctx SpecContext) {
+	It("denies hostPort, and an Unconfined profile on the pod or on a container that is not the worker", func(ctx SpecContext) {
 		denied(create(ctx, replicaSetController, workerNamespace, worker("hostport", func(p *corev1.Pod) {
 			p.Spec.Containers[0].Ports = []corev1.ContainerPort{{ContainerPort: 8080, HostPort: 8080}}
 		})))
-		denied(create(ctx, replicaSetController, workerNamespace, worker("seccomp-unconfined", func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
-		})))
-		denied(create(ctx, replicaSetController, workerNamespace, worker("apparmor-unconfined", func(p *corev1.Pod) {
+		denied(create(ctx, replicaSetController, workerNamespace, worker("pod-apparmor-unconfined", func(p *corev1.Pod) {
 			p.Spec.SecurityContext = &corev1.PodSecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}}
 		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("pod-seccomp-unconfined", func(p *corev1.Pod) {
+			p.Spec.SecurityContext = &corev1.PodSecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
+		})))
+		// The worker container itself carries both profiles in the shape of Substrate (the control case above).
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("worker-unconfined"))).To(Succeed())
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("seccomp-runtime", func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
+			p.Spec.Containers[0].SecurityContext.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
 		}))).To(Succeed())
 	})
 
@@ -480,6 +541,33 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}
 	})
 
+	It("lets only the installer exec, attach and port-forward in the control-plane namespace, and nobody in the worker namespace", func(ctx SpecContext) {
+		connect := func(user, ns, sub string) error {
+			req := as[user].CoreV1().RESTClient().Post().Param("command", "id").Param("stdout", "true")
+			return req.Namespace(ns).Resource("pods").Name(existing).SubResource(sub).Do(ctx).Error()
+		}
+		// Admission lets the installer through. The API server then has no kubelet to dial, so the error is another one.
+		for _, sub := range []string{"exec", "attach", "portforward"} {
+			err := connect("admin", controlNamespace, sub)
+			if err != nil {
+				Expect(err.Error()).NotTo(ContainSubstring("ValidatingAdmissionPolicy"), sub+" for the installer in the control-plane namespace")
+			}
+			err = connect(kubeadmAdmin, controlNamespace, sub)
+			if err != nil {
+				Expect(err.Error()).NotTo(ContainSubstring("ValidatingAdmissionPolicy"), sub+" for the kubeadm admin")
+			}
+			for _, user := range []string{workerController, other, daemonSetController} {
+				denied(connect(user, controlNamespace, sub))
+			}
+			// The worker namespace stays closed to the installer too.
+			for _, user := range []string{"admin", kubeadmAdmin} {
+				denied(connect(user, workerNamespace, sub))
+			}
+		}
+		// The proxies stay closed in the control-plane namespace for the installer.
+		denied(connect("admin", controlNamespace, "proxy"))
+	})
+
 	It("denies exec into a worker pod, for every identity", func(ctx SpecContext) {
 		// Admission runs before the API server opens the connection, so this needs no kubelet.
 		for _, user := range []string{"admin", workerController, other} {
@@ -508,6 +596,7 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 		// The default exempts the platform controllers from the digest rule (worker images are tags in
 		// Substrate v1.0.0, #1140). The specs test the rule itself, so they exempt nobody.
 		"--set", "execution.substrate.workerPolicy.digestExemptIdentities={}",
+		"--set", "execution.substrate.workerPolicy.workerImages={"+workerDigest+"}",
 		"--set", "sandboxObserver.enabled=false", "--set", "sandboxNetworkPolicy.enabled=false", "--set", "sandboxLimitRange.enabled=false",
 		"--show-only", workerPolicyTemplate)
 	cmd.Stdout, cmd.Stderr = &out, &stderr

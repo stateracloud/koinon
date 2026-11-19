@@ -20,8 +20,9 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   workerNetworkPolicy.apiServerCIDRs, which the render requires. A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
-  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: bucketInitJobs (the object store Job pod, selected by Job name), closedApps
-  (ate-idp-server, postgres, rustfs: no egress at all) and apiOnlyApps (k8s-credential-provider: DNS and the API
+  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: a default-deny egress policy covers every pod of the namespace (so ate-idp-server, postgres
+  and rustfs have no egress at all), and per-app policies allow bucketInitJobs (the object store Job pod, selected by Job name),
+  imageSource (the node agent's one image source) and apiOnlyApps (k8s-credential-provider: DNS and the API
   server only). Their ingress stays Substrate's own.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
@@ -127,28 +128,24 @@ spec:
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
 {{- end }}
-{{- with $np.closedApps }}
 ---
-# Pods that call nothing: no egress at all. Their ingress is Substrate's own
-# (ate-system-networkpolicies.yaml: default-deny-ingress at line 38, ate-idp-server at 168, postgres at 97; rustfs
-# at kind/rustfs.yaml:140), so this policy lists no Ingress type: a second ingress rule here would only add to it.
+# The one default-deny egress policy of the control-plane namespace: every pod of the namespace has no egress unless a
+# policy below allows it per app (control plane, API-only pods, the bucket-init Job, the image source). A pod that no
+# list names, such as a pod of a later Substrate version, has no egress at all (fail closed). The pods that call
+# nothing (ate-idp-server, postgres, rustfs) need no other policy. Their ingress is Substrate's own
+# (ate-system-networkpolicies.yaml: default-deny-ingress at line 38, ate-idp-server at 168, postgres at 97; rustfs at
+# kind/rustfs.yaml:140), so this policy lists no Ingress type: a second ingress rule here would only add to it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "koinon.fullname" $ }}-substrate-closed
+  name: {{ include "koinon.fullname" $ }}-substrate-default-deny-egress
   namespace: {{ $ns | quote }}
   labels:
     {{- include "koinon.commonLabels" $ | nindent 4 }}
 spec:
-  podSelector:
-    matchExpressions:
-      - key: app
-        operator: In
-        values:
-          {{- toYaml . | nindent 10 }}
+  podSelector: {}
   policyTypes: [Egress]
   egress: []
-{{- end }}
 {{- with $np.apiOnlyApps }}
 ---
 # Pods that call the Kubernetes API server and nothing else: DNS and the API server CIDRs. Their ingress is
@@ -220,5 +217,49 @@ spec:
               app: {{ $np.objectStoreApp | quote }}
       ports:
         - {port: {{ $np.objectStorePort }}, protocol: TCP}
+{{- end }}
+{{- $img := $np.imageSource | default dict }}
+{{- $imgPods := dig "podSelector" "matchLabels" dict $img }}
+{{- $imgCIDRs := $img.cidrs | default list }}
+{{- if and $imgPods $imgCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource names one image source: set podSelector (an in-cluster cache) or cidrs, not both" }}{{- end }}
+{{- if or $imgPods $imgCIDRs }}
+---
+# The node agent pulls actor images from ONE source: a pull-through cache of the operator. Nothing else of the
+# control plane reaches an image registry. Set imageSource to an in-cluster cache (podSelector, with a namespaceSelector
+# when the cache is in another namespace) or to an operator CIDR; the port is imageSource.port. Actor image references
+# are rewritten to this source with global.registryMirrors or global.imageRegistry (the digest is kept), so a pull
+# through the cache still verifies the digest. The policy lists no Ingress type: NetworkPolicies add up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-image-source
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml ($img.apps | default (list "atelet")) | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $imgPods }}
+        - podSelector:
+            {{- toYaml $img.podSelector | nindent 12 }}
+          {{- with $img.namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- else }}
+        {{- range $imgCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- end }}
+      ports:
+        - {port: {{ required "execution.substrate.workerNetworkPolicy.imageSource.port is required with an image source" $img.port }}, protocol: TCP}
 {{- end }}
 {{- end }}

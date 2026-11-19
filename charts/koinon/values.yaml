@@ -731,9 +731,10 @@ execution:
     # Substrate controller applied); no hostNetwork; hostPath only from allowedHostPaths; no volume
     # kind other than hostPath, emptyDir, configMap, downwardAPI and projected; no projected
     # serviceAccountToken and no automountServiceAccountToken true; added capabilities only from
-    # allowedCapabilities; digests pinned (digestExemptIdentities); no ephemeral containers. The
-    # control-plane namespace: hostPath only for the node agent (nodeAgent). Nobody execs, attaches or
-    # port-forwards into pods of either namespace.
+    # workerShapes; digests pinned (digestExemptIdentities); no ephemeral containers. The
+    # control-plane namespace: hostPath only for the node agent (nodeAgent); exec, attach and
+    # port-forward only for installerIdentities, with an audit annotation. Nobody execs, attaches or
+    # port-forwards into pods of the worker namespace.
     workerPolicy:
       enabled: true
       validationActions: [Deny]
@@ -772,9 +773,23 @@ execution:
         - /dev/vhost-net
         # The worker's base directory (volume ate-base), mounted in every tier, gVisor too.
         - /var/lib/ate
-      # Capabilities that a worker container may add (a ceiling; ADR 0120 section 6.2). The image
-      # may drop more.
-      allowedCapabilities: [SYS_ADMIN, NET_ADMIN]
+      # The worker images (name@sha256:...): the container named `worker` with one of these images is the
+      # worker container, the only container of the worker namespace that may add capabilities or have an
+      # Unconfined profile. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the
+      # registry mirrors) is added by the template. Empty and no pool: no container is a worker container and a
+      # worker pod does not start (fail closed). Use a digest (the digest rule applies to the controller).
+      workerImages: []
+      # The exact shape that Substrate sets on the worker container, per sandbox class: runAsUser 0, runAsGroup 0,
+      # privileged false, allowPrivilegeEscalation false, drop ALL, and these added capabilities; seccomp and
+      # AppArmor Unconfined (cmd/atecontroller/internal/controllers/workerpool_apply.go:377-468 at the pinned
+      # commit, preflight.SubstratePinnedCommit). The namespace has no wider ceiling. A Go spec compares these lists with the
+      # vendored source of that commit and fails when the pin moves and the source changes
+      # (internal/preflight/substrate_workershape_test.go). Do not widen them.
+      workerShapes:
+        gvisor:
+          capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, NET_RAW, SETFCAP]
+        microvm:
+          capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, MKNOD, SETFCAP, FSETID, SETPCAP]
       # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
       # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this
       # ServiceAccount. The list is atelet's own, not the worker list: the hostPath volumes of
@@ -809,16 +824,28 @@ execution:
       # atenet-router.yaml:189, atenet-egress.yaml:1179. A missing pod keeps the cluster default
       # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
-      # The pods of the control-plane namespace that call nothing, so they get no egress at all. Substrate's own
-      # ingress policies stay the only ingress rules for them: ate-idp-server (it mounts no API token,
-      # ate-idp-server.yaml, automountServiceAccountToken false), postgres (postgres/postgres.yaml) and
-      # rustfs (kind/rustfs.yaml:64). The `app` labels are those of manifests/ate-install at b34fbee7.
-      closedApps: [ate-idp-server, postgres, rustfs]
+      # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
+      # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
+      # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
+      # only ingress rules for them. A pod that a later Substrate version adds has no egress until a list names it.
       # The pods that call the Kubernetes API server and nothing else: DNS and apiServerCIDRs. The installer
       # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
       apiOnlyApps: [k8s-credential-provider]
       # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
       # bucket-init Job (kind/rustfs.yaml:93-133). They get DNS and the object store S3 port only.
+      # The ONE image source of the node agent (ADR 0120 section 6, issue 1089): the pods in `apps` (atelet) get egress
+      # to it and to no other registry. Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
+      # when it runs in another namespace) OR to operator cidrs, with the port. Both set: the render fails. None set:
+      # the node agent has no image egress (fail closed), which a cluster that serves images from the node needs.
+      # Actor image references are rewritten to this source with global.registryMirrors or global.imageRegistry (the
+      # digest is kept). Choose the mirror name once: it is part of the actor template hash, so changing it
+      # re-hashes every template.
+      imageSource:
+        apps: [atelet]
+        port: 443
+        podSelector: {}
+        namespaceSelector: {}
+        cidrs: []
       bucketInitJobs: [rustfs-bucket-init]
       objectStoreApp: rustfs
       objectStorePort: 9000

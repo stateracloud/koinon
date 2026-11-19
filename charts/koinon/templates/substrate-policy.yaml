@@ -10,7 +10,9 @@ Worker namespace:
   hostIPC; hostPath only from workerPolicy.allowedHostPaths; volumes of the kinds hostPath, emptyDir,
   configMap, downwardAPI and projected only; no projected serviceAccountToken source and
   automountServiceAccountToken not true (the worker has no Kubernetes client, ADR 0120 section 2.4);
-  added capabilities only from workerPolicy.allowedCapabilities; digests pinned (the platform
+  added capabilities and an Unconfined profile only on the worker container (name worker, a worker image), and only with the
+  shape that Substrate sets for the gVisor or the micro-VM class (workerPolicy.workerShapes; a spec compares it with
+  Substrate's source at the pinned commit); digests pinned (the platform
   controllers' pods are exempt until Substrate publishes by digest: workerPolicy.digestExemptIdentities);
   no ephemeral containers, for any identity;
 - objects: WorkerPool and the workload kinds that make pods are written only by the installer and by
@@ -21,9 +23,11 @@ workload controllers. No hostNetwork, no ephemeral containers, digests pinned (s
 may mount a hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
 ownerReference) and runs as the node agent ServiceAccount (workerPolicy.nodeAgent.serviceAccount),
 and only for workerPolicy.nodeAgent.allowedHostPaths. Every other pod there gets no hostPath.
-Both namespaces: pods/exec, attach, portforward, pods/proxy and services/proxy are denied to every
+Worker namespace: pods/exec, attach, portforward, pods/proxy and services/proxy are denied to every
 identity with no exemption (a process started that way is outside the guest launcher's and gateway's
-controls). Break-glass is not an exemption: a cluster admin suspends the binding, which shows in the
+controls). Control-plane namespace: the pod and service proxies are denied to every identity, and exec, attach and
+port-forward are allowed to the installer identities only (workerPolicy.installerIdentities or installerGroups); each
+request carries an audit annotation. Break-glass is not an exemption: a cluster admin suspends the binding, which shows in the
 audit log and as GitOps drift. The workload kinds, WorkerPool and CSIDriverConfig are written only by
 the installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
 Kubernetes' own controllers. Without this, anyone who can write a Deployment would get a privileged
@@ -45,6 +49,13 @@ pod past the pod rules. A CEL error denies under failurePolicy Fail.
 {{- $trusted := concat $w.podCreators $controllers }}
 {{- $platformTrusted := concat $controllers $w.platformControllers }}
 {{- $tagOK := $w.digestExemptIdentities }}
+{{- /* The worker images: the ones that the values name, and the image of the WorkerPool that the chart makes (rewritten by the
+registry mirrors like every image). With no worker image no container is a worker container, so a worker pod has no extra
+capability and no Unconfined profile and does not start: the policy fails closed. */}}
+{{- $workerImages := $w.workerImages | default list }}
+{{- if and $s.workerPool.enabled $s.workerPool.workerImage }}{{- $workerImages = append $workerImages (include "koinon.imageRef" (list . $s.workerPool.workerImage)) }}{{- end }}
+{{- $gvisorCaps := $w.workerShapes.gvisor.capabilities }}
+{{- $microCaps := $w.workerShapes.microvm.capabilities }}
 {{- $dsc := "system:serviceaccount:kube-system:daemon-set-controller" }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -108,10 +119,15 @@ spec:
       message: privileged containers and an unmasked /proc are not allowed in the worker namespace (the capability ceiling is the limit)
     - expression: "variables.allContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))"
       message: hostPort is not allowed in the worker namespace
-    - expression: "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined') && variables.allContainers.all(c, !has(c.securityContext) || ((!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined') && (!has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined')))"
-      message: an Unconfined seccomp or AppArmor profile is not allowed in the worker namespace
-    - expression: {{ printf "variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x in %s))" (toJson $w.allowedCapabilities) | quote }}
-      message: {{ printf "added capabilities in the worker namespace are limited to %s" (join ", " $w.allowedCapabilities) | quote }}
+    # The worker container is the one that Substrate's controller shapes (cmd/atecontroller workerpool_apply.go:377-468):
+    # its name is `worker` and its image is one of the worker images. Only it may have an Unconfined profile and added
+    # capabilities, and only the shape that Substrate sets. Every other container has neither.
+    - expression: {{ printf "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined') && variables.allContainers.all(c, (c.name == 'worker' && c.image in %s) || !has(c.securityContext) || ((!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined') && (!has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined')))" (toJson $workerImages) | quote }}
+      message: an Unconfined seccomp or AppArmor profile is allowed only on the worker container (name worker, a worker image), never on the pod and never on another container
+    - expression: {{ printf "variables.allContainers.all(c, (c.name == 'worker' && c.image in %s) || !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)" (toJson $workerImages) | quote }}
+      message: added capabilities are allowed only on the worker container (name worker, a worker image) in the worker namespace
+    - expression: {{ printf "variables.allContainers.all(c, !(c.name == 'worker' && c.image in %s) || (has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0 && has(c.securityContext.runAsGroup) && c.securityContext.runAsGroup == 0 && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop == ['ALL'] && has(c.securityContext.capabilities.add) && ((c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)) || (c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)))))" (toJson $workerImages) (toJson $gvisorCaps) (toJson $gvisorCaps) (toJson $microCaps) (toJson $microCaps) | quote }}
+      message: the worker container must have the exact shape that Substrate sets (runAsUser 0, runAsGroup 0, no privilege escalation, drop ALL, and the added capabilities of the gVisor or the micro-VM class)
     - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
       message: images in the worker namespace must be pinned by digest (name@sha256:<64 hex digits>)
 ---
@@ -210,9 +226,20 @@ spec:
         apiVersions: [v1]
         operations: [CONNECT]
         resources: [pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy]
+  variables:
+    - name: installer
+      expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
+    - name: inControlPlane
+      expression: {{ printf "request.namespace == %s" (toJson $ns) | quote }}
   validations:
-    - expression: "false"
-      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in the Substrate namespace (requested by ' + request.userInfo.username + ')'"
+    # The worker namespace denies every identity. The control-plane namespace admits exec, attach and port-forward for the
+    # installer identities only (an operator debug route), and denies the pod and service proxies to everyone.
+    - expression: "variables.inControlPlane && variables.installer && request.resource.resource == 'pods' && request.subResource in ['exec', 'attach', 'portforward']"
+      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in the Substrate namespaces for ' + request.userInfo.username + ' (the installer identities may exec, attach and port-forward in the control-plane namespace only)'"
+  # Every request that reaches this policy leaves a record in the audit log: who, what and where.
+  auditAnnotations:
+    - key: connect
+      valueExpression: "request.userInfo.username + ' ' + request.resource.resource + '/' + request.subResource + ' ' + request.namespace + '/' + request.name"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -222,7 +249,8 @@ metadata:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   policyName: {{ $connect }}
-  validationActions: {{ toJson $w.validationActions }}
+  # Audit is always on, so that an allowed request also leaves its audit annotation.
+  validationActions: {{ toJson (uniq (append $w.validationActions "Audit")) }}
   # No objectSelector: a CONNECT request's object is an options object without metadata.
   matchResources:
     namespaceSelector:

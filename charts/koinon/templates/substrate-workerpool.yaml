@@ -25,7 +25,7 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- with $p.nodeSelector }}{{- $_ := set $tmpl "nodeSelector" . }}{{- end }}
 {{- with $p.tolerations }}{{- $_ := set $tmpl "tolerations" . }}{{- end }}
 {{- with $sa }}{{- $_ := set $tmpl "serviceAccountName" . }}{{- end }}
-{{- $spec := dict "workerImage" $p.workerImage "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
+{{- $spec := dict "workerImage" (include "koinon.imageRef" (list . $p.workerImage)) "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
 {{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
 apiVersion: ate.dev/v1
 kind: WorkerPool

@@ -672,7 +672,15 @@
                 "platformControllers": {"type": "array", "items": {"type": "string"}},
                 "digestExemptIdentities": {"type": "array", "items": {"type": "string"}},
                 "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
-                "allowedCapabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}},
+                "workerImages": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "workerShapes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "gvisor": {"type": "object", "additionalProperties": false, "properties": {"capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}},
+                    "microvm": {"type": "object", "additionalProperties": false, "properties": {"capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}}
+                  }
+                },
                 "nodeAgent": {
                   "type": "object",
                   "additionalProperties": false,
@@ -691,8 +699,18 @@
               "properties": {
                 "enabled": {"type": "boolean"},
                 "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
-                "closedApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "apiOnlyApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "imageSource": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "apps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                    "podSelector": {"type": "object"},
+                    "namespaceSelector": {"type": "object"},
+                    "cidrs": {"type": "array", "items": {"type": "string"}}
+                  }
+                },
                 "bucketInitJobs": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "objectStoreApp": {"$ref": "#/definitions/nonEmpty"},
                 "objectStorePort": {"type": "integer", "minimum": 1, "maximum": 65535},

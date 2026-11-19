@@ -398,12 +398,32 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
-- The other pods of `ate-system` have a list each, so none of them is unfenced: `closedApps` (`ate-idp-server`,
-  `postgres`, `rustfs`) get no egress at all, and `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API
-  server only. The `rustfs-bucket-init` Job pod has no `app` label, so `bucketInitJobs` selects it by Job name and it
-  gets DNS and the object store S3 port only (`objectStoreApp`, `objectStorePort`). Their ingress stays Substrate's own
-  policies (`ate-system-networkpolicies.yaml`, `kind/rustfs.yaml`), because NetworkPolicies add up. Confirm the lists
-  against your Substrate manifests.
+- The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
+  pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
+  no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server only. The `rustfs-bucket-init`
+  Job pod has no `app` label, so `bucketInitJobs` selects it by Job name and it gets DNS and the object store S3
+  port only (`objectStoreApp`, `objectStorePort`). A pod that a later Substrate version adds has no egress until a
+  list names it. Their ingress stays Substrate's own policies (`ate-system-networkpolicies.yaml`,
+  `kind/rustfs.yaml`), because NetworkPolicies add up. Confirm the lists against your Substrate manifests.
+- The worker container may have extra privileges in one exact shape, and only in the worker namespace. Substrate
+  sets it in `workerpool_apply.go` (lines 377-468 at the pinned commit): user and group 0, not privileged, no
+  privilege escalation, drop `ALL`, add the capabilities of the sandbox class, and seccomp and AppArmor
+  `Unconfined`. The policy accepts this shape only on the container named `worker` whose image is in
+  `workerPolicy.workerImages` (the pool `workerImage` is added when the pool is enabled). Every other container
+  adds no capability and uses no `Unconfined` profile. There is no capability ceiling: the class sets
+  (`workerPolicy.workerShapes`) are exact. A Ginkgo spec in `internal/preflight` compares them with a vendored copy
+  of the Substrate source and fails when a Substrate bump changes the shape. Update the vendored copy and the sets
+  together in that bump. With an empty image list the policy denies every worker container (fail closed).
+- atelet pulls actor images from one image source, such as a pull-through cache. Set `workerNetworkPolicy.imageSource`
+  to a `podSelector` (with a `namespaceSelector`) for a cache in the cluster, or to `cidrs` for a cache outside it,
+  and set `port`. Set one of them: the render fails when you set both, and with neither atelet has no image egress.
+  Actor image references must go through `global.registryMirrors` or `global.imageRegistry` (the digest is kept).
+  Choose the mirror name once: it is part of the actor template hash, so a change re-hashes every template.
+  Needs main: the driver side of the actor image rewrite is not in this chart.
+- In `ate-system`, `pods/exec`, `attach` and `portforward` are allowed for the identities in
+  `workerPolicy.installerIdentities` only, and each request gets the audit annotation `connect` (user, resource,
+  subresource, pod). The worker namespace stays fully denied, and the proxy subresources stay denied for everyone.
+  The binding uses the actions `Deny` and `Audit`, so an allowed request is in the audit log too.
 - `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
   ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
   endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1

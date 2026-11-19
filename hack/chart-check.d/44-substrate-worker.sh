@@ -66,7 +66,16 @@ grep -Fq 'has(v.emptyDir) || has(v.configMap) || has(v.downwardAPI) || has(v.pro
 if grep -Eq 'persistentVolumeClaim|has\(v.csi\)|has\(v.nfs\)|has\(v.secret\)' <<<"$wpods"; then fail "the worker volume allowlist must not list network volumes or secrets"; fi
 grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected serviceAccountToken must be denied for worker pods"
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
-grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods" || fail "added capabilities must be limited to the ceiling"
+if grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods"; then fail "the namespace must have no capability ceiling: only the pinned worker shape adds capabilities"; fi
+grep -Fq "(c.name == 'worker' && c.image in [])" <<<"$wpods" || fail "with no worker image no container is a worker container (fail closed)"
+grep -Fq 'size(c.securityContext.capabilities.add) == 0' <<<"$wpods" || fail "a container that is not the worker container must add no capability"
+grep -Fq "c.securityContext.capabilities.drop == ['ALL']" <<<"$wpods" || fail "the worker container must drop ALL"
+grep -Fq 'c.securityContext.runAsUser == 0' <<<"$wpods" || fail "the worker container must run as user 0 (the shape of Substrate)"
+grep -Fq 'c.securityContext.runAsGroup == 0' <<<"$wpods" || fail "the worker container must run as group 0 (the shape of Substrate)"
+grep -Fq '!c.securityContext.allowPrivilegeEscalation' <<<"$wpods" || fail "the worker container must not escalate privilege"
+tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"]' || fail "the gVisor class capabilities must be the set of Substrate"
+tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"]' || fail "the micro-VM class capabilities must be the set of Substrate"
+if grep -Eq '"(ALL|SYS_PTRACE|SYS_MODULE|SYS_CHROOT)"' <<<"$wpods"; then fail "no capability beyond the two Substrate sets"; fi
 grep -Fq '@sha256:[a-f0-9]{64}' <<<"$wpods" || fail "worker images must be pinned by digest"
 grep -Fq 'has(src.clusterTrustBundle)' <<<"$wpods" || fail "projected sources in worker pods must be an allowlist without Secret"
 grep -Fq 'secretKeyRef' <<<"$wpods" || fail "worker pods must not take a Secret in env"
@@ -86,7 +95,13 @@ if grep -Fq 'ate-workers' <<<"$cpods"; then fail "the control-plane pod policy m
 grep -Fq "hostNetwork is not allowed" <<<"$cpods" || fail "hostNetwork must be denied in the control-plane namespace"
 has "the node agent ServiceAccount is configurable" 'object.spec.serviceAccountName in \[\\"agent-x\\"\]' "${wsub[@]}" --set execution.substrate.workerPolicy.nodeAgent.serviceAccount=agent-x "${pol[@]}"
 has "the node agent hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.nodeAgent.allowedHostPaths={/dev/kvm}' "${pol[@]}"
-has "the capability ceiling is configurable" 'x in \[\\"SYS_ADMIN\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.allowedCapabilities={SYS_ADMIN}' "${pol[@]}"
+wimg=(--set 'execution.substrate.workerPolicy.workerImages={registry.example/w@sha256:aaaa}')
+has "the worker images are configurable" '\\"registry.example/w@sha256:aaaa\\"' "${wsub[@]}" "${wimg[@]}" "${pol[@]}"
+wpool=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)
+has "the WorkerPool image is a worker image" '\\"registry.example/ateworker-gvisor:v1.0.0\\"' "${wsub[@]}" "${wpool[@]}" "${pol[@]}"
+wmir=(--set 'global.registryMirrors.registry\.example=mirror.example/cache')
+has "the mirrored worker image is the policy worker image" '\\"mirror.example/cache/ateworker-gvisor:v1.0.0\\"' "${wsub[@]}" "${wmir[@]}" "${wpool[@]}" "${pol[@]}"
+has "the mirrored worker image is the pool worker image" 'workerImage: mirror.example/cache/ateworker-gvisor:v1.0.0' "${wsub[@]}" "${wmir[@]}" "${wpool[@]}" "${pool[@]}"
 has "worker hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.allowedHostPaths={/dev/kvm}' "${pol[@]}"
 # Digest exemption: the default is the platform controllers; the list is used as written, so [] means none (#1140).
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$wpods" | tail -1)
@@ -105,6 +120,15 @@ if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "an empty digestExe
 
 # CONNECT and objects.
 has "exec, attach, port-forward, pod proxy and service proxy are denied" 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy\]' "${wsub[@]}" "${pol[@]}"
+connpol=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-connect\n' <<<"$pdocs")
+connbind=$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-connect\n' <<<"$pdocs")
+grep -Fq "request.subResource in ['exec', 'attach', 'portforward']" <<<"$connpol" || fail "only exec, attach and port-forward may pass the CONNECT policy"
+grep -Fq 'variables.inControlPlane && variables.installer' <<<"$connpol" || fail "the CONNECT policy admits the installer in the control-plane namespace only"
+tr -d '\134' <<<"$connpol" | grep -Fq 'request.namespace == "ate-system"' || fail "inControlPlane must be the control-plane namespace"
+grep -Fq 'system:masters' <<<"$connpol" || fail "the CONNECT installer groups follow workerPolicy.installerGroups"
+grep -Fq 'auditAnnotations:' <<<"$connpol" || fail "a CONNECT request leaves an audit annotation"
+grep -Fq 'validationActions: ["Deny","Audit"]' <<<"$connbind" || fail "the CONNECT binding denies and audits"
+has "the CONNECT installer identities are configurable" '\\"ops-x\\"' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={ops-x}' "${pol[@]}"
 has "the validation actions deny" 'validationActions: \["Deny"\]' "${wsub[@]}" "${pol[@]}"
 has "the object guard covers the three Substrate kinds" 'resources: \[workerpools, sandboxconfigs, csidriverconfigs\]' "${wsub[@]}" "${pol[@]}"
 has "the object guard covers the workload kinds" 'resources: \[deployments, replicasets, daemonsets, statefulsets\]' "${wsub[@]}" "${pol[@]}"
@@ -134,12 +158,13 @@ has "the worker namespace is privileged for Pod Security" 'pod-security.kubernet
 
 # NetworkPolicies: standard API only.
 npdocs=$(render "${wsub[@]}" "${np[@]}")
-[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 5 ]] || fail "expected five NetworkPolicies (workers, control plane, closed pods, API-only pods, bucket-init Job)"
-closed=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-closed\n' <<<"$npdocs")
+[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 5 ]] || fail "expected five NetworkPolicies (workers, control plane, default-deny egress, API-only pods, bucket-init Job)"
+closed=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-default-deny-egress\n' <<<"$npdocs")
 apionly=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-only\n' <<<"$npdocs")
-for app in ate-idp-server postgres rustfs; do grep -Fq -- "- $app" <<<"$closed" || fail "the closed policy must select $app"; done
-grep -Fq 'egress: []' <<<"$closed" || fail "the closed policy must deny all egress"
-grep -Fq 'policyTypes: [Egress]' <<<"$closed" || fail "the closed policy must leave ingress to Substrate's own policies"
+grep -Eq '^  podSelector: \{\}$' <<<"$closed" || fail "the default-deny egress policy must cover every pod of the control-plane namespace"
+grep -Fq 'namespace: "ate-system"' <<<"$closed" || fail "the default-deny egress policy must be in the control-plane namespace"
+grep -Fq 'egress: []' <<<"$closed" || fail "the default-deny egress policy must deny all egress"
+grep -Fq 'policyTypes: [Egress]' <<<"$closed" || fail "the default-deny egress policy must leave ingress to Substrate's own policies"
 grep -Fq -- '- k8s-credential-provider' <<<"$apionly" || fail "the API-only policy must select k8s-credential-provider"
 grep -Fq 'cidr: "192.0.2.10/32"' <<<"$apionly" || fail "the API-only policy must reach the API server CIDRs"
 grep -Fq 'policyTypes: [Egress]' <<<"$apionly" || fail "the API-only policy must leave ingress to Substrate's own policies"
@@ -150,8 +175,20 @@ grep -Fq 'app: "rustfs"' <<<"$bucket" || fail "the bucket-init policy must reach
 grep -Fq '{port: 9000, protocol: TCP}' <<<"$bucket" || fail "the bucket-init policy must reach the S3 port"
 grep -Fq 'policyTypes: [Egress]' <<<"$bucket" || fail "the bucket-init policy must leave ingress to Substrate's own policies"
 lacks "no bucket-init policy with an empty list" 'substrate-bucket-init' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.bucketInitJobs=null' "${np[@]}"
-has "the closed list is configurable" '- app-y$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps={app-y}' "${np[@]}"
-lacks "no closed policy with an empty list" 'substrate-closed' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps=null' "${np[@]}"
+lacks "no image-source policy until an image source is set" 'substrate-image-source' "${wsub[@]}" "${np[@]}"
+imgpod=(--set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchLabels.app=zot' --set 'execution.substrate.workerNetworkPolicy.imageSource.namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=registry' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000)
+imgdoc=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-image-source\n' <<<"$(render "${wsub[@]}" "${imgpod[@]}" "${np[@]}")")
+grep -Fq 'app: zot' <<<"$imgdoc" || fail "the image-source policy must select the in-cluster cache pods"
+grep -Fq 'kubernetes.io/metadata.name: registry' <<<"$imgdoc" || fail "the image-source policy must name the cache namespace"
+grep -Fq '{port: 5000, protocol: TCP}' <<<"$imgdoc" || fail "the image-source policy must use the configured port"
+grep -Fq -- '- atelet' <<<"$imgdoc" || fail "the image-source policy must select the node agent"
+grep -Fq 'policyTypes: [Egress]' <<<"$imgdoc" || fail "the image-source policy must leave ingress to Substrate's own policies"
+if grep -Fq 'ipBlock' <<<"$imgdoc"; then fail "an in-cluster image source must not open a CIDR"; fi
+imgcidr=(--set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={198.51.100.0/24}')
+has "an operator CIDR can be the image source" 'cidr: "198.51.100.0/24"' "${wsub[@]}" "${imgcidr[@]}" "${np[@]}"
+if render "${wsub[@]}" "${imgpod[@]}" "${imgcidr[@]}" "${np[@]}" >/dev/null 2>"$out/img.err"; then fail "two image sources must not render"; fi
+grep -Fq 'one image source' "$out/img.err" || fail "the two-sources error must say that there is one image source"
+if grep -v '^[[:space:]]*#' <<<"$closed" | grep -Eq 'ate-idp-server|postgres|rustfs'; then fail "the default-deny egress policy names no app: it covers them all"; fi
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")
 control=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' <<<"$npdocs")
 grep -Fq 'namespace: "ate-workers"' <<<"$workers" || fail "the workers policy must be in the worker namespace"

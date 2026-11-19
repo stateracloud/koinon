@@ -179,8 +179,9 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      `serviceAccountToken` source, and `automountServiceAccountToken` not true: the worker has no
      Kubernetes client (section 2.4). A rule "must be false" would refuse the pool pods, which leave
      the field unset, so the rule is "not true". The chart always names a worker ServiceAccount that sets
-     it false unless the values name a ServiceAccount (that one must set it). The capabilities that a
-     container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`). `privileged`, an unmasked `/proc`, `hostPort` and Unconfined seccomp or AppArmor profiles are denied.
+     it false unless the values name a ServiceAccount (that one must set it). A container may add
+     capabilities, and use Unconfined seccomp and AppArmor profiles, only in the exact shape that Substrate sets
+     (amendment 6.8). `privileged`, an unmasked `/proc` and `hostPort` are denied.
      Ephemeral containers are denied.
    - **Control-plane namespace.** Pods come from Kubernetes workload controllers. A pod may mount a
      hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
@@ -188,8 +189,9 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      (`/var/lib/ate`, the kubelet `plugins` and `device-plugins`, `/dev` and two GKE credential paths), which
      is not the worker list.
      Every other pod there gets no hostPath. Digests pinned and no `hostNetwork`, as for workers.
-   - **Both.** `pods/exec`, `attach`, `portforward`, `pods/proxy` and `services/proxy` are denied to every
-     identity. The worker pool, sandbox config and storage driver objects, and every workload kind, are
+   - **Both.** `pods/proxy` and `services/proxy` are denied to every identity. `pods/exec`, `attach` and
+     `portforward` are denied in the worker namespace to every identity. In the control-plane namespace only the
+     installer identities may use them, with an audit annotation (amendment 6.8). The worker pool, sandbox config and storage driver objects, and every workload kind, are
      writable only by the installer identity and by Kubernetes' own controllers. The Substrate controller
      applies the pool Deployments in the worker namespace only.
 4. **A tainted node pool for workers.** The `hardened` tier requires the tainted pool
@@ -208,6 +210,22 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
    "every pod without the worker label": a rule of the second form fails open for a pod that loses its
    label. A pod with another label is not selected, so the list follows the Substrate manifests.
+8. **Amendment (issue #1089, fix round 2).**
+   - **Worker shape.** Substrate sets one privilege shape on the worker container (`workerpool_apply.go:377-468`):
+     user and group 0, not privileged, no privilege escalation, drop `ALL`, add the capabilities of the class,
+     seccomp and AppArmor Unconfined. The policy accepts this shape only on the container named `worker` whose
+     image is a pinned worker image. Every other container in the namespace adds nothing and is never Unconfined.
+     The namespace has no capability ceiling. A spec compares the sets with a vendored copy of the source at the
+     pinned commit and fails on a change.
+   - **One image source.** atelet reaches one image source (a pull-through cache): a pod selector for a cache in
+     the cluster, or an operator CIDR and port. Actor image references go through `global.registryMirrors` or
+     `global.imageRegistry`, with the digest kept. The mirror name is chosen once, because it is part of the actor
+     template hash. The default in-cluster cache is a separate issue.
+   - **Installer connect.** The installer identities may run `exec`, `attach` and `portforward` in the control-plane
+     namespace, because the installer opens a port-forward to the object store. Each request carries an audit
+     annotation. No identity may do it in the worker namespace.
+   - **Fence.** The control-plane namespace has one default-deny egress policy and per-app allow rules, so a pod with
+     no rule has no egress.
 7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
