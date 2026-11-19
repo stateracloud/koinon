@@ -52,6 +52,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	remoteagentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
@@ -739,6 +741,48 @@ var isolationCases = map[string]isolationCase{
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
 		},
 	},
+	remoteagentv1alpha1connect.RemoteAgentServiceListRemoteAgentsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.remoteAgents.ListRemoteAgents(ctx, &remoteagentv1alpha1.ListRemoteAgentsRequest{OrgId: org})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceUpdateRemoteAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.UpdateRemoteAgent(ctx, &remoteagentv1alpha1.UpdateRemoteAgentRequest{
+				OrgId: org, RemoteAgentId: f.remoteAgent, CaBundle: new("intruder"),
+			})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceDeleteRemoteAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.DeleteRemoteAgent(ctx, &remoteagentv1alpha1.DeleteRemoteAgentRequest{OrgId: org, RemoteAgentId: f.remoteAgent})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceGetRemoteAgentCardProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.GetRemoteAgentCard(ctx, &remoteagentv1alpha1.GetRemoteAgentCardRequest{OrgId: org, RemoteAgentId: f.remoteAgent})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceAcceptRemoteAgentCardProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.AcceptRemoteAgentCard(ctx, &remoteagentv1alpha1.AcceptRemoteAgentCardRequest{
+				OrgId: org, RemoteAgentId: f.remoteAgent, ObservedCardHash: f.remoteAgentCardHash,
+			})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceGetAgentRemoteAgentsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.GetAgentRemoteAgents(ctx, &remoteagentv1alpha1.GetAgentRemoteAgentsRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceSetAgentRemoteAgentsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.SetAgentRemoteAgents(ctx, &remoteagentv1alpha1.SetAgentRemoteAgentsRequest{
+				OrgId: org, AgentId: f.agent.GetId(), RemoteAgentIds: []string{f.remoteAgent},
+			})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceGetAgentServersProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.GetAgentServers(ctx, &mcpserverv1alpha1.GetAgentServersRequest{OrgId: org, AgentId: f.agent.GetId()})
@@ -862,8 +906,11 @@ var isolationExempt = map[string]string{
 	budgetv1alpha1connect.PriceServiceGetPriceRefreshSettingsProcedure:   platformPricesReason,
 	budgetv1alpha1connect.PriceServiceCheckPriceSourcesProcedure:         platformPricesReason,
 	budgetv1alpha1connect.PriceServiceExplainPlatformPriceProcedure:      platformPricesReason,
-	authv1alpha1connect.AuthServiceWhoAmIProcedure:                       "describes the caller's own session; takes no IDs",
-	authv1alpha1connect.AuthServiceChangePasswordProcedure:               "changes the caller's own password; takes no IDs",
+	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: "reads the agent card at the URL before it " +
+		"writes, so a call in the caller's own org needs a live A2A agent; it names no resource ID, and the org check is " +
+		"the one every RemoteAgentService RPC shares (the seven cases above and the specs of internal/remoteagents)",
+	authv1alpha1connect.AuthServiceWhoAmIProcedure:         "describes the caller's own session; takes no IDs",
+	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
 	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
 		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
@@ -931,7 +978,7 @@ func foreignIDs(f orgFixture) []string {
 	return []string{
 		f.org, f.agent.GetId(), f.draft.GetId(), f.ticket.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
-		f.mcpServer, f.traceDest, f.trustedHost,
+		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost,
 	}
 }
 
@@ -982,6 +1029,13 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	thirty := 30
 	Expect(lg.SetMatchThreshold(ctx, orgID, audit.System("koinon-test:spec"), &thirty)).To(Succeed())
+	// A remote agent with a pinned card and an observed one, inserted directly: the isolation cases only name it.
+	f.remoteAgentCardHash = fmt.Sprintf("%064x", dbSeq.Add(1))
+	pinHash := fmt.Sprintf("%064x", dbSeq.Add(1))
+	Expect(e.pool.QueryRow(ctx,
+		`INSERT INTO remote_agents (org_id, name, card_url, card_hash, card, observed_card_hash, observed_card)
+		 VALUES ($1, 'isolated', 'https://agent.example.com', $2, '{}', $3, '{"x":1}') RETURNING id`,
+		f.org, pinHash, f.remoteAgentCardHash).Scan(&f.remoteAgent)).To(Succeed())
 	// A trace destination, inserted directly: the isolation cases only name it.
 	Expect(e.pool.QueryRow(ctx,
 		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,
@@ -1016,6 +1070,8 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND url = 'https://mcp.example.com/mcp'`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND tier = 'ask' AND review_reason IS NULL`, org),
 		count(ctx, e, `SELECT count(*) FROM agent_mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM remote_agents WHERE org_id = $1 AND ca_bundle = '' AND observed_card_hash IS NOT NULL`, org),
+		count(ctx, e, `SELECT count(*) FROM agent_remote_agents WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM trace_destinations WHERE org_id = $1 AND name = 'isolated'`, org),
 		count(ctx, e, `SELECT count(*) FROM org_trace_settings WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),
