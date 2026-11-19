@@ -387,14 +387,14 @@ fi
 # A text scan of one line: a window on another line than the Eventually( call is found by its `).WithTimeout(`.
 # Consistently is exempt (it tests that time passes); so is a window that is a variable.
 t11_base=$root/hack/ci-rules-t11-baseline.txt
-t11_re='(Eventually\(|[)}]\.WithTimeout\()'
+t11_re='(Eventually\(|[)}]\.WithTimeout\(|^[[:space:]]*\}\)?,[[:space:]]*[^,]+\)\.(Should|ShouldNot)\()'
 t11_dur='(time\.(Nanosecond|Microsecond|Millisecond|Second|Minute|Hour)|"[0-9.]+(ms|s|m|h)")'
 t11_bad=()
 t11_known=0
 while IFS= read -r f; do
 	[[ $f == *_test.go ]] || continue
 	[[ -f $root/$f ]] || continue
-	hits=$(grep -n -E "$t11_re" "$root/$f" | grep -E "$t11_dur" | grep -v -E 'racescale\.D\(|t11-ok:|Consistently\(' || true)
+	hits=$(grep -n -E "$t11_re" "$root/$f" | sed -E 's/WithPolling\([^)]*\)//g' | grep -E "$t11_dur" | grep -v -E 'racescale\.D\(|t11-ok:|Consistently\(' || true)
 	[[ -n $hits ]] || continue
 	if [[ -f $t11_base ]] && grep -qxF -- "$f" "$t11_base"; then
 		t11_known=$((t11_known + 1))

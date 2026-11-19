@@ -314,6 +314,10 @@ case_ "T11: a window in a file that is not a test passes" 0 'rule=T11 verdict=pa
 	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(10 * time.Second)\n" >"$r/internal/x/x.go"'
 case_ "T11: a file in the baseline passes" 0 'rule=T11 verdict=pass' \
 	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(10 * time.Second)\n" >"$r/internal/x/x_test.go"; printf "internal/x/x_test.go\n" >"$r/hack/ci-rules-t11-baseline.txt"'
+case_ "T11: a positional window on the closing line fails" 1 'rule=T11 verdict=fail' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(func() bool {\n\treturn true\n}, 20*time.Second).Should(BeTrue())\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a polling interval alone is not a window" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithPolling(100*time.Millisecond).Should(BeTrue())\n" >"$r/internal/x/x_test.go"'
 case_ "T11: a context deadline is not an Eventually window" 0 'rule=T11 verdict=pass' \
 	'mkdir -p "$r/internal/x"; printf "ctx, cancel := context.WithTimeout(ctx, 10*time.Second)\n" >"$r/internal/x/x_test.go"'
 

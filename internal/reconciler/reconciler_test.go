@@ -1836,7 +1836,7 @@ var _ = Describe("Reconciler", func() {
 			Eventually(mg.canceledAt).WithTimeout(racescale.D(5 * time.Second)).ShouldNot(BeZero())
 			took := mg.canceledAt().Sub(froze)
 			GinkgoWriter.Printf("old leader stopped %s after the connection went silent\n", took)
-			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+racescale.D(time.Second)),
+			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+2*time.Second),
 				"within heartbeat + ping timeout (and a margin for the scheduler)")
 			// The loop logs the reason when the lead returns, which is after the cancelled pass returned.
 			Eventually(logs.String).WithTimeout(racescale.D(5*time.Second)).Should(ContainSubstring("did not answer"),

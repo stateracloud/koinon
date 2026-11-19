@@ -526,7 +526,7 @@ func anthropicSpec(env Env) {
 			Eventually(func() bool {
 				recs := usageOf(ctx)
 				for i := before; i < len(recs); i++ {
-					if recs[i].Format == modelformat.Anthropic && recs[i].Stream {
+					if recs[i].Format == modelformat.Anthropic && recs[i].Stream && recs[i].Model == "claude-cut" {
 						rec = recs[i]
 						return true
 					}

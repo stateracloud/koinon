@@ -22,8 +22,8 @@ internal/gateway/kubernetes/budgets_test.go
 internal/gateway/standalone/agentgateway_test.go
 internal/gateway/standalone/reload_test.go
 internal/gateway/stateclient/client_test.go
+internal/gateway/stateserver/server_test.go
 internal/gateway/usagewire/usagewire_test.go
-internal/installbinding/installbinding_test.go
 internal/installid/installid_test.go
 internal/ledger/agentgateway_test.go
 internal/mcpask/mcpask_test.go
@@ -46,6 +46,7 @@ test/escape/admission_netpol_identity_test.go
 test/escape/admission_observer_test.go
 test/escape/admission_podfields_test.go
 test/escape/admission_test.go
+test/escape/admission_worker_test.go
 test/escape/gateway_test.go
 test/escape/netpol_test.go
 test/escape/sandbox_test.go
