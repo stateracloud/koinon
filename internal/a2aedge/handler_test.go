@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package a2aedge_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/a2aedge"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/services"
+)
+
+var taskUUID = pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, Valid: true}
+
+const taskID = "01020304-0506-0708-090a-0b0c0d0e0f10"
+
+// fake is an in-memory Backend: one thread whose timeline a spec moves forward.
+type fake struct {
+	mu      sync.Mutex
+	task    store.Task
+	events  []store.TaskEvent
+	seen    map[string]bool
+	cancels int
+	sc      a2aedge.Scope
+}
+
+func newFake() *fake {
+	return &fake{seen: map[string]bool{}, task: store.Task{ID: taskUUID, State: store.TaskStateSubmitted, Title: "t"}}
+}
+
+func (f *fake) add(kind, payload string) *store.TaskEvent {
+	e := store.TaskEvent{Seq: int64(len(f.events) + 1), Kind: kind, Payload: []byte(payload)}
+	f.events = append(f.events, e)
+	return &f.events[len(f.events)-1]
+}
+
+// move records a status change like the services package does.
+func (f *fake) move(to store.TaskState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.task.State = to
+	f.add("status.changed", `{"to":"`+string(to)+`"}`)
+}
+
+func (f *fake) Agent(context.Context, a2aedge.Scope) (a2aedge.Agent, error) {
+	return a2aedge.Agent{Name: "scout"}, nil
+}
+
+func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, mid, text string) (services.DirectMessageResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sc = sc
+	if f.seen[mid] {
+		return services.DirectMessageResult{Task: f.task}, nil
+	}
+	f.seen[mid] = true
+	b, _ := json.Marshal(map[string]string{"text": text})
+	e := f.add("message", string(b))
+	e.ActorKind = store.TaskActorKindUser
+	f.task.State = store.TaskStateSubmitted
+	return services.DirectMessageResult{Task: f.task, Event: e, Created: !task.Valid}, nil
+}
+
+func (f *fake) Thread(_ context.Context, _ a2aedge.Scope, id pgtype.UUID) (store.Task, []store.TaskEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id != taskUUID {
+		return store.Task{}, nil, a2aedge.ErrNotFound
+	}
+	return f.task, append([]store.TaskEvent(nil), f.events...), nil
+}
+
+func (f *fake) Cancel(_ context.Context, _ a2aedge.Scope, id pgtype.UUID) (store.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id != taskUUID {
+		return store.Task{}, a2aedge.ErrNotFound
+	}
+	if a2aedge.Ended(f.task.State) {
+		return store.Task{}, a2aedge.ErrRefused
+	}
+	f.cancels++
+	f.task.State = store.TaskStateCanceled
+	f.add("status.changed", `{"to":"canceled"}`)
+	return f.task, nil
+}
+
+func userMsg(id, body string) *a2a.Message {
+	return &a2a.Message{ID: id, Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart(body)}}
+}
+
+func inTask(m *a2a.Message, id string) *a2a.Message {
+	m.TaskID = a2a.TaskID(id)
+	return m
+}
+
+var _ = Describe("Handler", func() {
+	var (
+		f   *fake
+		h   *a2aedge.Handler
+		ctx context.Context
+	)
+	BeforeEach(func() {
+		f = newFake()
+		h = a2aedge.NewHandler(f, 2*time.Second, 5*time.Millisecond)
+		ctx = a2aedge.WithScope(context.Background(), a2aedge.Scope{Agent: pgtype.UUID{Valid: true}})
+	})
+
+	send := func(m *a2a.Message, cfg *a2a.SendMessageConfig) (a2a.SendMessageResult, error) {
+		return h.SendMessage(ctx, &a2a.SendMessageRequest{Message: m, Config: cfg})
+	}
+
+	It("refuses a call without a scope", func() {
+		_, err := h.SendMessage(context.Background(), &a2a.SendMessageRequest{Message: userMsg("m1", "hi")})
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("returns at once with ReturnImmediately", func() {
+		res, err := send(userMsg("m1", "hi"), &a2a.SendMessageConfig{ReturnImmediately: true})
+		Expect(err).NotTo(HaveOccurred())
+		t := res.(*a2a.Task)
+		Expect(t.Status.State).To(Equal(a2a.TaskStateSubmitted))
+		Expect(string(t.ID)).To(Equal(taskID))
+	})
+
+	It("waits for completed and returns the reply as an artifact", func() {
+		go func() {
+			defer GinkgoRecover()
+			time.Sleep(30 * time.Millisecond)
+			f.mu.Lock()
+			f.add("message", `{"text":"the answer"}`).ActorKind = store.TaskActorKindAgent
+			f.mu.Unlock()
+			f.move(store.TaskStateCompleted)
+		}()
+		res, err := send(userMsg("m1", "question"), nil)
+		Expect(err).NotTo(HaveOccurred())
+		t := res.(*a2a.Task)
+		Expect(t.Status.State).To(Equal(a2a.TaskStateCompleted))
+		Expect(t.Artifacts).To(HaveLen(1))
+		Expect(t.Artifacts[0].Parts[0].Text()).To(Equal("the answer"))
+	})
+
+	It("settles on input-required and shows the question", func() {
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			f.mu.Lock()
+			f.add("question.asked", `{"question":"which region?"}`).ActorKind = store.TaskActorKindAgent
+			f.mu.Unlock()
+			f.move(store.TaskStateInputRequired)
+		}()
+		res, err := send(userMsg("m1", "deploy"), nil)
+		Expect(err).NotTo(HaveOccurred())
+		t := res.(*a2a.Task)
+		Expect(t.Status.State).To(Equal(a2a.TaskStateInputRequired))
+		Expect(t.Status.Message).NotTo(BeNil())
+		Expect(t.Status.Message.Parts[0].Text()).To(ContainSubstring("which region?"))
+	})
+
+	It("does not settle on an input-required state from before the reply", func() {
+		f.events = append(f.events, store.TaskEvent{Seq: 1, Kind: "status.changed", Payload: []byte(`{"to":"input_required"}`)})
+		f.task.State = store.TaskStateInputRequired
+		go func() {
+			time.Sleep(60 * time.Millisecond)
+			f.move(store.TaskStateCompleted)
+		}()
+		res, err := send(inTask(userMsg("m2", "eu-west"), taskID), nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.(*a2a.Task).Status.State).To(Equal(a2a.TaskStateCompleted))
+	})
+
+	It("returns the task as it stands when the wait ends", func() {
+		h = a2aedge.NewHandler(f, 40*time.Millisecond, 5*time.Millisecond)
+		res, err := send(userMsg("m1", "slow"), nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.(*a2a.Task).Status.State).To(Equal(a2a.TaskStateSubmitted))
+	})
+
+	It("does not write a message twice for one message ID", func() {
+		_, err := send(userMsg("same", "once"), &a2a.SendMessageConfig{ReturnImmediately: true})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = send(userMsg("same", "once"), &a2a.SendMessageConfig{ReturnImmediately: true})
+		Expect(err).NotTo(HaveOccurred())
+		n := 0
+		for _, e := range f.events {
+			if e.Kind == "message" {
+				n++
+			}
+		}
+		Expect(n).To(Equal(1))
+	})
+
+	It("refuses bad input", func() {
+		_, err := send(nil, nil)
+		Expect(err).To(MatchError(a2a.ErrInvalidParams))
+		_, err = send(userMsg("", "x"), nil)
+		Expect(err).To(MatchError(a2a.ErrInvalidParams))
+		_, err = send(userMsg(strings.Repeat("a", 129), "x"), nil)
+		Expect(err).To(MatchError(a2a.ErrInvalidParams))
+		agent := userMsg("m", "x")
+		agent.Role = a2a.MessageRoleAgent
+		_, err = send(agent, nil)
+		Expect(err).To(MatchError(a2a.ErrInvalidParams))
+	})
+
+	It("refuses a message to an ended task and an unknown task", func() {
+		f.move(store.TaskStateCompleted)
+		_, err := send(inTask(userMsg("m", "x"), taskID), nil)
+		Expect(err).To(MatchError(a2a.ErrUnsupportedOperation))
+		_, err = send(inTask(userMsg("m", "x"), "00000000-0000-0000-0000-000000000009"), nil)
+		Expect(err).To(MatchError(a2a.ErrTaskNotFound))
+		_, err = send(inTask(userMsg("m", "x"), "not-a-uuid"), nil)
+		Expect(err).To(MatchError(a2a.ErrTaskNotFound))
+	})
+
+	It("gets and cancels a task", func() {
+		t, err := h.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(taskID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Status.State).To(Equal(a2a.TaskStateSubmitted))
+		t, err = h.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(taskID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Status.State).To(Equal(a2a.TaskStateCanceled))
+		_, err = h.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(taskID)})
+		Expect(err).To(MatchError(a2a.ErrTaskNotCancelable))
+	})
+
+	It("reports an unsupported operation for list and push configs", func() {
+		_, err := h.ListTasks(ctx, &a2a.ListTasksRequest{})
+		Expect(err).To(HaveOccurred())
+		_, err = h.CreateTaskPushConfig(ctx, &a2a.PushConfig{})
+		Expect(err).To(MatchError(a2a.ErrPushNotificationNotSupported))
+	})
+})

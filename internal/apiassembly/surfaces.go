@@ -9,6 +9,7 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/a2aedge"
 	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
@@ -87,13 +88,17 @@ func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembl
 	if ui == nil && !out.NoUI {
 		ui = web.Dist()
 	}
+	edge := a2aedge.New(a2aedge.Options{
+		Backend: a2aedge.PG{Pool: pool, Svc: svc}, PublicURL: installbinding.Origin(set.PublicURL),
+		Gate: admin.Gate, Principal: adminapi.PrincipalFrom,
+	})
 	handler, err := api.NewHandler(api.Options{
 		Auth:           pre.Auth,
 		Metrics:        pre.Metrics,
 		TrustedOrigins: set.TrustedOrigins,
 		Services:       append(append([]func(*connect.Server){}, out.Services...), svc.Register),
 		UI:             ui,
-		Mounts:         []func(*http.ServeMux){admin.Mount},
+		Mounts:         []func(*http.ServeMux){admin.Mount, edge.Mount},
 		Ready:          out.Ready,
 	})
 	if err != nil {
