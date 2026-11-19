@@ -277,6 +277,22 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		})))
 	})
 
+	It("denies a privileged container and an unmasked /proc", func(ctx SpecContext) {
+		yes := true
+		unmasked := corev1.UnmaskedProcMount
+		denied(create(ctx, replicaSetController, workerNamespace, worker("privileged", func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: &yes}
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("proc-unmasked", func(p *corev1.Pod) {
+			noHostUsers := false
+			p.Spec.HostUsers = &noHostUsers
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{ProcMount: &unmasked}
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("privileged-init", func(p *corev1.Pod) {
+			p.Spec.InitContainers = []corev1.Container{{Name: "init", Image: workerDigest, SecurityContext: &corev1.SecurityContext{Privileged: &yes}}}
+		})))
+	})
+
 	Context("the control-plane namespace and the node agent", func() {
 		atelet := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 			return worker(name, append([]func(*corev1.Pod){func(p *corev1.Pod) {

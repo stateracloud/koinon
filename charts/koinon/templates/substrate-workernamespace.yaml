@@ -7,6 +7,7 @@ policies of substrate-policy.yaml are the fence). The name label is what the pol
 NetworkPolicies select on.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") (or .Values.execution.substrate.workerPolicy.enabled .Values.execution.substrate.workerPool.enabled .Values.execution.substrate.workerNetworkPolicy.enabled) }}
+{{- if eq .Values.execution.substrate.namespace .Values.execution.substrate.workerNamespace }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
 apiVersion: v1
 kind: Namespace
 metadata:

@@ -165,7 +165,7 @@ The kubeconfig of the installer needs these rules:
 - `events`: list (the probe reads the kubelet event of a pod that did not start)
 - `customresourcedefinitions`: get
 - `deployments`: get, update in the Substrate namespace
-- `workerpools` (group `ate.dev`): get
+- `workerpools` (group `ate.dev`): get in the worker namespace (`--substrate-worker-namespace`)
 - non-resource URL `/.well-known/openid-configuration`: get
 
 `ate-setup` needs more (it creates the Substrate objects); those rules are those of Substrate.
@@ -329,7 +329,7 @@ Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6)
 WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
 controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
 
-- The pool always names the chart's worker ServiceAccount (`automountServiceAccountToken: false`). The
+- The pool names the chart's worker ServiceAccount (`automountServiceAccountToken: false`) unless the values name one. The
   controller's own `ateworker` ServiceAccount leaves the field unset, and the admission rule refuses a
   projected token, so a pool on `ateworker` does not start. If you name your own ServiceAccount, create it in
   the worker namespace and set the field false.

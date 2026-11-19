@@ -14,6 +14,7 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPool.enabled }}
 {{- $s := .Values.execution.substrate }}
 {{- $p := $s.workerPool }}
+{{- if eq $s.namespace $s.workerNamespace }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
 {{- $name := default (printf "koinon-%s" $p.sandboxClass) $p.name }}
 {{- $userSA := dig "template" "serviceAccountName" "" ($p.spec | default dict) }}
 {{- if not $p.workerImage }}{{- fail "execution.substrate.workerPool.workerImage is required when the WorkerPool is enabled (the worker image of the sandbox class, for example <registry>/ateworker-gvisor:v1.0.0)" }}{{- end }}

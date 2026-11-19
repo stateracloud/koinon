@@ -109,7 +109,9 @@ objs=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker
 grep -Fq "request.namespace == \"ate-workers\" && request.resource.group == 'apps' && request.resource.resource == 'deployments'" <<<"$objs" || fail "the controller may apply Deployments in the worker namespace only"
 grep -Fq '!object.spec.template.spec.automountServiceAccountToken' <<<"$objs" || fail "the Deployment template must not automount a token"
 grep -Fq 'object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in' <<<"$objs" || fail "the Deployment template hostPath must follow allowedHostPaths"
-grep -Fq "request.namespace == \"ate-workers\" && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in the worker namespace only"
+grep -Fq "request.namespace in [\"ate-system\",\"ate-workers\",\"\"] && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in both namespaces and of cluster-scoped ones"
+grep -Fq 'c.securityContext.privileged' <<<"$wpods" || fail "the worker pod rules must deny privileged containers"
+grep -Fq 'object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged)' <<<"$objs" || fail "the Deployment template must not be privileged"
 lacks "the policies are off when disabled" 'worker-(pods|connect|objects)|control-pods' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
 if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.validationActions={Nope}' >/dev/null 2>&1; then fail "an unknown validation action must not render"; fi
 
@@ -126,10 +128,11 @@ workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <
 control=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' <<<"$npdocs")
 grep -Fq 'namespace: "ate-workers"' <<<"$workers" || fail "the workers policy must be in the worker namespace"
 grep -Fq 'namespace: "ate-system"' <<<"$control" || fail "the control policy must be in the control-plane namespace"
-grep -Fq 'podSelector: {}' <<<"$workers" || fail "the workers policy must cover every pod of the worker namespace"
+grep -Eq '^  podSelector: \{\}$' <<<"$workers" || fail "the workers policy must cover every pod of the worker namespace"
 grep -Fq 'policyTypes: [Ingress, Egress]' <<<"$workers" || fail "the workers policy must cover ingress and egress"
 grep -Fq 'app: atenet-egress' <<<"$workers" || fail "worker egress must name atenet-egress"
-grep -Fq 'app.kubernetes.io/component: gateway' <<<"$workers" || fail "worker egress must name the gateway pods"
+if grep -Fq 'app.kubernetes.io/component: gateway' <<<"$workers"; then fail "worker egress must not name the gateway pods (atenet carries the traffic)"; fi
+if grep -Eq '^        - podSelector: \{\}$' <<<"$workers"; then fail "worker ingress must not allow other worker pods"; fi
 if grep -Fq 'app.kubernetes.io/component: api' <<<"$workers"; then fail "worker egress must not name the Koinon API pods"; fi
 grep -Fq 'port: 53' <<<"$workers" || fail "worker egress must allow DNS"
 if grep -Eq '192\.0\.2\.10|6443|ipBlock|extraEgress' <<<"$workers"; then fail "worker pods must have no API server route"; fi
@@ -157,7 +160,7 @@ lacks "the NetworkPolicies are off when disabled" 'substrate-(workers|control)' 
 
 # WorkerPool (Substrate v1.0.0 WorkerPoolSpec): off by default; workerImage is required; one sandbox
 # class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
-# The pool and its ServiceAccount are in the worker namespace, and the template always names the chart
+# The pool and its ServiceAccount are in the worker namespace, and the template names the chart
 # ServiceAccount (automountServiceAccountToken false), because the controller's own ateworker ServiceAccount
 # leaves the field unset.
 wp=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)

@@ -96,10 +96,12 @@ spec:
       message: {{ printf "hostPath is allowed only for %s in the worker namespace" (join ", " $w.allowedHostPaths) | quote }}
     - expression: "variables.volumes.all(v, has(v.hostPath) || has(v.emptyDir) || has(v.configMap) || has(v.downwardAPI) || has(v.projected))"
       message: volumes in the worker namespace must be hostPath, emptyDir, configMap, downwardAPI or projected (no PVC, CSI, ephemeral, NFS or other network volume)
-    - expression: "variables.volumes.all(v, !has(v.projected) || v.projected.sources.all(src, !has(src.serviceAccountToken)))"
+    - expression: "variables.volumes.all(v, !has(v.projected) || !has(v.projected.sources) || v.projected.sources.all(src, !has(src.serviceAccountToken)))"
       message: a projected serviceAccountToken volume is not allowed in the worker namespace (the worker has no Kubernetes client)
     - expression: "!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken"
       message: automountServiceAccountToken must not be true in the worker namespace
+    - expression: "variables.allContainers.all(c, !has(c.securityContext) || ((!has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(c.securityContext.procMount) || c.securityContext.procMount != 'Unmasked')))"
+      message: privileged containers and an unmasked /proc are not allowed in the worker namespace (the capability ceiling is the limit)
     - expression: {{ printf "variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x in %s))" (toJson $w.allowedCapabilities) | quote }}
       message: {{ printf "added capabilities in the worker namespace are limited to %s" (join ", " $w.allowedCapabilities) | quote }}
     - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
@@ -253,9 +255,9 @@ spec:
     # digest rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet
     # controller is digest-exempt (digestExemptIdentities, tracking issue #1140).
     - name: controllerOwn
-      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
     - name: controllerMetadata
-      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) ($wns | quote) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.namespace in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) (toJson (list $ns $wns "")) | quote }}
   validations:
     - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"

@@ -63,7 +63,7 @@ func substrateCRD(name string) *unstructured.Unstructured {
 func workerPool(name string, ready string) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "ate.dev/v1", "kind": "WorkerPool",
-		"metadata": map[string]any{"name": name, "namespace": "ate-system"},
+		"metadata": map[string]any{"name": name, "namespace": "ate-workers"},
 		"spec":     map[string]any{"replicas": int64(2)},
 	}}
 	switch ready {

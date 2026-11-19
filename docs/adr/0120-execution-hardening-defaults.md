@@ -38,7 +38,7 @@ decisions of 2026-11-18 add three constraints:
 - D2: per-binary credential binding is lost; per-route rules in the gateway replace it.
 - D5: disk and memory snapshots exist from the start, so the design carries short-lived tokens, snapshot
   encryption, snapshot access control and a verification path from the first day.
-- D7: privileged worker pods are accepted on any node; a tainted pool is an operator option.
+- D7: worker pods with extra capabilities (not `privileged`) are accepted on any node; a tainted pool is an operator option.
 
 ## Decision
 
@@ -172,7 +172,8 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      `serviceAccountToken` source, and `automountServiceAccountToken` not true: the worker has no
      Kubernetes client (section 2.4). A rule "must be false" would refuse the pool pods, which leave
      the field unset, so the rule is "not true". The chart always names a worker ServiceAccount that sets
-     it false. The capabilities that a container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`).
+     it false unless the values name a ServiceAccount (that one must set it). The capabilities that a
+     container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`). `privileged` and an unmasked `/proc` are denied.
      Ephemeral containers are denied.
    - **Control-plane namespace.** Pods come from Kubernetes workload controllers. A pod may mount a
      hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
@@ -192,7 +193,9 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    `io.katacontainers.*` annotations are denied, and the supervisor image is pinned.
 
 6. **Network fence.** The worker namespace has one policy for every pod: egress only to the atenet-egress
-   pods, Koinon's gateway and DNS. Workers get no route to the Kubernetes API server. The control-plane
+   pods and DNS. Workers get no route to the Kubernetes API server and none to the gateway: an actor's
+   traffic reaches the gateway through atenet. NetworkPolicies add up, so the per-pool policy that
+   Substrate's controller writes can widen worker egress, and no admission rule guards it yet. The control-plane
    namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
    "every pod without the worker label": a rule of the second form fails open for a pod that loses its
    label. A pod with another label is not selected, so the list follows the Substrate manifests.
@@ -260,7 +263,7 @@ spec needs a new ADR.
 - Negative: the guest launcher ([#1087](https://github.com/stateracloud/koinon/issues/1087)) becomes
   a hard dependency of the `vm` tier. Memory snapshots cost a digest, an encryption step and a
   single-use restore, so they are slower to roll out than plain suspend.
-- Negative: privileged workers enlarge the per-node trusted base (an escape from the guest into the
+- Negative: workers with `SYS_ADMIN` enlarge the per-node trusted base (an escape from the guest into the
   VMM lands in a root pod). Section 6 limits the blast radius with policy and an optional pool. It does
   not remove the risk.
 - Negative: the loss of per-binary credential binding is real. A process in the guest that can reach a

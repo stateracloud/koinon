@@ -4,10 +4,14 @@ NetworkPolicies of Substrate's two namespaces (execution.driver=substrate; ADR 0
 1089). Standard networking.k8s.io/v1 only (no CNI-specific resource). A CNI that does not enforce
 NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it).
 - Worker namespace (execution.substrate.workerNamespace): every pod is covered. Egress goes to the
-  atenet-egress pods, Koinon's gateway and DNS, and nowhere else. The worker has no Kubernetes client
+  atenet-egress pods and DNS, and nowhere else. The model route is not a worker route: the gateway
+  receives an actor's traffic from atenet in the control-plane namespace
+  (gatewayClientNamespaceSelector). The worker has no Kubernetes client
   and no route to the API server (ADR 0120 section 2.4); its identity is a PodCertificate projection,
   not a ServiceAccount token. Ingress comes from the control-plane namespace (atelet, the router) and
-  from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's
+  from Koinon's namespace; worker pods do not reach each other. NetworkPolicies add up: the per-pool
+  policy that Substrate's controller writes in this namespace can allow more than this one, and no
+  admission rule guards NetworkPolicy writes here (ADR 0120 section 6). An actor's traffic to the outside runs through atenet and the gateway's
   L7 rules, not through this policy. Substrate's controller adds its own per-pool policy next to it.
 - Control-plane namespace: the policy selects the pods whose `app` label is in
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
@@ -40,7 +44,6 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
-        - podSelector: {}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $ns | quote }}
@@ -49,20 +52,12 @@ spec:
               kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
   egress:
     - to:
-        # atenet-egress carries an actor's traffic out; the gateway is the model route.
+        # atenet-egress carries an actor's traffic out.
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $ns | quote }}
           podSelector:
             {{- toYaml $np.atenetEgressSelector | nindent 12 }}
-        {{- range (list "gateway") }}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
-          podSelector:
-            matchLabels:
-              {{- include "koinon.selectorLabels" (list $ .) | nindent 14 }}
-        {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
