@@ -222,15 +222,28 @@ func errorKind(err error) string {
 // Report writes results as a Markdown table, the form the PR body and docs/dev/load-tests.md use.
 func Report(w io.Writer, results []Result) error {
 	var b strings.Builder
-	b.WriteString("| driver | scenario | conc. | calls | errors | err % | calls/s | p50 | p95 | p99 | max |\n")
-	b.WriteString("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|\n")
+	b.WriteString("| driver | scenario | conc. | calls | errors | err % | calls/s | p50 | p95 | p99 | max | notes |\n")
+	b.WriteString("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|\n")
 	for _, r := range results {
-		fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %.2f | %.0f | %s | %s | %s | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %.2f | %.0f | %s | %s | %s | %s | %s |\n",
 			r.Driver, r.Scenario, r.Concurrency, r.Calls, r.Errors, 100*r.ErrorRate(), r.Throughput,
-			ms(r.P50), ms(r.P95), ms(r.P99), ms(r.Max))
+			ms(r.P50), ms(r.P95), ms(r.P99), ms(r.Max), notes(r))
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
 func ms(d time.Duration) string { return fmt.Sprintf("%.2f ms", float64(d)/float64(time.Millisecond)) }
+
+// notes says what the table has no column for: the progress notifications received, and the window
+// in which calls failed.
+func notes(r Result) string {
+	var parts []string
+	if exp, ok := r.Notes["progressExpected"]; ok {
+		parts = append(parts, fmt.Sprintf("progress %.0f of %.0f", r.Notes["progressReceived"], exp))
+	}
+	if r.Errors > 0 {
+		parts = append(parts, fmt.Sprintf("errors from %.1f s to %.1f s", r.FirstError.Seconds(), r.LastError.Seconds()))
+	}
+	return strings.Join(parts, "; ")
+}
