@@ -61,7 +61,7 @@ var _ = Describe("Server", func() {
 		req.Header.Set("Content-Type", "application/json")
 		res, err := http.DefaultClient.Do(req)
 		Expect(err).NotTo(HaveOccurred())
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		b, _ := io.ReadAll(res.Body)
 		return res.StatusCode, string(b)
 	}
