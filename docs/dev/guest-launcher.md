@@ -8,7 +8,7 @@
 
 `koinon-guest-launcher` (`cmd/koinon-guest-launcher`, `internal/guestlaunch`) hardens a Substrate
 guest and then starts the agent (ADR 0119, 0120 section 4, issue #1087). It is a static Go binary in
-the substrate overlay image (`make harness-substrate-opencode`). The OpenShell driver does not use it.
+the substrate overlay image (`make harness-substrate-<harness>`, `make harnesses-substrate` for all). The OpenShell driver does not use it.
 
 ## How it is invoked: an exec prefix
 
@@ -32,7 +32,7 @@ koinon-guest-launcher [--policy FILE] [--check] -- COMMAND [ARG...]
 Order of steps, all on one locked OS thread, then `execve`:
 
 0. Every descriptor above 2 is marked close-on-exec (`close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)`;
-   where the kernel lacks it, `FD_CLOEXEC` on each entry of `/proc/self/fd`; neither works: exit
+   where the kernel lacks it (`ENOSYS`, `EINVAL`) or an outer seccomp profile answers `EPERM`, `FD_CLOEXEC` on each entry of `/proc/self/fd`; neither works: exit
    70). The `execve` then closes them all, so nothing the guest server left open reaches the payload.
 1. `no_new_privs`.
 2. User drop to the policy's uid and gid (`setgroups`, `setresgid`, `setresuid`).
@@ -68,7 +68,7 @@ uid alone does not keep it out. Each way to a socket the payload did not create 
 | `socket(AF_VSOCK)` | seccomp, `EPERM` |
 | A descriptor inherited without CLOEXEC | step 0 above: closed by the `execve` |
 | `open("/proc/<pid>/fd/<n>")` of a socket | the kernel: a socket cannot be opened through its fd link (`ENXIO`, even for unconfined root; `sock_no_open` in `net/socket.c`) |
-| `pidfd_getfd`, `ptrace`, `process_vm_readv`/`writev`, `kcmp` | seccomp, `EPERM`, in every policy |
+| `pidfd_getfd`, `ptrace`, `process_vm_readv`/`writev`, `kcmp` | seccomp, `EPERM`; `Validate` refuses a policy whose `seccomp.mode` is not `require`, so no policy skips them |
 | `/proc/<pid>/mem`, `environ` and fd links of the guest server | the kernel's ptrace access check: the payload has no capability, so the guest server's permitted set is not a subset of its own (`cap_ptrace_access_check`); on the `vm` tier Landlock also refuses ptrace access to a process outside its domain |
 
 `pidfd_open` stays allowed: a pidfd only signals and waits (signals need no pidfd for the same uid),
@@ -87,7 +87,8 @@ could not apply (fail closed).
 ## Policy
 
 JSON, unknown fields refused. Each control has a `mode`: `require` (fail closed), `best_effort`
-(apply when the kernel has it and log one clear line when not) or `off`. A file that names
+(apply when the kernel has it and log one clear line when not) or `off`. `seccomp.mode` must be
+`require`: `off` and `best_effort` fail `Validate` (exit 64), because a skipped filter also skips the vsock and process-access denies (ADR 0120 fail closed). A file that names
 `landlock` replaces the path lists.
 
 The overlay image carries two policies that differ in the Landlock mode only (ADR 0120 section 4.2
@@ -124,8 +125,9 @@ another tier records the gap).
 
 Tracked on #1087 until the maintainer files separate issues:
 
-1. Flavor images carry the launcher only; the guest server joins them with #1088, which also
-   applies the exec prefix.
+1. Flavor images carry the launcher only. The guest server image `ate-env-guest` has no public build:
+   Koinon builds it from the Substrate source and pins it by digest (ADR 0061 image rules). That needs the
+   upstream source and a registry, and waits for the lab (see the PR body of #1087). #1088 applies the exec prefix.
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
 3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with

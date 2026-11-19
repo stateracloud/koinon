@@ -75,15 +75,17 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 // closeInheritedFds marks every descriptor from 3 up close-on-exec, so the execve that starts the
 // payload closes them all at once. Marking, not closing: the Go runtime holds descriptors of its own
 // (the netpoller's epoll), and closing one under it before the exec can crash the launcher. It uses
-// close_range(3, ~0U, CLOSE_RANGE_CLOEXEC) (Linux 5.11); on a kernel without it (ENOSYS, or EINVAL
-// for the flag on 5.9 and 5.10, or a gVisor that lacks it) it sets FD_CLOEXEC on each descriptor
+// close_range(3, ~0U, CLOSE_RANGE_CLOEXEC) (Linux 5.11); on a kernel without it (ENOSYS, EPERM from an outer
+// seccomp profile, or EINVAL for the flag on 5.9 and 5.10, or a gVisor that lacks it) it sets FD_CLOEXEC on each descriptor
 // /proc/self/fd lists. It fails closed: a descriptor it cannot mark stops the launch.
 func closeInheritedFds() error {
 	err := unix.CloseRange(3, math.MaxUint32, unix.CLOSE_RANGE_CLOEXEC)
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) {
+	// EPERM: an outer seccomp profile may return it for a syscall it does not know. The fallback
+	// still fails closed.
+	if !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EPERM) {
 		return fmt.Errorf("guest launcher: close_range: %w", err)
 	}
 	return cloexecFromProc()
@@ -338,21 +340,19 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 	return nil
 }
 
+// applySeccomp loads the deny filter. Validate refuses any mode but require, and this check holds
+// for a Policy built in code that skipped Validate: the vsock and process-access denies are never
+// optional (ADR 0120 fail closed).
 func applySeccomp(s SeccompPolicy, log *slog.Logger) error {
-	if s.Mode == ModeOff {
-		log.Info("guest launcher: seccomp off by policy")
-		return nil
+	if s.Mode != ModeRequire {
+		return fmt.Errorf("guest launcher: seccomp mode %q is refused: it must be require", s.Mode)
 	}
 	insts, skipped, err := BuildSeccomp(s)
 	if err == nil {
 		err = loadSeccomp(insts)
 	}
 	if err != nil {
-		if s.Mode == ModeRequire {
-			return fmt.Errorf("guest launcher: seccomp: %w", err)
-		}
-		log.Warn("guest launcher: seccomp filter NOT applied", "error", err.Error())
-		return nil
+		return fmt.Errorf("guest launcher: seccomp: %w", err)
 	}
 	log.Info("guest launcher: seccomp filter applied", "denied", len(s.denyList())-len(skipped), "skipped_unknown", skipped)
 	return nil
