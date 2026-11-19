@@ -159,6 +159,8 @@ step "seed N-1 with its own quickstart driver (label smoke)"
 # The driver of the tag runs in that tag's tree (its fixtures are relative paths).
 prev_dir="$work/prev/test/e2e"
 seed() {
+  # The single quotes are intended: the inner bash expands $1..$3 (same pattern as run.sh).
+  # shellcheck disable=SC2016
   env KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
     KOINON_E2E_FAKEMCP_URL="https://127.0.0.1:$MCP_PORT" \
