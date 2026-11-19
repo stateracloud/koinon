@@ -93,10 +93,19 @@ RUN --mount=type=secret,id=github_token,required=false \
 
 # The tarballs of yq, ast-grep and DuckDB carry no licence file, so the MIT texts come from the
 # tagged sources (sha256 of the files fetched on 2026-10-28). fd's tarball has its own.
+#
+# OpenCode's npm tarball holds only package.json and the compiled binary (no LICENSE), so its MIT
+# text comes from the tagged source too (v2.2.6, checked 2026-11-19). The binary itself is a static
+# Bun v1.4.4 build (confirmed by `strings` on the fetched tarball: "Bun v1.4.4 (38afee6c8) Linux x64"
+# and JSC::/WebKit symbols), which statically links JavaScriptCore/WebKit under LGPL-2 with a
+# relinking obligation; Bun's own LICENSE.md (MIT for Bun itself) carries that notice and the
+# relinking instructions verbatim, so it is fetched and shipped whole rather than summarized here.
 FROM scratch AS licenses
 ADD --checksum=sha256:697db34dabb21562fe84487a2ccd031fbd45382b89c2cbdec8ef31682c486040 https://raw.githubusercontent.com/mikefarah/yq/v4.54.1/LICENSE /yq
 ADD --checksum=sha256:81471889c77b2161a3e4dcdb1b2e6ca382e485766132d92d5fe1d7497e7dd2d9 https://raw.githubusercontent.com/ast-grep/ast-grep/0.51.0/LICENSE /ast-grep
 ADD --checksum=sha256:075c33400ffcb0c586dd106a029d3e733e9da3693f8fcb9cebfc651c8a2f14e3 https://raw.githubusercontent.com/duckdb/duckdb/v2.0.0/LICENSE /duckdb
+ADD --checksum=sha256:625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b https://raw.githubusercontent.com/anomalyco/opencode/v2.2.6/LICENSE /opencode
+ADD --checksum=sha256:362fe32c954ec829240bd7429c53d705eef08c6bfa45ffc2d02005f857cba4dd https://raw.githubusercontent.com/oven-sh/bun/bun-v1.4.4/LICENSE.md /bun
 
 # hadolint reads a stage name with an ARG suffix as an untagged image; both are stages defined above, which hack/dockerfile-lint.sh accepts
 # hadolint ignore=DL3006
@@ -189,6 +198,34 @@ RUN unzip -q -p /tmp/ast-grep.zip ast-grep > /usr/local/bin/ast-grep \
 COPY --from=licenses /yq /usr/share/doc/koinon-tools/yq/LICENSE
 COPY --from=licenses /ast-grep /usr/share/doc/koinon-tools/ast-grep/LICENSE
 COPY --from=licenses /duckdb /usr/share/doc/koinon-tools/duckdb/LICENSE
+COPY --from=licenses /opencode /usr/share/doc/koinon-tools/opencode/LICENSE
+COPY --from=licenses /bun /usr/share/doc/koinon-tools/bun/LICENSE.md
+# GPL source offer (#63): git, poppler-utils, bash and coreutils ship unmodified from Ubuntu or the
+# base image under the GPL. This generates Koinon's written offer (GPL-2.0 section 3(b) / GPL-3.0
+# section 6(b)) from the versions dpkg actually installed, so it cannot name the wrong version; the
+# check below fails the build if dpkg ever drops one of these packages without the offer noticing.
+RUN set -eux; \
+    { \
+      printf 'Koinon ships GNU/Linux packages under the GPL (git, poppler-utils, bash, coreutils),\n'; \
+      printf 'unmodified from Ubuntu or the base image. This is the written offer Koinon makes under\n'; \
+      printf 'GPL-2.0 section 3(b) / GPL-3.0 section 6(b), valid for three years from the image build date.\n'; \
+      printf '\n'; \
+      printf 'Installed GPL-licensed packages in this image:\n'; \
+      for p in bash coreutils git poppler-utils; do \
+        v=$(dpkg-query -W -f='${Version}' "$p"); \
+        printf '  - %s %s\n' "$p" "$v"; \
+      done; \
+      printf '\n'; \
+      printf 'Exact source: the Ubuntu snapshot this image was built from, snapshot %s\n' "$UBUNTU_SNAPSHOT"; \
+      printf '(https://snapshot.ubuntu.com/ubuntu/%s/). Add it to /etc/apt/sources.list.d, then use\n' "$UBUNTU_SNAPSHOT"; \
+      printf 'the Debian package manager source-fetch subcommand to get the source for the name and\n'; \
+      printf 'version named above.\n'; \
+      printf '\n'; \
+      printf 'If that snapshot is unreachable, open an issue at\n'; \
+      printf 'https://github.com/stateracloud/koinon/issues naming the package, version and image\n'; \
+      printf 'tag above. Koinon will provide the source on a medium customarily used for software\n'; \
+      printf 'interchange.\n'; \
+    } > /usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt
 # Build-time check, as root: fail the image if the standard library the agent relies on is
 # incomplete, if pip came in with a dependency, or if a tool or the DuckDB defaults do not work.
 # RUN uses dash, which has no pipefail: `tool | head -1` would pass with the tool missing (head
@@ -211,7 +248,17 @@ RUN set -eux; \
     test "$(duckdb -noheader -list -c "SELECT current_setting('threads')")" = 2; \
     test "$(duckdb -noheader -list -c "SELECT current_setting('autoinstall_known_extensions')")" = false; \
     duckdb -c "COPY (SELECT 1 AS a) TO '/tmp/koinon-check.parquet' (FORMAT parquet); SELECT * FROM '/tmp/koinon-check.parquet'; SELECT '{\"a\":1}'::JSON;"; \
-    rm -rf /tmp/koinon-check.parquet /tmp/duckdb
+    rm -rf /tmp/koinon-check.parquet /tmp/duckdb; \
+    for f in fd/LICENSE-MIT fd/LICENSE-APACHE ripgrep/UNLICENSE ripgrep/LICENSE-MIT ripgrep/COPYING \
+             yq/LICENSE ast-grep/LICENSE duckdb/LICENSE opencode/LICENSE bun/LICENSE.md GPL-SOURCE-OFFER.txt; do \
+      [ -s "/usr/share/doc/koinon-tools/$f" ] || { echo "missing or empty licence notice: $f" >&2; exit 1; }; \
+    done; \
+    grep -q 'MIT License' /usr/share/doc/koinon-tools/opencode/LICENSE; \
+    grep -qi 'JavaScriptCore' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
+    grep -qi 'LGPL' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
+    for p in bash coreutils git poppler-utils; do \
+      grep -q " $p " /usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt || { echo "GPL-SOURCE-OFFER.txt: missing $p" >&2; exit 1; }; \
+    done
 # The entry scripts' shared helpers (harnesses/common, build context "common").
 # "common" is a named build context (--build-context common=harnesses/common), not a stage
 # hadolint ignore=DL3022
