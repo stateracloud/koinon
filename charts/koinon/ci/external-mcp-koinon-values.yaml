@@ -12,5 +12,3 @@ bootstrapAdmin:
 gateway:
   mcp:
     driver: koinon
-    koinon:
-      acceptOrgTargetsDropped: true

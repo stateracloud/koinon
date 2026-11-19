@@ -302,6 +302,8 @@ postgres:
       api: ""
       reconciler: ""
       agentd: ""
+      # The login of koinon-gateway's leak guard (gateway.mcp.driver=koinon only; ADR 0097 decision 5).
+      mcpgateway: ""
   external:
     # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
     # the schema; the component roles need only DML. Components may share one role.
@@ -311,6 +313,9 @@ postgres:
       api: api-uri
       reconciler: reconciler-uri
       agentd: agentd-uri
+      # The URI of koinon-gateway's own login, a member of the group role koinon_gateway and of no other
+      # (gateway.mcp.driver=koinon only; create the role and the grants as in the install guide).
+      mcpgateway: mcpgateway-uri
 
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
@@ -352,7 +357,10 @@ gateway:
   # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
   # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
   # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
-  # gets stays agentgateway's until the follow-up that moves it (see ADR 0097).
+  # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
+  # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
+  # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
+  # Do not make this the default before issue #1132 (tools/list pinning) is closed.
   mcp:
     driver: agentgateway
     koinon:
@@ -368,10 +376,6 @@ gateway:
       # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
       shutdownDelaySeconds: 5
       drainTimeoutSeconds: 30
-      # Until the guard slice the gateway drops every org MCP target, so koinon-api's approved calls to
-      # org MCP servers fail through it, and so does its live check of an agent's MCP tools (same URL). The
-# platform tool servers are not reachable through it yet. The switch is refused unless this is true.
-      acceptOrgTargetsDropped: false
       podDisruptionBudget:
         maxUnavailable: 1
       resources:
@@ -382,8 +386,8 @@ gateway:
       tolerations: []
       affinity: {}
   # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
-  # koinon: also run koinon-gateway's model path, in pods of its own. Slice 1 brings it up and meters
-  # it; no agent is routed to it yet, and it does not yet enforce budgets or retry.
+  # koinon: also run koinon-gateway's model path, in pods of its own. It meters, stops a key at its
+  # budget and charges after each call (slice 2). It has no retry rule. No agent is routed to it yet.
   model:
     driver: agentgateway
     koinon:
@@ -955,6 +959,9 @@ networkPolicy:
   #     ports: [{port: 11434}]
   # List the same hosts in egress.allowedInternalHosts so providers and MCP servers may name them. The
   # rule covers every upstream the gateway calls: model providers and remote MCP servers.
+  # With postgres.mode=external and gateway.mcp.driver=koinon, koinon-gateway reads its database login
+  # through this list too (its egress has no other route to the database). The list then also reaches
+  # agentgateway and the model gateway, so keep the database rule to the database port and address.
   gatewayEgressTo: []
 
 # Prometheus metrics of koinon-api, koinon-reconciler and koinon-agentd (ADR 0023, amendment

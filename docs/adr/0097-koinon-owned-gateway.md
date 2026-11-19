@@ -340,6 +340,16 @@ does today, no more (model path at parity, below).
   call.
 - Each tool call writes one span and one audit row (target, tool, guard verdict, credential used), with
   no arguments, results or token values.
+- **Retention of `mcp_call_log`** (#278). The table follows the rule of the audit tables (ADR 0100):
+  Koinon deletes no row in v1, and audit retention is its own policy (#29). A row has a fixed small
+  size: bounded text columns and no argument, result or token value. One policy for all audit tables is
+  better than a rule for this table alone. The gateway role has INSERT on the table and nothing else,
+  so it cannot delete rows.
+- **Custody in the chart** (#278, step 2). `koinon-gateway` has its own database login
+  (`koinon_mcpgateway`, in the group role `koinon_gateway` only, never in `koinon_app`) and mounts its
+  own credentials Secret (`gateway.mcpKeysSecret`), not the provider keys. The reconciler writes the
+  `mcp-*` and `mcpca-*` files to that Secret. koinon-api checks an agent's live MCP tools through
+  `gateway-mcp-check-url`, which stays on the agentgateway URL until agents move to this path.
 - Per-target credentials are attached by Koinon's MCP path: the static credential (ADR 0057 item 5),
   the MCP sign-in token (ADR 0096) and the passport (ADR 0073). Each exists only between the gateway and
   the MCP server. This replaces ADR 0073's delivery through ext_authz and `backendAuth`, its delivery

@@ -73,6 +73,19 @@ metadata:
 type: Opaque
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "koinon.gatewayMCPKeysName" . }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    koinon.dev/owner: reconciler
+    koinon.dev/managed-by: koinon-reconciler
+# The reconciler fills this Secret with the credential files and CA bundles of the MCP servers (mcp-<id>-<hash>,
+# mcpca-<id>-<hash>), apart from the provider keys: koinon-gateway mounts this Secret and no provider key
+# (ADR 0097 decision 5). agentgateway mounts both while agents reach MCP through it. The chart renders no data.
+type: Opaque
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ $name }}-data
@@ -165,6 +178,10 @@ spec:
             - name: provider-keys
               mountPath: /secrets/providers
               readOnly: true
+            # The MCP credentials and CA bundles, in a Secret of their own.
+            - name: mcp-keys
+              mountPath: {{ include "koinon.gatewayMCPKeysDir" . }}
+              readOnly: true
             # The bearer token of koinon-api's OTLP listener, which agentgateway sends with its
             # access log. A file, so it stays out of the config ConfigMap.
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
@@ -181,6 +198,10 @@ spec:
         - name: provider-keys
           secret:
             secretName: {{ include "koinon.gatewayProvidersName" . }}
+            defaultMode: 0444
+        - name: mcp-keys
+          secret:
+            secretName: {{ include "koinon.gatewayMCPKeysName" . }}
             defaultMode: 0444
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
       {{- with $gw.nodeSelector }}

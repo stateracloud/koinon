@@ -73,7 +73,7 @@ func (e *Execution) Validate(openshellAddress string) error {
 			return errors.New("--substrate-control-address and --substrate-router-address are required with --execution-driver=substrate")
 		}
 		if !e.Substrate.AllowUnhardened {
-			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)")
+			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the gVisor tiers have no read-only root and the runtime class to tier map has no flag yet (issue #1088 slice c)")
 		}
 	default:
 		return fmt.Errorf("--execution-driver %q: want %s or %s", e.Driver, DriverOpenShell, DriverSubstrate)

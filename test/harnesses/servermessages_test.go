@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -320,7 +321,7 @@ func runAgentgateway(ctx context.Context, s kgateway.State, guardURL string) (sa
 		}
 		_ = resp.Body.Close()
 		return resp.StatusCode
-	}).WithTimeout(time.Minute).WithPolling(500*time.Millisecond).Should(Equal(http.StatusOK), func() string { return logs() })
+	}).WithTimeout(racescale.D(time.Minute)).WithPolling(500*time.Millisecond).Should(Equal(http.StatusOK), func() string { return logs() })
 	return fmt.Sprintf("http://host.docker.internal:%d", hostPort("4000")), logs
 }
 
@@ -396,7 +397,7 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		Expect(err).NotTo(HaveOccurred())
 		session, err := h.conn.NewSession(ctx, workdir)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(h.client.availableCommands).WithTimeout(30*time.Second).
+		Eventually(h.client.availableCommands).WithTimeout(racescale.D(30*time.Second)).
 			Should(ContainElement("koinon:"+messagesTarget+"_koinon-ready"), "the harness never announced the server")
 		time.Sleep(readySettle)
 		Expect(h.conn.SetModel(ctx, session, opencode.selectModel(contractModel))).To(Succeed())

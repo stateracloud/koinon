@@ -9,10 +9,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,8 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // maxRequestBody bounds a request body the gateway reads to rewrite it.
@@ -42,6 +46,27 @@ func (g *Gateway) refuse(w http.ResponseWriter, status int, text string) {
 	g.o.Metrics.request(resRefused)
 	w.Header().Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
 	http.Error(w, text, status)
+}
+
+// refuseBudget answers a key whose spend reached its limit: 429 budget_exceeded, marked final. The
+// provider is not called. Retry-After is the time until the window ends, which a consumer with a
+// cap reads as final; a limit without a window sends none (only a new limit resets it).
+func (g *Gateway) refuseBudget(w http.ResponseWriter, format modelformat.Format, wait time.Duration) {
+	g.o.Metrics.request(resBudget)
+	h := w.Header()
+	h.Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
+	h.Set("Content-Type", "application/json")
+	if wait > 0 {
+		h.Set("Retry-After", strconv.FormatInt(int64((wait+time.Second-1)/time.Second), 10))
+	}
+	w.WriteHeader(http.StatusTooManyRequests)
+	// The body has the error shape of the format, so the SDKs parse it.
+	const msg = "budget_exceeded: the API key budget is exceeded"
+	if format == modelformat.Anthropic {
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"budget_exceeded","message":"`+msg+`"}}`)
+		return
+	}
+	_, _ = io.WriteString(w, `{"error":{"type":"budget_exceeded","code":"budget_exceeded","message":"`+msg+`"}}`)
 }
 
 func keyInOtherHeader(h http.Header) bool {
@@ -119,6 +144,12 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, http.StatusNotFound, "refused: model_not_found")
 		return
 	}
+	// The budget stop. It runs after the key and the model are known, so a key that is not loaded
+	// yet is an unknown key (401), never a budget refusal.
+	if refused, wait := g.overBudget(key.Agent); refused {
+		g.refuseBudget(w, format, wait)
+		return
+	}
 	rendering, _ := gateway.RenderingOf(rt.m)
 	for _, f := range rendering.Reject {
 		if _, present := fields[f]; present {
@@ -147,7 +178,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(fields["max_completion_tokens"], &maxTokens)
 	}
 	c := &call{
-		g: g, start: g.o.Now(),
+		g: g, start: g.o.Now(), agent: key.Agent, price: rt.price,
 		rec: gateway.UsageRecord{
 			RequestID: uuid.NewString(), KeyID: key.ID, Agent: key.Agent, Time: g.o.Now(),
 			Model: rt.m.Name, Format: format, Stream: stream, UpstreamKnown: true, Upstream: true,
@@ -268,6 +299,64 @@ type call struct {
 	span  trace.Span
 	rec   gateway.UsageRecord
 	once  sync.Once
+	// agent and price are the agent and the model's price. The call is charged against the agent's
+	// limit in force when it ends.
+	agent gateway.AgentRef
+	price pricing.Price
+}
+
+// overBudget reports whether the agent has reached the limit in force, and the wait until its
+// window ends. The limit is read from the current snapshot: a request that read its snapshot before
+// an apply must not be checked against a generation the apply retired. The apply publishes the new
+// snapshot before a check can find the old generation retired, so one more read is enough. If an
+// apply retires the generation again and again, the call is refused (fail closed) with a short wait.
+func (g *Gateway) overBudget(a gateway.AgentRef) (bool, time.Duration) {
+	for range 8 {
+		l, ok := g.snap.Load().state.Limits[a]
+		if !ok {
+			return false, 0
+		}
+		if ok, wait, live := g.bud.check(a, l, g.o.Now()); live {
+			return !ok, wait
+		}
+	}
+	return true, time.Second
+}
+
+// charge adds the cost of the call to the agent's counter, under the limit in force now: a call
+// that started under an older generation is charged to the current one, which the ledger computed
+// before it saw this call. A call that reports its whole usage is priced on it. A 2xx call whose
+// usage is missing or partial (a cut or canceled stream, or a provider that sends no usage) is
+// charged a bound for what is missing: the request bytes at 4 bytes a token as input, and the
+// request's max_tokens as output (0 when the request sets none: a gap, see the PR). A cut stream
+// is charged at least that output bound. The next generation replaces the bound with the ledger's
+// own figure. A non-2xx answer is not charged here (a gap, see the PR). A price that cannot be
+// computed stops the key (fail closed).
+func (c *call) charge() {
+	cur, ok := c.g.snap.Load().state.Limits[c.agent]
+	if !ok {
+		return
+	}
+	u := pricing.Usage{
+		Input: c.rec.InputTokens, CacheRead: c.rec.CacheReadTokens, CacheWrite: c.rec.CacheWriteTokens,
+		Output: c.rec.OutputTokens, Reasoning: c.rec.ReasoningTokens,
+	}
+	if ok2xx := c.rec.Status >= 200 && c.rec.Status < 300; ok2xx {
+		if !c.rec.InputKnown {
+			u.Input = max(c.rec.RequestBytes, 0) / 4
+		}
+		if !c.rec.OutputKnown || c.rec.Error != "" {
+			u.Output = max(u.Output, c.rec.MaxTokens)
+		}
+	} else if !c.rec.InputKnown && !c.rec.OutputKnown {
+		return // an error answer or a refusal: nothing was generated
+	}
+	_, cost, err := c.price.Cost(u)
+	if err != nil {
+		c.g.o.Logger.Error("model call cannot be priced", "reason", "cost")
+		cost = money.USD(math.MaxInt64)
+	}
+	c.g.bud.charge(c.agent, cur, cost, c.g.o.Now())
 }
 
 // emit finishes the record and sends it, once.
@@ -277,6 +366,7 @@ func (c *call) emit(result string, edit func(*gateway.UsageRecord)) {
 			edit(&c.rec)
 		}
 		c.g.o.Metrics.request(result)
+		c.charge() // before the record leaves, so the agent's next call already sees the spend
 		if c.span != nil {
 			c.span.SetAttributes(attribute.String("gen_ai.request.model", c.rec.Model),
 				attribute.String("koinon.format", string(c.rec.Format)), attribute.Bool("koinon.stream", c.rec.Stream),

@@ -283,6 +283,38 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- end }}
 
 {{/*
+The URL koinon-api uses for its live check of an agent's MCP tools. An agent still reaches MCP through
+agentgateway while the driver is koinon (ADR 0097), so the check goes to the URL the agent uses, and not
+to koinon-gateway, which serves koinon-api's approved calls (koinon.gatewayMCPURL).
+*/}}
+{{- define "koinon.gatewayMCPCheckURL" -}}
+{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- end }}
+
+{{/*
+The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
+mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
+(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both while agents reach MCP through it.
+*/}}
+{{- define "koinon.gatewayMCPKeysName" -}}
+{{- include "koinon.componentName" (list . "gateway-mcp-keys") }}
+{{- end }}
+
+{{/* Where a gateway pod mounts the MCP credentials Secret. */}}
+{{- define "koinon.gatewayMCPKeysDir" -}}/secrets/mcp{{- end }}
+
+{{/*
+koinon-gateway's own database login (gateway.mcp.driver=koinon). In cnpg mode the URL file is a
+ConfigMap (no password in it: the password is PGPASSWORD, from the generated Secret); in external mode the
+file is a key of the external Secret.
+*/}}
+{{- define "koinon.mcpGatewayDBURLConfigName" -}}
+{{- include "koinon.componentName" (list . "mcp-gateway-db") }}
+{{- end }}
+
+{{- define "koinon.mcpGatewayDBURLDir" -}}/etc/koinon/mcp-db{{- end }}
+
+{{/*
 The labels the agentgateway controller puts on the proxy pods of Koinon's Gateway (kubernetes mode):
 the Gateway's name is the label value. NetworkPolicies select the proxy by them.
 */}}
@@ -348,6 +380,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ include "koinon.gatewayMCPURL" . | quote }}
+# The live check of an agent's MCP tools uses the MCP URL the agent uses: agentgateway's, also when koinon-gateway serves the approved calls.
+- name: KOINON_GATEWAY_MCP_CHECK_URL
+  value: {{ include "koinon.gatewayMCPCheckURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
 - name: KOINON_GATEWAY_MODE
   value: {{ .Values.gateway.mode | quote }}
@@ -553,7 +588,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- define "koinon.ensureSecrets" -}}
 {{- $specs := list -}}
 {{- if eq .Values.postgres.mode "cnpg" -}}
-{{- range $role := list "migrate" "api" "reconciler" "agentd" -}}
+{{- $roles := list "migrate" "api" "reconciler" "agentd" -}}
+{{- if include "koinon.mcpKoinon" . -}}{{- $roles = append $roles "mcpgateway" -}}{{- end -}}
+{{- range $role := $roles -}}
 {{- if not (index $.Values.postgres.cnpg.existingSecrets $role) -}}
 {{- $labels := fromYaml (include "koinon.generatedLabels" (list $ "postgres")) | merge (dict "cnpg.io/reload" "true") -}}
 {{- $specs = append $specs (dict "name" (include "koinon.pgSecret" (list $ $role)) "type" "kubernetes.io/basic-auth" "username" (include "koinon.pgRole" $role) "labels" $labels) -}}
