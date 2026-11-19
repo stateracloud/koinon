@@ -5,6 +5,7 @@ package a2aedge_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -62,21 +63,44 @@ func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, mi
 	if f.seen[mid] {
 		return services.DirectMessageResult{Task: f.task}, nil
 	}
+	if task.Valid && a2aedge.Ended(f.task.State) {
+		return services.DirectMessageResult{}, a2aedge.ErrRefused
+	}
 	f.seen[mid] = true
 	b, _ := json.Marshal(map[string]string{"text": text})
 	e := f.add("message", string(b))
 	e.ActorKind = store.TaskActorKindUser
-	f.task.State = store.TaskStateSubmitted
+	if !task.Valid {
+		f.task.State = store.TaskStateSubmitted
+	}
 	return services.DirectMessageResult{Task: f.task, Event: e, Created: !task.Valid}, nil
 }
 
-func (f *fake) Thread(_ context.Context, _ a2aedge.Scope, id pgtype.UUID) (store.Task, []store.TaskEvent, error) {
+func (f *fake) Thread(_ context.Context, _ a2aedge.Scope, id pgtype.UUID, after int64) (store.Task, []store.TaskEvent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if id != taskUUID {
 		return store.Task{}, nil, a2aedge.ErrNotFound
 	}
-	return f.task, append([]store.TaskEvent(nil), f.events...), nil
+	var ev []store.TaskEvent
+	for _, e := range f.events {
+		if e.Seq > after {
+			ev = append(ev, e)
+		}
+	}
+	return f.task, ev, nil
+}
+
+// park moves the task to input_required the way a run does: a run.parked event and the state, with
+// no status.changed event.
+func (f *fake) park(question string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if question != "" {
+		f.add("question.asked", `{"question":"`+question+`"}`).ActorKind = store.TaskActorKindAgent
+	}
+	f.add("run.parked", `{}`)
+	f.task.State = store.TaskStateInputRequired
 }
 
 func (f *fake) Cancel(_ context.Context, _ a2aedge.Scope, id pgtype.UUID) (store.Task, error) {
@@ -152,10 +176,7 @@ var _ = Describe("Handler", func() {
 	It("settles on input-required and shows the question", func() {
 		go func() {
 			time.Sleep(30 * time.Millisecond)
-			f.mu.Lock()
-			f.add("question.asked", `{"question":"which region?"}`).ActorKind = store.TaskActorKindAgent
-			f.mu.Unlock()
-			f.move(store.TaskStateInputRequired)
+			f.park("which region?")
 		}()
 		res, err := send(userMsg("m1", "deploy"), nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -166,7 +187,7 @@ var _ = Describe("Handler", func() {
 	})
 
 	It("does not settle on an input-required state from before the reply", func() {
-		f.events = append(f.events, store.TaskEvent{Seq: 1, Kind: "status.changed", Payload: []byte(`{"to":"input_required"}`)})
+		f.park("which region?")
 		f.task.State = store.TaskStateInputRequired
 		go func() {
 			time.Sleep(60 * time.Millisecond)
@@ -175,6 +196,33 @@ var _ = Describe("Handler", func() {
 		res, err := send(inTask(userMsg("m2", "eu-west"), taskID), nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.(*a2a.Task).Status.State).To(Equal(a2a.TaskStateCompleted))
+	})
+
+	It("gives the answer to a retried reply of a task that has ended since", func() {
+		f.park("which region?")
+		_, err := send(inTask(userMsg("m2", "eu-west"), taskID), &a2a.SendMessageConfig{ReturnImmediately: true})
+		Expect(err).NotTo(HaveOccurred())
+		f.move(store.TaskStateCompleted)
+		res, err := send(inTask(userMsg("m2", "eu-west"), taskID), nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.(*a2a.Task).Status.State).To(Equal(a2a.TaskStateCompleted))
+	})
+
+	It("shows a note when the task waits on a decision and no question was asked", func() {
+		f.park("")
+		t, err := h.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(taskID)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Status.Message.Parts[0].Text()).To(ContainSubstring("decision"))
+	})
+
+	It("hides an error of the backend that is not for the client", func() {
+		_, err := h.SendMessage(a2aedge.WithScope(context.Background(), a2aedge.Scope{}), &a2a.SendMessageRequest{Message: inTask(userMsg("m", "x"), "01020304-0506-0708-090a-0b0c0d0e0f11")})
+		Expect(err).To(MatchError(a2a.ErrTaskNotFound))
+		f2 := &failing{fake: newFake()}
+		h2 := a2aedge.NewHandler(f2, time.Second, time.Millisecond)
+		_, err = h2.SendMessage(ctx, &a2a.SendMessageRequest{Message: userMsg("m", "x")})
+		Expect(err).To(MatchError(a2a.ErrInternalError))
+		Expect(err.Error()).NotTo(ContainSubstring("SQLSTATE"))
 	})
 
 	It("returns the task as it stands when the wait ends", func() {
@@ -239,3 +287,10 @@ var _ = Describe("Handler", func() {
 		Expect(err).To(MatchError(a2a.ErrPushNotificationNotSupported))
 	})
 })
+
+// failing returns an error with database detail from Deliver.
+type failing struct{ *fake }
+
+func (f *failing) Deliver(context.Context, a2aedge.Scope, pgtype.UUID, string, string) (services.DirectMessageResult, error) {
+	return services.DirectMessageResult{}, errors.New("ERROR: invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)")
+}

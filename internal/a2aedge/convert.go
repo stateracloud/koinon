@@ -18,6 +18,7 @@ const (
 	kindMessage       = "message"
 	kindStatusChanged = "status.changed"
 	kindQuestionAsked = "question.asked"
+	kindParked        = "run.parked"
 	artifactReplyID   = "reply"
 )
 
@@ -113,6 +114,13 @@ func Task(t store.Task, events []store.TaskEvent, historyLength *int) *a2a.Task 
 		}
 		if out.Status.Message == nil {
 			out.Status.Message = history[i]
+		}
+	}
+	if t.State == store.TaskStateInputRequired && out.Status.Message == nil {
+		// A run parked on an approval has no question. The client cannot answer it here.
+		out.Status.Message = &a2a.Message{
+			ID: id + ":wait", Role: a2a.MessageRoleAgent, TaskID: a2a.TaskID(id), ContextID: id,
+			Parts: a2a.ContentParts{a2a.NewTextPart("The agent waits for a decision in Koinon.")},
 		}
 	}
 	if t.State == store.TaskStateCompleted && out.Status.Message != nil {

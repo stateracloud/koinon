@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -26,6 +27,9 @@ const (
 
 	maxMessageBytes   = 64 << 10
 	maxMessageIDBytes = 128
+	// maxWaiters bounds the blocking sends in flight. Over the bound a send returns at once, as with
+	// returnImmediately, and the client reads the task with GetTask.
+	maxWaiters = 64
 )
 
 type scopeKey struct{}
@@ -46,9 +50,10 @@ func scopeOf(ctx context.Context) (Scope, error) {
 // Handler is the A2A request handler of the edge. It implements [a2asrv.RequestHandler] over a
 // [Backend] and holds no state.
 type Handler struct {
-	be   Backend
-	wait time.Duration
-	poll time.Duration
+	be      Backend
+	wait    time.Duration
+	poll    time.Duration
+	waiters chan struct{}
 }
 
 var _ a2asrv.RequestHandler = (*Handler)(nil)
@@ -61,7 +66,7 @@ func NewHandler(be Backend, wait, poll time.Duration) *Handler {
 	if poll <= 0 {
 		poll = DefaultPoll
 	}
-	return &Handler{be: be, wait: wait, poll: poll}
+	return &Handler{be: be, wait: wait, poll: poll, waiters: make(chan struct{}, maxWaiters)}
 }
 
 func unsupported(what string) error {
@@ -77,8 +82,14 @@ func mapErr(err error) error {
 		return a2a.ErrTaskNotFound
 	case errors.Is(err, ErrRefused):
 		return fmt.Errorf("%w: %s", a2a.ErrUnsupportedOperation, strings.TrimPrefix(err.Error(), ErrRefused.Error()+": "))
+	case errors.Is(err, ErrInvalid):
+		return fmt.Errorf("%w: %s", a2a.ErrInvalidParams, strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": "))
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err
 	}
-	return err
+	// The text of any other error can carry database detail: log it, and tell the client nothing.
+	slog.Error("a2a edge: request failed", "err", err)
+	return a2a.ErrInternalError
 }
 
 // text joins the text parts of a message. A part of another kind is refused: the agent takes text.
@@ -132,11 +143,10 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 			return nil, a2a.ErrTaskNotFound
 		}
 		var err error
-		if task, _, err = h.be.Thread(ctx, sc, id); err != nil {
+		// Only the existence of the thread is read here. An ended task is refused by the delivery,
+		// under the lock of the task, so that a retry of a message that was taken still gets its answer.
+		if task, _, err = h.be.Thread(ctx, sc, id, 1<<62); err != nil {
 			return nil, mapErr(err)
-		}
-		if Ended(task.State) {
-			return nil, fmt.Errorf("%w: the task is %s; start a new task", a2a.ErrUnsupportedOperation, State(task.State))
 		}
 		if m.ContextID != "" && m.ContextID != string(m.TaskID) {
 			return nil, fmt.Errorf("%w: contextId does not match the task", a2a.ErrInvalidParams)
@@ -159,12 +169,18 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 	if req.Config != nil && req.Config.ReturnImmediately {
 		return h.view(ctx, sc, res.Task.ID, hist)
 	}
+	select {
+	case h.waiters <- struct{}{}:
+		defer func() { <-h.waiters }()
+	default:
+		return h.view(ctx, sc, res.Task.ID, hist)
+	}
 	return h.settle(ctx, sc, res.Task.ID, marker, hist)
 }
 
 // view reads the task as it stands.
 func (h *Handler) view(ctx context.Context, sc Scope, id pgtype.UUID, hist *int) (*a2a.Task, error) {
-	t, ev, err := h.be.Thread(ctx, sc, id)
+	t, ev, err := h.be.Thread(ctx, sc, id, 0)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -173,39 +189,48 @@ func (h *Handler) view(ctx context.Context, sc Scope, id pgtype.UUID, hist *int)
 
 // settle waits until the task is in a state the client has to act on or an end state, reached
 // after the message (marker is the sequence number of the message). When the wait ends first, it
-// returns the task as it stands.
+// returns the task as it stands. It reads the timeline after the marker only, so a long thread
+// costs no more than a short one.
 func (h *Handler) settle(ctx context.Context, sc Scope, id pgtype.UUID, marker int64, hist *int) (*a2a.Task, error) {
 	deadline := time.NewTimer(h.wait)
 	defer deadline.Stop()
 	tick := time.NewTicker(h.poll)
 	defer tick.Stop()
 	for {
-		t, ev, err := h.be.Thread(ctx, sc, id)
+		t, ev, err := h.be.Thread(ctx, sc, id, marker)
 		if err != nil {
 			return nil, mapErr(err)
 		}
-		if Settled(t.State) && reachedAfter(ev, t.State, marker) {
-			return Task(t, ev, hist), nil
+		if settledAfter(t.State, ev) {
+			return h.view(ctx, sc, id, hist)
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return Task(t, ev, hist), nil
+			return h.view(ctx, sc, id, hist)
 		case <-tick.C:
 		}
 	}
 }
 
-// reachedAfter reports whether the task moved to state after the message. A task that was
-// input-required before a reply must not settle on that old state, and a reopened task is
-// submitted again by the message itself.
-func reachedAfter(ev []store.TaskEvent, state store.TaskState, marker int64) bool {
+// settledAfter reports whether the task is in a state the client acts on, reached after the message.
+// ev holds the events after the message. An end state counts at once: a task that has ended takes no
+// message, so the message did not leave it there. The task state input-required is not enough: it
+// can be the state from before a reply. The run that parks on a question or an approval writes
+// run.parked (or question.asked) without a status.changed event, so those count as the proof.
+func settledAfter(state store.TaskState, ev []store.TaskEvent) bool {
+	switch {
+	case Ended(state):
+		return true
+	case state != store.TaskStateInputRequired:
+		return false
+	}
 	for _, e := range ev {
-		if e.Seq <= marker {
-			continue
+		if e.Kind == kindParked || e.Kind == kindQuestionAsked {
+			return true
 		}
-		if to, ok := statusTo(e); ok && to == state {
+		if to, ok := statusTo(e); ok && to == store.TaskStateInputRequired {
 			return true
 		}
 	}

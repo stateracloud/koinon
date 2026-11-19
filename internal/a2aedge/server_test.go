@@ -97,10 +97,7 @@ var _ = Describe("Server", func() {
 	It("runs a v1.0 JSON-RPC round trip through input-required", func() {
 		go func() {
 			time.Sleep(30 * time.Millisecond)
-			f.mu.Lock()
-			f.add("question.asked", `{"question":"which region?"}`).ActorKind = store.TaskActorKindAgent
-			f.mu.Unlock()
-			f.move(store.TaskStateInputRequired)
+			f.park("which region?")
 		}()
 		req := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"deploy"}]}}}`
 		code, body := do("POST", "/a2a/v1/agents/"+agentID+"/jsonrpc", tok, req)

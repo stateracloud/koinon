@@ -60,6 +60,9 @@ type DirectMessage struct {
 	// MessageID is chosen by the client and is the dedupe key.
 	MessageID string
 	Text      string
+	// NoReopen refuses a thread whose task has completed, where a person's follow-up would reopen
+	// it. The A2A edge sets it: an A2A task that has ended takes no message (ADR 0122).
+	NoReopen bool
 }
 
 // DirectMessageResult is what a direct message did.
@@ -172,6 +175,9 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 		case store.TaskStateCanceled, store.TaskStateFailed:
 			return pgtype.UUID{}, connect.NewError(connect.CodeFailedPrecondition, "the thread's task has "+string(task.State)+"; start a new thread")
 		case store.TaskStateCompleted:
+			if in.NoReopen {
+				return pgtype.UUID{}, connect.NewError(connect.CodeFailedPrecondition, "the thread's task has completed; start a new thread")
+			}
 			// A follow-up reopens the task (ADR 0066 TR3 amendment): same task, same timeline, same
 			// harness session when it is still there.
 			if task, err = q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: in.Org, ID: task.ID, State: store.TaskStateSubmitted}); err != nil {

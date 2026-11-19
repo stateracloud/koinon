@@ -18,7 +18,10 @@ import (
 	"github.com/stateracloud/koinon/templates"
 )
 
-const maxTimelineEvents = 10_000
+const (
+	maxTimelineEvents = 10_000
+	timelinePage      = 1_000
+)
 
 // PG is the [Backend] over Postgres and the services package.
 type PG struct {
@@ -53,8 +56,10 @@ func (b PG) Agent(ctx context.Context, sc Scope) (Agent, error) {
 
 // Deliver implements [Backend].
 func (b PG) Deliver(ctx context.Context, sc Scope, task pgtype.UUID, messageID, text string) (services.DirectMessageResult, error) {
-	res, err := b.Svc.DeliverDirectMessage(ctx, services.DirectMessage{
+	res, err := b.Svc.SendDirectMessageAs(ctx, services.DirectMessage{
 		Org: sc.Org, Agent: sc.Agent, Task: task, User: sc.User, MessageID: messageID, Text: text,
+		// A2A: a task that has ended takes no message.
+		NoReopen: task.Valid,
 	})
 	return res, mapService(err)
 }
@@ -64,11 +69,18 @@ func mapService(err error) error {
 	if err == nil {
 		return nil
 	}
-	switch connect.CodeOf(err) {
-	case connect.CodeNotFound:
-		return ErrNotFound
-	case connect.CodeFailedPrecondition, connect.CodeInvalidArgument, connect.CodeAlreadyExists:
-		return fmt.Errorf("%w: %s", ErrRefused, err.Error())
+	// The message of a connect error is written for the client. Other errors are not, and pass
+	// on as they are (the handler hides them).
+	var ce *connect.Error
+	if errors.As(err, &ce) {
+		switch ce.Code() {
+		case connect.CodeNotFound:
+			return ErrNotFound
+		case connect.CodeInvalidArgument:
+			return fmt.Errorf("%w: %s", ErrInvalid, ce.Message())
+		case connect.CodeFailedPrecondition, connect.CodeAlreadyExists, connect.CodeUnavailable:
+			return fmt.Errorf("%w: %s", ErrRefused, ce.Message())
+		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -84,7 +96,7 @@ func isThread(t store.Task, agent pgtype.UUID) bool {
 }
 
 // Thread implements [Backend].
-func (b PG) Thread(ctx context.Context, sc Scope, id pgtype.UUID) (store.Task, []store.TaskEvent, error) {
+func (b PG) Thread(ctx context.Context, sc Scope, id pgtype.UUID, after int64) (store.Task, []store.TaskEvent, error) {
 	q := store.New(b.Pool)
 	t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: sc.Org, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -96,13 +108,26 @@ func (b PG) Thread(ctx context.Context, sc Scope, id pgtype.UUID) (store.Task, [
 	if !isThread(t, sc.Agent) {
 		return store.Task{}, nil, ErrNotFound
 	}
-	ev, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: sc.Org, TaskID: id, AfterSeq: 0, MaxEvents: maxTimelineEvents})
-	return t, ev, err
+	// The timeline is read in pages up to a cap. A thread longer than the cap shows its first
+	// events only (ADR 0122, consequences); a wait reads after its message, so it is not affected.
+	var all []store.TaskEvent
+	for len(all) < maxTimelineEvents {
+		ev, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: sc.Org, TaskID: id, AfterSeq: after, MaxEvents: timelinePage})
+		if err != nil {
+			return store.Task{}, nil, err
+		}
+		all = append(all, ev...)
+		if len(ev) < timelinePage {
+			break
+		}
+		after = ev[len(ev)-1].Seq
+	}
+	return t, all, nil
 }
 
 // Cancel implements [Backend].
 func (b PG) Cancel(ctx context.Context, sc Scope, id pgtype.UUID) (store.Task, error) {
-	if _, _, err := b.Thread(ctx, sc, id); err != nil {
+	if _, _, err := b.Thread(ctx, sc, id, 1<<62); err != nil {
 		return store.Task{}, err
 	}
 	t, err := b.Svc.CancelTaskAs(ctx, sc.Org, sc.User, id)

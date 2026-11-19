@@ -28,3 +28,25 @@ func (s *Server) CancelTaskAs(ctx context.Context, org, user, id pgtype.UUID) (s
 	}
 	return t, nil
 }
+
+// SendDirectMessageAs delivers a direct message for a caller that is not a Connect session (the A2A
+// edge, ADR 0122), with the checks and the path of SendDirectMessage: the message ID and text are
+// bounded, and with durable on the message goes through the org's rate-limited queue (DB2). The
+// caller has checked the role.
+func (s *Server) SendDirectMessageAs(ctx context.Context, in DirectMessage) (DirectMessageResult, error) {
+	if err := s.refuseWhileHeld(); err != nil {
+		return DirectMessageResult{}, err
+	}
+	if err := checkMessageID(in.MessageID); err != nil {
+		return DirectMessageResult{}, err
+	}
+	text, err := checkMessage(in.Text, true)
+	if err != nil {
+		return DirectMessageResult{}, err
+	}
+	in.Text = text
+	if s.dm != nil {
+		return s.dm.deliver(ctx, in)
+	}
+	return s.DeliverDirectMessage(ctx, in)
+}

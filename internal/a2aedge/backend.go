@@ -18,6 +18,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrRefused: the agent or the task is in a state that takes no message (the text says why).
 	ErrRefused = errors.New("refused")
+	// ErrInvalid: the message is not valid (the text says why, for the client).
+	ErrInvalid = errors.New("invalid")
 )
 
 // Scope is who calls and where. The auth layer sets it; the handler never reads it from the body.
@@ -38,10 +40,13 @@ type Backend interface {
 	// active or has no direct_message trigger.
 	Agent(ctx context.Context, sc Scope) (Agent, error)
 	// Deliver writes a message into a thread (new when task is invalid) once per message ID. The
-	// result's Event holds the timeline entry of the message; it is nil for a replay.
+	// result's Event holds the timeline entry of the message; it is nil for a replay. A thread whose
+	// task has ended is refused ([ErrRefused]) and is not reopened, but a replay of a message that
+	// was taken before the task ended returns the task.
 	Deliver(ctx context.Context, sc Scope, task pgtype.UUID, messageID, text string) (services.DirectMessageResult, error)
-	// Thread returns a thread of the agent and its timeline, or [ErrNotFound] for any other task.
-	Thread(ctx context.Context, sc Scope, task pgtype.UUID) (store.Task, []store.TaskEvent, error)
+	// Thread returns a thread of the agent and its timeline after sequence number after (0 is the
+	// whole timeline, up to a cap), or [ErrNotFound] for any other task.
+	Thread(ctx context.Context, sc Scope, task pgtype.UUID, after int64) (store.Task, []store.TaskEvent, error)
 	// Cancel cancels an open thread of the agent. A thread that has ended gives [ErrRefused].
 	Cancel(ctx context.Context, sc Scope, task pgtype.UUID) (store.Task, error)
 }
