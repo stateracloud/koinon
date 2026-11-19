@@ -136,24 +136,44 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 	if err != nil {
 		return nil, err
 	}
-	var task store.Task
-	if m.TaskID != "" {
-		id, ok := parseUUID(string(m.TaskID))
+	var thread pgtype.UUID
+	reopen := false
+	switch {
+	case m.TaskID != "":
+		// A message to a task answers the open turn. A turn that ended takes no message (A2A: a
+		// terminal task cannot restart); the client names the context instead.
+		id, n, ok := parseTaskID(string(m.TaskID))
 		if !ok {
 			return nil, a2a.ErrTaskNotFound
 		}
-		var err error
-		// Only the existence of the thread is read here. An ended task is refused by the delivery,
-		// under the lock of the task, so that a retry of a message that was taken still gets its answer.
-		if task, _, err = h.be.Thread(ctx, sc, id, 1<<62); err != nil {
-			return nil, mapErr(err)
-		}
-		if m.ContextID != "" && m.ContextID != string(m.TaskID) {
+		if m.ContextID != "" && m.ContextID != uuidString(id) {
 			return nil, fmt.Errorf("%w: contextId does not match the task", a2a.ErrInvalidParams)
 		}
-		task.ID = id
+		_, ev, err := h.be.Thread(ctx, sc, id, 0)
+		if err != nil {
+			return nil, mapErr(err)
+		}
+		switch last := Turns(ev); {
+		case n > last:
+			return nil, a2a.ErrTaskNotFound
+		case n < last:
+			return nil, fmt.Errorf("%w: the task has ended; send the message with its contextId to start a new task", a2a.ErrUnsupportedOperation)
+		}
+		// The last turn may have completed too. The delivery refuses it under the lock of the task,
+		// so that a retry of a message that was taken still gets its answer.
+		thread = id
+	case m.ContextID != "":
+		// A message with a context and no task starts the next turn: a new task in the thread.
+		id, ok := parseUUID(m.ContextID)
+		if !ok {
+			return nil, a2a.ErrTaskNotFound
+		}
+		if _, _, err := h.be.Thread(ctx, sc, id, 1<<62); err != nil {
+			return nil, mapErr(err)
+		}
+		thread, reopen = id, true
 	}
-	res, err := h.be.Deliver(ctx, sc, task.ID, m.ID, body)
+	res, err := h.be.Deliver(ctx, sc, thread, reopen, m.ID, body)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -167,24 +187,27 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 		hist = req.Config.HistoryLength
 	}
 	if req.Config != nil && req.Config.ReturnImmediately {
-		return h.view(ctx, sc, res.Task.ID, hist)
+		return h.view(ctx, sc, res.Task.ID, 0, hist)
 	}
 	select {
 	case h.waiters <- struct{}{}:
 		defer func() { <-h.waiters }()
 	default:
-		return h.view(ctx, sc, res.Task.ID, hist)
+		return h.view(ctx, sc, res.Task.ID, 0, hist)
 	}
 	return h.settle(ctx, sc, res.Task.ID, marker, hist)
 }
 
-// view reads the task as it stands.
-func (h *Handler) view(ctx context.Context, sc Scope, id pgtype.UUID, hist *int) (*a2a.Task, error) {
+// view reads turn n of a thread as it stands (0 is the last turn).
+func (h *Handler) view(ctx context.Context, sc Scope, id pgtype.UUID, n int, hist *int) (*a2a.Task, error) {
 	t, ev, err := h.be.Thread(ctx, sc, id, 0)
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return Task(t, ev, hist), nil
+	if n > Turns(ev) {
+		return nil, a2a.ErrTaskNotFound
+	}
+	return Task(t, ev, n, hist), nil
 }
 
 // settle waits until the task is in a state the client has to act on or an end state, reached
@@ -202,13 +225,13 @@ func (h *Handler) settle(ctx context.Context, sc Scope, id pgtype.UUID, marker i
 			return nil, mapErr(err)
 		}
 		if settledAfter(t.State, ev) {
-			return h.view(ctx, sc, id, hist)
+			return h.view(ctx, sc, id, 0, hist)
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return h.view(ctx, sc, id, hist)
+			return h.view(ctx, sc, id, 0, hist)
 		case <-tick.C:
 		}
 	}
@@ -243,11 +266,11 @@ func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Ta
 	if err != nil {
 		return nil, err
 	}
-	id, ok := parseUUID(string(req.ID))
+	id, n, ok := parseTaskID(string(req.ID))
 	if !ok {
 		return nil, a2a.ErrTaskNotFound
 	}
-	return h.view(ctx, sc, id, req.HistoryLength)
+	return h.view(ctx, sc, id, n, req.HistoryLength)
 }
 
 // CancelTask implements [a2asrv.RequestHandler].
@@ -256,9 +279,20 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	id, ok := parseUUID(string(req.ID))
+	id, n, ok := parseTaskID(string(req.ID))
 	if !ok {
 		return nil, a2a.ErrTaskNotFound
+	}
+	_, ev, err := h.be.Thread(ctx, sc, id, 0)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	switch last := Turns(ev); {
+	case n > last:
+		return nil, a2a.ErrTaskNotFound
+	case n < last:
+		// An earlier turn ended.
+		return nil, a2a.ErrTaskNotCancelable
 	}
 	if _, err := h.be.Cancel(ctx, sc, id); err != nil {
 		if errors.Is(err, ErrRefused) {
@@ -266,7 +300,7 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*
 		}
 		return nil, mapErr(err)
 	}
-	return h.view(ctx, sc, id, nil)
+	return h.view(ctx, sc, id, n, nil)
 }
 
 // ListTasks implements [a2asrv.RequestHandler]. The edge does not list: a client keeps the IDs of

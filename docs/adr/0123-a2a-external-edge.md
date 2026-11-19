@@ -32,8 +32,30 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    binding at `jsonrpc` and the v0.3 binding at `v0.3/jsonrpc`. It serves one agent card per agent at
    `.well-known/agent-card.json`. The edge implements `a2asrv.RequestHandler` of a2a-go directly over
    Koinon tasks. It has no second task store and no executor.
-2. **A message is a direct message.** `SendMessage` without a task ID starts a thread. With a task ID
-   it continues that thread. It uses the same path as a person who writes to the agent: the checks
+2. **A thread is a context. A turn is a task.** The edge follows A2A 1.0.0: a task that has ended
+   (completed, failed, canceled, rejected) never takes a new message, and a follow-up turn is a new
+   task in the same `contextId` (sections 3.1.1, 3.4.3). A Koinon direct-message thread is one
+   `contextId`: the UUID of the Koinon task. Each turn of the thread is one A2A task. The task ID is
+   `<thread UUID>.<turn>`, with the turn counted from 1, and a task ID is never reused. A turn
+   starts with the first message of a person, and with each message of a person that reopens a
+   completed thread. A message that answers a question is part of the open turn. Every turn before
+   the last has ended as completed, because only a completed thread takes a follow-up.
+   The new task is linked to the one before it: the first message of the turn has
+   `referenceTaskIds` with the earlier task. `SendMessage` has three forms:
+   - No task ID and no context ID: a new thread, turn 1.
+   - A context ID and no task ID: the next turn in that thread. If the last turn is still open,
+     the message is part of it (it is the same thread, and Koinon queues the message), and the
+     answer holds the open task. A thread that failed or was canceled takes no message.
+   - A task ID: the answer to that task. Only the last turn can take it, and only while it is open.
+     A turn that ended gives `UnsupportedOperationError`. A task ID that is not a turn of a thread
+     of the agent gives `TaskNotFoundError`. A `contextId` that is not the thread of the task gives
+     `InvalidParamsError`.
+
+   The message goes through the same path as a person who writes to the agent: the checks of the
+   message, the org queue when durable work is on, and the same agent and trigger rules. The
+   A2A message ID is the idempotency key. A retry of a message that was taken returns the task, also
+   when the task has ended since. An agent takes A2A messages only if it has a `direct_message` trigger.
+   The edge shows no other task of the agent. the same path as a person who writes to the agent: the checks
    of the message, the org queue when durable work is on, and the same agent and trigger rules. The
    A2A message ID is the idempotency key. A retry of a message that was taken returns the task, also
    when the task has ended since. An agent takes A2A messages only if it has a `direct_message` trigger.
@@ -49,13 +71,12 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    | canceled | `TASK_STATE_CANCELED` |
    | failed | `TASK_STATE_FAILED` |
 
-   The task ID and the context ID are the Koinon task ID. Messages of people are user messages.
+   The state of the last turn is the Koinon state. An earlier turn is `completed`. Messages of people are user messages.
    Messages and questions of the agent are agent messages. When the task needs input, the status
    message holds the question. A completed task has one artifact, `reply`, with the last reply of
-   the agent. A task that has ended takes no message, and the delivery refuses it inside the lock of the task (a
-   follow-up from a person reopens a completed task, an A2A message does not): the client starts a
-   new task. A client that sends a `contextId` without a task ID starts a new thread: Koinon does not
-   link A2A tasks into one context yet (see open questions).
+   the agent, for the turn of the task. A message to a task that has completed is refused inside the
+   lock of the task, so a race with the end of the turn cannot reopen it. Only a message with the
+   context ID reopens the thread.
 4. **Blocking send.** `SendMessage` waits until the task is `input-required` or has ended, up to 30
    seconds, then returns the task as it stands. `returnImmediately` returns at once. The client
    then reads the task with `GetTask`. The wait reads only the events after the message. A run that
@@ -93,16 +114,14 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   cannot decide it. _(inferred)_
 - Negative: a reply to an `input-required` task is a new message in the thread. It is not checked
   that the message answers the open question of the agent. _(inferred)_
+- Negative: the turns are read from the timeline: no new column or table. A thread whose timeline is
+  over 10,000 events has a wrong turn count in `GetTask`, as above.
+- Negative: a thread has one open turn at a time, so a client cannot run two tasks in one context
+  at once. It starts a new thread (a new context) for work in parallel.
 - Follow-ups: the outbound slice; pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
 
 ## Open questions
 
-- Multi-turn conversations. A direct-message thread completes after each turn, and a person's
-  next message reopens it. The edge refuses a message to a completed task, as A2A says an ended
-  task is final. A client that keeps one `contextId` over many turns gets a new thread each time,
-  without the earlier turns. Options: map `contextId` to the thread and reopen it (the task ID is
-  then reused, which A2A does not allow), or link the new task to the earlier one in the same
-  context. This is a decision about the public API of the edge.
 - Does a reply in the thread answer an open `ask_user` question without a separate step? To check
   on kind.
 

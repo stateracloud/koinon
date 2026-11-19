@@ -55,11 +55,11 @@ func (b PG) Agent(ctx context.Context, sc Scope) (Agent, error) {
 }
 
 // Deliver implements [Backend].
-func (b PG) Deliver(ctx context.Context, sc Scope, task pgtype.UUID, messageID, text string) (services.DirectMessageResult, error) {
+func (b PG) Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, messageID, text string) (services.DirectMessageResult, error) {
 	res, err := b.Svc.SendDirectMessageAs(ctx, services.DirectMessage{
 		Org: sc.Org, Agent: sc.Agent, Task: task, User: sc.User, MessageID: messageID, Text: text,
-		// A2A: a task that has ended takes no message.
-		NoReopen: task.Valid,
+		// A message to a task that completed is refused. A message with the context starts the next turn.
+		NoReopen: task.Valid && !reopen,
 	})
 	return res, mapService(err)
 }

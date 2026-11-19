@@ -6,8 +6,8 @@
 // maps the message to a direct-message thread, which is a task (ADR 0065, ADR 0066), and maps the
 // task state back to an A2A task state, with `input-required` for a task that waits on a person.
 //
-// The edge holds no state of its own. The A2A task ID is the Koinon task ID, and the A2A context ID
-// is the same ID. It reuses the direct-message path of the services package, so an agent opts in
+// The edge holds no state of its own. A Koinon thread is the A2A context (its ID is the Koinon task ID),
+// and each turn of the thread is an A2A task (ADR 0123 decision 2). It reuses the direct-message path of the services package, so an agent opts in
 // with a `direct_message` trigger, and a client can only reach threads of that agent.
 //
 // # Authentication

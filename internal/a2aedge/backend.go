@@ -40,10 +40,11 @@ type Backend interface {
 	// active or has no direct_message trigger.
 	Agent(ctx context.Context, sc Scope) (Agent, error)
 	// Deliver writes a message into a thread (new when task is invalid) once per message ID. The
-	// result's Event holds the timeline entry of the message; it is nil for a replay. A thread whose
-	// task has ended is refused ([ErrRefused]) and is not reopened, but a replay of a message that
-	// was taken before the task ended returns the task.
-	Deliver(ctx context.Context, sc Scope, task pgtype.UUID, messageID, text string) (services.DirectMessageResult, error)
+	// result's Event holds the timeline entry of the message; it is nil for a replay. A completed
+	// thread is reopened (the next turn) only when reopen is set. Otherwise it is refused
+	// ([ErrRefused]), but a replay of a message that was taken before it completed returns the
+	// task. A thread that failed or was canceled is always refused.
+	Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, messageID, text string) (services.DirectMessageResult, error)
 	// Thread returns a thread of the agent and its timeline after sequence number after (0 is the
 	// whole timeline, up to a cap), or [ErrNotFound] for any other task.
 	Thread(ctx context.Context, sc Scope, task pgtype.UUID, after int64) (store.Task, []store.TaskEvent, error)
