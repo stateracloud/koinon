@@ -150,7 +150,7 @@ image is part of S2 (chart work).
 The kubeconfig of the installer needs these rules:
 
 - `namespaces`: get, create, delete
-- `nodes`: list (platform detection and the kind check)
+- `nodes`: list (platform detection, the kind check and the gVisor user-namespace probe)
 - `storageclasses` (group `storage.k8s.io`): list (the `generic` storage preflight)
 - `secrets` in the Substrate namespace: get, create (the `generic` object-store credentials)
 - `pods`: create, get, delete, list in the Substrate namespace; `pods/log`: get
@@ -168,6 +168,12 @@ The kubeconfig of the installer needs these rules:
 - With the vm tier: one node mounts `/dev/kvm`, `/dev/net/tun`, `/dev/vhost-vsock` and `/dev/vhost-net`
   (a probe pod with `CharDevice` host paths; only the node it lands on is checked, so use
   `--substrate-node-selector` to aim it at workers).
+- With the gVisor class (`--substrate-gvisor`, on by default; the installer sets it from `--sandbox-classes`):
+  `user.max_user_namespaces` is above 0 on every node that `--substrate-node-selector` selects (a short
+  read-only probe pod per node; the check needs `nodes`: list). Without the selector it probes
+  the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
+  plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
+  See "Talos: user namespaces for gVisor".
 - Substrate's api server can validate service-account tokens from a pod in its namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -267,6 +273,45 @@ This is interim: it goes when the pinned Substrate writes the entry for every in
 
 When `ate-setup` fails, the installer keeps the pinned build and prints the exact `ate-setup delete ate-system`
 command that removes the partial install.
+
+## Talos: user namespaces for gVisor
+
+The gVisor class cannot start an agent on a node with `user.max_user_namespaces=0`. Talos sets that value
+by default. gVisor (`runsc`) starts its sentry in a user namespace. On such a node the start fails with
+`runsc create` exit 128 and `fork/exec .../gvisor-sentry-prewarmer: no space left on device`. The disk is
+not full: the kernel returns ENOSPC because it allows no user namespace. The preflight check
+"Substrate gVisor user namespaces" finds this before the first agent start. The vm tier does not need user
+namespaces, and the check does not run without the gVisor class.
+
+Talos, a machine config patch for the worker nodes (`userns.yaml`):
+
+```yaml
+machine:
+  sysctls:
+    user.max_user_namespaces: "11255"
+```
+
+```bash
+talosctl --talosconfig <file> patch machineconfig --nodes <worker node addresses> --patch @userns.yaml
+```
+
+Omni: add the same `machine.sysctls` entry to a config patch of the worker machine set.
+
+kubeadm and other Linux nodes:
+
+```bash
+sysctl -w user.max_user_namespaces=11255
+echo 'user.max_user_namespaces = 11255' > /etc/sysctl.d/99-gvisor.conf
+```
+
+The value 11255 is the one that a Talos cluster confirmed (Kubernetes 1.37.1: with 0, every first resume failed;
+with 11255 on the workers and no other change, an agent started, suspended and resumed with its state). Any
+value above 0 lets the sentry start.
+
+Cost: user namespaces widen the kernel attack surface for every pod on those nodes, because an unprivileged
+process can then reach kernel code that otherwise needs privilege. Set the value on the worker nodes that run
+gVisor sandboxes only, and leave the control plane nodes at 0. Use `--substrate-node-selector` so the check
+reads the same nodes.
 
 ## Verified and unverified
 

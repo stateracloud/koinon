@@ -105,6 +105,20 @@ func (p Profile) Validate() error {
 	return nil
 }
 
+// UsesGVisor says whether the install has the gvisor sandbox class: the default classes (gvisor,microvm), the
+// generic platform (gvisor only) or a list that names gvisor.
+func (p Profile) UsesGVisor() bool {
+	if p.Platform == PlatformGeneric || p.SandboxClasses == "" {
+		return true
+	}
+	for _, class := range strings.Split(p.SandboxClasses, ",") {
+		if strings.TrimSpace(class) == "gvisor" {
+			return true
+		}
+	}
+	return false
+}
+
 // noDevEnvFlag is passed to ate-setup deploy and delete alike, so a delete undoes the same install.
 const noDevEnvFlag = "--no-dev-env"
 
@@ -416,6 +430,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	if err := i.CheckKind(ctx); err != nil {
 		return err
 	}
+	// The installed classes decide whether the gVisor node check applies.
+	sub.GVisor = i.Profile.UsesGVisor()
+	i.Checker.Config.Substrate = &sub
 	if platform == PlatformGeneric {
 		// Only the gvisor class is installed, so the node devices of the vm tier are not needed.
 		sub.VMTier = false
