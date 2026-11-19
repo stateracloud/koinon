@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // maxRequestBody bounds a request body the gateway reads to rewrite it.
@@ -42,6 +44,27 @@ func (g *Gateway) refuse(w http.ResponseWriter, status int, text string) {
 	g.o.Metrics.request(resRefused)
 	w.Header().Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
 	http.Error(w, text, status)
+}
+
+// refuseBudget answers a key whose spend reached its limit: 429 budget_exceeded, marked final. The
+// provider is not called. Retry-After is the time until the window ends, which a consumer with a
+// cap reads as final; a limit without a window sends none (only a new limit resets it).
+func (g *Gateway) refuseBudget(w http.ResponseWriter, format modelformat.Format, wait time.Duration) {
+	g.o.Metrics.request(resBudget)
+	h := w.Header()
+	h.Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
+	h.Set("Content-Type", "application/json")
+	if wait > 0 {
+		h.Set("Retry-After", strconv.FormatInt(int64((wait+time.Second-1)/time.Second), 10))
+	}
+	w.WriteHeader(http.StatusTooManyRequests)
+	// The body has the error shape of the format, so the SDKs parse it.
+	const msg = "budget_exceeded: the API key budget is exceeded"
+	if format == modelformat.Anthropic {
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"budget_exceeded","message":"`+msg+`"}}`)
+		return
+	}
+	_, _ = io.WriteString(w, `{"error":{"type":"budget_exceeded","code":"budget_exceeded","message":"`+msg+`"}}`)
 }
 
 func keyInOtherHeader(h http.Header) bool {
@@ -119,6 +142,16 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, http.StatusNotFound, "refused: model_not_found")
 		return
 	}
+	// The budget stop. It runs after the key and the model are known, so a key that is not loaded
+	// yet is an unknown key (401), never a budget refusal.
+	var limit *gateway.Limit
+	if l, ok := snap.state.Limits[key.Agent]; ok {
+		limit = &l
+		if ok, wait := g.bud.check(key.Agent, l, g.o.Now()); !ok {
+			g.refuseBudget(w, format, wait)
+			return
+		}
+	}
 	rendering, _ := gateway.RenderingOf(rt.m)
 	for _, f := range rendering.Reject {
 		if _, present := fields[f]; present {
@@ -147,7 +180,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(fields["max_completion_tokens"], &maxTokens)
 	}
 	c := &call{
-		g: g, start: g.o.Now(),
+		g: g, start: g.o.Now(), limit: limit, agent: key.Agent, price: rt.price,
 		rec: gateway.UsageRecord{
 			RequestID: uuid.NewString(), KeyID: key.ID, Agent: key.Agent, Time: g.o.Now(),
 			Model: rt.m.Name, Format: format, Stream: stream, UpstreamKnown: true, Upstream: true,
@@ -268,6 +301,28 @@ type call struct {
 	span  trace.Span
 	rec   gateway.UsageRecord
 	once  sync.Once
+	// limit is the agent's limit at the start of the call, nil when it has none; price is the
+	// model's. The call is charged against them when it ends.
+	limit *gateway.Limit
+	agent gateway.AgentRef
+	price pricing.Price
+}
+
+// charge adds the cost of what the call used to the agent's counter. A call that reported no
+// usage costs nothing here: the ledger prices the record on its own (ADR 0041).
+func (c *call) charge() {
+	if c.limit == nil || !(c.rec.InputKnown || c.rec.OutputKnown) {
+		return
+	}
+	_, cost, err := c.price.Cost(pricing.Usage{
+		Input: c.rec.InputTokens, CacheRead: c.rec.CacheReadTokens, CacheWrite: c.rec.CacheWriteTokens,
+		Output: c.rec.OutputTokens, Reasoning: c.rec.ReasoningTokens,
+	})
+	if err != nil {
+		c.g.o.Logger.Error("model call cannot be priced", "reason", "cost")
+		return
+	}
+	c.g.bud.charge(c.agent, *c.limit, cost, c.g.o.Now())
 }
 
 // emit finishes the record and sends it, once.
@@ -277,6 +332,7 @@ func (c *call) emit(result string, edit func(*gateway.UsageRecord)) {
 			edit(&c.rec)
 		}
 		c.g.o.Metrics.request(result)
+		c.charge() // before the record leaves, so the agent's next call already sees the spend
 		if c.span != nil {
 			c.span.SetAttributes(attribute.String("gen_ai.request.model", c.rec.Model),
 				attribute.String("koinon.format", string(c.rec.Format)), attribute.Bool("koinon.stream", c.rec.Stream),
