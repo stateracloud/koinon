@@ -106,6 +106,14 @@ func principalFrom(ctx context.Context) tokens.Principal {
 	return p
 }
 
+// PrincipalFrom returns the token that [Server.Gate] authenticated, or the zero Principal.
+func PrincipalFrom(ctx context.Context) tokens.Principal { return principalFrom(ctx) }
+
+// Gate wraps next with the bearer-token check of the admin API: the same token lookup, failure
+// rate limit and audit event per call. Another surface that takes org API tokens (the A2A edge,
+// ADR 0123) mounts behind it, so one gate decides who is a caller.
+func (s *Server) Gate(next http.Handler) http.Handler { return s.authenticate(next) }
+
 // Mount registers the API on mux under BasePath.
 func (s *Server) Mount(mux *http.ServeMux) {
 	api := HandlerFromMuxWithBaseURL(NewStrictHandlerWithOptions(s, nil, StrictHTTPServerOptions{
