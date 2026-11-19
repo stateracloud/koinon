@@ -63,6 +63,8 @@ has "agentgateway mounts the provider keys" 'secretName: koinon-gateway-provider
 has "agentgateway mounts the MCP credentials" 'secretName: koinon-gateway-mcp-keys$' --show-only templates/gateway-standalone.yaml
 has "the reconciler is told the MCP credentials Secret" 'mcpKeysSecret: koinon-gateway-mcp-keys$' --show-only templates/config.yaml
 has "the reconciler is told the MCP credentials directory" 'mcpKeysDir: /secrets/mcp$' --show-only templates/config.yaml
+lacks "the reconciler serves no sealed credential by default" 'mcpSealed' --show-only templates/config.yaml
+has "the reconciler serves sealed credentials with the koinon driver" 'mcpSealed: true$' "${mcp[@]}" --show-only templates/config.yaml
 # The database login (cnpg mode): its own role, a member of koinon_gateway only, with a Secret of its own.
 has "koinon-gateway database role koinon_mcpgateway" 'name: koinon_mcpgateway$' "${mcp[@]}" --show-only templates/postgres-cnpg.yaml
 has "koinon-gateway database role is a member of koinon_gateway only" 'inRoles: \[koinon_gateway\]$' "${mcp[@]}" --show-only templates/postgres-cnpg.yaml

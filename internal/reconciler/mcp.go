@@ -93,6 +93,9 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				}
 				format, err := secretstore.EnvelopeFormat(row.Credential)
 				switch {
+				case err == nil && format == secretstore.FormatV2 && !r.cfg.MCPSealed:
+					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its credential is sealed to the gateway key and gateway.mcp.driver is not koinon; set the driver back to koinon or save the credential again", org.Slug, row.Name))
+					continue
 				case err == nil && format == secretstore.FormatV2:
 					// Ciphertext (ADR 0097 decision 12): the reconciler copies the stored bytes and never opens
 					// them. Only the gateway holds the key. The check below reads the envelope's fields and no key.

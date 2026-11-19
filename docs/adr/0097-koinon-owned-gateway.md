@@ -783,6 +783,20 @@ move, once.
    that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule: run `keys seal-mcp --to-v1` first (the reverse move, under the KEK identity). Slice 4 builds it. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
    still reads those files (marked by the file name: `mcp-…` plaintext, `mcpv2-…` ciphertext). Nothing
    stored changes yet.
+
+   Known limits of slice 3, recorded so a later slice can close them:
+   - The write gate is `KOINON_GATEWAY_MCP_SEAL_V2`, which the chart sets only with the koinon driver. It does
+     not prove that every pod runs release N. In the upgrade that first sets it, an N-1 koinon-gateway
+     replica reads an `mcpv2-` file as plaintext. Start sealing in a release after the one that ships the
+     v2 reader, or add a gate that says every component is at N.
+   - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
+     it with the koinon driver). Without it the server is left out and the log says why, so a move back to
+     agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.
+   - The trace router no longer scrubs MCP credential values: it cannot read v2 and the reconciler holds no key.
+     koinon-gateway holds the plaintext, so it must scrub the values it opened from the spans it writes.
+     This is open work, not done here.
+   - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
+     credential more than once, so the counter is not a count of refused calls.
 2. **Move (slice 4).** `koinon-api keys seal-mcp` runs under the KEK identity (the same identity as
    `keys reencrypt`; plaintext exists only in that process, never written, logged or sent). For each
    v1 value it opens the value with the KEK and seals it to the `active` public key, with a

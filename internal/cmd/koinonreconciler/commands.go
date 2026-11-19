@@ -96,6 +96,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"provider-keys-dir":                    "gateway.providerKeysDir",
 	"mcp-keys-secret":                      "gateway.mcpKeysSecret",
 	"mcp-keys-dir":                         "gateway.mcpKeysDir",
+	"gateway-mcp-sealed":                   "gateway.mcpSealed",
 	"gateway-access-log-otlp":              "gateway.accessLogOtlp",
 	"gateway-access-log-otlp-token-file":   "gateway.accessLogOtlpTokenFile",
 	"gateway-access-log-otlp-token-secret": "gateway.accessLogOtlpTokenSecret",
@@ -262,6 +263,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.providerKeysSecret, "provider-keys-secret", "", "Secret that receives the opened provider keys for agentgateway")
 	fs.StringVar(&c.providerKeysDir, "provider-keys-dir", "", "directory where agentgateway mounts the provider keys Secret")
 	fs.StringVar(&c.mcpKeysSecret, "mcp-keys-secret", "", "Secret that receives the MCP credential files and CA bundles, apart from the provider keys; empty: they go to the provider keys Secret")
+	fs.BoolVar(&c.mcpSealed, "gateway-mcp-sealed", false, "serve sealed (v2) MCP credentials: koinon-gateway serves every MCP path (gateway.mcp.driver=koinon)")
 	fs.StringVar(&c.mcpKeysDir, "mcp-keys-dir", "", "directory where the gateway pods mount the MCP credentials Secret, for the rendered config; empty: --provider-keys-dir")
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",

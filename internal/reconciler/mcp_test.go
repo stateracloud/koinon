@@ -178,7 +178,7 @@ var _ = Describe("Org MCP servers", func() {
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
-			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
+			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, MCPSealed: true,
 			Harnesses: map[string]reconciler.Harness{
 				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
@@ -201,6 +201,24 @@ var _ = Describe("Org MCP servers", func() {
 		}
 		Expect(fmt.Sprintf("%+v", st)).NotTo(ContainSubstring(plaintext))
 		Expect(log.String()).NotTo(ContainSubstring(plaintext))
+
+		// Without the koinon MCP driver (agentgateway would send the envelope upstream as the key), the
+		// sealed server is left out, and its file leaves the Secret.
+		rr2, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Keys:           ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
+			},
+			Logger: slog.New(slog.DiscardHandler),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rr2.ReconcileAll(ctx)).To(MatchError(ContainSubstring("sealed to the gateway key")))
+		_, ok = targetOf(mg.last(), slug+"-sealed")
+		Expect(ok).To(BeFalse(), "a sealed credential is not served without the koinon MCP driver")
 	})
 
 	It("writes MCP credentials to their own Secret, away from the provider keys, when one is configured (#278 S4b)", func(ctx SpecContext) {

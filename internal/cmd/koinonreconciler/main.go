@@ -239,6 +239,7 @@ func serve(ctx context.Context, cfg config) error {
 			ProviderKeyDir:      cfg.providerKeysDir,
 			MCPKeys:             mcpKeyStore(kube, cfg),
 			MCPKeyDir:           cfg.mcpKeysDir,
+			MCPSealed:           cfg.mcpSealed,
 			URLPolicy:           urlPolicy,
 			ProviderKeySettle:   cfg.keySettle,
 			Harnesses:           cfg.harnesses(),

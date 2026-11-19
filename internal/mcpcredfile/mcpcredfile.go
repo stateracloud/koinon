@@ -66,6 +66,11 @@ func ParseSealed(base string) (org, server string, ok bool) {
 		return "", "", false
 	}
 	org, server = rest[:uuidLen], rest[uuidLen+1:2*uuidLen+1]
+	for _, c := range rest[2*uuidLen+2:] {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", "", false
+		}
+	}
 	var u pgtype.UUID
 	if u.Scan(org) != nil || !u.Valid || u.Scan(server) != nil || !u.Valid {
 		return "", "", false

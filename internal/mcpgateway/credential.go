@@ -114,6 +114,10 @@ func (c StaticCredentials) open(base string, content []byte) (plain []byte, keyI
 	if err := json.Unmarshal(content, &env); err != nil || env.Format != secretstore.FormatV2 {
 		return nil, "", &OpenError{Reason: gatewaykeys.ReasonFormat, Err: secretstore.ErrUnsupportedFormat}
 	}
+	// The key ID comes from the file, so it is checked before it reaches a log row: a bad one is dropped.
+	if !secretstore.ValidRecipientKeyID(env.RecipientKeyID) {
+		env.RecipientKeyID = ""
+	}
 	org, server, ok := mcpcredfile.ParseSealed(base)
 	if !ok {
 		return nil, env.RecipientKeyID, &OpenError{Reason: gatewaykeys.ReasonFormat, KeyID: env.RecipientKeyID, Err: secretstore.ErrUnsupportedFormat}

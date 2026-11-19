@@ -121,6 +121,9 @@ type Config struct {
 	MCPKeys ProviderKeyStore
 	// MCPKeyDir is where the gateway pods mount MCPKeys, for the rendered config. Empty: ProviderKeyDir.
 	MCPKeyDir string
+	// MCPSealed is true when koinon-gateway serves every MCP path (gateway.mcp.driver=koinon). Only then does the
+	// reconciler serve a sealed (v2) credential: agentgateway would send the envelope upstream as the key.
+	MCPSealed bool
 	// Prices finds the price of each served model; required (prices.NewResolver).
 	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.

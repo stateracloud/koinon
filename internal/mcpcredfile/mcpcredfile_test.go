@@ -59,6 +59,7 @@ func TestParseSealedRefusesBadNames(t *testing.T) {
 	for _, name := range []string{
 		"", "mcpv2-", "mcp-" + server + "-0a1b2c3d", good + "x", good[:len(good)-1],
 		"mcpv2-" + org + "_" + server + "-0a1b2c3d",
+		"mcpv2-" + org + "-" + server + "-0a1b2c3z",
 		"mcpv2-" + strings.Repeat("z", 36) + "-" + server + "-0a1b2c3d",
 	} {
 		if _, _, ok := mcpcredfile.ParseSealed(name); ok {
