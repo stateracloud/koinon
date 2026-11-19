@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/internal/tracing/scrub"
@@ -178,6 +179,7 @@ var secretColumns = []secretColumn{
 	{catalog.ProvidersTable, catalog.CostKeyColumn, "id", catalog.CostKeyBinding, whole, nil},
 	{connections.Table, connections.Column, "id", connections.BindingFor, connectionFields, nil},
 	{mcpservers.ServersTable, mcpservers.CredentialColumn, "id", mcpservers.CredentialBinding, whole, nil},
+	{remoteagents.Table, remoteagents.CredentialColumn, "id", remoteagents.CredentialBinding, whole, nil},
 	{checkpoint.Table, checkpoint.Column, "agent_id", checkpoint.Binding, whole, nil},
 	{checkpoint.EpochsTable, checkpoint.Column, "binding_row", nil, whole, checkpoint.EpochRowBinding},
 	{tracedest.DestinationsTable, tracedest.CredentialsColumn, "id", tracedest.Binding, func(plain []byte) []string {
