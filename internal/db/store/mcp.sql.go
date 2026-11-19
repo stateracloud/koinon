@@ -454,6 +454,101 @@ func (q *Queries) GetServedMCPServerByName(ctx context.Context, arg GetServedMCP
 	return i, err
 }
 
+const getServedMCPServerForGuard = `-- name: GetServedMCPServerForGuard :one
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, source, managed_by_secret,
+       declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since,
+       consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input,
+       exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by,
+       admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
+FROM mcp_servers
+WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL
+`
+
+type GetServedMCPServerForGuardParams struct {
+	OrgID pgtype.UUID
+	Name  string
+}
+
+type GetServedMCPServerForGuardRow struct {
+	OrgID                  pgtype.UUID
+	ID                     pgtype.UUID
+	Name                   string
+	Url                    string
+	Transport              McpTransport
+	CredentialHeader       pgtype.Text
+	CredentialPrefix       string
+	Source                 ConfigSource
+	ManagedBySecret        pgtype.Text
+	DeclaredVersion        pgtype.Text
+	RemovedAt              pgtype.Timestamptz
+	DisabledReason         pgtype.Text
+	Health                 McpHealth
+	HealthReason           pgtype.Text
+	HealthCheckedAt        pgtype.Timestamptz
+	HealthSince            pgtype.Timestamptz
+	ConsecutiveFailures    int32
+	ToolsSyncedAt          pgtype.Timestamptz
+	CreatedBy              pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	Kind                   McpServerKind
+	ExposesUntrustedInput  bool
+	ExposesPrivateData     bool
+	CodeHostConnectionID   pgtype.UUID
+	CredentialLostAt       pgtype.Timestamptz
+	AdminDisabledAt        pgtype.Timestamptz
+	AdminDisabledBy        pgtype.Text
+	AdminDisabledNote      pgtype.Text
+	AdminDisabledUnderBy   pgtype.Text
+	AdminDisabledUnderNote pgtype.Text
+	CaBundle               string
+	InsecureSkipVerify     bool
+}
+
+// GetServedMCPServerByName without the sealed credential column. The leak guard runs as the gateway's
+// database role, which has a column-level grant on mcp_servers that leaves out `credential` (ADR 0097
+// decision 5, #278): a SELECT * would be refused. Keep this list equal to migrations.GatewayMCPServerColumns.
+func (q *Queries) GetServedMCPServerForGuard(ctx context.Context, arg GetServedMCPServerForGuardParams) (GetServedMCPServerForGuardRow, error) {
+	row := q.db.QueryRow(ctx, getServedMCPServerForGuard, arg.OrgID, arg.Name)
+	var i GetServedMCPServerForGuardRow
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Transport,
+		&i.CredentialHeader,
+		&i.CredentialPrefix,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.DisabledReason,
+		&i.Health,
+		&i.HealthReason,
+		&i.HealthCheckedAt,
+		&i.HealthSince,
+		&i.ConsecutiveFailures,
+		&i.ToolsSyncedAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Kind,
+		&i.ExposesUntrustedInput,
+		&i.ExposesPrivateData,
+		&i.CodeHostConnectionID,
+		&i.CredentialLostAt,
+		&i.AdminDisabledAt,
+		&i.AdminDisabledBy,
+		&i.AdminDisabledNote,
+		&i.AdminDisabledUnderBy,
+		&i.AdminDisabledUnderNote,
+		&i.CaBundle,
+		&i.InsecureSkipVerify,
+	)
+	return i, err
+}
+
 const insertAgentMCPServer = `-- name: InsertAgentMCPServer :exec
 INSERT INTO agent_mcp_servers (org_id, agent_id, server_id, tools)
 VALUES ($1, $2, $3, $4)

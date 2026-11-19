@@ -656,6 +656,8 @@
             "tokenAudience": {"type": "string"},
             "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
+            "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},
+            "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},
             "gatewayClientNamespaceSelector": {"type": "object"}
           }
         }

@@ -1091,6 +1091,17 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if not .Values.execution.substrate.allowUnhardened }}
 {{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)" }}
 {{- end }}
+{{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
+{{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
+{{- end }}
+{{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers }}
+{{- if not (has $tier (list "vm" "hardened" "dev")) }}
+{{- fail (printf "execution.substrate.runtimeClassTiers.%s %q: want vm, hardened or dev" $class $tier) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.execution.substrate.defaultTier (not (has .Values.execution.substrate.defaultTier (list "vm" "hardened" "dev"))) }}
+{{- fail (printf "execution.substrate.defaultTier %q: want vm, hardened or dev" .Values.execution.substrate.defaultTier) }}
+{{- end }}
 {{- range $k := list "sandboxObserver" "sandboxNetworkPolicy" "sandboxLimitRange" }}
 {{- if (index $.Values $k).enabled }}
 {{- fail (printf "%s.enabled acts on OpenShell's namespaces and pods: set it to false with execution.driver=substrate" $k) }}
@@ -1159,6 +1170,14 @@ it carries no credentials.
   value: {{ .Values.execution.substrate.routerAddress | quote }}
 - name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
   value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
+{{- with .Values.execution.substrate.defaultTier }}
+- name: KOINON_SUBSTRATE_DEFAULT_TIER
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.execution.substrate.runtimeClassTiers }}
+- name: KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS
+  value: {{ include "koinon.substrateTiers" . | quote }}
+{{- end }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
 {{- if .Values.execution.substrate.caSecret }}
@@ -1437,4 +1456,13 @@ releases on one cluster never render the same cluster-scoped name.
 {{- else -}}
 {{- $full -}}
 {{- end -}}
+{{- end }}
+
+{{/* The runtime class to tier map of the substrate driver as "class=tier" entries, sorted by class. */}}
+{{- define "koinon.substrateTiers" -}}
+{{- $e := list -}}
+{{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers -}}
+{{- $e = append $e (printf "%s=%s" $class $tier) -}}
+{{- end -}}
+{{- join "," $e -}}
 {{- end }}

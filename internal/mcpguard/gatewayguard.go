@@ -67,7 +67,8 @@ func (a *GatewayGuard) Load(ctx context.Context) error {
 	// read its tables and write the call log: without them every call is refused, so the route stays
 	// closed and the log says why.
 	var ok bool
-	if err := a.pool.QueryRow(ctx, `SELECT has_table_privilege(current_user, 'mcp_servers', 'SELECT')
+	if err := a.pool.QueryRow(ctx, `SELECT has_column_privilege(current_user, 'mcp_servers', 'id', 'SELECT')
+		AND has_column_privilege(current_user, 'connections', 'secret_fingerprint', 'SELECT')
 		AND has_table_privilege(current_user, 'leak_guard_sessions', 'INSERT')
 		AND has_table_privilege(current_user, 'mcp_call_log', 'INSERT')`).Scan(&ok); err != nil {
 		return err

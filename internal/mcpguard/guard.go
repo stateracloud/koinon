@@ -304,7 +304,7 @@ func (g *Guard) identify(ctx context.Context, agent, target string) (caller, *Ou
 	if base, isAsk := strings.CutSuffix(name, mcpservers.AskSuffix); isAsk {
 		name, c.ask = base, true
 	}
-	srv, err := g.q.GetServedMCPServerByName(ctx, store.GetServedMCPServerByNameParams{OrgID: org.ID, Name: name})
+	row, err := g.q.GetServedMCPServerForGuard(ctx, store.GetServedMCPServerForGuardParams{OrgID: org.ID, Name: name})
 	if errors.Is(err, pgx.ErrNoRows) {
 		o := refuse(ReasonIdentity, fmt.Sprintf("refused by the leak guard: the org has no MCP server %s", name))
 		return caller{}, &o, nil
@@ -312,7 +312,7 @@ func (g *Guard) identify(ctx context.Context, agent, target string) (caller, *Ou
 	if err != nil {
 		return caller{}, nil, err
 	}
-	c.org, c.agent, c.server = org, a, srv
+	c.org, c.agent, c.server = org, a, serverOf(row)
 	return c, nil, nil
 }
 
@@ -911,4 +911,22 @@ func (g *Guard) urlRule(st *leakguard.RunState, srv store.McpServer, decl sinkcl
 // with no text match.
 func onlyBothLegs(v Verdict) bool {
 	return v.Reason == ReasonBothLegs && v.Match == nil && len(v.Reasons) == 1 && v.Reasons[0] == ReasonBothLegs
+}
+
+// serverOf is the server row without its sealed credential: the guard runs as the gateway's database
+// role, which may not read that column (migrations.GatewayMCPServerColumns).
+func serverOf(r store.GetServedMCPServerForGuardRow) store.McpServer {
+	return store.McpServer{
+		OrgID: r.OrgID, ID: r.ID, Name: r.Name, Url: r.Url, Transport: r.Transport,
+		CredentialHeader: r.CredentialHeader, CredentialPrefix: r.CredentialPrefix, Source: r.Source,
+		ManagedBySecret: r.ManagedBySecret, DeclaredVersion: r.DeclaredVersion, RemovedAt: r.RemovedAt,
+		DisabledReason: r.DisabledReason, Health: r.Health, HealthReason: r.HealthReason,
+		HealthCheckedAt: r.HealthCheckedAt, HealthSince: r.HealthSince, ConsecutiveFailures: r.ConsecutiveFailures,
+		ToolsSyncedAt: r.ToolsSyncedAt, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		Kind: r.Kind, ExposesUntrustedInput: r.ExposesUntrustedInput, ExposesPrivateData: r.ExposesPrivateData,
+		CodeHostConnectionID: r.CodeHostConnectionID, CredentialLostAt: r.CredentialLostAt,
+		AdminDisabledAt: r.AdminDisabledAt, AdminDisabledBy: r.AdminDisabledBy, AdminDisabledNote: r.AdminDisabledNote,
+		AdminDisabledUnderBy: r.AdminDisabledUnderBy, AdminDisabledUnderNote: r.AdminDisabledUnderNote,
+		CaBundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify,
+	}
 }
