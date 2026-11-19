@@ -490,26 +490,66 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		}
 	}, NodeTimeout(2*time.Minute))
 
-	It("cannot attach to or read the supervisor (PID 1)", func(ctx SpecContext) {
-		res := probe(ctx,
-			check{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
-			check{"id": "mem", "op": "syscall", "name": "proc1_mem"},
-			check{"id": "visible", "op": "read", "path": "/proc/1/status"},
-		)
+	// The guest agent is PID 1 (the OpenShell supervisor; the Substrate guest launcher's agent) and the
+	// guest server is whatever listens inside the guest for control calls. Both belong to the platform.
+	It("cannot reach the guest agent or guest server as the agent user", func(ctx SpecContext) {
+		checks := []check{
+			{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
+			{"id": "mem", "op": "syscall", "name": "proc1_mem"},
+			{"id": "visible", "op": "read", "path": "/proc/1/status"},
+		}
+		// Unix sockets of the guest server, when the driver has them (comma-separated paths).
+		sockets := []string{}
+		for _, s := range strings.Split(os.Getenv("KOINON_ESCAPE_GUEST_SOCKETS"), ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				sockets = append(sockets, s)
+				checks = append(checks, check{"id": "unix " + s, "op": "unix", "path": s})
+			}
+		}
+		res := probe(ctx, checks...)
 		Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
 		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
+		for _, s := range sockets {
+			Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM", "ENOENT"), "the guest server socket %s accepted the agent user", s)
+		}
 	}, NodeTimeout(2*time.Minute))
 
-	// Kata is a manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes
-	// under another runtime class, and CI has no Kata at all.
-	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
-		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a Kata guest.
-		testenv.Require(testenv.Var("kata", "KOINON_ESCAPE_HOST_KERNEL"))
+	// ateapi and atelet are Substrate's control plane and node agent. Only agentd's identity and the
+	// platform may call them (ADR 0120 section 3.3); the actor never. OpenShell has neither, so the
+	// spec skips on that driver (issue #1092; the Substrate leg comes with the driver, #1088).
+	It("cannot call ateapi or atelet", func(ctx SpecContext) {
+		if escapeDriver() == driverOpenShell {
+			Skip("not applicable on the OpenShell driver: it has no ateapi or atelet")
+		}
+		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
+		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
+		checks := make([]check, 0, len(ts))
+		for _, t := range ts {
+			checks = append(checks, tcp(t))
+		}
+		res := probe(ctx, checks...)
+		for _, c := range checks {
+			// A refusal at connect, not a timeout: a timeout could mean the network is down.
+			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH"), c["id"])
+		}
+	}, NodeTimeout(2*time.Minute))
+
+	// A manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes under
+	// another runtime, and CI has no microVM at all.
+	It("runs in a microVM guest, not on the host kernel", func(ctx SpecContext) {
+		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a microVM guest.
+		testenv.Require(testenv.Var("microvm", "KOINON_ESCAPE_HOST_KERNEL"))
 		host := os.Getenv("KOINON_ESCAPE_HOST_KERNEL")
 		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
 		k := res["kernel"].(map[string]any)
-		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not under Kata")
+		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not in a microVM")
 		Expect(k["hypervisor"]).To(BeTrue(), "the guest sees a hypervisor")
 	}, NodeTimeout(2*time.Minute))
 })
+
+const driverOpenShell = "openshell"
+
+// escapeDriver is the execution driver the suite runs against (KOINON_ESCAPE_DRIVER, default
+// openshell). The specs that exist only for Substrate skip on the OpenShell driver.
+func escapeDriver() string { return envOr("KOINON_ESCAPE_DRIVER", driverOpenShell) }

@@ -43,6 +43,18 @@ def tcp(c):
         s.close()
 
 
+def unix(c):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    try:
+        s.connect(c["path"])
+        return "open"
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def udp_dns(c):
     # A real query for example.com; an answer means UDP reached a resolver.
     q = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
@@ -236,6 +248,6 @@ def kernel(_):
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
