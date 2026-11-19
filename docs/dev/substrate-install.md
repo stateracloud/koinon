@@ -400,8 +400,10 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
 - The other pods of `ate-system` have a list each, so none of them is unfenced: `closedApps` (`ate-idp-server`,
   `postgres`, `rustfs`) get no egress at all, and `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API
-  server only. Their ingress stays Substrate's own policies (`ate-system-networkpolicies.yaml`, `kind/rustfs.yaml`),
-  because NetworkPolicies add up. Confirm the three lists against your Substrate manifests.
+  server only. The `rustfs-bucket-init` Job pod has no `app` label, so `bucketInitJobs` selects it by Job name and it
+  gets DNS and the object store S3 port only (`objectStoreApp`, `objectStorePort`). Their ingress stays Substrate's own
+  policies (`ate-system-networkpolicies.yaml`, `kind/rustfs.yaml`), because NetworkPolicies add up. Confirm the lists
+  against your Substrate manifests.
 - `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
   ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
   endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1

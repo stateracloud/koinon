@@ -20,7 +20,7 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   workerNetworkPolicy.apiServerCIDRs, which the render requires. A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
-  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: closedApps
+  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: bucketInitJobs (the object store Job pod, selected by Job name), closedApps
   (ate-idp-server, postgres, rustfs: no egress at all) and apiOnlyApps (k8s-credential-provider: DNS and the API
   server only). Their ingress stays Substrate's own.
 */ -}}
@@ -185,5 +185,40 @@ spec:
       ports:
         - {port: 443, protocol: TCP}
         - {port: 6443, protocol: TCP}
+{{- end }}
+{{- with $np.bucketInitJobs }}
+---
+# The bucket-init Job pod of the object store has no `app` label, so the Job name selects it. It needs DNS and the
+# object store S3 port, and nothing else (kind/rustfs.yaml:93-133 creates a bucket; the object store admits it at
+# kind/rustfs.yaml:140). Its ingress is Substrate's own, so this policy lists no Ingress type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-bucket-init
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: batch.kubernetes.io/job-name
+        operator: In
+        values:
+          {{- toYaml . | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ $np.objectStoreApp | quote }}
+      ports:
+        - {port: {{ $np.objectStorePort }}, protocol: TCP}
 {{- end }}
 {{- end }}

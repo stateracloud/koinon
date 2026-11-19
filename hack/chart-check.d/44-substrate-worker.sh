@@ -119,7 +119,8 @@ grep -Fq '!object.spec.template.spec.automountServiceAccountToken' <<<"$objs" ||
 grep -Fq 'object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in' <<<"$objs" || fail "the Deployment template hostPath must follow allowedHostPaths"
 grep -Fq "variables.reqNamespace in [\"ate-system\",\"ate-workers\",\"\"] && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in both namespaces and of cluster-scoped ones"
 grep -Fq "has(request.namespace) ? request.namespace : ''" <<<"$objs" || fail "a cluster-scoped object has no request.namespace key: the objects policy must guard the read"
-if [[ "$(tr -d '\134' <<<"$objs" | grep -Fc 'request.namespace')" != 2 ]]; then fail "the objects policy reads request.namespace outside the guard"; fi
+rest=$(tr -d '\134' <<<"$objs" | grep -Fv '#' | sed "s/has(request.namespace) ? request.namespace : ''//")
+if grep -Fq 'request.namespace' <<<"$rest"; then fail "the objects policy reads request.namespace outside the guard"; fi
 grep -Fq 'c.securityContext.privileged' <<<"$wpods" || fail "the worker pod rules must deny privileged containers"
 grep -Fq 'object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged)' <<<"$objs" || fail "the Deployment template must not be privileged"
 lacks "the policies are off when disabled" 'worker-(pods|connect|objects)|control-pods' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
@@ -133,7 +134,7 @@ has "the worker namespace is privileged for Pod Security" 'pod-security.kubernet
 
 # NetworkPolicies: standard API only.
 npdocs=$(render "${wsub[@]}" "${np[@]}")
-[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 4 ]] || fail "expected four NetworkPolicies (workers, control plane, closed pods, API-only pods)"
+[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 5 ]] || fail "expected five NetworkPolicies (workers, control plane, closed pods, API-only pods, bucket-init Job)"
 closed=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-closed\n' <<<"$npdocs")
 apionly=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-only\n' <<<"$npdocs")
 for app in ate-idp-server postgres rustfs; do grep -Fq -- "- $app" <<<"$closed" || fail "the closed policy must select $app"; done
@@ -142,6 +143,13 @@ grep -Fq 'policyTypes: [Egress]' <<<"$closed" || fail "the closed policy must le
 grep -Fq -- '- k8s-credential-provider' <<<"$apionly" || fail "the API-only policy must select k8s-credential-provider"
 grep -Fq 'cidr: "192.0.2.10/32"' <<<"$apionly" || fail "the API-only policy must reach the API server CIDRs"
 grep -Fq 'policyTypes: [Egress]' <<<"$apionly" || fail "the API-only policy must leave ingress to Substrate's own policies"
+bucket=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-bucket-init\n' <<<"$npdocs")
+grep -Fq 'key: batch.kubernetes.io/job-name' <<<"$bucket" || fail "the bucket-init policy must select the Job pod by Job name"
+grep -Fq -- '- rustfs-bucket-init' <<<"$bucket" || fail "the bucket-init policy must select rustfs-bucket-init"
+grep -Fq 'app: "rustfs"' <<<"$bucket" || fail "the bucket-init policy must reach the object store only"
+grep -Fq '{port: 9000, protocol: TCP}' <<<"$bucket" || fail "the bucket-init policy must reach the S3 port"
+grep -Fq 'policyTypes: [Egress]' <<<"$bucket" || fail "the bucket-init policy must leave ingress to Substrate's own policies"
+lacks "no bucket-init policy with an empty list" 'substrate-bucket-init' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.bucketInitJobs=null' "${np[@]}"
 has "the closed list is configurable" '- app-y$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps={app-y}' "${np[@]}"
 lacks "no closed policy with an empty list" 'substrate-closed' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps=null' "${np[@]}"
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")

@@ -817,6 +817,11 @@ execution:
       # The pods that call the Kubernetes API server and nothing else: DNS and apiServerCIDRs. The installer
       # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
       apiOnlyApps: [k8s-credential-provider]
+      # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
+      # bucket-init Job (kind/rustfs.yaml:93-133). They get DNS and the object store S3 port only.
+      bucketInitJobs: [rustfs-bucket-init]
+      objectStoreApp: rustfs
+      objectStorePort: 9000
       # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1179), in the
       # control-plane namespace.
       atenetEgressSelector:

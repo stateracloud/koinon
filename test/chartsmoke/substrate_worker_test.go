@@ -16,7 +16,7 @@ func showOnly(template string) []string {
 }
 
 // The Substrate driver's worker namespace (issue #1089): with execution.driver=substrate the chart
-// renders the worker Namespace, the ValidatingAdmissionPolicies and the four NetworkPolicies (workers, control
+// renders the worker Namespace, the ValidatingAdmissionPolicies and the five NetworkPolicies (workers, control
 // plane, closed pods, API-only pods) next to the components that the smoke suite starts. They are objects for the API server, not
 // containers, so this spec renders the chart and checks that each of them reaches the manifest. It needs
 // helm and no Docker. The policies themselves run against a real API server in test/escape
@@ -30,7 +30,7 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 4))
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 4))
 		netpol := helmRenderWith(ctx, values, showOnly("templates/substrate-networkpolicy.yaml")...)
-		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 4))
+		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 5))
 		namespaces := helmRenderWith(ctx, values, showOnly("templates/substrate-workernamespace.yaml")...)
 		Expect(namespaces.Ignored).To(HaveKeyWithValue("Namespace", 1))
 	})

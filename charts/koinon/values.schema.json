@@ -693,6 +693,9 @@
                 "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "closedApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "apiOnlyApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "bucketInitJobs": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "objectStoreApp": {"$ref": "#/definitions/nonEmpty"},
+                "objectStorePort": {"type": "integer", "minimum": 1, "maximum": 65535},
                 "atenetEgressSelector": {"type": "object"},
                 "apiServerCIDRs": {"type": "array", "items": {"type": "string"}},
                 "extraEgress": {"type": "array", "items": {"type": "object"}}
