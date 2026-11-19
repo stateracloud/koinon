@@ -31,7 +31,7 @@ has "worker CONNECT policy" 'name: koinon-koinon-worker-connect$' "${wsub[@]}" "
 has "policies are native ValidatingAdmissionPolicies" 'kind: ValidatingAdmissionPolicyBinding' "${wsub[@]}" "${pol[@]}"
 lacks "no Kyverno" '[Kk]yverno' "${wsub[@]}" "${pol[@]}"
 # The CEL strings are YAML-quoted JSON: strip the escapes so the greps read the CEL.
-pdocs=$(render "${wsub[@]}" "${pol[@]}" | tr -d '\\')
+pdocs=$(render "${wsub[@]}" "${pol[@]}" | tr -d '\134')
 wbind=$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$pdocs")
 cbind=$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-control-pods\n' <<<"$pdocs")
 grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$wbind" || fail "the worker pod policy must bind to the worker namespace"
