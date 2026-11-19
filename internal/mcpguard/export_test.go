@@ -4,3 +4,6 @@ package mcpguard
 
 // SetFeedPolled sets a function the guard runs before each step of its wait for agentd's feed.
 func SetFeedPolled(g *Guard, f func()) { g.feedPolled = f }
+
+// ServerOf is serverOf, for the spec that keeps the guard's server row equal to the table.
+var ServerOf = serverOf

@@ -6,7 +6,7 @@
 
 sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
-	--set execution.substrate.allowUnhardened=true --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
+	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
 # OpenShell stays the default: no Substrate input reaches any component.
@@ -40,6 +40,18 @@ if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown dr
 if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null 2>"$out/sub.err"; then fail "substrate without allowUnhardened must not render"; fi
 grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
 env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
+
+# The tiers reach both components: the driver starts no guest process without one (#1088).
+env_is KOINON_SUBSTRATE_DEFAULT_TIER '"dev"' "${sub[@]}"
+has "the default tier is in the reconciler config" 'defaultTier: "dev"' "${sub[@]}" --show-only templates/config.yaml
+tiers=(--set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.runtimeClassTiers.gvisor=hardened)
+env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"gvisor=hardened,kata=vm"' "${sub[@]}" "${tiers[@]}"
+has "the class tiers are in the reconciler config" '- "kata=vm"' "${sub[@]}" "${tiers[@]}" --show-only templates/config.yaml
+lacks "no tier list without class tiers" 'runtimeClassTiers' "${sub[@]}" --show-only templates/config.yaml
+if render "${sub[@]}" --set execution.substrate.defaultTier= >/dev/null 2>"$out/sub.err"; then fail "substrate without a tier must not render"; fi
+grep -q 'defaultTier' "$out/sub.err" || fail "the missing-tier error must name execution.substrate.defaultTier"
+render "${sub[@]}" --set execution.substrate.defaultTier= "${tiers[@]}" >/dev/null 2>&1 || fail "class tiers alone must render"
+if render "${sub[@]}" --set execution.substrate.runtimeClassTiers.kata=root >/dev/null 2>&1; then fail "an unknown tier must not render"; fi
 
 # The gateway NetworkPolicy admits the model port from Substrate's namespace, not OpenShell's, with
 # the substrate driver; the default is unchanged.

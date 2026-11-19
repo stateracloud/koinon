@@ -275,6 +275,7 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 		"--set", "execution.substrate.tokenAudience=ateapi",
 		"--set", "execution.substrate.allowUnhardened=true",
 		"--set", "execution.substrate.workerNetworkPolicy.enabled=false",
+		"--set", "execution.substrate.defaultTier=dev",
 		"--set", "sandboxObserver.enabled=false", "--set", "sandboxNetworkPolicy.enabled=false", "--set", "sandboxLimitRange.enabled=false",
 		"--show-only", workerPolicyTemplate)
 	cmd.Stdout, cmd.Stderr = &out, &stderr

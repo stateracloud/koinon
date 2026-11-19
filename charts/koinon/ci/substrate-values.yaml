@@ -15,6 +15,7 @@ execution:
       installerIdentities: [system:admin]
     workerNetworkPolicy:
       apiServerCIDRs: [192.0.2.10/32]
+    defaultTier: dev
 sandboxObserver:
   enabled: false
 sandboxNetworkPolicy:

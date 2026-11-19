@@ -129,7 +129,9 @@ func Resolve(cmd *cobra.Command, v *viper.Viper) error {
 				return
 			}
 		}
-		if !fromEnv(names) && v.GetString(key) == "" {
+		// A YAML list reads as "" through GetString, so a slice flag is judged by its elements.
+		isSlice := f.Value.Type() == "stringSlice" || f.Value.Type() == "stringArray"
+		if !fromEnv(names) && (isSlice && len(v.GetStringSlice(key)) == 0 || !isSlice && v.GetString(key) == "") {
 			return
 		}
 		var val string
