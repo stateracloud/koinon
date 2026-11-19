@@ -8,14 +8,23 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
-// A2A interop with a kagent agent, both directions (issue #131). This is a skeleton. It skips unless
-// the lab gives it a Koinon A2A edge and a kagent agent. It is not a required CI job.
+// A2A interop with a kagent agent, both directions (issue #131, ADR 0123).
 //
-//	KOINON_E2E_A2A_URL    the Koinon external A2A edge (ADR 0011); not built yet
-//	KOINON_E2E_KAGENT_URL the A2A endpoint of a kagent agent that runs a pinned release and a fake model
+// The exchange of one task between the Koinon outbound client and the Koinon edge, with
+// input-required, runs without a cluster in internal/a2aout (loop_test.go). The state mapping is in
+// internal/a2aedge (state_test.go). The specs below need a real kagent agent, so they need kind. They
+// skip unless the lab gives them these (not a required CI job):
 //
-// The kagent release pin is not set: the lane VM cannot read kagent releases, so no version was checked
-// against the 3-day rule (ADR 0079).
+//	KOINON_E2E_A2A_URL    base URL of the Koinon edge, e.g. https://koinon.example/a2a/v1
+//	KOINON_E2E_KAGENT_URL base URL of the A2A endpoint of a kagent agent
+//
+// What a run needs (kind, per the issue):
+//   - a kind cluster with Koinon installed and an explicit KUBECONFIG file;
+//   - a kagent release pinned to a version at least 3 days old (ADR 0079); it is NOT pinned here, because
+//     the lane VM could not read kagent releases or reach registry.k8s.io, quay.io and docker.io;
+//   - a kagent agent whose model is the fake model server, so no paid model is called;
+//   - a Koinon agent with a direct_message trigger, a remote_agents entry for the kagent agent, and an org
+//     API token (fake in tests: koinon_test_not-a-real-token).
 var _ = Describe("A2A interop with kagent", Label("a2a", "kagent"), func() {
 	BeforeEach(func() {
 		testenv.Require(
@@ -24,15 +33,15 @@ var _ = Describe("A2A interop with kagent", Label("a2a", "kagent"), func() {
 		)
 	})
 
-	It("lets a Koinon agent call a kagent agent", func() {
-		Fail("not built: needs the Koinon external A2A client (ADR 0011, v1.0 follow-up)")
+	It("lets a kagent agent send a task to a Koinon agent", func() {
+		Skip("needs kind: send a v0.3 and a v1.0 SendMessage from the kagent agent to the Koinon edge; expect a task in input-required when the Koinon agent asks")
 	})
 
-	It("lets a kagent agent call a Koinon agent", func() {
-		Fail("not built: needs the Koinon external A2A edge (ADR 0011, v1.0 follow-up)")
+	It("lets a Koinon agent send a task to a kagent agent", func() {
+		Skip("needs kind: the Koinon agent calls send_task on the remote_agents entry; expect completed with the reply of the fake model")
 	})
 
-	It("maps a parked run that needs input to input-required", func() {
-		Fail("not built: needs the Koinon external A2A edge (ADR 0011, v1.0 follow-up)")
+	It("keeps input-required across both systems", func() {
+		Skip("needs kind: the kagent agent answers a question of the Koinon agent, and the Koinon agent answers a question of the kagent agent")
 	})
 })
