@@ -33,7 +33,7 @@ has "images are pinned by digest" "@sha256:\[a-f0-9\]\{64\}" "${wsub[@]}" "${pol
 has "hostNetwork is denied" 'hostNetwork is not allowed' "${wsub[@]}" "${pol[@]}"
 has "hostPath is limited to the documented set" 'v.hostPath.path in \[\\"/dev/kvm\\",\\"/dev/net/tun\\",\\"/dev/vhost-vsock\\",\\"/dev/vhost-net\\",\\"/var/lib/ate\\"\]' "${wsub[@]}" "${pol[@]}"
 has "ephemeral containers are denied" "request.subResource != 'ephemeralcontainers'" "${wsub[@]}" "${pol[@]}"
-has "exec, attach, port-forward and proxy are denied" 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy\]' "${wsub[@]}" "${pol[@]}"
+has "exec, attach, port-forward, pod proxy and service proxy are denied" 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy\]' "${wsub[@]}" "${pol[@]}"
 has "the validation actions deny" 'validationActions: \["Deny"\]' "${wsub[@]}" "${pol[@]}"
 tag=$(render "${wsub[@]}" "${pol[@]}")
 grep -Eq -- 'name: tagAllowed' <<<"$tag" || fail "the digest exemption variable is missing"

@@ -10,7 +10,7 @@ pod's creator cannot choose.
   are exempt until Substrate publishes by digest: execution.substrate.workerPolicy.digestExemptIdentities).
   No hostNetwork. hostPath only from workerPolicy.allowedHostPaths, on every volume. No ephemeral
   containers, for any identity, the controller included;
-- CONNECT: pods/exec, attach, portforward and proxy are denied to every identity with no exemption (a
+- CONNECT: pods/exec, attach, portforward, pods/proxy and services/proxy are denied to every identity with no exemption (a
   process started that way is outside the guest launcher's and gateway's controls). Break-glass is not
   an exemption: a cluster admin suspends the binding, which shows in the audit log and as GitOps drift.
   It is its own policy because an options object has no spec or metadata;
@@ -106,7 +106,7 @@ spec:
       - apiGroups: [""]
         apiVersions: [v1]
         operations: [CONNECT]
-        resources: [pods/exec, pods/attach, pods/portforward, pods/proxy]
+        resources: [pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy]
   validations:
     - expression: "false"
       messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in the Substrate namespace (requested by ' + request.userInfo.username + ')'"

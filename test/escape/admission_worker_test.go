@@ -242,6 +242,15 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}
 	})
 
+	It("denies the service proxy of the worker namespace, for every identity", func(ctx SpecContext) {
+		// A service proxy reaches a Service port through the API server, past the NetworkPolicy.
+		// nodes/proxy is cluster-scoped and outside this namespaced policy.
+		for _, user := range []string{"admin", workerController, other} {
+			req := as[user].CoreV1().RESTClient().Get()
+			denied(req.Namespace(workerNamespace).Resource("services").Name("any:80").SubResource("proxy").Do(ctx).Error())
+		}
+	})
+
 	It("denies exec into a worker pod, for every identity", func(ctx SpecContext) {
 		// Admission runs before the API server opens the connection, so this needs no kubelet.
 		for _, user := range []string{"admin", workerController, other} {
