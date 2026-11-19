@@ -641,3 +641,16 @@ happened, through allowed low-risk calls.
 The table of decision 5 reads, for both legs and `external-low`: pass, with the bytes counted. The
 open question "does a cap refusal stop the run?" of the amendment of 2026-11-16 is closed: there is
 no cap refusal.
+
+## Amendment (2026-11-19, #1132): a tool list is served only as approved
+
+Decision 4 sets the legs of a tool result. It did not say what a changed `tools/list` does. The tool
+text is a prompt, so a new tool or a changed description is a new instruction to the model.
+
+- The guard compares the hash of each tool's sanitised text with the hash an admin approved. A tool
+  with another hash is left out of the list, and a call to it is refused with the reason
+  `tool_changed`, until an admin reviews it again. See ADR 0097 decision 13.
+- A tool that no admin approved yet is served as sanitised text. It sets the untrusted-input leg, and
+  only when its server declares that leg. The leg alone never causes an approval.
+- A tool list that the guard cannot read is not served, and it sets both legs (fail closed, as for any
+  reply the guard never saw).

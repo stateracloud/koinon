@@ -2247,6 +2247,9 @@ where the target's own CA bundle (public certificates) is mounted, empty for the
 | credential_file | 7 | `string` | singular |  |  |
 | ca_file | 8 | `string` | singular |  |  |
 | insecure_skip_verify | 9 | `bool` | singular |  |  |
+| builtin | 10 | `string` | singular |  | builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123). |
+| remote_agents | 11 | `koinon.gateway.v1alpha1.RemoteAgent` | repeated |  |  |
+| handle_key_file | 12 | `string` | singular |  | handle_key_file holds the key that signs the task and context handles of the built-in target. |
 
 ### Message Model
 
@@ -2304,6 +2307,23 @@ in the gateway, not the key.
 | api_key_file | 5 | `string` | singular |  |  |
 | anthropic_workspace_id | 6 | `string` | singular |  |  |
 | models | 7 | `koinon.gateway.v1alpha1.Model` | repeated |  |  |
+
+### Message RemoteAgent
+
+RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| id | 2 | `string` | singular |  |  |
+| card_url | 3 | `string` | singular |  |  |
+| credential_header | 4 | `string` | singular |  |  |
+| credential_prefix | 5 | `string` | singular |  |  |
+| credential_file | 6 | `string` | singular |  |  |
+| ca_file | 7 | `string` | singular |  |  |
+| insecure_skip_verify | 8 | `bool` | singular |  |  |
+| card_hash | 9 | `string` | singular |  | card_hash is the pin: the SHA-256 of the canonical agent card, in hex. |
+| agents | 10 | `string` | repeated |  | agents are the names of the Koinon agents that may call this remote agent. |
 
 ### Message StateUpdate
 
@@ -3447,6 +3467,179 @@ QuestionState is where a question stands.
 | QUESTION_STATE_DISMISSED | 4 | Dismissed by the person; the default was applied. |
 | QUESTION_STATE_EXPIRED | 5 | Nobody answered in time; the default was applied. |
 | QUESTION_STATE_CANCELED | 6 | The run ended (canceled, failed or finished) before anyone answered; nothing was applied. |
+
+## koinon.remoteagent.v1alpha1
+
+Files: `koinon/remoteagent/v1alpha1/remoteagent.proto`
+
+### Service RemoteAgentService
+
+RemoteAgentService manages an org's remote agents: external A2A agents that the org's agents may call
+(ADR 0123 decisions 9, 11 and 13). A remote agent is its own resource, not an MCP server. It is the
+connect-rpc face of the same service layer the admin API uses. Admins and owners only.
+
+A remote agent is pinned to its agent card. Only an admin moves the pin: at registration, on a change of
+the URL, or with AcceptRemoteAgentCard. The health check reads the card again; a card that differs from
+the pin is a finding (observed_card_hash) and never an update. The card text is data from another party:
+GetRemoteAgentCard returns it to an admin, and nothing else returns it. Credentials are write-only.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| AcceptRemoteAgentCard | `koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardRequest` | `koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardResponse` | - | AcceptRemoteAgentCard moves the observed card to the pin. observed_card_hash must be the hash the admin read; if the health check saw another card since, the call fails with ABORTED. Audited as remote_agent.card.accepted. |
+| CreateRemoteAgent | `koinon.remoteagent.v1alpha1.CreateRemoteAgentRequest` | `koinon.remoteagent.v1alpha1.CreateRemoteAgentResponse` | - | CreateRemoteAgent registers an agent. It reads the agent card at card_url and pins it. A card that cannot be read, or that offers no interface on the host of card_url, is refused with INVALID_ARGUMENT. Audited as remote_agent.created. |
+| DeleteRemoteAgent | `koinon.remoteagent.v1alpha1.DeleteRemoteAgentRequest` | `koinon.remoteagent.v1alpha1.DeleteRemoteAgentResponse` | - | DeleteRemoteAgent deletes an agent and the grants of it. Audited as remote_agent.deleted. |
+| GetAgentRemoteAgents | `koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsRequest` | `koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsResponse` | - | GetAgentRemoteAgents returns the remote agents an agent may call. An agent with none calls none. |
+| GetRemoteAgentCard | `koinon.remoteagent.v1alpha1.GetRemoteAgentCardRequest` | `koinon.remoteagent.v1alpha1.GetRemoteAgentCardResponse` | - | GetRemoteAgentCard returns the pinned card and the observed one. The text is data from another party. |
+| ListRemoteAgents | `koinon.remoteagent.v1alpha1.ListRemoteAgentsRequest` | `koinon.remoteagent.v1alpha1.ListRemoteAgentsResponse` | - |  |
+| SetAgentRemoteAgents | `koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsRequest` | `koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsResponse` | - | SetAgentRemoteAgents replaces them. Audited as agent.remote_agents.set. |
+| UpdateRemoteAgent | `koinon.remoteagent.v1alpha1.UpdateRemoteAgentRequest` | `koinon.remoteagent.v1alpha1.UpdateRemoteAgentResponse` | - | UpdateRemoteAgent changes an agent. A change of card_url reads the card at the new URL and moves the pin to it. Audited as remote_agent.updated. |
+
+### Message AcceptRemoteAgentCardRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| remote_agent_id | 2 | `string` | singular |  |  |
+| observed_card_hash | 3 | `string` | singular |  |  |
+
+### Message AcceptRemoteAgentCardResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agent | 1 | `koinon.remoteagent.v1alpha1.RemoteAgent` | singular |  |  |
+
+### Message CreateRemoteAgentRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| name | 2 | `string` | singular |  |  |
+| card_url | 3 | `string` | singular |  |  |
+| credential_header | 4 | `string` | singular |  | credential_header defaults to Authorization when credential_value is set. |
+| credential_prefix | 5 | `string` | singular |  |  |
+| credential_value | 6 | `string` | singular |  |  |
+| ca_bundle | 7 | `string` | singular |  | ca_bundle is a PEM bundle of the one CA that signs the agent's certificate. https only, never with insecure_skip_verify. |
+| insecure_skip_verify | 8 | `bool` | singular |  |  |
+
+### Message CreateRemoteAgentResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agent | 1 | `koinon.remoteagent.v1alpha1.RemoteAgent` | singular |  |  |
+
+### Message DeleteRemoteAgentRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| remote_agent_id | 2 | `string` | singular |  |  |
+
+### Message DeleteRemoteAgentResponse
+
+No fields.
+
+### Message GetAgentRemoteAgentsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+
+### Message GetAgentRemoteAgentsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agent_ids | 1 | `string` | repeated |  |  |
+
+### Message GetRemoteAgentCardRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| remote_agent_id | 2 | `string` | singular |  |  |
+
+### Message GetRemoteAgentCardResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| card_hash | 1 | `string` | singular |  |  |
+| card_json | 2 | `string` | singular |  | card_json is the pinned canonical card. Data from another party: show it to an admin only. |
+| observed_card_hash | 3 | `string` | singular |  |  |
+| observed_card_json | 4 | `string` | singular |  |  |
+
+### Message ListRemoteAgentsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ListRemoteAgentsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agents | 1 | `koinon.remoteagent.v1alpha1.RemoteAgent` | repeated |  |  |
+
+### Message RemoteAgent
+
+RemoteAgent holds no credential and no card text.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| org_id | 2 | `string` | singular |  |  |
+| name | 3 | `string` | singular |  | name is a DNS label of at most 24 characters. The model passes it as the agent argument of the built-in tools. |
+| card_url | 4 | `string` | singular |  | card_url is the base URL of the agent. Its card is at /.well-known/agent-card.json under it. |
+| has_credential | 5 | `bool` | singular |  |  |
+| credential_header | 6 | `string` | singular |  |  |
+| credential_prefix | 7 | `string` | singular |  |  |
+| credential_lost_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
+| ca_bundle | 9 | `string` | singular |  |  |
+| insecure_skip_verify | 10 | `bool` | singular |  |  |
+| card_hash | 11 | `string` | singular |  | card_hash is the SHA-256 (hex) of the pinned canonical card. |
+| card_checked_at | 12 | `google.protobuf.Timestamp` | singular |  |  |
+| observed_card_hash | 13 | `string` | singular |  | observed_card_hash is set while the health check saw a card that is not the pin and an admin did not accept it. It stays until an admin accepts it. |
+| health | 14 | `string` | singular |  | health is "unknown", "healthy" or "unhealthy". |
+| health_reason | 15 | `string` | singular |  |  |
+| health_checked_at | 16 | `google.protobuf.Timestamp` | singular |  |  |
+| health_since | 17 | `google.protobuf.Timestamp` | singular |  |  |
+| consecutive_failures | 18 | `int32` | singular |  |  |
+| disabled_reason | 19 | `string` | singular |  |  |
+| created_at | 20 | `google.protobuf.Timestamp` | singular |  |  |
+| updated_at | 21 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message SetAgentRemoteAgentsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| remote_agent_ids | 3 | `string` | repeated |  |  |
+
+### Message SetAgentRemoteAgentsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agent_ids | 1 | `string` | repeated |  |  |
+
+### Message UpdateRemoteAgentRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| remote_agent_id | 2 | `string` | singular |  |  |
+| card_url | 3 | `string` | optional |  | Unset fields stay. A credential_* field replaces the credential; credential_value unset keeps the stored secret. |
+| credential_header | 4 | `string` | optional |  |  |
+| credential_prefix | 5 | `string` | optional |  |  |
+| credential_value | 6 | `string` | optional |  |  |
+| remove_credential | 7 | `bool` | singular |  |  |
+| ca_bundle | 8 | `string` | optional |  |  |
+| insecure_skip_verify | 9 | `bool` | optional |  |  |
+
+### Message UpdateRemoteAgentResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| remote_agent | 1 | `koinon.remoteagent.v1alpha1.RemoteAgent` | singular |  |  |
 
 ## koinon.run.v1alpha1
 

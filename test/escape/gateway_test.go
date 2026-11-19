@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
+	"github.com/stateracloud/koinon/internal/testing/uniqname"
 )
 
 func envOr(key, def string) string {
@@ -71,9 +72,9 @@ func dialGateway(ctx context.Context) *gateway {
 	return g
 }
 
-// suffix makes the names of one run unique; OpenShell 0.1.5 allows at most 19 characters in a
-// sandbox name.
-func suffix() int64 { return time.Now().UnixNano() / int64(time.Millisecond) % 100_000_000 }
+// suffix makes the names of one run unique (process ID and counter, not a clock tick that two specs
+// can share); OpenShell 0.1.5 allows at most 19 characters in a sandbox name.
+func suffix() int64 { return uniqname.Suffix() }
 
 // provider imports p with its profile and deletes both when the container ends.
 func (g *gateway) provider(ctx context.Context, p execution.Provider) {

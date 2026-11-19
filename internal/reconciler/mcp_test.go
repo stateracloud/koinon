@@ -18,6 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -132,6 +134,44 @@ var _ = Describe("Org MCP servers", func() {
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(sec.Data[strings.TrimPrefix(t.CredentialFile, "/secrets/providers/")])).To(Equal("not-a-real-token"))
+	})
+
+	It("writes MCP credentials to their own Secret, away from the provider keys, when one is configured (#278 S4b)", func(ctx SpecContext) {
+		const mcpSecret = "koinon-gateway-mcp-keys"
+		osg := fakegateway.New()
+		cc, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+		rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:  prices.NewResolver(pricing.Embedded()),
+			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}, Keys: ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+			ProviderKeyDir: "/secrets/providers",
+			MCPKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: mcpSecret},
+			MCPKeyDir:      "/secrets/mcp", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		s := server(ctx, org, "wiki", "koinon_test_not-a-real-token", map[string]string{"read": "auto"})
+		// An install from before the split: the provider keys Secret still holds an MCP file.
+		_, err = kube.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace, Labels: map[string]string{"koinon.dev/managed-by": "koinon-reconciler"}},
+			Data:       map[string][]byte{"mcp-legacy-00000000": []byte("koinon_test_not-a-real-token")},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(rr.ReconcileAll(ctx)).To(Succeed())
+
+		t, ok := targetOf(mg.last(), slug+"-wiki")
+		Expect(ok).To(BeTrue())
+		Expect(t.CredentialFile).To(HavePrefix("/secrets/mcp/mcp-" + s.ID + "-"))
+		file := strings.TrimPrefix(t.CredentialFile, "/secrets/mcp/")
+		mcpSec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpSecret, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(mcpSec.Data[file])).To(Equal("koinon_test_not-a-real-token"))
+		prov, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(prov.Data).NotTo(HaveKey(file), "the provider keys Secret holds no MCP credential")
+		Expect(prov.Data).NotTo(HaveKey("mcp-legacy-00000000"), "the pass removes the legacy MCP file from the provider keys Secret")
 	})
 
 	It("grants an agent the auto tools directly, the ask tools through the approval proxy, and no never tools", func(ctx SpecContext) {
@@ -289,7 +329,7 @@ var _ = Describe("Org MCP servers", func() {
 				got, err := svc.Get(ctx, org, s.ID)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(got.Health).To(Equal("healthy"))
-			}).WithTimeout(10 * time.Second).Should(Succeed())
+			}).WithTimeout(racescale.D(10 * time.Second)).Should(Succeed())
 			Expect(tiers(ctx, s)).To(HaveKey("read"))
 		})
 

@@ -11,6 +11,9 @@ import (
 )
 
 type Querier interface {
+	// Moves the observed card to the pin and clears the finding. The caller checked, on the locked row, that
+	// the observed hash is the one the admin read.
+	AcceptRemoteAgentCard(ctx context.Context, arg AcceptRemoteAgentCardParams) (RemoteAgent, error)
 	AckGatewayStateRevision(ctx context.Context, arg AckGatewayStateRevisionParams) error
 	AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeMCPToolReviewParams) (McpTool, error)
 	// draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
@@ -35,6 +38,9 @@ type Querier interface {
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
 	// item starts waiting on them). Returns the rows that were new.
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
+	// A tool an admin reviewed before the pin existed, and whose description and schema did not change
+	// since: the text the server publishes now is the text that was reviewed, so it is the pin (#1132).
+	AdoptMCPToolPin(ctx context.Context, arg AdoptMCPToolPinParams) error
 	// Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
 	AnswerHomeRepositoryProbe(ctx context.Context, arg AnswerHomeRepositoryProbeParams) (int64, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
@@ -289,6 +295,14 @@ type Querier interface {
 	CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
+	// Remote agents: external A2A agents of an org, and the grants of the org's agents (#1129, ADR 0123
+	// decisions 9, 11 and 13). credential is an envelope (internal/secretstore); no query decrypts anything.
+	// card and observed_card are data from another party, for admins only.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	CreateRemoteAgent(ctx context.Context, arg CreateRemoteAgentParams) (RemoteAgent, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
 	// Run state machine (ADR 0030). Every transition is a compare-and-set on the
 	// source state, and owner writes also on the epoch: a racing, illegal or stale
 	// write matches no rows (pgx.ErrNoRows for :one). The runs_check_transition
@@ -327,6 +341,7 @@ type Querier interface {
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
+	DeleteAgentRemoteAgents(ctx context.Context, arg DeleteAgentRemoteAgentsParams) error
 	// Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns
 	// those two columns); clear the run overrides first (ClearAgentRunLimits).
 	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
@@ -353,6 +368,7 @@ type Querier interface {
 	DeleteOrgFetchTrustedHost(ctx context.Context, arg DeleteOrgFetchTrustedHostParams) (int64, error)
 	DeletePlatformTraceDestination(ctx context.Context) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
+	DeleteRemoteAgent(ctx context.Context, arg DeleteRemoteAgentParams) (int64, error)
 	DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
@@ -520,6 +536,8 @@ type Querier interface {
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
 	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
+	// The hash of the install chain row at one chain_seq (a checkpoint names the row it signed).
+	GetInstallEventHash(ctx context.Context, chainSeq int64) ([]byte, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The install ID (old issue 615): created once by a migration, never changed. KMS-wrapped KEKs are bound
@@ -532,6 +550,9 @@ type Querier interface {
 	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
 	// The newest audit.anchor install event and its age by the database's clock.
 	GetLastInstallAnchor(ctx context.Context) (GetLastInstallAnchorRow, error)
+	// The newest audit.checkpoint install event, its age by the database's clock and its summary as Postgres
+	// prints it (ADR 0100 decision 4.2).
+	GetLastInstallCheckpoint(ctx context.Context) (GetLastInstallCheckpointRow, error)
 	// The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
 	// checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
 	GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent, error)
@@ -615,6 +636,9 @@ type Querier interface {
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
 	GetRecoveryRequest(ctx context.Context, nonce string) (RecoveryRequest, error)
+	GetRemoteAgent(ctx context.Context, arg GetRemoteAgentParams) (RemoteAgent, error)
+	// The row locked, for the writes that read it first (a health record, an accept).
+	GetRemoteAgentForUpdate(ctx context.Context, arg GetRemoteAgentForUpdateParams) (RemoteAgent, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunArtifact(ctx context.Context, arg GetRunArtifactParams) (RunArtifact, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
@@ -649,6 +673,10 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
+	// GetServedMCPServerByName without the sealed credential column. The leak guard runs as the gateway's
+	// database role, which has a column-level grant on mcp_servers that leaves out `credential` (ADR 0097
+	// decision 5, #278): a SELECT * would be refused. Keep this list equal to migrations.GatewayMCPServerColumns.
+	GetServedMCPServerForGuard(ctx context.Context, arg GetServedMCPServerForGuardParams) (GetServedMCPServerForGuardRow, error)
 	// An org's recorded USD spend of its system key since @since, for the key's daily budget.
 	GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSinceParams) (string, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
@@ -681,6 +709,7 @@ type Querier interface {
 	// Gives a new agent its template's limit as its own editable limit.
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
+	InsertAgentRemoteAgent(ctx context.Context, arg InsertAgentRemoteAgentParams) error
 	// A call a person approved has run through the gateway (internal/approvals). The guard's own record
 	// of it is the parked decision (action 'approve', or the 'ask_target' pass); this row copies that
 	// decision's class, payload size and legs as a pass with reason 'approved', so the bytes that left
@@ -700,6 +729,8 @@ type Querier interface {
 	// One decision of the MCP leak guard. The agent's running run is read in the same statement, so a
 	// decision costs one round trip. No argument, payload or matched text is stored.
 	InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGuardDecisionParams) error
+	// One row per tool call the gateway served. No arguments, results or token values (ADR 0097).
+	InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogParams) error
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
@@ -801,6 +832,8 @@ type Querier interface {
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
 	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
+	ListAgentRemoteAgents(ctx context.Context, orgID pgtype.UUID) ([]AgentRemoteAgent, error)
+	ListAgentRemoteAgentsOfAgent(ctx context.Context, arg ListAgentRemoteAgentsOfAgentParams) ([]AgentRemoteAgent, error)
 	ListAgentRunLimits(ctx context.Context, orgID pgtype.UUID) ([]ListAgentRunLimitsRow, error)
 	// Every agent's recorded USD spend since @since, for the budgets list.
 	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
@@ -845,6 +878,8 @@ type Querier interface {
 	// The read path (AuditService.List, GET /admin/v1/audit): newest first by id, optionally narrowed
 	// by time range, action prefix and actor. before_id is the cursor, the last id of the previous page.
 	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
+	// The remote agents of one org that the health check reads: enabled, and with a credential that was not lost.
+	ListCheckableRemoteAgents(ctx context.Context, orgID pgtype.UUID) ([]RemoteAgent, error)
 	// One connection's part of the scope, to tell whether a new reading changes it.
 	ListCodeHostConnectionRepos(ctx context.Context, arg ListCodeHostConnectionReposParams) ([]ListCodeHostConnectionReposRow, error)
 	ListCodeHostPollers(ctx context.Context, orgID pgtype.UUID) ([]CodeHostPoller, error)
@@ -928,6 +963,9 @@ type Querier interface {
 	// Every platform.settings.observed event, oldest first. An event holds only the keys that changed, so
 	// the last recorded settings are the events applied in turn (ADR 0100 decision 3). A few rows per install.
 	ListInstallSettingsEvents(ctx context.Context) ([]InstallAuditEvent, error)
+	// Every audit.signing_key.added event, oldest first: the public keys of the checkpoints (ADR 0100
+	// decision 4.2). A rotated key stays listed, so an old checkpoint still verifies.
+	ListInstallSigningKeys(ctx context.Context) ([]ListInstallSigningKeysRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
@@ -989,6 +1027,9 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by org. The run
 	// claim loop of koinon-agentd uses ListOrgIDsWithRunWork instead.
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// The remote-agent health check: finds the orgs that have a remote agent to check, returning org ids only;
+	// every read and write after it is scoped by @org_id.
+	ListOrgIDsWithCheckableRemoteAgents(ctx context.Context) ([]pgtype.UUID, error)
 	// The live orgs where the checkpoint tick has work: an open request (to claim, take over or fail,
 	// home_checkpoints_open) or a ready sandbox whose agent has had no checkpoint requested for
 	// @interval_seconds (the hourly request; agent_sandboxes_checkpointable). The tick runs every
@@ -1103,6 +1144,7 @@ type Querier interface {
 	ListQuestionsToRemind(ctx context.Context, arg ListQuestionsToRemindParams) ([]Question, error)
 	// The agent's latest replies on the task, newest first.
 	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error)
+	ListRemoteAgents(ctx context.Context, orgID pgtype.UUID) ([]RemoteAgent, error)
 	// The artifacts of a run, without their bodies.
 	ListRunArtifacts(ctx context.Context, arg ListRunArtifactsParams) ([]ListRunArtifactsRow, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
@@ -1364,6 +1406,10 @@ type Querier interface {
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
+	// One health check's result, computed by the caller from the locked row (GetRemoteAgentForUpdate): the new
+	// health, its reason, the failure count and the observed card. health_since moves only when health changes.
+	// The pin (card, card_hash) is never written here.
+	RecordRemoteAgentCheck(ctx context.Context, arg RecordRemoteAgentCheckParams) (RemoteAgent, error)
 	RecordSandboxCreation(ctx context.Context, arg RecordSandboxCreationParams) (pgtype.UUID, error)
 	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
 	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
@@ -1639,6 +1685,9 @@ type Querier interface {
 	// being saved; the zero UUID for a new server). The reconciler serves a subset of these, so the sum
 	// is an upper bound of what it puts in the gateway Secret.
 	SumMCPCABundleBytes(ctx context.Context, exceptID pgtype.UUID) (int64, error)
+	// The CA bundle bytes of the org's remote agents except one (the one being saved; the zero UUID for a new
+	// one). The reconciler puts them in the gateway Secret with the MCP bundles, so they share the org budget.
+	SumRemoteAgentCABundleBytes(ctx context.Context, arg SumRemoteAgentCABundleBytesParams) (int64, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// The bytes that left the org for each external sink: the payload of every external call the guard
@@ -1700,6 +1749,12 @@ type Querier interface {
 	// Setting the key, or removing it, ends a lost key (#85): the trigger credential_lost_clear covers
 	// a stored key, this a removed one.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
+	// A change of the URL is a different agent: the pin moves to the card that was read at the new URL (@set_card),
+	// and health starts over. A change of the credential or of the TLS trust starts health over too: the new
+	// settings are unproven. credential is written only when @set_credential is true, and credential_header and
+	// credential_prefix only when @set_credential_meta is true, for the reasons of UpdateMCPServer: `keys rewrap`
+	// may have replaced the envelope since the caller read the row.
+	UpdateRemoteAgent(ctx context.Context, arg UpdateRemoteAgentParams) (RemoteAgent, error)
 	// Replaces the settings of a destination. Applies only to the version the caller read
 	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
 	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the

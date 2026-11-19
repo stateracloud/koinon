@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/wake"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -270,12 +271,12 @@ var _ = Describe("Reconciler latency defaults", func() {
 		go func() { done <- r.ReconcileAll(ctx) }()
 		Eventually(entered).Should(BeClosed(), "the pass is waiting for the gateway")
 
-		Eventually(func() openshellv1.SandboxPhase { return phase(agent.ID) }).WithTimeout(10*time.Second).
+		Eventually(func() openshellv1.SandboxPhase { return phase(agent.ID) }).WithTimeout(racescale.D(10*time.Second)).
 			Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "the start did not wait for the gateway reload")
 		Consistently(done, 200*time.Millisecond).ShouldNot(Receive(), "the gateway is still reloading")
 
 		close(hold)
-		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+		Eventually(done).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(BeNil()))
 	})
 	// Early jobs run while the gateway Apply is still in flight. They may do that only because the
 	// sandbox's policy names the gateway's MCP route whatever tools any agent has (the grants
@@ -313,12 +314,12 @@ var _ = Describe("Reconciler latency defaults", func() {
 		done := make(chan error, 1)
 		go func() { done <- tr.ReconcileAll(ctx) }()
 		Eventually(entered).Should(BeClosed())
-		Eventually(func() openshellv1.SandboxPhase { return phase(agent.ID) }).WithTimeout(10 * time.Second).
+		Eventually(func() openshellv1.SandboxPhase { return phase(agent.ID) }).WithTimeout(racescale.D(10 * time.Second)).
 			Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 		Expect(routes()).To(Equal(before), "the early job's policy does not depend on the Apply")
 		Expect(grant.ID.Valid).To(BeTrue())
 		close(hold)
-		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+		Eventually(done).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(BeNil()))
 	})
 
 	// A sandbox starts on demand (old issue 315): activating agents creates nothing; the first run, a

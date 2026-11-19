@@ -170,6 +170,9 @@ type Lookups interface {
 type Config struct {
 	// KeyDir is where the gateway mounts the provider key files.
 	KeyDir string
+	// MCPKeyDir is where the gateway pods mount the MCP credential files and CA bundles when they are in a
+	// Secret of their own. Empty: KeyDir.
+	MCPKeyDir string
 	// KeySettle is how long a new key file needs to reach the gateway pod.
 	KeySettle time.Duration
 	// Wake, when set, is called once KeySettle after a pass wrote new key files: the exact end of the
@@ -826,6 +829,20 @@ func (p *Planner) recordAppliedMCP(servers []*MCPServer, probes []Probe) []Probe
 	return fresh
 }
 
+// mcpKeyDir is the directory the MCP credential files and CA bundles are mounted at.
+func (p *Planner) mcpKeyDir() string {
+	if p.cfg.MCPKeyDir != "" {
+		return p.cfg.MCPKeyDir
+	}
+	return p.cfg.KeyDir
+}
+
+// IsMCPFile reports whether a key file name is an MCP server's credential or CA bundle (mcp-..., mcpca-...), as
+// the reconciler names them. A provider key file is named by a UUID and a hash, so the names never collide.
+func IsMCPFile(name string) bool {
+	return strings.HasPrefix(name, "mcp-") || strings.HasPrefix(name, "mcpca-")
+}
+
 func (s *MCPServer) target() string { return mcpservers.TargetName(s.Org.Slug, s.Name) }
 
 func (s *MCPServer) probeAgent() gateway.AgentRef {
@@ -841,10 +858,10 @@ func (p *Planner) mcpTarget(s *MCPServer) gateway.MCPTarget {
 	if s.File != "" {
 		t.CredentialHeader = s.CredentialHeader
 		t.CredentialPrefix = s.CredentialPrefix
-		t.CredentialFile = path.Join(p.cfg.KeyDir, s.File)
+		t.CredentialFile = path.Join(p.mcpKeyDir(), s.File)
 	}
 	if s.CAFile != "" {
-		t.CAFile = path.Join(p.cfg.KeyDir, s.CAFile)
+		t.CAFile = path.Join(p.mcpKeyDir(), s.CAFile)
 	}
 	t.InsecureSkipVerify = s.InsecureSkipVerify
 	return t

@@ -9346,6 +9346,33 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "builtin",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "builtin names code that runs in koinon-gateway in place of an upstream URL (\"a2a\", ADR 0123)."
+            },
+            {
+              "name": "remote_agents",
+              "number": 11,
+              "type": "koinon.gateway.v1alpha1.RemoteAgent",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "handle_key_file",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "handle_key_file holds the key that signs the task and context handles of the built-in target."
             }
           ]
         },
@@ -9634,6 +9661,105 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RemoteAgent",
+          "fullName": "koinon.gateway.v1alpha1.RemoteAgent",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "RemoteAgent is one external A2A agent of a built-in \"a2a\" target (ADR 0123 decision 9).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_header",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_prefix",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_file",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_file",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 8,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_hash",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "card_hash is the pin: the SHA-256 of the canonical agent card, in hex."
+            },
+            {
+              "name": "agents",
+              "number": 10,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agents are the names of the Koinon agents that may call this remote agent."
             }
           ]
         },
@@ -14402,6 +14528,799 @@
           ]
         }
       ]
+    },
+    {
+      "name": "koinon.remoteagent.v1alpha1",
+      "files": [
+        "koinon/remoteagent/v1alpha1/remoteagent.proto"
+      ],
+      "services": [
+        {
+          "name": "RemoteAgentService",
+          "fullName": "koinon.remoteagent.v1alpha1.RemoteAgentService",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "RemoteAgentService manages an org's remote agents: external A2A agents that the org's agents may call\n(ADR 0123 decisions 9, 11 and 13). A remote agent is its own resource, not an MCP server. It is the\nconnect-rpc face of the same service layer the admin API uses. Admins and owners only.\n\nA remote agent is pinned to its agent card. Only an admin moves the pin: at registration, on a change of\nthe URL, or with AcceptRemoteAgentCard. The health check reads the card again; a card that differs from\nthe pin is a finding (observed_card_hash) and never an update. The card text is data from another party:\nGetRemoteAgentCard returns it to an admin, and nothing else returns it. Credentials are write-only.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "AcceptRemoteAgentCard",
+              "description": "AcceptRemoteAgentCard moves the observed card to the pin. observed_card_hash must be the hash the\nadmin read; if the health check saw another card since, the call fails with ABORTED. Audited as\nremote_agent.card.accepted.",
+              "requestType": "koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "CreateRemoteAgent",
+              "description": "CreateRemoteAgent registers an agent. It reads the agent card at card_url and pins it. A card that\ncannot be read, or that offers no interface on the host of card_url, is refused with INVALID_ARGUMENT.\nAudited as remote_agent.created.",
+              "requestType": "koinon.remoteagent.v1alpha1.CreateRemoteAgentRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.CreateRemoteAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "DeleteRemoteAgent",
+              "description": "DeleteRemoteAgent deletes an agent and the grants of it. Audited as remote_agent.deleted.",
+              "requestType": "koinon.remoteagent.v1alpha1.DeleteRemoteAgentRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.DeleteRemoteAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetAgentRemoteAgents",
+              "description": "GetAgentRemoteAgents returns the remote agents an agent may call. An agent with none calls none.",
+              "requestType": "koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetRemoteAgentCard",
+              "description": "GetRemoteAgentCard returns the pinned card and the observed one. The text is data from another party.",
+              "requestType": "koinon.remoteagent.v1alpha1.GetRemoteAgentCardRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.GetRemoteAgentCardResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListRemoteAgents",
+              "description": "",
+              "requestType": "koinon.remoteagent.v1alpha1.ListRemoteAgentsRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.ListRemoteAgentsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetAgentRemoteAgents",
+              "description": "SetAgentRemoteAgents replaces them. Audited as agent.remote_agents.set.",
+              "requestType": "koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "UpdateRemoteAgent",
+              "description": "UpdateRemoteAgent changes an agent. A change of card_url reads the card at the new URL and moves the\npin to it. Audited as remote_agent.updated.",
+              "requestType": "koinon.remoteagent.v1alpha1.UpdateRemoteAgentRequest",
+              "responseType": "koinon.remoteagent.v1alpha1.UpdateRemoteAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "AcceptRemoteAgentCardRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remote_agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "observed_card_hash",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "AcceptRemoteAgentCardResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.AcceptRemoteAgentCardResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agent",
+              "number": 1,
+              "type": "koinon.remoteagent.v1alpha1.RemoteAgent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateRemoteAgentRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.CreateRemoteAgentRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_header",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "credential_header defaults to Authorization when credential_value is set."
+            },
+            {
+              "name": "credential_prefix",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_value",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_bundle",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ca_bundle is a PEM bundle of the one CA that signs the agent's certificate. https only, never with\ninsecure_skip_verify."
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 8,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateRemoteAgentResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.CreateRemoteAgentResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agent",
+              "number": 1,
+              "type": "koinon.remoteagent.v1alpha1.RemoteAgent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DeleteRemoteAgentRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.DeleteRemoteAgentRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remote_agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DeleteRemoteAgentResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.DeleteRemoteAgentResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
+          "name": "GetAgentRemoteAgentsRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetAgentRemoteAgentsResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.GetAgentRemoteAgentsResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agent_ids",
+              "number": 1,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetRemoteAgentCardRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.GetRemoteAgentCardRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remote_agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetRemoteAgentCardResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.GetRemoteAgentCardResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "card_hash",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_json",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "card_json is the pinned canonical card. Data from another party: show it to an admin only."
+            },
+            {
+              "name": "observed_card_hash",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "observed_card_json",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListRemoteAgentsRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.ListRemoteAgentsRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListRemoteAgentsResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.ListRemoteAgentsResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agents",
+              "number": 1,
+              "type": "koinon.remoteagent.v1alpha1.RemoteAgent",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RemoteAgent",
+          "fullName": "koinon.remoteagent.v1alpha1.RemoteAgent",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "RemoteAgent holds no credential and no card text.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "name is a DNS label of at most 24 characters. The model passes it as the agent argument of the\nbuilt-in tools."
+            },
+            {
+              "name": "card_url",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "card_url is the base URL of the agent. Its card is at /.well-known/agent-card.json under it."
+            },
+            {
+              "name": "has_credential",
+              "number": 5,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_header",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_prefix",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_lost_at",
+              "number": 8,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_bundle",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 10,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_hash",
+              "number": 11,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "card_hash is the SHA-256 (hex) of the pinned canonical card."
+            },
+            {
+              "name": "card_checked_at",
+              "number": 12,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "observed_card_hash",
+              "number": 13,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "observed_card_hash is set while the health check saw a card that is not the pin and an admin did not\naccept it. It stays until an admin accepts it."
+            },
+            {
+              "name": "health",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "health is \"unknown\", \"healthy\" or \"unhealthy\"."
+            },
+            {
+              "name": "health_reason",
+              "number": 15,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "health_checked_at",
+              "number": 16,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "health_since",
+              "number": 17,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "consecutive_failures",
+              "number": 18,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "disabled_reason",
+              "number": 19,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "created_at",
+              "number": 20,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "updated_at",
+              "number": 21,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentRemoteAgentsRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remote_agent_ids",
+              "number": 3,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentRemoteAgentsResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.SetAgentRemoteAgentsResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agent_ids",
+              "number": 1,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "UpdateRemoteAgentRequest",
+          "fullName": "koinon.remoteagent.v1alpha1.UpdateRemoteAgentRequest",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remote_agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_url",
+              "number": 3,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Unset fields stay. A credential_* field replaces the credential; credential_value unset keeps the\nstored secret."
+            },
+            {
+              "name": "credential_header",
+              "number": 4,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_prefix",
+              "number": 5,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_value",
+              "number": 6,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "remove_credential",
+              "number": 7,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_bundle",
+              "number": 8,
+              "type": "string",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 9,
+              "type": "bool",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "UpdateRemoteAgentResponse",
+          "fullName": "koinon.remoteagent.v1alpha1.UpdateRemoteAgentResponse",
+          "file": "koinon/remoteagent/v1alpha1/remoteagent.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "remote_agent",
+              "number": 1,
+              "type": "koinon.remoteagent.v1alpha1.RemoteAgent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "enums": []
     },
     {
       "name": "koinon.run.v1alpha1",

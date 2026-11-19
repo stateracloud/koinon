@@ -47,7 +47,7 @@ _(Changed by [0119](0119-agent-substrate-execution-layer.md): flavor images carr
   level (for example: is a Kata RuntimeClass present? is the VAP installed?).
 
 **Amendment ([0119](0119-agent-substrate-execution-layer.md), issue #1087).** On the substrate
-driver the harness image gains the guest launcher (`make harness-substrate-opencode`: the image of
+driver the harness image gains the guest launcher (`make harness-substrate-<harness>`: the image of
 `make harness-opencode` plus `/usr/local/bin/koinon-guest-launcher` and its two policies). The launcher is an
 exec prefix, not the ENTRYPOINT: the driver runs the harness over the in-guest ProcessService, so every
 substrate-driver Exec of a harness (the ACP launch in particular) is

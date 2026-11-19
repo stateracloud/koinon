@@ -68,6 +68,9 @@ type Profile struct {
 	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
 	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
+	// GVisorMirror is the base URL of an operator mirror of the gVisor release (layout in GVisorDefaultMirror);
+	// empty means the public gVisor bucket. Only the installer host reads it, never a sandbox or a node.
+	GVisorMirror string
 	// Platform is the kind of cluster. Empty means detect it from the nodes: kind or generic, never gke.
 	Platform Platform
 	// RustFSStorageClass, RustFSStorageSize and PostgresStorageSize size the in-cluster object store and the
@@ -103,6 +106,20 @@ func (p Profile) Validate() error {
 		}
 	}
 	return nil
+}
+
+// UsesGVisor says whether the install has the gvisor sandbox class: the default classes (gvisor,microvm), the
+// generic platform (gvisor only) or a list that names gvisor.
+func (p Profile) UsesGVisor() bool {
+	if p.Platform == PlatformGeneric || p.SandboxClasses == "" {
+		return true
+	}
+	for _, class := range strings.Split(p.SandboxClasses, ",") {
+		if strings.TrimSpace(class) == "gvisor" {
+			return true
+		}
+	}
+	return false
 }
 
 // noDevEnvFlag is passed to ate-setup deploy and delete alike, so a delete undoes the same install.
@@ -193,6 +210,10 @@ type Installer struct {
 	// PollInterval and WaitTimeout bound the wait for the CRDs (defaults 2s and 2m).
 	PollInterval time.Duration
 	WaitTimeout  time.Duration
+	// GVisorStore and GVisorFetcher are for the tests. Nil means the cluster object store reached through a
+	// port-forward to its rustfs pod, and a plain HTTP GET (gvisorstore.go).
+	GVisorStore   func(ctx context.Context) (AssetStore, func(), error)
+	GVisorFetcher AssetFetcher
 }
 
 // ErrPrerequisites is returned when the prerequisite preflight fails: nothing was installed.
@@ -234,6 +255,33 @@ func (b *Build) Root() string { return b.tmp }
 // Cleanup deletes the tree and the binary.
 func (b *Build) Cleanup() { _ = os.RemoveAll(b.tmp) }
 
+// exportPin exports PinnedCommit from SourceRepo into dst. Scratch files go into tmp.
+func (i *Installer) exportPin(ctx context.Context, tmp, dst string) error {
+	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
+	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
+	// of the source runs in git archive and no replace ref substitutes the pinned objects.
+	repo := filepath.Join(tmp, "repo.git")
+	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
+	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err)
+	}
+	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
+	if err != nil {
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err)
+	}
+	if strings.TrimSpace(got) != PinnedCommit {
+		return fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got))
+	}
+	archive := filepath.Join(tmp, "src.tar")
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
+		return fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err)
+	}
+	if err := extractTar(archive, dst); err != nil {
+		return fmt.Errorf("%w: %w", ErrPin, err)
+	}
+	return nil
+}
+
 // BuildSetup exports the pinned commit from SourceRepo into a fresh temporary directory, builds
 // ate-setup there and checks that the binary reports the pinned version and commit. The caller must
 // call Cleanup when err is nil; on an error BuildSetup has removed the directory itself.
@@ -250,27 +298,8 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 		b.Cleanup()
 		return nil, err
 	}
-	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
-	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
-	// of the source runs in git archive and no replace ref substitutes the pinned objects.
-	repo := filepath.Join(tmp, "repo.git")
-	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
-	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
-		return fail(fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err))
-	}
-	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
-	if err != nil {
-		return fail(fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err))
-	}
-	if strings.TrimSpace(got) != PinnedCommit {
-		return fail(fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got)))
-	}
-	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
-		return fail(fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err))
-	}
-	if err := extractTar(archive, b.dir); err != nil {
-		return fail(fmt.Errorf("%w: %w", ErrPin, err))
+	if err := i.exportPin(ctx, tmp, b.dir); err != nil {
+		return fail(err)
 	}
 	const versionPkg = "go.ate.dev/substrate/internal/version"
 	ldflags := "-X " + versionPkg + ".Version=" + PinnedVersion + " -X " + versionPkg + ".Commit=" + PinnedCommit
@@ -416,6 +445,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	if err := i.CheckKind(ctx); err != nil {
 		return err
 	}
+	// The installed classes decide whether the gVisor node check applies.
+	sub.GVisor = i.Profile.UsesGVisor()
+	i.Checker.Config.Substrate = &sub
 	if platform == PlatformGeneric {
 		// Only the gvisor class is installed, so the node devices of the vm tier are not needed.
 		sub.VMTier = false
@@ -502,6 +534,9 @@ func (i *Installer) Install(ctx context.Context) error {
 		return err
 	}
 	if err := i.EnsureRouterSPIFFE(ctx); err != nil {
+		return err
+	}
+	if err := i.EnsureGVisorAssets(ctx); err != nil {
 		return err
 	}
 	if failed := preflight.Write(i.Out, i.Checker.Run(ctx)); failed > 0 {

@@ -62,7 +62,9 @@ half-fitting edit. The corrections:
 4. Credentials. The object-store root credentials are random keys in the Secret `koinon-rustfs-credentials`
    in the Substrate namespace, not the fixed `rustfsadmin`. The installer creates the Secret once and keeps
    it. A Secret that lacks a key is an error that names the Secret; the installer never rewrites it and never
-   prints a key.
+   prints a key. The installer makes no other key. The Koinon reconciler only reads the snapshot bucket
+   (`--substrate-snapshot-*`), so give it its own read-only key for that bucket, made by hand with the
+   store's own tools. Never give it the root key: that key can write and delete every snapshot.
 5. atelet logs at `info` (the kind overlay sets `debug`) and has no local-registry replacement.
 
 The kind route also brings its observability and sizing: an `otel-system` namespace with an OpenTelemetry collector
@@ -81,6 +83,14 @@ message. Exit condition: upstream plans a generic install
 ([agent-substrate/substrate #1782](https://github.com/agent-substrate/substrate/issues/1782)); Koinon moves to
 it and drops the corrections and the script. There is no upstream Helm chart yet (#79), and Koinon does not fork.
 
+A test renders the real pinned tree with the generic overlay and checks the objects that `kubectl kustomize`
+makes (`TestGenericOverlayRendersThePinnedTree`): no `rustfsadmin`, the Secret references, the bucket-init Job and
+its bucket, `10Gi` and `20Gi`, and atelet at `--log-level=info`. It needs a clone of Substrate that holds the
+pinned commit in `KOINON_SUBSTRATE_SOURCE`, and `kubectl`. Without them it skips with the requirement names
+`substrate-source` and `kubectl`; `KOINON_REQUIRE` turns the skip into a failure. A second test
+(`TestRenderChecksFindWhatTheyLookFor`) runs the same checks on a small tree of the same shape and needs
+`kubectl` only.
+
 The storage preflight of `generic` fails, before anything is created, when a named StorageClass does not
 exist, or when a volume has no named class and the cluster has no default class.
 
@@ -95,6 +105,7 @@ Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
 | `--postgres-storage-size`, `--rustfs-storage-class`, `--rustfs-storage-size` | none (Koinon patch) | `generic` only. See [What `generic` corrects](#what-generic-corrects). |
 | `--gcp-project-id`, `--snapshot-transfer-gsa-name` | the same names | `gke` only. |
 | `--setup-csi nfs\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`). `hostpath` and `both` are for kind only; `generic` refuses them. |
+| `--gvisor-mirror <base-url>` | none (Koinon step) | The installer host cannot reach `storage.googleapis.com`. See [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
@@ -136,7 +147,9 @@ Order of the step:
 7. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
    installer finds the router container by name (`atenet-router`), reads the flag in its command and
    arguments, and retries when the Deployment changed during the update.
-8. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
+8. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
+   object store" below.
+9. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
    namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
 
 The probe pods in the Substrate namespace use no image pull secrets: `--probe-image-pull-secrets` names
@@ -150,7 +163,7 @@ image is part of S2 (chart work).
 The kubeconfig of the installer needs these rules:
 
 - `namespaces`: get, create, delete
-- `nodes`: list (platform detection and the kind check)
+- `nodes`: list (platform detection, the kind check and the gVisor user-namespace probe)
 - `storageclasses` (group `storage.k8s.io`): list (the `generic` storage preflight)
 - `secrets` in the Substrate namespace: get, create (the `generic` object-store credentials)
 - `pods`: create, get, delete, list in the Substrate namespace; `pods/log`: get
@@ -168,6 +181,12 @@ The kubeconfig of the installer needs these rules:
 - With the vm tier: one node mounts `/dev/kvm`, `/dev/net/tun`, `/dev/vhost-vsock` and `/dev/vhost-net`
   (a probe pod with `CharDevice` host paths; only the node it lands on is checked, so use
   `--substrate-node-selector` to aim it at workers).
+- With the gVisor class (`--substrate-gvisor`, on by default; the installer sets it from `--sandbox-classes`):
+  `user.max_user_namespaces` is above 0 on every node that `--substrate-node-selector` selects (a short
+  read-only probe pod per node; the check needs `nodes`: list). Without the selector it probes
+  the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
+  plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
+  See "Talos: user namespaces for gVisor".
 - Substrate's api server can validate service-account tokens from a pod in its namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -267,6 +286,101 @@ This is interim: it goes when the pinned Substrate writes the entry for every in
 
 When `ate-setup` fails, the installer keeps the pinned build and prints the exact `ate-setup delete ate-system`
 command that removes the partial install.
+
+## gVisor tarball in the cluster object store
+
+Substrate ships the SandboxConfig `gvisor-default`. It points at `gs://gvisor/...`, so atelet reads the
+gVisor tarball from the internet. Koinon keeps the Substrate namespaces closed to the internet (ADR 0120
+section 6), so the installer puts the pinned tarball in the cluster object store and applies a SandboxConfig
+that points there. Pods in the cluster then download the tarball with no egress to the internet. This is
+step 8 of the install, on the `kind` and `generic` platforms when the install has the gvisor class. On `gke`
+the `gs://` default stays: that route has no in-cluster object store.
+
+What the installer does:
+
+1. It reads the keys of the rustfs Deployment (a value, or a Secret reference) and opens a port-forward to the
+   rustfs pod. The keys stay in the installer process. They are never written, printed or sent to a sandbox.
+2. For each architecture (`amd64`, `arm64`) it reads the object
+   `gvisor-assets/<arch>/<sha256>` in the snapshot bucket (`--storage-bucket`). The key has no `atespaces`
+   segment, so atelet's object-store plugin serves it. It is the layout `ate-setup` uses for the microVM assets.
+3. An object with the pinned SHA-256 is left as it is: a second run fetches and writes nothing.
+   An object with another SHA-256 is an error. The installer never overwrites it. Delete the object if it is
+   wrong, then run the installer again.
+4. A missing object is fetched from the source, checked against the pinned SHA-256 before the first byte
+   goes to the store, written, read back and checked again.
+5. It creates the SandboxConfig `koinon-gvisor` (class `gvisor`, annotation
+   `sandboxconfig.ate.dev/is-class-default: "true"`, so it is newer than `gvisor-default` and wins). Its
+   version `gvisor-<release>` has `s3://<bucket>/gvisor-assets/<arch>/<sha256>` and the same SHA-256 for each
+   architecture. A new release adds a version and keeps the old ones, because a snapshot restores its memory only on
+   the version it was taken with. A version that exists with other assets is an error, never a rewrite.
+
+Limits:
+
+- Substrate picks the newest class default. If `ate-setup` is cleaned up and run again, `gvisor-default` is
+  newer and wins. The installer then prints a warning. Delete SandboxConfig `koinon-gvisor` and run the installer
+  again.
+- On a cluster that already has snapshots on an older `gvisor-default` version, the pools move to
+  `koinon-gvisor`, which has only the pinned release. Actors with snapshots on the older version cannot restore
+  their memory. New installs are not affected.
+- On the `kind` platform the bucket must exist. The platform creates only its own snapshot bucket, so a
+  different `--storage-bucket` fails with a message that names the bucket.
+- One tarball download has a limit of 20 minutes.
+
+The pinned release and its checksums are in `hack/versions.env` (`GVISOR_VERSION`, `GVISOR_SHA256_AMD64`,
+`GVISOR_SHA256_ARM64`) and in `internal/substrateinstall/gvisorpin.go`. A test compares the two. The
+release is the one of version `v7` of `gvisor-default` in the pinned Substrate.
+
+### Mirror and air-gapped installs
+
+The installer host fetches the tarball, not the cluster. By default it reads
+`https://storage.googleapis.com/gvisor/releases/release/<release>/<x86_64|aarch64>/gvisor.tar.zstd`. For a host without
+internet, copy those two files to a server that the host reaches and pass its base URL:
+`--gvisor-mirror https://mirror.example.com/gvisor`. The layout below the base is `<release>/<x86_64|aarch64>/gvisor.tar.zstd`.
+The pinned SHA-256 protects the content, so a mirror needs no trust. A wrong file fails with nothing written.
+
+To check an install: atelet logs name the asset with `s3://` and the pinned SHA-256, and no pod in the Substrate
+namespaces reaches `storage.googleapis.com`.
+
+Cost: a repeat run reads each object through the port-forward to compare its SHA-256 (about 60 MB for each architecture).
+
+## Talos: user namespaces for gVisor
+
+The gVisor class cannot start an agent on a node with `user.max_user_namespaces=0`. Talos sets that value
+by default. gVisor (`runsc`) starts its sentry in a user namespace. On such a node the start fails with
+`runsc create` exit 128 and `fork/exec .../gvisor-sentry-prewarmer: no space left on device`. The disk is
+not full: the kernel returns ENOSPC because it allows no user namespace. The preflight check
+"Substrate gVisor user namespaces" finds this before the first agent start. The vm tier does not need user
+namespaces, and the check does not run without the gVisor class.
+
+Talos, a machine config patch for the worker nodes (`userns.yaml`):
+
+```yaml
+machine:
+  sysctls:
+    user.max_user_namespaces: "11255"
+```
+
+```bash
+talosctl --talosconfig <file> patch machineconfig --nodes <worker node addresses> --patch @userns.yaml
+```
+
+Omni: add the same `machine.sysctls` entry to a config patch of the worker machine set.
+
+kubeadm and other Linux nodes:
+
+```bash
+sysctl -w user.max_user_namespaces=11255
+echo 'user.max_user_namespaces = 11255' > /etc/sysctl.d/99-gvisor.conf
+```
+
+The value 11255 is the one that a Talos cluster confirmed (Kubernetes 1.37.1: with 0, every first resume failed;
+with 11255 on the workers and no other change, an agent started, suspended and resumed with its state). Any
+value above 0 lets the sentry start.
+
+Cost: user namespaces widen the kernel attack surface for every pod on those nodes, because an unprivileged
+process can then reach kernel code that otherwise needs privilege. Set the value on the worker nodes that run
+gVisor sandboxes only, and leave the control plane nodes at 0. Use `--substrate-node-selector` so the check
+reads the same nodes.
 
 ## Verified and unverified
 

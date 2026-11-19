@@ -64,7 +64,7 @@ current milestone a due date, and put Ready issues in it.
 ## 6. People
 
 - `@ovirandunu` stays an admin with full trust in the repository. He gets no access to procoduck's
-  OpenBao, model budget, home lab or CI box; he uses his own setup.
+  secret store, model budget, home lab or CI box; he uses his own setup.
 - Either human's agents may push `-rc` tags on a green main; final `vX.Y.Z` tags stay procoduck's.
 
 ## 7. Retire the GitHub App (the updater is gone)

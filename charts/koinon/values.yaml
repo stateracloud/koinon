@@ -302,6 +302,13 @@ postgres:
       api: ""
       reconciler: ""
       agentd: ""
+      # The login of koinon-gateway's leak guard (gateway.mcp.driver=koinon only; ADR 0097 decision 5).
+      mcpgateway: ""
+      # The logins of the gateway key lifecycle (gateway.mcp.koinon.recipientKey; ADR 0097 decision 12): the
+      # key-admin Job's login (group role koinon_gateway_key_admin) and the re-seal login (group role
+      # koinon_gateway_reseal; no Job uses it before the re-seal slice).
+      gwkeyadmin: ""
+      reseal: ""
   external:
     # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
     # the schema; the component roles need only DML. Components may share one role.
@@ -311,6 +318,17 @@ postgres:
       api: api-uri
       reconciler: reconciler-uri
       agentd: agentd-uri
+      # The URI of koinon-gateway's own login, a member of the group role koinon_gateway and of no other
+      # (gateway.mcp.driver=koinon only; create the role and the grants as in the install guide).
+      mcpgateway: mcpgateway-uri
+      # The URIs of the gateway key lifecycle logins (gateway.mcp.koinon.recipientKey, key-admin and re-seal).
+      # Create the group roles koinon_gateway_key_admin and koinon_gateway_reseal and make each login a member
+      # of its own group role and of no other (`koinon-api migrate --grants-only` grants them). With one shared
+      # database role for every component (the "components may share one role" case above) the table grants do
+      # NOT separate the gateway key from koinon-api: koinon-api could then insert a public key. Use a
+      # separate role for the key-admin login, or accept that the database does not enforce this boundary.
+      gwkeyadmin: gwkeyadmin-uri
+      reseal: reseal-uri
 
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
@@ -352,7 +370,10 @@ gateway:
   # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
   # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
   # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
-  # gets stays agentgateway's until the follow-up that moves it (see ADR 0097).
+  # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
+  # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
+  # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
+  # Do not make this the default before issue #1132 (tools/list pinning) is closed.
   mcp:
     driver: agentgateway
     koinon:
@@ -368,10 +389,82 @@ gateway:
       # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
       shutdownDelaySeconds: 5
       drainTimeoutSeconds: 30
-      # Until the guard slice the gateway drops every org MCP target, so koinon-api's approved calls to
-      # org MCP servers fail through it, and so does its live check of an agent's MCP tools (same URL). The
-# platform tool servers are not reachable through it yet. The switch is refused unless this is true.
-      acceptOrgTargetsDropped: false
+      podDisruptionBudget:
+        maxUnavailable: 1
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {memory: 256Mi}
+      podAnnotations: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+      # The gateway's recipient key (ADR 0097 decision 12, issue #1151): koinon-api seals each stored MCP
+      # credential to the public key, and only koinon-gateway holds the private key. The private key is
+      # wrapped by a KMS key of its own, never the KEK's: the gateway identity may decrypt with it, only the
+      # key-admin Job's identity may encrypt, and koinon-api and the reconciler have no right on it. The KMS
+      # server, region and CA are the ones of secrets.kek.kms; the backend is secrets.kek.kms.backend. With
+      # the local backend the Secret holds the private key as it is, and koinon-api can read it. Nothing then
+      # protects the key from koinon-api: the install reports this ("custody local"). Use a KMS for the
+      # custody boundary.
+      recipientKey:
+        enabled: true
+        # Empty: <fullname>-gateway-recipient-key. Only the key-admin Job writes it (see guard).
+        secretName: ""
+        # A native ValidatingAdmissionPolicy: only the key-admin Job's service account may create, change or
+        # delete that Secret. Turn it off only to remove the Secret on purpose.
+        guard:
+          enabled: true
+        kms:
+          openbao:
+            # The transit key that wraps the gateway key. It MUST differ from secrets.kek.kms.openbao.key.
+            # Policies: the gateway role update on <transitMount>/decrypt/<key>; the key-admin role update on
+            # <transitMount>/encrypt/<key> and <transitMount>/decrypt/<key>. Never grant create (a mistyped
+            # key name would make a new key). Bind each role to its service account
+            # (<fullname>-mcp-gateway, <fullname>-gateway-key-admin).
+            key: koinon-gateway
+            roles:
+              gateway: koinon-gateway
+              keyAdmin: koinon-gateway-key-admin
+            # The audience of the gateway pod's projected service account token (the pod mounts no
+            # automatic token). Empty is the API server's default audience.
+            audience: ""
+          awskms:
+            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). It MUST differ from
+            # secrets.kek.kms.awskms.keyId. Policies: the gateway role kms:Decrypt on it; the key-admin role
+            # kms:Encrypt and kms:Decrypt. With IRSA set both ARNs, the chart puts each on its ServiceAccount.
+            keyId: ""
+            roleArns:
+              gateway: ""
+              keyAdmin: ""
+        keyAdmin:
+          # init (the default): make the first key when there is none, and activate it once every gateway
+          # pod loaded it. rotate: add a new key; it needs a rotationId, and you set action back to init after the rotation (the Job runs again on any change of its pod template, an image bump too). Change rotationId to rotate again. retire: retire each
+          # retiring key whose wait is over and that no stored credential names (it deletes its wrapped
+          # private key). The Job runs again whenever its inputs change; each run is idempotent.
+          action: init
+          rotationId: ""
+          # How long the Job waits for every gateway pod to load a new key before it leaves it pending.
+          waitLoaded: 10m
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+  # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
+  # koinon: also run koinon-gateway's model path, in pods of its own. It meters, stops a key at its
+  # budget and charges after each call (slice 2). It has no retry rule. No agent is routed to it yet.
+  model:
+    driver: agentgateway
+    koinon:
+      image:
+        repository: gateway
+        tag: ""
+        digest: ""
+      replicas: 2
+      port: 8080
+      shutdownDelaySeconds: 5
+      drainTimeoutSeconds: 30
       podDisruptionBudget:
         maxUnavailable: 1
       resources:
@@ -591,6 +684,26 @@ checkpoints:
   # with the per-home limit.
   scratchSize: 14Gi
 
+# Run-evidence export (#966, ADR 0121). One Job that exports a recorded run's scrubbed evidence (JSON
+# Lines, the same as "koinon-api run-evidence export") to an S3 prefix, so an operator needs no exec
+# into the distroless api pod. Set org, run, out and s3.existingSecret, run helm upgrade, read the
+# files from the bucket, then turn it off again. The Job uses the koinon-api service account and
+# adds no RBAC.
+runEvidence:
+  export:
+    enabled: false
+    # The run's org ID and run ID (UUIDs).
+    org: ""
+    run: ""
+    # s3://bucket/prefix. Use one prefix for each export.
+    out: ""
+    s3:
+      # Secret with the keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region.
+      existingSecret: ""
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 512Mi}
+
 # GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
 # installation tokens and open approved pull requests; GitHub Enterprise Server uses
 # https://<host>/api/v3. The e2e test points it at a fake.
@@ -647,8 +760,21 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
-    # Required true with substrate: the harness does not yet run behind the guest launcher and the
-    # gVisor tiers have no read-only root (issue #1088 slices b and c). Remove when both have merged.
+    # The guest server image that runs in every actor (`ate-env-guest`, built by the release workflow's
+    # env-guest job from github.com/agent-substrate/env; upstream publishes none). Empty means
+    # <image.registry>/ate-env-guest:<appVersion>. A digest reference (name@sha256:...) is allowed and
+    # is the one to pin. The release's env-guest job prints the digest. The driver reads this value in #1088;
+    # nothing in the chart reads it yet.
+    guestImage: ""
+    # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
+    # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
+    # a class that is not here cannot run one. With substrate, set this or defaultTier.
+    runtimeClassTiers: {}
+    # Tier of a sandbox that names no runtime class. Empty means there is none.
+    defaultTier: ""
+    # Required true with substrate: the guest image does not yet carry the guest launcher and the
+    # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:
+    # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
     # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the
@@ -827,6 +953,9 @@ networkPolicy:
   #     ports: [{port: 11434}]
   # List the same hosts in egress.allowedInternalHosts so providers and MCP servers may name them. The
   # rule covers every upstream the gateway calls: model providers and remote MCP servers.
+  # With postgres.mode=external and gateway.mcp.driver=koinon, koinon-gateway reads its database login
+  # through this list too (its egress has no other route to the database). The list then also reaches
+  # agentgateway and the model gateway, so keep the database rule to the database port and address.
   gatewayEgressTo: []
 
 # Prometheus metrics of koinon-api, koinon-reconciler and koinon-agentd (ADR 0023, amendment

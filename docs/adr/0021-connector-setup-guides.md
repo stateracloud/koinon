@@ -36,7 +36,7 @@ license (see ADR [0043](0043-workload-identity-adapters-and-koinon-issuer.md)).
 - The builder generates setup-specific values (callback URLs, issuer, subject, scopes) for the
   user's org and deployment.
 - Secrets are entered through inline secure inputs that post directly to the secret store
-  (Vault/OpenBao); they never enter the chat, the model context or Postgres.
+  (the secret store); they never enter the chat, the model context or Postgres.
   _(Replaced by [0056](0056-model-providers-pricing-and-budgets-per-org.md): a secure input is written to an envelope-encrypted column in Postgres. The rule that a secret never enters the chat or the model context stays.)_
 - Each step is validated as it completes (e.g. "app installed on repo", "token exchange works"), so
   errors appear at the step that caused them.

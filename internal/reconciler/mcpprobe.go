@@ -154,6 +154,15 @@ func (r *Reconciler) listTools(ctx context.Context, p gatewayplan.Probe) ([]mcps
 			}
 			if t.Annotations != nil {
 				lt.ReadOnlyHint = t.Annotations.ReadOnlyHint
+				if raw, err := jsonOf(t.Annotations); err == nil {
+					lt.Annotations = raw
+				}
+			}
+			lt.Title = t.Title
+			if t.OutputSchema != nil {
+				if raw, err := jsonOf(t.OutputSchema); err == nil {
+					lt.OutputSchema = raw
+				}
 			}
 			out = append(out, lt)
 		}

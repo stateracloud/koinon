@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -524,6 +525,90 @@ type MCPTarget struct {
 	// InsecureSkipVerify turns the target's certificate check off (as curl -k): TLS is used, the
 	// server's identity is not verified. It needs an https URL and excludes CAFile.
 	InsecureSkipVerify bool
+	// Builtin makes the target one that the gateway runs in its own process (ADR 0123 decision 10):
+	// it has no upstream URL, and the credential, CA and URL fields above stay empty. The only value
+	// is [BuiltinA2A]. A driver that cannot serve such a target leaves it out (see
+	// [MCPState.WithoutBuiltin]).
+	Builtin string
+	// RemoteAgents are the external A2A agents of a [BuiltinA2A] target. No other target has any.
+	RemoteAgents []MCPRemoteAgent
+	// HandleKeyFile is the path, inside the gateway, of the secret that signs the task handles of a
+	// [BuiltinA2A] target (ADR 0123 decision 10). All replicas read the same file. It is a secret:
+	// only the path is public.
+	HandleKeyFile string
+}
+
+// Same reports whether t and o are the same config. MCPTarget is not comparable with == since a
+// built-in target holds a list.
+func (t MCPTarget) Same(o MCPTarget) bool { return reflect.DeepEqual(t, o) }
+
+// BuiltinA2A is the value of [MCPTarget.Builtin] for the target that serves send_task, get_task and
+// cancel_task.
+const BuiltinA2A = "a2a"
+
+// MCPRemoteAgent is one external A2A agent that a [BuiltinA2A] target can reach (ADR 0123). The
+// reconciler leaves out a remote agent that is disabled or unhealthy, so a listed one is servable.
+type MCPRemoteAgent struct {
+	// Name is the name the model passes as the agent argument: a DNS label.
+	Name string
+	// ID is the stable ID of the remote agent. A task handle is bound to it.
+	ID string
+	// CardURL is the base URL of the external agent. The card is at /.well-known/agent-card.json.
+	CardURL string
+	// CredentialHeader, CredentialPrefix and CredentialFile, CAFile and InsecureSkipVerify have the
+	// meaning they have on [MCPTarget], for the card URL.
+	CredentialHeader   string
+	CredentialPrefix   string
+	CredentialFile     string
+	CAFile             string
+	InsecureSkipVerify bool
+	// CardHash is the pinned hash of the agent card. A card with another hash stops every call.
+	CardHash string
+	// Agents are the IDs (the Name of the [AgentRef]) of the agents of the target's org that may call
+	// this remote agent.
+	Agents []string
+}
+
+// Target returns the [MCPTarget] that the A2A client dials for r: the card URL with the credential
+// and the TLS trust of the remote agent, in the org of t.
+func (r MCPRemoteAgent) Target(org string) MCPTarget {
+	return MCPTarget{
+		Name: r.Name, URL: r.CardURL, Org: org,
+		CredentialHeader: r.CredentialHeader, CredentialPrefix: r.CredentialPrefix, CredentialFile: r.CredentialFile,
+		CAFile: r.CAFile, InsecureSkipVerify: r.InsecureSkipVerify,
+	}
+}
+
+// WithoutBuiltin returns s without its [MCPTarget.Builtin] targets and the grants of them, and one
+// Rejection for each target left out. A driver that cannot run a built-in target (agentgateway
+// has no code of ours in it) uses it, so one such target never fails the config of the other orgs.
+func (s MCPState) WithoutBuiltin() (MCPState, []Rejection) {
+	var rej []Rejection
+	left := map[string]bool{}
+	out := MCPState{}
+	for _, t := range s.MCP {
+		if t.Builtin == "" {
+			out.MCP = append(out.MCP, t)
+			continue
+		}
+		left[t.Name] = true
+		rej = append(rej, Rejection{Org: t.Org, Kind: "MCPTarget", Name: t.Name, Reason: "built-in target: this gateway driver cannot serve it (needs mcp.driver koinon)"})
+	}
+	if len(left) == 0 {
+		return s, nil
+	}
+	for a, grants := range s.Tools {
+		for _, g := range grants {
+			if left[g.Target] {
+				continue
+			}
+			if out.Tools == nil {
+				out.Tools = map[AgentRef][]ToolGrant{}
+			}
+			out.Tools[a] = append(out.Tools[a], g)
+		}
+	}
+	return out, rej
 }
 
 // ToolGrant allows an agent to see and call some tools of one MCP target.
@@ -914,11 +999,12 @@ func (s MCPState) validate() []error {
 	targets := map[string]bool{}
 	for _, t := range s.MCP {
 		switch {
-		case !targetName.MatchString(t.Name) || t.URL == "":
+		case !targetName.MatchString(t.Name) || (t.URL == "" && t.Builtin == ""):
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid name or empty URL", t.Name))
 		case targets[t.Name]:
 			errs = append(errs, fmt.Errorf("mcp target %q: duplicate", t.Name))
 		}
+		errs = append(errs, t.validateBuiltin()...)
 		if t.Org != "" && !orgSlug.MatchString(t.Org) {
 			errs = append(errs, fmt.Errorf("mcp target %q: org must be an org slug", t.Name))
 		}
@@ -1055,4 +1141,84 @@ type NoUsage struct{}
 // ReadUsage implements UsageReader.
 func (NoUsage) ReadUsage(context.Context, time.Time) ([]UsageRecord, error) {
 	return nil, ErrUsageUnsupported
+}
+
+// maxRemoteAgentName is the longest name of a remote agent (ADR 0123 decision 9).
+const maxRemoteAgentName = 24
+
+var cardHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// validateBuiltin checks the fields of the built-in kind of t, and that no other target has them.
+func (t MCPTarget) validateBuiltin() []error {
+	var errs []error
+	bad := func(format string, a ...any) {
+		errs = append(errs, fmt.Errorf("mcp target %q: "+format, append([]any{t.Name}, a...)...))
+	}
+	if t.Builtin == "" {
+		if len(t.RemoteAgents) > 0 || t.HandleKeyFile != "" {
+			bad("remote agents and a handle key belong to a built-in target")
+		}
+		return errs
+	}
+	if t.Builtin != BuiltinA2A {
+		bad("unknown built-in kind %q", t.Builtin)
+		return errs
+	}
+	switch {
+	case t.URL != "" || t.SSE:
+		bad("a built-in target has no upstream URL")
+	case t.CredentialHeader != "" || t.CredentialPrefix != "" || t.CredentialFile != "" || t.CAFile != "" || t.InsecureSkipVerify:
+		bad("a built-in target has no credential or TLS trust of its own")
+	case t.Org == "":
+		bad("a built-in target belongs to an org")
+	}
+	if !keyPath.MatchString(t.HandleKeyFile) {
+		bad("invalid handle key file path")
+	}
+	seen := map[string]bool{}
+	for _, r := range t.RemoteAgents {
+		switch {
+		case !dnsLabel.MatchString(r.Name) || len(r.Name) > maxRemoteAgentName:
+			bad("remote agent %q: name must be a DNS label of at most %d characters", r.Name, maxRemoteAgentName)
+		case seen[r.Name]:
+			bad("remote agent %q: duplicate", r.Name)
+		}
+		seen[r.Name] = true
+		if r.ID == "" {
+			bad("remote agent %q: no ID", r.Name)
+		}
+		if !cardHashRe.MatchString(r.CardHash) {
+			bad("remote agent %q: card hash must be 64 hex characters", r.Name)
+		}
+		u, err := url.Parse(r.CardURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			bad("remote agent %q: card URL must be an http or https URL", r.Name)
+		}
+		if (r.CredentialHeader == "") != (r.CredentialFile == "") {
+			bad("remote agent %q: a credential needs both a header and a file", r.Name)
+		}
+		if r.CredentialHeader != "" && !headerName.MatchString(r.CredentialHeader) {
+			bad("remote agent %q: invalid credential header name", r.Name)
+		}
+		for _, f := range [...]struct{ what, v string }{{"credential file", r.CredentialFile}, {"CA file", r.CAFile}} {
+			if f.v != "" && !keyPath.MatchString(f.v) {
+				bad("remote agent %q: invalid %s path", r.Name, f.what)
+			}
+		}
+		if strings.ContainsAny(r.CredentialPrefix, "\r\n") {
+			bad("remote agent %q: invalid credential prefix", r.Name)
+		}
+		if r.CAFile != "" && r.InsecureSkipVerify {
+			bad("remote agent %q: a CA file and insecureSkipVerify exclude each other", r.Name)
+		}
+		if (r.CAFile != "" || r.InsecureSkipVerify) && (err != nil || u.Scheme != "https") {
+			bad("remote agent %q: a CA file or insecureSkipVerify needs an https URL", r.Name)
+		}
+		for _, a := range r.Agents {
+			if !dnsLabel.MatchString(a) {
+				bad("remote agent %q: invalid agent %q", r.Name, a)
+			}
+		}
+	}
+	return errs
 }

@@ -54,6 +54,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
@@ -65,6 +66,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -139,6 +141,8 @@ type Options struct {
 	Catalog *catalog.Service
 	// MCP manages remote MCP servers (ADR 0057). Nil means McpServerService answers UNIMPLEMENTED.
 	MCP *mcpservers.Service
+	// RemoteAgents manages remote A2A agents (ADR 0123). Nil means RemoteAgentService answers UNIMPLEMENTED.
+	RemoteAgents *remoteagents.Service
 	// Notifier delivers the notifications that follow a commit (ADR 0066, practice B2). Nil means
 	// an inline one: best effort, no retry. koinon-api passes a DBOS-backed one with --durable.
 	Notifier *durable.Notifier
@@ -183,15 +187,16 @@ type Server struct {
 	budgets   *budget.Service
 	prices    *prices.Service
 	// refresher runs the platform price RPCs' writes and fetches (BindPriceRefresher).
-	refresher *prices.Refresher
-	hosts     *codehost.Registry
-	approvals *approvals.Service
-	catalog   *catalog.Service
-	mcp       *mcpservers.Service
-	typing    typingGate
-	notifier  *durable.Notifier
-	dm        *DirectMessageQueue
-	urlPolicy catalog.URLPolicy
+	refresher    *prices.Refresher
+	hosts        *codehost.Registry
+	approvals    *approvals.Service
+	catalog      *catalog.Service
+	mcp          *mcpservers.Service
+	remoteAgents *remoteagents.Service
+	typing       typingGate
+	notifier     *durable.Notifier
+	dm           *DirectMessageQueue
+	urlPolicy    catalog.URLPolicy
 	// agentModels changes agents' model settings; modelCheck runs the provider echo check.
 	agentModels *agentmodel.Service
 	// agentResources changes agents' sandbox resource overrides (ADR 0083).
@@ -235,7 +240,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
-		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
+		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP, remoteAgents: opts.RemoteAgents,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), agentResources: agentresources.New(pool, sandboxPolicy(opts)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 		hold: opts.RestoreHold, outward: outward.New(pool).WithRestoreHold(opts.RestoreHold),
@@ -264,6 +269,7 @@ func (s *Server) Register(server *connect.Server) {
 	approvalv1alpha1connect.RegisterApprovalServiceHandler(server, s)
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
+	remoteagentv1alpha1connect.RegisterRemoteAgentServiceHandler(server, s)
 	leakguardv1alpha1connect.RegisterLeakGuardServiceHandler(server, s)
 	outwardv1alpha1connect.RegisterOutwardServiceHandler(server, s)
 	orgsettingsv1alpha1connect.RegisterOrgSettingsServiceHandler(server, s)
@@ -283,6 +289,7 @@ var (
 	_ budgetv1alpha1connect.PriceServiceHandler            = (*Server)(nil)
 	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
 	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
+	_ remoteagentv1alpha1connect.RemoteAgentServiceHandler = (*Server)(nil)
 	_ leakguardv1alpha1connect.LeakGuardServiceHandler     = (*Server)(nil)
 	_ outwardv1alpha1connect.OutwardServiceHandler         = (*Server)(nil)
 	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)

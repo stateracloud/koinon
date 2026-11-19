@@ -111,6 +111,11 @@ ADR 0119 phase 1 gateway routes for OpenShell exist.
 3. "Where the tier supports them" has one meaning: the guest kernel offers the feature. The launcher
    reports which controls it applied. If the `vm` tier cannot apply one, the sandbox does not start.
    For another tier the launcher records the gap in the audit log and in a platform-admin warning.
+   The gVisor tiers have a writable root filesystem by decision (2026-11-19): Substrate v1.0.0 sets the
+   root of an actor container writable, and a read-only root breaks `MEMORY` snapshots. Koinon carries no
+   Substrate patch. So where Landlock is not available on these tiers, nothing limits writes to the root.
+   Issue [#1150](https://github.com/stateracloud/koinon/issues/1150) tracks this; each Substrate update
+   reviews it. The read-only root requirement of 2026-11-18 (in `docs/dev/guest-launcher.md`, from #1087) is withdrawn.
 4. Whenever the driver passes a seccomp profile to the guest, the preflight checks that the profile
    works in the guest. A probe that must fail with `EPERM` (for example `keyctl`) is the check. For
    OpenShell on Kata this keeps the old guest-seccomp check of 0048 (warn, do not block). For the
@@ -140,7 +145,9 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    KEK from the secret store). If the driver's own store does not give that, Koinon encrypts the
    export (the tar checkpoints of [0032](0032-agent-home-checkpoints.md)) before it leaves the host.
 4. **Access control.** One org's snapshots sit under one prefix or bucket. Only the execution layer's
-   own identity can read or write that prefix. No Koinon API returns raw snapshot bytes to a user. A
+   own identity can read or write that prefix. One exception: the Koinon reconciler holds a read-only key
+   for the snapshot bucket, to compute the content digest of item 5. It is limited to one bucket, not
+   to one org's prefix; a check that the prefix belongs to the workspace is open work (#1090). No Koinon API returns raw snapshot bytes to a user. A
    restore is allowed only into the same org (the same atespace or namespace) and the same actor
    template digest. A cross-org restore is refused.
 5. **Verification before restore.** Koinon records the SHA-256 digest of each snapshot when it is

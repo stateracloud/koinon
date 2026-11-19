@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -127,7 +128,18 @@ func (g *guestServer) StartProcess(ctx context.Context, r *ateenvv1alpha.StartPr
 	}
 	g.c.mu.Lock()
 	a.nextPID++
-	p := &fproc{id: "p" + itoa(a.nextPID), argv: r.GetCommand(), changed: make(chan struct{}), started: time.Now()}
+	argv := r.GetCommand()
+	a.started = append(a.started, append([]string(nil), argv...))
+	if path.Base(argv[0]) == "koinon-guest-launcher" {
+		// The launcher hardens the process, then runs the command after "--".
+		i := slices.Index(argv, "--")
+		if i < 0 || i == len(argv)-1 {
+			g.c.mu.Unlock()
+			return nil, status.Error(codes.InvalidArgument, "launcher: no command after --")
+		}
+		argv = argv[i+1:]
+	}
+	p := &fproc{id: "p" + itoa(a.nextPID), argv: argv, changed: make(chan struct{}), started: time.Now()}
 	a.procs[p.id] = p
 	g.c.mu.Unlock()
 	if d := r.GetTimeout().AsDuration(); d > 0 {

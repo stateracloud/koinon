@@ -12,13 +12,21 @@
 # the harness image is FLAVOR_IMAGE. The guest server is a Substrate component that is not in this
 # repository; it joins this overlay when the substrate driver takes it (#1088).
 ARG FLAVOR_IMAGE
+# The harness's entry script (ADR 0048), set by `make harness-substrate-<name>`.
+ARG ENTRY_SCRIPT=/usr/local/bin/koinon-opencode
 FROM ${FLAVOR_IMAGE}
 ARG TARGETARCH
+# Declared again: an ARG before FROM is not visible inside the stage.
+ARG ENTRY_SCRIPT
 # "launcher" is a named build context (--build-context launcher=build/guest-launcher), not a stage
 # hadolint ignore=DL3022
 COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr/local/bin/koinon-guest-launcher
 # Two policies, one per tier family (ADR 0120 section 4.2 and 4.3): the vm tier fails closed without
-# Landlock, the gVisor tiers (hardened, dev) run it best effort behind the read-only root.
+# Landlock, the gVisor tiers (hardened, dev) run it best effort (their root is writable by decision, issue #1150).
 COPY --chmod=0644 policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
-# The payload is the harness's entry script (koinon-opencode here); another harness gets its own overlay line.
-ENTRYPOINT ["/usr/local/bin/koinon-guest-launcher", "--policy", "/etc/koinon/guest-launcher/policy-vm.json", "--", "/usr/local/bin/koinon-opencode"]
+# An exec-form ENTRYPOINT cannot expand a build argument, so a fixed path links to the harness's entry script.
+# The harness image ends as uid 10001 (harnesses/opencode/Dockerfile); /usr/local/bin belongs to root.
+USER root
+RUN ln -s "${ENTRY_SCRIPT}" /usr/local/bin/koinon-entry
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/koinon-guest-launcher", "--policy", "/etc/koinon/guest-launcher/policy-vm.json", "--", "/usr/local/bin/koinon-entry"]

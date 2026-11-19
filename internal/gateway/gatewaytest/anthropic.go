@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/thinking"
 )
 
@@ -360,6 +361,13 @@ func anthropicSpec(env Env) {
 		})
 
 		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {
+			if env.NoTranslation {
+				code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{
+					"model": "claude-test", "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+				})
+				Expect(code).To(Equal(http.StatusNotFound), "no format translation: "+out)
+				return
+			}
 			// The tools filter is a per-model body field; it must not touch the type "function" tools of
 			// another route.
 			code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{
@@ -490,6 +498,13 @@ func anthropicSpec(env Env) {
 			// The upstream drops the connection after half of the events. The client's read fails or
 			// ends early; what matters is the record.
 			before := len(usageOf(ctx))
+			// A request of another format ends after the snapshot above, as a late record of an earlier
+			// spec would: its record is in the list when the cut stream's is not yet, so a spec that takes
+			// the last record or any growth of the count reads the wrong one.
+			code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{
+				"model": "gpt-test", "stream": false, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+			})
+			Expect(code).To(Equal(http.StatusOK), out)
 			raw, err := json.Marshal(msgBody("claude-cut", true))
 			Expect(err).NotTo(HaveOccurred())
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/messages", bytes.NewReader(raw))
@@ -501,12 +516,23 @@ func anthropicSpec(env Env) {
 				_ = resp.Body.Close()
 			}
 
-			var recs []gateway.UsageRecord
-			Eventually(func() int {
-				recs = usageOf(ctx)
-				return len(recs)
-			}, 30*time.Second, time.Second).Should(BeNumerically(">", before))
-			rec := recs[len(recs)-1]
+			// The record is found by what the request was (a stream in the Messages format), not by its
+			// place or by a growing count. The log is shared by every spec of keyC, and the record of an
+			// earlier spec's request (a chat-completions call, a refused call) can land after this
+			// spec's first read: the count then grows, and the last record is not the cut stream's
+			// (#994, standalone run 44482919462: format openai, expected anthropic). The log only
+			// grows, so every record after the first `before` is new.
+			var rec gateway.UsageRecord
+			Eventually(func() bool {
+				recs := usageOf(ctx)
+				for i := before; i < len(recs); i++ {
+					if recs[i].Format == modelformat.Anthropic && recs[i].Stream && recs[i].Model == "claude-cut" {
+						rec = recs[i]
+						return true
+					}
+				}
+				return false
+			}, racescale.D(30*time.Second), time.Second).Should(BeTrue(), "the gateway keeps a usage record of the cut Messages stream")
 			// The gateway answered 200 before the cut, so the status says nothing; what tells the ledger is
 			// the error reason, set only when the gateway failed the response, with the usage of
 			// message_start alone (the final output count of 10 never arrived).

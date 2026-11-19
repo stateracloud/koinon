@@ -43,6 +43,12 @@
 // "keys status" and "keys export"). Not yet: the fingerprints recorded in the database and the
 // unreachable-key metric that calls [Wrapper.Probe] (415b), and the KMS adapters (old issue 416, old issue 417).
 //
+// # Envelope v2 (ADR 0097 decision 12)
+//
+// A value can instead be sealed to a recipient's public key ([SealV2], recipient.go): the DEK is
+// sealed with HPKE, so the sealer holds no secret and only the holder of the private key
+// ([RecipientKey]) opens the value. No caller uses it yet.
+//
 // # Additional authenticated data
 //
 // Both the payload and the wrapped DEK are authenticated with a [Binding]:

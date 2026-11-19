@@ -143,3 +143,5 @@ are in [0046](0046-adr-conventions.md).
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |
 | [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification) |
 | [0120](0120-execution-hardening-defaults.md) | Execution hardening defaults | Accepted (decisions D1, D2, D5 and D7 settled by the maintainer on 2026-11-18) |
+| [0121](0121-run-evidence-export-job.md) | Run-evidence export as a chart Job | Proposed |
+| [0123](0123-a2a-external-edge.md) | External A2A edge | Proposed |

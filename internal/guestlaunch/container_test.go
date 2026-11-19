@@ -84,7 +84,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for name, doc := range map[string][]byte{
 			"policy.json":           policy,
 			"user-best-effort.json": []byte(`{"landlock":{"mode":"off"},"user":{"mode":"best_effort","uid":1000,"gid":1000}}`),
-			"user-caps.json":        []byte(`{"capabilities":{"allow":["CAP_NET_BIND_SERVICE"]},"landlock":{"mode":"off"},"seccomp":{"mode":"off"},"user":{"mode":"require","uid":1000,"gid":1000}}`),
+			"user-caps.json":        []byte(`{"capabilities":{"allow":["CAP_NET_BIND_SERVICE"]},"landlock":{"mode":"off"},"seccomp":{"mode":"require"},"user":{"mode":"require","uid":1000,"gid":1000}}`),
 			"user-require.json":     []byte(`{"landlock":{"mode":"off"},"user":{"mode":"require","uid":1000,"gid":1000}}`),
 		} {
 			Expect(tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(doc))})).To(Succeed())
@@ -234,16 +234,24 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		)
 
 		// A host without a syscall is simulated by a Docker seccomp profile that answers it ENOSYS.
-		hide := func(syscall string) []string {
-			prof := `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["` + syscall + `"],"action":"SCMP_ACT_ERRNO","errnoRet":38}]}`
-			path := filepath.Join(dir, "no-"+syscall+".json")
+		hideWith := func(syscall string, errno int) []string {
+			prof := fmt.Sprintf(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":[%q],"action":"SCMP_ACT_ERRNO","errnoRet":%d}]}`, syscall, errno)
+			path := filepath.Join(dir, fmt.Sprintf("no-%s-%d.json", syscall, errno))
 			Expect(os.WriteFile(path, []byte(prof), 0o600)).To(Succeed())
 			return append([]string{"--security-opt=seccomp=" + path}, substrate...)
 		}
+		hide := func(syscall string) []string { return hideWith(syscall, 38) }
 		noLandlock := func() []string { return hide("landlock_create_ruleset") }
 
 		It("closes inherited descriptors through /proc/self/fd when close_range is missing", func() {
 			out, code := runWith(hide("close_range"), inherit("/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")...)
+			skipWithoutLandlock(out, code)
+			Expect(code).To(Equal(0), out)
+			Expect(verdicts(out)).To(HaveKeyWithValue("inherited_fd", "blocked"), out)
+		})
+
+		It("falls back to /proc/self/fd when an outer seccomp profile answers close_range with EPERM", func() {
+			out, code := runWith(hideWith("close_range", 1), inherit("/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")...)
 			skipWithoutLandlock(out, code)
 			Expect(code).To(Equal(0), out)
 			Expect(verdicts(out)).To(HaveKeyWithValue("inherited_fd", "blocked"), out)
@@ -272,7 +280,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("filesystem rules NOT applied"))
-			Expect(out).To(ContainSubstring("read-only root"))
+			Expect(out).To(ContainSubstring("writable root by decision"))
 			Expect(verdicts(out)).To(HaveKeyWithValue("ptrace", "blocked"), "every other control still applies")
 		})
 	})

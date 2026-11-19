@@ -57,6 +57,8 @@ var _ = Describe("ParsePolicy", func() {
 		},
 		Entry("unknown field", `{"seccomp":{"mod":"off"}}`, "unknown field"),
 		Entry("unknown mode", `{"seccomp":{"mode":"warn"}}`, "must be require, best_effort or off"),
+		Entry("seccomp off", `{"seccomp":{"mode":"off"}}`, "seccomp mode \"off\" is refused"),
+		Entry("seccomp best_effort", `{"seccomp":{"mode":"best_effort"}}`, "seccomp mode \"best_effort\" is refused"),
 		Entry("unknown capability", `{"capabilities":{"allow":["CAP_NOPE"]}}`, "unknown capability"),
 		Entry("relative path", `{"landlock":{"read_write":["tmp"]}}`, "not absolute"),
 		Entry("unknown deny name", `{"seccomp":{"deny":["ptrace","not_a_syscall"]}}`, "unknown syscall"),
@@ -70,7 +72,7 @@ var _ = Describe("ParsePolicy", func() {
 func jsonList(l []string) string { return `["` + strings.Join(l, `","`) + `"]` }
 
 // The two image policies differ in the Landlock mode only (ADR 0120 section 4.2 and 4.3): the vm
-// tier fails closed, the gVisor tiers rely on the read-only root when the kernel has no Landlock.
+// tier fails closed, the gVisor tiers record the gap when the kernel has no Landlock (their root is writable by decision, issue #1150).
 var _ = Describe("the image policies", func() {
 	load := func(name string) guestlaunch.Policy {
 		f, err := os.Open("../../cmd/koinon-guest-launcher/" + name)

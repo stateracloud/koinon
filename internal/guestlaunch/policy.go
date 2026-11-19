@@ -164,6 +164,12 @@ func (p Policy) Validate() error {
 			return fmt.Errorf("guest launcher policy: %s mode %q must be require, best_effort or off", name, m)
 		}
 	}
+	// The filter carries the vsock deny and the process-access denies, so no policy may skip it
+	// (ADR 0120 fail closed). Off and best_effort (which skips the whole filter when it fails to
+	// load) are refused.
+	if p.Seccomp.Mode != ModeRequire {
+		return fmt.Errorf("guest launcher policy: seccomp mode %q is refused: it must be require", p.Seccomp.Mode)
+	}
 	for _, c := range p.Capabilities.Allow {
 		if _, ok := capNumber(c); !ok {
 			return fmt.Errorf("guest launcher policy: unknown capability %q", c)

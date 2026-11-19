@@ -288,7 +288,10 @@
                 "migrate": {"type": "string"},
                 "api": {"type": "string"},
                 "reconciler": {"type": "string"},
-                "agentd": {"type": "string"}
+                "agentd": {"type": "string"},
+                "mcpgateway": {"type": "string"},
+                "gwkeyadmin": {"type": "string"},
+                "reseal": {"type": "string"}
               }
             }
           }
@@ -306,7 +309,10 @@
                 "migrate": {"$ref": "#/definitions/nonEmpty"},
                 "api": {"$ref": "#/definitions/nonEmpty"},
                 "reconciler": {"$ref": "#/definitions/nonEmpty"},
-                "agentd": {"$ref": "#/definitions/nonEmpty"}
+                "agentd": {"$ref": "#/definitions/nonEmpty"},
+                "mcpgateway": {"$ref": "#/definitions/nonEmpty"},
+                "gwkeyadmin": {"$ref": "#/definitions/nonEmpty"},
+                "reseal": {"$ref": "#/definitions/nonEmpty"}
               }
             }
           }
@@ -383,7 +389,93 @@
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
                 "shutdownDelaySeconds": {"type": "integer", "minimum": 0},
                 "drainTimeoutSeconds": {"type": "integer", "minimum": 1},
-                "acceptOrgTargetsDropped": {"type": "boolean"},
+                "podDisruptionBudget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {"maxUnavailable": {"type": "integer", "minimum": 1}}
+                },
+                "resources": {"$ref": "#/definitions/resources"},
+                "podAnnotations": {"$ref": "#/definitions/map"},
+                "nodeSelector": {"$ref": "#/definitions/map"},
+                "tolerations": {"type": "array"},
+                "affinity": {"$ref": "#/definitions/map"},
+                "recipientKey": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "secretName": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"},
+                    "guard": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+                    "kms": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "openbao": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "key": {"type": "string"},
+                            "roles": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {"gateway": {"type": "string"}, "keyAdmin": {"type": "string"}}
+                            },
+                            "audience": {"type": "string"}
+                          }
+                        },
+                        "awskms": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "keyId": {"type": "string"},
+                            "roleArns": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {"gateway": {"type": "string"}, "keyAdmin": {"type": "string"}}
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "keyAdmin": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "action": {"enum": ["init", "rotate", "retire"]},
+                        "rotationId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{0,63}$"},
+                        "waitLoaded": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
+                        "resources": {"$ref": "#/definitions/resources"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "driver": {"enum": ["agentgateway", "koinon"]},
+            "koinon": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["repository"],
+                  "properties": {
+                    "repository": {"$ref": "#/definitions/nonEmpty"},
+                    "tag": {"type": "string"},
+                    "digest": {"type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$"}
+                  }
+                },
+                "replicas": {"type": "integer", "minimum": 2},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
+                "shutdownDelaySeconds": {"type": "integer", "minimum": 0},
+                "drainTimeoutSeconds": {"type": "integer", "minimum": 1},
                 "podDisruptionBudget": {
                   "type": "object",
                   "additionalProperties": false,
@@ -566,6 +658,29 @@
         "opencode": {"$ref": "#/definitions/harness"}
       }
     },
+    "runEvidence": {
+      "description": "Run-evidence export Job (#966, ADR 0121).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "export": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "org": {"type": "string"},
+            "run": {"type": "string"},
+            "out": {"type": "string"},
+            "s3": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"existingSecret": {"type": "string"}}
+            },
+            "resources": {"type": "object"}
+          }
+        }
+      }
+    },
     "harnessPrepull": {
       "description": "Pre-pull the harness images on the Kata nodes (plan item LT1).",
       "type": "object",
@@ -593,7 +708,10 @@
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
+            "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
+            "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},
+            "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},
             "gatewayClientNamespaceSelector": {"type": "object"}
           }
         }

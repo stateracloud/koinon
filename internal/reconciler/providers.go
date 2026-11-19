@@ -227,3 +227,51 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 	}
 	return out, errs, nil
 }
+
+// keyFilePart is the key files of one store in a pass.
+type keyFilePart struct {
+	what  string
+	store ProviderKeyStore
+	files map[string][]byte
+}
+
+// splitKeyFiles divides the pass's key files between the provider keys store and, when one is configured,
+// the MCP credentials store. A part with no files is left out, so a pass that has nothing for a store never
+// writes to it.
+func (r *Reconciler) splitKeyFiles(files map[string][]byte) []keyFilePart {
+	if len(files) == 0 {
+		return nil
+	}
+	if r.cfg.MCPKeys == nil {
+		return []keyFilePart{{what: "provider keys", store: r.cfg.ProviderKeys, files: files}}
+	}
+	providers, mcp := map[string][]byte{}, map[string][]byte{}
+	for name, v := range files {
+		if gatewayplan.IsMCPFile(name) {
+			mcp[name] = v
+		} else {
+			providers[name] = v
+		}
+	}
+	var out []keyFilePart
+	if len(providers) > 0 {
+		out = append(out, keyFilePart{what: "provider keys", store: r.cfg.ProviderKeys, files: providers})
+	}
+	if len(mcp) > 0 {
+		out = append(out, keyFilePart{what: "MCP credentials", store: r.cfg.MCPKeys, files: mcp})
+	}
+	return out
+}
+
+// splitKeep divides the names to keep between the provider keys store and the MCP credentials store.
+func splitKeep(keep map[string]bool) (providers, mcp map[string]bool) {
+	providers, mcp = map[string]bool{}, map[string]bool{}
+	for name, k := range keep {
+		if gatewayplan.IsMCPFile(name) {
+			mcp[name] = k
+		} else {
+			providers[name] = k
+		}
+	}
+	return providers, mcp
+}

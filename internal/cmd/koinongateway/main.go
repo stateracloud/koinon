@@ -26,31 +26,60 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"go.opentelemetry.io/otel"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
+	"github.com/stateracloud/koinon/internal/gateway/usagewire"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
+	"github.com/stateracloud/koinon/internal/mcpgateway/pgaudit"
+	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/modelgateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 // mcpPath is where the MCP endpoint is served. It is the path agentgateway served it at, so an
 // agent's URL does not change with the driver.
 const mcpPath = "/mcp"
 
+// usageFlushLimit bounds the last export at shutdown. The pod's grace period is the shutdown delay,
+// the drain timeout and 30 seconds, and the flush runs after the drain, so it must fit in the 30.
+const usageFlushLimit = 20 * time.Second
+
 type config struct {
 	listenAddr  string
 	healthAddr  string
 	metricsAddr string
 
+	// modelPath also serves the model path (ADR 0097 step 2, issue 279): the route of each model format,
+	// on the same listener. Off, the gateway serves the MCP path only.
+	modelPath bool
+	// mcpPath serves the MCP path. It is on unless a deployment runs the model path in pods of its own.
+	mcpPath bool
+
 	stateURL       string
 	stateTokenFile string
 	podName        string
+	// databaseURLFile holds the connection string of the gateway's own database login (role
+	// migrations.GatewayRole). Empty: no guard, so org targets are not served (fail closed).
+	databaseURLFile string
+	// recipientKeyDir is the mounted Secret with the wrapped gateway recipient keys (ADR 0097 decision 12).
+	// Empty: the gateway loads no key. wrapping is the gateway's own wrapping key (never the KEK's).
+	recipientKeyDir string
+	wrapping        wrapping.Config
 
 	drain time.Duration
 	// shutdownDelay is how long the gateway keeps serving after SIGTERM, with /readyz at 503.
@@ -61,10 +90,20 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.listenAddr, "listen-addr", ":8080", "address of the MCP listener, where agents connect with their gateway key (path "+mcpPath+")")
 	fs.StringVar(&c.healthAddr, "health-addr", ":15021", "address of the health listener (/healthz, /readyz); empty disables it")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", ":15020", "address of the Prometheus listener (/metrics); empty disables it")
+	fs.BoolVar(&c.mcpPath, "mcp-path", true, "serve the MCP path (path "+mcpPath+")")
+	fs.BoolVar(&c.modelPath, "model-path", false,
+		"also serve the model path: the chat completions and Messages routes, with the usage tap; usage records go to koinon-api over OTLP")
 	fs.StringVar(&c.stateURL, "state-url", "",
 		"base URL of koinon-api's internal listener that serves the gateway State stream (for example http://koinon-api.koinon.svc:4318)")
 	fs.StringVar(&c.stateTokenFile, "state-token-file", "",
 		"file with the gateway's bearer token for that listener (the OTLP token Secret, key token, mounted read-only); read on every request, so a rotation needs no restart")
+	fs.StringVar(&c.databaseURLFile, "database-url-file", "",
+		"file with the Postgres connection string of the gateway's own login (a member of the role "+migrations.GatewayRole+"). "+
+			"With it the leak guard runs in the process and org MCP targets are served; without it the gateway serves platform targets only")
+	fs.StringVar(&c.recipientKeyDir, "recipient-key-dir", "",
+		"directory of the Secret with the gateway's wrapped recipient keys (one file per key ID). With it the gateway unwraps them, checks them against the gateway_recipient_keys rows and reports each loaded; "+
+			"it is not ready while a row needs a key it cannot unwrap. The key-wrapping flags (--kek-backend and the --openbao-* or --awskms-* flags) name the gateway's own wrapping key")
+	c.wrapping.Flags(fs)
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
@@ -84,6 +123,9 @@ func (c *config) validate() error {
 	if c.listenAddr == "" {
 		return errors.New("--listen-addr must not be empty")
 	}
+	if !c.mcpPath && !c.modelPath {
+		return errors.New("--mcp-path=false needs --model-path: the gateway would serve nothing")
+	}
 	if c.shutdownDelay < 0 {
 		return errors.New("--shutdown-delay must not be negative")
 	}
@@ -101,7 +143,7 @@ func NewRootCommand() *cobra.Command {
 		Short: "Koinon's gateway, MCP path",
 		Long: "koinon-gateway serves the MCP path of Koinon's gateway (ADR 0097 step 2): agents connect with their gateway key, " +
 			"and the gateway forwards each tool call to the MCP server that owns the tool, after the grant check and the guard. " +
-			"It follows the State stream of koinon-api for its config and holds no database or key-encryption key.\n\n" +
+			"It follows the State stream of koinon-api for its config and holds no key-encryption key. Its only database access is the leak guard's own login (--database-url-file).\n\n" +
 			"Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper case with " +
 			"dashes as underscores (--state-url is KOINON_STATE_URL). Secrets are read from files, never from flags.",
 		Args:    cobra.NoArgs,
@@ -111,6 +153,7 @@ func NewRootCommand() *cobra.Command {
 	cli.Bind(cmd, cli.NewViper())
 	cli.AllowEnv(cmd, "KOINON_MEMORY_LIMIT_BYTES")
 	c.flags(cmd.Flags())
+	cmd.AddCommand(newKeysCommand())
 	cli.EnvAlias(cmd, "pod-name", "POD_NAME")
 	for _, n := range []string{"state-url", "state-token-file"} {
 		if err := cmd.MarkFlagRequired(n); err != nil {
@@ -129,14 +172,17 @@ func Main(ctx context.Context, args []string) int {
 }
 
 // readToken reads the bearer token from file, trimmed of the trailing newline.
-func readToken(file string) (string, error) {
-	b, err := os.ReadFile(file) //nolint:gosec // the path is the operator's --state-token-file flag
+func readToken(file string) (string, error) { return readSecretFile(file, "the State stream token") }
+
+// readSecretFile reads a secret from file, trimmed. An error names the file, never its content.
+func readSecretFile(file, what string) (string, error) {
+	b, err := os.ReadFile(file) //nolint:gosec // the path is the operator's flag
 	if err != nil {
-		return "", fmt.Errorf("read the State stream token: %w", err) // the error names the file, never its content
+		return "", fmt.Errorf("read %s: %w", what, err)
 	}
 	t := strings.TrimSpace(string(b))
 	if t == "" {
-		return "", errors.New("the State stream token file is empty")
+		return "", fmt.Errorf("the file of %s is empty", what)
 	}
 	return t, nil
 }
@@ -147,19 +193,62 @@ func run(ctx context.Context, cfg config) error {
 		return err // fail at start, not on the first request
 	}
 	reg := metrics.NewRegistry()
-	gw := mcpgateway.New(mcpgateway.Options{
+	gopts := mcpgateway.Options{
 		Metrics: mcpgateway.NewMetrics(reg),
 		Tracer:  otel.Tracer("koinon-gateway"),
 		Audit:   logAudit{log: log},
 		Logger:  log,
-	})
+	}
+	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
+	var keys *gatewaykeys.Loader
+	if cfg.mcpPath && cfg.databaseURLFile != "" {
+		guard, audit, pool, err := openGuard(ctx, cfg.databaseURLFile, log, reg)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
+		if cfg.recipientKeyDir != "" {
+			if keys, err = startKeyLoader(ctx, cfg, pool, reg, log); err != nil {
+				return err
+			}
+		}
+	}
+	gw := mcpgateway.New(gopts)
+	var (
+		mg        *modelgateway.Gateway
+		exp       *usagewire.Exporter
+		modelHalf gateway.ModelPathGateway
+	)
+	if cfg.modelPath {
+		exp = usagewire.NewExporter(usagewire.ExporterOptions{
+			URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) }, Logger: log,
+		})
+		mg = modelgateway.New(modelgateway.Options{
+			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: otel.Tracer("koinon-gateway"), Logger: log,
+		})
+		modelHalf = mg
+		// A dropped record is a lost charge: both numbers are visible to an operator (ADR 0023: no labels).
+		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "koinon_gateway_usage_records_dropped_total",
+			Help: "Usage records the exporter dropped (queue full or refused by the receiver).",
+		}, func() float64 { return float64(exp.Dropped()) }))
+		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "koinon_gateway_usage_records_queued",
+			Help: "Usage records that wait for export.",
+		}, func() float64 { return float64(exp.Queued()) }))
+	}
+	var mcpHalf gateway.MCPGateway
+	if cfg.mcpPath {
+		mcpHalf = gw
+	}
 	copyID, err := stateclient.NewCopyID(cfg.podName)
 	if err != nil {
 		return err
 	}
 	sc, err := stateclient.New(stateclient.Config{
 		URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) },
-		CopyID: copyID, MCP: gw, Metrics: stateclient.NewMetrics(reg), Log: log,
+		CopyID: copyID, MCP: mcpHalf, Model: modelHalf, Metrics: stateclient.NewMetrics(reg), Log: log,
 	})
 	if err != nil {
 		return err
@@ -173,12 +262,26 @@ func run(ctx context.Context, cfg config) error {
 	// leaves the Service first.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
-	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, gw, log); err != nil {
+	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
+		if keys != nil {
+			if ok, _ := keys.Ready(); !ok {
+				return false
+			}
+		}
+		return (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != "")
+	}, log); err != nil {
 		return err
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(mcpPath, gw.Handler())
+	if cfg.mcpPath {
+		mux.Handle(mcpPath, gw.Handler())
+	}
+	if mg != nil {
+		for _, p := range gateway.RoutePaths() {
+			mux.Handle(p, mg.Handler())
+		}
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.listenAddr)
 	if err != nil {
 		return fmt.Errorf("MCP listener: %w", err)
@@ -198,6 +301,12 @@ func run(ctx context.Context, cfg config) error {
 			}
 		}
 	})
+	// The exporter outlives the listener: a call that finishes during the drain still writes its record.
+	expCtx, stopExport := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopExport()
+	if exp != nil {
+		safego.Go(expCtx, log, "usage-export", func(ctx context.Context) { exp.Run(ctx, min(cfg.drain, usageFlushLimit)) })
+	}
 	safego.Go(ctx, log, "state-stream", func(ctx context.Context) { _ = sc.Run(ctx) })
 	log.Info("starting koinon-gateway", "version", project.Version, "listen", ln.Addr().String(), "copy", copyID)
 
@@ -216,11 +325,19 @@ func run(ctx context.Context, cfg config) error {
 	// Drain: new requests get 503 and the pool retires; a call in flight finishes first.
 	log.Info("draining koinon-gateway", "timeout", cfg.drain.String())
 	gw.Drain()
+	if mg != nil {
+		mg.Drain()
+	}
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.drain)
 	defer cancel()
 	if err := srv.Shutdown(sctx); err != nil {
 		_ = srv.Close()
 		log.Warn("drain deadline passed: open requests were closed", "err", err)
+	}
+	if exp != nil {
+		// Run flushes what is queued once its context ends; wait for it so the last records reach the ledger.
+		stopExport()
+		<-exp.Done()
 	}
 	stopHealth()
 	log.Info("stopped koinon-gateway")
@@ -229,7 +346,7 @@ func run(ctx context.Context, cfg config) error {
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is
 // not draining) on addr. An empty addr serves nothing.
-func serveHealth(life, term context.Context, addr string, gw *mcpgateway.Gateway, log *slog.Logger) error {
+func serveHealth(life, term context.Context, addr string, configured func() bool, log *slog.Logger) error {
 	if addr == "" {
 		return nil
 	}
@@ -239,7 +356,7 @@ func serveHealth(life, term context.Context, addr string, gw *mcpgateway.Gateway
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		// A replica with no config would refuse every key: it is not ready until the first
 		// revision applied. Once one has, a later State stream outage keeps the config in force.
-		if !applied.Load() && gw.Revision() != "" {
+		if !applied.Load() && configured() {
 			applied.Store(true)
 		}
 		if term.Err() != nil || !applied.Load() {
@@ -269,8 +386,7 @@ func serveHealth(life, term context.Context, addr string, gw *mcpgateway.Gateway
 
 // logAudit writes one structured log line per tool call. It names the agent, target, tool, outcome,
 // guard reason and credential kind, and never an argument, a result or a token (ADR 0097 decision
-// 5). The line is the audit row of this slice: the gateway has no database login, so the row
-// reaches Postgres only when a later slice gives it a write path (see the PR text).
+// 5). It is written beside the Postgres row (pgaudit) when the gateway has a database login.
 type logAudit struct{ log *slog.Logger }
 
 func (a logAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
@@ -281,4 +397,74 @@ func (a logAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
 		slog.String("outcome", string(r.Outcome)), slog.String("verdict", r.Verdict),
 		slog.String("credential", r.CredKind), slog.Duration("duration", r.Duration))
 	return nil
+}
+
+// openGuard opens the gateway's database login and builds the leak guard on it, with the Postgres audit
+// writer. The guard's route stays closed (every message and call is refused) until the database has
+// answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
+// refusal (ADR 0120 section 2).
+func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, *pgxpool.Pool, error) {
+	dsn, err := readSecretFile(urlFile, "the database URL")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("open the guard's database login: %w", errors.New("the connection string does not parse"))
+	}
+	gm := mcpguard.NewMetrics(reg)
+	g := mcpguard.New(pool, mcpguard.Options{
+		Logger: log, Metrics: gm,
+		// Koinon's own tool servers: the code-host tools and the platform's own tools.
+		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
+		// No Approve in this slice: a call that needs a person's decision is refused (fail closed).
+	})
+	ga := mcpguard.NewGatewayGuard(g, log)
+	safego.Go(ctx, log, "guard-load", func(ctx context.Context) {
+		for ctx.Err() == nil {
+			err := ga.Load(ctx)
+			if err == nil {
+				log.Info("the leak guard reached its database")
+				return
+			}
+			log.Warn("the leak guard cannot reach its database; org targets stay closed", "err", err)
+			select {
+			case <-ctx.Done():
+			case <-time.After(2 * time.Second):
+			}
+		}
+	})
+	return ga, pgaudit.New(pool), pool, nil
+}
+
+// startKeyLoader builds the gateway's key loader on the guard's database login and runs it. The wrapping
+// key is the gateway's own; the gateway's identity may decrypt with it and may not encrypt (ADR 0097 12.3).
+// The first pass runs in the background: /readyz stays 503 until it passed once.
+func startKeyLoader(ctx context.Context, cfg config, pool *pgxpool.Pool, reg prometheus.Registerer, log *slog.Logger) (*gatewaykeys.Loader, error) {
+	ws, err := wrapping.New(ctx, cfg.wrapping, wrapping.Service, installid.BoundOnlySource(pool))
+	if err != nil {
+		return nil, fmt.Errorf("the gateway's key-wrapping key: %w", err)
+	}
+	copyID, err := stateclient.NewCopyID(cfg.podName)
+	if err != nil {
+		return nil, err
+	}
+	l := gatewaykeys.NewLoader(cfg.recipientKeyDir, pool, ws.WithInstallID(installid.Source(pool)), copyID, gatewaykeys.NewMetrics(reg))
+	l.Logf = func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) }
+	safego.Go(ctx, log, "recipient-keys", l.Run)
+	return l, nil
+}
+
+// multiAudit writes every row to each Audit. One failing writer does not stop the others, and the
+// first error is returned.
+type multiAudit []mcpgateway.Audit
+
+func (m multiAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
+	var first error
+	for _, a := range m {
+		if err := a.Record(ctx, r); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }

@@ -68,6 +68,9 @@ func newSubstrateCommand() *cobra.Command {
 			if !c.substrateProbes {
 				return errors.New("substrate install runs the probe pods: --substrate-probes=false is only for preflight")
 			}
+			if !c.substrateGVisor {
+				return errors.New("substrate install sets the gVisor check from --sandbox-classes: --substrate-gvisor=false is only for preflight")
+			}
 			if c.substrateIssuer != "" {
 				// The install writes the issuer ate-setup trusts; a second flag for the probe alone could disagree with it.
 				return errors.New("substrate install takes the issuer from --expected-jwt-issuer: --substrate-expected-issuer is only for preflight")
@@ -111,6 +114,7 @@ func newSubstrateCommand() *cobra.Command {
 		"Default: kind when every node is a kind node, else generic; gke is never detected")
 	f.BoolVar(&kind, "kind", false, "deprecated: use --platform kind")
 	_ = f.MarkDeprecated("kind", "use --platform kind")
+	f.StringVar(&profile.GVisorMirror, "gvisor-mirror", "", "base URL of a mirror of the gVisor release "+substrateinstall.GVisorRelease+" (<base>/"+substrateinstall.GVisorRelease+"/<x86_64|aarch64>/gvisor.tar.zstd); default "+substrateinstall.GVisorDefaultMirror+". The installer host fetches the tarball and checks its pinned SHA-256")
 	f.StringVar(&profile.RustFSStorageClass, "rustfs-storage-class", "", "generic platform: StorageClass of the volume of the in-cluster object store (default: the cluster default class)")
 	f.StringVar(&profile.RustFSStorageSize, "rustfs-storage-size", "", "generic platform: size of the object-store volume (default "+substrateinstall.DefaultRustFSStorageSize+")")
 	f.StringVar(&profile.PostgresStorageSize, "postgres-storage-size", "", "generic platform: size of the bundled PostgreSQL volume (default "+substrateinstall.DefaultPostgresStorageSize+"); its class is --postgres-storage-class")

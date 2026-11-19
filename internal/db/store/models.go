@@ -1837,6 +1837,12 @@ type AgentMcpServer struct {
 	Tools    []string
 }
 
+type AgentRemoteAgent struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	RemoteAgentID pgtype.UUID
+}
+
 type AgentRunLimit struct {
 	OrgID            pgtype.UUID
 	AgentID          pgtype.UUID
@@ -2050,6 +2056,23 @@ type GatewayProviderFailure struct {
 	Reason     string
 	Detail     string
 	UpdatedAt  pgtype.Timestamptz
+}
+
+type GatewayRecipientKey struct {
+	KeyID       string
+	Recipient   string
+	PublicKey   []byte
+	State       string
+	CreatedAt   pgtype.Timestamptz
+	ActivatedAt pgtype.Timestamptz
+	RetiringAt  pgtype.Timestamptz
+	RetiredAt   pgtype.Timestamptz
+}
+
+type GatewayRecipientKeyLoad struct {
+	KeyID    string
+	CopyID   string
+	LoadedAt pgtype.Timestamptz
 }
 
 type GatewayServedModel struct {
@@ -2304,6 +2327,19 @@ type LocalCredential struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type McpCallLog struct {
+	ID             int64
+	CreatedAt      pgtype.Timestamptz
+	OrgSlug        string
+	Agent          string
+	Target         string
+	Tool           string
+	Outcome        string
+	Verdict        string
+	CredentialKind string
+	DurationMs     int32
+}
+
 type McpServer struct {
 	OrgID                  pgtype.UUID
 	ID                     pgtype.UUID
@@ -2365,6 +2401,11 @@ type McpTool struct {
 	AddressArgs               []string
 	ResultUntrustedInput      pgtype.Bool
 	ResultPrivateData         pgtype.Bool
+	ToolJson                  []byte
+	ToolHash                  pgtype.Text
+	ApprovedJson              []byte
+	ApprovedHash              pgtype.Text
+	ApprovedAt                pgtype.Timestamptz
 }
 
 type Model struct {
@@ -2785,6 +2826,33 @@ type RecoveryRequest struct {
 	Requester    string
 	SealedResult string
 	CreatedAt    pgtype.Timestamptz
+}
+
+type RemoteAgent struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	Name                string
+	CardUrl             string
+	CredentialHeader    pgtype.Text
+	CredentialPrefix    string
+	Credential          []byte
+	CredentialLostAt    pgtype.Timestamptz
+	CaBundle            string
+	InsecureSkipVerify  bool
+	CardHash            string
+	Card                string
+	ObservedCardHash    pgtype.Text
+	ObservedCard        pgtype.Text
+	CardCheckedAt       pgtype.Timestamptz
+	Health              McpHealth
+	HealthReason        pgtype.Text
+	HealthCheckedAt     pgtype.Timestamptz
+	HealthSince         pgtype.Timestamptz
+	ConsecutiveFailures int32
+	DisabledReason      pgtype.Text
+	CreatedBy           pgtype.UUID
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
 }
 
 type RestoreAcceptedRemoval struct {

@@ -84,6 +84,7 @@ var recordedSettings = []platformSetting{
 	setting("gateway-mode", kindValue),
 	setting("gateway-url", kindURL),
 	setting("gateway-mcp-url", kindURL),
+	setting("gateway-mcp-check-url", kindURL),
 	setting("github-api-url", kindURL),
 
 	// keys and secrets
@@ -107,6 +108,7 @@ var recordedSettings = []platformSetting{
 	setting("awskms-ca-file", kindRef),
 	setting("awskms-timeout", kindValue),
 	{Flag: "saved-work-secret", Key: "saved-work-object", Kind: kindRef},
+	{Flag: "audit-signing-secret", Key: "audit-signing-object", Kind: kindRef},
 	setting("saved-work-addr", kindValue),
 
 	// telemetry and scheduling

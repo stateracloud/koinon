@@ -87,8 +87,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		keyRecord  = fmt.Sprintf("kesak-%d", n)
 		ghRecord   = fmt.Sprintf("kesag-%d", n)
 		repo       = envOr("KOINON_ESCAPE_REPO", "octocat/Hello-World")
-		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
-		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
+		gatewayKey = fmt.Sprintf("koinon-escape-keycred-%d", n)
+		githubKey  = fmt.Sprintf("koinon-escape-ghcred-%d", n) // not the profile ID below: a leak scan must tell them apart
 		// No default: the cluster's DNS and API Service IPs differ per cluster, so a fixed one would pass
 		// on another cluster without probing anything. test/escape/kind.sh reads them from the cluster.
 		clusterDNS = os.Getenv("KOINON_ESCAPE_CLUSTER_DNS")
@@ -490,26 +490,91 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		}
 	}, NodeTimeout(2*time.Minute))
 
-	It("cannot attach to or read the supervisor (PID 1)", func(ctx SpecContext) {
-		res := probe(ctx,
-			check{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
-			check{"id": "mem", "op": "syscall", "name": "proc1_mem"},
-			check{"id": "visible", "op": "read", "path": "/proc/1/status"},
-		)
+	// The guest agent is PID 1 (the OpenShell supervisor; the Substrate guest launcher's agent) and the
+	// guest server is whatever listens inside the guest for control calls. Both belong to the platform.
+	It("cannot reach the guest agent or guest server as the agent user", func(ctx SpecContext) {
+		checks := []check{
+			{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
+			{"id": "mem", "op": "syscall", "name": "proc1_mem"},
+			{"id": "visible", "op": "read", "path": "/proc/1/status"},
+		}
+		// Unix sockets of the guest server, when the driver has them (comma-separated paths).
+		sockets := []string{}
+		for _, s := range strings.Split(os.Getenv("KOINON_ESCAPE_GUEST_SOCKETS"), ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				sockets = append(sockets, s)
+				checks = append(checks, check{"id": "unix " + s, "op": "unix", "path": s})
+			}
+		}
+		// The Substrate guest server answers on vsock: the agent user must not open the socket family.
+		vsock := os.Getenv("KOINON_ESCAPE_GUEST_VSOCK") != ""
+		if vsock {
+			checks = append(checks, check{"id": "vsock", "op": "syscall", "name": "vsock"})
+		}
+		if len(sockets) == 0 && !vsock {
+			GinkgoWriter.Println("guest server half: not applicable here, set KOINON_ESCAPE_GUEST_SOCKETS or KOINON_ESCAPE_GUEST_VSOCK on a driver that has one")
+		}
+		res := probe(ctx, checks...)
+		if vsock {
+			Expect(res["vsock"]).To(BeElementOf("EPERM", "EACCES", "EAFNOSUPPORT"))
+		}
 		Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
 		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
+		for _, s := range sockets {
+			// ENOENT fails too: a mistyped path must not pass for a fence.
+			Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM"), "the guest server socket %s accepted the agent user, or does not exist", s)
+		}
 	}, NodeTimeout(2*time.Minute))
 
-	// Kata is a manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes
-	// under another runtime class, and CI has no Kata at all.
-	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
-		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a Kata guest.
-		testenv.Require(testenv.Var("kata", "KOINON_ESCAPE_HOST_KERNEL"))
+	// A manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes under
+	// another runtime, and CI has no microVM at all.
+	It("runs in a microVM guest, not on the host kernel", func(ctx SpecContext) {
+		// KOINON_ESCAPE_HOST_KERNEL is the nodes' uname -r; set it to require a microVM guest.
+		testenv.Require(testenv.Var("microvm", "KOINON_ESCAPE_HOST_KERNEL"))
 		host := os.Getenv("KOINON_ESCAPE_HOST_KERNEL")
 		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
 		k := res["kernel"].(map[string]any)
-		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not under Kata")
+		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not in a microVM")
 		Expect(k["hypervisor"]).To(BeTrue(), "the guest sees a hypervisor")
+	}, NodeTimeout(2*time.Minute))
+})
+
+const driverOpenShell = "openshell"
+
+// escapeDriver is the execution driver the suite runs against (KOINON_ESCAPE_DRIVER, default
+// openshell). The specs that exist only for Substrate skip on the OpenShell driver.
+func escapeDriver() string { return envOr("KOINON_ESCAPE_DRIVER", driverOpenShell) }
+
+// substrateProbe runs probe checks in a Substrate sandbox and returns each check's result by id. The
+// Substrate driver (issue #1088) sets it; until then the Substrate specs skip, and fail under
+// KOINON_REQUIRE=substrate-driver.
+var substrateProbe func(ctx context.Context, checks ...check) map[string]any
+
+// ateapi and atelet are Substrate's control plane and node agent. Only agentd's identity and the
+// platform may call them (ADR 0120 section 3.3); the actor never. OpenShell has neither, so the
+// specs skip on that driver.
+var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
+	It("cannot call ateapi or atelet", func(ctx SpecContext) {
+		if escapeDriver() == driverOpenShell {
+			Skip("not applicable on the OpenShell driver: it has no ateapi or atelet")
+		}
+		if substrateProbe == nil {
+			if testenv.Required(os.Getenv(testenv.RequireVar), "substrate-driver") {
+				Fail("no Substrate probe (issue #1088), and KOINON_REQUIRE has substrate-driver")
+			}
+			Skip("the Substrate driver does not exist yet (issue #1088)")
+		}
+		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
+		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
+		checks := make([]check, 0, len(ts))
+		for _, t := range ts {
+			checks = append(checks, check{"id": "tcp " + t.String(), "op": "tcp", "host": t.host, "port": t.port})
+		}
+		res := substrateProbe(ctx, checks...)
+		for _, c := range checks {
+			// Refused by the guest's fence, like every other denial in this suite.
+			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM"), c["id"])
+		}
 	}, NodeTimeout(2*time.Minute))
 })

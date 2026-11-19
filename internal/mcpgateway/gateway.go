@@ -52,6 +52,9 @@ type Options struct {
 	CallTimeout time.Duration
 	// ListTimeout bounds one target's part of a tools/list. Zero means 10 seconds.
 	ListTimeout time.Duration
+	// Builtins are the kinds of built-in target this process can run, by [gateway.MCPTarget.Builtin].
+	// A built-in target of another kind is not served. Nil serves none.
+	Builtins map[string]Builtin
 }
 
 // Gateway is the MCP path. It implements [gateway.MCPGateway]: ApplyMCP swaps its configuration,
@@ -61,9 +64,12 @@ type Gateway struct {
 	g    failClosed // the guard, as the gateway calls it: not loaded or panicking refuses
 	snap atomic.Pointer[snapshot]
 
-	mu    sync.Mutex
-	pool  map[poolKey]*upstream
-	drain bool
+	left leftOutSet // the tools each list left out (#1132)
+
+	mu         sync.Mutex
+	pool       map[poolKey]*upstream
+	refreshing map[poolKey]bool // a list_changed relist is running
+	drain      bool
 }
 
 // New returns a Gateway that serves nothing until ApplyMCP.
@@ -145,11 +151,14 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 			drop(t.Name, dropDuplicateName)
 		case t.Name == "" || strings.Contains(t.Name, "_"):
 			drop("", dropInvalidName)
-		case t.URL == "":
+		case t.Builtin != "" && g.o.Builtins[t.Builtin] == nil:
+			// This process has no code for the kind: the target is not served (ADR 0123 decision 10).
+			drop(t.Name, dropBuiltinUnsupported)
+		case t.URL == "" && t.Builtin == "":
 			drop(t.Name, dropNoURL)
 		case isAllowGuard(g.o.Guard) && t.Org != "":
 			drop(t.Name, dropOrgNeedsGuard)
-		case t.CredentialHeader != "" && !credentialSafeURL(t.URL):
+		case t.Builtin == "" && t.CredentialHeader != "" && !credentialSafeURL(t.URL):
 			drop(t.Name, dropCredentialNeedsHTTPS)
 		default:
 			s.targets[t.Name] = t

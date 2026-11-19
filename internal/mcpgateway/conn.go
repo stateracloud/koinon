@@ -105,6 +105,7 @@ type owedEntry struct {
 // response is judged under.
 type pendingCall struct {
 	method string
+	tool   string          // the tool of a tools/call
 	ctx    context.Context //nolint:containedctx // the call's own context, kept until its response
 }
 
@@ -146,6 +147,20 @@ func (c *guardConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 func (c *guardConn) Close() error {
 	c.once.Do(func() { c.lost.Store(true); close(c.done); c.stop() })
 	return c.inner.Close()
+}
+
+// toolOf is the tool name of a tools/call request, and "" for any other message.
+func toolOf(m *jsonrpc.Request) string {
+	if m.Method != "tools/call" {
+		return ""
+	}
+	var p struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(m.Params, &p) != nil {
+		return ""
+	}
+	return p.Name
 }
 
 func idKey(id jsonrpc.ID) string {
@@ -190,6 +205,7 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 		}
 		v := Verdict{}
 		gm := c.message(ToUpstream, kind, m.Method, m)
+		gm.Tool = toolOf(m)
 		switch {
 		case !slices.Contains(UpstreamRequests, m.Method):
 			v = Verdict{Refuse: true, Reason: "refused: the method " + m.Method + " is not allowed"}
@@ -251,7 +267,7 @@ func (c *guardConn) track(ctx context.Context, m *jsonrpc.Request, kind Kind) {
 	switch {
 	case kind == KindRequest:
 		k := idKey(m.ID)
-		c.pending[k] = pendingCall{method: m.Method, ctx: ctx}
+		c.pending[k] = pendingCall{method: m.Method, tool: toolOf(m), ctx: ctx}
 		// The entry must not outlive a caller that gave up, whether or not a cancellation reaches
 		// the target. A late response is still judged for a short grace time, then the entry goes.
 		context.AfterFunc(ctx, func() {
@@ -411,6 +427,7 @@ func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message, p pendingC
 			kind = KindError
 		}
 		gm := c.message(FromUpstream, kind, method, m)
+		gm.Tool = p.tool
 		if kind == KindResult && isInputRequired(m.Result) {
 			c.violation(ctx, gm, ViolationInputRequired)
 			_ = c.guard.Inspect(ctx, gm)

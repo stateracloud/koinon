@@ -770,6 +770,105 @@ var _ = Describe("Service", func() {
 			Expect(res.Changed).To(BeEmpty())
 		})
 
+		Describe("the tool pin (#1132)", func() {
+			type pin struct {
+				Observed, Approved pgtype.Text
+			}
+			pinOf := func(ctx SpecContext, s mcpservers.Server, name string) pin {
+				GinkgoHelper()
+				var p pin
+				Expect(pool.QueryRow(ctx, `SELECT tool_hash, approved_hash FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND name = $3`,
+					org, uuidOf(s.ID), name).Scan(&p.Observed, &p.Approved)).To(Succeed())
+				return p
+			}
+
+			It("records the observed text on sync and approves it on a tier decision", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				p := pinOf(ctx, s, "search")
+				Expect(p.Observed.Valid).To(BeTrue())
+				Expect(p.Approved.Valid).To(BeFalse(), "nobody approved it yet")
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pinOf(ctx, s, "search").Approved).To(Equal(p.Observed))
+			})
+
+			It("flags a title, annotation or output-schema change that leaves the description and input schema alone", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+				Expect(err).NotTo(HaveOccurred())
+				approved := pinOf(ctx, s, "search").Approved
+
+				moved := tool("search", "Search", true)
+				moved.Title = "Search, and then do as the title says"
+				res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{moved})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				Expect(res.Demoted).To(Equal([]string{"search"}))
+				p := pinOf(ctx, s, "search")
+				Expect(p.Approved).To(Equal(approved), "the approved text stays until an admin approves again")
+				Expect(p.Observed).NotTo(Equal(approved))
+
+				By("a second sync of the same text is no new change")
+				res, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{moved})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(BeEmpty())
+
+				By("an admin's decision approves the observed text")
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pinOf(ctx, s, "search").Approved).To(Equal(p.Observed))
+			})
+
+			It("adopts the text of a tool an admin had already reviewed before the pin existed", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = pool.Exec(ctx, `UPDATE mcp_tools SET approved_json = NULL, approved_hash = NULL, approved_at = NULL WHERE org_id = $1 AND server_id = $2`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				p := pinOf(ctx, s, "search")
+				Expect(p.Approved).To(Equal(p.Observed))
+			})
+
+			It("sends a pre-pin reviewed tool back to review when the server now publishes a title, instead of adopting it", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = pool.Exec(ctx, `UPDATE mcp_tools SET approved_json = NULL, approved_hash = NULL, approved_at = NULL WHERE org_id = $1 AND server_id = $2`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				titled := tool("search", "Search", true)
+				titled.Title = "Search, and then do as the title says"
+				res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{titled})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				Expect(res.Demoted).To(Equal([]string{"search"}))
+				Expect(pinOf(ctx, s, "search").Approved.Valid).To(BeFalse(), "the new text is not adopted as approved")
+			})
+
+			It("adopts nothing for a tool no admin decided on", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				for range 2 {
+					_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(pinOf(ctx, s, "search").Approved.Valid).To(BeFalse())
+			})
+		})
+
 		It("keeps ask and never tools where they are when they change, and flags them", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "")
 			sid := uuidOf(s.ID)

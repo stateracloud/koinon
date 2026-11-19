@@ -157,12 +157,19 @@ guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm
 			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
 	done
 
-.PHONY: harness-substrate-opencode
-harness-substrate-opencode: harness-opencode guest-launcher ## Build the OpenCode harness image with the guest launcher (koinon/sandbox:<tag>-substrate)
+# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES. The entry script
+# is /usr/local/bin/koinon-<name> (ADR 0048). A later harness gets an overlay with no Makefile change.
+SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
+.PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%
+$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest launcher (koinon/sandbox:<tag>-substrate)
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
-		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,opencode) \
+		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,$*) \
+		--build-arg ENTRY_SCRIPT=/usr/local/bin/koinon-$* \
 		--build-context launcher=build/guest-launcher \
-		--tag koinon/sandbox:$(call harness_tag,opencode)-substrate cmd/koinon-guest-launcher
+		--tag koinon/sandbox:$(call harness_tag,$*)-substrate cmd/koinon-guest-launcher
+
+.PHONY: harnesses-substrate
+harnesses-substrate: $(SUBSTRATE_HARNESSES) ## Build the substrate overlay of every harness image
 
 .PHONY: harnesses
 harnesses: $(addprefix harness-,$(HARNESSES)) ## Build all harness images
@@ -244,6 +251,10 @@ DEV_KIND_CLUSTER ?= koinon-dev
 .PHONY: dev
 dev: ## Run the inner loop with Tilt against the current kube context (dev-kind-up's kind, or a cluster listed in hack/dev/local.yaml)
 	tilt up
+
+.PHONY: load-gateway
+load-gateway: ## Gateway load suite (issue 280): cloud only, never in CI or `make test`; see docs/dev/load-tests.md
+	hack/load-gateway.sh $(LOAD_ARGS)
 
 .PHONY: dev-kind-up
 dev-kind-up: ## Create the kind cluster kind-koinon-dev with Koinon's prerequisites (CNPG, Agent Sandbox, OpenShell)

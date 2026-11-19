@@ -3,7 +3,9 @@
 postgres.mode=cnpg: a CloudNativePG Cluster with least-privilege roles (ADR 0003):
 - koinon_migrate owns the database and its schema and runs the migrations;
 - koinon_app (NOLOGIN) receives DML on everything koinon_migrate creates;
-- koinon_api, koinon_reconciler and koinon_agentd log in and inherit koinon_app.
+- koinon_api, koinon_reconciler and koinon_agentd log in and inherit koinon_app;
+- koinon_gateway (NOLOGIN) is the group role of koinon-gateway's leak guard (ADR 0097 decision 5), and
+  koinon_mcpgateway logs in and inherits koinon_gateway only (gateway.mcp.driver=koinon).
 The role Secrets are not rendered: the ensure-secrets hook Job creates the missing ones with a
 random password, or postgres.cnpg.existingSecrets names your own (templates/ensure-secrets.yaml). TLS is required for every TCP connection;
 clients verify the server against the cluster CA.
@@ -45,6 +47,14 @@ spec:
         # The only role that may insert install audit events (ADR 0100 decision 1.1a). `koinon-api migrate`
         # grants it its privileges after the goose migrations; only koinon-api's login role is a member, below.
         - CREATE ROLE koinon_install_audit_writer NOLOGIN
+        # The group role of koinon-gateway's leak guard. `koinon-api migrate` grants it exactly what the guard
+        # reads and writes after the goose migrations (migrations.GrantGateway). It is not part of koinon_app.
+        - CREATE ROLE koinon_gateway NOLOGIN
+        # The group roles of the gateway key lifecycle (ADR 0097 decision 12): the key-admin Job's login and the
+        # re-seal login. `koinon-api migrate` grants them (migrations.GrantGatewayKeyRoles). Neither is part of
+        # koinon_app: koinon-api may read the public keys and cannot write them.
+        - CREATE ROLE koinon_gateway_key_admin NOLOGIN
+        - CREATE ROLE koinon_gateway_reseal NOLOGIN
         - GRANT CONNECT ON DATABASE {{ $db }} TO koinon_app
         - GRANT USAGE ON SCHEMA public TO koinon_app
         - ALTER DEFAULT PRIVILEGES FOR ROLE {{ $migrate }} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app
@@ -57,6 +67,16 @@ spec:
              it after the pre-upgrade migrate Job has run, so the post-upgrade hook
              (install-audit-grants.yaml, `koinon-api migrate --grants-only`) waits for it and grants it. */}}
       - name: koinon_install_audit_writer
+        ensure: present
+        login: false
+      {{- /* Managed as well as created above, for the reason the writer role is. */}}
+      - name: koinon_gateway
+        ensure: present
+        login: false
+      - name: koinon_gateway_key_admin
+        ensure: present
+        login: false
+      - name: koinon_gateway_reseal
         ensure: present
         login: false
       {{- range $role := list "api" "reconciler" "agentd" }}
@@ -74,6 +94,29 @@ spec:
         inRoles: [koinon_app{{ if or (eq $role "api") (and (eq $role "reconciler") $.Values.recovery.enabled) }}, koinon_install_audit_writer{{ end }}]
         passwordSecret:
           name: {{ include "koinon.pgSecret" (list $ $role) }}
+      {{- end }}
+      {{- if include "koinon.mcpKoinon" . }}
+      {{- /* koinon-gateway's own login: a member of the gateway group role and of nothing else. It is not
+             in koinon_app, so it has no DML on tables outside its grants. */}}
+      - name: {{ include "koinon.pgRole" "mcpgateway" }}
+        ensure: present
+        login: true
+        inherit: true
+        inRoles: [koinon_gateway]
+        passwordSecret:
+          name: {{ include "koinon.pgSecret" (list . "mcpgateway") }}
+      {{- end }}
+      {{- if include "koinon.gwKey" . }}
+      {{- /* The gateway key lifecycle logins: each a member of its own group role and of nothing else. */}}
+      {{- range $pair := list (list "gwkeyadmin" "koinon_gateway_key_admin") (list "reseal" "koinon_gateway_reseal") }}
+      - name: {{ include "koinon.pgRole" (index $pair 0) }}
+        ensure: present
+        login: true
+        inherit: true
+        inRoles: [{{ index $pair 1 }}]
+        passwordSecret:
+          name: {{ include "koinon.pgSecret" (list $ (index $pair 0)) }}
+      {{- end }}
       {{- end }}
   storage:
     size: {{ .Values.postgres.cnpg.storage.size }}

@@ -39,6 +39,10 @@ func (d *Driver) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.Is
 // refuses. The file agentgateway would have refused as a whole is never delivered (old issue 245).
 func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	s, rejected := s.WithoutInvalidLimits()
+	// A built-in target runs code of ours in koinon-gateway: agentgateway cannot serve it.
+	mcp, noBuiltin := s.WithoutBuiltin()
+	s.MCPState = mcp
+	rejected = append(rejected, noBuiltin...)
 	rev, err := d.apply(ctx, s)
 	if err != nil {
 		return "", err

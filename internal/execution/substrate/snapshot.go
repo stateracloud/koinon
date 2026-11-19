@@ -95,7 +95,7 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 	}
 	digest, err := d.digest(ctx, tag)
 	if err != nil {
-		return execution.Snapshot{}, execution.GRPCError(op, err)
+		return execution.Snapshot{}, storeError(op, err)
 	}
 	return snapshotFrom(workspace, tag, digest), nil
 }
@@ -157,7 +157,7 @@ func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap exec
 	}
 	digest, err := d.digest(ctx, tag)
 	if err != nil {
-		return execution.Sandbox{}, execution.GRPCError(op, err)
+		return execution.Sandbox{}, storeError(op, err)
 	}
 	if digest != snap.Digest {
 		return execution.Sandbox{}, fail(op, execution.ErrInvalid, "snapshot %s does not match its recorded digest", snap.ID)

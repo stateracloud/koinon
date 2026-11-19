@@ -55,7 +55,7 @@ func newRootCommandWith(run func(context.Context, config) error, list func(conte
 
 // configKeys maps a flag to its key in the chart's config.yaml (charts/koinon/templates/config.yaml).
 // A flag that is not here is not in the file.
-var configKeys = map[string]string{
+var configKeys = map[string]string{ //nolint:gosec // flag and config key names, not credentials
 	"execution-driver":                     "execution.driver",
 	"substrate-control-address":            "execution.substrate.controlAddress",
 	"substrate-router-address":             "execution.substrate.routerAddress",
@@ -63,6 +63,13 @@ var configKeys = map[string]string{
 	"substrate-server-name":                "execution.substrate.serverName",
 	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
 	"substrate-token-file":                 "execution.substrate.tokenFile",
+	"substrate-runtime-class-tiers":        "execution.substrate.runtimeClassTiers",
+	"substrate-default-tier":               "execution.substrate.defaultTier",
+	"substrate-snapshot-endpoint":          "execution.substrate.snapshotStore.endpoint",
+	"substrate-snapshot-region":            "execution.substrate.snapshotStore.region",
+	"substrate-snapshot-bucket":            "execution.substrate.snapshotStore.bucket",
+	"substrate-snapshot-access-key-file":   "execution.substrate.snapshotStore.accessKeyFile",
+	"substrate-snapshot-secret-key-file":   "execution.substrate.snapshotStore.secretKeyFile",
 	"openshell-address":                    "openshell.address",
 	"openshell-tls-dir":                    "openshell.tls",
 	"runtime-class":                        "openshell.runtimeClassName",
@@ -87,6 +94,8 @@ var configKeys = map[string]string{
 	"gateway-database-url":                 "gateway.databaseUrl",
 	"provider-keys-secret":                 "gateway.providerKeysSecret",
 	"provider-keys-dir":                    "gateway.providerKeysDir",
+	"mcp-keys-secret":                      "gateway.mcpKeysSecret",
+	"mcp-keys-dir":                         "gateway.mcpKeysDir",
 	"gateway-access-log-otlp":              "gateway.accessLogOtlp",
 	"gateway-access-log-otlp-token-file":   "gateway.accessLogOtlpTokenFile",
 	"gateway-access-log-otlp-token-secret": "gateway.accessLogOtlpTokenSecret",
@@ -252,6 +261,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.gatewayDBURL, "gateway-database-url", "", "agentgateway budget store URL in the rendered config")
 	fs.StringVar(&c.providerKeysSecret, "provider-keys-secret", "", "Secret that receives the opened provider keys for agentgateway")
 	fs.StringVar(&c.providerKeysDir, "provider-keys-dir", "", "directory where agentgateway mounts the provider keys Secret")
+	fs.StringVar(&c.mcpKeysSecret, "mcp-keys-secret", "", "Secret that receives the MCP credential files and CA bundles, apart from the provider keys; empty: they go to the provider keys Secret")
+	fs.StringVar(&c.mcpKeysDir, "mcp-keys-dir", "", "directory where the gateway pods mount the MCP credentials Secret, for the rendered config; empty: --provider-keys-dir")
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")

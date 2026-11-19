@@ -107,13 +107,13 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return nil, errDraining
 	}
-	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg == t && u.acquire() {
+	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg.Same(t) && u.acquire() {
 		g.mu.Unlock()
 		return u, nil
 	}
 	// A request that carries an old snapshot must not evict the session of the current config, nor
 	// connect to a target an apply changed or removed.
-	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || !now.Same(t) {
 		g.mu.Unlock()
 		return nil, errConfigChanged
 	}
@@ -135,13 +135,13 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		return nil, errDraining
 	}
 	u.refs = 1
-	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || !now.Same(t) {
 		// The config changed while this session connected. Serve this one call on it, never pool it.
 		u.retired = true
 		g.mu.Unlock()
 		return u, nil
 	}
-	if cur, ok := g.pool[key]; ok && cur.cfg == t && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
+	if cur, ok := g.pool[key]; ok && cur.cfg.Same(t) && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
 		g.mu.Unlock()
 		u.refs, u.retired = 0, true
 		u.retire()
@@ -156,8 +156,12 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 	return u, nil
 }
 
-func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
-	base := g.o.HTTPClient.Transport
+// NewTargetHTTPClient returns the HTTP client of one upstream target for one agent: the target's CA
+// bundle or skipped verification applies to this client only, the credential is set on every request
+// (and only to the target's host, over https), and a redirect is never followed, so the credential
+// stays with the target. base nil is http.DefaultTransport. The MCP path and the A2A outbound client
+// (ADR 0123 decision 7) both build their clients here, so one rule covers both.
+func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gateway.AgentRef, src CredentialSource) (*http.Client, error) {
 	if base == nil {
 		base = http.DefaultTransport
 	}
@@ -176,11 +180,18 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 			return nil, err
 		}
 	}
-	hc := &http.Client{
-		Transport: &credentialTransport{base: base, target: t, agent: key.agent, src: g.o.Credentials},
+	return &http.Client{
+		Transport: &credentialTransport{base: base, target: t, agent: agent, src: src},
 		Timeout:   0,
 		// A target must not redirect the gateway: the credential stays with the target's host.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
+}
+
+func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
+	hc, err := NewTargetHTTPClient(g.o.HTTPClient.Transport, t, key.agent, g.o.Credentials)
+	if err != nil {
+		return nil, err
 	}
 	var inner mcp.Transport = &mcp.StreamableClientTransport{
 		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1,
@@ -191,6 +202,14 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-gateway", Version: "0"}, &mcp.ClientOptions{
 		// An empty set of capabilities: no sampling, no elicitation. AddRoots below adds roots.
 		Capabilities: &mcp.ClientCapabilities{},
+		// A target that says its tools changed gets the same check as a tools/list (#1132): a tool whose
+		// text moved is left out before the agent can call it.
+		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
+			go func() {
+				defer func() { _ = recover() }()
+				g.refresh(t, key.agent)
+			}()
+		},
 	})
 	// ADR 0097 decision 5 has the gateway answer roots/list with one fixed folder. Roots are
 	// deprecated from MCP 2026-07-28 but work for twelve more months; sampling stays unadvertised.
@@ -299,13 +318,19 @@ func (g *Gateway) evict(u *upstream) {
 func (g *Gateway) evictChanged(old, cur *snapshot) {
 	g.mu.Lock()
 	var gone []*upstream
+	var changed []string
 	for k, u := range g.pool {
-		if t, ok := cur.targets[k.target]; !ok || t != u.cfg {
+		if t, ok := cur.targets[k.target]; !ok || !t.Same(u.cfg) {
 			gone = append(gone, u)
+			changed = append(changed, k.target)
 			delete(g.pool, k)
 		}
 	}
 	g.mu.Unlock()
+	// The tools a list left out belong to the old target config: the next list decides again.
+	for _, n := range changed {
+		g.left.forget(n)
+	}
 	for _, u := range gone {
 		u.retire()
 	}

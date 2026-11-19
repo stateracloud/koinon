@@ -109,7 +109,7 @@ var _ = Describe("koinon-api audit export and verify --file", func() {
 		out, err := run("verify", "--file", first)
 		Expect(err).NotTo(HaveOccurred(), out)
 		Expect(out).To(HavePrefix("ok      install chain (file): 3 events"))
-		Expect(out).To(ContainSubstring("note    a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it\n"),
+		Expect(out).To(ContainSubstring("note    a file verified alone proves internal consistency only, not authenticity; use --after, --anchors with an install export, or --checkpoint with the public key (kept off the cluster), to pin it\n"),
 			"a file checked alone says what that does not prove")
 
 		By("a partial export: unchecked alone, checked with --after")

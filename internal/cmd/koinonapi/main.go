@@ -29,6 +29,7 @@
 package koinonapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -73,6 +74,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/installbinding"
@@ -181,9 +183,12 @@ type config struct {
 	guardAddr                                                            string
 	guardByteCap                                                         int
 	savedWorkSecret                                                      string
-	secretsNamespace                                                     string
-	kubeconfig                                                           string
-	githubAPIURL                                                         string
+	// auditSigningSecret names the Secret with the Ed25519 seed that signs audit checkpoints (ADR 0100
+	// decision 4.2); koinon-api creates it on first use and never overwrites it. Empty turns checkpoints off.
+	auditSigningSecret string
+	secretsNamespace   string
+	kubeconfig         string
+	githubAPIURL       string
 	// chartVersion is the Helm chart's version, which the chart passes; it is only recorded
 	// (platform.settings.observed).
 	chartVersion string
@@ -205,6 +210,10 @@ type config struct {
 	// providers and MCP servers may name.
 	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
 	gatewayMCPURL string
+	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. An agent reaches MCP
+	// through agentgateway until the follow-up that moves it (ADR 0097), so the check must use the URL the agent
+	// uses, which is not always the URL of approved calls. Empty: the check uses gatewayMCPURL.
+	gatewayMCPCheckURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
 	// gatewayMode is the chart's gateway.mode (standalone or kubernetes).
@@ -308,6 +317,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
 	c.kekWrapping.Flags(fs)
+	fs.StringVar(&c.auditSigningSecret, "audit-signing-secret", "",
+		"Secret with the Ed25519 key that signs audit checkpoints (ADR 0100 decision 4.2); created on first use, never overwritten, read by koinon-api alone; empty turns checkpoints off")
 	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
@@ -332,6 +343,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
+	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
 			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
@@ -633,6 +645,13 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	// The gateway's public key (ADR 0097 decision 12): koinon-api holds the active public key only, read
+	// from the table every reload interval. No caller seals a v2 envelope yet (slice 3); the key is held
+	// ready, and a row that fails its check is refused and logged.
+	gatewayKeys := &gatewaykeys.PublicKeys{}
+	safego.GoOrStop(bgCtx, slog.Default(), "gateway-public-key", stop, func(ctx context.Context) {
+		gatewayKeys.Run(ctx, pool, func(f string, a ...any) { slog.Warn(fmt.Sprintf(f, a...)) })
+	})
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
 	// Postgres, wrapped by the KEKs of a mounted Secret, which are wrapped in turn as
 	// cfg.kekWrapping says (ADR 0085 decision 12). koinon-api is decrypt-only: with a KMS, new KEKs
@@ -652,7 +671,7 @@ func serve(ctx context.Context, cfg config) error {
 	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
 	// The key events of the install audit chain (ADR 0100 decision 3): the keys this process generates,
 	// and the check on start that compares the whole key-set state with the last recorded one.
-	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.release, cfg.kekSecret, cfg.savedWorkSecret)
+	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.release, cfg.kekSecret, cfg.savedWorkSecret, cfg.auditSigningSecret)
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
@@ -771,6 +790,14 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	audit.RegisterAnchorMetric(reg)
 	anchorJob := &audit.AnchorJob{DB: pool, Interval: cfg.anchorInterval, Log: slog.Default()}
+	// Signed checkpoints (ADR 0100 decision 4.2) need the Kubernetes API for the signing Secret; without
+	// it, or without --audit-signing-secret, none is signed and the checkpoint age gauge only grows.
+	switch {
+	case cfg.auditSigningSecret != "" && kube != nil:
+		anchorJob.Keys = &kubeSigningKeys{kube: kube, namespace: cfg.secretsNamespace, name: cfg.auditSigningSecret, audits: keyAudits}
+	default:
+		slog.Warn("audit checkpoints are off: they need --audit-signing-secret and access to the Kubernetes API")
+	}
 	safego.GoOrStop(bgCtx, slog.Default(), "audit-anchor", stop, func(ctx context.Context) { anchorJob.Run(ctx) })
 	writerCheck := &audit.InstallWriterCheck{DB: pool, Log: slog.Default()}
 	writerCheck.Check(ctx)
@@ -954,8 +981,8 @@ func serve(ctx context.Context, cfg config) error {
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
 		// The live check of an agent's MCP tools (old issue 488): koinon-api reads the agent's gateway key
 		// and lists the tools as the agent; koinon-agentd gets names only, never the key.
-		if cfg.gatewayMCPURL != "" {
-			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: cfg.gatewayMCPURL, Key: keyFn})
+		if checkURL := cmp.Or(cfg.gatewayMCPCheckURL, cfg.gatewayMCPURL); checkURL != "" {
+			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: checkURL, Key: keyFn})
 		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.
@@ -1044,6 +1071,8 @@ type migrateOptions struct {
 	// of warning. The chart passes it on an external database, where no hook will create the role
 	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
 	requireWriter bool
+	// waitGateway makes --grants-only wait for the gateway group role too (gateway.mcp.driver=koinon).
+	waitGateway bool
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -1065,9 +1094,15 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		// koinon_api's membership in the role: CNPG adds the managed role's inRoles on its own schedule,
 		// possibly after this hook succeeds. That is harmless: koinon-api retries every install write
 		// the database refuses (retryInstallWrite) until the membership lands (ADR 0100 decision 1.1a).
-		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
+		if err := grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
 			return migrations.GrantInstallAuditWriter(ctx, db)
-		})
+		}); err != nil {
+			return err
+		}
+		if o.waitGateway {
+			return waitGrantGateway(waitCtx, wait, 2*time.Second, db)
+		}
+		return grantGateway(waitCtx, db)
 	}
 
 	// On an external database nothing creates the install audit writer role later, so the chart
@@ -1110,6 +1145,9 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 			"on an external database create it (" + project.InstallAuditDocURL + ") and run koinon-api migrate again. " +
 			"Until then koinon-api writes no install audit event")
 	}
+	if err := grantGateway(ctx, db); err != nil {
+		return err
+	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).
@@ -1117,6 +1155,51 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())
+}
+
+// grantGateway gives koinon-gateway's database role its privileges (ADR 0097 decision 5). The role
+// exists only when the chart's gateway switch is on, so a missing role is not an error: nothing
+// connects as it, and the next migrate or --grants-only run grants it once it exists.
+func grantGateway(ctx context.Context, db migrations.Execer) error {
+	granted, err := migrations.GrantGateway(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the gateway role: %w", err)
+	}
+	if !granted {
+		slog.Info("the role " + migrations.GatewayRole + " does not exist, so it was granted nothing (the Koinon MCP gateway is off, or the role comes later)")
+	}
+	// The roles of the gateway key lifecycle (ADR 0097 decision 12). They exist only with the chart's
+	// gateway key switch; a missing one is skipped.
+	roles, err := migrations.GrantGatewayKeyRoles(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the gateway key roles: %w", err)
+	}
+	if len(roles) > 0 {
+		slog.Info("granted the gateway key roles their privileges", "roles", roles)
+	}
+	return nil
+}
+
+// waitGrantGateway calls GrantGateway every poll until the role exists and is granted, for as long as ctx
+// lasts. A new CloudNativePG managed role appears only after the Cluster update, so one call can find
+// nothing to grant on an upgrade.
+func waitGrantGateway(ctx context.Context, wait, poll time.Duration, db migrations.Execer) error {
+	for {
+		granted, err := migrations.GrantGateway(ctx, db)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("grant the gateway role: %w", err)
+		case granted:
+			slog.Info("granted the gateway role its privileges", "role", migrations.GatewayRole)
+			return nil
+		}
+		slog.Info("waiting for the gateway role", "role", migrations.GatewayRole)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the role %s did not appear within %s: the CloudNativePG Cluster has not reconciled its managed roles", migrations.GatewayRole, wait)
+		case <-time.After(poll):
+		}
+	}
 }
 
 // grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as
@@ -1169,16 +1252,23 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 // ensureSavedWorkKey is savedWorkKey that also reports whether this call created the Secret (not a
 // concurrent replica, not an earlier start), so the start records keys.generated once.
 func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, name string) ([]byte, bool, error) {
+	return ensureRandomKeySecret(ctx, kube, namespace, name, savedwork.KeyFile)
+}
+
+// ensureRandomKeySecret returns the 32 bytes under dataKey of the Secret, creating the Secret with 32
+// random bytes when it does not exist and never overwriting one that does. created is true only for the
+// call that made the Secret. Both the saved-work key and the audit signing seed are made this way.
+func ensureRandomKeySecret(ctx context.Context, kube kubernetes.Interface, namespace, name, dataKey string) ([]byte, bool, error) {
 	secrets := kube.CoreV1().Secrets(namespace)
 	get := func() ([]byte, error) {
 		sec, err := secrets.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
-		if len(sec.Data[savedwork.KeyFile]) < 32 {
-			return nil, fmt.Errorf("the Secret %s/%s has no usable %q", namespace, name, savedwork.KeyFile)
+		if len(sec.Data[dataKey]) < 32 {
+			return nil, fmt.Errorf("the Secret %s/%s has no usable %q", namespace, name, dataKey)
 		}
-		return sec.Data[savedwork.KeyFile], nil
+		return sec.Data[dataKey], nil
 	}
 	key, err := get()
 	if err == nil || !apierrors.IsNotFound(err) {
@@ -1191,7 +1281,7 @@ func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespac
 	_, err = secrets.Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{project.Domain + "/managed-by": "koinon-api"}},
 		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{savedwork.KeyFile: k},
+		Data:       map[string][]byte{dataKey: k},
 	}, metav1.CreateOptions{FieldManager: "koinon-api"})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return nil, false, err

@@ -263,6 +263,11 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- if eq .Values.gateway.mcp.driver "koinon" }}true{{ end -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the model path (gateway.model.driver=koinon). Empty otherwise. */}}
+{{- define "koinon.modelKoinon" -}}
+{{- if eq .Values.gateway.model.driver "koinon" }}true{{ end -}}
+{{- end }}
+
 {{/* The MCP gateway's Service, fully qualified like koinon.gatewayHost. */}}
 {{- define "koinon.mcpGatewayHost" -}}
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
@@ -276,6 +281,38 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+The URL koinon-api uses for its live check of an agent's MCP tools. An agent still reaches MCP through
+agentgateway while the driver is koinon (ADR 0097), so the check goes to the URL the agent uses, and not
+to koinon-gateway, which serves koinon-api's approved calls (koinon.gatewayMCPURL).
+*/}}
+{{- define "koinon.gatewayMCPCheckURL" -}}
+{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- end }}
+
+{{/*
+The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
+mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
+(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both while agents reach MCP through it.
+*/}}
+{{- define "koinon.gatewayMCPKeysName" -}}
+{{- include "koinon.componentName" (list . "gateway-mcp-keys") }}
+{{- end }}
+
+{{/* Where a gateway pod mounts the MCP credentials Secret. */}}
+{{- define "koinon.gatewayMCPKeysDir" -}}/secrets/mcp{{- end }}
+
+{{/*
+koinon-gateway's own database login (gateway.mcp.driver=koinon). In cnpg mode the URL file is a
+ConfigMap (no password in it: the password is PGPASSWORD, from the generated Secret); in external mode the
+file is a key of the external Secret.
+*/}}
+{{- define "koinon.mcpGatewayDBURLConfigName" -}}
+{{- include "koinon.componentName" (list . "mcp-gateway-db") }}
+{{- end }}
+
+{{- define "koinon.mcpGatewayDBURLDir" -}}/etc/koinon/mcp-db{{- end }}
 
 {{/*
 The labels the agentgateway controller puts on the proxy pods of Koinon's Gateway (kubernetes mode):
@@ -343,6 +380,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ include "koinon.gatewayMCPURL" . | quote }}
+# The live check of an agent's MCP tools uses the MCP URL the agent uses: agentgateway's, also when koinon-gateway serves the approved calls.
+- name: KOINON_GATEWAY_MCP_CHECK_URL
+  value: {{ include "koinon.gatewayMCPCheckURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
 - name: KOINON_GATEWAY_MODE
   value: {{ .Values.gateway.mode | quote }}
@@ -548,7 +588,10 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- define "koinon.ensureSecrets" -}}
 {{- $specs := list -}}
 {{- if eq .Values.postgres.mode "cnpg" -}}
-{{- range $role := list "migrate" "api" "reconciler" "agentd" -}}
+{{- $roles := list "migrate" "api" "reconciler" "agentd" -}}
+{{- if include "koinon.mcpKoinon" . -}}{{- $roles = append $roles "mcpgateway" -}}{{- end -}}
+{{- if include "koinon.gwKey" . -}}{{- $roles = concat $roles (list "gwkeyadmin" "reseal") -}}{{- end -}}
+{{- range $role := $roles -}}
 {{- if not (index $.Values.postgres.cnpg.existingSecrets $role) -}}
 {{- $labels := fromYaml (include "koinon.generatedLabels" (list $ "postgres")) | merge (dict "cnpg.io/reload" "true") -}}
 {{- $specs = append $specs (dict "name" (include "koinon.pgSecret" (list $ $role)) "type" "kubernetes.io/basic-auth" "username" (include "koinon.pgRole" $role) "labels" $labels) -}}
@@ -1047,7 +1090,18 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the harness does not yet run behind the guest launcher and the gVisor tiers have no read-only root (issue #1088 slices b and c)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the guest image does not yet carry the guest launcher (issue #1088 slice f). The gVisor tiers keep a writable root (issue #1150)" }}
+{{- end }}
+{{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
+{{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
+{{- end }}
+{{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers }}
+{{- if not (has $tier (list "vm" "hardened" "dev")) }}
+{{- fail (printf "execution.substrate.runtimeClassTiers.%s %q: want vm, hardened or dev" $class $tier) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.execution.substrate.defaultTier (not (has .Values.execution.substrate.defaultTier (list "vm" "hardened" "dev"))) }}
+{{- fail (printf "execution.substrate.defaultTier %q: want vm, hardened or dev" .Values.execution.substrate.defaultTier) }}
 {{- end }}
 {{- range $k := list "sandboxObserver" "sandboxNetworkPolicy" "sandboxLimitRange" }}
 {{- if (index $.Values $k).enabled }}
@@ -1070,6 +1124,10 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where agentgateway is;
 it carries no credentials.
 */}}
+{{/* The Secret koinon-api creates on its first checkpoint for the Ed25519 key that signs audit checkpoints (ADR 0100 decision 4.2). Helm never renders it, so an upgrade never overwrites the key. Only koinon-api reads it, through the Kubernetes API: no workload mounts it and no Role other than koinon-api's names it. Rotation: delete it (ADR 0100, signed checkpoints). */}}
+{{- define "koinon.auditSigningSecretName" -}}
+{{- include "koinon.componentName" (list . "audit-signing") -}}
+{{- end }}
 {{/* The Secret koinon-api creates on first use for the key that signs saved-work uploads (ADR 0054). koinon-agentd mounts it read-only (optional: it exists once koinon-api has started); it is not a KEK. */}}
 {{- define "koinon.savedWorkSecretName" -}}
 {{- include "koinon.componentName" (list . "saved-work") -}}
@@ -1113,6 +1171,14 @@ it carries no credentials.
   value: {{ .Values.execution.substrate.routerAddress | quote }}
 - name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
   value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
+{{- with .Values.execution.substrate.defaultTier }}
+- name: KOINON_SUBSTRATE_DEFAULT_TIER
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.execution.substrate.runtimeClassTiers }}
+- name: KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS
+  value: {{ include "koinon.substrateTiers" . | quote }}
+{{- end }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
 {{- if .Values.execution.substrate.caSecret }}
@@ -1232,6 +1298,71 @@ spec:
 {{- end }}
 
 {{/*
+The run-evidence export Job's pod template (run-evidence-export.yaml), as a string: the Job is named by its hash.
+dict root, re (values runEvidence.export).
+*/}}
+{{- define "koinon.runEvidencePod" -}}
+{{- $ := .root -}}
+{{- $re := .re -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "run-evidence") | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "koinon.componentName" (list $ "api") }}
+  # The token reads the KEK Secret through the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: run-evidence
+      image: {{ include "koinon.image" (list $ $.Values.api.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - run-evidence
+        - export
+        - {{ printf "--org=%s" $re.org | quote }}
+        - {{ printf "--run=%s" $re.run | quote }}
+        - {{ printf "--out=%s" $re.out | quote }}
+        - {{ printf "--kek-secret=%s" (include "koinon.kekSecretName" $) | quote }}
+        - --s3-endpoint=$(S3_ENDPOINT)
+        - --s3-region=$(S3_REGION)
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- range $env, $key := dict "S3_ENDPOINT" "endpoint" "S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}
+        - name: {{ $env }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $re.s3.existingSecret | quote }}
+              key: {{ $key }}
+        {{- end }}
+        {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
+        {{- include "koinon.kmsEnv" (dict "root" $ "role" "api") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $re.resources | nindent 8 }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{/*
 koinon.pricesRefreshMode is koinon-api's --prices-refresh (ADR 0098, maintainer decision 2026-11-07):
 prices.refresh.enabled unset is auto (koinon-api fetches OpenRouter only while an openrouter provider
 exists; the chart knows nothing about providers), false is off, true is on.
@@ -1326,4 +1457,175 @@ releases on one cluster never render the same cluster-scoped name.
 {{- else -}}
 {{- $full -}}
 {{- end -}}
+{{- end }}
+
+{{/* The runtime class to tier map of the substrate driver as "class=tier" entries, sorted by class. */}}
+{{- define "koinon.substrateTiers" -}}
+{{- $e := list -}}
+{{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers -}}
+{{- $e = append $e (printf "%s=%s" $class $tier) -}}
+{{- end -}}
+{{- join "," $e -}}
+{{- end }}
+
+{{/*
+The gateway recipient key (ADR 0097 decision 12, issue #1151): true when koinon-gateway serves the MCP path
+and gateway.mcp.koinon.recipientKey.enabled is on. Empty otherwise.
+*/}}
+{{- define "koinon.gwKey" -}}
+{{- if and (include "koinon.mcpKoinon" .) .Values.gateway.mcp.koinon.recipientKey.enabled }}true{{ end -}}
+{{- end }}
+
+{{/* The Secret that holds the wrapped gateway private keys. Only the key-admin Job writes it. */}}
+{{- define "koinon.gwKeySecretName" -}}
+{{- .Values.gateway.mcp.koinon.recipientKey.secretName | default (printf "%s-gateway-recipient-key" (include "koinon.fullname" .)) -}}
+{{- end }}
+
+{{/* The key-admin Job's service account. One name: the subject of the KMS role and of the guard. */}}
+{{- define "koinon.gwKeyAdminName" -}}
+{{- printf "%s-gateway-key-admin" (include "koinon.fullname" .) -}}
+{{- end }}
+
+{{/* Where the gateway pod mounts the wrapped keys, and its projected KMS token. */}}
+{{- define "koinon.gwKeyDir" -}}/etc/koinon/gateway-key{{- end }}
+{{- define "koinon.gwKeyTokenDir" -}}/var/run/secrets/koinon/gateway-kms{{- end }}
+
+{{/*
+The KMS settings of the gateway key (dict root, role: gateway or keyAdmin). The backend, server, region and CA
+are secrets.kek.kms's; the wrapping key and the roles are gateway.mcp.koinon.recipientKey.kms's. The key MUST
+differ from the KEK's: with the same key the custody boundary is gone, because koinon-api decrypts KEKs.
+Empty with the local backend (the gateway key is then held as it is).
+*/}}
+{{- define "koinon.gwKeyKmsEnv" -}}
+{{- $root := .root }}
+{{- $rk := $root.Values.gateway.mcp.koinon.recipientKey.kms }}
+{{- $kms := $root.Values.secrets.kek.kms }}
+{{- if eq (include "koinon.kms" $root) "openbao" }}
+{{- $o := $kms.openbao }}
+{{- $key := required "gateway.mcp.koinon.recipientKey.kms.openbao.key is required with the openbao backend" $rk.openbao.key }}
+{{- if eq $key $o.key }}{{ fail "gateway.mcp.koinon.recipientKey.kms.openbao.key must differ from secrets.kek.kms.openbao.key: koinon-api may decrypt with the KEK's key" }}{{ end }}
+- name: KOINON_KEK_BACKEND
+  value: openbao
+- name: KOINON_OPENBAO_ADDRESS
+  value: {{ $o.address | quote }}
+- name: KOINON_OPENBAO_TRANSIT_MOUNT
+  value: {{ $o.transitMount | default "transit" | quote }}
+- name: KOINON_OPENBAO_KEY
+  value: {{ $key | quote }}
+- name: KOINON_OPENBAO_AUTH_MOUNT
+  value: {{ $o.authMount | default "kubernetes" | quote }}
+- name: KOINON_OPENBAO_ROLE
+  value: {{ index $rk.openbao.roles .role | quote }}
+{{- with $o.namespace }}
+- name: KOINON_OPENBAO_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- with $o.timeout }}
+- name: KOINON_OPENBAO_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $o.caConfigMap }}
+- name: KOINON_OPENBAO_CA_FILE
+  value: /etc/koinon/openbao-ca/ca.crt
+{{- end }}
+{{- if eq .role "gateway" }}
+- name: KOINON_OPENBAO_TOKEN_FILE
+  value: {{ include "koinon.gwKeyTokenDir" $root }}/token
+{{- end }}
+{{- else if eq (include "koinon.kms" $root) "awskms" }}
+{{- $a := $kms.awskms }}
+{{- $key := required "gateway.mcp.koinon.recipientKey.kms.awskms.keyId is required with the awskms backend" $rk.awskms.keyId }}
+{{- if eq $key $a.keyId }}{{ fail "gateway.mcp.koinon.recipientKey.kms.awskms.keyId must differ from secrets.kek.kms.awskms.keyId: koinon-api may decrypt with the KEK's key" }}{{ end }}
+- name: KOINON_KEK_BACKEND
+  value: awskms
+- name: KOINON_AWSKMS_REGION
+  value: {{ $a.region | quote }}
+- name: KOINON_AWSKMS_KEY_ID
+  value: {{ $key | quote }}
+{{- with $a.endpoint }}
+- name: KOINON_AWSKMS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.stsEndpoint }}
+- name: KOINON_AWSKMS_STS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.timeout }}
+- name: KOINON_AWSKMS_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $a.caConfigMap }}
+- name: KOINON_AWSKMS_CA_FILE
+  value: /etc/koinon/awskms-ca/ca.crt
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* The IRSA annotation of the gateway or key-admin ServiceAccount (dict root, role). Empty unless awskms. */}}
+{{- define "koinon.gwKeyServiceAccountAnnotations" -}}
+{{- if eq (include "koinon.kms" .root) "awskms" }}
+{{- with index .root.Values.gateway.mcp.koinon.recipientKey.kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+The gateway key-admin Job's pod template (gateway-recipient-key.yaml), as a string: the Job is named by its hash.
+dict root, sa, secret (Secret name), rk (values gateway.mcp.koinon.recipientKey).
+*/}}
+{{- define "koinon.gwKeyAdminPod" -}}
+{{- $ := .root -}}
+{{- $rk := .rk -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "key-admin") | nindent 4 }}
+  {{- with $rk.keyAdmin.rotationId }}
+  annotations:
+    # Changes the hash that names the Job: a new rotationId runs the action once more.
+    koinon.dev/rotation-id: {{ . | quote }}
+  {{- end }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ .sa }}
+  # The token signs in to the KMS (Kubernetes auth) and reaches the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: gateway-key-admin
+      image: {{ include "koinon.image" (list $ $.Values.gateway.mcp.koinon.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - keys
+        - {{ $rk.keyAdmin.action | default "init" | quote }}
+        - {{ printf "--secret=%s" .secret | quote }}
+        - {{ printf "--replicas=%d" (int $.Values.gateway.mcp.koinon.replicas) | quote }}
+        - {{ printf "--wait-loaded=%s" ($rk.keyAdmin.waitLoaded | default "10m") | quote }}
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- include "koinon.dbEnv" (list $ "gwkeyadmin") | nindent 8 }}
+        {{- include "koinon.gwKeyKmsEnv" (dict "root" $ "role" "keyAdmin") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $rk.keyAdmin.resources | nindent 8 }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
 {{- end }}

@@ -113,6 +113,7 @@ Put a new check in the earliest row that fits. "yes" runs and blocks, "adv" runs
 | Upgrade from last release | planned, #83, #519 | - | - | - | from v0.3 | from v0.3 | - | long | from v0.3 |
 | VM tier (Kata) | lab only | - | - | - | - | - | yes | n/a | no |
 | Real model | `docs/dev/real-model-tests.md` | outside CI | outside CI | outside CI | outside CI | outside CI | by hand | n/a | no |
+| Gateway load | `docs/dev/load-tests.md` (`make load-gateway`) | outside CI | outside CI | outside CI | outside CI | outside CI | by hand, in the cloud | n/a | no |
 
 ### Required checks (Q)
 
@@ -232,6 +233,17 @@ assertions inside and outside the sandbox. Use envtest. Never Kyverno, also not 
 Why: a policy test with only deny cases passes when the policy denies everything.
 Check: review. Source: [Gatekeeper gator](https://open-policy-agent.github.io/gatekeeper/website/docs/v3.15.x/gator)
 (offline policy test suites, the pattern for allowed and denied cases). Scope: general pattern. In force: now.
+
+**T11. MUST** put the window of an `Eventually` in a Go test inside `racescale.D(...)`, and set the default window
+of a suite with `SetDefaultEventuallyTimeout(racescale.D(...))`.
+Why: the window tells a hang from a slow machine. Under `-race` and `-p` a fixed window is too short, and the spec
+fails once in many runs (#994, #660). A spec that tests elapsed time itself (`Consistently`, a quiet period) is
+exempt. Put `// t11-ok: <reason>` on the line of any other window that must stay literal.
+Check: `hack/ci-rules-check.sh` (rule T11) fails on a literal duration (`time.Second`, `"5s"`) in an `Eventually(`
+or `).WithTimeout(` line of a `*_test.go` file. `hack/ci-rules-t11-baseline.txt` lists the files that have not moved
+yet. The list only shrinks: wrap the windows of a file and delete its line. A text scan of one line: a window held
+in a variable is not seen.
+Source: Koinon decision (#994). Scope: Koinon only. In force: now.
 
 ### Workflow security (W)
 

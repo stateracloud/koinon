@@ -15,6 +15,7 @@ import (
 	koinharness "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // ADR 0069 decision 6: a model in the Anthropic format runs on the koinon-anthropic entry, which
@@ -53,7 +54,7 @@ func harnessFor(ctx context.Context, sb *sandbox, gw *gateway, model string, for
 		err = h.conn.LoadSession(ctx, session, workdir)
 	}
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(h.client.availableCommands).WithTimeout(30 * time.Second).Should(ContainElement(opencode.readyCommand))
+	Eventually(h.client.availableCommands).WithTimeout(racescale.D(30 * time.Second)).Should(ContainElement(opencode.readyCommand))
 	time.Sleep(readySettle)
 	Expect(h.conn.SetModel(ctx, session, entryFor(format, model))).To(Succeed())
 	return h, session

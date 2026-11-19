@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/sinkclass"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)", func() {
@@ -72,7 +73,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 		})
 		Expect(err).NotTo(HaveOccurred())
 		conn := res.GetConnection().GetId()
-		Eventually(repos(ctx)).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		Eventually(repos(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(2))
 		l, err := orgsettings.NewService(e.pool).LeakGuard(ctx, mustUUID(org))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.Scope().Internal(conn, "acme", "handbook", time.Now())).To(BeTrue())
@@ -84,7 +85,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 		By("testing it reads again, and a person's sync is audited even when nothing changed")
 		_, err = owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: conn})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(2))
 	})
 
 	It("audits the reading under the request ID of the call that asked for it", func(ctx SpecContext) {
@@ -104,7 +105,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 			OrgId: org, DisplayName: "acme", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(1))
+		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
 		created := events("connection.create")
 		Expect(created).To(HaveLen(1))
 		Expect(created[0].RequestID).NotTo(BeEmpty())
@@ -115,7 +116,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 			Secret: &connectionv1alpha1.SetConnectionSecretRequest_Github{Github: &connectionv1alpha1.GitHubConnectionSecret{PrivateKey: string(gh.PEM)}},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		Eventually(func() []store.AuditEvent { return replaces(ctx) }).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(2))
 		rekeyed := events("connection.secret.set")
 		Expect(rekeyed).To(HaveLen(1))
 		Expect(rekeyed[0].RequestID).NotTo(BeEmpty())
@@ -132,7 +133,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 			OrgId: org, DisplayName: "acme", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(repos(ctx)).WithTimeout(10 * time.Second).Should(HaveLen(2))
+		Eventually(repos(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(2))
 
 		By("the new credential cannot be read (the host is down): the old reading must not stay")
 		gh.Server.Close()
@@ -142,7 +143,7 @@ var _ = Describe("the code-host scope through ConnectionService (ADR 0091, #115)
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(repos(ctx)()).To(BeEmpty(), "deleted with the secret change, before any reading")
-		Consistently(repos(ctx)).WithTimeout(time.Second).Should(BeEmpty())
+		Consistently(repos(ctx)).WithTimeout(racescale.D(time.Second)).Should(BeEmpty())
 	})
 })
 
@@ -198,7 +199,7 @@ var _ = Describe("the periodic code-host scope refresh beside a person's reading
 		})
 		Expect(err).NotTo(HaveOccurred())
 		conn = res.GetConnection().GetId()
-		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 		Eventually(func() int { mu.Lock(); defer mu.Unlock(); return inFlight }).Should(BeZero())
 		mu.Lock()
 		hold, maxSeen = make(chan struct{}), 0
@@ -227,11 +228,11 @@ var _ = Describe("the periodic code-host scope refresh beside a person's reading
 
 		_, err := owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: conn})
 		Expect(err).NotTo(HaveOccurred())
-		Consistently(listing).WithTimeout(500*time.Millisecond).Should(Equal(1), "the person's reading waits for the refresh's")
+		Consistently(listing).WithTimeout(racescale.D(500*time.Millisecond)).Should(Equal(1), "the person's reading waits for the refresh's")
 
 		releaseListings()
-		Eventually(refresh).WithTimeout(10 * time.Second).Should(BeClosed())
-		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(10*time.Second).Should(Equal(2), "the person's reading ran after it")
+		Eventually(refresh).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
+		Eventually(func() int { return len(scopeReplaces(ctx, e, org)) }).WithTimeout(racescale.D(10*time.Second)).Should(Equal(2), "the person's reading ran after it")
 		mu.Lock()
 		defer mu.Unlock()
 		Expect(maxSeen).To(Equal(1))
@@ -244,11 +245,11 @@ var _ = Describe("the periodic code-host scope refresh beside a person's reading
 
 		drained := make(chan struct{})
 		go func() { defer GinkgoRecover(); defer close(drained); e.rpc.Drain(context.Background()) }()
-		Consistently(drained).WithTimeout(500 * time.Millisecond).ShouldNot(BeClosed())
+		Consistently(drained).WithTimeout(racescale.D(500 * time.Millisecond)).ShouldNot(BeClosed())
 
 		releaseListings()
-		Eventually(drained).WithTimeout(10 * time.Second).Should(BeClosed())
-		Eventually(refresh).WithTimeout(10 * time.Second).Should(BeClosed())
+		Eventually(drained).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
+		Eventually(refresh).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
 	})
 })
 

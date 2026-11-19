@@ -45,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	ateenvv1alpha "github.com/stateracloud/koinon/internal/gen/substrate/ateenv/v1alpha"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 // TargetActorHeader selects the actor a request to the atenet router goes to, as
@@ -73,9 +74,17 @@ type Config struct {
 	// changed behind the same address (upstream T-25; ADR 0119 D5). It is required for snapshots:
 	// when it is nil, SnapshotSandbox and RestoreSandbox fail closed with [execution.ErrUnsupported],
 	// because a digest over the control API's metadata alone would restore a changed object without
-	// error. The production object-store reader that fills it is a later slice (Part of #1082, slice e).
-	// Until then the reconciler wiring leaves it nil and every snapshot fails closed.
+	// error. [ObjectStore.ContentDigester] makes the production function; the reconciler builds it from
+	// the --substrate-snapshot-* flags, and without them every snapshot fails closed.
 	ContentDigest func(ctx context.Context, objectURI string) (string, error)
+	// RuntimeClassTiers maps the runtime class of a sandbox (SandboxSpec.RuntimeClassName, which the
+	// template carries as a worker selector) to its isolation tier (ADR 0075). Exec puts the launcher
+	// prefix of that tier in front of every command ([harness.Descriptor.LauncherPrefix]).
+	RuntimeClassTiers map[string]harness.Tier
+	// DefaultTier is the tier of a sandbox whose template names no runtime class. Empty means there is
+	// none. A sandbox whose tier is unknown fails Exec with [execution.ErrFailedPrecondition]: the
+	// driver never starts a guest process, Upload's included, without the launcher.
+	DefaultTier harness.Tier
 	// DrainTimeout bounds each of the two waits of a suspend for the router calls that started
 	// before it: first for the short calls (stdin writes, uploads) to end by themselves, then,
 	// after they are cancelled, for them to return. It also bounds the wait for an actor that a
@@ -120,6 +129,9 @@ type Driver struct {
 	// owed holds the actors that SnapshotSandbox suspended and could not resume. A retry of the
 	// snapshot resumes them, because the seam says the sandbox keeps running.
 	owed map[key]bool
+	// tiers caches the tier of a template by atespace and name. A template name is a hash of its
+	// content, so the entry never goes stale.
+	tiers map[key]harness.Tier
 
 	resuspends *prometheus.CounterVec
 }
@@ -146,6 +158,7 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		cfg:        cfg.withDefaults(),
 		gates:      map[key]*gate{},
 		owed:       map[key]bool{},
+		tiers:      map[key]harness.Tier{},
 		resuspends: newResuspends(),
 	}
 }
