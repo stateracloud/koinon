@@ -99,7 +99,7 @@ func (fixedTokens) ReadToken(_ context.Context, _ store.Connection, scope codeho
 }
 
 var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server connection", func() {
-	It("renders nothing for a connection whose host is a private address", func(ctx SpecContext) {
+	DescribeTable("renders nothing for a connection whose host is a private address or a short name (#1054)", func(ctx SpecContext, baseURL string) {
 		osg := fakegateway.New()
 		cc, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -108,7 +108,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
 		Expect(err).NotTo(HaveOccurred())
-		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": "https://10.0.0.1"})
+		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": baseURL})
 		Expect(err).NotTo(HaveOccurred())
 		conn, err := q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: org, ID: id, Connector: "github", DisplayName: "internal", Config: config,
@@ -142,7 +142,11 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		n := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		Expect(osg.Profile(execution.WorkspaceName(org.Bytes), n.GitHubProfile)).To(BeNil(), "no egress to a private host")
 		Expect(osg.Calls("CreateSandbox")).To(BeZero())
-	})
+	},
+		Entry("a private address", "https://10.0.0.1"),
+		Entry("a search-path Service name", "https://gitea.ns.svc"),
+		Entry("a single-label name", "https://intranet"),
+	)
 
 	It("reads the host from the connection and renders only it, in the profile and the policy", func(ctx SpecContext) {
 		osg := fakegateway.New()

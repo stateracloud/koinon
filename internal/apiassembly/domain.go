@@ -73,7 +73,7 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	// Gitea provider dial Connection base URLs through the egress policy.
 	gh := out.GitHub
 	if gh == nil {
-		gh = github.NewClient(github.Options{BaseURL: set.GitHubAPIURL, DialContext: d.urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})})
+		gh = github.NewClient(github.Options{BaseURL: set.GitHubAPIURL, DialContext: d.urlPolicy.SandboxDialContext(&net.Dialer{Timeout: 5 * time.Second})})
 	}
 	d.hosts = providers.New(gh)
 	// The MCP leak guard (ADR 0091) and the ask-tier proxy refer to each other: the guard records its

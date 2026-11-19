@@ -869,7 +869,7 @@ var _ = Describe("Importer", func() {
 		})
 
 		It("ignores a connection Secret whose base URL is a private or internal host", func(ctx SpecContext) {
-			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres"} {
+			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres", "https://gitea.ns.svc", "https://gitea.ns.svc:443", "https://INTRANET.", "https://u@intranet:8443"} {
 				d := conn()
 				d["baseUrl"] = v
 				put(ctx, "gh", declarative.TypeConnection, slug, d)
@@ -1070,6 +1070,8 @@ var _ = Describe("Importer", func() {
 				Entry("the base URL is http", func(d map[string]string) { d["baseUrl"] = "http://git.example.test" }),
 				Entry("the base URL has a glob in its path", func(d map[string]string) { d["baseUrl"] = "https://git.example.test/*" }),
 				Entry("the base URL is an internal host", func(d map[string]string) { d["baseUrl"] = "https://10.0.0.1/gitea" }),
+				Entry("the base URL is a short name", func(d map[string]string) { d["baseUrl"] = "https://gitea.ns.svc/gitea" }),
+				Entry("the base URL is a single-label name", func(d map[string]string) { d["baseUrl"] = "https://intranet:3000/gitea" }),
 				Entry("a token is missing", func(d map[string]string) { delete(d, "writeToken") }),
 				Entry("the tokens are the same", func(d map[string]string) { d["writeToken"] = d["readToken"] }),
 				Entry("a token has a space", func(d map[string]string) { d["readToken"] = "koinon_test not-a-real" }),

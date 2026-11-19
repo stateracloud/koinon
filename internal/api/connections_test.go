@@ -248,6 +248,10 @@ var _ = Describe("ConnectionService", func() {
 			{BaseUrl: "https://10.0.0.1"},
 			{BaseUrl: "https://127.0.0.1:8443"},
 			{BaseUrl: "https://koinon-postgres"},
+			{BaseUrl: "https://gitea.ns.svc"},
+			{BaseUrl: "https://gitea.ns.svc:443"},
+			{BaseUrl: "https://INTRANET."},
+			{BaseUrl: "https://user@intranet:8443"},
 			{CaBundle: "not pem"},
 			{CaBundle: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-a-real-key")}))},
 		} {
@@ -935,6 +939,10 @@ var _ = Describe("ConnectionService for Gitea", func() {
 		Entry("http", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "http://git.example.test" }),
 		Entry("a glob in the path", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://git.example.test/*" }),
 		Entry("an internal host", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://10.0.0.1/gitea" }),
+		Entry("a search-path Service name (#1054)", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) {
+			r.BaseUrl = "https://gitea.ns.svc:3000/gitea"
+		}),
+		Entry("a single-label name (#1054)", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://INTRANET./gitea" }),
 		Entry("a bad CA bundle", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.CaBundle = "not pem" }),
 		Entry("a missing read token", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.ReadToken = "" }),
 		Entry("the same token twice", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.WriteToken = r.ReadToken }),

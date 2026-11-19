@@ -258,6 +258,75 @@ func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
 	return p.check(ctx, rawURL, true)
 }
 
+// CheckSandbox is Check for a URL that also becomes sandbox egress, such as a connector's base URL. The
+// sandbox resolver uses no search domains, so a short name that resolves in the API does not resolve
+// there (#1054). It refuses a short name (see ShortName) before any allow-list entry is read: an
+// allow-listed short name would pass the platform check and still fail in the sandbox.
+func (p URLPolicy) CheckSandbox(ctx context.Context, rawURL string) error {
+	if err := sandboxName(rawURL); err != nil {
+		return err
+	}
+	return p.Check(ctx, rawURL)
+}
+
+// CheckSandboxStrict is CheckStrict with the rule of CheckSandbox, for rendering.
+func (p URLPolicy) CheckSandboxStrict(ctx context.Context, rawURL string) error {
+	if err := sandboxName(rawURL); err != nil {
+		return err
+	}
+	return p.CheckStrict(ctx, rawURL)
+}
+
+// SandboxDialContext is DialContext that also refuses a short name, for clients of connector URLs.
+func (p URLPolicy) SandboxDialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dial := p.DialContext(d)
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if why := ShortName(host); why != "" {
+				return nil, invalid("the host %q is a short name: %s", host, why)
+			}
+		}
+		return dial(ctx, network, addr)
+	}
+}
+
+func sandboxName(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return invalid("url must be an http(s) URL")
+	}
+	if why := ShortName(u.Hostname()); why != "" {
+		return invalid("the url's host %q is a short name: %s", u.Hostname(), why)
+	}
+	return nil
+}
+
+// ShortName returns, for a host that only a resolver with search domains can resolve, a message that
+// names the full form to write; it returns "" for any other host. A short name is a name without a dot
+// ("intranet", "gitea") or a Service name that ends in ".svc" or ".svc.cluster" ("gitea.ns.svc"). The
+// sandbox DNS has no search domains, so the full ".svc.cluster.local" form (or the chart's cluster
+// domain) is the shortest name that resolves there. IP literals in any WHATWG form are not names.
+// Case and one trailing dot do not matter.
+func ShortName(host string) string {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "" {
+		return ""
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return ""
+	}
+	if _, numeric, _ := whatwgIPv4(host); numeric {
+		return ""
+	}
+	switch {
+	case !strings.Contains(host, "."):
+		return "the sandbox resolves no search domains; write the full name, such as " + host + ".<namespace>.svc.cluster.local"
+	case strings.HasSuffix(host, ".svc"), strings.HasSuffix(host, ".svc.cluster"):
+		return "the sandbox resolves no search domains; write the full name, " + strings.TrimSuffix(strings.TrimSuffix(host, ".cluster"), ".svc") + ".svc.cluster.local"
+	}
+	return ""
+}
+
 func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {

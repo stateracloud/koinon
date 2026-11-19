@@ -263,7 +263,7 @@ func serve(ctx context.Context, cfg config) error {
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
 				Keys:   keyring,
-				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second})}),
+				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.SandboxDialContext(&net.Dialer{Timeout: 5 * time.Second})}),
 			},
 			Observer:      observer,
 			NetworkPolicy: netpol,
