@@ -219,9 +219,12 @@ func forwardPod(ctx context.Context, cfg *rest.Config, kube kubernetes.Interface
 		return 0, nil, errors.New("the port-forward was not ready in 30 seconds")
 	}
 	ports, err := fw.GetPorts()
-	if err != nil || len(ports) != 1 {
+	if err == nil && len(ports) != 1 {
+		err = errors.New("the port-forward did not report one port")
+	}
+	if err != nil {
 		stop()
-		return 0, nil, fmt.Errorf("the port-forward reports no port: %v", err)
+		return 0, nil, fmt.Errorf("the port-forward reports no port: %w", err)
 	}
 	return int(ports[0].Local), stop, nil
 }

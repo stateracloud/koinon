@@ -263,7 +263,8 @@ func TestANewReleaseAddsAVersionAndKeepsTheOldOne(t *testing.T) {
 		"apiVersion": "ate.dev/v1", "kind": "SandboxConfig",
 		"metadata": map[string]any{"name": substrateinstall.GVisorSandboxConfigName},
 		"spec": map[string]any{"sandboxClass": "gvisor", "defaultVersion": "gvisor-20260101-0", "versions": []any{
-			map[string]any{"name": "gvisor-20260101-0", "state": "Enabled", "assets": map[string]any{}}}},
+			map[string]any{"name": "gvisor-20260101-0", "state": "Enabled", "assets": map[string]any{}},
+		}},
 	}}
 	dyn, get := sandboxConfigClient(old)
 	changed, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
