@@ -138,103 +138,146 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
      | `TASK_STATE_REJECTED` | failed, reason `rejected` |
 
      A state that is not in this table is an error. The client never guesses. `auth-required`
-     waits for a person: an admin adds the credential to the connection, because the sandbox never
+     waits for a person: an admin adds the credential to the remote agent, because the sandbox never
      supplies one. A message with no task is `completed`, with its text as the reply.
-9. **How an agent reaches the client: remote agents.** An external A2A agent is a first-class
-   resource of the org, a *remote agent*. It is not an MCP server and not a value of the
-   `mcp_transport` enum, which this ADR does not change. A remote agent has these fields:
-   - `name`: a DNS label of at most 24 characters, unique in the org (the same rule as an MCP server).
+9. **How an agent reaches the client: remote agents.** An external A2A agent is its own resource
+   of the org, a *remote agent*. It is not an MCP server and not a value of the `mcp_transport`
+   enum, which this ADR does not change. The table `remote_agents` is keyed by `(org_id, id)`. Its
+   fields:
+   - `name`: a DNS label of at most 24 characters, unique in the org.
    - `card_url`: the base URL of the external agent. The card is at `/.well-known/agent-card.json`
-     under it. The platform URL policy applies at registration, in the reconciler and at every dial.
-   - the credential: `credential_header`, `credential_prefix` and `credential`, the same three
-     fields and the same sealed envelope as `mcp_servers`, written through the same code
-     (`internal/mcpservers`: seal, open and the loader check). It is write-only in the API. A
-     credential needs an https URL. The sandbox never holds it (decision 7).
-   - `card_hash`, `card_checked_at`: see decision 11.
-   - health fields with the same meaning as `mcp_servers`: `health` (unknown, healthy, unhealthy),
-     `health_reason`, `health_checked_at`, `health_since`, `consecutive_failures`.
+     under it. The platform URL policy applies at registration, in the reconciler and at each dial.
+   - The credential: `credential_header`, `credential_prefix` and `credential`. They have the same
+     meaning, the same sealed envelope and the same code (`internal/mcpservers`) as in `mcp_servers`.
+     The API never returns them. A credential needs an https URL (decision 7).
+   - The TLS trust: `ca_bundle` and `insecure_skip_verify`, with the same checks as in `mcp_servers`.
+   - The card pin: `card_hash`, `card` (the pinned card, at most 256 KiB), `observed_card_hash`,
+     `observed_card` and `card_checked_at`. See decision 11.
+   - The health: `health` (unknown, healthy, unhealthy), `health_reason`, `health_checked_at`,
+     `health_since` and `consecutive_failures`.
    - `disabled_reason`, `created_by` and the timestamps.
 
-   The table is `remote_agents`, keyed by `(org_id, id)`. An agent may call a remote agent only if an
-   admin allows it: the table `agent_remote_agents` `(org_id, agent_id, remote_agent_id)` has
-   composite foreign keys to `agents` and `remote_agents`, and an agent with no row calls none (the
-   shape of `agent_mcp_servers`). The migration only adds tables and one column (decision 10), so
-   it follows the expand-only rule of ADR 0085 and `internal/db/AGENTS.md`.
-10. **The built-in gateway target and its three tools.** The MCP gateway serves one built-in target
-    per org, `<org slug>-agents`, besides the targets of the MCP servers. It has no upstream URL: the
-    gateway runs its tools itself, on top of `internal/a2aout`. It has three FIXED tools. The set is
-    not read from any card.
+   The table `agent_remote_agents` `(org_id, agent_id, remote_agent_id)` holds the grants. It has
+   composite foreign keys to `agents` and `remote_agents`. An agent with no row calls no remote
+   agent. A change of `remote_agents` or `agent_remote_agents` sends a NOTIFY to the reconciler, as
+   the MCP tables do (migrations 00059 and 00061).
+10. **The built-in gateway target and its three tools.** The gateway serves one built-in target per
+    org, `<org slug>-agents`, besides the targets of the MCP servers. The target has no upstream
+    URL. The gateway runs its tools in its own process, with `internal/a2aout`. The tools are fixed
+    in code. No card changes them.
 
     | Tool | Arguments | Effect |
     | --- | --- | --- |
     | `send_task` | `agent`, `message`, optional `context_id`, optional `task_id` | Sends one message. Returns the state and the reply text. |
-    | `get_task` | `agent`, `task_id` | Reads the task and returns the same. |
-    | `cancel_task` | `agent`, `task_id` | Cancels the task and returns the same. |
+    | `get_task` | `agent`, `task_id` | Reads the task. Returns the same. |
+    | `cancel_task` | `agent`, `task_id` | Cancels the task. Returns the same. |
 
-    `agent` is the `name` of a remote agent. It is an argument, not part of the tool name, so a new
-    remote agent adds no tool and changes no `tools/list`. The gateway refuses a call to a remote
-    agent that the calling agent has no `agent_remote_agents` row for, that is disabled, that is
-    unhealthy, or that belongs to another org. The state names are the Koinon names of decision 8.
-    A task that needs input returns `input_required` with the question. The agent answers with
-    `send_task` and the same `task_id`.
+    `agent` is the `name` of a remote agent. It is an argument and not part of the tool name, so a
+    new remote agent adds no tool and does not change `tools/list`. The state names are the Koinon
+    names of decision 8. A task that needs input returns `input_required` with the question. The
+    agent answers with `send_task` and the same `task_id`.
 
-    The three tools use the existing MCP path, with no second path:
-    - **Rows.** The target needs a parent for `mcp_tools`. The org gets one built-in `mcp_servers`
-      row, named `agents`, with a new nullable column `builtin text` (the value `a2a`). A built-in row
-      has no URL, no credential and no transport. The remote-agent service creates it with the first
-      remote agent, and the reconciler serves it as a target with `Builtin: "a2a"` and no URL. The
-      tool list of the target is fixed in code, so the existing prober, which lists the target
-      through the gateway, writes one `mcp_tools` row for each tool, with a `content_hash` of the
-      fixed description and schema. The prober does not dial a built-in target.
-    - **Tiers and grants.** The tier of each tool is `ask` by default, as for every new MCP tool, and
-      an admin sets `auto` or `never` by the existing call. The ask tier goes through the approval
-      proxy of ADR 0057, which calls the built-in target after the approval. `agent_mcp_servers`
-      grants the target to an agent. A tool on a built-in row is set to `auto` only by an admin,
-      never by a default.
-    - **Guard and audit.** Every call passes `checkCall`, the span and the audit row like any other
-      call. The audit row names the target, the tool and the kind of credential. It never holds the
-      message, the reply, the remote agent card or a token (ADR 0023). The metric labels are fixed
-      (no org, agent, user or run ID). `send_task` has the sink class of an outbound message to a
-      third party, with `agent` as the address argument, so the leak guard of ADR 0084 sees the
-      message as data that leaves Koinon.
-    - **Credential.** The gateway reads the credential of the remote agent on each request, from the
-      same kind of file as an MCP credential, named by the ID of the remote agent and the hash of its
-      envelope. The agent never sets or sees it. `a2aout` gets the HTTP client from
-      `mcpgateway.NewTargetHTTPClient`, as decision 7 says.
-11. **The card is for admins only.** The text of the agent card (name, description, skills, examples)
-    is data from another party. It never reaches a model: not in a tool description, not in a tool
-    result, not in an error and not in a log. The tools of decision 10 do not change with the card.
-    An admin reads the card in the API (`GetRemoteAgentCard`), through the same checks, and the UI
-    shows it as quoted text.
-    - **Pin.** `card_hash` is the SHA-256 (hex) of the canonical JSON of the card (sorted keys,
-      no insignificant white space). The registration fetches the card and stores the hash. The
-      registration fails if the card cannot be read or does not pass the checks of decision 7.
+    The gateway refuses a call in each of these cases. The agent has no grant for the remote agent.
+    The remote agent is disabled. The remote agent is unhealthy. The remote agent is in another
+    org. The refusal text is fixed. It names no URL and no card text.
+
+    **Where it runs.** Only `internal/mcpgateway` runs the built-in target. The charts default to
+    the `agentgateway` MCP driver, and the koinon gateway does not become the default before #1132
+    closes (decision 11). So the feature works when `mcp.driver` is `koinon`. With another driver
+    the reconciler does not serve the built-in target and reports why. No default install has the
+    tools until #1132 closes.
+
+    **How the gateway gets its data.** The gateway reads no database. The reconciler pushes it in
+    `gateway.MCPConfig`. `MCPTarget` gets the field `Builtin` (the value `a2a`). `MCPState.validate`
+    accepts an empty URL for a target with `Builtin` set, and for no other target. A target has a
+    list of `MCPRemoteAgent` entries: the name, the ID, the card URL, the credential file, the TLS
+    trust, the pinned `card_hash`, and the IDs of the agents that have a grant. The reconciler
+    leaves out a remote agent that is disabled or unhealthy. A driver that cannot serve a
+    `Builtin` target refuses it with an error, so one config never fails for all orgs.
+
+    **Rows.** The `mcp_tools` rows need a parent `mcp_servers` row. The org gets one built-in row,
+    with the name `agents`, created with the first remote agent. The migration adds the column
+    `builtin text` (the value `a2a`). The URL of a built-in row is the fixed text
+    `koinon-builtin://a2a`. The migration widens the URL check to accept that text and nothing
+    else, and adds a check that `builtin` and this URL go together. The columns `url` and
+    `transport` stay `NOT NULL`. An older binary reads the row without error. Its URL policy
+    refuses the URL, so it reports the row as not served and goes on with the other servers.
+
+    Code that writes `mcp_servers` must skip a built-in row. `UpdateMCPServer`, `DeleteMCPServer`
+    and the class calls refuse it. `ShadowUIMCPServers` does not disable it. The MCP server
+    service refuses the name `agents`, and the registration of the first remote agent fails with
+    a clear message when an MCP server of the org already has this name. The prober does not dial a
+    built-in row. It reads the tool list from the gateway as for any target. The fixed tool list
+    gives one `mcp_tools` row for each tool, with a `content_hash` of the fixed description and
+    schema.
+
+    **Tiers, guard and audit.** Each tool starts in the `ask` tier, as every new MCP tool does. An
+    admin sets `auto` or `never` with the existing call. `agent_mcp_servers` grants the target to
+    an agent, and `agent_remote_agents` grants each remote agent. The gateway checks both. The ask
+    tier uses the approval proxy of ADR 0057. The binding of an approved call (`call_binding`)
+    holds the ID of the remote agent, the hash of its `card_url` and its `card_hash`, besides the
+    tool hash. A change of the URL or an accepted card makes the call park again. The proxy checks
+    `agent_remote_agents` before it asks a person. Each call passes `checkCall`, the span and the
+    audit row of any other call. The audit row names the target, the tool and the kind of
+    credential. It never holds the message, the reply, the card or a token. The metric labels are
+    fixed (ADR 0023). The `send_task` tool has an external sink class, with `agent` as the address
+    argument, so the leak guard of ADR 0084 sees the message as data that leaves Koinon.
+
+    **Credential.** The gateway reads the credential of the remote agent on each request from a
+    file, as for an MCP server. The file name holds the ID of the remote agent and the hash of its
+    envelope. `a2aout` gets its HTTP client from `mcpgateway.NewTargetHTTPClient`, as decision 7
+    says. The gateway maps each `a2aout` error to a fixed text before the model sees it, because
+    a `url.Error` can name the full URL.
+
+    **Task handles.** All agents with a grant share the credential of one remote agent, and the
+    remote agent cannot tell them apart. So the gateway gives the model a handle in place of the
+    task ID: `<task ID>.<tag>`. The tag is an HMAC-SHA256 over the org, the calling agent, the
+    remote agent and the task ID. The key is a gateway secret that the reconciler renders, so all
+    replicas share it. `get_task`, `cancel_task` and an answer in `send_task` refuse a handle with
+    a wrong tag. No agent can read or cancel the task of another agent.
+11. **The card is for admins only, and it is pinned.** The text of the agent card (name,
+    description, skills, examples) is data from another party. It never reaches a model: not in a
+    tool description, a tool result, an error or a log. The tools of decision 10 do not change with
+    the card. An admin reads the stored card in the API, and the UI shows it as quoted text.
+    - **Pin.** `card_hash` is the SHA-256 (hex) of the canonical JSON of the card (sorted keys, no
+      insignificant white space). Registration reads the card, applies the checks of decision 7 and
+      stores the card and its hash. It fails if the card cannot be read.
+    - **The gateway checks the pin at the point of use.** `a2aout.New` takes the expected
+      `card_hash` and refuses a card with another hash. The gateway builds a client for each call
+      or session, so a changed card stops the next call at once. The check does not wait for the
+      prober. The gateway writes the audit outcome `card_changed`.
     - **Health check.** The reconciler prober reads the card of each enabled remote agent every 60
-      seconds, with the same limits as the MCP prober. A card that differs from `card_hash` is a
-      health finding: `health` is `unhealthy` with the reason `card_changed`. It is not an update.
-      The stored hash does not change, the gateway refuses `send_task`, `get_task` and `cancel_task`
-      for the remote agent, and the finding stays until an admin calls `AcceptRemoteAgentCard` with
-      the hash that the admin reviewed. If the card changed again since, the call fails with
-      `ABORTED` and nothing changes (the rule of `SetToolSink`). An unreachable card is an
-      `unhealthy` finding with another reason, and it recovers by itself.
-    - Per-agent tools from the skills of a card are not part of this decision. They need a pin of
-      `tools/list` ([#1132](https://github.com/stateracloud/koinon/issues/1132)) first. The koinon
-      gateway MCP path does not become the default before that issue closes. This ADR does not touch
+      seconds. It opens the credential as the reconciler does to render the file. A card with
+      another hash is a finding: `health` is `unhealthy` with the reason `card_changed`, at the
+      first difference and without the three-failure rule of the MCP prober. The finding does not
+      clear itself. The prober stores the new card in `observed_card` and its hash in
+      `observed_card_hash`. It never changes `card` or `card_hash`. An unreachable card is another
+      finding that follows the MCP rule: it needs three failures, and one success clears it.
+    - **Accept.** `AcceptRemoteAgentCard` takes the `observed_card_hash` that the admin read. It
+      fails with `ABORTED` and changes nothing if the stored `observed_card_hash` is different now
+      (the rule of `SetToolSink`). Otherwise it copies `observed_card` to `card` and the hash to
+      `card_hash`, and clears the finding. A server that shows a different card to each caller can
+      still fail the check at the gateway. It cannot make an admin accept a card that the gateway
+      did not see.
+    - **Not in this decision.** A tool for each skill of a card needs a pin of `tools/list`
+      ([#1132](https://github.com/stateracloud/koinon/issues/1132)) first. The koinon gateway MCP
+      path does not become the default before that issue closes. This ADR does not touch
       `tools/list` handling.
-12. **A reply is an untrusted tool result.** The text of a remote agent (the reply and the question
-    of an `input_required` task) is the result of the tool call. It follows the same leg handling
-    as the result of any other tool: the guard's untrusted-input leg applies to every tool of the
-    built-in target, so a run that reads a reply is tainted as it is after any other untrusted tool
-    result. The text is cut at 64 KiB (decision 7). The result carries no instruction of the
-    platform. A remote agent can never turn a tier or a grant into another one.
-13. **Names of the interfaces.** Protobuf package `koinon.remoteagent.v1alpha1`, service
-    `RemoteAgentService`, with `ListRemoteAgents`, `CreateRemoteAgent`, `UpdateRemoteAgent`,
-    `DeleteRemoteAgent`, `GetRemoteAgentCard`, `AcceptRemoteAgentCard`, `GetAgentRemoteAgents` and
-    `SetAgentRemoteAgents`. The admin API has `/remote-agents`, `/remote-agents/{remoteAgentId}`,
-    `/remote-agents/{remoteAgentId}/card`, `/remote-agents/{remoteAgentId}/card/accept` and
-    `/agents/{agentId}/remote-agents`. The roles are the ones of the MCP server calls: admin and
-    owner. Each write has an audit event (`remote_agent.created`, `.updated`, `.deleted`,
-    `.card.accepted`, and `agent.remote_agents.set`). Proto fields are only added.
+12. **A reply is an untrusted tool result.** The text of a remote agent (a reply or a question) is
+    the result of the tool call. It has the same leg handling as the result of any other tool.
+    The guard's untrusted-input leg applies to every tool of the built-in target, so a run that
+    reads a reply is tainted, as after any other untrusted result. The text is cut at 64 KiB
+    (decision 7). A remote agent can never change a tier or a grant.
+13. **Names of the interfaces.** The protobuf package is `koinon.remoteagent.v1alpha1`, with the
+    service `RemoteAgentService`. Its calls are `ListRemoteAgents`, `CreateRemoteAgent`,
+    `UpdateRemoteAgent`, `DeleteRemoteAgent`, `GetRemoteAgentCard`, `AcceptRemoteAgentCard`,
+    `GetAgentRemoteAgents` and `SetAgentRemoteAgents`. The admin API has `/remote-agents`,
+    `/remote-agents/{remoteAgentId}`, `/remote-agents/{remoteAgentId}/card`,
+    `/remote-agents/{remoteAgentId}/card/accept` and `/agents/{agentId}/remote-agents`. The roles
+    are the roles of the MCP server calls: admin and owner. Each write has an audit event
+    (`remote_agent.created`, `.updated`, `.deleted`, `.card.accepted` and
+    `agent.remote_agents.set`). Proto fields are only added. The migration only adds tables and
+    columns and widens one check, so it follows the expand-only rule of ADR 0085.
 
 ## Alternatives considered
 
@@ -266,8 +309,12 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   pin of #1132 (decision 11).
 - Negative: any change of a card, also a harmless one, stops the calls until an admin accepts it.
   _(inferred)_
-- Negative: a built-in row in `mcp_servers` means that code which lists servers must skip it for
-  the URL policy, the credential and the prober (decision 10). _(inferred)_
+- Negative: a built-in row in `mcp_servers` means that code which writes servers must skip it
+  (decision 10). _(inferred)_
+- Negative: the tools work only with `mcp.driver: koinon`, so no default install has them until
+  #1132 closes (decision 10).
+- Negative: the gateway builds a card fetch for each client, so a call to a new session costs one
+  more request. _(inferred)_
 - Negative: the client polls. A long task costs one `GetTask` per interval.
 - Negative: an `auth-required` task has no automatic way out: a person adds the credential and
   starts a new turn. _(inferred)_
