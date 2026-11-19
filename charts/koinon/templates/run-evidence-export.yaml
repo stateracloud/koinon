@@ -11,7 +11,7 @@ build its scrubber (--kek-secret): it writes no secret and no key material to it
 come from a Secret, never from values.
 
 The Job's name carries a hash of its pod template, so a new org, run or output makes a new Job and
-an unchanged upgrade leaves the finished one alone. Remove the values after the export.
+an unchanged upgrade leaves the finished one alone. The Job has no TTL (a deleted Job would run again on the next upgrade and overwrite the files in the prefix): remove the values after the export, and delete the Job.
 */ -}}
 {{- with .Values.runEvidence.export }}
 {{- if .enabled }}
@@ -32,7 +32,6 @@ metadata:
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 1800
-  ttlSecondsAfterFinished: 86400
   template:
     {{- $pod | nindent 4 }}
 {{- end }}

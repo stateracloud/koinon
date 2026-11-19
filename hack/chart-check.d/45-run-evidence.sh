@@ -26,3 +26,5 @@ re_out=$(render "${re[@]}" "${reon[@]}")
 if grep -Eq 'kind: (Role|RoleBinding|ServiceAccount)' <<<"$re_out"; then fail "run-evidence Job adds no RBAC or service account"; fi
 if grep -Eq 'AWS_SECRET_ACCESS_KEY.*value:|secret.*value: ' <<<"$re_out"; then fail "run-evidence Job holds no key in values"; fi
 if grep -q 'helm.sh/hook' <<<"$re_out"; then fail "run-evidence Job is not a Helm hook"; fi
+lacks "run-evidence Job has no TTL (it would rerun on a later upgrade)" 'ttlSecondsAfterFinished' "${re[@]}" "${reon[@]}"
+has "run-evidence pod accepts no connections" 'name: koinon-run-evidence$' --show-only templates/networkpolicy.yaml "${reon[@]}"

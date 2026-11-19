@@ -33,8 +33,11 @@ an authenticated API download, or a CLI that streams the bundle.
    stays. The two flags exclude each other.
 2. The chart gets an opt-in Job, `runEvidence.export` (off by default). It runs the command with the
    koinon-api service account, which already reads the KEK Secret and holds the KMS decrypt role. It
-   adds no RBAC and no service account. It writes to an S3 prefix. S3 keys come from an existing
-   Secret. Key material never enters logs, env or values.
+   adds no RBAC and no service account. The cost: that account can also read other Secrets of the
+   namespace and update the KEK Secret, so only the code keeps the export read-only (a `get`). A
+   separate account (the key-admin pattern) needs its own KMS role or IAM trust. Follow-up if an
+   operator wants it. The Job has no TTL: a deleted Job would run again on the next upgrade. It writes to an S3 prefix. S3 keys come from an existing
+   Secret. No KEK material enters logs, env or values. The S3 keys are in env (static keys from the Secret). An export overwrites files that exist in its prefix: use one prefix for each export.
 3. The Job is not a hook. Its name carries a hash of its pod template: a new org, run or prefix makes
    a new Job. The operator turns the values off after the export.
 4. The evidence rules do not change (ADR 0023, ADR 0057): no tokens, no arguments or results, host
