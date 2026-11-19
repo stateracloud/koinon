@@ -170,6 +170,16 @@ func TestTheKeyAndTheSandboxConfigURLEndInTheSuffixOfTheRealFormat(t *testing.T)
 	}
 }
 
+func TestAPlainTarWhoseFirstNameLooksLikeAnotherMagicNumberIsStillTar(t *testing.T) {
+	g := NewWithT(t)
+	tar := make([]byte, 512)
+	copy(tar, "BZh")
+	copy(tar[257:], "ustar")
+	suffix, err := substrateinstall.ArchiveSuffix(tar)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(suffix).To(Equal(".tar"))
+}
+
 func TestAnUnknownArchiveFormatIsAnErrorAndNothingIsWritten(t *testing.T) {
 	g := NewWithT(t)
 	body := []byte("koinon_test_not-an-archive")

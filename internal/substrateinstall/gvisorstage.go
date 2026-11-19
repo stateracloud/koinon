@@ -38,14 +38,16 @@ var ErrUnknownArchive = errors.New("gvisor asset is not a gzip, bzip2, zstd or t
 // 262 bytes of the archive) and returns the suffix of its URL.
 func archiveSuffix(head []byte) (string, error) {
 	switch {
+	// The strong check goes first: the name of the first member of a plain tar can start with the bytes of
+	// another magic number.
+	case len(head) >= 262 && bytes.Equal(head[257:262], []byte("ustar")):
+		return ".tar", nil
 	case bytes.HasPrefix(head, []byte{0x1f, 0x8b}):
 		return ".tar.gz", nil
 	case bytes.HasPrefix(head, []byte("BZh")):
 		return ".tar.bz2", nil
 	case bytes.HasPrefix(head, []byte{0x28, 0xb5, 0x2f, 0xfd}):
 		return ".tar.zst", nil
-	case len(head) >= 262 && bytes.Equal(head[257:262], []byte("ustar")):
-		return ".tar", nil
 	}
 	return "", ErrUnknownArchive
 }
@@ -155,7 +157,7 @@ func uploadGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, url
 		return "", fmt.Errorf("fetch the gvisor tarball for %s from %s: %w. Use --gvisor-mirror for a mirror the cluster host can reach", a.goArch, redactURL(url), err)
 	}
 	defer func() { _ = src.Close() }()
-	tmp, err := os.CreateTemp("", "koinon-gvisor-*.tar.zstd")
+	tmp, err := os.CreateTemp("", "koinon-gvisor-*.tar")
 	if err != nil {
 		return "", err
 	}
