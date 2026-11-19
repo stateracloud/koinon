@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -101,7 +102,7 @@ func (t *Target) Call(ctx context.Context, tgt gateway.MCPTarget, agent gateway.
 	}
 	switch tool {
 	case ToolSendTask:
-		if a.Message == "" || len(a.Message) > a2aout.MaxText {
+		if strings.TrimSpace(a.Message) == "" || len(a.Message) > a2aout.MaxText {
 			return fail(textBadArgs)
 		}
 	case ToolGetTask, ToolCancelTask:
@@ -195,7 +196,25 @@ func (c *call) failure(err error) mcpgateway.BuiltinResult {
 	return r
 }
 
+// maxID bounds a task or context ID from a remote agent. The ID is the text of another party.
+const maxID = 256
+
+func validID(s string) bool {
+	if len(s) > maxID {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *call) sealed(r *a2aout.Result) mcpgateway.BuiltinResult {
+	if !validID(string(r.TaskID)) || !validID(r.ContextID) {
+		return fail(textUnanswered)
+	}
 	out := reply{State: string(r.State), Reason: string(r.Reason), Question: r.Question, Reply: r.Reply}
 	if r.TaskID != "" {
 		out.TaskID = c.h.seal(kindTask, c.org, c.agent, c.ra.ID, string(r.TaskID))
@@ -214,25 +233,17 @@ func (c *call) task() (a2a.TaskID, bool) {
 
 func (c *call) send(ctx context.Context) mcpgateway.BuiltinResult {
 	req := a2aout.Request{Text: c.a.Message}
-	switch {
-	case c.a.TaskID != "" && c.a.ContextID != "":
-		// A follow-up turn: a new task in the context, with the ended task in referenceTaskIds.
-		after, ok := c.task()
-		cid, err := c.h.open(kindContext, c.org, c.agent, c.ra.ID, c.a.ContextID)
-		if !ok || err != nil {
+	var id a2a.TaskID
+	var cid string
+	if c.a.TaskID != "" {
+		var ok bool
+		if id, ok = c.task(); !ok {
 			return fail(textBadHandle)
 		}
-		req.After, req.ContextID = after, cid
-	case c.a.TaskID != "":
-		// The answer to a task that waits for input. The client refuses any other state.
-		id, ok := c.task()
-		if !ok {
-			return fail(textBadHandle)
-		}
-		req.AnswerTask = id
-	case c.a.ContextID != "":
-		cid, err := c.h.open(kindContext, c.org, c.agent, c.ra.ID, c.a.ContextID)
-		if err != nil {
+	}
+	if c.a.ContextID != "" {
+		var err error
+		if cid, err = c.h.open(kindContext, c.org, c.agent, c.ra.ID, c.a.ContextID); err != nil {
 			return fail(textBadHandle)
 		}
 		req.ContextID = cid
@@ -242,6 +253,29 @@ func (c *call) send(ctx context.Context) mcpgateway.BuiltinResult {
 		return *bad
 	}
 	defer cl.Close() //nolint:errcheck // nothing to do on a failed close
+	switch {
+	case id != "" && cid != "":
+		// Both IDs: read the task. A task that waits for input gets the answer. A task that ended gets a
+		// follow-up turn (a new task with the ended task in referenceTaskIds). Any other state is refused.
+		t, err := cl.Get(ctx, id)
+		if err != nil {
+			return c.failure(err)
+		}
+		if t.ContextID != cid {
+			return fail(textBadHandle)
+		}
+		switch {
+		case a2aout.Ended(t.External):
+			req.After = id
+		case t.External == a2a.TaskStateInputRequired:
+			req.AnswerTask = id
+		default:
+			return fail(textNotAwaiting)
+		}
+	case id != "":
+		// The answer to a task that waits for input. The client refuses any other state.
+		req.AnswerTask = id
+	}
 	res, err := cl.Send(ctx, req)
 	if err != nil {
 		return c.failure(err)

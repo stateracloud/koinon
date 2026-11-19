@@ -132,6 +132,24 @@ var _ = Describe("the built-in A2A target", func() {
 			Expect(f.sent[1].Message.TaskID).To(Equal(a2a.TaskID("t1")))
 		})
 
+		It("answers the waiting task, not a new one, when the caller gives both IDs", func() {
+			f.send = func(r *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+				if r.Message.TaskID != "" {
+					return f.put(withReply(task("t1", "c1", a2a.TaskStateCompleted, ""), "thanks")), nil
+				}
+				return f.put(task("t1", "c1", a2a.TaskStateInputRequired, "Which region?")), nil
+			}
+			o := ok(call(scout, "send_task", map[string]any{"agent": "kagent", "message": "deploy"}))
+			a := ok(call(scout, "send_task", map[string]any{"agent": "kagent", "message": "eu", "task_id": o.TaskID, "context_id": o.ContextID}))
+			Expect(a.State).To(Equal("completed"))
+			Expect(f.sent[1].Message.TaskID).To(Equal(a2a.TaskID("t1")))
+			Expect(f.sent[1].Message.ReferenceTasks).To(BeEmpty())
+		})
+
+		It("refuses a message of white space", func() {
+			Expect(refused(call(scout, "send_task", map[string]any{"agent": "kagent", "message": "  \n"}))).To(ContainSubstring("not valid"))
+		})
+
 		It("maps auth-required and rejected to a reason", func() {
 			f.send = func(*a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
 				return f.put(task("t1", "c1", a2a.TaskStateAuthRequired, "")), nil
