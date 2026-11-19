@@ -95,7 +95,7 @@ func logRecord(r gateway.UsageRecord) *logspb.LogRecord {
 	if r.ReasoningKnown {
 		attrs = append(attrs, integer(agentgateway.LogFieldReasoning, r.ReasoningTokens))
 	}
-	ns := uint64(at.UnixNano()) //nolint:gosec // a time after 1970
+	ns := uint64(at.UnixNano())
 	return &logspb.LogRecord{TimeUnixNano: ns, ObservedTimeUnixNano: ns, Attributes: attrs}
 }
 

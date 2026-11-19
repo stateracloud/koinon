@@ -322,7 +322,6 @@ type tapBody struct {
 
 	once sync.Once
 	n    int64
-	err  error
 }
 
 func (b *tapBody) Read(p []byte) (int, error) {

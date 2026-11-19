@@ -223,8 +223,10 @@ var _ = Describe("koinon-gateway, model path", func() {
 		agent := gateway.AgentRef{Org: "acme", Name: "repo-helper"}
 		u := staterev.Snapshot(gateway.State{
 			Keys: []gateway.Key{{ID: "k1", Agent: agent, Hash: gateway.HashKey(fakeKey)}},
-			ModelState: gateway.ModelState{Providers: []gateway.Provider{{Org: "acme", Name: "p", Type: "custom", BaseURL: up.URL + "/v1",
-				Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}}}}},
+			ModelState: gateway.ModelState{Providers: []gateway.Provider{{
+				Org: "acme", Name: "p", Type: "custom", BaseURL: up.URL + "/v1",
+				Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
+			}}},
 		})
 		u.Revision = 3
 		store := &memStore{cur: u}
