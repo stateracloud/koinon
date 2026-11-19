@@ -205,6 +205,7 @@ func (c *guardConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 		}
 		v := Verdict{}
 		gm := c.message(ToUpstream, kind, m.Method, m)
+		gm.Tool = toolOf(m)
 		switch {
 		case !slices.Contains(UpstreamRequests, m.Method):
 			v = Verdict{Refuse: true, Reason: "refused: the method " + m.Method + " is not allowed"}
@@ -426,6 +427,7 @@ func (c *guardConn) inbound(ctx context.Context, msg jsonrpc.Message, p pendingC
 			kind = KindError
 		}
 		gm := c.message(FromUpstream, kind, method, m)
+		gm.Tool = p.tool
 		if kind == KindResult && isInputRequired(m.Result) {
 			c.violation(ctx, gm, ViolationInputRequired)
 			_ = c.guard.Inspect(ctx, gm)

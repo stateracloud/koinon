@@ -104,6 +104,29 @@ var _ = Describe("the guard in the MCP path", func() {
 		}
 	})
 
+	It("names the tool on a tools/call and on the result that answers it, and on no other message", func(ctx SpecContext) {
+		s := connect(ctx, front.URL, key.Material)
+		_, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		guard.mu.Lock()
+		defer guard.mu.Unlock()
+		var request, result int
+		for _, msg := range guard.seen {
+			if msg.Method == "tools/call" && (msg.Kind == mcpgateway.KindRequest || msg.Kind == mcpgateway.KindResult) {
+				Expect(msg.Tool).To(Equal("read_item"))
+				if msg.Kind == mcpgateway.KindRequest {
+					request++
+				} else {
+					result++
+				}
+				continue
+			}
+			Expect(msg.Tool).To(BeEmpty(), "%s %s", msg.Kind, msg.Method)
+		}
+		Expect(request).To(Equal(1))
+		Expect(result).To(Equal(1))
+	})
+
 	It("runs the call check after the grants, with the arguments and the credential kind", func(ctx SpecContext) {
 		s := connect(ctx, front.URL, key.Material)
 		_, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_read_item", Arguments: map[string]any{"text": "hello"}})
