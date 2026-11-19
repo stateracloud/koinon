@@ -348,6 +348,16 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(v.Reason).NotTo(ContainSubstring("Halvorsen"))
 		Expect(approvals(ctx)).To(BeZero(), "the gateway guard has no approval route")
 
+		// A JSON-RPC error that quotes private text is fingerprinted too: the same text sent out later is caught.
+		errBody, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "error": map[string]any{"code": -32000, "message": "failed near: " + secretPage[100:320]}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gg.Inspect(ctx, mcpgateway.Message{
+			Target: mcpservers.TargetName(slug, "wiki"), Agent: ref, Dir: mcpgateway.FromUpstream,
+			Kind: mcpgateway.KindError, Method: "tools/call", Tool: "read_page", Raw: errBody,
+		}).Refuse).To(BeFalse())
+		Expect(callOf("tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[110:310]}).Refuse).To(BeTrue(),
+			"private text quoted in an error reply is still matched")
+
 		// The role holds nothing it does not use: no write to the catalog, no read of approvals, and an
 		// insert-only call log.
 		can := func(table, priv string) bool {

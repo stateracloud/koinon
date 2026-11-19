@@ -99,7 +99,9 @@ func (a *GatewayGuard) Inspect(ctx context.Context, m mcpgateway.Message) mcpgat
 			if m.Tool == "" {
 				return a.unseen(ctx, agent, m)
 			}
-			var result json.RawMessage
+			// An error reply reaches the agent too, and a server can quote private text in its message,
+			// so the whole error body is fingerprinted like a result (#254).
+			result := m.Raw
 			if m.Kind == mcpgateway.KindResult {
 				result = resultOf(m.Raw)
 			}
