@@ -132,15 +132,25 @@ func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket strin
 }
 
 // legacyGVisorAssets is the assets map as an installer from before the archive suffix wrote it: the same URLs
-// without gvisorAssetSuffix.
+// without the archive suffix.
 func legacyGVisorAssets(assets any) map[string]any {
 	out := map[string]any{}
 	byArch, _ := assets.(map[string]any)
 	for arch, a := range byArch {
 		g, _ := a.(map[string]any)["gvisor"].(map[string]any)
-		out[arch] = map[string]any{"gvisor": map[string]any{"url": strings.TrimSuffix(fmt.Sprint(g["url"]), gvisorAssetSuffix), "sha256": g["sha256"]}}
+		out[arch] = map[string]any{"gvisor": map[string]any{"url": trimArchiveSuffix(fmt.Sprint(g["url"])), "sha256": g["sha256"]}}
 	}
 	return out
+}
+
+// trimArchiveSuffix drops the archive suffix of a staged URL, when it has one.
+func trimArchiveSuffix(url string) string {
+	for _, suffix := range archiveSuffixes {
+		if strings.HasSuffix(url, suffix) {
+			return strings.TrimSuffix(url, suffix)
+		}
+	}
+	return url
 }
 
 // gvisorOrderWarning returns a warning when `gvisor-default` is as new as or newer than the Koinon config.

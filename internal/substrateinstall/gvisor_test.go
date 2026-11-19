@@ -27,7 +27,7 @@ import (
 )
 
 // fakeBody stands for the tarball: the pin of the tests is its SHA-256 (PinGVisorForTest).
-var fakeBody = []byte("koinon_test_not-a-real-tarball")
+var fakeBody = append([]byte{0x28, 0xb5, 0x2f, 0xfd}, "koinon_test_not-a-real-tarball"...)
 
 type fakeStore struct {
 	mu      sync.Mutex
@@ -127,6 +127,69 @@ func TestRepeatStageFetchesAndWritesNothing(t *testing.T) {
 	g.Expect(res.Uploaded).To(BeEmpty())
 	g.Expect(store.puts).To(BeEmpty())
 	g.Expect(fetch.calls).To(BeEmpty(), "an object with the pinned digest is not fetched again")
+}
+
+// archiveBodies has one fake body for each format that atelet knows. The bodies are not real archives: only the
+// magic numbers are real.
+func archiveBodies() map[string][]byte {
+	tar := make([]byte, 512)
+	copy(tar[257:], "ustar")
+	return map[string][]byte{
+		".tar.gz":  append([]byte{0x1f, 0x8b}, "koinon_test_not-a-real-tarball"...),
+		".tar.bz2": append([]byte("BZh9"), "koinon_test_not-a-real-tarball"...),
+		".tar.zst": fakeBody,
+		".tar":     tar,
+	}
+}
+
+func TestTheKeyAndTheSandboxConfigURLEndInTheSuffixOfTheRealFormat(t *testing.T) {
+	for suffix, body := range archiveBodies() {
+		t.Run(suffix, func(t *testing.T) {
+			g := NewWithT(t)
+			substrateinstall.PinGVisorForTest(t, body)
+			store, fetch := newStore(), &fakeFetcher{body: body}
+			res, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, a := range res.Assets {
+				g.Expect(a.Key).To(Equal("gvisor-assets/" + a.Arch + "/" + a.SHA256 + suffix))
+			}
+			dyn, get := sandboxConfigClient()
+			_, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", res.Assets)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, a := range res.Assets {
+				g.Expect(toJSON(t, get(t))).To(ContainSubstring(`"s3://snapshots/` + a.Key + `"`))
+			}
+			// A re-run finds the object under its suffix and writes nothing.
+			store.puts, fetch.calls = nil, nil
+			res, err = substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(res.Present).To(ConsistOf("amd64", "arm64"))
+			g.Expect(store.puts).To(BeEmpty())
+			g.Expect(fetch.calls).To(BeEmpty())
+		})
+	}
+}
+
+func TestAnUnknownArchiveFormatIsAnErrorAndNothingIsWritten(t *testing.T) {
+	g := NewWithT(t)
+	body := []byte("koinon_test_not-an-archive")
+	substrateinstall.PinGVisorForTest(t, body)
+	store, fetch := newStore(), &fakeFetcher{body: body}
+	_, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).To(MatchError(substrateinstall.ErrUnknownArchive))
+	g.Expect(store.puts).To(BeEmpty())
+	_, err = substrateinstall.ArchiveSuffix(nil)
+	g.Expect(err).To(MatchError(substrateinstall.ErrUnknownArchive))
+}
+
+func TestAnObjectOfAnotherDigestUnderAnotherSuffixIsAnError(t *testing.T) {
+	g := NewWithT(t)
+	store, fetch := stageEnv(t)
+	key := strings.TrimSuffix(substrateinstall.GVisorKey("amd64"), ".tar.zst") + ".tar.gz"
+	store.objects[key] = []byte("not the tarball")
+	_, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).To(MatchError(substrateinstall.ErrDigestMismatch))
+	g.Expect(store.puts).To(BeEmpty())
 }
 
 func TestAKeyStagedWithoutTheSuffixIsLeftAloneAndTheNewKeyIsStaged(t *testing.T) {

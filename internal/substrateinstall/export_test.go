@@ -17,6 +17,8 @@ func (i *Installer) ExportPin(ctx context.Context, tmp, dst string) error {
 // PinGVisorForTest makes the pinned digest of each architecture the SHA-256 of body for the test, so a fake
 // fetcher needs no 60 MB tarball. It returns the key of each architecture.
 func PinGVisorForTest(t interface{ Cleanup(func()) }, body []byte) {
+	testBody = body
+	t.Cleanup(func() { testBody = nil })
 	saved := append([]gvisorArch(nil), gvisorArches...)
 	sum := sha256.Sum256(body)
 	for k := range gvisorArches {
@@ -25,11 +27,18 @@ func PinGVisorForTest(t interface{ Cleanup(func()) }, body []byte) {
 	t.Cleanup(func() { copy(gvisorArches, saved) })
 }
 
+// testBody is the body of the pin in force: the key of an architecture follows its format.
+var testBody []byte
+
 // GVisorKey is the object key of an architecture (GOARCH) under the pin in force.
 func GVisorKey(goArch string) string {
 	for _, a := range gvisorArches {
 		if a.goArch == goArch {
-			return gvisorKey(a)
+			suffix, err := archiveSuffix(testBody)
+			if err != nil {
+				return ""
+			}
+			return gvisorKey(a, suffix)
 		}
 	}
 	return ""
@@ -44,3 +53,6 @@ func GVisorSource(mirror, goArch string) string {
 	}
 	return ""
 }
+
+// ArchiveSuffix is archiveSuffix for the tests.
+func ArchiveSuffix(head []byte) (string, error) { return archiveSuffix(head) }
