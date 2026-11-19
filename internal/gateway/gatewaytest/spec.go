@@ -64,6 +64,10 @@ type Env struct {
 	// the gateway refuses with 403 a request that carries a gateway key in any header but
 	// Authorization.
 	HeaderAllowlist bool
+	// NoTranslation is true when the gateway serves a model on the route of its own format only and
+	// answers a request in the other format with 404 (ADR 0069: no format translation). agentgateway
+	// translates a chat-completions request for a Messages model.
+	NoTranslation bool
 	// Unmarked lists the refusal kinds (the Refusal* constants) that agentgateway v1.7.0 cannot mark
 	// do-not-retry in this mode, because it answers them before any response policy runs (old issue 342). The
 	// marker contract (gateway.DoNotRetry) holds for every other refusal; a consumer treats these as
