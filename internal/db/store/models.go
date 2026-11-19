@@ -2401,6 +2401,11 @@ type McpTool struct {
 	AddressArgs               []string
 	ResultUntrustedInput      pgtype.Bool
 	ResultPrivateData         pgtype.Bool
+	ToolJson                  []byte
+	ToolHash                  pgtype.Text
+	ApprovedJson              []byte
+	ApprovedHash              pgtype.Text
+	ApprovedAt                pgtype.Timestamptz
 }
 
 type Model struct {

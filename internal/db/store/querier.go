@@ -38,6 +38,9 @@ type Querier interface {
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
 	// item starts waiting on them). Returns the rows that were new.
 	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
+	// A tool an admin reviewed before the pin existed, and whose description and schema did not change
+	// since: the text the server publishes now is the text that was reviewed, so it is the pin (#1132).
+	AdoptMCPToolPin(ctx context.Context, arg AdoptMCPToolPinParams) error
 	// Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
 	AnswerHomeRepositoryProbe(ctx context.Context, arg AnswerHomeRepositoryProbeParams) (int64, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker

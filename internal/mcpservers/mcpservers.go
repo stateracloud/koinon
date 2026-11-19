@@ -53,6 +53,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
+	"github.com/stateracloud/koinon/internal/mcptoolpin"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/sinkclass"
@@ -1057,6 +1058,11 @@ type ListedTool struct {
 	Description  string
 	InputSchema  json.RawMessage
 	ReadOnlyHint bool
+	// Title, Annotations and OutputSchema are the other members the model sees (#1132). They are as the
+	// server published them; the sync sanitises them with the rest (mcptoolpin).
+	Title        string
+	Annotations  json.RawMessage
+	OutputSchema json.RawMessage
 }
 
 // ContentHash is the SHA-256 (hex) of a tool's description and canonical input schema.
@@ -1155,17 +1161,37 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			rep.Capped, rep.Cleaned = rep.Capped || srep.Capped, rep.Cleaned || srep.Cleaned
 			names = append(names, lt.Name)
 			hash := ToolContentHash(lt.Description, published, desc, schema)
+			// The pin covers every member the model sees (#1132): the same function builds the text
+			// the gateway compares.
+			pin, _, perr := mcptoolpin.Normalise(mcptoolpin.Published{
+				Name: lt.Name, Title: lt.Title, Description: lt.Description, Annotations: lt.Annotations,
+				InputSchema: published, OutputSchema: lt.OutputSchema,
+			})
+			if perr != nil {
+				continue // the name check above passed; Normalise has the same rule
+			}
+			toolJSON, toolHash := []byte(pin.JSON()), pin.Hash()
 			cur, ok := have[lt.Name]
+			// A tool with an approved pin whose text moved is a change, even when the description and
+			// the input schema did not (a new title, annotation or output schema). A tool already waiting
+			// for review is not flagged again by every sync; the touch below keeps its observed text current.
+			pinMoved := ok && cur.ApprovedHash.Valid && cur.ApprovedHash.String != toolHash && !cur.ReviewReason.Valid
+			// A tool an admin reviewed before the pin existed never had its title, output schema or
+			// annotation title reviewed: the old hash did not cover them. When the server publishes
+			// one now, the tool goes back to review, and the sync does not adopt that text as approved.
+			legacyExtra := ok && !cur.ApprovedHash.Valid && cur.TierSetBy.Valid && !cur.ReviewReason.Valid &&
+				(pin.Title != "" || len(pin.OutputSchema) > 0 || (pin.Annotations != nil && pin.Annotations.Title != ""))
 			switch {
 			case !ok:
 				if _, err := q.InsertMCPTool(ctx, store.InsertMCPToolParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash, ReadOnlyHint: lt.ReadOnlyHint,
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+					ToolJson: toolJSON, ToolHash: pgtype.Text{String: toolHash, Valid: true},
 				}); err != nil {
 					return err
 				}
 				res.New = append(res.New, lt.Name)
-			case cur.ContentHash != hash:
+			case cur.ContentHash != hash || pinMoved || legacyExtra:
 				reason := ReviewChanged
 				if cur.Tier == store.McpTierAuto {
 					reason = ReviewChangedDemoted
@@ -1175,6 +1201,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
 					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: reason, Valid: true},
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+					ToolJson: toolJSON, ToolHash: pgtype.Text{String: toolHash, Valid: true},
 				})
 				if err != nil {
 					return err
@@ -1188,7 +1215,13 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 				if err := q.TouchMCPTool(ctx, store.TouchMCPToolParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, ReadOnlyHint: lt.ReadOnlyHint,
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+					ToolJson: toolJSON, ToolHash: pgtype.Text{String: toolHash, Valid: true},
 				}); err != nil {
+					return err
+				}
+				// A tool an admin reviewed before the pin existed, unchanged since: pin the text
+				// the server publishes now.
+				if err := q.AdoptMCPToolPin(ctx, store.AdoptMCPToolPinParams{OrgID: org, ServerID: serverID, Name: lt.Name}); err != nil {
 					return err
 				}
 			}

@@ -202,6 +202,14 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-gateway", Version: "0"}, &mcp.ClientOptions{
 		// An empty set of capabilities: no sampling, no elicitation. AddRoots below adds roots.
 		Capabilities: &mcp.ClientCapabilities{},
+		// A target that says its tools changed gets the same check as a tools/list (#1132): a tool whose
+		// text moved is left out before the agent can call it.
+		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
+			go func() {
+				defer func() { _ = recover() }()
+				g.refresh(t, key.agent)
+			}()
+		},
 	})
 	// ADR 0097 decision 5 has the gateway answer roots/list with one fixed folder. Roots are
 	// deprecated from MCP 2026-07-28 but work for twelve more months; sampling stays unadvertised.
@@ -310,13 +318,19 @@ func (g *Gateway) evict(u *upstream) {
 func (g *Gateway) evictChanged(old, cur *snapshot) {
 	g.mu.Lock()
 	var gone []*upstream
+	var changed []string
 	for k, u := range g.pool {
 		if t, ok := cur.targets[k.target]; !ok || t != u.cfg {
 			gone = append(gone, u)
+			changed = append(changed, k.target)
 			delete(g.pool, k)
 		}
 	}
 	g.mu.Unlock()
+	// The tools a list left out belong to the old target config: the next list decides again.
+	for _, n := range changed {
+		g.left.forget(n)
+	}
 	for _, u := range gone {
 		u.retire()
 	}

@@ -16,7 +16,7 @@ var (
 	actions = []Action{Pass, Refuse, Approve, NeedsDecision}
 	reasons = []string{
 		ReasonInternal, ReasonClean, ReasonBothLegs, ReasonTaint, ReasonURLRule, ReasonCheck,
-		ReasonError, ReasonAmbiguous, ReasonIdentity, ReasonNoRun, ReasonExempt, ReasonAskTarget, ReasonFeedStalled,
+		ReasonError, ReasonAmbiguous, ReasonIdentity, ReasonNoRun, ReasonToolChanged, ReasonExempt, ReasonAskTarget, ReasonFeedStalled,
 		ReasonReplyUnseen,
 	}
 	// classUnknown labels a decision taken before the class was known (identity, errors).
