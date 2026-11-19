@@ -157,7 +157,7 @@ guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm
 			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
 	done
 
-# One overlay per harness: make harness-substrate-<name> for every name in HARNESSES. The entry script
+# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES. The entry script
 # is /usr/local/bin/koinon-<name> (ADR 0048). A later harness gets an overlay with no Makefile change.
 SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
 .PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%

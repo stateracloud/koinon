@@ -16,6 +16,8 @@ ARG FLAVOR_IMAGE
 ARG ENTRY_SCRIPT=/usr/local/bin/koinon-opencode
 FROM ${FLAVOR_IMAGE}
 ARG TARGETARCH
+# Declared again: an ARG before FROM is not visible inside the stage.
+ARG ENTRY_SCRIPT
 # "launcher" is a named build context (--build-context launcher=build/guest-launcher), not a stage
 # hadolint ignore=DL3022
 COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr/local/bin/koinon-guest-launcher
@@ -23,5 +25,8 @@ COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr
 # Landlock, the gVisor tiers (hardened, dev) run it best effort behind the read-only root.
 COPY --chmod=0644 policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
 # An exec-form ENTRYPOINT cannot expand a build argument, so a fixed path links to the harness's entry script.
+# The harness image ends as uid 10001 (harnesses/opencode/Dockerfile); /usr/local/bin belongs to root.
+USER root
 RUN ln -s "${ENTRY_SCRIPT}" /usr/local/bin/koinon-entry
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/koinon-guest-launcher", "--policy", "/etc/koinon/guest-launcher/policy-vm.json", "--", "/usr/local/bin/koinon-entry"]
