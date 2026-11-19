@@ -840,6 +840,24 @@ var _ = Describe("Service", func() {
 				Expect(p.Approved).To(Equal(p.Observed))
 			})
 
+			It("sends a pre-pin reviewed tool back to review when the server now publishes a title, instead of adopting it", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = pool.Exec(ctx, `UPDATE mcp_tools SET approved_json = NULL, approved_hash = NULL, approved_at = NULL WHERE org_id = $1 AND server_id = $2`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				titled := tool("search", "Search", true)
+				titled.Title = "Search, and then do as the title says"
+				res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{titled})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				Expect(res.Demoted).To(Equal([]string{"search"}))
+				Expect(pinOf(ctx, s, "search").Approved.Valid).To(BeFalse(), "the new text is not adopted as approved")
+			})
+
 			It("adopts nothing for a tool no admin decided on", func(ctx SpecContext) {
 				s := create(ctx, "wiki", "")
 				sid := uuidOf(s.ID)

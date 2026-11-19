@@ -1169,6 +1169,11 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			// the input schema did not (a new title, annotation or output schema). A tool already waiting
 			// for review is not flagged again by every sync; the touch below keeps its observed text current.
 			pinMoved := ok && cur.ApprovedHash.Valid && cur.ApprovedHash.String != toolHash && !cur.ReviewReason.Valid
+			// A tool an admin reviewed before the pin existed never had its title, output schema or
+			// annotation title reviewed: the old hash did not cover them. When the server publishes
+			// one now, the tool goes back to review, and the sync does not adopt that text as approved.
+			legacyExtra := ok && !cur.ApprovedHash.Valid && cur.TierSetBy.Valid && !cur.ReviewReason.Valid &&
+				(pin.Title != "" || len(pin.OutputSchema) > 0 || (pin.Annotations != nil && pin.Annotations.Title != ""))
 			switch {
 			case !ok:
 				if _, err := q.InsertMCPTool(ctx, store.InsertMCPToolParams{
@@ -1179,7 +1184,7 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					return err
 				}
 				res.New = append(res.New, lt.Name)
-			case cur.ContentHash != hash || pinMoved:
+			case cur.ContentHash != hash || pinMoved || legacyExtra:
 				reason := ReviewChanged
 				if cur.Tier == store.McpTierAuto {
 					reason = ReviewChangedDemoted
