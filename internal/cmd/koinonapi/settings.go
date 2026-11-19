@@ -84,6 +84,7 @@ var recordedSettings = []platformSetting{
 	setting("gateway-mode", kindValue),
 	setting("gateway-url", kindURL),
 	setting("gateway-mcp-url", kindURL),
+	setting("gateway-mcp-check-url", kindURL),
 	setting("github-api-url", kindURL),
 
 	// keys and secrets

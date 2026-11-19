@@ -56,7 +56,7 @@ use cases besides Copilot will need in-sandbox auth.
 
 - **Gateway-held only**: keeps the promise absolute, but blocks Copilot subscriptions and any tool
   whose auth cannot be brokered.
-- **Secure input to Vault, mounted at start**: the human pastes a token through a secure input
+- **Secure input to the secret store, mounted at start**: the human pastes a token through a secure input
   (decision 21) and Koinon mounts it. Rejected in favour of takeover because many flows (device code,
   OAuth in a browser) do not yield a pasteable token, and it would create a second storage path.
 - **Any org by default**: rejected; subscription terms are usually personal.
@@ -77,7 +77,7 @@ use cases besides Copilot will need in-sandbox auth.
 
 - GitHub Copilot terms of service for agent and gateway use (open item #4).
 - Which other auth types to allowlist first.
-- Encryption key custody for the encrypted path (per agent key in Vault?).
+- Encryption key custody for the encrypted path (per agent key in the secret store?).
 
 ## Amendment (2026-11-11): the exception is narrowed to credentials that cannot be held outside
 

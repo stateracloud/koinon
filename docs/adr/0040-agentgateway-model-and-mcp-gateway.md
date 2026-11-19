@@ -54,7 +54,7 @@ _(Changed by [0119](0119-agent-substrate-execution-layer.md): forge and registry
    key is the provider credential: the sandbox only sees an OpenShell placeholder, which the
    supervisor swaps for the real key on requests to agentgateway. The harness's base URL
    (`OPENAI_BASE_URL`, `baseURL`, `base_url`, depending on flavor) points at agentgateway.
-4. **Provider keys** live in Vault/OpenBao and are loaded by agentgateway; they never reach the
+4. **Provider keys** live in the secret store and are loaded by agentgateway; they never reach the
    sandbox or the OpenShell provider records. _(Changed by [0056](0056-model-providers-pricing-and-budgets-per-org.md): provider keys are envelope-encrypted in Postgres. They still never reach the sandbox or the provider records.)_
 5. **Cost data**: agentgateway's built-in price catalog yields `llm.cost` per request; access logs or
    OTel spans carry org, agent, ticket and run attribution and feed Koinon's spend ledger
@@ -69,7 +69,7 @@ flowchart LR
     H[Harness] -->|placeholder key| S[OpenShell supervisor proxy]
   end
   S -->|real agent key, policy-checked| AG[agentgateway]
-  AG -->|provider key from Vault| P[(Model providers / self-hosted)]
+  AG -->|provider key from the secret store| P[(Model providers / self-hosted)]
   AG -->|MCP tool calls| M[Shared MCP servers]
   AG -->|access logs / OTel llm.cost| L[Koinon spend ledger]
   L -->|per-key limits| AG

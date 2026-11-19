@@ -30,6 +30,9 @@ data:
       # The reconciler writes the opened provider keys into this Secret; the gateway mounts it.
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers
+      # The MCP credential files and CA bundles go to a Secret of their own, so koinon-gateway mounts no provider key.
+      mcpKeysSecret: {{ include "koinon.gatewayMCPKeysName" . }}
+      mcpKeysDir: {{ include "koinon.gatewayMCPKeysDir" . }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.
       name: {{ include "koinon.componentName" (list . "gateway") }}

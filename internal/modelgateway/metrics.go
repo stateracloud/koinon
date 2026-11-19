@@ -18,6 +18,7 @@ const (
 	resUpstream = "upstream_error"
 	resFailed   = "failed" // a stream cut or an error event
 	resCanceled = "canceled"
+	resBudget   = "budget_exceeded" // the key's spend reached its limit; the provider was not called
 )
 
 // NewMetrics registers the counters on reg (nil registers nothing).
@@ -32,10 +33,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help: "Model config entries left out of the applied config, by reason.",
 		}, []string{"reason"}),
 	}
-	for _, r := range []string{resOK, resRefused, resUpstream, resFailed, resCanceled} {
+	for _, r := range []string{resOK, resRefused, resUpstream, resFailed, resCanceled, resBudget} {
 		m.Requests.WithLabelValues(r)
 	}
-	for _, r := range []string{"base_url", "format"} {
+	for _, r := range []string{"base_url", "format", "price"} {
 		m.Config.WithLabelValues(r)
 	}
 	if reg != nil {

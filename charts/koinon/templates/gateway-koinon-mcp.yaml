@@ -8,16 +8,16 @@ follows the State stream of koinon-api (the OTLP listener, with the same bearer 
 access log) and applies the revision the reconciler published. A pod is not ready before its first
 revision applied, so a rollout never takes the old pods away before the new ones can serve.
 
-Secret custody (ADR 0097 decision 5, ADR 0120): the pod has no database login, no key-encryption key and
-no Kubernetes API access (no token is mounted). It reads the credential files of the MCP targets from the
-provider-keys Secret, at the path agentgateway reads them from. That Secret also holds the LLM provider
-keys the reconciler opens, so the pod can read them: this is a known gap. The fix is a separate Secret for
-the MCP credential files, written by the reconciler (a later slice, with the guard and the database role;
-see the PR text). Decrypting org credentials in the gateway comes in that slice too.
+Secret custody (ADR 0097 decision 5, ADR 0120): the pod has no key-encryption key and no Kubernetes API
+access (no token is mounted). Its only database access is the leak guard's own login: koinon_mcpgateway,
+a member of the group role koinon_gateway and of no other (koinon_gateway gets exactly what the guard reads
+and writes, `koinon-api migrate`). It reads the credential files of the MCP targets from the Secret of the
+MCP credentials, which the reconciler writes apart from the LLM provider keys: the pod mounts no provider
+key. The decrypt key for org credentials comes in the next slice (S4c of issue #278).
 
-Until the guard slice, the gateway drops every org target (fail closed), so koinon-api's approved calls
-to org MCP servers fail through it, and so does its live check of an agent's MCP tools. The platform
-tool servers are not reachable either (see the NetworkPolicy). For that reason the switch needs gateway.mcp.koinon.acceptOrgTargetsDropped.
+The database login in each mode: cnpg mode renders a ConfigMap with the URL (no password, verify-full
+against the cluster CA) and the pod takes the generated password as PGPASSWORD; external mode mounts a
+key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 */ -}}
 {{- if include "koinon.mcpKoinon" . }}
 {{- if ne .Values.gateway.mode "standalone" }}
@@ -27,8 +27,19 @@ tool servers are not reachable either (see the NetworkPolicy). For that reason t
 {{- $m := .Values.gateway.mcp.koinon }}
 {{- $drain := int $m.drainTimeoutSeconds }}
 {{- $delay := int $m.shutdownDelaySeconds }}
-{{- if not $m.acceptOrgTargetsDropped }}
-{{- fail "gateway.mcp.driver=koinon serves platform targets only until the guard slice (ADR 0097 step 2, issue #278): it drops org MCP targets, so approved calls to org MCP servers fail, and koinon-api's live check of an agent's MCP tools (which uses the same URL) reports every org MCP server as missing. Set gateway.mcp.koinon.acceptOrgTargetsDropped=true to accept that" }}
+{{- $dbDir := include "koinon.mcpGatewayDBURLDir" . }}
+{{- $mcpKeysDir := include "koinon.gatewayMCPKeysDir" . }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+---
+# The URL of the guard's database login, without a password (the pod sets PGPASSWORD). It holds no secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "koinon.mcpGatewayDBURLConfigName" . }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+data:
+  url: {{ printf "postgres://%s@%s-rw.%s.svc:5432/%s?sslmode=verify-full&sslrootcert=/etc/koinon/db-ca/ca.crt" (include "koinon.pgRole" "mcpgateway") (include "koinon.pgCluster" .) .Release.Namespace .Values.postgres.cnpg.database | quote }}
 {{- end }}
 ---
 apiVersion: v1
@@ -96,9 +107,17 @@ spec:
             - --metrics-addr=:15020
             - --state-url=http://{{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
             - --state-token-file={{ include "koinon.otlpTokenDir" . }}/token
+            - --database-url-file={{ $dbDir }}/url
             - --shutdown-delay={{ $delay }}s
             - --drain-timeout={{ $drain }}s
           env:
+            {{- if eq .Values.postgres.mode "cnpg" }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "koinon.pgSecret" (list . "mcpgateway") }}
+                  key: password
+            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -129,20 +148,38 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            # The credential files of the MCP targets, as in the agentgateway pod: a directory mount,
-            # so a rotated credential needs no restart.
-            - name: provider-keys
-              mountPath: /secrets/providers
+            # The credential files and CA bundles of the MCP targets: a directory mount, so a rotated
+            # credential needs no restart. The LLM provider keys are not mounted.
+            - name: mcp-keys
+              mountPath: {{ $mcpKeysDir }}
               readOnly: true
+            - name: mcp-db
+              mountPath: {{ $dbDir }}
+              readOnly: true
+            {{- include "koinon.dbVolumeMount" . | nindent 12 }}
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-        - name: provider-keys
+        - name: mcp-keys
           secret:
-            secretName: {{ include "koinon.gatewayProvidersName" . }}
+            secretName: {{ include "koinon.gatewayMCPKeysName" . }}
             defaultMode: 0444
+        {{- if eq .Values.postgres.mode "cnpg" }}
+        - name: mcp-db
+          configMap:
+            name: {{ include "koinon.mcpGatewayDBURLConfigName" . }}
+        {{- else }}
+        - name: mcp-db
+          secret:
+            secretName: {{ required "postgres.external.secretName is required in external mode" .Values.postgres.external.secretName }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "postgres.external.keys.mcpgateway is required when gateway.mcp.driver=koinon" .Values.postgres.external.keys.mcpgateway }}
+                path: url
+        {{- end }}
+        {{- include "koinon.dbVolume" . | nindent 8 }}
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
       {{- with $m.nodeSelector }}
       nodeSelector:

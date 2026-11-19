@@ -27,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/stateracloud/koinon/internal/testing/uniqname"
 )
 
 var metaGet = metav1.GetOptions{}
@@ -599,7 +601,7 @@ func volumeFiles(data map[string][]byte, items []corev1.KeyToPath, defaultMode *
 // its mount. Docker writes into a volume through a container, so a helper container that is
 // never started has the volume mounted while the files are copied in with their owners.
 func (r *runner) fileVolume(ctx context.Context, files map[string]volumeFile, fsGroup int, target string, readOnly bool) testcontainers.ContainerMount {
-	name := fmt.Sprintf("chartsmoke-%d", time.Now().UnixNano())
+	name := uniqname.Name("chartsmoke")
 	r.dockerVolumes = append(r.dockerVolumes, name)
 	helper, err := testcontainers.Run(ctx, r.helperImage,
 		testcontainers.WithNoStart(),

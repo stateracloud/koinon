@@ -66,7 +66,7 @@ Three things changed during grilling on 2026-10-21:
 ```mermaid
 flowchart LR
   H[Harness in sandbox<br/>base URL = gateway<br/>key = placeholder] --> SV[OpenShell supervisor<br/>swaps agent key]
-  SV --> AGW[agentgateway<br/>provider keys from Vault]
+  SV --> AGW[agentgateway<br/>provider keys from the secret store]
   AGW --> P[Model providers / self-hosted]
   AGW -- llm.cost logs / OTel --> L[Koinon spend ledger]
   L -- per-key limits --> AGW

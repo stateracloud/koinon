@@ -237,6 +237,8 @@ func serve(ctx context.Context, cfg config) error {
 			Keys:                keyring,
 			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:      cfg.providerKeysDir,
+			MCPKeys:             mcpKeyStore(kube, cfg),
+			MCPKeyDir:           cfg.mcpKeysDir,
 			URLPolicy:           urlPolicy,
 			ProviderKeySettle:   cfg.keySettle,
 			Harnesses:           cfg.harnesses(),
@@ -455,4 +457,13 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 		return driver, nil
 	}
 	return nil, fmt.Errorf("gateway mode %q is not supported", cfg.gatewayMode)
+}
+
+// mcpKeyStore is the Secret of the MCP credentials, or nil when none is configured (kubernetes mode: the
+// credentials share the provider keys Secret).
+func mcpKeyStore(kube kubernetes.Interface, cfg config) reconciler.ProviderKeyStore {
+	if cfg.mcpKeysSecret == "" {
+		return nil
+	}
+	return reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.mcpKeysSecret}
 }

@@ -37,6 +37,9 @@ var (
 
 func TestAgentd(t *testing.T) {
 	RegisterFailHandler(Fail)
+	// A run goes through Postgres and the fake harness: under -race and -p the 1 s default is too short
+	// (issue 994). Eventually returns at the first success; the window only tells a hang from a slow machine.
+	SetDefaultEventuallyTimeout(racescale.D(10 * time.Second))
 	RunSpecs(t, "agentd")
 }
 

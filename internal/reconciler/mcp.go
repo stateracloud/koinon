@@ -146,8 +146,8 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 			out.servers = append(out.servers, s)
 		}
 	}
-	if len(out.files) > 0 && r.cfg.ProviderKeys == nil {
-		return out, errs, errors.New("reconciler: MCP servers have credentials but no provider key store is configured")
+	if len(out.files) > 0 && r.cfg.ProviderKeys == nil && r.cfg.MCPKeys == nil {
+		return out, errs, errors.New("reconciler: MCP servers have credentials but no key store is configured")
 	}
 	return out, errs, nil
 }

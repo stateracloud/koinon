@@ -87,8 +87,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		keyRecord  = fmt.Sprintf("kesak-%d", n)
 		ghRecord   = fmt.Sprintf("kesag-%d", n)
 		repo       = envOr("KOINON_ESCAPE_REPO", "octocat/Hello-World")
-		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
-		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
+		gatewayKey = fmt.Sprintf("koinon-escape-keycred-%d", n)
+		githubKey  = fmt.Sprintf("koinon-escape-ghcred-%d", n) // not the profile ID below: a leak scan must tell them apart
 		// No default: the cluster's DNS and API Service IPs differ per cluster, so a fixed one would pass
 		// on another cluster without probing anything. test/escape/kind.sh reads them from the cluster.
 		clusterDNS = os.Getenv("KOINON_ESCAPE_CLUSTER_DNS")

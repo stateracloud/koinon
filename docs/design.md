@@ -22,7 +22,7 @@ Web UI ─────────────┐        ┌──── Slack, 
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ renders
 ┌──────────── NVIDIA OpenShell (reused) ───────┐  ┌─ Shared services (reused) ─┐
-│ OpenShell gateway: lifecycle, providers,     │◄─│ Secret store (Vault/OpenBao)│
+│ OpenShell gateway: lifecycle, providers,     │◄─│ Secret store                │
 │ policies, inference.local                    │  │                             │
 │ Sandbox per agent (Agent Sandbox, Kata):     │─►│ LiteLLM: models, budgets    │
 │  harness speaks ACP (agentd: control plane)  │  │                             │
@@ -47,7 +47,7 @@ stay outside the agent.
 | Fallback execution backend | OpenSandbox credential vault, behind the same interface | the `ExecutionBackend` interface |
 | Model routing, budgets, virtual keys | LiteLLM behind OpenShell's `inference.local` | budget hierarchy and cost per task |
 | Shared MCP servers | ToolHive operator and registry (to evaluate) | grants and the progressive per-agent endpoint |
-| Secret storage | Postgres: provider keys and connection secrets are envelope-encrypted, the KEK is a Kubernetes Secret (ADR 0056); no hard dependency on Vault or OpenBao | connection cards and secure inputs |
+| Secret storage | Postgres: provider keys and connection secrets are envelope-encrypted, the KEK is a Kubernetes Secret (ADR 0056); no hard dependency on an external secret store | connection cards and secure inputs |
 | Orgs, personal orgs, roles, cross-org links | — | all of it, aligned with OpenShell workspaces (RFC 0011) |
 | Tasks, A2A, parking, approvals, triggers | DBOS Go as a library for schedules, timers, webhook processing and per-org limits (ADR 0066) | tasks, the inbox, triggers, park and resume |
 | Connector types, setup guides, agent builder, templates | — | all of it |
