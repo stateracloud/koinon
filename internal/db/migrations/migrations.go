@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"strings"
 )
 
 // FS holds every migration file.
@@ -78,22 +79,44 @@ func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 // GatewayRole is the NOLOGIN group role of koinon-gateway's database login (ADR 0097 decision 5,
 // #278). It is the gateway's only database privilege: it reads what the leak guard decides on,
 // writes the guard's own state and inserts the call log, and nothing else. It cannot read a
-// provider key, a secret or an approval. It can read the sealed (encrypted) credential columns of
-// mcp_servers and connections, because the guard's queries select whole rows; the gateway is the only
-// process that may later hold the key to open them (ADR 0097 decision 5), so a column-level grant
-// follows when those queries name their columns. The chart will create the role and make the
-// gateway's login a member (S4b of #278); until then nothing creates it. The grant runs on every
+// provider key, a secret or an approval. On mcp_servers and connections it holds column-level grants
+// that leave out the sealed credential columns (mcp_servers.credential, connections.secret_envelope):
+// the gateway is the only process that may later hold the key to open them (ADR 0097 decision 5), so
+// it needs no read of them, and a column added later is not readable until it is named here. The
+// chart creates the role and makes the gateway's login a member (S4b of #278). The grant runs on every
 // migrate and in --grants-only without waiting for the role, so a role that appears later gets its
 // grants at the next run; until then the gateway refuses every org call (fail closed). The migrate
 // role has no CREATEROLE.
 const GatewayRole = "koinon_gateway"
 
+// GatewayMCPServerColumns are the columns of mcp_servers the gateway may read: every column except the
+// sealed `credential`. The guard's query GetServedMCPServerForGuard selects exactly these; specs in
+// internal/mcpguard keep the query, the row conversion and the database equal to it.
+var GatewayMCPServerColumns = []string{
+	"org_id", "id", "name", "url", "transport", "credential_header", "credential_prefix", "source",
+	"managed_by_secret", "declared_version", "removed_at", "disabled_reason", "health", "health_reason",
+	"health_checked_at", "health_since", "consecutive_failures", "tools_synced_at", "created_by",
+	"created_at", "updated_at", "kind", "exposes_untrusted_input", "exposes_private_data",
+	"code_host_connection_id", "credential_lost_at", "admin_disabled_at", "admin_disabled_by",
+	"admin_disabled_note", "admin_disabled_under_by", "admin_disabled_under_note", "ca_bundle",
+	"insecure_skip_verify",
+}
+
+// GatewayConnectionColumns are the columns of connections the gateway may read. The guard joins
+// connections to the code-host scope (ListOrgCodeHostRepos) and reads only these four: it never reads
+// the sealed secret_envelope, the secret's name or the connection's config.
+var GatewayConnectionColumns = []string{"org_id", "id", "removed_at", "secret_fingerprint"}
+
 // gatewayGrants are the privileges of GatewayRole. Each line names why the gateway needs it.
 var gatewayGrants = []string{
-	// The guard identifies the caller and the server, reads the tool declarations, the org's leak-guard
-	// settings and the code-host connection's repository list (mcpguard, orgsettings.LeakGuardOf).
-	`GRANT SELECT ON orgs, agents, mcp_servers, mcp_tools, runs, agent_sandboxes,
-		org_settings, org_fetch_trusted_hosts, org_code_host_repos, org_code_host_readings, connections TO ` + GatewayRole,
+	// The guard identifies the server and reads the code-host connection's scope (mcpguard,
+	// orgsettings.LeakGuardOf), by named columns: the sealed credential columns are not among them.
+	`GRANT SELECT (` + strings.Join(GatewayMCPServerColumns, ", ") + `) ON mcp_servers TO ` + GatewayRole,
+	`GRANT SELECT (` + strings.Join(GatewayConnectionColumns, ", ") + `) ON connections TO ` + GatewayRole,
+	// The guard identifies the caller, reads the tool declarations, the org's leak-guard settings and the
+	// code-host scope (mcpguard, orgsettings.LeakGuardOf).
+	`GRANT SELECT ON orgs, agents, mcp_tools, runs, agent_sandboxes,
+		org_settings, org_fetch_trusted_hosts, org_code_host_repos, org_code_host_readings TO ` + GatewayRole,
 	// The guard's own state: sessions, fingerprints, open calls, the feed, the decision record.
 	`GRANT SELECT, INSERT, UPDATE, DELETE ON leak_guard_sessions, leak_guard_fingerprints, leak_guard_runs, leak_guard_open_calls, leak_guard_decisions TO ` + GatewayRole,
 	// The call log: insert only.
@@ -111,6 +134,20 @@ func GrantGateway(ctx context.Context, db Execer) (bool, error) {
 	}
 	if !exists {
 		return false, nil
+	}
+	// An earlier version granted whole-table SELECT on mcp_servers and connections. Drop it, so a database
+	// that has it ends with the column grants and nothing wider. Only when it is there: a revoke also
+	// removes the column grants, and a running gateway must not lose them on every migrate.
+	for _, table := range []string{"mcp_servers", "connections"} {
+		var wide bool
+		if err := db.QueryRowContext(ctx, `SELECT has_table_privilege($1, $2, 'SELECT')`, GatewayRole, table).Scan(&wide); err != nil {
+			return false, err
+		}
+		if wide {
+			if _, err := db.ExecContext(ctx, `REVOKE SELECT ON `+table+` FROM `+GatewayRole); err != nil {
+				return false, err
+			}
+		}
 	}
 	for _, stmt := range gatewayGrants {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
