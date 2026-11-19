@@ -8,7 +8,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
-// A2A interop with a kagent agent, both directions (issue #131, ADR 0123).
+// A2A interop with a kagent agent, both directions (issue 131, moved to 1129 for the kind test; ADR 0123).
 //
 // The exchange of one task between the Koinon outbound client and the Koinon edge, with
 // input-required, runs without a cluster in internal/a2aout (loop_test.go). The state mapping is in
@@ -27,21 +27,18 @@ import (
 //     API token (fake in tests: koinon_test_not-a-real-token).
 var _ = Describe("A2A interop with kagent", Label("a2a", "kagent"), func() {
 	BeforeEach(func() {
-		testenv.Require(
-			testenv.Var("a2a-edge", "KOINON_E2E_A2A_URL"),
-			testenv.Var("kagent", "KOINON_E2E_KAGENT_URL"),
-		)
+		testenv.Require(testenv.Vars("kagent", "KOINON_E2E_A2A_URL", "KOINON_E2E_KAGENT_URL"))
 	})
 
-	It("lets a kagent agent send a task to a Koinon agent", func() {
-		Skip("needs kind: send a v0.3 and a v1.0 SendMessage from the kagent agent to the Koinon edge; expect a task in input-required when the Koinon agent asks")
+	PIt("lets a kagent agent send a task to a Koinon agent", func() {
+		Skip("pending, needs kind: send a v0.3 and a v1.0 SendMessage from the kagent agent to the Koinon edge; expect a task in input-required when the Koinon agent asks")
 	})
 
-	It("lets a Koinon agent send a task to a kagent agent", func() {
-		Skip("needs kind: the Koinon agent calls send_task on the remote_agents entry; expect completed with the reply of the fake model")
+	PIt("lets a Koinon agent send a task to a kagent agent", func() {
+		Skip("pending, needs kind: the Koinon agent calls send_task on the remote_agents entry; expect completed with the reply of the fake model")
 	})
 
-	It("keeps input-required across both systems", func() {
-		Skip("needs kind: the kagent agent answers a question of the Koinon agent, and the Koinon agent answers a question of the kagent agent")
+	PIt("keeps input-required across both systems", func() {
+		Skip("pending, needs kind: the kagent agent answers a question of the Koinon agent, and the Koinon agent answers a question of the kagent agent")
 	})
 })

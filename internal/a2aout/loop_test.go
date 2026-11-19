@@ -34,6 +34,8 @@ type loopBackend struct {
 	task   store.Task
 	events []store.TaskEvent
 	seen   map[string]bool
+	// tasks records the task argument of every Deliver call: an answer must carry the open task.
+	tasks []pgtype.UUID
 }
 
 var loopTask = pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, Valid: true}
@@ -53,6 +55,7 @@ func (b *loopBackend) Deliver(_ context.Context, _ a2aedge.Scope, task pgtype.UU
 		return services.DirectMessageResult{Task: b.task}, nil
 	}
 	b.seen[mid] = true
+	b.tasks = append(b.tasks, task)
 	payload, _ := json.Marshal(map[string]string{"text": text, "message_id": mid})
 	if !task.Valid {
 		b.task = store.Task{ID: loopTask, State: store.TaskStateSubmitted, Title: "t"}
@@ -112,18 +115,22 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 		agentID = "0a0b0c0d-0000-0000-0000-000000000001"
 	)
 	var (
-		be  *loopBackend
-		srv *httptest.Server
-		cli *a2aout.Client
-		ctx = context.Background()
+		be      *loopBackend
+		ca      string
+		refused int
+		srv     *httptest.Server
+		cli     *a2aout.Client
+		ctx     = context.Background()
 	)
 
 	BeforeEach(func() {
 		be = &loopBackend{seen: map[string]bool{}}
+		refused = 0
 		type ctxKey struct{}
 		gate := func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer "+token {
+					refused++
 					http.Error(w, "no", http.StatusUnauthorized)
 					return
 				}
@@ -143,7 +150,7 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 		}).Mount(mux)
 
 		dir := GinkgoT().TempDir()
-		ca := filepath.Join(dir, "ca.pem")
+		ca = filepath.Join(dir, "ca.pem")
 		Expect(os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)).To(Succeed())
 		cred := filepath.Join(dir, "token")
 		Expect(os.WriteFile(cred, []byte(token+"\n"), 0o600)).To(Succeed())
@@ -179,6 +186,10 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 		a, err := cli.Send(ctx, a2aout.Request{Text: "eu-west", AnswerTask: r.TaskID, ContextID: r.ContextID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.TaskID).To(Equal(r.TaskID))
+		// The edge routed the answer to the open task: the second message carries it, not a new task.
+		Expect(be.tasks).To(HaveLen(2))
+		Expect(be.tasks[0].Valid).To(BeFalse())
+		Expect(be.tasks[1]).To(Equal(loopTask))
 
 		be.finish("deployed to eu-west")
 		done, err := cli.Await(ctx, r.TaskID)
@@ -189,11 +200,13 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 
 	It("refuses a client that has no token", func() {
 		o := a2aout.Options{
-			Target: gateway.MCPTarget{Name: "koinon-peer", URL: srv.URL + a2aedge.BasePath + "/agents/" + agentID},
+			Target: gateway.MCPTarget{Name: "koinon-peer", URL: srv.URL + a2aedge.BasePath + "/agents/" + agentID, CAFile: ca},
 			Agent:  gateway.AgentRef{Org: "acme", Name: "caller"},
 			Policy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: []string{"127.0.0.1"}},
 		}
 		_, err := a2aout.FetchCard(ctx, o)
 		Expect(err).To(HaveOccurred())
+		// The gate refused the request: the failure is not a TLS error.
+		Expect(refused).To(Equal(1))
 	})
 })
