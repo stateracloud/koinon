@@ -114,10 +114,12 @@ has "the installer group defaults to system:masters" 'g in \[\\"system:masters\\
 has "the kubeadm admin group is an installer by default" 'kubeadm:cluster-admins' "${wsub[@]}" "${pol[@]}"
 has "installer identities are configurable" 'system:admin' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
 objs=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-objects\n' <<<"$pdocs")
-grep -Fq "request.namespace == \"ate-workers\" && request.resource.group == 'apps' && request.resource.resource == 'deployments'" <<<"$objs" || fail "the controller may apply Deployments in the worker namespace only"
+grep -Fq "variables.reqNamespace == \"ate-workers\" && request.resource.group == 'apps' && request.resource.resource == 'deployments'" <<<"$objs" || fail "the controller may apply Deployments in the worker namespace only"
 grep -Fq '!object.spec.template.spec.automountServiceAccountToken' <<<"$objs" || fail "the Deployment template must not automount a token"
 grep -Fq 'object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in' <<<"$objs" || fail "the Deployment template hostPath must follow allowedHostPaths"
-grep -Fq "request.namespace in [\"ate-system\",\"ate-workers\",\"\"] && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in both namespaces and of cluster-scoped ones"
+grep -Fq "variables.reqNamespace in [\"ate-system\",\"ate-workers\",\"\"] && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in both namespaces and of cluster-scoped ones"
+grep -Fq "has(request.namespace) ? request.namespace : ''" <<<"$objs" || fail "a cluster-scoped object has no request.namespace key: the objects policy must guard the read"
+if [[ "$(tr -d '\134' <<<"$objs" | grep -Fc 'request.namespace')" != 2 ]]; then fail "the objects policy reads request.namespace outside the guard"; fi
 grep -Fq 'c.securityContext.privileged' <<<"$wpods" || fail "the worker pod rules must deny privileged containers"
 grep -Fq 'object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged)' <<<"$objs" || fail "the Deployment template must not be privileged"
 lacks "the policies are off when disabled" 'worker-(pods|connect|objects)|control-pods' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
@@ -131,7 +133,17 @@ has "the worker namespace is privileged for Pod Security" 'pod-security.kubernet
 
 # NetworkPolicies: standard API only.
 npdocs=$(render "${wsub[@]}" "${np[@]}")
-[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 2 ]] || fail "expected two NetworkPolicies (workers and control plane)"
+[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 4 ]] || fail "expected four NetworkPolicies (workers, control plane, closed pods, API-only pods)"
+closed=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-closed\n' <<<"$npdocs")
+apionly=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-only\n' <<<"$npdocs")
+for app in ate-idp-server postgres rustfs; do grep -Fq -- "- $app" <<<"$closed" || fail "the closed policy must select $app"; done
+grep -Fq 'egress: []' <<<"$closed" || fail "the closed policy must deny all egress"
+grep -Fq 'policyTypes: [Egress]' <<<"$closed" || fail "the closed policy must leave ingress to Substrate's own policies"
+grep -Fq -- '- k8s-credential-provider' <<<"$apionly" || fail "the API-only policy must select k8s-credential-provider"
+grep -Fq 'cidr: "192.0.2.10/32"' <<<"$apionly" || fail "the API-only policy must reach the API server CIDRs"
+grep -Fq 'policyTypes: [Egress]' <<<"$apionly" || fail "the API-only policy must leave ingress to Substrate's own policies"
+has "the closed list is configurable" '- app-y$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps={app-y}' "${np[@]}"
+lacks "no closed policy with an empty list" 'substrate-closed' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.closedApps=null' "${np[@]}"
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")
 control=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' <<<"$npdocs")
 grep -Fq 'namespace: "ate-workers"' <<<"$workers" || fail "the workers policy must be in the worker namespace"
@@ -144,7 +156,8 @@ if grep -Eq '^        - podSelector: \{\}$' <<<"$workers"; then fail "worker ing
 if grep -Fq 'app.kubernetes.io/component: api' <<<"$workers"; then fail "worker egress must not name the Koinon API pods"; fi
 grep -Fq 'port: 53' <<<"$workers" || fail "worker egress must allow DNS"
 if grep -Eq '192\.0\.2\.10|6443|ipBlock|extraEgress' <<<"$workers"; then fail "worker pods must have no API server route"; fi
-if grep -Eq '0\.0\.0\.0/0|::/0|postgres|cnpg' <<<"$npdocs"; then fail "no public or database egress"; fi
+# The closed policy names Substrate's own postgres pod (it gets no egress), so only the policies with egress rules are checked.
+if grep -Eq '0\.0\.0\.0/0|::/0|postgres|cnpg' <<<"$workers$control$apionly"; then fail "no public or database egress"; fi
 grep -Fq 'key: app' <<<"$control" || fail "the control policy must select on the app label"
 grep -Fq 'operator: In' <<<"$control" || fail "the control policy must select an explicit list of app labels"
 if grep -Eq 'DoesNotExist|ate.dev/worker-pool' <<<"$control"; then fail "the control policy must not key on the absence of the worker label (fails open)"; fi

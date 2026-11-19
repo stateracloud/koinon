@@ -398,6 +398,14 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- The other pods of `ate-system` have a list each, so none of them is unfenced: `closedApps` (`ate-idp-server`,
+  `postgres`, `rustfs`) get no egress at all, and `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API
+  server only. Their ingress stays Substrate's own policies (`ate-system-networkpolicies.yaml`, `kind/rustfs.yaml`),
+  because NetworkPolicies add up. Confirm the three lists against your Substrate manifests.
+- `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
+  ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
+  endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1
+  and 10.250.0.1). List both when in doubt.
 - atelet needs no internet egress when the gVisor tarball comes from the cluster object store. The installer
   stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
   issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.

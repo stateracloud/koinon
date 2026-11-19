@@ -17,8 +17,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -60,6 +64,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 	var (
 		admin  *kubernetes.Clientset
 		as     map[string]*kubernetes.Clientset
+		asDyn  map[string]dynamic.Interface
 		dryRun = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 	)
 	const (
@@ -101,12 +106,14 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		testenv.Require(testenv.Envtest)
 		policies, bindings := renderWorkerPolicy(ctx)
 
-		env := &envtest.Environment{}
+		// A cluster-scoped Substrate kind: the objects policy sees it with no request.namespace key.
+		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxConfigCRD()}}
 		cfg, err := env.Start()
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(env.Stop)
 		admin = kubernetes.NewForConfigOrDie(cfg)
 		as = map[string]*kubernetes.Clientset{"admin": admin}
+		asDyn = map[string]dynamic.Interface{"admin": dynamic.NewForConfigOrDie(cfg)}
 		for _, user := range []string{workerController, replicaSetController, daemonSetController, other, kubeadmAdmin} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
@@ -126,6 +133,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			}
 			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: groups}
 			as[user] = kubernetes.NewForConfigOrDie(c)
+			asDyn[user] = dynamic.NewForConfigOrDie(c)
 		}
 		for _, ns := range []string{workerNamespace, controlNamespace} {
 			_, err = admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
@@ -139,6 +147,10 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 				&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "atelet"}}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
+
+		// The SandboxConfig the objects cases act on exists before the policies do.
+		_, err = asDyn["admin"].Resource(sandboxConfigGVR).Create(ctx, sandboxConfig("gvisor-default"), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
 		// The pod the update and connect cases act on exists before the policies do.
 		_, err = admin.CoreV1().Pods(workerNamespace).Create(ctx, worker(existing), metav1.CreateOptions{})
@@ -422,6 +434,29 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("lets the controller finalize a cluster-scoped SandboxConfig, and nothing else write it", func(ctx SpecContext) {
+		// The object has no namespace: CEL has no request.namespace key for it (a read fails with "no such key").
+		sc, err := asDyn["admin"].Resource(sandboxConfigGVR).Get(ctx, "gvisor-default", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		dry := metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}}
+		// A finalizer change is a metadata change: it keeps the spec.
+		meta := sc.DeepCopy()
+		meta.SetFinalizers([]string{"ate.dev/finalizer"})
+		_, err = asDyn[workerController].Resource(sandboxConfigGVR).Update(ctx, meta, dry)
+		Expect(err).NotTo(HaveOccurred())
+		// A spec change is not.
+		spec := sc.DeepCopy()
+		Expect(unstructured.SetNestedField(spec.Object, "changed", "spec", "class")).To(Succeed())
+		_, err = asDyn[workerController].Resource(sandboxConfigGVR).Update(ctx, spec, dry)
+		denied(err)
+		// Another identity may not write it at all.
+		_, err = asDyn[other].Resource(sandboxConfigGVR).Update(ctx, meta, dry)
+		denied(err)
+		// The installer may.
+		_, err = asDyn[kubeadmAdmin].Resource(sandboxConfigGVR).Update(ctx, spec, dry)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("denies ephemeral containers in a worker pod, the controller's included", func(ctx SpecContext) {
 		for _, user := range []string{workerController, other, "admin"} {
 			p, err := admin.CoreV1().Pods(workerNamespace).Get(ctx, existing, metav1.GetOptions{})
@@ -509,4 +544,34 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 	Expect(policies).NotTo(BeEmpty(), "worker policies")
 	Expect(bindings).NotTo(BeEmpty(), "worker policy bindings")
 	return policies, bindings
+}
+
+var sandboxConfigGVR = schema.GroupVersionResource{Group: "ate.dev", Version: "v1", Resource: "sandboxconfigs"}
+
+// sandboxConfigCRD is a minimal cluster-scoped SandboxConfig: the shape of the kind matters, not its schema.
+func sandboxConfigCRD() *apiextensionsv1.CustomResourceDefinition {
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: sandboxConfigGVR.Resource + "." + sandboxConfigGVR.Group},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: sandboxConfigGVR.Group,
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: "sandboxconfigs", Singular: "sandboxconfig", Kind: "SandboxConfig", ListKind: "SandboxConfigList",
+			},
+			Scope: apiextensionsv1.ClusterScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+				Name: sandboxConfigGVR.Version, Served: true, Storage: true,
+				Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+					Type: "object", XPreserveUnknownFields: new(true),
+				}},
+			}},
+		},
+	}
+}
+
+func sandboxConfig(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "ate.dev/v1", "kind": "SandboxConfig",
+		"metadata": map[string]any{"name": name},
+		"spec":     map[string]any{"class": "gvisor"},
+	}}
 }

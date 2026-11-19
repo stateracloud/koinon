@@ -20,6 +20,9 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   workerNetworkPolicy.apiServerCIDRs, which the render requires. A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
+  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: closedApps
+  (ate-idp-server, postgres, rustfs: no egress at all) and apiOnlyApps (k8s-credential-provider: DNS and the API
+  server only). Their ingress stays Substrate's own.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
 {{- $s := .Values.execution.substrate }}
@@ -123,5 +126,64 @@ spec:
         - {port: 6443, protocol: TCP}
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- with $np.closedApps }}
+---
+# Pods that call nothing: no egress at all. Their ingress is Substrate's own
+# (ate-system-networkpolicies.yaml: default-deny-ingress at line 38, ate-idp-server at 168, postgres at 97; rustfs
+# at kind/rustfs.yaml:140), so this policy lists no Ingress type: a second ingress rule here would only add to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-closed
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml . | nindent 10 }}
+  policyTypes: [Egress]
+  egress: []
+{{- end }}
+{{- with $np.apiOnlyApps }}
+---
+# Pods that call the Kubernetes API server and nothing else: DNS and the API server CIDRs. Their ingress is
+# Substrate's own (k8s-credential-provider admits the egress gateway only; ate-system-networkpolicies.yaml lines 15-35
+# and 236-241), so this policy lists no Ingress type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-api-only
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml . | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
 {{- end }}
 {{- end }}

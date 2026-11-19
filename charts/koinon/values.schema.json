@@ -691,6 +691,8 @@
               "properties": {
                 "enabled": {"type": "boolean"},
                 "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "closedApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "apiOnlyApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "atenetEgressSelector": {"type": "object"},
                 "apiServerCIDRs": {"type": "array", "items": {"type": "string"}},
                 "extraEgress": {"type": "array", "items": {"type": "object"}}

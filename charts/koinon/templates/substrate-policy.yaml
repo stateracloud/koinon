@@ -262,6 +262,10 @@ spec:
       expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
     - name: kube
       expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
+    # A cluster-scoped object (SandboxConfig, CSIDriverConfig) has no request.namespace key in CEL: the read
+    # fails with "no such key". The variable is the empty string for such an object.
+    - name: reqNamespace
+      expression: "has(request.namespace) ? request.namespace : ''"
     # The Substrate controller applies the Deployment of a WorkerPool in the worker namespace (server-side
     # apply creates and updates it) and deletes it. It may not write any other workload kind, or
     # anything in the control-plane namespace. The pod template follows the pod rules already at the
@@ -269,9 +273,9 @@ spec:
     # digest rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet
     # controller is digest-exempt (digestExemptIdentities, tracking issue #1140).
     - name: controllerOwn
-      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && variables.reqNamespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
     - name: controllerMetadata
-      expression: {{ printf "request.userInfo.username in %s && request.namespace in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) (toJson (list $ns $wns "")) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && variables.reqNamespace in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) (toJson (list $ns $wns "")) | quote }}
   validations:
     - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
