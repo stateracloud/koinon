@@ -97,9 +97,13 @@ RUN --mount=type=secret,id=github_token,required=false \
 # OpenCode's npm tarball holds only package.json and the compiled binary (no LICENSE), so its MIT
 # text comes from the tagged source too (v2.2.6, checked 2026-11-19). The binary itself is a static
 # Bun v1.4.4 build (confirmed by `strings` on the fetched tarball: "Bun v1.4.4 (38afee6c8) Linux x64"
-# and JSC::/WebKit symbols), which statically links JavaScriptCore/WebKit under LGPL-2 with a
-# relinking obligation; Bun's own LICENSE.md (MIT for Bun itself) carries that notice and the
-# relinking instructions verbatim, so it is fetched and shipped whole rather than summarized here.
+# and JSC::/WebKit symbols), which statically links JavaScriptCore/WebKit under LGPL-2. LGPL-2
+# section 6(1) needs the object form plus the means to relink; Bun's own LICENSE.md already names
+# both (the oven-sh/webkit fork it builds against and the `bun sync-webkit-source` / `bun run
+# build:local` steps to relink), so shipping that file unmodified, alongside the unmodified Bun
+# binary OpenCode embeds, passes Bun's own LGPL compliance through rather than duplicating it;
+# the build-time check below greps for the fork URL and the word "relink" to catch an upstream
+# rewrite that drops either.
 FROM scratch AS licenses
 ADD --checksum=sha256:697db34dabb21562fe84487a2ccd031fbd45382b89c2cbdec8ef31682c486040 https://raw.githubusercontent.com/mikefarah/yq/v4.54.1/LICENSE /yq
 ADD --checksum=sha256:81471889c77b2161a3e4dcdb1b2e6ca382e485766132d92d5fe1d7497e7dd2d9 https://raw.githubusercontent.com/ast-grep/ast-grep/0.51.0/LICENSE /ast-grep
@@ -200,21 +204,23 @@ COPY --from=licenses /ast-grep /usr/share/doc/koinon-tools/ast-grep/LICENSE
 COPY --from=licenses /duckdb /usr/share/doc/koinon-tools/duckdb/LICENSE
 COPY --from=licenses /opencode /usr/share/doc/koinon-tools/opencode/LICENSE
 COPY --from=licenses /bun /usr/share/doc/koinon-tools/bun/LICENSE.md
-# GPL source offer (#63): git, poppler-utils, bash and coreutils ship unmodified from Ubuntu or the
-# base image under the GPL. This generates Koinon's written offer (GPL-2.0 section 3(b) / GPL-3.0
-# section 6(b)) from the versions dpkg actually installed, so it cannot name the wrong version; the
-# check below fails the build if dpkg ever drops one of these packages without the offer noticing.
+# GPL/LGPL source offer (#63): git, poppler-utils, bash, coreutils and the base image's C library
+# ship unmodified from Ubuntu under the GPL or LGPL, among other licences. Naming only the
+# packages Koinon knows are (L)GPL would make the offer under-inclusive if that list is wrong or
+# goes stale, so this instead offers the source of every package dpkg reports installed, keyed to
+# the one Ubuntu snapshot the image was built from; the check below fails the build if any of the
+# packages Koinon knows are (L)GPL stop appearing in that full list.
 RUN set -eux; \
     { \
-      printf 'Koinon ships GNU/Linux packages under the GPL (git, poppler-utils, bash, coreutils),\n'; \
-      printf 'unmodified from Ubuntu or the base image. This is the written offer Koinon makes under\n'; \
-      printf 'GPL-2.0 section 3(b) / GPL-3.0 section 6(b), valid for three years from the image build date.\n'; \
+      printf 'This is the written offer Koinon makes, under GPL-2.0 section 3(b) / GPL-3.0 section\n'; \
+      printf '6(b) and the equivalent LGPL sections, for the complete corresponding source of every\n'; \
+      printf 'package installed in this image from the Ubuntu snapshot named below (GPL and LGPL\n'; \
+      printf 'packages include git, poppler-utils, bash, coreutils and others), valid for three\n'; \
+      printf 'years from the image build date.\n'; \
       printf '\n'; \
-      printf 'Installed GPL-licensed packages in this image:\n'; \
-      for p in bash coreutils git poppler-utils; do \
-        v=$(dpkg-query -W -f='${Version}' "$p"); \
-        printf '  - %s %s\n' "$p" "$v"; \
-      done; \
+      printf 'Installed packages in this image (dpkg-query -W):\n'; \
+      pkgs=$(dpkg-query -W -f='  - ${Package} ${Version}\n'); \
+      printf '%s\n' "$pkgs"; \
       printf '\n'; \
       printf 'Exact source: the Ubuntu snapshot this image was built from, snapshot %s\n' "$UBUNTU_SNAPSHOT"; \
       printf '(https://snapshot.ubuntu.com/ubuntu/%s/). Add it to /etc/apt/sources.list.d, then use\n' "$UBUNTU_SNAPSHOT"; \
@@ -256,6 +262,8 @@ RUN set -eux; \
     grep -q 'MIT License' /usr/share/doc/koinon-tools/opencode/LICENSE; \
     grep -qi 'JavaScriptCore' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
     grep -qi 'LGPL' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
+    grep -qi 'relink' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
+    grep -q 'oven-sh/webkit' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
     for p in bash coreutils git poppler-utils; do \
       grep -q " $p " /usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt || { echo "GPL-SOURCE-OFFER.txt: missing $p" >&2; exit 1; }; \
     done

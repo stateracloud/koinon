@@ -496,6 +496,7 @@ tool_repo() {
 	BUILDX) echo "docker/buildx" ;;
 	ATE_ENV) echo "agent-substrate/env" ;; # a commit pin: dated by the commit's date
 	GVISOR) echo "google/gvisor" ;; # tag release-<version> (issue 1157)
+	CARGO_ABOUT) echo "EmbarkStudios/cargo-about" ;; # #63
 	esac
 }
 while IFS=$'\t' read -r file line; do
