@@ -250,8 +250,6 @@ var _ = Describe("ConnectionService", func() {
 			{BaseUrl: "https://koinon-postgres"},
 			{BaseUrl: "https://gitea.ns.svc"},
 			{BaseUrl: "https://gitea.ns.svc:443"},
-			{BaseUrl: "https://INTRANET."},
-			{BaseUrl: "https://user@intranet:8443"},
 			{CaBundle: "not pem"},
 			{CaBundle: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-a-real-key")}))},
 		} {
@@ -260,6 +258,15 @@ var _ = Describe("ConnectionService", func() {
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", req)
 		}
 		Expect(count(ctx, e, `SELECT count(*) FROM connections`)).To(BeZero())
+	})
+
+	It("names the short-name rule when a GitHub base URL is a search-path Service name (#1054)", func(ctx SpecContext) {
+		req := &connectionv1alpha1.CreateGitHubConnectionRequest{BaseUrl: "https://gitea.ns.svc"}
+		req.OrgId, req.AppId, req.InstallationId, req.PrivateKey = org, gh.AppID, gh.InstallationID, string(gh.PEM)
+		_, err := owner.conns.CreateGitHubConnection(ctx, req)
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("short name")))
+		Expect(err).To(MatchError(ContainSubstring("gitea.ns.svc.cluster.local")))
 	})
 
 	It("reports failing checks at the step that caused them", func(ctx SpecContext) {
@@ -942,7 +949,6 @@ var _ = Describe("ConnectionService for Gitea", func() {
 		Entry("a search-path Service name (#1054)", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) {
 			r.BaseUrl = "https://gitea.ns.svc:3000/gitea"
 		}),
-		Entry("a single-label name (#1054)", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://INTRANET./gitea" }),
 		Entry("a bad CA bundle", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.CaBundle = "not pem" }),
 		Entry("a missing read token", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.ReadToken = "" }),
 		Entry("the same token twice", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.WriteToken = r.ReadToken }),

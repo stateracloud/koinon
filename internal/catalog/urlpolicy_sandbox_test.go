@@ -81,10 +81,13 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("Service name, userinfo", "https://u@gitea.ns.svc", "gitea.ns.svc.cluster.local"),
 		Entry("allow-listed Service name", "http://gitea.ns.svc:3000", "gitea.ns.svc.cluster.local"),
 		Entry("Service name with .svc.cluster", "https://gitea.ns.svc.cluster", "gitea.ns.svc.cluster.local"),
+		Entry("single label, one trailing dot", "http://intranet./", "intranet.<namespace>.svc.cluster.local"),
+		Entry("Service name, one trailing dot", "https://gitea.ns.svc./", "gitea.ns.svc.cluster.local"),
+		Entry("namespace-qualified name, one trailing dot", "https://gitea.ns./", "gitea.ns.svc.cluster.local"),
 		Entry("namespace-qualified name, search domains expand it", "https://gitea.ns", "gitea.ns.svc.cluster.local"),
 		Entry("namespace-qualified name with a port", "https://Gitea.NS:3000/x", "gitea.ns.svc.cluster.local"),
-		Entry("four dots, below ndots 5", "https://x.y.z.w.v", "x.y.z.w.v.svc.cluster.local"),
-		Entry("five dots, at ndots 5: the search fallback still expands it", "https://x.y.z.w.v.u", "x.y.z.w.v.u.svc.cluster.local"),
+		Entry("four dots, below ndots 5", "https://x.y.z.w.v", "fully qualified name"),
+		Entry("five dots, at ndots 5: the search fallback still expands it", "https://x.y.z.w.v.u", "fully qualified name"),
 	)
 
 	DescribeTable("passes a full name, a public name or an IP literal",
@@ -114,6 +117,29 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		}
 	})
 
+	It("refuses in strict mode when the absolute lookup fails after the platform check resolved the name", func(ctx SpecContext) {
+		calls := 0
+		flaky := catalog.URLPolicy{Resolver: func(_ context.Context, h string) ([]netip.Addr, error) {
+			calls++
+			if calls == 1 {
+				return []netip.Addr{netip.MustParseAddr("203.0.113.9")}, nil
+			}
+			return nil, errors.New("SERVFAIL")
+		}}
+		Expect(flaky.CheckSandboxStrict(ctx, "https://git.example.com")).To(MatchError(ContainSubstring("does not resolve as an absolute name")))
+	})
+
+	It("applies the address rules to the addresses of the absolute lookup", func(ctx SpecContext) {
+		split := catalog.URLPolicy{Resolver: func(_ context.Context, h string) ([]netip.Addr, error) {
+			if strings.HasSuffix(h, ".") { // what the sandbox resolves
+				return []netip.Addr{netip.MustParseAddr("10.1.2.3")}, nil
+			}
+			return []netip.Addr{netip.MustParseAddr("203.0.113.9")}, nil
+		}}
+		Expect(split.Check(ctx, "https://git.example.com")).To(Succeed())
+		Expect(split.CheckSandbox(ctx, "https://git.example.com")).To(MatchError(ContainSubstring("private")))
+	})
+
 	It("keeps Check unchanged for a model provider: a short name that the platform allows passes", func(ctx SpecContext) {
 		Expect(p.Check(ctx, "http://intranet")).To(Succeed())
 		Expect(p.Check(ctx, "http://gitea.ns.svc:3000")).To(Succeed())
@@ -127,7 +153,7 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("empty", "", false),
 		Entry("label", "gitea", true),
 		Entry("label, uppercase", "GITEA", true),
-		Entry("label with one trailing dot is absolute", "gitea.", false),
+		Entry("label with one trailing dot", "gitea.", true),
 		Entry("two trailing dots are an empty label", "gitea..", true),
 		Entry("name.ns.svc", "gitea.ns.svc", true),
 		Entry("full", "gitea.ns.svc.cluster.local", false),
@@ -144,11 +170,22 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue(), addr)
 		}
+		By("looking the host up once, as an absolute name")
+		var looked []string
+		spy := catalog.URLPolicy{Resolver: func(_ context.Context, h string) ([]netip.Addr, error) {
+			looked = append(looked, h)
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		}}
+		_, _ = spy.SandboxDialContext(&net.Dialer{})(ctx, "tcp", "git.example.com:443")
+		Expect(looked).To(Equal([]string{"git.example.com."}))
+		By("refusing a name that only the search domains resolve")
+		_, err := p.SandboxDialContext(&net.Dialer{})(ctx, "tcp", "gitea.dev:443")
+		Expect(err).To(MatchError(ContainSubstring("absolute name")))
 		// A full name reaches the policy dial: this one resolves to a denied address.
 		deny := catalog.URLPolicy{Resolver: func(context.Context, string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 		}}
-		_, err := deny.SandboxDialContext(&net.Dialer{})(ctx, "tcp", "gitea.ns.svc.cluster.local:443")
+		_, err = deny.SandboxDialContext(&net.Dialer{})(ctx, "tcp", "gitea.ns.svc.cluster.local:443")
 		Expect(err).To(MatchError(ContainSubstring("egress policy denies")))
 	})
 })
