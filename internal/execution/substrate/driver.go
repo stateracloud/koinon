@@ -83,7 +83,7 @@ type Config struct {
 	RuntimeClassTiers map[string]harness.Tier
 	// DefaultTier is the tier of a sandbox whose template names no runtime class. Empty means there is
 	// none. A sandbox whose tier is unknown fails Exec with [execution.ErrFailedPrecondition]: the
-	// driver never starts a guest process without the launcher.
+	// driver never starts a guest process, Upload's included, without the launcher.
 	DefaultTier harness.Tier
 	// DrainTimeout bounds each of the two waits of a suspend for the router calls that started
 	// before it: first for the short calls (stdin writes, uploads) to end by themselves, then,

@@ -40,17 +40,14 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	if len(req.Command) == 0 {
 		return nil, fail(op, execution.ErrInvalid, "command is empty")
 	}
-	prefix, err := d.launcherPrefix(ctx, op, k)
-	if err != nil {
-		return nil, err
-	}
 	command := req.Command
 	if req.LoginShell {
 		// A login shell sources the user's profile; "$@" passes the command through unparsed.
 		command = append([]string{"bash", "-lc", `exec "$@"`, "bash"}, command...)
 	}
-	// The launcher is the outermost process, so the login shell and the command are both hardened.
-	start := &ateenvv1alpha.StartProcessRequest{Command: slices.Concat(prefix, command), Cwd: req.Workdir, Stdin: true}
+	// startProcess puts the launcher in front, as the outermost process, so the login shell and the
+	// command are both hardened.
+	start := &ateenvv1alpha.StartProcessRequest{Command: command, Cwd: req.Workdir, Stdin: true}
 	if req.Timeout > 0 {
 		start.Timeout = durationpb.New(req.Timeout)
 	}
@@ -102,9 +99,11 @@ func (d *Driver) launcherPrefix(ctx context.Context, op string, k key) ([]string
 				return nil, fail(op, execution.ErrFailedPrecondition, "sandbox %s has runtime class %q, which has no isolation tier: no launcher policy applies", k, class)
 			}
 		}
-		d.mu.Lock()
-		d.tiers[tk] = tier
-		d.mu.Unlock()
+		if IsDerivedTemplate(tk.actor) { // a derived name is a hash of its content; any other may change
+			d.mu.Lock()
+			d.tiers[tk] = tier
+			d.mu.Unlock()
+		}
 	}
 	prefix, ok := harness.Descriptor{}.LauncherPrefix(tier)
 	if !ok {
@@ -116,6 +115,13 @@ func (d *Driver) launcherPrefix(ctx context.Context, op string, k key) ([]string
 // startProcess starts a process, retrying while the guest daemon is not up yet: an actor runs
 // before its daemon listens.
 func (d *Driver) startProcess(ctx context.Context, op string, k key, req *ateenvv1alpha.StartProcessRequest) (*ateenvv1alpha.Process, error) {
+	// Every guest process starts here: Exec and the commands of Upload. The tier is read after the
+	// caller entered the gate, so a deleted and re-created sandbox cannot get the old tier's policy.
+	prefix, err := d.launcherPrefix(ctx, op, k)
+	if err != nil {
+		return nil, err
+	}
+	req.Command = slices.Concat(prefix, req.Command)
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
 	delay := d.cfg.PollInterval
 	for {

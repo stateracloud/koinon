@@ -3,6 +3,8 @@
 package substrate_test
 
 import (
+	"archive/tar"
+	"bytes"
 	"io"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -108,5 +110,18 @@ var _ = Describe("the launcher prefix", func() {
 		_, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
 		Expect(err).To(MatchError(execution.ErrFailedPrecondition))
 		Expect(cl.Started(ws, "sb")).To(BeEmpty())
+	})
+
+	It("wraps the commands of Upload too", func(ctx SpecContext) {
+		ready(ctx, d, "sb")
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		Expect(tw.Close()).To(Succeed())
+		Expect(d.Upload(ctx, ws, "sb", "/sandbox", &buf)).To(Succeed())
+		started := cl.Started(ws, "sb")
+		Expect(started).To(HaveLen(3)) // rm of the archive comes last, so mkdir and tar come first
+		for _, argv := range started {
+			Expect(argv[:4]).To(Equal([]string{launcher, "--policy", "/etc/koinon/guest-launcher/policy-gvisor.json", "--"}))
+		}
 	})
 })
