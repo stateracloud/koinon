@@ -258,23 +258,46 @@ func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
 	return p.check(ctx, rawURL, true)
 }
 
+// SearchNdots is the "ndots" of a Kubernetes pod resolver (dnsPolicy ClusterFirst). A name with fewer dots,
+// and no trailing dot, is tried with each search domain first; a name with this many dots or more is
+// tried as given first and with the search domains only when that fails. Either way the API pod can
+// resolve a name that is not absolute through its search domains. The OpenShell policy DNS of the sandbox
+// has no search domains (charts/koinon/templates/_helpers.tpl "koinon.gatewayHost", values.yaml).
+const SearchNdots = 5
+
 // CheckSandbox is Check for a URL that also becomes sandbox egress, such as a connector's base URL. The
-// sandbox resolver uses no search domains, so a short name that resolves in the API does not resolve
-// there (#1054). It refuses a short name (see ShortName) before any allow-list entry is read: an
-// allow-listed short name would pass the platform check and still fail in the sandbox.
+// sandbox resolver uses no search domains, so a name that only the search domains resolve works in the API
+// and fails in the sandbox (#1054). It refuses such a name (see ShortName and searchOnly) before any
+// allow-list entry is read: an allow-listed short name would pass the platform check and still fail in
+// the sandbox.
 func (p URLPolicy) CheckSandbox(ctx context.Context, rawURL string) error {
-	if err := sandboxName(rawURL); err != nil {
-		return err
-	}
-	return p.Check(ctx, rawURL)
+	return p.checkSandbox(ctx, rawURL, false)
 }
 
 // CheckSandboxStrict is CheckStrict with the rule of CheckSandbox, for rendering.
 func (p URLPolicy) CheckSandboxStrict(ctx context.Context, rawURL string) error {
-	if err := sandboxName(rawURL); err != nil {
+	return p.checkSandbox(ctx, rawURL, true)
+}
+
+func (p URLPolicy) checkSandbox(ctx context.Context, rawURL string, strict bool) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return invalid("url must be an http(s) URL")
+	}
+	if why := ShortName(u.Hostname()); why != "" {
+		return invalid("the url's host %q is a short name: %s", u.Hostname(), why)
+	}
+	check := p.Check
+	if strict {
+		check = p.CheckStrict
+	}
+	if err := check(ctx, rawURL); err != nil {
 		return err
 	}
-	return p.CheckStrict(ctx, rawURL)
+	if why := p.searchOnly(ctx, u.Hostname()); why != "" {
+		return invalid("the url's host %q is a short name: %s", u.Hostname(), why)
+	}
+	return nil
 }
 
 // SandboxDialContext is DialContext that also refuses a short name, for clients of connector URLs.
@@ -285,31 +308,70 @@ func (p URLPolicy) SandboxDialContext(d *net.Dialer) func(ctx context.Context, n
 			if why := ShortName(host); why != "" {
 				return nil, invalid("the host %q is a short name: %s", host, why)
 			}
+			if why := p.searchOnly(ctx, host); why != "" {
+				return nil, invalid("the host %q is a short name: %s", host, why)
+			}
 		}
 		return dial(ctx, network, addr)
 	}
 }
 
-func sandboxName(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
-		return invalid("url must be an http(s) URL")
+// searchOnly returns a message when host resolves as given (through the search domains of this pod) but
+// not as an absolute name, which is how the sandbox resolves it. It returns "" for an IP literal, for a
+// name with a trailing dot (it is absolute already), and for a name that does not resolve at all
+// (nothing is reachable through it; the render check refuses it). It derives the answer from the
+// resolver, not from the number of labels: "git.example.com" is not a short name, "gitea.ns" is.
+func (p URLPolicy) searchOnly(ctx context.Context, host string) string {
+	host = strings.ToLower(host)
+	if host == "" || strings.HasSuffix(host, ".") {
+		return ""
 	}
-	if why := ShortName(u.Hostname()); why != "" {
-		return invalid("the url's host %q is a short name: %s", u.Hostname(), why)
+	if _, err := netip.ParseAddr(host); err == nil {
+		return ""
 	}
-	return nil
+	if _, numeric, _ := whatwgIPv4(host); numeric {
+		return ""
+	}
+	if _, err := p.lookup(ctx, host+"."); err == nil {
+		return ""
+	}
+	if _, err := p.lookup(ctx, host); err != nil {
+		return ""
+	}
+	return fullNameHint(host)
+}
+
+func fullNameHint(host string) string {
+	var full string
+	switch {
+	case strings.HasSuffix(host, ".svc"):
+		full = host + ".cluster.local"
+	case strings.HasSuffix(host, ".svc.cluster"):
+		full = host + ".local"
+	case strings.Contains(host, "."):
+		full = host + ".svc.cluster.local"
+	default:
+		full = host + ".<namespace>.svc.cluster.local"
+	}
+	return "the sandbox resolves no search domains, so it cannot resolve this name; write the full name, such as " + full + ", or end the name with a dot"
 }
 
 // ShortName returns, for a host that only a resolver with search domains can resolve, a message that
-// names the full form to write; it returns "" for any other host. A short name is a name without a dot
-// ("intranet", "gitea") or a Service name that ends in ".svc" or ".svc.cluster" ("gitea.ns.svc"). The
-// sandbox DNS has no search domains, so the full ".svc.cluster.local" form (or the chart's cluster
-// domain) is the shortest name that resolves there. IP literals in any WHATWG form are not names.
-// Case and trailing dots do not matter.
+// names the full form to write; it returns "" for any other host. The static part of the rule is a name
+// without a dot ("intranet") or a Service name that ends in ".svc" or ".svc.cluster" ("gitea.ns.svc"):
+// both are search-path names in every cluster. URLPolicy.searchOnly adds the names that only a lookup
+// shows ("gitea.ns"). The sandbox DNS has no search domains, so the full ".svc.cluster.local" form (or
+// the chart's cluster domain) is the shortest cluster name that resolves there. IP literals in any
+// WHATWG form are not names. Case does not matter. One trailing dot makes a name absolute, which no
+// resolver expands; more than one is an empty label and is refused.
 func ShortName(host string) string {
-	host = strings.TrimRight(strings.ToLower(host), ".")
-	if host == "" {
+	host = strings.ToLower(host)
+	switch {
+	case host == "":
+		return ""
+	case strings.HasSuffix(host, ".."):
+		return "the name has an empty label; write the full name without extra dots"
+	case strings.HasSuffix(host, "."):
 		return ""
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
@@ -319,10 +381,8 @@ func ShortName(host string) string {
 		return ""
 	}
 	switch {
-	case !strings.Contains(host, "."):
-		return "the sandbox resolves no search domains; write the full name, such as " + host + ".<namespace>.svc.cluster.local"
-	case strings.HasSuffix(host, ".svc"), strings.HasSuffix(host, ".svc.cluster"):
-		return "the sandbox resolves no search domains; write the full name, " + strings.TrimSuffix(strings.TrimSuffix(host, ".cluster"), ".svc") + ".svc.cluster.local"
+	case !strings.Contains(host, "."), strings.HasSuffix(host, ".svc"), strings.HasSuffix(host, ".svc.cluster"):
+		return fullNameHint(host)
 	}
 	return ""
 }
