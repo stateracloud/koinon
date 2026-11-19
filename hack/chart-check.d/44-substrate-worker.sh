@@ -68,11 +68,17 @@ grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected servic
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods" || fail "added capabilities must be limited to the ceiling"
 grep -Fq '@sha256:[a-f0-9]{64}' <<<"$wpods" || fail "worker images must be pinned by digest"
+grep -Fq 'hostPort' <<<"$wpods" || fail "worker pods must not use hostPort"
+grep -Fq "!= 'Unconfined'" <<<"$wpods" || fail "worker pods must not run Unconfined seccomp or AppArmor"
+creatorline=$(grep -A1 -E 'name: creator' <<<"$cpods" | tail -1)
+if grep -Fq 'ate-controller' <<<"$creatorline"; then fail "the Substrate controller must not create pods in the control-plane namespace"; fi
+if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.atenetEgressSelector={}' --show-only templates/substrate-networkpolicy.yaml >/dev/null 2>"$out/sel.err"; then fail "an empty atenetEgressSelector must fail the render"; fi
 # Control-plane pods: hostPath only for the node agent, created by the DaemonSet controller.
 grep -Fq "o.kind == 'DaemonSet'" <<<"$cpods" || fail "the node agent pod must belong to a DaemonSet"
 nodeline=$(grep -A1 -E 'name: nodeAgent' <<<"$cpods" | tail -1)
 grep -Fq 'daemon-set-controller' <<<"$nodeline" || fail "the DaemonSet controller must create the node agent pod"
 grep -Fq 'object.spec.serviceAccountName in ["atelet"]' <<<"$nodeline" || fail "the node agent pod must run as the atelet ServiceAccount"
+grep -Fq 'v.hostPath.path in ["/var/lib/ate","/var/lib/kubelet/plugins","/var/lib/kubelet/device-plugins","/dev","/home/kubernetes/bin","/etc/srv/kubernetes/cri_auth_config.yaml"]' <<<"$cpods" || fail "the node agent hostPath list must be atelet's own list"
 grep -Fq 'variables.nodeAgent && v.hostPath.path in' <<<"$cpods" || fail "hostPath in the control-plane namespace must need the node agent rule"
 if grep -Fq 'ate-workers' <<<"$cpods"; then fail "the control-plane pod policy must not mention the worker namespace"; fi
 grep -Fq "hostNetwork is not allowed" <<<"$cpods" || fail "hostNetwork must be denied in the control-plane namespace"

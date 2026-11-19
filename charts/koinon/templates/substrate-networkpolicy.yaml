@@ -11,7 +11,7 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   not a ServiceAccount token. Ingress comes from the control-plane namespace (atelet, the router) and
   from Koinon's namespace; worker pods do not reach each other. NetworkPolicies add up: the per-pool
   policy that Substrate's controller writes in this namespace can allow more than this one, and no
-  admission rule guards NetworkPolicy writes here (ADR 0120 section 6). An actor's traffic to the outside runs through atenet and the gateway's
+  admission rule guards NetworkPolicy writes here (ADR 0120 section 6; exit condition: issue 1158). An actor's traffic to the outside runs through atenet and the gateway's
   L7 rules, not through this policy. Substrate's controller adds its own per-pool policy next to it.
 - Control-plane namespace: the policy selects the pods whose `app` label is in
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
@@ -29,6 +29,7 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
 {{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
 {{- if not $np.apiServerCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the policy would cut the Substrate control plane off from the Kubernetes API server. Name the API server's CIDRs (kubectl get endpoints kubernetes -n default), or set workerNetworkPolicy.enabled=false and fence the namespaces yourself." }}{{- end }}
 {{- if not $np.controlPlaneApps }}{{- fail "execution.substrate.workerNetworkPolicy.controlPlaneApps is empty: the control-plane policy would select no pod" }}{{- end }}
+{{- if not (or $np.atenetEgressSelector.matchLabels $np.atenetEgressSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let workers reach every pod in the control-plane namespace" }}{{- end }}
 {{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $ns $s.gatewayClientNamespaceSelector }}
 {{- if ne $gwNS $ns }}{{- fail (printf "execution.substrate.gatewayClientNamespaceSelector names namespace %q but execution.substrate.namespace is %q: the gateway would drop the worker traffic" $gwNS $ns) }}{{- end }}
 ---

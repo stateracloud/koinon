@@ -340,7 +340,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
 - atelet needs no internet egress when the gVisor tarball comes from the cluster object store (an
-  `s3://` SandboxConfig; ADR 0120 section 6.7, not yet proven). After the policies apply, restart every
+  `s3://` SandboxConfig; ADR 0120 section 6.7, not yet proven; the staging is issue #1157). After the policies apply, restart every
   DaemonSet in `ate-system`, so that its pods pass the new rules.
 - `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
   the same, add the gateway's SPIFFE ID to that list.

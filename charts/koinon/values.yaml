@@ -777,15 +777,18 @@ execution:
       allowedCapabilities: [SYS_ADMIN, NET_ADMIN]
       # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
       # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this
-      # ServiceAccount. Add the credential-provider paths only when a platform needs them (GKE).
+      # ServiceAccount. The list is atelet's own, not the worker list: the hostPath volumes of
+      # Substrate v1.0.0 manifests/ate-install/atelet.yaml (b34fbee7) lines 394-430. The last two are
+      # the GKE credential-provider paths; remove them on a platform without GKE.
       nodeAgent:
-        serviceAccount: atelet
+        serviceAccount: atelet  # atelet.yaml:145
         allowedHostPaths:
-          - /dev/kvm
-          - /dev/net/tun
-          - /dev/vhost-vsock
-          - /dev/vhost-net
           - /var/lib/ate
+          - /var/lib/kubelet/plugins
+          - /var/lib/kubelet/device-plugins
+          - /dev
+          - /home/kubernetes/bin
+          - /etc/srv/kubernetes/cri_auth_config.yaml
       # Who may write WorkerPool, SandboxConfig, CSIDriverConfig and the workload kinds (Deployment,
       # ReplicaSet, DaemonSet, StatefulSet, Job, CronJob) in the namespaces: the installer (ate-setup and
       # `helm upgrade`), by user name or by group. The default groups are the cluster admins' own
@@ -794,17 +797,20 @@ execution:
       installerIdentities: []
       installerGroups: [system:masters, kubeadm:cluster-admins]
     # NetworkPolicies of both namespaces. No CNI-specific feature.
-    # Worker namespace: worker pods may reach atenet-egress, the gateway and DNS, and nothing else
+    # Worker namespace: worker pods may reach atenet-egress and DNS, and nothing else
     # (ADR 0120 section 2.4). Control-plane namespace: the pods whose `app` label is in
     # controlPlaneApps may reach each other, the worker namespace, the gateway, DNS and the Kubernetes
     # API server. A pod with another `app` label is not selected by that policy (it is not fenced),
     # so keep the list in step with the Substrate manifests.
     workerNetworkPolicy:
       enabled: true
-      # `app` label values of the control-plane pods (Substrate v1.0.0 manifests). Confirm against the
-      # install: a missing pod keeps the cluster default network rules.
+      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.0
+      # (b34fbee7) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
+      # atenet-router.yaml:189, atenet-egress.yaml:1179. A missing pod keeps the cluster default
+      # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
-      # The pods that carry worker traffic out (atenet-egress), in the control-plane namespace.
+      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1179), in the
+      # control-plane namespace.
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress

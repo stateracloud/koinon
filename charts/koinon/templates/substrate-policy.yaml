@@ -102,6 +102,10 @@ spec:
       message: automountServiceAccountToken must not be true in the worker namespace
     - expression: "variables.allContainers.all(c, !has(c.securityContext) || ((!has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(c.securityContext.procMount) || c.securityContext.procMount != 'Unmasked')))"
       message: privileged containers and an unmasked /proc are not allowed in the worker namespace (the capability ceiling is the limit)
+    - expression: "variables.allContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))"
+      message: hostPort is not allowed in the worker namespace
+    - expression: "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined') && variables.allContainers.all(c, !has(c.securityContext) || ((!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined') && (!has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined')))"
+      message: an Unconfined seccomp or AppArmor profile is not allowed in the worker namespace
     - expression: {{ printf "variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x in %s))" (toJson $w.allowedCapabilities) | quote }}
       message: {{ printf "added capabilities in the worker namespace are limited to %s" (join ", " $w.allowedCapabilities) | quote }}
     - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
@@ -140,6 +144,10 @@ spec:
       expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson $platformTrusted) | quote }}
+    # Only Kubernetes' workload controllers create pods here. The Substrate controller does not: it
+    # writes the pool Deployments in the worker namespace, so it gets no pod CREATE in this one.
+    - name: creator
+      expression: {{ printf "request.userInfo.username in %s" (toJson $w.platformControllers) | quote }}
     - name: tagAllowed
       expression: {{ printf "request.userInfo.username in %s" (toJson $tagOK) | quote }}
     - name: volumes
@@ -153,8 +161,10 @@ spec:
   validations:
     - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
       message: ephemeral containers are not allowed in the Substrate namespace
-    - expression: "request.operation != 'CREATE' || variables.trusted"
-      messageExpression: "'only the Substrate controller and Kubernetes workload controllers may create pods in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "request.operation != 'CREATE' || variables.creator"
+      messageExpression: "'only Kubernetes workload controllers may create pods in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "request.operation != 'CREATE' || (has(object.metadata.ownerReferences) && object.metadata.ownerReferences.exists(o, has(o.controller) && o.controller))"
+      message: a pod in the Substrate namespace must have a controller ownerReference (a workload controller makes it)
     - expression: "request.operation != 'UPDATE' || variables.trusted || variables.unchanged"
       messageExpression: "'only the Substrate controller may change a pod spec in the Substrate namespace, not ' + request.userInfo.username"
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"

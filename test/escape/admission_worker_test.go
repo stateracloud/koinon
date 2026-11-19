@@ -5,6 +5,7 @@ package escape_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -293,6 +294,21 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		})))
 	})
 
+	It("denies hostPort and Unconfined seccomp or AppArmor profiles", func(ctx SpecContext) {
+		denied(create(ctx, replicaSetController, workerNamespace, worker("hostport", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Ports = []corev1.ContainerPort{{ContainerPort: 8080, HostPort: 8080}}
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("seccomp-unconfined", func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}}
+		})))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("apparmor-unconfined", func(p *corev1.Pod) {
+			p.Spec.SecurityContext = &corev1.PodSecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}}
+		})))
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("seccomp-runtime", func(p *corev1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
+		}))).To(Succeed())
+	})
+
 	Context("the control-plane namespace and the node agent", func() {
 		atelet := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 			return worker(name, append([]func(*corev1.Pod){func(p *corev1.Pod) {
@@ -304,7 +320,16 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		It("admits the atelet pod: the DaemonSet controller, a DaemonSet owner, the atelet ServiceAccount, an allowed hostPath (control)", func(ctx SpecContext) {
 			Expect(create(ctx, daemonSetController, controlNamespace, atelet("atelet"))).To(Succeed())
 		})
+		It("admits each hostPath of the atelet manifest (Substrate v1.0.0 atelet.yaml), and no worker device for the node agent", func(ctx SpecContext) {
+			for i, path := range []string{"/var/lib/ate", "/var/lib/kubelet/plugins", "/var/lib/kubelet/device-plugins", "/dev", "/home/kubernetes/bin", "/etc/srv/kubernetes/cri_auth_config.yaml"} {
+				Expect(create(ctx, daemonSetController, controlNamespace, atelet(fmt.Sprintf("atelet-path-%d", i), func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = path }))).To(Succeed())
+			}
+			// The worker list is not the node agent's list, and the reverse also holds.
+			denied(create(ctx, replicaSetController, workerNamespace, worker("worker-dev", func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = "/dev" })))
+			denied(create(ctx, replicaSetController, workerNamespace, worker("worker-kubelet", func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = "/var/lib/kubelet/plugins" })))
+		})
 		It("denies the same pod from another identity, with another owner or ServiceAccount, or with a hostPath outside its list", func(ctx SpecContext) {
+			denied(create(ctx, workerController, controlNamespace, atelet("by-ate-controller")))
 			denied(create(ctx, replicaSetController, controlNamespace, atelet("by-rs")))
 			denied(create(ctx, "admin", controlNamespace, atelet("by-admin")))
 			denied(create(ctx, daemonSetController, controlNamespace, atelet("wrong-owner", func(p *corev1.Pod) { p.OwnerReferences[0].Kind = "StatefulSet" })))

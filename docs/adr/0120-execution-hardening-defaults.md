@@ -180,11 +180,13 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      Kubernetes client (section 2.4). A rule "must be false" would refuse the pool pods, which leave
      the field unset, so the rule is "not true". The chart always names a worker ServiceAccount that sets
      it false unless the values name a ServiceAccount (that one must set it). The capabilities that a
-     container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`). `privileged` and an unmasked `/proc` are denied.
+     container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`). `privileged`, an unmasked `/proc`, `hostPort` and Unconfined seccomp or AppArmor profiles are denied.
      Ephemeral containers are denied.
    - **Control-plane namespace.** Pods come from Kubernetes workload controllers. A pod may mount a
      hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
-     `ownerReference`) and it runs as the ServiceAccount `atelet`, and only for the node agent's own list.
+     `ownerReference`) and it runs as the ServiceAccount `atelet`, and only for the node agent's own list: the hostPath volumes of atelet's manifest in Substrate v1.0.0
+     (`/var/lib/ate`, the kubelet `plugins` and `device-plugins`, `/dev` and two GKE credential paths), which
+     is not the worker list.
      Every other pod there gets no hostPath. Digests pinned and no `hostNetwork`, as for workers.
    - **Both.** `pods/exec`, `attach`, `portforward`, `pods/proxy` and `services/proxy` are denied to every
      identity. The worker pool, sandbox config and storage driver objects, and every workload kind, are
@@ -202,7 +204,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 6. **Network fence.** The worker namespace has one policy for every pod: egress only to the atenet-egress
    pods and DNS. Workers get no route to the Kubernetes API server and none to the gateway: an actor's
    traffic reaches the gateway through atenet. NetworkPolicies add up, so the per-pool policy that
-   Substrate's controller writes can widen worker egress, and no admission rule guards it yet. The control-plane
+   Substrate's controller writes can widen worker egress, and no admission rule guards it yet (exit condition: [#1158](https://github.com/stateracloud/koinon/issues/1158)). The control-plane
    namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
    "every pod without the worker label": a rule of the second form fails open for a pod that loses its
    label. A pod with another label is not selected, so the list follows the Substrate manifests.
@@ -211,7 +213,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
    holds in the control-plane namespace too. Status: design. The `s3://` `SandboxConfig` from the cluster
    store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
-   DaemonSet in `ate-system` after the policies apply.
+   DaemonSet in `ate-system` after the policies apply. The staging code is [#1157](https://github.com/stateracloud/koinon/issues/1157); this PR changes none of it.
 
 ### 7. OpenShell driver profile for the window
 
