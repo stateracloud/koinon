@@ -794,7 +794,16 @@ move, once.
      `Format` value in `formatgate.Formats` with its reader components, and its writer calls `Gate.Ready`.
      `KOINON_GATEWAY_MCP_SEAL_V2` stays as an operator override. It can only close the gate. The gate does not
      move sealing to N+1. A pod from before the reporter writes no row, so only the replica count shows it:
-     the gate stays closed until the expected number of pods report.
+     the gate stays closed until the expected number of pods report. In a surge rollout the new pods can
+     report before the last old pod has stopped, so koinon-api also requires the gate to stay open for two
+     minutes without a break (`formatgate.DefaultHold`, longer than a pod's drain and a report's TTL) before
+     it seals. A rollback leaves fresh N rows for up to the TTL; the same hold covers it.
+   - agentgateway still serves the agents' MCP path while the driver is koinon, and it cannot open a sealed
+     credential. The standalone renderer leaves such a target out of agentgateway's config, so no envelope
+     goes upstream. The result is that an agent cannot reach a server with a sealed credential, and koinon-api's
+     live tool check (which goes to agentgateway) cannot list its tools, until the follow-up moves the agent MCP URL
+     and the check to koinon-gateway. Until then, an operator who needs agents to reach every server keeps `gateway.mcp.koinon.recipientKey.enabled` off:
+     with no active key koinon-api writes v1.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.

@@ -387,8 +387,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 - name: KOINON_GATEWAY_MODE
   value: {{ .Values.gateway.mode | quote }}
 {{- if include "koinon.mcpKoinon" . }}
-# koinon-gateway serves every MCP path: koinon-api seals a stored MCP credential to the gateway's public key
-# once a key is active (ADR 0097 decision 12.5 step 0). With agentgateway it seals v1, which agentgateway can read.
+# koinon-api seals a stored MCP credential to the gateway's public key once a key is active (ADR 0097 decision
+# 12.5 step 0). With agentgateway it seals v1, which agentgateway can read. agentgateway still serves the
+# agents' MCP path with this driver and leaves a sealed target out of its config (see the ADR known limits).
 - name: KOINON_GATEWAY_MCP_SEAL_V2
   value: "true"
 # Sealing starts only when this many pods of every component report that they read the sealed format

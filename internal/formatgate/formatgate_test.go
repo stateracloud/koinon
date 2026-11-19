@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/formatgate"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -95,6 +96,53 @@ var _ = Describe("the format gate", func() {
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM component_reports WHERE instance = 'api-0' AND $1 = ANY (reads)`, v2).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))
+	})
+})
+
+type fixedKey struct {
+	pub secretstore.RecipientPublicKey
+}
+
+func (f fixedKey) Current() (secretstore.RecipientPublicKey, error) { return f.pub, nil }
+
+var _ = Describe("the gated key", func() {
+	It("gives the key only after the gate has stayed open for the hold, and starts again after a break", func(ctx SpecContext) {
+		pool := pgtest.Start(ctx)
+		gate := formatgate.Gate{DB: pool, Expect: map[formatgate.Component]int{formatgate.API: 1, formatgate.Reconciler: 1, formatgate.Gateway: 1}}
+		v2 := formatgate.MCPCredentialV2.Name
+		report := func(c formatgate.Component, instance string, reads ...string) {
+			GinkgoHelper()
+			Expect(formatgate.Reporter{DB: pool, Component: c, Instance: instance, Reads: reads}.Report(ctx)).To(Succeed())
+		}
+		report(formatgate.API, "a", v2)
+		report(formatgate.Reconciler, "r", v2)
+		report(formatgate.Gateway, "g", v2)
+		gk, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
+		Expect(err).NotTo(HaveOccurred())
+		now := time.Now()
+		k := &formatgate.GatedKey{Inner: fixedKey{gk.Public()}, Gate: gate, Format: formatgate.MCPCredentialV2,
+			Hold: time.Minute, Now: func() time.Time { return now }}
+
+		_, err = k.Current()
+		Expect(err).To(MatchError(formatgate.ErrNotReady), "the gate has only just opened")
+		now = now.Add(59 * time.Second)
+		_, err = k.Current()
+		Expect(err).To(MatchError(formatgate.ErrNotReady))
+		now = now.Add(2 * time.Second)
+		got, err := k.Current()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.ID()).To(Equal(gk.ID()))
+
+		By("a pod at N-1 shuts the gate and restarts the hold")
+		report(formatgate.Gateway, "g")
+		_, err = k.Current()
+		Expect(err).To(MatchError(formatgate.ErrNotReady))
+		report(formatgate.Gateway, "g", v2)
+		_, err = k.Current()
+		Expect(err).To(MatchError(formatgate.ErrNotReady), "the hold starts again")
+		now = now.Add(61 * time.Second)
+		_, err = k.Current()
+		Expect(err).NotTo(HaveOccurred())
 	})
 })
 

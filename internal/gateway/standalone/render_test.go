@@ -74,6 +74,27 @@ var _ = Describe("Render", func() {
 		Expect(insecure).To(Equal(map[string]bool{"acme-scratch": true}), "skipped verification (backendTLS.insecure) must not reach another target")
 	})
 
+	It("leaves out a target whose credential is sealed to the koinon-gateway key, so agentgateway never sends the envelope upstream (ADR 0097 12.5)", func() {
+		var f fixture
+		for _, c := range fixtures() {
+			if c.name == "mcp-server-ca" {
+				f = c
+			}
+		}
+		st := f.state
+		st.MCP = slices.Clone(st.MCP)
+		for i := range st.MCP {
+			if st.MCP[i].Name == "acme-wiki" {
+				st.MCP[i].CredentialFile = "/secrets/upstream/mcpv2-acme-wiki-0123abcd"
+			}
+		}
+		got, _, err := standalone.Render(st, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(got)).NotTo(ContainSubstring("mcpv2-"))
+		Expect(string(got)).NotTo(ContainSubstring("mcp.wiki.example.com"))
+		Expect(string(got)).To(ContainSubstring("acme-scratch"), "the other targets stay")
+	})
+
 	It("refuses skipped verification on a URL that is not https, and together with a CA file", func() {
 		for _, raw := range []string{"http://mcp.example.com/mcp", "HTTP://mcp.example.com/mcp"} {
 			s := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-wiki", Org: "acme", URL: raw, InsecureSkipVerify: true}}}

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
+	"github.com/stateracloud/koinon/internal/mcpcredfile"
 )
 
 // Options are the static settings of a standalone agentgateway. Most of them
@@ -775,6 +777,11 @@ func build(s gateway.State, o Options) document {
 			},
 		}
 		for _, t := range sortedTargets(s) {
+			// agentgateway cannot open a credential sealed to the koinon-gateway key (ADR 0097 12.5): it would
+			// send the envelope upstream. Leave the target out. koinon-gateway serves it from the same State.
+			if t.CredentialFile != "" && mcpcredfile.IsSealed(filepath.Base(t.CredentialFile)) {
+				continue
+			}
 			mt := mcpTarget{Name: t.Name}
 			if t.SSE {
 				mt.SSE = &mcpEndpoint{Host: t.URL}

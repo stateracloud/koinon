@@ -5,6 +5,7 @@ package mcpservers_test
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -102,6 +104,13 @@ var _ = Describe("sealing a server credential to the gateway key", func() {
 		got, err := mcpservers.OpenCredential(ring, org, sid, raw)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(plaintext))
+	})
+
+	It("seals v1 while the format gate is shut (not every component reads v2)", func(ctx SpecContext) {
+		svc := svcWith(fixedKey{err: fmt.Errorf("%w: gateway pod(s) do not read it", formatgate.ErrNotReady)})
+		s, err := svc.Create(ctx, org, actor, user, in)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(secretstore.EnvelopeFormat(stored(ctx, s.ID))).To(Equal(secretstore.FormatV1))
 	})
 
 	It("refuses the write, and never falls back to v1, when the key cannot be read", func(ctx SpecContext) {

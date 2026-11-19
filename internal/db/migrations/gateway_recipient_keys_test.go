@@ -158,6 +158,13 @@ var _ = Describe("gateway recipient keys", func() {
 			Expect(column(ctx, g, "gateway_recipient_key_loads", "loaded_at", "UPDATE")).To(BeTrue())
 			Expect(column(ctx, g, "gateway_recipient_key_loads", "key_id", "UPDATE")).To(BeFalse())
 			Expect(table(ctx, g, "gateway_recipient_key_loads", "DELETE")).To(BeFalse())
+			// It reports the formats it reads (internal/formatgate), as an upsert that changes two columns.
+			Expect(table(ctx, g, "component_reports", "INSERT")).To(BeTrue())
+			Expect(table(ctx, g, "component_reports", "SELECT")).To(BeTrue())
+			Expect(column(ctx, g, "component_reports", "reads", "UPDATE")).To(BeTrue())
+			Expect(column(ctx, g, "component_reports", "reported_at", "UPDATE")).To(BeTrue())
+			Expect(column(ctx, g, "component_reports", "component", "UPDATE")).To(BeFalse())
+			Expect(table(ctx, g, "component_reports", "DELETE")).To(BeFalse())
 			// It never writes mcp_servers and never reads the sealed column.
 			Expect(table(ctx, g, "mcp_servers", "UPDATE")).To(BeFalse())
 			Expect(column(ctx, g, "mcp_servers", "credential", "UPDATE")).To(BeFalse())

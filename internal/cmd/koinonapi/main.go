@@ -762,7 +762,7 @@ func serve(ctx context.Context, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("--compat-expect: %w", err)
 		}
-		mcpRecipient = formatgate.GatedKey{
+		mcpRecipient = &formatgate.GatedKey{
 			Inner: gatewayKeys, Format: formatgate.MCPCredentialV2, Gate: formatgate.Gate{DB: pool, Expect: expect},
 		}
 	}
