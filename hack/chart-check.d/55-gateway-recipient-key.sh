@@ -139,3 +139,8 @@ grep -Fq 'custody local' <<<"$notes_local" || fail "NOTES report custody local w
 if grep -Fq 'koinon-api cannot' <<<"$notes_local"; then fail "NOTES never claim koinon-api cannot decrypt on the local backend"; fi
 notes_kms=$(gnotes "${gk[@]}" "${gkms[@]}")
 grep -Fq 'custody kms' <<<"$notes_kms" || fail "NOTES report custody kms with a KMS"
+
+# koinon-api seals MCP credentials to the gateway key (envelope v2) only when the koinon MCP driver is on. The
+# agentgateway driver reads plaintext files, so it keeps v1 (ADR 0097 decision 12, 12.5 step 0).
+env_is KOINON_GATEWAY_MCP_SEAL_V2 '"true"' "${gk[@]}"
+lacks "koinon-api seals v1 with the agentgateway MCP driver" 'KOINON_GATEWAY_MCP_SEAL_V2' --show-only templates/deployments.yaml

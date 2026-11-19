@@ -12,9 +12,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -164,6 +167,29 @@ var _ = Describe("Postgres", Ordered, func() {
 		Expect(sc.Text("key=" + providerKey)).To(Equal("key=" + providerKey))
 	})
 
+	It("skips a v2 MCP credential (sealed to the gateway key) without making the org's secret set unopenable", func(ctx SpecContext) {
+		ring := secretstoretest.Keyring()
+		o, u, _ := pgtest.NewOrg(ctx, pool)
+		gk, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gatewaykeys.Insert(ctx, pool, gk.Public())).To(Succeed())
+		_, err = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Pending, gatewaykeys.Active)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) {
+			_, _ = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Active, gatewaykeys.Retiring)
+			_, _ = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Retiring, gatewaykeys.Retired)
+		})
+		svc := mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}).WithRecipient(fixedRecipient{gk.Public()})
+		_, err = svc.Create(ctx, o, audit.User(u), u, mcpservers.Input{
+			Name: "sealed", URL: "https://mcp.example.com/mcp", CredentialHeader: "X-Api-Key", CredentialValue: "koinon_test_not-a-real-token-v2",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		set, err := router.NewPGSecrets(pool, ring, nil).Secrets(ctx, o)
+		Expect(err).NotTo(HaveOccurred(), "a v2 value is not an unopenable value")
+		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
+		Expect(sc.Text("x")).To(Equal("x"))
+	})
+
 	It("scrubs every repository epoch's home repository password, and fingerprints a new epoch", func(ctx SpecContext) {
 		ring := secretstoretest.Keyring()
 		pw := checkpoint.Passwords{Q: q, Keys: ring, Begin: pool.Begin}
@@ -212,3 +238,10 @@ var _ = Describe("Postgres", Ordered, func() {
 func secretstoreBinding(org, id pgtype.UUID) secretstore.Binding {
 	return catalog.KeyBinding(org, id)
 }
+
+// fixedRecipient is a fixed gateway public key, the source koinon-api seals to.
+type fixedRecipient struct {
+	pub secretstore.RecipientPublicKey
+}
+
+func (f fixedRecipient) Current() (secretstore.RecipientPublicKey, error) { return f.pub, nil }

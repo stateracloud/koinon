@@ -810,14 +810,15 @@ drops anything.
 - `mcp_credential.sealed_v2` batch rows from the move and the re-seal: counts, old and new key ID.
 - Each `mcp_call_log` row already records the credential kind (`credential_kind`, migration 00096). Slice 3 adds a `recipient_key_id` column (add-only) for the key of the envelope it opened.
 - Metrics with fixed labels (ADR 0023): `koinon_gateway_recipient_key_loaded{state}`,
-  `koinon_gateway_credential_open_failures_total{reason}` (`unknown_key`, `wrong_key`, `binding`,
-  `format`, `unreachable`), and the custody gauge above.
+  `koinon_gateway_credential_open_failures_total{reason}` (`unknown_key`, `open`, `format`, `kms`), and the custody gauge above.
+  `open` covers a wrong key, a changed byte and another row's binding: the AEAD cannot tell them apart, and a
+  split would suggest it can (slice 3 chose these names).
 
 **Failure modes.** The rule everywhere is fail closed.
 
 | Case | Result |
 | --- | --- |
-| Envelope names a key ID the gateway does not hold | The target is not served: 503 for that target, a run event, no request sent upstream, never a call without its credential. Other targets keep working. |
+| Envelope names a key ID the gateway does not hold | The target is not served: the call fails with a tool error (`credential_kind` `error`, outcome `upstream_error`, and the key ID in `recipient_key_id`), no request is sent upstream, never a call without its credential. Other targets keep working. |
 | Wrong key, changed bytes, or another row's binding | The same (`ErrOpen`). No retry with another key. |
 | Unknown `fmt`, suite or KEM | The same (`ErrUnsupportedFormat`). |
 | KMS unreachable at start | The pod is not ready (MCP path on), so a rollout stops. The wrapper errors wrap `ErrUnreachable`, so an outage is not shown as a wrong key. |
@@ -863,7 +864,7 @@ twice the guess, go back to the maintainer).
    key commands (init, rotate, retire), the gateway key-admin identity and Job, chart values, the
    Secret, the `kek-guard` rule, OpenBao and AWS policy docs, the KMS identity token mount, the load and probe in the gateway, the `pending` to `active` report, the
    public-key load in koinon-api, metrics. Specs 1 (chart part) and 8.
-3. **Seal v2, copy ciphertext, open in the gateway.** `mcpservers` seals v2 when a key is `active`,
+3. **Seal v2, copy ciphertext, open in the gateway** (done in #1151 slice 3; a v2 file is named `mcpv2-<org ID>-<server ID>-<8 hex>`, because the binding names the org and the gateway has only its slug; the trace router skips v2 values; the chart sets `KOINON_GATEWAY_MCP_SEAL_V2` only with `gateway.mcp.driver=koinon`). `mcpservers` seals v2 when a key is `active`,
    the reconciler copies `mcpv2-` files, the gateway opens them and fails closed (its `keyPath` and the planner accept `mcpv2-` names), the `keyscli` usage query and `AnyEnvelope` skip v2, `mcp_call_log.recipient_key_id`, and the driver gate of 12.5 step 0.
    Specs 1 to 5.
 4. **The move.** `keys seal-mcp` (and `--to-v1`), `keys verify` count, the upgrade preflight, a kind e2e with `local`.

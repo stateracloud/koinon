@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -167,7 +168,7 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(secretstore.EnvelopeFormat(stored)).To(Equal(secretstore.FormatV2))
 
 		// The reconciler's keyring is the ordinary KEK ring: it holds no gateway key, so it could not open the value.
-		var log bytes.Buffer
+		var log lockedBuffer
 		osg := fakegateway.New()
 		cc, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -697,6 +698,24 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(n).To(Equal(1))
 	})
 })
+
+// lockedBuffer is a log sink that the reconciler goroutines and the spec can use together.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
 
 // activeKey is a fixed gateway public key, the source koinon-api seals to.
 type activeKey struct {
