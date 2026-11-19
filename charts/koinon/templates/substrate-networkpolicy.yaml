@@ -219,8 +219,10 @@ spec:
         - {port: {{ $np.objectStorePort }}, protocol: TCP}
 {{- end }}
 {{- $img := $np.imageSource | default dict }}
-{{- $imgPods := dig "podSelector" "matchLabels" dict $img }}
+{{- $imgPods := dict }}
+{{- if or (dig "podSelector" "matchLabels" dict $img) (dig "podSelector" "matchExpressions" list $img) }}{{- $imgPods = $img.podSelector }}{{- end }}
 {{- $imgCIDRs := $img.cidrs | default list }}
+{{- range $imgCIDRs }}{{- if has . (list "0.0.0.0/0" "::/0") }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource.cidrs must name the image source, not the whole internet" }}{{- end }}{{- end }}
 {{- if and $imgPods $imgCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource names one image source: set podSelector (an in-cluster cache) or cidrs, not both" }}{{- end }}
 {{- if or $imgPods $imgCIDRs }}
 ---
@@ -228,7 +230,8 @@ spec:
 # control plane reaches an image registry. Set imageSource to an in-cluster cache (podSelector, with a namespaceSelector
 # when the cache is in another namespace) or to an operator CIDR; the port is imageSource.port. Actor image references
 # are rewritten to this source with global.registryMirrors or global.imageRegistry (the digest is kept), so a pull
-# through the cache still verifies the digest. The policy lists no Ingress type: NetworkPolicies add up.
+# through the cache still verifies the digest. The policy lists no Ingress type: NetworkPolicies add up. Egress rules add up too:
+# extraEgress applies to every control-plane app, atelet included, so a route opened there is open to atelet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

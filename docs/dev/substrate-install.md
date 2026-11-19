@@ -421,9 +421,9 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   Choose the mirror name once: it is part of the actor template hash, so a change re-hashes every template.
   Needs main: the driver side of the actor image rewrite is not in this chart.
 - In `ate-system`, `pods/exec`, `attach` and `portforward` are allowed for the identities in
-  `workerPolicy.installerIdentities` only, and each request gets the audit annotation `connect` (user, resource,
+  `workerPolicy.installerIdentities` and `installerGroups` only, and each request gets the audit annotation `connect` (user, resource,
   subresource, pod). The worker namespace stays fully denied, and the proxy subresources stay denied for everyone.
-  The binding uses the actions `Deny` and `Audit`, so an allowed request is in the audit log too.
+  The audit annotation is written for allowed requests too. The binding also lists `Audit`, which records a refused request.
 - `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
   ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
   endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1

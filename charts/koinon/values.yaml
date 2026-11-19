@@ -777,7 +777,7 @@ execution:
       # worker container, the only container of the worker namespace that may add capabilities or have an
       # Unconfined profile. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the
       # registry mirrors) is added by the template. Empty and no pool: no container is a worker container and a
-      # worker pod does not start (fail closed). Use a digest (the digest rule applies to the controller).
+      # worker pod does not start (fail closed). Use a digest. The digest rule has an interim exemption for the ReplicaSet controller (digestExemptIdentities, #1140), so a tag image also gets the shape until #1140 closes.
       workerImages: []
       # The exact shape that Substrate sets on the worker container, per sandbox class: runAsUser 0, runAsGroup 0,
       # privileged false, allowPrivilegeEscalation false, drop ALL, and these added capabilities; seccomp and

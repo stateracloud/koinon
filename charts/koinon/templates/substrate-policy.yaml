@@ -249,7 +249,8 @@ metadata:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   policyName: {{ $connect }}
-  # Audit is always on, so that an allowed request also leaves its audit annotation.
+  # The audit annotation is written for allowed requests whatever the actions are. Audit is added so that a refused
+  # request is recorded too.
   validationActions: {{ toJson (uniq (append $w.validationActions "Audit")) }}
   # No objectSelector: a CONNECT request's object is an options object without metadata.
   matchResources:

@@ -75,7 +75,7 @@ grep -Fq 'c.securityContext.runAsGroup == 0' <<<"$wpods" || fail "the worker con
 grep -Fq '!c.securityContext.allowPrivilegeEscalation' <<<"$wpods" || fail "the worker container must not escalate privilege"
 tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"]' || fail "the gVisor class capabilities must be the set of Substrate"
 tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"]' || fail "the micro-VM class capabilities must be the set of Substrate"
-if grep -Eq '"(ALL|SYS_PTRACE|SYS_MODULE|SYS_CHROOT)"' <<<"$wpods"; then fail "no capability beyond the two Substrate sets"; fi
+if tr -d '\134' <<<"$wpods" | grep -Eq '"(ALL|SYS_PTRACE|SYS_MODULE|SYS_CHROOT)"'; then fail "no capability beyond the two Substrate sets"; fi
 grep -Fq '@sha256:[a-f0-9]{64}' <<<"$wpods" || fail "worker images must be pinned by digest"
 grep -Fq 'has(src.clusterTrustBundle)' <<<"$wpods" || fail "projected sources in worker pods must be an allowlist without Secret"
 grep -Fq 'secretKeyRef' <<<"$wpods" || fail "worker pods must not take a Secret in env"
@@ -187,6 +187,8 @@ if grep -Fq 'ipBlock' <<<"$imgdoc"; then fail "an in-cluster image source must n
 imgcidr=(--set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={198.51.100.0/24}')
 has "an operator CIDR can be the image source" 'cidr: "198.51.100.0/24"' "${wsub[@]}" "${imgcidr[@]}" "${np[@]}"
 if render "${wsub[@]}" "${imgpod[@]}" "${imgcidr[@]}" "${np[@]}" >/dev/null 2>"$out/img.err"; then fail "two image sources must not render"; fi
+if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={0.0.0.0/0}' "${np[@]}" >/dev/null 2>&1; then fail "the whole internet must not be an image source"; fi
+has "a matchExpressions pod selector can be the image source" 'matchExpressions' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].key=app' --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].operator=Exists' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000 "${np[@]}"
 grep -Fq 'one image source' "$out/img.err" || fail "the two-sources error must say that there is one image source"
 if grep -v '^[[:space:]]*#' <<<"$closed" | grep -Eq 'ate-idp-server|postgres|rustfs'; then fail "the default-deny egress policy names no app: it covers them all"; fi
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")
