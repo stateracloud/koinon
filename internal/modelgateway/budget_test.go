@@ -272,7 +272,7 @@ var _ = Describe("the budget stop of the model path", func() {
 			defer GinkgoRecover()
 			resp, err := http.DefaultClient.Do(req)
 			Expect(err).NotTo(HaveOccurred())
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			done <- resp.StatusCode
 		}()
 		_, err = pw.Write([]byte(`{"model":"m",`))
