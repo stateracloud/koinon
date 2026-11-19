@@ -398,8 +398,8 @@ maintainer decided on 2026-11-17 to drop the Kata requirement.
   do not apply to it. That decision comes with the runtime's own issue; this amendment only removes
   the Kata name.
 - **Qualification (decisions 2 and 10).** Each runtime is qualified by its own escape-suite run before
-  the docs name it supported. The spec "runs in a microVM guest, not on the host kernel" (decision 9) is
-  read as "runs in a microVM guest, not on the host kernel"; renaming the spec is a test change, not
+  the docs name it supported. The spec "runs in a microVM guest, not on the host kernel" (decision 9) was
+  named "runs in a Kata guest, not on the host kernel" before the rename; renaming the spec is a test change, not
   part of this amendment.
 - **Decision 11 is changed:** its line "The Kata runtime class stays required for the `vm` tier" is
   replaced by "A microVM, as defined above, stays required for the `vm` tier". The other lines hold.

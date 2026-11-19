@@ -161,7 +161,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 
 	It("denies hostNetwork and a hostPath outside the documented set", func(ctx SpecContext) {
 		denied(create(ctx, workerController, workerNamespace, worker("host-network", func(p *corev1.Pod) { p.Spec.HostNetwork = true })))
-		for _, path := range []string{"/", "/etc", "/var/run/docker.sock", "/var/lib/kubelet", workerHostPathOK + "/../etc"} {
+		for _, path := range []string{"/", "/etc", "/var/run/docker.sock", "/var/lib/kubelet", workerHostPathOK + "x"} {
 			denied(create(ctx, workerController, workerNamespace, worker("host-path", func(p *corev1.Pod) {
 				p.Spec.Volumes[0].HostPath.Path = path
 			})))

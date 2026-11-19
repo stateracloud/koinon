@@ -229,6 +229,8 @@ def syscall(c):
             return err_name(e)
     if n == "raw_packet":
         return rawsock(socket.AF_PACKET)
+    if n == "vsock":
+        return rawsock40(40)
     if n == "raw_inet":
         return rawsock(socket.AF_INET)
     raise ValueError(n)
@@ -237,6 +239,15 @@ def syscall(c):
 def rawsock(family):
     try:
         socket.socket(family, socket.SOCK_RAW, 0).close()
+        return "ok"
+    except OSError as e:
+        return err_name(e)
+
+
+def rawsock40(family):
+    # AF_VSOCK (40): the Substrate guest server's channel (docs/dev/guest-launcher.md).
+    try:
+        socket.socket(family, socket.SOCK_STREAM, 0).close()
         return "ok"
     except OSError as e:
         return err_name(e)

@@ -506,7 +506,18 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 				checks = append(checks, check{"id": "unix " + s, "op": "unix", "path": s})
 			}
 		}
+		// The Substrate guest server answers on vsock: the agent user must not open the socket family.
+		vsock := os.Getenv("KOINON_ESCAPE_GUEST_VSOCK") != ""
+		if vsock {
+			checks = append(checks, check{"id": "vsock", "op": "syscall", "name": "vsock"})
+		}
+		if len(sockets) == 0 && !vsock {
+			GinkgoWriter.Println("guest server half: not applicable here, set KOINON_ESCAPE_GUEST_SOCKETS or KOINON_ESCAPE_GUEST_VSOCK on a driver that has one")
+		}
 		res := probe(ctx, checks...)
+		if vsock {
+			Expect(res["vsock"]).To(BeElementOf("EPERM", "EACCES", "EAFNOSUPPORT"))
+		}
 		Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
 		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
