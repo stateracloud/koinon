@@ -64,11 +64,14 @@ jobs:
           cd gvisor-dl
           curl -fsSL -O "$base/gvisor.tar.bz2" -O "$base/gvisor.tar.bz2.sha512"
           sha512sum -c gvisor.tar.bz2.sha512
-          tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1
+          tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1 gvisor-bin
           chmod +x runsc containerd-shim-runsc-v1
           for f in runsc containerd-shim-runsc-v1; do
             docker cp "$f" gv-control-plane:/usr/local/bin/"$f"
           done
+          # runsc runs the sidecar binaries in gvisor-bin/ next to itself (gvisor.dev install guide).
+          docker cp -a gvisor-bin gv-control-plane:/usr/local/bin/gvisor-bin
+          docker exec gv-control-plane ls -l /usr/local/bin/gvisor-bin
           docker exec gv-control-plane runsc --version
           docker exec gv-control-plane containerd --version
           docker exec gv-control-plane grep -n '^version' /etc/containerd/config.toml
