@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	koinharness "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // One layer retries a failed model request, with Koinon's policy (ADR 0056 amendment 2026-10-31,
@@ -54,7 +55,7 @@ var _ = Describe("koinon-opencode model retries", func() {
 		Expect(err).To(HaveOccurred(), "the turn fails once the retries end")
 		// No try is left over to run after the turn ended.
 		n := len(primary(gw))
-		Consistently(func() int { return len(primary(gw)) }).WithTimeout(3 * time.Second).Should(Equal(n))
+		Consistently(func() int { return len(primary(gw)) }).WithTimeout(racescale.D(3 * time.Second)).Should(Equal(n))
 		return primary(gw), took
 	}
 

@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -133,12 +134,12 @@ func describeAgentd(f definition) bool {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
 				Expect(err).NotTo(HaveOccurred())
 				return got.State
-			}).WithTimeout(3 * time.Minute).WithPolling(250 * time.Millisecond).Should(BeElementOf(
+			}).WithTimeout(racescale.D(3 * time.Minute)).WithPolling(250 * time.Millisecond).Should(BeElementOf(
 				store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled))
 			got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
 			Expect(err).NotTo(HaveOccurred())
 			// The run is over once agentd has swept after it, too.
-			Eventually(backend.settled).WithTimeout(time.Minute).Should(BeTrue(), "agentd swept after the run")
+			Eventually(backend.settled).WithTimeout(racescale.D(time.Minute)).Should(BeTrue(), "agentd swept after the run")
 			return got
 		}
 
@@ -322,7 +323,7 @@ func expectOnlyMain(ctx context.Context, sb *sandbox) {
 	Eventually(func() string {
 		return sb.run(ctx, "sh", "-c", `for d in /proc/[0-9]*; do `+
 			`grep -qE '^State:\s+[^Z]' "$d/status" 2>/dev/null && [ "${d#/proc/}" != $$ ] && echo "${d#/proc/} $(tr '\0' ' ' < "$d/cmdline")"; done; true`)
-	}).WithTimeout(30 * time.Second).WithPolling(time.Second).Should(Equal("1 /bin/sleep infinity \n"))
+	}).WithTimeout(racescale.D(30 * time.Second)).WithPolling(time.Second).Should(Equal("1 /bin/sleep infinity \n"))
 }
 
 // dockerBackend is agentd's execution backend on the Docker stand-in sandbox, recorded as

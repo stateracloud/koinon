@@ -18,6 +18,7 @@ import (
 	koinharness "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 // opencode is the OpenCode harness's contract (harnesses/opencode/README.md).
@@ -95,7 +96,7 @@ func opencodeHarness(ctx context.Context, sb *sandbox, gw *gateway, extra ...str
 	Expect(err).NotTo(HaveOccurred())
 	session, err := h.conn.NewSession(ctx, workdir)
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(h.client.availableCommands).WithTimeout(30 * time.Second).Should(ContainElement(opencode.readyCommand))
+	Eventually(h.client.availableCommands).WithTimeout(racescale.D(30 * time.Second)).Should(ContainElement(opencode.readyCommand))
 	time.Sleep(readySettle)
 	Expect(h.conn.SetModel(ctx, session, opencode.selectModel(contractModel))).To(Succeed())
 	return h, session

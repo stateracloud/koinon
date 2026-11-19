@@ -23,7 +23,7 @@ var counter atomic.Uint64
 // span plus the next counter value. It has at most 11 digits (a process ID has at most 7), so a short
 // prefix and the number fit in a 19-character OpenShell sandbox name.
 func Suffix() int64 {
-	return int64(os.Getpid())*span + int64((counter.Add(1)-1)%span) //nolint:gosec // bounded by span
+	return int64(os.Getpid())*span + int64((counter.Add(1)-1)%span)
 }
 
 // Name returns prefix, a dash and Suffix: "kesa-12345678".

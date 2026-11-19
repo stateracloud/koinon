@@ -296,6 +296,27 @@ case_ "T7: a lint that fails for another reason does not fail T7" 0 'rule=T7 ver
 case_ "T7: a lint with no timeout finding passes" 0 'rule=T7 verdict=pass' \
 	'printf "exit 0\n" >"$r/hack/runner-lint.sh"'
 
+# T11
+case_ "a good tree: T11 passes" 0 'rule=T11 verdict=pass' ':'
+case_ "T11: a planted unscaled Eventually window fails" 1 'rule=T11 verdict=fail' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(10 * time.Second).Should(BeTrue())\n" >"$r/internal/x/x_test.go"'
+case_ "T11: an unscaled window on a continuation line fails" 1 'rule=T11 verdict=fail' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).\n\tWithPolling(time.Second).Should(Succeed())\n}).WithTimeout(5 * time.Second)\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a positional string window fails" 1 'rule=T11 verdict=fail' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f, \"5s\").Should(BeTrue())\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a window in racescale.D passes" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a t11-ok comment passes" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(time.Second).Should(BeTrue()) // t11-ok: the time is the subject\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a Consistently window passes" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Consistently(f).WithTimeout(time.Second).Should(BeZero())\n" >"$r/internal/x/x_test.go"'
+case_ "T11: a window in a file that is not a test passes" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(10 * time.Second)\n" >"$r/internal/x/x.go"'
+case_ "T11: a file in the baseline passes" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "Eventually(f).WithTimeout(10 * time.Second)\n" >"$r/internal/x/x_test.go"; printf "internal/x/x_test.go\n" >"$r/hack/ci-rules-t11-baseline.txt"'
+case_ "T11: a context deadline is not an Eventually window" 0 'rule=T11 verdict=pass' \
+	'mkdir -p "$r/internal/x"; printf "ctx, cancel := context.WithTimeout(ctx, 10*time.Second)\n" >"$r/internal/x/x_test.go"'
+
 # The real tree must not fail.
 out=$("$script" "$repo" 2>&1)
 rc=$?
