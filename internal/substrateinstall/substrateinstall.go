@@ -234,6 +234,33 @@ func (b *Build) Root() string { return b.tmp }
 // Cleanup deletes the tree and the binary.
 func (b *Build) Cleanup() { _ = os.RemoveAll(b.tmp) }
 
+// exportPin exports PinnedCommit from SourceRepo into dst. Scratch files go into tmp.
+func (i *Installer) exportPin(ctx context.Context, tmp, dst string) error {
+	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
+	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
+	// of the source runs in git archive and no replace ref substitutes the pinned objects.
+	repo := filepath.Join(tmp, "repo.git")
+	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
+	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err)
+	}
+	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
+	if err != nil {
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err)
+	}
+	if strings.TrimSpace(got) != PinnedCommit {
+		return fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got))
+	}
+	archive := filepath.Join(tmp, "src.tar")
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
+		return fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err)
+	}
+	if err := extractTar(archive, dst); err != nil {
+		return fmt.Errorf("%w: %w", ErrPin, err)
+	}
+	return nil
+}
+
 // BuildSetup exports the pinned commit from SourceRepo into a fresh temporary directory, builds
 // ate-setup there and checks that the binary reports the pinned version and commit. The caller must
 // call Cleanup when err is nil; on an error BuildSetup has removed the directory itself.
@@ -250,27 +277,8 @@ func (i *Installer) BuildSetup(ctx context.Context) (*Build, error) {
 		b.Cleanup()
 		return nil, err
 	}
-	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
-	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
-	// of the source runs in git archive and no replace ref substitutes the pinned objects.
-	repo := filepath.Join(tmp, "repo.git")
-	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
-	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
-		return fail(fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err))
-	}
-	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
-	if err != nil {
-		return fail(fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err))
-	}
-	if strings.TrimSpace(got) != PinnedCommit {
-		return fail(fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got)))
-	}
-	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
-		return fail(fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err))
-	}
-	if err := extractTar(archive, b.dir); err != nil {
-		return fail(fmt.Errorf("%w: %w", ErrPin, err))
+	if err := i.exportPin(ctx, tmp, b.dir); err != nil {
+		return fail(err)
 	}
 	const versionPkg = "go.ate.dev/substrate/internal/version"
 	ldflags := "-X " + versionPkg + ".Version=" + PinnedVersion + " -X " + versionPkg + ".Commit=" + PinnedCommit

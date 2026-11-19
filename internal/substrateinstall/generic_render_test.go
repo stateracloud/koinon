@@ -16,6 +16,9 @@ package substrateinstall_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +35,7 @@ import (
 var (
 	substrateSource = testenv.Var("substrate-source", "KOINON_SUBSTRATE_SOURCE")
 	kubectlBinary   = testenv.Binary("kubectl")
+	gitBinary       = testenv.Binary("git")
 )
 
 // object is one rendered Kubernetes object, as untyped YAML: the checks read paths, not Go types, so a
@@ -81,7 +85,7 @@ func (r rendered) find(kind, name string) (object, bool) {
 func renderKustomize(t *testing.T, dir string) rendered {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(t.Context(), "kubectl", "kustomize", dir)
+	cmd := exec.CommandContext(t.Context(), "kubectl", "kustomize", "--load-restrictor=LoadRestrictionsNone", dir)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.Env = append(os.Environ(), "KUBECONFIG=/dev/null")
 	if err := cmd.Run(); err != nil {
@@ -101,7 +105,7 @@ func renderKustomize(t *testing.T, dir string) rendered {
 	return r
 }
 
-// envFrom returns the environment of the named container as name -> entry.
+// envOf returns the environment of the named container as name -> entry.
 func envOf(containers []map[string]any, container string) map[string]map[string]any {
 	out := map[string]map[string]any{}
 	for _, c := range containers {
@@ -141,6 +145,7 @@ func checkGenericRender(g Gomega, r rendered, bucket string) {
 
 	rustfs, ok := r.find("Deployment", "rustfs")
 	g.Expect(ok).To(BeTrue(), "Deployment rustfs")
+	g.Expect(firstContainer(rustfs, "containers", "rustfs")["image"]).NotTo(BeEmpty(), "rustfs has no image")
 	secretRef(g, envOf(rustfs.containers("containers"), "rustfs"), "RUSTFS_ACCESS_KEY", "access-key", "Deployment rustfs")
 	secretRef(g, envOf(rustfs.containers("containers"), "rustfs"), "RUSTFS_SECRET_KEY", "secret-key", "Deployment rustfs")
 
@@ -152,13 +157,17 @@ func checkGenericRender(g Gomega, r rendered, bucket string) {
 	secretRef(g, jobEnv, "AWS_SECRET_ACCESS_KEY", "secret-key", "Job rustfs-bucket-init")
 	g.Expect(jobEnv).To(HaveKey("BUCKET"))
 	g.Expect(jobEnv["BUCKET"]).To(HaveKeyWithValue("value", bucket))
-	g.Expect(r.text).NotTo(ContainSubstring("ate-snapshots"), "the fixed upstream bucket name is gone")
+	g.Expect(job.containers("containers")[0]["command"]).NotTo(BeEmpty(), "the Job keeps its command")
+	jobText, _ := yaml.Marshal(map[string]any(job))
+	g.Expect(string(jobText)).NotTo(ContainSubstring("ate-snapshots"), "the fixed upstream bucket name is gone from the Job")
 
 	// (d) the object store plugin of the API server and of atelet reads the Secret too.
 	for _, w := range []struct{ kind, name string }{{"Deployment", "ate-api-server"}, {"DaemonSet", "atelet"}} {
 		o, ok := r.find(w.kind, w.name)
 		g.Expect(ok).To(BeTrue(), "%s %s", w.kind, w.name)
 		env := envOf(o.containers("initContainers"), "objectstore-plugin")
+		// A patch makes a container of its own when the name does not match: it then has an env and no image.
+		g.Expect(firstContainer(o, "initContainers", "objectstore-plugin")["image"]).NotTo(BeEmpty(), "%s %s: objectstore-plugin has no image", w.kind, w.name)
 		secretRef(g, env, "AWS_ACCESS_KEY_ID", "access-key", w.kind+" "+w.name)
 		secretRef(g, env, "AWS_SECRET_ACCESS_KEY", "secret-key", w.kind+" "+w.name)
 	}
@@ -191,20 +200,37 @@ func checkGenericRender(g Gomega, r rendered, bucket string) {
 	}
 }
 
+// execRunner runs the real git for the export step of the installer.
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, dir, name string, args, env []string, out io.Writer) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, out, out
+	cmd.Env = append(os.Environ(), env...)
+	return cmd.Run()
+}
+
+func (execRunner) Output(ctx context.Context, dir, name string, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// genericNamespace is Substrate's fixed namespace (preflight.SubstrateConfig defaults to it).
+const genericNamespace = "ate-system"
+
 func TestGenericOverlayRendersThePinnedTree(t *testing.T) {
-	testenv.RequireT(t, substrateSource, kubectlBinary)
-	src := os.Getenv("KOINON_SUBSTRATE_SOURCE")
-	dir := t.TempDir()
-	archive := filepath.Join(t.TempDir(), "pin.tar")
-	if out, err := exec.CommandContext(t.Context(), "git", "-C", src, "archive", "--format=tar", "--output="+archive, substrateinstall.PinnedCommit).CombinedOutput(); err != nil {
-		t.Fatalf("%s does not hold the pinned commit %s: %v\n%s", src, substrateinstall.PinnedCommit, err, out)
-	}
-	if out, err := exec.CommandContext(t.Context(), "tar", "-xf", archive, "-C", dir).CombinedOutput(); err != nil {
-		t.Fatalf("export the pinned tree: %v\n%s", err, out)
+	testenv.RequireT(t, substrateSource, kubectlBinary, gitBinary)
+	// The export is the installer's own: a fresh bare clone, no filter driver or replace ref of the source.
+	inst := &substrateinstall.Installer{Runner: execRunner{}, SourceRepo: os.Getenv("KOINON_SUBSTRATE_SOURCE"), Out: io.Discard}
+	dir := filepath.Join(t.TempDir(), "src")
+	if err := inst.ExportPin(t.Context(), t.TempDir(), dir); err != nil {
+		t.Fatal(err)
 	}
 
 	p := genericProfile()
-	if err := p.ApplyGenericOverlay(dir, "ate-system"); err != nil {
+	if err := p.ApplyGenericOverlay(dir, genericNamespace); err != nil {
 		t.Fatalf("the generic overlay does not fit the pinned tree: %v", err)
 	}
 	checkGenericRender(NewWithT(t), renderKustomize(t, filepath.Join(dir, "manifests", "ate-install", "kind")), p.StorageBucket)
@@ -330,15 +356,58 @@ spec:
 	}
 }
 
-// failures runs the checks with a Gomega that collects its failures, so a test can expect them.
+// stop is what the collecting Gomega panics with, so failures() ends the checks at the first failure and
+// tells that panic from a runtime panic in the checks themselves.
+type stop struct{}
+
+// failures runs the checks with a Gomega that collects its failure. A panic that is not a Gomega failure
+// (an index or a type assertion in the checks) goes on, so it cannot read as "no failure".
 func failures(r rendered, bucket string) []string {
 	var out []string
-	g := NewGomega(func(message string, _ ...int) { out = append(out, message); panic(out) })
+	g := NewGomega(func(message string, _ ...int) { out = append(out, message); panic(stop{}) })
 	func() {
-		defer func() { _ = recover() }()
+		defer func() {
+			if v := recover(); v != nil {
+				if _, ok := v.(stop); !ok {
+					panic(v)
+				}
+			}
+		}()
 		checkGenericRender(g, r, bucket)
 	}()
 	return out
+}
+
+// edit returns a deep copy of r with fn applied to the named object (fn gets nil text changes through r.text).
+func edit(t *testing.T, r rendered, kind, name string, fn func(o object)) rendered {
+	t.Helper()
+	raw, err := json.Marshal(r.objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := rendered{text: r.text}
+	if err := json.Unmarshal(raw, &out.objects); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "" {
+		o, ok := out.find(kind, name)
+		if !ok {
+			t.Fatalf("no %s %s", kind, name)
+		}
+		fn(o)
+	} else {
+		fn(nil)
+	}
+	return out
+}
+
+func firstContainer(o object, list, name string) map[string]any {
+	for _, c := range o.containers(list) {
+		if c["name"] == name {
+			return c
+		}
+	}
+	return nil
 }
 
 func TestRenderChecksFindWhatTheyLookFor(t *testing.T) {
@@ -350,10 +419,10 @@ func TestRenderChecksFindWhatTheyLookFor(t *testing.T) {
 		t.Fatal("the checks pass on the tree without the generic overlay")
 	}
 
-	// With the overlay they pass, and a bucket other than the profile's fails them.
+	// With the overlay they pass.
 	dir := writeTree(t, upstreamShapedTree())
 	p := genericProfile()
-	if err := p.ApplyGenericOverlay(dir, "ate-system"); err != nil {
+	if err := p.ApplyGenericOverlay(dir, genericNamespace); err != nil {
 		t.Fatal(err)
 	}
 	r := renderKustomize(t, kind(dir))
@@ -362,5 +431,71 @@ func TestRenderChecksFindWhatTheyLookFor(t *testing.T) {
 	}
 	if len(failures(r, "another-bucket")) == 0 {
 		t.Fatal("the checks pass for another bucket")
+	}
+
+	// Each check fails when its one correction is undone: no check is empty.
+	secretToPlain := func(c map[string]any, name string) {
+		for _, e := range c["env"].([]any) {
+			if m := e.(map[string]any); m["name"] == name {
+				delete(m, "valueFrom")
+				m["value"] = "koinon_test_not-a-real-token"
+			}
+		}
+	}
+	undo := map[string]func(*testing.T) rendered{
+		"a plain value in rustfs": func(t *testing.T) rendered {
+			return edit(t, r, "Deployment", "rustfs", func(o object) { secretToPlain(firstContainer(o, "containers", "rustfs"), "RUSTFS_SECRET_KEY") })
+		},
+		"a plain value in the bucket Job": func(t *testing.T) rendered {
+			return edit(t, r, "Job", "rustfs-bucket-init", func(o object) { secretToPlain(firstContainer(o, "containers", "create-bucket"), "AWS_ACCESS_KEY_ID") })
+		},
+		"no BUCKET in the bucket Job": func(t *testing.T) rendered {
+			return edit(t, r, "Job", "rustfs-bucket-init", func(o object) { firstContainer(o, "containers", "create-bucket")["env"] = []any{} })
+		},
+		"a plain value in the api server plugin": func(t *testing.T) rendered {
+			return edit(t, r, "Deployment", "ate-api-server", func(o object) {
+				secretToPlain(firstContainer(o, "initContainers", "objectstore-plugin"), "AWS_SECRET_ACCESS_KEY")
+			})
+		},
+		"a plain value in the atelet plugin": func(t *testing.T) rendered {
+			return edit(t, r, "DaemonSet", "atelet", func(o object) {
+				secretToPlain(firstContainer(o, "initContainers", "objectstore-plugin"), "AWS_ACCESS_KEY_ID")
+			})
+		},
+		"an object store claim of 1Gi": func(t *testing.T) rendered {
+			return edit(t, r, "PersistentVolumeClaim", "rustfs-data", func(o object) {
+				o["spec"].(map[string]any)["resources"].(map[string]any)["requests"].(map[string]any)["storage"] = "1Gi"
+			})
+		},
+		"a PostgreSQL volume of 1Gi": func(t *testing.T) rendered {
+			return edit(t, r, "StatefulSet", "postgres", func(o object) {
+				tpl := o["spec"].(map[string]any)["volumeClaimTemplates"].([]any)[0].(map[string]any)
+				tpl["spec"].(map[string]any)["resources"].(map[string]any)["requests"].(map[string]any)["storage"] = "1Gi"
+			})
+		},
+		"atelet at debug": func(t *testing.T) rendered {
+			return edit(t, r, "DaemonSet", "atelet", func(o object) { firstContainer(o, "containers", "atelet")["args"] = []any{"--log-level=debug"} })
+		},
+		"the registry replacement": func(t *testing.T) rendered {
+			return edit(t, r, "DaemonSet", "atelet", func(o object) {
+				c := firstContainer(o, "containers", "atelet")
+				c["args"] = append(c["args"].([]any), "--localhost-registry-replacement=kind-registry:5000")
+			})
+		},
+		"a container that a patch made alone": func(t *testing.T) rendered {
+			return edit(t, r, "Deployment", "ate-api-server", func(o object) { delete(firstContainer(o, "initContainers", "objectstore-plugin"), "image") })
+		},
+		"the fixed upstream credential": func(t *testing.T) rendered {
+			return edit(t, r, "", "", func(object) {})
+		},
+	}
+	for name, mk := range undo {
+		bad := mk(t)
+		if name == "the fixed upstream credential" {
+			bad.text += "\nvalue: rustfsadmin\n"
+		}
+		if len(failures(bad, p.StorageBucket)) == 0 {
+			t.Errorf("the checks pass with %s", name)
+		}
 	}
 }
