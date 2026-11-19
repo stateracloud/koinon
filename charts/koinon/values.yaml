@@ -382,8 +382,8 @@ gateway:
       tolerations: []
       affinity: {}
   # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
-  # koinon: also run koinon-gateway's model path, in pods of its own. Slice 1 brings it up and meters
-  # it; no agent is routed to it yet, and it does not yet enforce budgets or retry.
+  # koinon: also run koinon-gateway's model path, in pods of its own. It meters, stops a key at its
+  # budget and charges after each call (slice 2). It has no retry rule. No agent is routed to it yet.
   model:
     driver: agentgateway
     koinon:

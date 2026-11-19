@@ -79,6 +79,7 @@ var _ = func() bool {
 		Host:            "127.0.0.1",
 		HeaderAllowlist: true,
 		NoTranslation:   true,
+		GatewayBudgets:  true,
 		KeyFile:         func(name string) string { return filepath.Join(dir, name) },
 		Start: func(_ context.Context, _ []int, files map[string]string, _ string) (*gatewaytest.Gateway, error) {
 			for name, content := range files {
