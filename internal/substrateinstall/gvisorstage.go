@@ -28,7 +28,7 @@ const gvisorAssetPrefix = "gvisor-assets"
 // archive format from the suffix of the URL and refuses a URL without a known one (issue #1157). The pinned
 // tarball (gvisor.tar.zstd) is zstd, and atelet knows zstd as ".tar.zst". The digest is of the same bytes.
 // A key staged before this suffix existed (<prefix>/<arch>/<sha256>) stays in the store: the installer does not
-// read it, and no SandboxConfig names it. An operator can delete it.
+// read it. ApplySandboxConfig replaces a version that names it. An operator can delete the old object.
 const gvisorAssetSuffix = ".tar.zst"
 
 // maxGVisorBytes bounds a download: the tarballs are about 60 MB.

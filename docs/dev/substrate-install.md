@@ -309,7 +309,9 @@ What the installer does:
 4. A missing object is fetched from the source, checked against the pinned SHA-256 before the first byte
    goes to the store, written, read back and checked again.
    The key and the SandboxConfig URL end in `.tar.zst`: atelet chooses the archive format from that suffix. An
-   object from an older installer, without the suffix, stays in the bucket. Nothing uses it. Delete it by hand.
+   object from an older installer, without the suffix, stays in the bucket. Nothing uses it after the next run. Delete it by hand.
+   A SandboxConfig version from an older installer, with URLs without the suffix, is replaced in place. atelet
+   refused it, so no snapshot depends on it.
 5. It creates the SandboxConfig `koinon-gvisor` (class `gvisor`, annotation
    `sandboxconfig.ate.dev/is-class-default: "true"`, so it is newer than `gvisor-default` and wins). Its
    version `gvisor-<release>` has `s3://<bucket>/gvisor-assets/<arch>/<sha256>.tar.zst` and the same SHA-256 for each

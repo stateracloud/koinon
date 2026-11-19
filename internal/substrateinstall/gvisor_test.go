@@ -281,6 +281,28 @@ func TestApplyingTheSameSandboxConfigTwiceChangesNothing(t *testing.T) {
 	}
 }
 
+func TestAVersionFromBeforeTheSuffixIsReplacedInPlace(t *testing.T) {
+	g := NewWithT(t)
+	dyn, get := sandboxConfigClient()
+	legacy := stagedAssets()
+	for i := range legacy {
+		legacy[i].Key = strings.TrimSuffix(legacy[i].Key, ".tar.zst")
+	}
+	_, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", legacy)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(toJSON(t, get(t))).NotTo(ContainSubstring(".tar.zst"))
+	changed, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	cfg := get(t)
+	versions, _, _ := unstructured.NestedSlice(cfg.Object, "spec", "versions")
+	g.Expect(versions).To(HaveLen(1))
+	g.Expect(toJSON(t, cfg)).To(ContainSubstring("s3://snapshots/gvisor-assets/amd64/" + strings.Repeat("a", 64) + ".tar.zst"))
+	changed, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeFalse())
+}
+
 func TestANewReleaseAddsAVersionAndKeepsTheOldOne(t *testing.T) {
 	g := NewWithT(t)
 	old := &unstructured.Unstructured{Object: map[string]any{
