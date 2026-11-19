@@ -67,15 +67,15 @@ lacks "worker egress does not name the database" 'postgres|cnpg' "${wsub[@]}" "$
 lacks "worker NetworkPolicy has no public egress" '0\.0\.0\.0/0|::/0' "${wsub[@]}" "${np[@]}"
 has "the default API server rule uses the CIDR" 'cidr: "192.0.2.10/32"' "${wsub[@]}" "${np[@]}"
 # Worker pods (label ate.dev/worker-pool) get no API server route; the control-plane pods get it.
-has "a policy selects the worker pods" 'operator: Exists' "${wsub[@]}" "${np[@]}"
-has "a policy selects the control-plane pods" 'operator: DoesNotExist' "${wsub[@]}" "${np[@]}"
 has "the worker label is the pool label" 'key: ate.dev/worker-pool' "${wsub[@]}" "${np[@]}"
-has "two NetworkPolicies" 'name: koinon-substrate-control$' "${wsub[@]}" "${np[@]}"
 npdocs=$(render "${wsub[@]}" "${np[@]}")
 workers=$(awk '/^---/{d++} d>=1 && /name: koinon-substrate-workers/{f=1} f' <<<"$npdocs" | awk 'NR>1 && /^---/{exit} {print}')
+[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 2 ]] || fail "expected two NetworkPolicies (workers and control plane)"
+grep -Fq 'operator: Exists' <<<"$workers" || fail "the workers policy must select pods that have the worker label"
 grep -Fq 'ate.dev/worker-pool' <<<"$workers" || fail "the workers policy must select the worker label"
 if grep -Eq '192\.0\.2\.10|6443|ipBlock' <<<"$workers"; then fail "worker pods must have no API server route"; fi
 control=$(awk '/name: koinon-substrate-control/{f=1} f' <<<"$npdocs")
+grep -Fq 'operator: DoesNotExist' <<<"$control" || fail "the control-plane policy must select pods without the worker label"
 grep -Fq 'cidr: "192.0.2.10/32"' <<<"$control" || fail "the control-plane policy must carry the API server route"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs=null' >/dev/null 2>"$out/sub.err"; then fail "an empty apiServerCIDRs must not render"; fi
 grep -q 'apiServerCIDRs' "$out/sub.err" || fail "the empty-CIDR error must name apiServerCIDRs"

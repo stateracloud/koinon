@@ -4,12 +4,14 @@ NetworkPolicy for Substrate's namespace (execution.driver=substrate; ADR 0120 se
 Standard networking.k8s.io/v1 only (no CNI-specific resource). The pods of the namespace may talk to
 each other, resolve names, and reach Koinon's gateway and API pods; nothing else leaves the
 namespace unless workerNetworkPolicy.extraEgress says so. Two policies split the Kubernetes API server
-route: worker pods (label ate.dev/worker-pool, set by the WorkerPool controller) get none, because the
-worker has no Kubernetes client and its identity is a PodCertificate projection, not a ServiceAccount
-token (ADR 0120 section 2.4); the control-plane pods (atelet, ate-controller, ate-api, atenet, the
-podcert controller, the credential provider) get it only when workerNetworkPolicy.apiServerCIDRs names it. Ingress
-comes from the namespace itself and from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7
-rules, not through this policy. A CNI that does not enforce NetworkPolicy ignores all of it (the
+route. Worker pods (label ate.dev/worker-pool, set by the WorkerPool controller) get none: the worker
+has no Kubernetes client, and its identity is a PodCertificate projection, not a ServiceAccount token
+(ADR 0120 section 2.4). The control-plane pods (atelet, ate-controller, ate-api, atenet, the podcert
+controller, the credential provider) get it on the CIDRs of workerNetworkPolicy.apiServerCIDRs, which
+the render requires. If the label were missing on a worker pod, that pod would join the control-plane
+policy, so keep the label key in step with Substrate. Ingress comes from the namespace itself and from
+Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7 rules,
+not through this policy. A CNI that does not enforce NetworkPolicy ignores all of it (the
 preflight's NetworkPolicy probe reports it).
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
