@@ -70,7 +70,7 @@ cluster.
 ```mermaid
 sequenceDiagram
   participant R as Koinon control plane
-  participant I as Koinon OIDC issuer (key in Vault)
+  participant I as Koinon OIDC issuer (key in the secret store)
   participant C as Cloud STS / Entra / GCP STS
   participant O as OpenShell gateway
   participant S as Sandbox supervisor

@@ -35,7 +35,7 @@ There are three levels:
    - the scopes, each with a risk tier ([0008](0008-approvals-and-risk-tiers.md));
    - a machine-readable setup guide ([0021](0021-connector-setup-guides.md)).
 2. **Connection**: a per-org card that configures one instance of a type (for example "our GitHub
-   App installation on org X"), with its secrets in Vault/OpenBao.
+   App installation on org X"), with its secrets in the secret store.
    _(Replaced: connection secrets are envelope-encrypted in Postgres, see [0056](0056-model-providers-pricing-and-budgets-per-org.md); the amendment of [0049](0049-v01-scope-decisions.md) below is replaced the same way.)_
 3. **Grant**: per agent, a subset of the connection's scopes plus an approval preset.
 
