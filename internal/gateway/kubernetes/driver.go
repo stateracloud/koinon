@@ -71,6 +71,9 @@ func (d *Driver) Usage() gateway.UsageReader { return gateway.NoUsage{} }
 // *gateway.RejectedError together with the revision, and does not hold back the other orgs.
 func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	o := d.Options.withDefaults()
+	// A built-in target runs code of ours in koinon-gateway: this driver cannot serve it.
+	mcp, noBuiltin := s.WithoutBuiltin()
+	s.MCPState = mcp
 	r, err := Render(s, o)
 	if err != nil {
 		return "", err
@@ -87,7 +90,7 @@ func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, 
 	var tApplied, tStatus time.Time
 
 	var (
-		rejected  []gateway.Rejection
+		rejected  = noBuiltin
 		applyErrs []error
 	)
 	for _, obj := range r.Objects {

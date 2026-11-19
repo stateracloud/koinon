@@ -2247,6 +2247,9 @@ where the target's own CA bundle (public certificates) is mounted, empty for the
 | credential_file | 7 | `string` | singular |  |  |
 | ca_file | 8 | `string` | singular |  |  |
 | insecure_skip_verify | 9 | `bool` | singular |  |  |
+| builtin | 10 | `string` | singular |  | builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123). |
+| remote_agents | 11 | `koinon.gateway.v1alpha1.RemoteAgent` | repeated |  |  |
+| handle_key_file | 12 | `string` | singular |  | handle_key_file holds the key that signs the task and context handles of the built-in target. |
 
 ### Message Model
 
@@ -2304,6 +2307,23 @@ in the gateway, not the key.
 | api_key_file | 5 | `string` | singular |  |  |
 | anthropic_workspace_id | 6 | `string` | singular |  |  |
 | models | 7 | `koinon.gateway.v1alpha1.Model` | repeated |  |  |
+
+### Message RemoteAgent
+
+RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  |  |
+| id | 2 | `string` | singular |  |  |
+| card_url | 3 | `string` | singular |  |  |
+| credential_header | 4 | `string` | singular |  |  |
+| credential_prefix | 5 | `string` | singular |  |  |
+| credential_file | 6 | `string` | singular |  |  |
+| ca_file | 7 | `string` | singular |  |  |
+| insecure_skip_verify | 8 | `bool` | singular |  |  |
+| card_hash | 9 | `string` | singular |  | card_hash is the pin: the SHA-256 of the canonical agent card, in hex. |
+| agents | 10 | `string` | repeated |  | agents are the names of the Koinon agents that may call this remote agent. |
 
 ### Message StateUpdate
 

@@ -167,6 +167,12 @@ func (g *Gateway) listTools(ctx context.Context, agent gateway.AgentRef) *mcp.Li
 }
 
 func (g *Gateway) targetTools(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) ([]*mcp.Tool, error) {
+	if t.Builtin != "" {
+		if b := g.o.Builtins[t.Builtin]; b != nil {
+			return b.Tools(), nil
+		}
+		return nil, errors.New("mcpgateway: no code for the built-in target")
+	}
 	var lastErr error
 	for range 2 {
 		u, err := g.session(ctx, t, agent)
@@ -269,6 +275,9 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		row.Verdict = v.Reason
 		finish(OutcomeRefusedGuard)
 		return refusedResult(v.Reason)
+	}
+	if t.Builtin != "" {
+		return g.callBuiltin(ctx, agent, t, tool, p.Arguments, &row, finish)
 	}
 	// The upstream call has its own full limit: a long wait for a person must not shorten it.
 	cctx, cancel := context.WithTimeout(ctx, g.o.CallTimeout)
