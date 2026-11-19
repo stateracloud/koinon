@@ -106,18 +106,28 @@ func (a Admin) check(ctx context.Context, rows []Row) error {
 }
 
 // Add makes a new key and stores it as `pending`: the first key (init) or the next one (rotate). It
-// writes the wrapped private key first and the row second, so a failure between the two leaves a Secret
-// entry that a rerun refuses as foreign: the person reads that and cleans up. It returns the new key's
-// ID. With a pending key already there it returns that key and makes nothing (the command is safe to
-// rerun).
+// writes the row first and the wrapped private key second. A failure between the two leaves a pending row
+// with no Secret entry: Add retires that row at once (or a rerun does) and makes a new key, so no private
+// key is ever stored without a row. It returns the new key's ID. With a pending key whose wrapped key is
+// stored it returns that key and makes nothing (the command is safe to rerun).
 func (a Admin) Add(ctx context.Context) (string, error) {
 	rows, err := List(ctx, a.DB)
 	if err != nil {
 		return "", err
 	}
 	if p := find(rows, Pending); p != nil {
-		a.logf("gateway key %s is pending already", p.KeyID)
-		return p.KeyID, nil
+		entries, _, err := a.Secrets.Read(ctx)
+		if err != nil {
+			return "", err
+		}
+		if _, ok := entries[p.KeyID]; ok {
+			a.logf("gateway key %s is pending already", p.KeyID)
+			return p.KeyID, nil
+		}
+		if ok, err := Move(ctx, a.DB, p.KeyID, Pending, Retired); err != nil || !ok {
+			return "", errors.Join(err, errChanged)
+		}
+		a.logf("gateway key %s was pending with no wrapped private key; it is retired", p.KeyID)
 	}
 	if err := a.check(ctx, rows); err != nil {
 		return "", err
@@ -134,11 +144,15 @@ func (a Admin) Add(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := a.Secrets.Put(ctx, k.ID(), stored); err != nil {
-		return "", fmt.Errorf("gatewaykeys: store the wrapped key %s: %w", k.ID(), err)
-	}
 	if err := Insert(ctx, a.DB, k.Public()); err != nil {
 		return "", err
+	}
+	if err := a.Secrets.Put(ctx, k.ID(), stored); err != nil {
+		// Best effort: a rerun retires the row too.
+		if _, mErr := Move(ctx, a.DB, k.ID(), Pending, Retired); mErr != nil {
+			a.logf("gateway key %s: %v", k.ID(), mErr)
+		}
+		return "", fmt.Errorf("gatewaykeys: store the wrapped key %s: %w", k.ID(), err)
 	}
 	a.logf("gateway key %s is pending (%s)", k.ID(), stored.Backend)
 	return k.ID(), nil
@@ -211,18 +225,12 @@ func (a Admin) Retire(ctx context.Context) (retired []string, kept map[string]st
 				kept[r.KeyID] = "the wait after it left active is not over"
 				continue
 			}
-			n, err := InUse(ctx, a.DB, r.KeyID)
+			reason, err := a.retireRow(ctx, r.KeyID)
 			if err != nil {
 				return retired, kept, err
 			}
-			if n > 0 {
-				kept[r.KeyID] = fmt.Sprintf("%d stored credentials are still sealed to it (re-seal first)", n)
-				continue
-			}
-			if ok, err := Move(ctx, a.DB, r.KeyID, Retiring, Retired); err != nil {
-				return retired, kept, err
-			} else if !ok {
-				kept[r.KeyID] = "its state changed"
+			if reason != "" {
+				kept[r.KeyID] = reason
 				continue
 			}
 			if err := a.Secrets.Delete(ctx, r.KeyID); err != nil {
@@ -232,4 +240,39 @@ func (a Admin) Retire(ctx context.Context) (retired []string, kept map[string]st
 		}
 	}
 	return retired, kept, nil
+}
+
+// retireRow moves one `retiring` row to `retired` in a transaction that holds the row lock while it counts
+// the credentials sealed to the key. The credential trigger takes a shared lock on the same row, so a
+// credential cannot be sealed to the key between the count and the move. It returns the reason to keep
+// the key, or "" when it retired the row.
+func (a Admin) retireRow(ctx context.Context, keyID string) (string, error) {
+	tx, err := a.DB.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var state string
+	if err := tx.QueryRow(ctx, `SELECT state FROM gateway_recipient_keys WHERE key_id = $1 FOR UPDATE`, keyID).Scan(&state); err != nil {
+		return "", fmt.Errorf("gatewaykeys: lock key %s: %w", keyID, err)
+	}
+	if state != string(Retiring) {
+		return "its state changed", nil
+	}
+	n, err := InUse(ctx, tx, keyID)
+	if err != nil {
+		return "", err
+	}
+	if n > 0 {
+		return fmt.Sprintf("%d stored credentials are still sealed to it (re-seal first)", n), nil
+	}
+	if ok, err := Move(ctx, tx, keyID, Retiring, Retired); err != nil {
+		return "", err
+	} else if !ok {
+		return "its state changed", nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return "", nil
 }

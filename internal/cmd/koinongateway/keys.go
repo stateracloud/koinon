@@ -190,6 +190,11 @@ func (o *keysOptions) addAndActivate(ctx context.Context, a gatewaykeys.Admin, r
 				continue
 			}
 		}
+		if errors.Is(err, gatewaykeys.ErrNotLoaded) && o.waitLoaded > 0 {
+			// The Job was told to wait for the gateways and they did not load the key in time: fail the
+			// Job, so the person sees it. The key stays pending; nothing seals to it.
+			return fmt.Errorf("gateway key %s stays pending after %s: %w", id, o.waitLoaded, err)
+		}
 		return reportActivation(out, id, err)
 	}
 }

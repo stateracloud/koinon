@@ -159,6 +159,23 @@ var gatewayResealGrants = []string{
 // gateway key switch), so the next migrate or --grants-only run grants it once it does.
 func GrantGatewayKeyRoles(ctx context.Context, db Execer) ([]string, error) {
 	var granted []string
+	// The shared application role keeps SELECT only. Default privileges may have given it more after the
+	// migration ran (the role can appear later), so close it again on every run.
+	var appExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'koinon_app')`).Scan(&appExists); err != nil {
+		return granted, err
+	}
+	if appExists {
+		for _, stmt := range []string{
+			`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON gateway_recipient_keys FROM koinon_app`,
+			`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON gateway_recipient_key_loads FROM koinon_app`,
+			`REVOKE EXECUTE ON FUNCTION gateway_recipient_key_in_use(text) FROM koinon_app`,
+		} {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				return granted, err
+			}
+		}
+	}
 	for _, r := range []struct {
 		role   string
 		grants []string

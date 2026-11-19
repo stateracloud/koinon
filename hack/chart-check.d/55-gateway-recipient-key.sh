@@ -41,11 +41,15 @@ has "gateway key Role follows secretName" 'resourceNames: \[mine\]' "${gkey_only
 # The Job is named by its pod template: same inputs, same name; a new action or rotation id, a new Job.
 gjob() { render "${gkey_only[@]}" "${gk[@]}" "$@" | grep -A2 '^kind: Job$' | sed -n 's/^  name: //p'; }
 j1=$(gjob) j2=$(gjob) j3=$(gjob --set gateway.mcp.koinon.recipientKey.keyAdmin.rotationId=r1)
-j4=$(gjob --set gateway.mcp.koinon.recipientKey.keyAdmin.action=rotate)
+j4=$(gjob --set gateway.mcp.koinon.recipientKey.keyAdmin.action=rotate --set gateway.mcp.koinon.recipientKey.keyAdmin.rotationId=r1)
 [[ $j1 =~ ^koinon-gateway-key-admin-[0-9a-f]{10}$ ]] || fail "gateway key Job name is koinon-gateway-key-admin-<hash>, got '$j1'"
 [[ $j1 == "$j2" ]] || fail "gateway key Job name is stable across renders ($j1, $j2)"
 [[ $j1 != "$j3" ]] || fail "gateway key Job name changes with rotationId"
 [[ $j1 != "$j4" ]] || fail "gateway key Job name changes with the action"
+# A rotate Job runs again whenever its pod template changes, so every rotation must name itself.
+if render "${gkey_only[@]}" "${gk[@]}" --set gateway.mcp.koinon.recipientKey.keyAdmin.action=rotate >/dev/null 2>&1; then
+	fail "action=rotate without a rotationId must fail the render"
+fi
 
 # The Job accepts no connections, as the other Jobs.
 has "gateway key Job accepts no connections" '^# key-admin accepts no connections' "${gk[@]}" --show-only templates/networkpolicy.yaml

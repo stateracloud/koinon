@@ -73,6 +73,13 @@ var _ = Describe("gateway recipient keys", func() {
 			To(MatchError(ContainSubstring("one_active")))
 	})
 
+	It("keeps at most one pending key", func(ctx SpecContext) {
+		Expect(insertKey(ctx, key1, "pending")).To(Succeed())
+		Expect(insertKey(ctx, key2, "pending")).To(MatchError(ContainSubstring("one_pending")))
+		Expect(exec(ctx, `UPDATE gateway_recipient_keys SET state = 'retired', retired_at = now() WHERE key_id = $1`, key1)).To(Succeed())
+		Expect(insertKey(ctx, key2, "pending")).To(Succeed())
+	})
+
 	It("refuses a malformed key ID, a state with the wrong times and a key nobody reported", func(ctx SpecContext) {
 		Expect(insertKey(ctx, "gk-nothex", "pending")).To(HaveOccurred())
 		Expect(exec(ctx, `INSERT INTO gateway_recipient_keys (key_id, recipient, public_key, state) VALUES ($1, 'hpke-aaaa-bbbb-cccc', $2, 'active')`,

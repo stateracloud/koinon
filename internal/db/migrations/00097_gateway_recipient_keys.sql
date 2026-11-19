@@ -47,6 +47,8 @@ CREATE TABLE gateway_recipient_keys (
 
 -- At most one key is active: koinon-api seals to the newest active key.
 CREATE UNIQUE INDEX gateway_recipient_keys_one_active ON gateway_recipient_keys ((true)) WHERE state = 'active';
+-- One rotation at a time: a second key-admin run cannot add a second pending key.
+CREATE UNIQUE INDEX gateway_recipient_keys_one_pending ON gateway_recipient_keys ((true)) WHERE state = 'pending';
 
 -- +goose StatementBegin
 CREATE FUNCTION gateway_recipient_keys_guard() RETURNS trigger
@@ -117,7 +119,7 @@ $$;
 -- A v2 credential must name a key that is active or retiring (ADR 0097 12.4).
 -- +goose StatementBegin
 CREATE FUNCTION mcp_servers_credential_key_check() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 BEGIN
     IF NEW.credential IS NULL OR NEW.credential ->> 'fmt' IS DISTINCT FROM '2' THEN
         RETURN NEW;
@@ -125,9 +127,12 @@ BEGIN
     IF TG_OP = 'UPDATE' AND NEW.credential IS NOT DISTINCT FROM OLD.credential THEN
         RETURN NEW;
     END IF;
+    -- FOR SHARE: a concurrent retire (which locks the row FOR UPDATE and then counts the credentials)
+    -- waits for this write, or this write waits for it and then sees the key retired.
     IF NOT EXISTS (
         SELECT 1 FROM gateway_recipient_keys
         WHERE key_id = NEW.credential ->> 'recipient_key_id' AND state IN ('active', 'retiring')
+        FOR SHARE
     ) THEN
         RAISE EXCEPTION 'a v2 MCP credential must name an active or retiring gateway key (ADR 0097 12.4)'
             USING ERRCODE = 'check_violation';
@@ -155,3 +160,4 @@ END
 $$;
 -- +goose StatementEnd
 REVOKE EXECUTE ON FUNCTION gateway_recipient_key_in_use(text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION mcp_servers_credential_key_check() FROM PUBLIC;

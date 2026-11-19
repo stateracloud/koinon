@@ -5,6 +5,7 @@ package gatewaykeys
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -81,6 +82,15 @@ type Loader struct {
 	mu    sync.Mutex
 	ready bool
 	err   error
+
+	// cache keeps each unwrapped key by ID and the digest of its stored bytes, so a pass calls the KMS only
+	// for a new or changed entry and a loaded key stays held through a KMS outage.
+	cache map[string]cachedKey
+}
+
+type cachedKey struct {
+	sum [sha256.Size]byte
+	key *secretstore.RecipientKey
 }
 
 // NewLoader returns a loader with an empty keyring.
@@ -111,47 +121,75 @@ func (l *Loader) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	entries, err := readDir(l.Dir)
+	entries, sums, err := readDir(l.Dir)
 	if err != nil {
 		return err
+	}
+	if l.cache == nil {
+		l.cache = map[string]cachedKey{}
 	}
 	var keys []*secretstore.RecipientKey
 	counts := map[State]float64{}
 	var loaded []Row
-	custody := ""
+	local := false
+	kms := false
 	var errs []error
+	next := map[string]cachedKey{}
 	for _, r := range rows {
 		if r.State == Retired {
 			continue
 		}
 		pub, err := r.PublicKey()
 		if err != nil {
-			errs = append(errs, err)
+			if r.State != Pending {
+				errs = append(errs, err)
+			}
 			continue
 		}
 		s, ok := entries[r.KeyID]
 		if !ok {
+			if r.State == Pending {
+				// The key-admin writes the row before the Secret entry (or the Secret is not mounted yet): the
+				// gateway does not need a pending key to serve, so it waits and does not report it loaded.
+				l.logf("gateway key %s is pending and has no wrapped private key yet", r.KeyID)
+				continue
+			}
 			errs = append(errs, fmt.Errorf("gateway key %s (%s) has no wrapped private key in %s", r.KeyID, r.State, l.Dir))
 			continue
 		}
-		k, err := l.Wrap.UnwrapRecipientKey(ctx, r.Recipient, r.KeyID, s)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("gateway key %s: %w", r.KeyID, err))
-			continue
+		var k *secretstore.RecipientKey
+		if c, ok := l.cache[r.KeyID]; ok && c.sum == sums[r.KeyID] {
+			k = c.key
+		} else {
+			k, err = l.Wrap.UnwrapRecipientKey(ctx, r.Recipient, r.KeyID, s)
+			if err != nil {
+				l.failure(ReasonKMS)
+				if r.State == Pending {
+					l.logf("gateway key %s (pending): %v", r.KeyID, err)
+				} else {
+					errs = append(errs, fmt.Errorf("gateway key %s: %w", r.KeyID, err))
+				}
+				continue
+			}
+			if k.ID() != r.KeyID || !bytes.Equal(k.Public().Bytes(), pub.Bytes()) {
+				l.failure(ReasonOpen)
+				if r.State != Pending {
+					errs = append(errs, fmt.Errorf("gateway key %s: its private key does not match the public row", r.KeyID))
+				}
+				continue
+			}
 		}
-		if k.ID() != r.KeyID || !bytes.Equal(k.Public().Bytes(), pub.Bytes()) {
-			errs = append(errs, fmt.Errorf("gateway key %s: its private key does not match the public row", r.KeyID))
-			continue
-		}
+		next[r.KeyID] = cachedKey{sum: sums[r.KeyID], key: k}
 		keys = append(keys, k)
 		loaded = append(loaded, r)
 		counts[r.State]++
 		if s.Backend == secretstore.BackendLocal {
-			custody = "local"
+			local = true
 		} else {
-			custody = "kms"
+			kms = true
 		}
 	}
+	l.cache = next
 	for id := range entries {
 		known := false
 		for _, r := range rows {
@@ -168,9 +206,10 @@ func (l *Loader) load(ctx context.Context) error {
 		for _, s := range []State{Pending, Active, Retiring} {
 			l.Metrics.Loaded.WithLabelValues(string(s)).Set(counts[s])
 		}
+		// `local` wins: one key that koinon-api can read is the weakest custody of the install.
 		for _, c := range []string{"kms", "local"} {
 			v := 0.0
-			if c == custody {
+			if (c == "local" && local) || (c == "kms" && kms && !local) {
 				v = 1
 			}
 			l.Metrics.Custody.WithLabelValues(c).Set(v)
@@ -183,6 +222,18 @@ func (l *Loader) load(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (l *Loader) logf(format string, args ...any) {
+	if l.Logf != nil {
+		l.Logf(format, args...)
+	}
+}
+
+func (l *Loader) failure(reason string) {
+	if l.Metrics != nil {
+		l.Metrics.Failures.WithLabelValues(reason).Inc()
+	}
 }
 
 // Run loads at once and then every [ReportInterval] until ctx ends.
@@ -202,27 +253,29 @@ func (l *Loader) Run(ctx context.Context) {
 }
 
 // readDir reads a mounted Secret directory; a missing directory is empty (the Secret is optional).
-func readDir(dir string) (map[string]secretstore.StoredKEK, error) {
+func readDir(dir string) (map[string]secretstore.StoredKEK, map[string][sha256.Size]byte, error) {
 	des, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) || dir == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	data := map[string][]byte{}
+	sums := map[string][sha256.Size]byte{}
 	for _, de := range des {
 		if de.IsDir() || !secretstore.ValidRecipientKeyID(de.Name()) {
 			continue // the kubelet's ..data links and dot files
 		}
 		b, err := os.ReadFile(filepath.Join(dir, de.Name())) //nolint:gosec // dir is the operator-set key mount; the name passed ValidRecipientKeyID
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		data[de.Name()] = b
+		sums[de.Name()] = sha256.Sum256(b)
 	}
 	stored, _, err := secretstore.ParseStoredKeys(data)
-	return stored, err
+	return stored, sums, err
 }
 
 // PublicKeys is koinon-api's view of the gateway's public keys: the newest `active` key to seal to. It

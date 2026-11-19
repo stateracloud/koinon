@@ -52,6 +52,22 @@ var _ = Describe("the gateway key lifecycle", func() {
 		Expect(entries).To(HaveKey(id))
 	})
 
+	It("retires a pending row that has no wrapped private key and makes a new key", func(ctx SpecContext) {
+		id, err := admin.Add(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sec.Delete(ctx, id)).To(Succeed()) // the Put after the row insert failed
+		next, err := admin.Add(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(next).NotTo(Equal(id))
+		rows, err := gatewaykeys.List(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		states := map[string]gatewaykeys.State{}
+		for _, r := range rows {
+			states[r.KeyID] = r.State
+		}
+		Expect(states).To(Equal(map[string]gatewaykeys.State{id: gatewaykeys.Retired, next: gatewaykeys.Pending}))
+	})
+
 	It("refuses a Secret entry that no row names", func(ctx SpecContext) {
 		Expect(sec.Put(ctx, "gk-0123456789abcdef", secretstore.StoredKEK{Backend: secretstore.BackendLocal, Wrapped: make([]byte, 32)})).To(Succeed())
 		_, err := admin.Add(ctx)
@@ -133,14 +149,44 @@ var _ = Describe("the gateway key lifecycle", func() {
 			Expect(testutil.CollectAndCount(reg, "koinon_gateway_recipient_key_custody")).To(Equal(2))
 		})
 
-		It("is not ready when a row's private key is missing", func(ctx SpecContext) {
-			_, err := admin.Add(ctx)
+		It("is not ready when the private key of an active row is missing", func(ctx SpecContext) {
+			id, err := admin.Add(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, id, "gw-a")).To(Succeed())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, id, "gw-b")).To(Succeed())
+			_, err = admin.Activate(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			l := gatewaykeys.NewLoader(GinkgoT().TempDir(), pool, ws, "gw-a", nil)
 			Expect(l.Load(ctx)).NotTo(Succeed())
 			ok, why := l.Ready()
 			Expect(ok).To(BeFalse())
 			Expect(why).To(HaveOccurred())
+		})
+
+		It("stays ready while a pending key has no wrapped private key yet, and holds the active key", func(ctx SpecContext) {
+			first, err := admin.Add(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, first, "gw-a")).To(Succeed())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, first, "gw-b")).To(Succeed())
+			_, err = admin.Activate(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			dir := GinkgoT().TempDir()
+			entries, _, err := sec.Read(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			enc, err := entries[first].Encode()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(filepath.Join(dir, first), enc, 0o600)).To(Succeed())
+
+			By("a rotation that wrote its row and not yet its Secret entry")
+			second, err := admin.Add(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			l := gatewaykeys.NewLoader(dir, pool, ws, "gw-a", nil)
+			Expect(l.Load(ctx)).To(Succeed())
+			Expect(l.Keyring.Has(first)).To(BeTrue())
+			Expect(l.Keyring.Has(second)).To(BeFalse())
+			by, err := gatewaykeys.LoadedBy(ctx, pool, second, time.Minute)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(by).To(BeEmpty(), "a key the gateway does not hold is not reported")
 		})
 
 		It("is ready with no key rows yet", func(ctx SpecContext) {

@@ -438,7 +438,7 @@ gateway:
               keyAdmin: ""
         keyAdmin:
           # init (the default): make the first key when there is none, and activate it once every gateway
-          # pod loaded it. rotate: add a new key; change rotationId to run it again. retire: retire each
+          # pod loaded it. rotate: add a new key; it needs a rotationId, and you set action back to init after the rotation (the Job runs again on any change of its pod template, an image bump too). Change rotationId to rotate again. retire: retire each
           # retiring key whose wait is over and that no stored credential names (it deletes its wrapped
           # private key). The Job runs again whenever its inputs change; each run is idempotent.
           action: init

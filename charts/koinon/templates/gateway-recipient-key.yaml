@@ -16,6 +16,9 @@ no key, so the Job and the pods come up together.
 {{- $sa := include "koinon.gwKeyAdminName" . }}
 {{- $secret := include "koinon.gwKeySecretName" . }}
 {{- $rk := .Values.gateway.mcp.koinon.recipientKey }}
+{{- if and (eq ($rk.keyAdmin.action | default "init") "rotate") (not $rk.keyAdmin.rotationId) }}
+{{- fail "gateway.mcp.koinon.recipientKey.keyAdmin.action=rotate needs a rotationId: the Job runs again on every change of its pod template (an image bump too), so each rotation names itself and you set action back to init after it" }}
+{{- end }}
 {{- $pod := include "koinon.gwKeyAdminPod" (dict "root" . "sa" $sa "secret" $secret "rk" $rk) }}
 ---
 apiVersion: v1
