@@ -107,8 +107,9 @@ spec:
     {{- end }}
 {{- $closed := list "reconciler" "agentd" "migrate" }}
 {{- if include "koinon.kms" . }}{{ $closed = append $closed "key-admin" }}{{ end }}
+{{- if .Values.runEvidence.export.enabled }}{{ $closed = append $closed "run-evidence" }}{{ end }}
 {{- range $component := $closed }}
-{{- $jobOnly := has $component (list "migrate" "key-admin") }}
+{{- $jobOnly := has $component (list "migrate" "key-admin" "run-evidence") }}
 ---
 # {{ $component }} accepts no connections{{ if not $jobOnly }}, except Prometheus scrapes of /metrics from metrics.allowFrom{{ end }}.
 apiVersion: networking.k8s.io/v1

@@ -1,0 +1,38 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The run-evidence export Job (#966, ADR 0121): only with runEvidence.export.enabled. It runs
+"koinon-api run-evidence export" for one run of one org and writes the scrubbed JSON Lines
+evidence to an S3 prefix. The api image is distroless, so the operator needs no exec into a pod
+and no copy out of one.
+
+It uses the koinon-api service account, which already reads the KEK Secret and holds the KMS
+decrypt role, and the koinon_api database role. It adds no RBAC. The export reads the KEKs only to
+build its scrubber (--kek-secret): it writes no secret and no key material to its logs. S3 keys
+come from a Secret, never from values.
+
+The Job's name carries a hash of its pod template, so a new org, run or output makes a new Job and
+an unchanged upgrade leaves the finished one alone. The Job has no TTL (a deleted Job would run again on the next upgrade and overwrite the files in the prefix): remove the values after the export, and delete the Job.
+*/ -}}
+{{- with .Values.runEvidence.export }}
+{{- if .enabled }}
+{{- if not (and .org .run .out .s3.existingSecret) }}
+{{- fail "runEvidence.export needs org, run, out (s3://bucket/prefix) and s3.existingSecret (a Secret with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region)" }}
+{{- end }}
+{{- if not (hasPrefix "s3://" .out) }}
+{{- fail "runEvidence.export.out must start with s3://: a Job has no volume to keep a directory in" }}
+{{- end }}
+{{- $name := include "koinon.componentName" (list $ "run-evidence") }}
+{{- $pod := include "koinon.runEvidencePod" (dict "root" $ "re" .) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" ($name | trunc 40 | trimSuffix "-") ($pod | sha256sum | trunc 10) }}
+  labels:
+    {{- include "koinon.labels" (list $ "run-evidence") | nindent 4 }}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1800
+  template:
+    {{- $pod | nindent 4 }}
+{{- end }}
+{{- end }}

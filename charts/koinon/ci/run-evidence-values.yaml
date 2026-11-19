@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+# The run-evidence export Job on (#966, ADR 0121): the chart smoke test starts the Job's container
+# with the flags and env the chart sets, so a change in how the export starts fails there.
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+gateway:
+  mode: kubernetes
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      storageClass: fast
+runEvidence:
+  export:
+    enabled: true
+    org: 00000000-0000-4000-8000-000000000001
+    run: 00000000-0000-4000-8000-000000000002
+    out: s3://evidence-bucket/run-2
+    s3:
+      existingSecret: koinon-evidence-s3
