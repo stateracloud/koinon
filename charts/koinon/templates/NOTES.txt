@@ -101,6 +101,12 @@ keys in Secret {{ include "koinon.kekSecretName" . }}{{ if not .Values.secrets.k
 
 Keep the file outside the cluster and apart from the database backup. The backup and restore guide
 (https://koinon.stateracloud.com/docs/operate/backup-restore/) shows how to restore it.
+{{- if include "koinon.gwKey" . }}
+
+Gateway key (custody {{ if include "koinon.kms" . }}kms: only koinon-gateway can unwrap the private key that opens stored MCP credentials; koinon-api and the reconciler have no right on the KMS key {{ include "koinon.kms" . }}{{ else }}local: the Secret {{ include "koinon.gwKeySecretName" . }} holds the private key as it is, and koinon-api can read the Secrets of this namespace, so nothing keeps it from koinon-api. Use a KMS (secrets.kek.kms.backend) for a custody boundary{{ end }}). The key-admin Job {{ include "koinon.gwKeyAdminName" . }}-<hash> makes the first key and activates it once every gateway pod loaded it; check it with:
+
+  kubectl -n {{ .Release.Namespace }} logs job -l app.kubernetes.io/component=key-admin
+{{- end }}
 
 Rotation and the compromise procedure: https://koinon.stateracloud.com/docs/operate/secret-keys/.
 

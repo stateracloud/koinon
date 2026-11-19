@@ -289,7 +289,9 @@
                 "api": {"type": "string"},
                 "reconciler": {"type": "string"},
                 "agentd": {"type": "string"},
-                "mcpgateway": {"type": "string"}
+                "mcpgateway": {"type": "string"},
+                "gwkeyadmin": {"type": "string"},
+                "reseal": {"type": "string"}
               }
             }
           }
@@ -308,7 +310,9 @@
                 "api": {"$ref": "#/definitions/nonEmpty"},
                 "reconciler": {"$ref": "#/definitions/nonEmpty"},
                 "agentd": {"$ref": "#/definitions/nonEmpty"},
-                "mcpgateway": {"$ref": "#/definitions/nonEmpty"}
+                "mcpgateway": {"$ref": "#/definitions/nonEmpty"},
+                "gwkeyadmin": {"$ref": "#/definitions/nonEmpty"},
+                "reseal": {"$ref": "#/definitions/nonEmpty"}
               }
             }
           }
@@ -394,7 +398,57 @@
                 "podAnnotations": {"$ref": "#/definitions/map"},
                 "nodeSelector": {"$ref": "#/definitions/map"},
                 "tolerations": {"type": "array"},
-                "affinity": {"$ref": "#/definitions/map"}
+                "affinity": {"$ref": "#/definitions/map"},
+                "recipientKey": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "secretName": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"},
+                    "guard": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+                    "kms": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "openbao": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "key": {"type": "string"},
+                            "roles": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {"gateway": {"type": "string"}, "keyAdmin": {"type": "string"}}
+                            },
+                            "audience": {"type": "string"}
+                          }
+                        },
+                        "awskms": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "keyId": {"type": "string"},
+                            "roleArns": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {"gateway": {"type": "string"}, "keyAdmin": {"type": "string"}}
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "keyAdmin": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "action": {"enum": ["init", "rotate", "retire"]},
+                        "rotationId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{0,63}$"},
+                        "waitLoaded": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
+                        "resources": {"$ref": "#/definitions/resources"}
+                      }
+                    }
+                  }
+                }
               }
             }
           }

@@ -1,0 +1,87 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The gateway recipient key Job (ADR 0097 decision 12, issue #1151, slice 2): only with gateway.mcp.driver=koinon and
+gateway.mcp.koinon.recipientKey.enabled. It runs "koinon-gateway keys <action>" with its own service account. That
+account is the only identity that may encrypt with the gateway's wrapping key in the KMS (the gateway may
+decrypt; koinon-api and the reconciler have no right on it), and the only one the guard policy lets write the
+Secret of the wrapped private keys (kek-guard.yaml). Its database login is the group role
+koinon_gateway_key_admin: it may insert a public key and move its state, and it cannot read a stored credential.
+
+Like key-admin.yaml it is an ordinary release resource, not a hook, and a hash of its pod template names the
+Job: a change of the action, rotationId, image or KMS settings makes a new Job that runs once. Each run is
+idempotent. init makes the first key and activates it once every gateway pod loaded it; the pods are ready with
+no key, so the Job and the pods come up together.
+*/ -}}
+{{- if include "koinon.gwKey" . }}
+{{- $sa := include "koinon.gwKeyAdminName" . }}
+{{- $secret := include "koinon.gwKeySecretName" . }}
+{{- $rk := .Values.gateway.mcp.koinon.recipientKey }}
+{{- if and (eq ($rk.keyAdmin.action | default "init") "rotate") (not $rk.keyAdmin.rotationId) }}
+{{- fail "gateway.mcp.koinon.recipientKey.keyAdmin.action=rotate needs a rotationId: the Job runs again on every change of its pod template (an image bump too), so each rotation names itself and you set action back to init after it" }}
+{{- end }}
+{{- $pod := include "koinon.gwKeyAdminPod" (dict "root" . "sa" $sa "secret" $secret "rk" $rk) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+  {{- with include "koinon.gwKeyServiceAccountAnnotations" (dict "root" . "role" "keyAdmin") | trim }}
+  # IRSA: the IAM role that may encrypt with the gateway's KMS key (recipientKey.kms.awskms.roleArns.keyAdmin).
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+rules:
+  # The Secret of the wrapped private keys, by name: read it, add a key, delete a retired one.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $secret }}]
+    verbs: [get, update, delete]
+  # create cannot be limited by resourceNames: this namespaced Role can create any Secret here. The Job
+  # creates only that Secret, and only when it does not exist.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+# The hash names the pod template: a changed template is a new Job, never an update of an immutable
+# one. The prefix is cut to 52 so the hash always survives the 63-character limit.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" ($sa | trunc 52 | trimSuffix "-") ($pod | sha256sum | trunc 10) }}
+  labels:
+    {{- include "koinon.labels" (list . "key-admin") | nindent 4 }}
+  annotations:
+    # After the CNPG Cluster and the ServiceAccounts (wave 0), with the migration (wave 1).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 6
+  # The wait for the gateway pods to load the key is inside this limit.
+  activeDeadlineSeconds: 1800
+  template:
+    {{- $pod | nindent 4 }}
+{{- end }}

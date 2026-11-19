@@ -10,3 +10,6 @@ eeb1369f4fce29db9c39b7acfdfcb773fcdafb32:web/e2e/settings.spec.ts:generic-api-ke
 68580d89ecfb095423d3c9fe100c61e532762345:test/e2e/mcp_test.go:generic-api-key:300
 # A rendered CEL agent rule in a golden file that a later commit of this branch removes; not a secret. CI scans every commit.
 f4c673c5a2c884e04f391920753477dd7bc9f252:internal/gateway/standalone/testdata/mcp-upstream-ca.yaml:generic-api-key:96
+# Fake gateway key IDs (public, hex-shaped) in the migration spec of #1151; the next commit uses low-entropy IDs.
+e08a915cc566a711f30e71fe5c291004ecd21432:internal/db/migrations/gateway_recipient_keys_test.go:generic-api-key:23
+e08a915cc566a711f30e71fe5c291004ecd21432:internal/db/migrations/gateway_recipient_keys_test.go:generic-api-key:24
