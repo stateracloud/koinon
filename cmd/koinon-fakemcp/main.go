@@ -68,6 +68,7 @@ func main() {
 	value := flag.String("value", "not-a-real-token", "the credential header's expected value")
 	certFile := flag.String("tls-cert-file", "", "serve HTTPS with this PEM certificate (needs -tls-key-file)")
 	keyFile := flag.String("tls-key-file", "", "the PEM private key of -tls-cert-file")
+	loadTools := flag.Bool("load-tools", false, "also serve stream_progress, a tool that answers after a number of progress notifications (the long-stream case of the gateway load suite, issue 280)")
 	httpAddr := flag.String("http-addr", "", "with TLS: also serve plain HTTP on this address (for a server that needs no credential, such as the OAuth case)")
 	flag.Parse()
 	if (*certFile == "") != (*keyFile == "") {
@@ -78,13 +79,13 @@ func main() {
 		slog.Error("-http-addr needs TLS (without it, -addr already serves plain HTTP)")
 		os.Exit(2)
 	}
-	if err := run(*addr, *httpAddr, *header, *value, *certFile, *keyFile); err != nil {
+	if err := run(*addr, *httpAddr, *header, *value, *certFile, *keyFile, *loadTools); err != nil {
 		slog.Error("koinon-fakemcp failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, httpAddr, header, value, certFile, keyFile string) error {
+func run(addr, httpAddr, header, value, certFile, keyFile string, loadTools bool) error {
 	recs := &log{}
 	srv := mcp.NewServer(&mcp.Implementation{Name: project.Name + "-fakemcp", Version: project.Version}, nil)
 	type args struct {
@@ -111,6 +112,9 @@ func run(addr, httpAddr, header, value, certFile, keyFile string) error {
 		recs.add(record{Time: time.Now(), Method: "TOOL", Tool: "fetch_url", Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fetch_url ok: " + in.URL}}}, nil, nil
 	})
+	if loadTools {
+		addStreamTool(srv)
+	}
 	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
 		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
 	mux := http.NewServeMux()
@@ -189,4 +193,38 @@ func run(addr, httpAddr, header, value, certFile, keyFile string) error {
 		return err
 	}
 	return nil
+}
+
+// streamArgs are the arguments of stream_progress.
+type streamArgs struct {
+	// Steps is the number of progress notifications, IntervalMS the pause before each one.
+	Steps      int `json:"steps"`
+	IntervalMS int `json:"interval_ms"`
+}
+
+// addStreamTool adds stream_progress: it sends Steps progress notifications, IntervalMS apart, then
+// answers. A client that asks for progress (a progress token) holds the response stream open that long.
+// The load suite uses it as the long stream of the MCP path. It records nothing: a load run makes
+// many calls.
+func addStreamTool(srv *mcp.Server) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "stream_progress", Description: "Fake tool stream_progress: answers after a number of progress notifications",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in streamArgs) (*mcp.CallToolResult, any, error) {
+		steps, every := min(max(in.Steps, 0), 10000), time.Duration(min(max(in.IntervalMS, 0), 10000))*time.Millisecond
+		token := req.Params.GetProgressToken()
+		for i := 1; i <= steps; i++ {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-time.After(every):
+			}
+			if token != nil {
+				if err := req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: float64(i), Total: float64(steps), Message: "step"}); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "stream_progress done"}}}, nil, nil
+	})
 }

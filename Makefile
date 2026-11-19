@@ -245,6 +245,10 @@ DEV_KIND_CLUSTER ?= koinon-dev
 dev: ## Run the inner loop with Tilt against the current kube context (dev-kind-up's kind, or a cluster listed in hack/dev/local.yaml)
 	tilt up
 
+.PHONY: load-gateway
+load-gateway: ## Gateway load suite (issue 280): cloud only, never in CI or `make test`; see docs/dev/load-tests.md
+	hack/load-gateway.sh $(LOAD_ARGS)
+
 .PHONY: dev-kind-up
 dev-kind-up: ## Create the kind cluster kind-koinon-dev with Koinon's prerequisites (CNPG, Agent Sandbox, OpenShell)
 	CLUSTER=$(DEV_KIND_CLUSTER) test/e2e/kind/up.sh
