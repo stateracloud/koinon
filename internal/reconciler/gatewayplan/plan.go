@@ -45,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/mcpcredfile"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
@@ -837,10 +838,10 @@ func (p *Planner) mcpKeyDir() string {
 	return p.cfg.KeyDir
 }
 
-// IsMCPFile reports whether a key file name is an MCP server's credential or CA bundle (mcp-..., mcpca-...), as
-// the reconciler names them. A provider key file is named by a UUID and a hash, so the names never collide.
+// IsMCPFile reports whether a key file name is an MCP server's credential or CA bundle (mcp-..., mcpv2-...,
+// mcpca-...), as the reconciler names them. A provider key file is named by a UUID and a hash, so the names never collide.
 func IsMCPFile(name string) bool {
-	return strings.HasPrefix(name, "mcp-") || strings.HasPrefix(name, "mcpca-")
+	return strings.HasPrefix(name, mcpcredfile.PlainPrefix) || strings.HasPrefix(name, mcpcredfile.SealedPrefix) || strings.HasPrefix(name, "mcpca-")
 }
 
 func (s *MCPServer) target() string { return mcpservers.TargetName(s.Org.Slug, s.Name) }

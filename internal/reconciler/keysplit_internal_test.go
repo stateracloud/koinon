@@ -31,7 +31,7 @@ func TestSplitKeyFilesWithoutMCPStoreKeepsOneStore(t *testing.T) {
 
 func TestIsMCPFile(t *testing.T) {
 	for name, want := range map[string]bool{
-		"mcp-1-2": true, "mcpca-1-2": true, "0a1b-2": false, "": false,
+		"mcp-1-2": true, "mcpv2-1-2-3": true, "mcpca-1-2": true, "0a1b-2": false, "": false,
 	} {
 		if got := gatewayplan.IsMCPFile(name); got != want {
 			t.Errorf("IsMCPFile(%q) = %v, want %v", name, got, want)

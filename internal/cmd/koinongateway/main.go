@@ -212,6 +212,8 @@ func run(ctx context.Context, cfg config) error {
 			if keys, err = startKeyLoader(ctx, cfg, pool, reg, log); err != nil {
 				return err
 			}
+			// Sealed MCP credentials (mcpv2- files) open with these keys; a refused one is counted.
+			gopts.Credentials = mcpgateway.StaticCredentials{Keys: keys.Keyring, OnOpenFailure: keys.CountFailure}
 		}
 	}
 	gw := mcpgateway.New(gopts)

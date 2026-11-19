@@ -35,7 +35,9 @@ type AuditRow struct {
 	Outcome  Outcome
 	Verdict  string // the guard's reason on a refusal, "" otherwise
 	CredKind string // CredentialNone, CredentialStatic, ...
-	Duration time.Duration
+	// RecipientKeyID is the ID of the gateway key that opened the call's sealed credential, "" for none.
+	RecipientKeyID string
+	Duration       time.Duration
 }
 
 // Audit stores one row per tool call. A failing Audit must not fail the call: the gateway logs it.

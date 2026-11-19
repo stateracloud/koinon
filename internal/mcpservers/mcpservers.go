@@ -52,6 +52,8 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
+	"github.com/stateracloud/koinon/internal/mcpcredfile"
 	"github.com/stateracloud/koinon/internal/mcpsanitize"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -85,13 +87,13 @@ type Keys = catalog.Keys
 
 // Table and column of server credentials, as bound into the AAD.
 const (
-	ServersTable     = "mcp_servers"
-	CredentialColumn = "credential"
+	ServersTable     = mcpcredfile.ServersTable
+	CredentialColumn = mcpcredfile.CredentialColumn
 )
 
 // CredentialBinding is the AAD binding of a server's credential.
 func CredentialBinding(org, id pgtype.UUID) secretstore.Binding {
-	return secretstore.Binding{OrgID: org.String(), Table: ServersTable, RowID: id.String(), Column: CredentialColumn}
+	return mcpcredfile.Binding(org.String(), id.String())
 }
 
 // Sources.
@@ -270,6 +272,8 @@ type Service struct {
 	policy    catalog.URLPolicy
 	preflight Preflight
 	hold      *restorehold.Guard
+	// recipient, when set, is the public key MCP credentials are sealed to (see WithRecipient).
+	recipient RecipientSource
 	// noTargetTLS is set when the configured gateway cannot render a per-target TLS policy.
 	noTargetTLS bool
 }
@@ -580,9 +584,37 @@ func parseID(s string) (pgtype.UUID, error) {
 	return id, nil
 }
 
+// RecipientSource gives the public key of the gateway to seal MCP credentials to (ADR 0097 decision 12):
+// the newest `active` one. *gatewaykeys.PublicKeys is one. It holds no private key.
+type RecipientSource interface {
+	Current() (secretstore.RecipientPublicKey, error)
+}
+
+// WithRecipient makes the service seal a credential to the gateway's key (envelope v2) when the source has an
+// `active` key, and as v1 (the KEK) when it has none. The caller sets it only when every MCP path of the
+// install is koinon-gateway (ADR 0097 decision 12.5 step 0): agentgateway reads plaintext and cannot read v2.
+func (s *Service) WithRecipient(r RecipientSource) *Service {
+	s.recipient = r
+	return s
+}
+
 func (s *Service) seal(org, id pgtype.UUID, value string) ([]byte, error) {
 	if value == "" {
 		return nil, nil
+	}
+	if s.recipient != nil {
+		pub, err := s.recipient.Current()
+		switch {
+		case err == nil:
+			env, err := secretstore.SealV2(pub, CredentialBinding(org, id), []byte(value))
+			if err != nil {
+				return nil, fmt.Errorf("mcpservers: seal credential to the gateway key: %w", err)
+			}
+			return json.Marshal(env)
+		case !errors.Is(err, gatewaykeys.ErrNoActiveKey):
+			// A read that failed is not "no key": a silent v1 would put the plaintext back in the reconciler.
+			return nil, fmt.Errorf("mcpservers: gateway key: %w", err)
+		}
 	}
 	if s.keys == nil {
 		return nil, ErrNoKeys
@@ -613,6 +645,20 @@ func OpenCredential(keys catalog.Opener, org, id pgtype.UUID, envelope []byte) (
 	}
 	defer clear(plain)
 	return string(plain), nil
+}
+
+// ParseSealedCredential reads a stored v2 credential envelope for the reconciler's copy: it checks the shape and
+// opens nothing. The reconciler holds no gateway key and cannot open it. A value that is no v2 envelope, or
+// that names no valid key ID, is refused here, so a broken value is not copied into the Secret.
+func ParseSealedCredential(envelope []byte) (secretstore.EnvelopeV2, error) {
+	var env secretstore.EnvelopeV2
+	if err := json.Unmarshal(envelope, &env); err != nil || env.Format != secretstore.FormatV2 {
+		return env, invalid("server credential envelope is unreadable")
+	}
+	if !secretstore.ValidRecipientKeyID(env.RecipientKeyID) || len(env.Enc) == 0 || len(env.SealedDEK) == 0 || len(env.Ciphertext) == 0 {
+		return env, invalid("server credential envelope is not a valid v2 envelope")
+	}
+	return env, nil
 }
 
 // Input creates a server.

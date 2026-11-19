@@ -57,15 +57,15 @@ var _ = Describe("the Postgres audit writer", func() {
 		Expect(w.Record(ctx, mcpgateway.AuditRow{
 			Agent: gateway.AgentRef{Org: "acme", Name: "reader"}, Target: "alpha", Tool: "read_item",
 			Outcome: mcpgateway.OutcomeRefusedGuard, Verdict: "withheld by the leak guard", CredKind: "static",
-			Duration: 42 * time.Millisecond,
+			RecipientKeyID: "gk-0123456789abcdef", Duration: 42 * time.Millisecond,
 		})).To(Succeed())
 
-		var org, agent, target, tool, outcome, verdict, kind string
+		var org, agent, target, tool, outcome, verdict, kind, keyID string
 		var ms int32
-		Expect(admin.QueryRow(ctx, `SELECT org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms FROM mcp_call_log`).
-			Scan(&org, &agent, &target, &tool, &outcome, &verdict, &kind, &ms)).To(Succeed())
-		Expect([]any{org, agent, target, tool, outcome, verdict, kind, ms}).To(Equal(
-			[]any{"acme", "reader", "alpha", "read_item", "refused_guard", "withheld by the leak guard", "static", int32(42)}))
+		Expect(admin.QueryRow(ctx, `SELECT org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms, recipient_key_id FROM mcp_call_log`).
+			Scan(&org, &agent, &target, &tool, &outcome, &verdict, &kind, &ms, &keyID)).To(Succeed())
+		Expect([]any{org, agent, target, tool, outcome, verdict, kind, ms, keyID}).To(Equal(
+			[]any{"acme", "reader", "alpha", "read_item", "refused_guard", "withheld by the leak guard", "static", int32(42), "gk-0123456789abcdef"}))
 
 		var cols []string
 		rows, err := admin.Query(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name = 'mcp_call_log'`)
@@ -76,7 +76,7 @@ var _ = Describe("the Postgres audit writer", func() {
 			Expect(rows.Scan(&c)).To(Succeed())
 			cols = append(cols, c)
 		}
-		Expect(cols).To(ConsistOf("id", "created_at", "org_slug", "agent", "target", "tool", "outcome", "verdict", "credential_kind", "duration_ms"),
+		Expect(cols).To(ConsistOf("id", "created_at", "org_slug", "agent", "target", "tool", "outcome", "verdict", "credential_kind", "duration_ms", "recipient_key_id"),
 			"the log has no column for an argument, a result or a token")
 	})
 

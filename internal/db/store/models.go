@@ -2338,6 +2338,7 @@ type McpCallLog struct {
 	Verdict        string
 	CredentialKind string
 	DurationMs     int32
+	RecipientKeyID string
 }
 
 type McpServer struct {

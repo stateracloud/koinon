@@ -40,5 +40,5 @@ WHERE half = @half AND revision >= @revision AND copy_id = ANY(@copy_ids::text[]
 
 -- name: InsertMCPCallLog :exec
 -- One row per tool call the gateway served. No arguments, results or token values (ADR 0097).
-INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms)
-VALUES (@org_slug, @agent, @target, @tool, @outcome, @verdict, @credential_kind, @duration_ms);
+INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, recipient_key_id, duration_ms)
+VALUES (@org_slug, @agent, @target, @tool, @outcome, @verdict, @credential_kind, @recipient_key_id, @duration_ms);

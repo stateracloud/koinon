@@ -3,6 +3,7 @@
 package reconciler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,10 +29,12 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -134,6 +137,69 @@ var _ = Describe("Org MCP servers", func() {
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(sec.Data[strings.TrimPrefix(t.CredentialFile, "/secrets/providers/")])).To(Equal("not-a-real-token"))
+	})
+
+	It("copies a v2 credential as ciphertext and never opens it: no gateway key, no plaintext in the Secret, the target or the log (ADR 0097 decision 12, spec 2)", func(ctx SpecContext) {
+		const plaintext = "koinon_test_not-a-real-token-v2"
+		gk, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
+		Expect(err).NotTo(HaveOccurred())
+		// The database refuses a v2 credential whose key is not active: register the key, and retire it after.
+		Expect(gatewaykeys.Insert(ctx, pool, gk.Public())).To(Succeed())
+		_, err = gatewaykeys.Move(ctx, pool, gk.Public().ID(), gatewaykeys.Pending, gatewaykeys.Active)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) {
+			id := gk.Public().ID()
+			_, _ = gatewaykeys.Move(ctx, pool, id, gatewaykeys.Active, gatewaykeys.Retiring)
+			_, _ = gatewaykeys.Move(ctx, pool, id, gatewaykeys.Retiring, gatewaykeys.Retired)
+		})
+		sealing := mcpservers.New(pool, ring, nil).WithURLPolicy(testPolicy).WithRecipient(activeKey{gk.Public()})
+		actor := audit.System("koinon-test:spec")
+		s, err := sealing.Create(ctx, org, actor, user, mcpservers.Input{
+			Name: "sealed", URL: "https://mcp.example.com/sealed", CredentialHeader: "X-Api-Key", CredentialValue: plaintext,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) { _ = sealing.Delete(ctx, org, actor, s.ID) })
+		var sid pgtype.UUID
+		Expect(sid.Scan(s.ID)).To(Succeed())
+		var stored []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, sid).Scan(&stored)).To(Succeed())
+		Expect(stored).NotTo(ContainSubstring(plaintext))
+		Expect(secretstore.EnvelopeFormat(stored)).To(Equal(secretstore.FormatV2))
+
+		// The reconciler's keyring is the ordinary KEK ring: it holds no gateway key, so it could not open the value.
+		var log bytes.Buffer
+		osg := fakegateway.New()
+		cc, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+		rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Keys:           ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
+			Harnesses: map[string]reconciler.Harness{
+				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
+			},
+			Logger: slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rr.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		t, ok := targetOf(st, slug+"-sealed")
+		Expect(ok).To(BeTrue())
+		var orgText string
+		Expect(pool.QueryRow(ctx, `SELECT $1::uuid::text`, org).Scan(&orgText)).To(Succeed())
+		Expect(t.CredentialFile).To(HavePrefix("/secrets/providers/mcpv2-" + orgText + "-" + s.ID + "-"))
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sec.Data[strings.TrimPrefix(t.CredentialFile, "/secrets/providers/")]).To(Equal(stored), "the Secret holds the database bytes")
+		for k, v := range sec.Data {
+			Expect(string(v)).NotTo(ContainSubstring(plaintext), k)
+		}
+		Expect(fmt.Sprintf("%+v", st)).NotTo(ContainSubstring(plaintext))
+		Expect(log.String()).NotTo(ContainSubstring(plaintext))
 	})
 
 	It("writes MCP credentials to their own Secret, away from the provider keys, when one is configured (#278 S4b)", func(ctx SpecContext) {
@@ -631,3 +697,10 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(n).To(Equal(1))
 	})
 })
+
+// activeKey is a fixed gateway public key, the source koinon-api seals to.
+type activeKey struct {
+	pub secretstore.RecipientPublicKey
+}
+
+func (a activeKey) Current() (secretstore.RecipientPublicKey, error) { return a.pub, nil }

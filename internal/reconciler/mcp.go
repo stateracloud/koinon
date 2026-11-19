@@ -15,8 +15,10 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpcredfile"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Remote MCP servers (plan item MC1, ADR 0057). Each enabled server of an org becomes a gateway
@@ -83,20 +85,32 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 			}
 			// Every check runs before any file is written: a server that is left out must leave no
 			// credential (or CA bundle) in the Secret.
-			var credential string
+			var credential []byte
 			if len(row.Credential) > 0 {
-				cred, err := mcpservers.OpenCredential(r.cfg.Keys, org.ID, row.ID, row.Credential)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its credential cannot be opened: %w", org.Slug, row.Name, err))
-					continue
-				}
 				if err := mcpservers.CheckCredentialLoader(row.CredentialHeader.String, row.CredentialPrefix); err != nil {
 					errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
 					continue
 				}
-				credential = cred
-				sum := sha256.Sum256(row.Credential)
-				s.File = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
+				format, err := secretstore.EnvelopeFormat(row.Credential)
+				switch {
+				case err == nil && format == secretstore.FormatV2:
+					// Ciphertext (ADR 0097 decision 12): the reconciler copies the stored bytes and never opens
+					// them. Only the gateway holds the key. The check below reads the envelope's fields and no key.
+					if _, err := mcpservers.ParseSealedCredential(row.Credential); err != nil {
+						errs = append(errs, fmt.Errorf("MCP server %s/%s not served: %w", org.Slug, row.Name, err))
+						continue
+					}
+					credential = row.Credential
+					s.File = mcpcredfile.SealedName(org.ID, row.ID, row.Credential)
+				default:
+					cred, err := mcpservers.OpenCredential(r.cfg.Keys, org.ID, row.ID, row.Credential)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its credential cannot be opened: %w", org.Slug, row.Name, err))
+						continue
+					}
+					credential = []byte(cred)
+					s.File = mcpcredfile.PlainName(row.ID, row.Credential)
+				}
 				s.CredentialHeader, s.CredentialPrefix = row.CredentialHeader.String, row.CredentialPrefix
 			}
 			if row.CaBundle != "" || row.InsecureSkipVerify {
@@ -128,7 +142,7 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				s.CAFile = "mcpca-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
 			}
 			if s.File != "" {
-				out.files[s.File] = []byte(credential)
+				out.files[s.File] = credential
 			}
 			if s.CAFile != "" {
 				out.files[s.CAFile] = []byte(row.CaBundle)

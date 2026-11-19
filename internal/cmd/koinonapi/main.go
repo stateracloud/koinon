@@ -85,6 +85,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/orcatalog"
@@ -217,7 +218,10 @@ type config struct {
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
 	// gatewayMode is the chart's gateway.mode (standalone or kubernetes).
-	gatewayMode          project.GatewayMode
+	gatewayMode project.GatewayMode
+	// sealMCPv2 is set by the chart when koinon-gateway serves every MCP path (gateway.mcp.driver=koinon): then
+	// a stored MCP credential is sealed to the gateway's key when one is active (ADR 0097 decision 12.5 step 0).
+	sealMCPv2            bool
 	egressAllowedHosts   string
 	providerAllowedHosts string
 }
@@ -342,6 +346,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener as koinon-api reaches it (for example http://koinon-gateway.koinon.svc:8080), for the provider echo check; empty disables the check")
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
+	fs.BoolVar(&c.sealMCPv2, "gateway-mcp-seal-v2", false,
+		"seal a stored MCP credential to the gateway's public key (envelope v2) when a key is active, and as v1 otherwise; set only when koinon-gateway serves every MCP path, because agentgateway reads the credential as plaintext")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
@@ -724,6 +730,11 @@ func serve(ctx context.Context, cfg config) error {
 			slog.Info("moved connection secrets into the store", "count", n)
 		}
 	}
+	// The driver gate (ADR 0097 decision 12.5 step 0): without it koinon-api seals v1 only.
+	var mcpRecipient mcpservers.RecipientSource
+	if cfg.sealMCPv2 {
+		mcpRecipient = gatewayKeys
+	}
 	reg := metrics.NewRegistry()
 	apiMetrics := api.NewMetrics(reg)
 	asm, err := apiassembly.Assemble(ctx, apiassembly.Outside{
@@ -734,6 +745,7 @@ func serve(ctx context.Context, cfg config) error {
 		WatchPoll: cfg.watchPoll, TrustedOrigins: splitList(cfg.trustedOrigins), RestoreHold: cfg.restoreHold,
 		GuardByteCap: cfg.guardByteCap, PublicURL: cfg.publicURL, OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: cfg.oidcRedirectURL,
 		AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions,
+		MCPRecipient:            mcpRecipient,
 	}, apiassembly.Prebuilt{
 		Auth: authSvc, Hub: hub, Metrics: apiMetrics, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow,
 	})

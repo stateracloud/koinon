@@ -258,6 +258,12 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 				rows.Close()
 				return nil, fmt.Errorf("reading %s: %w", c.table, err)
 			}
+			// A v2 envelope is sealed to the gateway's key (ADR 0097 decision 12): no process that writes a trace
+			// holds the value, so none can put it in a trace, and the gateway alone can open it. It is not
+			// an unopenable value: skipping it must not stop the org's trace content.
+			if f, ferr := secretstore.EnvelopeFormat(raw); ferr == nil && f == secretstore.FormatV2 {
+				continue
+			}
 			var env secretstore.Envelope
 			if json.Unmarshal(raw, &env) != nil {
 				unopenable++
