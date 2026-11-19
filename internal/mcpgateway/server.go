@@ -149,6 +149,11 @@ func (g *Gateway) listTools(ctx context.Context, agent gateway.AgentRef) *mcp.Li
 				g.o.Logger.Warn("tools/list: target skipped", "target", name, "error", errKind(err))
 				return
 			}
+			// The text of each tool is the approved text, or it is left out (#1132).
+			got, _, ok := g.vetted(lctx, t, agent, got)
+			if !ok {
+				return
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			for _, tool := range got {
@@ -258,6 +263,19 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	}
 	row.Target, row.Tool = target, tool
 	t := s.targets[target]
+	// A replica that has not checked this target's list lately checks it now: the list may have been
+	// served by another replica, and a changed tool must not pass because this one never saw it.
+	if key := (poolKey{target: target, agent: agent}); g.g.checksToolLists() && !g.left.fresh(key, toolPinTTL) && !g.recheck(ctx, t, agent) {
+		row.Verdict = reasonToolListUnreadable
+		finish(OutcomeRefusedGuard)
+		return refusedResult(reasonToolListUnreadable)
+	}
+	// A tool that a list left out changed since an admin approved it: no call reaches the target.
+	if g.left.has(poolKey{target: target, agent: agent}, tool) {
+		row.Verdict = reasonToolChanged
+		finish(OutcomeRefusedGuard)
+		return refusedResult(reasonToolChanged)
+	}
 	if c, err := g.o.Credentials.Credential(ctx, t, agent); err == nil {
 		row.CredKind = c.Kind
 	} else {

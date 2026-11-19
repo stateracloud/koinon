@@ -64,9 +64,12 @@ type Gateway struct {
 	g    failClosed // the guard, as the gateway calls it: not loaded or panicking refuses
 	snap atomic.Pointer[snapshot]
 
-	mu    sync.Mutex
-	pool  map[poolKey]*upstream
-	drain bool
+	left leftOutSet // the tools each list left out (#1132)
+
+	mu         sync.Mutex
+	pool       map[poolKey]*upstream
+	refreshing map[poolKey]bool // a list_changed relist is running
+	drain      bool
 }
 
 // New returns a Gateway that serves nothing until ApplyMCP.

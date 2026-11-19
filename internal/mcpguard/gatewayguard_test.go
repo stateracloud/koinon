@@ -33,7 +33,12 @@ var _ = Describe("the gateway guard adapter, without a database", func() {
 			msg(mcpgateway.ToUpstream, mcpgateway.KindRequest, "tools/call"),
 			msg(mcpgateway.ToUpstream, mcpgateway.KindRequest, "initialize"),
 			msg(mcpgateway.FromUpstream, mcpgateway.KindResult, "initialize"),
-			msg(mcpgateway.FromUpstream, mcpgateway.KindResult, "tools/list"),
+			// A readable list sets no leg here: CheckToolList decides on what it carries (#1132).
+			func() mcpgateway.Message {
+				m := msg(mcpgateway.FromUpstream, mcpgateway.KindResult, "tools/list")
+				m.Raw = []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}`)
+				return m
+			}(),
 			msg(mcpgateway.FromUpstream, mcpgateway.KindResult, "ping"),
 			msg(mcpgateway.FromUpstream, mcpgateway.KindNotification, "notifications/progress"),
 			msg(mcpgateway.FromUpstream, mcpgateway.KindRequest, "ping"),
