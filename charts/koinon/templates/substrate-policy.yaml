@@ -14,9 +14,11 @@ pod's creator cannot choose.
   process started that way is outside the guest launcher's and gateway's controls). Break-glass is not
   an exemption: a cluster admin suspends the binding, which shows in the audit log and as GitOps drift.
   It is its own policy because an options object has no spec or metadata;
-- objects: WorkerPool, SandboxConfig and CSIDriverConfig are written only by the installer identities
-  (workerPolicy.installerIdentities) and by Kubernetes' namespace deletion. Rendered only when that
-  list is set.
+- objects: WorkerPool, SandboxConfig and CSIDriverConfig, and the workload kinds that make pods
+  (Deployments, ReplicaSets, DaemonSets, StatefulSets, Jobs, CronJobs), are written only by the
+  installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
+  Kubernetes' own controllers; the Substrate controller may change the metadata of its objects. Without
+  this, anyone who can write a Deployment here would get a privileged pod past the pod rules.
 A CEL error denies under failurePolicy Fail.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPolicy.enabled }}
@@ -64,6 +66,14 @@ spec:
       messageExpression: "'only the Substrate controller may change a pod spec in the Substrate namespace, not ' + request.userInfo.username"
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
       message: hostNetwork is not allowed in the Substrate namespace
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: hostPID and hostIPC are not allowed in the Substrate namespace
+    - expression: "!has(object.metadata.annotations) || object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))"
+      message: io.katacontainers.* annotations are not allowed in the Substrate namespace
+    - expression: >-
+        request.operation != 'UPDATE' || variables.trusted ||
+        (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})
+      message: only the Substrate controller may change the labels of a pod in the Substrate namespace
     - expression: {{ printf "variables.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)" (toJson $w.allowedHostPaths) | quote }}
       message: {{ printf "hostPath is allowed only for %s in the Substrate namespace" (join ", " $w.allowedHostPaths) | quote }}
     - expression: "variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
@@ -115,9 +125,8 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns | quote }}
-{{- if $w.installerIdentities }}
-{{- /* Kubernetes' own controllers delete the objects with their namespace. */}}
-{{- $writers := concat $w.installerIdentities (list "system:serviceaccount:kube-system:namespace-controller" "system:serviceaccount:kube-system:generic-garbage-collector" "system:kube-controller-manager") }}
+{{- /* Kubernetes' own controllers write the workload objects and delete everything with the namespace. */}}
+{{- $kube := concat $w.platformControllers (list "system:serviceaccount:kube-system:deployment-controller" "system:serviceaccount:kube-system:namespace-controller" "system:serviceaccount:kube-system:generic-garbage-collector") }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -133,8 +142,24 @@ spec:
         apiVersions: ["*"]
         operations: [CREATE, UPDATE, DELETE]
         resources: [workerpools, sandboxconfigs, csidriverconfigs]
+      - apiGroups: [apps]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [deployments, replicasets, daemonsets, statefulsets]
+      - apiGroups: [batch]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [jobs, cronjobs]
+  variables:
+    - name: installer
+      expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
+    - name: kube
+      expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
+    # The Substrate controller changes metadata (finalizers, annotations) of its own objects, never the spec.
+    - name: controllerMetadata
+      expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && object.spec == oldObject.spec" (toJson $controllers) | quote }}
   validations:
-    - expression: {{ printf "request.userInfo.username in %s" (toJson $writers) | quote }}
+    - expression: "variables.installer || variables.kube || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -150,5 +175,4 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns | quote }}
-{{- end }}
 {{- end }}

@@ -2,7 +2,7 @@
 {{- /*
 NetworkPolicy for Substrate's namespace (execution.driver=substrate; ADR 0120 section 2, issue 1089).
 Standard networking.k8s.io/v1 only (no CNI-specific resource). The pods of the namespace may talk to
-each other, resolve names, and reach Koinon's own namespace (the gateway and ateapi's callers); the
+each other, resolve names, and reach Koinon's gateway and API pods; the
 Kubernetes API server only when workerNetworkPolicy.apiServerCIDRs names it; nothing else leaves the
 namespace unless workerNetworkPolicy.extraEgress says so. Ingress comes from the namespace itself and
 from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7
@@ -32,9 +32,15 @@ spec:
   egress:
     - to:
         - podSelector: {}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database.
+        {{- range (list "gateway" "api") }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+              kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list $ .) | nindent 14 }}
+        {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

@@ -35,10 +35,24 @@ has "hostPath is limited to the documented set" 'v.hostPath.path in \[\\"/dev/kv
 has "ephemeral containers are denied" "request.subResource != 'ephemeralcontainers'" "${wsub[@]}" "${pol[@]}"
 has "exec, attach, port-forward and proxy are denied" 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy\]' "${wsub[@]}" "${pol[@]}"
 has "the validation actions deny" 'validationActions: \["Deny"\]' "${wsub[@]}" "${pol[@]}"
-has "the digest exemption is the platform controllers by default" 'name: tagAllowed' "${wsub[@]}" "${pol[@]}"
-lacks "no object policy without installer identities" 'worker-objects' "${wsub[@]}"
-has "worker objects are guarded when installer identities are set" 'name: koinon-koinon-worker-objects$' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
-has "the object guard covers the three kinds" 'resources: \[workerpools, sandboxconfigs, csidriverconfigs\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
+tag=$(render "${wsub[@]}" "${pol[@]}")
+grep -Eq -- 'name: tagAllowed' <<<"$tag" || fail "the digest exemption variable is missing"
+tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$tag" | tail -1)
+grep -Fq 'replicaset-controller' <<<"$tagline" || fail "the digest exemption must default to the platform controllers"
+if grep -Fq 'ate-controller' <<<"$tagline"; then fail "the Substrate controller must not be exempt from the digest rule by default"; fi
+tagline=$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}" | grep -A1 -E 'name: tagAllowed' | tail -1)
+grep -Fq 'system:serviceaccount:x:y' <<<"$tagline" || fail "digestExemptIdentities must set the exemption"
+if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "digestExemptIdentities must replace the default list"; fi
+has "hostPID and hostIPC are denied" 'hostPID and hostIPC are not allowed' "${wsub[@]}" "${pol[@]}"
+has "kata annotations are denied" 'io.katacontainers' "${wsub[@]}" "${pol[@]}"
+has "untrusted identities cannot relabel a worker pod" 'may change the labels of a pod' "${wsub[@]}" "${pol[@]}"
+has "the object guard is on by default" 'name: koinon-koinon-worker-objects$' "${wsub[@]}" "${pol[@]}"
+has "the object guard covers the three Substrate kinds" 'resources: \[workerpools, sandboxconfigs, csidriverconfigs\]' "${wsub[@]}" "${pol[@]}"
+has "the object guard covers the workload kinds" 'resources: \[deployments, replicasets, daemonsets, statefulsets\]' "${wsub[@]}" "${pol[@]}"
+has "the object guard covers jobs and cronjobs" 'resources: \[jobs, cronjobs\]' "${wsub[@]}" "${pol[@]}"
+has "the installer group defaults to system:masters" 'g in \[\\"system:masters\\"\]' "${wsub[@]}" "${pol[@]}"
+has "installer identities are configurable" 'system:admin' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
+has "the controller may change metadata of Substrate objects only" "request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && object.spec == oldObject.spec" "${wsub[@]}" "${pol[@]}"
 lacks "the policies are off when disabled" 'worker-pods|worker-connect' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
 if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.validationActions={Nope}' >/dev/null 2>&1; then fail "an unknown validation action must not render"; fi
 
@@ -47,6 +61,9 @@ has "worker NetworkPolicy in the Substrate namespace" 'namespace: "ate-system"' 
 has "worker NetworkPolicy covers ingress and egress" 'policyTypes: \[Ingress, Egress\]' "${wsub[@]}" "${np[@]}"
 has "worker NetworkPolicy allows DNS" 'port: 53' "${wsub[@]}" "${np[@]}"
 has "worker NetworkPolicy admits Koinon's namespace" 'kubernetes.io/metadata.name: "koinon"' "${wsub[@]}" "${np[@]}"
+has "worker egress to Koinon names the gateway pods" 'app.kubernetes.io/component: gateway' "${wsub[@]}" "${np[@]}"
+has "worker egress to Koinon names the API pods" 'app.kubernetes.io/component: api' "${wsub[@]}" "${np[@]}"
+lacks "worker egress does not name the database" 'postgres|cnpg' "${wsub[@]}" "${np[@]}"
 lacks "worker NetworkPolicy has no public egress" '0\.0\.0\.0/0|::/0' "${wsub[@]}" "${np[@]}"
 lacks "no API server rule without CIDRs" 'ipBlock' "${wsub[@]}" "${np[@]}"
 has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={10.0.0.1/32}' "${np[@]}"

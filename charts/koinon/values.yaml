@@ -706,7 +706,7 @@ execution:
         - system:kube-controller-manager
       # Identities whose pods may use a tag instead of a digest. Default: platformControllers.
       # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
-      # then set this to [] (the chart check pins the default).
+      # then set this to [] (the chart check pins the default). Tracking issue: needs main (to be opened).
       digestExemptIdentities: []
       # hostPath volumes allowed in the namespace: the device nodes of the vm tier (ADR 0075). Add
       # the credential-provider paths only when a platform needs them (GKE).
@@ -715,10 +715,12 @@ execution:
         - /dev/net/tun
         - /dev/vhost-vsock
         - /dev/vhost-net
-      # Identities that may write WorkerPool, SandboxConfig and CSIDriverConfig objects (the
-      # installer: ate-setup and `helm upgrade`). Empty renders no guard for those kinds: set it on
-      # every real install.
+      # Who may write WorkerPool, SandboxConfig, CSIDriverConfig and the workload kinds (Deployment,
+      # ReplicaSet, DaemonSet, StatefulSet, Job, CronJob) in the namespace: the installer (ate-setup and
+      # `helm upgrade`), by user name or by group. The default group is the cluster admins' own. Narrow
+      # it to the installer's identity on a real install.
       installerIdentities: []
+      installerGroups: [system:masters]
     # NetworkPolicy of the Substrate namespace: default-deny for pods that no rule below names, and
     # only the allowed peers. No CNI-specific feature.
     workerNetworkPolicy:

@@ -643,7 +643,8 @@
                 "platformControllers": {"type": "array", "items": {"type": "string"}},
                 "digestExemptIdentities": {"type": "array", "items": {"type": "string"}},
                 "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
-                "installerIdentities": {"type": "array", "items": {"type": "string"}}
+                "installerIdentities": {"type": "array", "items": {"type": "string"}},
+                "installerGroups": {"type": "array", "items": {"type": "string"}}
               }
             },
             "workerNetworkPolicy": {
