@@ -32,6 +32,7 @@ type actor struct {
 
 	// the guest: it survives a suspend, as the memory of a snapshotted VM does
 	procs   map[string]*fproc
+	started [][]string // every command the guest was asked to start, as sent
 	files   map[string][]byte
 	nextPID int
 
