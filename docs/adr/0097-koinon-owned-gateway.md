@@ -672,7 +672,7 @@ envelopes stay at v1 until then.
   (`MLKEM768-X25519`, `0x647a`, in the same package) with no format change. Checked in slice 1 (go1.27.4):
   Go's FIPS 140-only mode refuses X25519 ("use of X25519 is not allowed in FIPS 140-only mode"). The code
   has a second accepted suite, DHKEM(P-256, HKDF-SHA256) (`hpke-0010-0001-0002`), and
-  `DefaultRecipientSuite` returns it in that mode. A key keeps its suite for life.
+  `DefaultRecipientSuite` returns it in that mode. The suite of a key does not change.
 - **One DEK per value, as today.** The payload is sealed with AES-256-GCM under a fresh random 32-byte
   DEK, exactly as in v1. The DEK is the HPKE plaintext. The payload code does not change.
 
@@ -719,7 +719,7 @@ RBAC text).
 
 - The gateway's private key (32 bytes for X25519) is wrapped by the existing `secretstore.Wrapper`
   (`local`, `openbao`, `awskms`). It is stored in the same form as a wrapped KEK (`StoredKEK`: backend,
-  key ID, wrapped bytes, install ID). Install binding and `Probe` are reused. Slice 1 adds a purpose tag to the AAD (`kekAAD`, `kekInstallAAD`), so a wrapped gateway key can never be read as a KEK. The gateway builds its own `Wrappers` value with its own wrapping key, because one `Wrappers` has one primary key. The install binding needs `install_identity` and `kek_bound_only`: the gateway role and the re-seal role get SELECT on both (slice 2).
+  key ID, wrapped bytes, install ID). Install binding and `Probe` are reused. Slice 1 adds a separate AAD with its own purpose tag (`recipientKeyAAD`). `kekAAD` and `kekInstallAAD` do not change (wrapped KEKs are stored). So a wrapped gateway key can never be read as a KEK. The gateway builds its own `Wrappers` value with its own wrapping key, because one `Wrappers` has one primary key. The install binding needs `install_identity` and `kek_bound_only`: the gateway role and the re-seal role get SELECT on both (slice 2).
 - The wrapping key is a **separate** KMS key: an OpenBao transit key (default `koinon-gateway`) or an AWS
   KMS key, not the KEK's key. Its policy lets only the gateway's identity decrypt: the gateway's
   Kubernetes auth role in OpenBao, the gateway's IAM role in the AWS key policy. koinon-api and the

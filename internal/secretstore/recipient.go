@@ -13,7 +13,6 @@ package secretstore
 
 import (
 	"context"
-	"crypto/ecdh"
 	"crypto/fips140"
 	"crypto/hpke"
 	"crypto/rand"
@@ -51,16 +50,25 @@ func DefaultRecipientSuite() string {
 
 // suiteInfo is an accepted suite.
 type suiteInfo struct {
-	kemID uint16
-	curve ecdh.Curve
+	kemID, kdfID, aeadID uint16
 }
 
 var suites = map[string]suiteInfo{
-	SuiteX25519: {kemID: 0x0020, curve: ecdh.X25519()},
-	SuiteP256:   {kemID: 0x0010, curve: ecdh.P256()},
+	SuiteX25519: {kemID: 0x0020, kdfID: 0x0001, aeadID: 0x0002},
+	SuiteP256:   {kemID: 0x0010, kdfID: 0x0001, aeadID: 0x0002},
 }
 
 func (s suiteInfo) kem() (hpke.KEM, error) { return hpke.NewKEM(s.kemID) }
+
+// kdfAEAD returns the KDF and the AEAD of the suite.
+func (s suiteInfo) kdfAEAD() (hpke.KDF, hpke.AEAD, error) {
+	kdf, err := hpke.NewKDF(s.kdfID)
+	if err != nil {
+		return nil, nil, err
+	}
+	aead, err := hpke.NewAEAD(s.aeadID)
+	return kdf, aead, err
+}
 
 func lookupSuite(name string) (suiteInfo, error) {
 	s, ok := suites[name]
@@ -185,7 +193,15 @@ func SealV2(to RecipientPublicKey, b Binding, plaintext []byte) (EnvelopeV2, err
 	env.Ciphertext = payload.Seal(nil, nonce, plaintext, b.aadV2("payload", to.id))
 
 	dekData := b.aadV2("dek", to.id)
-	enc, sender, err := hpke.NewSender(to.pub, hpke.HKDFSHA256(), hpke.AES256GCM(), dekData)
+	si, err := lookupSuite(to.suite)
+	if err != nil {
+		return EnvelopeV2{}, err
+	}
+	kdf, aead, err := si.kdfAEAD()
+	if err != nil {
+		return EnvelopeV2{}, err
+	}
+	enc, sender, err := hpke.NewSender(to.pub, kdf, aead, dekData)
 	if err != nil {
 		return EnvelopeV2{}, fmt.Errorf("secretstore: seal to %s: %w", to.id, err)
 	}
@@ -264,14 +280,19 @@ func (k *RecipientKey) Open(b Binding, env EnvelopeV2) ([]byte, error) {
 	if env.Format != FormatV2 || env.Alg != AlgAES256GCM {
 		return nil, fmt.Errorf("%w %d / %q", ErrUnsupportedFormat, env.Format, env.Alg)
 	}
-	if _, err := lookupSuite(env.Recipient); err != nil {
+	si, err := lookupSuite(env.Recipient)
+	if err != nil {
 		return nil, err
 	}
 	if env.RecipientKeyID != k.pub.id || env.Recipient != k.suite {
 		return nil, fmt.Errorf("%w %q", ErrUnknownRecipientKey, env.RecipientKeyID)
 	}
 	dekData := b.aadV2("dek", k.pub.id)
-	r, err := hpke.NewRecipient(env.Enc, k.priv, hpke.HKDFSHA256(), hpke.AES256GCM(), dekData)
+	kdf, aead, err := si.kdfAEAD()
+	if err != nil {
+		return nil, ErrOpen
+	}
+	r, err := hpke.NewRecipient(env.Enc, k.priv, kdf, aead, dekData)
 	if err != nil {
 		return nil, ErrOpen
 	}
@@ -333,6 +354,9 @@ func (r *RecipientKeyring) Open(b Binding, env EnvelopeV2) ([]byte, error) {
 	if !ok {
 		if env.Format != FormatV2 || env.Alg != AlgAES256GCM {
 			return nil, fmt.Errorf("%w %d / %q", ErrUnsupportedFormat, env.Format, env.Alg)
+		}
+		if _, err := lookupSuite(env.Recipient); err != nil {
+			return nil, err
 		}
 		return nil, fmt.Errorf("%w %q", ErrUnknownRecipientKey, env.RecipientKeyID)
 	}

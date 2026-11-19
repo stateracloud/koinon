@@ -5,10 +5,14 @@ package secretstore_test
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -196,6 +200,10 @@ var _ = Describe("envelope v2 (sealed to a recipient key)", func() {
 			env.Format = 1
 			_, err = ring.Open(recipientBinding, env)
 			Expect(err).To(MatchError(secretstore.ErrUnsupportedFormat))
+			env.Format = secretstore.FormatV2
+			env.Recipient = "hpke-647a-0001-0002"
+			_, err = ring.Open(recipientBinding, env)
+			Expect(err).To(MatchError(secretstore.ErrUnsupportedFormat), "an unknown suite is a format error, not an unknown key")
 		})
 	})
 
@@ -269,6 +277,22 @@ var _ = Describe("envelope v2 (sealed to a recipient key)", func() {
 			Expect(err).To(MatchError(secretstore.ErrOpen))
 		})
 
+		It("refuses a wrapped key whose pair is not the ID it is loaded under (local backend: the only guard)", func() {
+			ws, err := secretstore.NewWrappers(secretstore.StaticBoundOnly(secretstore.BoundOnly{}), secretstore.Local{})
+			Expect(err).NotTo(HaveOccurred())
+			s, err := ws.WrapRecipientKey(ctx, key)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = ws.UnwrapRecipientKey(ctx, secretstore.SuiteX25519, "gk-0000000000000000", s)
+			Expect(err).To(MatchError(secretstore.ErrRecipientKeyID))
+		})
+
+		It("is not unwrapped by a wrapper that holds only the KEK's KMS key", func() {
+			s, err := wrappers(true, &secretstoretest.FakeKMS{Name: "koinon-gateway"}).WrapRecipientKey(ctx, key)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = wrappers(false, &secretstoretest.FakeKMS{Name: "koinon-kek"}).UnwrapRecipientKey(ctx, secretstore.SuiteX25519, key.ID(), s)
+			Expect(err).To(HaveOccurred())
+		})
+
 		It("refuses a KMS key that is not bound to an install", func() {
 			s := secretstore.StoredKEK{Backend: secretstoretest.FakeKMSBackend, KeyID: "koinon-test", Wrapped: []byte("x")}
 			_, err := wrappers(false, &secretstoretest.FakeKMS{}).UnwrapRecipientKey(ctx, secretstore.SuiteX25519, key.ID(), s)
@@ -340,5 +364,43 @@ var _ = Describe("the default recipient suite", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = k.Open(recipientBinding, env)
 		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+var _ = Describe("the suite table against the RFC 9180 vectors of the Go tree", func() {
+	It("derives the vector's key pair for each accepted suite (KEM, KDF, AEAD IDs and key encoding)", func() {
+		raw, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "src", "crypto", "hpke", "testdata", "rfc9180.json"))
+		if err != nil {
+			Skip("the Go source tree has no HPKE test vectors: " + err.Error())
+		}
+		var vectors []struct {
+			Mode int    `json:"mode"`
+			KEM  int    `json:"kem_id"`
+			KDF  int    `json:"kdf_id"`
+			AEAD int    `json:"aead_id"`
+			SkRm string `json:"skRm"`
+			PkRm string `json:"pkRm"`
+		}
+		Expect(json.Unmarshal(raw, &vectors)).To(Succeed())
+		want := map[string]int{secretstore.SuiteX25519: 0, secretstore.SuiteP256: 0}
+		for _, v := range vectors {
+			for suite := range want {
+				var kem, kdf, aead int
+				_, err := fmt.Sscanf(suite, "hpke-%04x-%04x-%04x", &kem, &kdf, &aead)
+				Expect(err).NotTo(HaveOccurred())
+				if v.Mode != 0 || v.KEM != kem || v.KDF != kdf || v.AEAD != aead {
+					continue
+				}
+				sk, err := hex.DecodeString(v.SkRm)
+				Expect(err).NotTo(HaveOccurred())
+				k, err := secretstore.NewRecipientKey(suite, sk)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hex.EncodeToString(k.Public().Bytes())).To(Equal(v.PkRm), suite)
+				want[suite]++
+			}
+		}
+		for suite, n := range want {
+			Expect(n).To(BeNumerically(">", 0), "no RFC 9180 vector for %s", suite)
+		}
 	})
 })

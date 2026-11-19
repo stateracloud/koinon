@@ -23,10 +23,11 @@ import (
 // They are what releases wrote to Secrets and to Postgres, so a change that makes a spec here fail
 // is a break of stored data, not a test to update.
 //
-// The seven stored formats:
+// The eight stored formats:
 //
 //	envelope_v1.json      a sealed value (Envelope, fmt 1), the JSON in an encrypted column
 //	envelope_v2.json      a value sealed to a recipient key (EnvelopeV2, fmt 2; ADR 0097 decision 12)
+//	envelope_v2_p256.json the same for the P-256 suite (the FIPS 140-only default)
 //	kek_local.base64      a local KEK in the KEK Secret: the base64 of 32 bytes
 //	kek_local.hex         a local KEK as 64 hex characters (read, never written)
 //	kek_wrapped_v1.json   a KMS-wrapped KEK, format 1: bound to its KEK ID
@@ -58,7 +59,7 @@ var (
 )
 
 // goldenFiles is every golden file name, for the check that testdata/ holds no other.
-var goldenFiles = []string{"envelope_v1.json", "envelope_v2.json", "kek_local.base64", "kek_local.hex", "kek_wrapped_v1.json", "kek_wrapped_v2.json", "active"}
+var goldenFiles = []string{"envelope_v1.json", "envelope_v2.json", "envelope_v2_p256.json", "kek_local.base64", "kek_local.hex", "kek_wrapped_v1.json", "kek_wrapped_v2.json", "active"}
 
 // lp is the length-prefixed encoding of the associated data, written again here on purpose: the
 // spec pins the bytes the code authenticates, so a change of its encoding cannot go unnoticed.
@@ -104,6 +105,14 @@ func writeGolden(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	put("envelope_v2.json", append(raw2, '\n'))
 
+	pkey, err := secretstore.NewRecipientKey(secretstore.SuiteP256, goldenRecipientSeed)
+	Expect(err).NotTo(HaveOccurred())
+	env3, err := secretstore.SealV2(pkey.Public(), goldenBinding, []byte(goldenPlaintext))
+	Expect(err).NotTo(HaveOccurred())
+	raw3, err := json.Marshal(env3)
+	Expect(err).NotTo(HaveOccurred())
+	put("envelope_v2_p256.json", append(raw3, '\n'))
+
 	put("kek_local.base64", append(secretstore.EncodeKey(goldenKEK), '\n'))
 	put("kek_local.hex", []byte(hex.EncodeToString(goldenKEK)+"\n"))
 
@@ -130,7 +139,7 @@ var _ = Describe("stored formats (golden files in testdata/)", func() {
 		}
 	})
 
-	It("holds exactly the seven golden files", func() {
+	It("holds exactly the eight golden files", func() {
 		ents, err := os.ReadDir("testdata")
 		Expect(err).NotTo(HaveOccurred())
 		var names []string
@@ -198,6 +207,19 @@ var _ = Describe("stored formats (golden files in testdata/)", func() {
 		var v1 secretstore.Envelope
 		Expect(json.Unmarshal(raw, &v1)).To(Succeed())
 		Expect(secretstore.UnsupportedFormat(v1)).To(BeTrue())
+	})
+
+	It("opens the P-256 value (envelope, fmt 2) and keeps its key ID", func() {
+		raw := readGolden("envelope_v2_p256.json")
+		key, err := secretstore.NewRecipientKey(secretstore.SuiteP256, goldenRecipientSeed)
+		Expect(err).NotTo(HaveOccurred())
+		var env secretstore.EnvelopeV2
+		Expect(json.Unmarshal(raw, &env)).To(Succeed())
+		Expect(env.Recipient).To(Equal(secretstore.SuiteP256))
+		Expect(env.RecipientKeyID).To(Equal(key.ID()))
+		got, err := key.Open(goldenBinding, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(got)).To(Equal(goldenPlaintext))
 	})
 
 	It("reads a local KEK as base64 and as hex", func() {
