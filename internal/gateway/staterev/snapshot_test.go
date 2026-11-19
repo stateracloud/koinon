@@ -133,6 +133,10 @@ var _ = Describe("secret material", func() {
 	reviewedLeaves := []string{
 		"Keys[].Agent.Name", "Keys[].Agent.Org", "Keys[].Hash", "Keys[].ID",
 		"Limits{}.Amount", "Limits{}.Generation", "Limits{}.Unit", "Limits{}.Window", "Limits{}~Name", "Limits{}~Org",
+		"MCP[].Builtin", "MCP[].HandleKeyFile",
+		"MCP[].RemoteAgents[].Agents[]", "MCP[].RemoteAgents[].CAFile", "MCP[].RemoteAgents[].CardHash", "MCP[].RemoteAgents[].CardURL",
+		"MCP[].RemoteAgents[].CredentialFile", "MCP[].RemoteAgents[].CredentialHeader", "MCP[].RemoteAgents[].CredentialPrefix",
+		"MCP[].RemoteAgents[].ID", "MCP[].RemoteAgents[].InsecureSkipVerify", "MCP[].RemoteAgents[].Name",
 		"MCP[].CAFile", "MCP[].CredentialFile", "MCP[].CredentialHeader", "MCP[].CredentialPrefix", "MCP[].InsecureSkipVerify", "MCP[].Name", "MCP[].Org", "MCP[].SSE", "MCP[].URL",
 		"Models{}[]", "Models{}~Name", "Models{}~Org",
 		"Providers[].AnthropicWorkspaceID", "Providers[].APIKeyFile", "Providers[].BaseURL",

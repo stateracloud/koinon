@@ -107,13 +107,13 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		g.mu.Unlock()
 		return nil, errDraining
 	}
-	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg == t && u.acquire() {
+	if u, ok := g.pool[key]; ok && !u.idle(g.o.IdleTTL) && !u.gt.dead() && u.cfg.Same(t) && u.acquire() {
 		g.mu.Unlock()
 		return u, nil
 	}
 	// A request that carries an old snapshot must not evict the session of the current config, nor
 	// connect to a target an apply changed or removed.
-	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || !now.Same(t) {
 		g.mu.Unlock()
 		return nil, errConfigChanged
 	}
@@ -135,13 +135,13 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 		return nil, errDraining
 	}
 	u.refs = 1
-	if now, ok := g.snap.Load().targets[t.Name]; !ok || now != t {
+	if now, ok := g.snap.Load().targets[t.Name]; !ok || !now.Same(t) {
 		// The config changed while this session connected. Serve this one call on it, never pool it.
 		u.retired = true
 		g.mu.Unlock()
 		return u, nil
 	}
-	if cur, ok := g.pool[key]; ok && cur.cfg == t && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
+	if cur, ok := g.pool[key]; ok && cur.cfg.Same(t) && !cur.gt.dead() && !cur.idle(g.o.IdleTTL) && cur.acquire() { // another request connected first
 		g.mu.Unlock()
 		u.refs, u.retired = 0, true
 		u.retire()
@@ -320,7 +320,7 @@ func (g *Gateway) evictChanged(old, cur *snapshot) {
 	var gone []*upstream
 	var changed []string
 	for k, u := range g.pool {
-		if t, ok := cur.targets[k.target]; !ok || t != u.cfg {
+		if t, ok := cur.targets[k.target]; !ok || !t.Same(u.cfg) {
 			gone = append(gone, u)
 			changed = append(changed, k.target)
 			delete(g.pool, k)

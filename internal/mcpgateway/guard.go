@@ -221,6 +221,7 @@ const (
 	dropDuplicateName        = "duplicate_name"
 	dropNoURL                = "no_url"
 	dropOrgNeedsGuard        = "org_needs_guard"
+	dropBuiltinUnsupported   = "builtin_unsupported"
 )
 
 // Metrics are the gateway's Prometheus counters. Every label has a fixed set of values (ADR 0023).
@@ -262,7 +263,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, r := range []string{guardNotLoaded, guardPanic} {
 		m.GuardFailures.WithLabelValues(r)
 	}
-	for _, r := range []string{dropCredentialNeedsHTTPS, dropInvalidName, dropDuplicateName, dropNoURL, dropOrgNeedsGuard} {
+	for _, r := range []string{dropCredentialNeedsHTTPS, dropInvalidName, dropDuplicateName, dropNoURL, dropOrgNeedsGuard, dropBuiltinUnsupported} {
 		m.Dropped.WithLabelValues(r)
 	}
 	if reg != nil {

@@ -1131,8 +1131,13 @@ type MCPTarget struct {
 	CredentialFile     string                 `protobuf:"bytes,7,opt,name=credential_file,json=credentialFile,proto3" json:"credential_file,omitempty"`
 	CaFile             string                 `protobuf:"bytes,8,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`
 	InsecureSkipVerify bool                   `protobuf:"varint,9,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123).
+	Builtin      string         `protobuf:"bytes,10,opt,name=builtin,proto3" json:"builtin,omitempty"`
+	RemoteAgents []*RemoteAgent `protobuf:"bytes,11,rep,name=remote_agents,json=remoteAgents,proto3" json:"remote_agents,omitempty"`
+	// handle_key_file holds the key that signs the task and context handles of the built-in target.
+	HandleKeyFile string `protobuf:"bytes,12,opt,name=handle_key_file,json=handleKeyFile,proto3" json:"handle_key_file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MCPTarget) Reset() {
@@ -1228,6 +1233,146 @@ func (x *MCPTarget) GetInsecureSkipVerify() bool {
 	return false
 }
 
+func (x *MCPTarget) GetBuiltin() string {
+	if x != nil {
+		return x.Builtin
+	}
+	return ""
+}
+
+func (x *MCPTarget) GetRemoteAgents() []*RemoteAgent {
+	if x != nil {
+		return x.RemoteAgents
+	}
+	return nil
+}
+
+func (x *MCPTarget) GetHandleKeyFile() string {
+	if x != nil {
+		return x.HandleKeyFile
+	}
+	return ""
+}
+
+// RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
+type RemoteAgent struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id                 string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	CardUrl            string                 `protobuf:"bytes,3,opt,name=card_url,json=cardUrl,proto3" json:"card_url,omitempty"`
+	CredentialHeader   string                 `protobuf:"bytes,4,opt,name=credential_header,json=credentialHeader,proto3" json:"credential_header,omitempty"`
+	CredentialPrefix   string                 `protobuf:"bytes,5,opt,name=credential_prefix,json=credentialPrefix,proto3" json:"credential_prefix,omitempty"`
+	CredentialFile     string                 `protobuf:"bytes,6,opt,name=credential_file,json=credentialFile,proto3" json:"credential_file,omitempty"`
+	CaFile             string                 `protobuf:"bytes,7,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`
+	InsecureSkipVerify bool                   `protobuf:"varint,8,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
+	// card_hash is the pin: the SHA-256 of the canonical agent card, in hex.
+	CardHash string `protobuf:"bytes,9,opt,name=card_hash,json=cardHash,proto3" json:"card_hash,omitempty"`
+	// agents are the names of the Koinon agents that may call this remote agent.
+	Agents        []string `protobuf:"bytes,10,rep,name=agents,proto3" json:"agents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteAgent) Reset() {
+	*x = RemoteAgent{}
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteAgent) ProtoMessage() {}
+
+func (x *RemoteAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteAgent.ProtoReflect.Descriptor instead.
+func (*RemoteAgent) Descriptor() ([]byte, []int) {
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RemoteAgent) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetCardUrl() string {
+	if x != nil {
+		return x.CardUrl
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetCredentialHeader() string {
+	if x != nil {
+		return x.CredentialHeader
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetCredentialPrefix() string {
+	if x != nil {
+		return x.CredentialPrefix
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetCredentialFile() string {
+	if x != nil {
+		return x.CredentialFile
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetCaFile() string {
+	if x != nil {
+		return x.CaFile
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetInsecureSkipVerify() bool {
+	if x != nil {
+		return x.InsecureSkipVerify
+	}
+	return false
+}
+
+func (x *RemoteAgent) GetCardHash() string {
+	if x != nil {
+		return x.CardHash
+	}
+	return ""
+}
+
+func (x *RemoteAgent) GetAgents() []string {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
 type AgentTools struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Agent         *AgentRef              `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
@@ -1238,7 +1383,7 @@ type AgentTools struct {
 
 func (x *AgentTools) Reset() {
 	*x = AgentTools{}
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[17]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1250,7 +1395,7 @@ func (x *AgentTools) String() string {
 func (*AgentTools) ProtoMessage() {}
 
 func (x *AgentTools) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[17]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1263,7 +1408,7 @@ func (x *AgentTools) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTools.ProtoReflect.Descriptor instead.
 func (*AgentTools) Descriptor() ([]byte, []int) {
-	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{17}
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AgentTools) GetAgent() *AgentRef {
@@ -1291,7 +1436,7 @@ type ToolGrant struct {
 
 func (x *ToolGrant) Reset() {
 	*x = ToolGrant{}
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[18]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1303,7 +1448,7 @@ func (x *ToolGrant) String() string {
 func (*ToolGrant) ProtoMessage() {}
 
 func (x *ToolGrant) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[18]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1461,7 @@ func (x *ToolGrant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolGrant.ProtoReflect.Descriptor instead.
 func (*ToolGrant) Descriptor() ([]byte, []int) {
-	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{18}
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ToolGrant) GetTarget() string {
@@ -1426,7 +1571,7 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x06models\x18\x02 \x03(\tR\x06models\"\x83\x01\n" +
 	"\bMCPState\x12<\n" +
 	"\atargets\x18\x01 \x03(\v2\".koinon.gateway.v1alpha1.MCPTargetR\atargets\x129\n" +
-	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xa3\x02\n" +
+	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xb0\x03\n" +
 	"\tMCPTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x10\n" +
@@ -1436,7 +1581,23 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x11credential_prefix\x18\x06 \x01(\tR\x10credentialPrefix\x12'\n" +
 	"\x0fcredential_file\x18\a \x01(\tR\x0ecredentialFile\x12\x17\n" +
 	"\aca_file\x18\b \x01(\tR\x06caFile\x120\n" +
-	"\x14insecure_skip_verify\x18\t \x01(\bR\x12insecureSkipVerify\"\x81\x01\n" +
+	"\x14insecure_skip_verify\x18\t \x01(\bR\x12insecureSkipVerify\x12\x18\n" +
+	"\abuiltin\x18\n" +
+	" \x01(\tR\abuiltin\x12I\n" +
+	"\rremote_agents\x18\v \x03(\v2$.koinon.gateway.v1alpha1.RemoteAgentR\fremoteAgents\x12&\n" +
+	"\x0fhandle_key_file\x18\f \x01(\tR\rhandleKeyFile\"\xcf\x02\n" +
+	"\vRemoteAgent\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x19\n" +
+	"\bcard_url\x18\x03 \x01(\tR\acardUrl\x12+\n" +
+	"\x11credential_header\x18\x04 \x01(\tR\x10credentialHeader\x12+\n" +
+	"\x11credential_prefix\x18\x05 \x01(\tR\x10credentialPrefix\x12'\n" +
+	"\x0fcredential_file\x18\x06 \x01(\tR\x0ecredentialFile\x12\x17\n" +
+	"\aca_file\x18\a \x01(\tR\x06caFile\x120\n" +
+	"\x14insecure_skip_verify\x18\b \x01(\bR\x12insecureSkipVerify\x12\x1b\n" +
+	"\tcard_hash\x18\t \x01(\tR\bcardHash\x12\x16\n" +
+	"\x06agents\x18\n" +
+	" \x03(\tR\x06agents\"\x81\x01\n" +
 	"\n" +
 	"AgentTools\x127\n" +
 	"\x05agent\x18\x01 \x01(\v2!.koinon.gateway.v1alpha1.AgentRefR\x05agent\x12:\n" +
@@ -1467,7 +1628,7 @@ func file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_gateway_v1alpha1_state_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(Half)(0),                   // 0: koinon.gateway.v1alpha1.Half
 	(*StreamStateRequest)(nil),  // 1: koinon.gateway.v1alpha1.StreamStateRequest
@@ -1487,8 +1648,9 @@ var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(*AgentModels)(nil),         // 15: koinon.gateway.v1alpha1.AgentModels
 	(*MCPState)(nil),            // 16: koinon.gateway.v1alpha1.MCPState
 	(*MCPTarget)(nil),           // 17: koinon.gateway.v1alpha1.MCPTarget
-	(*AgentTools)(nil),          // 18: koinon.gateway.v1alpha1.AgentTools
-	(*ToolGrant)(nil),           // 19: koinon.gateway.v1alpha1.ToolGrant
+	(*RemoteAgent)(nil),         // 18: koinon.gateway.v1alpha1.RemoteAgent
+	(*AgentTools)(nil),          // 19: koinon.gateway.v1alpha1.AgentTools
+	(*ToolGrant)(nil),           // 20: koinon.gateway.v1alpha1.ToolGrant
 }
 var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
 	0,  // 0: koinon.gateway.v1alpha1.AckRevisionRequest.half:type_name -> koinon.gateway.v1alpha1.Half
@@ -1507,18 +1669,19 @@ var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
 	14, // 13: koinon.gateway.v1alpha1.Price.tiers:type_name -> koinon.gateway.v1alpha1.PriceTier
 	5,  // 14: koinon.gateway.v1alpha1.AgentModels.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
 	17, // 15: koinon.gateway.v1alpha1.MCPState.targets:type_name -> koinon.gateway.v1alpha1.MCPTarget
-	18, // 16: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
-	5,  // 17: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	19, // 18: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
-	1,  // 19: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
-	2,  // 20: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
-	4,  // 21: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
-	3,  // 22: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
-	21, // [21:23] is the sub-list for method output_type
-	19, // [19:21] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	19, // 16: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
+	18, // 17: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
+	5,  // 18: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	20, // 19: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
+	1,  // 20: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
+	2,  // 21: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
+	4,  // 22: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
+	3,  // 23: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
+	22, // [22:24] is the sub-list for method output_type
+	20, // [20:22] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_koinon_gateway_v1alpha1_state_proto_init() }
@@ -1532,7 +1695,7 @@ func file_koinon_gateway_v1alpha1_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_gateway_v1alpha1_state_proto_rawDesc), len(file_koinon_gateway_v1alpha1_state_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

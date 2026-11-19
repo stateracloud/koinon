@@ -92,6 +92,15 @@ var _ = Describe("the Postgres audit writer", func() {
 		Expect(w.Record(ctx, row)).NotTo(Succeed())
 	})
 
+	It("records a call that a changed agent card refused", func(ctx SpecContext) {
+		w := pgaudit.New(restricted)
+		row := mcpgateway.AuditRow{Agent: gateway.AgentRef{Org: "acme", Name: "reader"}, Target: "acme-agents", Tool: "send_task", Outcome: mcpgateway.OutcomeCardChanged, CredKind: "static"}
+		Expect(w.Record(ctx, row)).To(Succeed())
+		var got string
+		Expect(admin.QueryRow(ctx, `SELECT outcome FROM mcp_call_log WHERE tool = 'send_task'`).Scan(&got)).To(Succeed())
+		Expect(got).To(Equal("card_changed"))
+	})
+
 	It("cuts a tool name the agent chose that is longer than the column allows", func(ctx SpecContext) {
 		w := pgaudit.New(restricted)
 		row := mcpgateway.AuditRow{

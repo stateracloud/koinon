@@ -24,6 +24,9 @@ const (
 	// OutcomeUpstreamError is a call that failed before a result: the target is down or the
 	// credential failed.
 	OutcomeUpstreamError Outcome = "upstream_error"
+	// OutcomeCardChanged is a call to a remote agent whose agent card is not the pinned one (ADR 0123
+	// decision 11). The call was refused before any message went out.
+	OutcomeCardChanged Outcome = "card_changed"
 )
 
 // AuditRow is what the gateway records for one tool call. It names no argument, no result and no
