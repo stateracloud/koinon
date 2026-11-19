@@ -17,7 +17,7 @@ func showOnly(template string) []string {
 
 // The Substrate driver's worker namespace (issue #1089): with execution.driver=substrate the chart
 // renders the worker Namespace, the ValidatingAdmissionPolicies and the five NetworkPolicies (workers, control
-// plane, closed pods, API-only pods) next to the components that the smoke suite starts. They are objects for the API server, not
+// plane, closed pods, API-only pods, bucket-init Job) next to the components that the smoke suite starts. They are objects for the API server, not
 // containers, so this spec renders the chart and checks that each of them reaches the manifest. It needs
 // helm and no Docker. The policies themselves run against a real API server in test/escape
 // (make test-admission).
