@@ -20,8 +20,8 @@ import (
 var _ = Describe("gateway recipient keys", func() {
 	const (
 		pub1 = "koinon_test_not-a-real-public-key-0001-padding"
-		key1 = "gk-0123456789abcdef"
-		key2 = "gk-fedcba9876543210"
+		key1 = "gk-0000000000000001"
+		key2 = "gk-0000000000000002"
 	)
 	exec := func(ctx context.Context, q string, args ...any) error {
 		_, err := db.ExecContext(ctx, q, args...)
