@@ -4,6 +4,7 @@ package substrateinstall_test
 
 import (
 	"archive/tar"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/stateracloud/koinon/internal/preflight"
@@ -373,6 +375,9 @@ func TestGenericInstallRunsAteSetupWithTheCorrectedTreeAndNoDocker(t *testing.T)
 	r.tarFiles = pinnedKindFiles()
 	var out strings.Builder
 	i.Out = &out
+	store, fetch := stageEnv(t)
+	i.GVisorFetcher = fetch
+	i.GVisorStore = func(context.Context) (substrateinstall.AssetStore, func(), error) { return store, func() {}, nil }
 	var sawTree string
 	r.onSetup = func(dir string) { sawTree = readFile(t, dir, "manifests/ate-install/kind/atelet/kustomization.yaml") }
 	// The full preflight after the install fails (no Substrate api server in the fake cluster); the install ran.
@@ -387,6 +392,11 @@ func TestGenericInstallRunsAteSetupWithTheCorrectedTreeAndNoDocker(t *testing.T)
 	g.Expect(out.String()).NotTo(ContainSubstring("devices"), "no node-device probe without the vm tier")
 	_, err := client.CoreV1().Secrets("ate-system").Get(t.Context(), substrateinstall.RustFSSecretName, metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
+	// The gVisor tarballs are in the store and the SandboxConfig points at them, before the final preflight.
+	g.Expect(store.puts).To(HaveLen(2))
+	cfg, err := i.Dynamic.Resource(schema.GroupVersionResource{Group: "ate.dev", Version: "v1", Resource: "sandboxconfigs"}).Get(t.Context(), substrateinstall.GVisorSandboxConfigName, metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(toJSON(t, cfg)).To(ContainSubstring("s3://koinon-snaps/gvisor-assets/amd64/"))
 }
 
 func TestGenericInstallStopsBeforeBuildingWhenThereIsNoStorageClass(t *testing.T) {
