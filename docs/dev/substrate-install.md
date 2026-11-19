@@ -398,9 +398,13 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
-- atelet needs no internet egress when the gVisor tarball comes from the cluster object store (an
-  `s3://` SandboxConfig; ADR 0120 section 6.7, not yet proven; the staging is issue #1157). After the policies apply, restart every
-  DaemonSet in `ate-system`, so that its pods pass the new rules.
+- atelet needs no internet egress when the gVisor tarball comes from the cluster object store. The installer
+  stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
+  issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.
+  The kind check must prove that atelet reads the `s3://` SandboxConfig `koinon-gvisor` with egress denied. After
+  the policies apply, restart every DaemonSet in `ate-system`, so that its pods pass the new rules.
+- The installer writes the SandboxConfig `koinon-gvisor`. It must run as an identity in
+  `workerPolicy.installerIdentities`, or the objects policy refuses the write.
 - Known limit (open, needs a decision from main): the preflight and install probe pods are bare pods with tag images
   and, for the device probe, hostPath devices. The control-plane policy refuses them once the chart is installed.
   Run `koinon-api substrate install` and the probes before `helm install`, or add a probe-identity rule.

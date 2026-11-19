@@ -211,9 +211,10 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
-   holds in the control-plane namespace too. Status: design. The `s3://` `SandboxConfig` from the cluster
-   store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
-   DaemonSet in `ate-system` after the policies apply. The staging code is [#1157](https://github.com/stateracloud/koinon/issues/1157); this PR changes none of it.
+   holds in the control-plane namespace too. Status: the staging is built
+   ([#1157](https://github.com/stateracloud/koinon/issues/1157); `substrate-install.md`). The read by atelet from
+   the cluster store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
+   DaemonSet in `ate-system` after the policies apply.
 
 ### 7. OpenShell driver profile for the window
 
