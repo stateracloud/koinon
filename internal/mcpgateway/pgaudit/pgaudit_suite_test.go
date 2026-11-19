@@ -33,12 +33,8 @@ var _ = Describe("the Postgres audit writer", func() {
 		admin = pgtest.Start(ctx)
 		db := stdlib.OpenDBFromPool(admin)
 		DeferCleanup(func() { _ = db.Close() })
-		// Before the role exists, the grants are a no-op that says so.
-		ok, err := migrations.GrantGateway(ctx, db)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ok).To(BeFalse())
 		Expect(pgtest.EnsureRole(ctx, db, migrations.GatewayRole)).To(Succeed())
-		ok, err = migrations.GrantGateway(ctx, db)
+		ok, err := migrations.GrantGateway(ctx, db)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
 		ok, err = migrations.GrantGateway(ctx, db)

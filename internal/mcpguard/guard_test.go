@@ -358,6 +358,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		}
 		Expect(can("mcp_servers", "UPDATE")).To(BeFalse())
 		Expect(can("approval_requests", "SELECT")).To(BeFalse())
+		// audit-lint:allow a test of the database's own grants: the gateway role must not write the audit table
 		Expect(can("audit_events", "INSERT")).To(BeFalse())
 		Expect(can("mcp_call_log", "INSERT")).To(BeTrue())
 		Expect(can("mcp_call_log", "SELECT")).To(BeFalse())
