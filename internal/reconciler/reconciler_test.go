@@ -46,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -1340,7 +1341,7 @@ var _ = Describe("Reconciler", func() {
 		done := make(chan error, 1)
 		go func() { done <- r.Run(runCtx) }()
 		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
-		Eventually(applies.Load).WithTimeout(10*time.Second).Should(BeNumerically(">=", 1), "the leader's first pass")
+		Eventually(applies.Load).WithTimeout(racescale.D(10*time.Second)).Should(BeNumerically(">=", 1), "the leader's first pass")
 		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
 
 		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
@@ -1363,7 +1364,7 @@ var _ = Describe("Reconciler", func() {
 		_, err = ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
 		committed := time.Now()
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(revokedAt.Load).WithTimeout(10*time.Second).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
+		Eventually(revokedAt.Load).WithTimeout(racescale.D(10*time.Second)).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
 		revoked := *revokedAt.Load()
 
 		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
@@ -1586,7 +1587,7 @@ var _ = Describe("Reconciler", func() {
 		queueRun(ctx, org, user, agent.ID)
 		Eventually(func() openshellv1.SandboxPhase {
 			return osg.Sandbox(ws, names.Sandbox).GetStatus().GetPhase()
-		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+		}).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 	})
 
 	// Issue 573: one agent's slow backend call must not hold back another agent. A pass hands the
@@ -1608,12 +1609,12 @@ var _ = Describe("Reconciler", func() {
 		done := make(chan error, 1)
 		go func() { done <- r.Run(runCtx) }()
 		DeferCleanup(func() { release(); cancel(); Eventually(done).Should(Receive(BeNil())) })
-		Eventually(func() int { return osg.Calls("DeleteSandbox") }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Eventually(func() int { return osg.Calls("DeleteSandbox") }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
 
 		By("agent B is created during that delete: its sandbox exists before the delete returns")
 		agentB := newAgent(ctx, org, user)
 		namesB := execution.AgentObjectNames(org.Bytes, agentB.ID.Bytes)
-		Eventually(func() *openshellv1.Sandbox { return osg.Sandbox(wsName, namesB.Sandbox) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		Eventually(func() *openshellv1.Sandbox { return osg.Sandbox(wsName, namesB.Sandbox) }).WithTimeout(racescale.D(10 * time.Second)).ShouldNot(BeNil())
 		Expect(osg.Sandbox(wsName, namesA.Sandbox)).NotTo(BeNil(), "agent A's delete has not returned")
 		Expect(logs.String()).To(ContainSubstring("requesting the deletion of a sandbox"), "the delete is logged before the call")
 
@@ -1621,7 +1622,7 @@ var _ = Describe("Reconciler", func() {
 		release()
 		Eventually(func() string {
 			return osg.Sandbox(wsName, namesA.Sandbox).GetSpec().GetTemplate().GetImage()
-		}).WithTimeout(10 * time.Second).Should(Equal(image + "-2"))
+		}).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(image + "-2"))
 	})
 
 	Describe("the leader lock (#573)", func() {
@@ -1682,7 +1683,7 @@ var _ = Describe("Reconciler", func() {
 
 			t := time.Now()
 			release()
-			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(1))
+			Eventually(leading).WithTimeout(racescale.D(2 * time.Second)).Should(Equal(1))
 			GinkgoWriter.Printf("leader hand-over took %s\n", time.Since(t))
 			Expect(logs.String()).To(MatchRegexp(`reconciler is leading" waited=\S+`))
 		})
@@ -1710,7 +1711,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(leading()).To(Equal(1))
 
 			stopFirst()
-			Eventually(leading).WithTimeout(2 * time.Second).Should(Equal(2))
+			Eventually(leading).WithTimeout(racescale.D(2 * time.Second)).Should(Equal(2))
 			Expect(holders(ctx)).To(Equal(1))
 		})
 
@@ -1732,7 +1733,7 @@ var _ = Describe("Reconciler", func() {
 			Eventually(func() int { return lockRows(ctx, key, false) }).Should(Equal(1), "the waiter is queued on the server")
 
 			cancel()
-			Eventually(res).WithTimeout(2 * time.Second).Should(Receive(MatchError(context.Canceled)))
+			Eventually(res).WithTimeout(racescale.D(2 * time.Second)).Should(Receive(MatchError(context.Canceled)))
 			// The server-side wait is gone: a closed socket alone would leave the backend queued.
 			Eventually(func() int { return lockRows(ctx, key, false) }).Should(BeZero())
 			_, err = holder.Exec(ctx, "SELECT pg_advisory_unlock($1)", key)
@@ -1769,8 +1770,8 @@ var _ = Describe("Reconciler", func() {
 				AND ((l.classid::bigint << 32) | l.objid::bigint) = $1`, leaderKey).Scan(&terminated)).To(Succeed())
 			Expect(terminated).To(Equal(1))
 
-			Eventually(mg.canceledAt).WithTimeout(2 * time.Second).ShouldNot(BeZero())
-			Eventually(leading).WithTimeout(3 * time.Second).Should(Equal(2))
+			Eventually(mg.canceledAt).WithTimeout(racescale.D(2 * time.Second)).ShouldNot(BeZero())
+			Eventually(leading).WithTimeout(racescale.D(3 * time.Second)).Should(Equal(2))
 			Eventually(mg.applyTimes).Should(HaveLen(2))
 			// The order of the old pass's cancel and the new leader's first write is NOT guaranteed:
 			// the server frees the lock when the backend dies, and the old leader learns of the dead
@@ -1785,10 +1786,15 @@ var _ = Describe("Reconciler", func() {
 
 		It("stops the old leader within the detection bound after a silent connection loss (#635)", func(ctx SpecContext) {
 			const heartbeat, pingTimeout = 400 * time.Millisecond, 400 * time.Millisecond
+			// The cancelled pass takes a while to return, as on a loaded runner. The loop logs why the
+			// lead ended only after the pass returned (#994: the log was read at the cancel and did
+			// not hold the reason yet), so the spec has to wait for the log, not read it at the cancel.
+			const cancelLag = 600 * time.Millisecond
 			cfg.ResyncInterval = time.Hour
 			cfg.LeaderHeartbeat, cfg.LeaderPingTimeout = heartbeat, pingTimeout
 			mg.mu.Lock()
 			mg.hold, mg.entered = make(chan struct{}), make(chan struct{})
+			mg.cancelLag = cancelLag
 			entered := mg.entered
 			mg.mu.Unlock()
 			DeferCleanup(func() {
@@ -1816,12 +1822,14 @@ var _ = Describe("Reconciler", func() {
 			// leader's own heartbeat can see it.
 			froze := time.Now()
 			proxy.freeze()
-			Eventually(mg.canceledAt).WithTimeout(5 * time.Second).ShouldNot(BeZero())
+			Eventually(mg.canceledAt).WithTimeout(racescale.D(5 * time.Second)).ShouldNot(BeZero())
 			took := mg.canceledAt().Sub(froze)
 			GinkgoWriter.Printf("old leader stopped %s after the connection went silent\n", took)
-			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+time.Second),
+			Expect(took).To(BeNumerically("<=", heartbeat+pingTimeout+racescale.D(time.Second)),
 				"within heartbeat + ping timeout (and a margin for the scheduler)")
-			Expect(logs.String()).To(ContainSubstring("did not answer"))
+			// The loop logs the reason when the lead returns, which is after the cancelled pass returned.
+			Eventually(logs.String).WithTimeout(racescale.D(5*time.Second)).Should(ContainSubstring("did not answer"),
+				"the loop says that the lock connection did not answer")
 		})
 
 		It("keeps the lead on a quiet but healthy connection across several heartbeat periods (#635)", func(ctx SpecContext) {

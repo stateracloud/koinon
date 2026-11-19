@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -101,16 +102,16 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			return sb.Phase
 		}
-		Eventually(phase).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(5 * time.Second).
+		Eventually(phase).WithContext(ctx).WithTimeout(racescale.D(5 * time.Minute)).WithPolling(5 * time.Second).
 			Should(Equal(execution.PhaseReady))
 
 		later = time.Now().Add(time.Hour)
-		Eventually(phase).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).
+		Eventually(phase).WithContext(ctx).WithTimeout(racescale.D(2 * time.Minute)).WithPolling(5 * time.Second).
 			Should(Equal(execution.PhaseStopped))
 
 		_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(phase).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).
+		Eventually(phase).WithContext(ctx).WithTimeout(racescale.D(2 * time.Minute)).WithPolling(5 * time.Second).
 			Should(Equal(execution.Phase("NotFound")))
 	}, NodeTimeout(12*time.Minute))
 })

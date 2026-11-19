@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -289,7 +290,7 @@ var _ = Describe("Org MCP servers", func() {
 				got, err := svc.Get(ctx, org, s.ID)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(got.Health).To(Equal("healthy"))
-			}).WithTimeout(10 * time.Second).Should(Succeed())
+			}).WithTimeout(racescale.D(10 * time.Second)).Should(Succeed())
 			Expect(tiers(ctx, s)).To(HaveKey("read"))
 		})
 
