@@ -46,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -78,6 +79,8 @@ var Columns = []Column{
 	{Table: savedwork.Table, Column: savedwork.Column},
 	// Remote MCP server credentials (ADR 0057).
 	{Table: mcpservers.ServersTable, Column: mcpservers.CredentialColumn},
+	// Remote A2A agent credentials (ADR 0123 decision 9).
+	{Table: remoteagents.Table, Column: remoteagents.CredentialColumn},
 	// Agent home repository passwords (ADR 0032); keyed by agent_id, see rowKey.
 	{Table: checkpoint.Table, Column: checkpoint.Column},
 	// The passwords of later repository epochs (ADR 0085 decision 13); keyed by binding_row.

@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/tracedest"
@@ -61,6 +62,7 @@ var lostRules = map[Column]lostRule{
 	{connections.Table, connections.Column}:                    {markLost, "connections"},
 	{savedwork.Table, savedwork.Column}:                        {"status = 'expired'", "savedWork"},
 	{mcpservers.ServersTable, mcpservers.CredentialColumn}:     {markLost, "mcpServers"},
+	{remoteagents.Table, remoteagents.CredentialColumn}:        {markLost, "remoteAgents"},
 	{checkpoint.Table, checkpoint.Column}:                      {markLost, "homeRepositories"},
 	{checkpoint.EpochsTable, checkpoint.Column}:                {markLost, "homeRepositories"},
 	{tracedest.DestinationsTable, tracedest.CredentialsColumn}: {markLost, "traceDestinations"},

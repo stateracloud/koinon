@@ -60,6 +60,10 @@ var _ = Describe("lost credentials", func() {
 			id := scan(`INSERT INTO mcp_servers (org_id, name, url, credential_header, credential) VALUES ($1, 'm', 'https://mcp.example.com/m', 'X-Api-Key', $2) RETURNING id`, org, envelope)
 			return fmt.Sprintf("id = '%s'", id)
 		}},
+		{name: "remote_agents", envelope: "credential", other: "card_url = card_url || 'x'", insert: func(org string) string {
+			id := scan(`INSERT INTO remote_agents (org_id, name, card_url, credential_header, credential, card_hash, card) VALUES ($1, 'ra', 'https://agent.example.com', 'X-Api-Key', $2, repeat('a', 64), '{}') RETURNING id`, org, envelope)
+			return fmt.Sprintf("id = '%s'", id)
+		}},
 		{name: "trace_destinations", envelope: "credentials", other: "endpoint_url = endpoint_url || '/x'", insert: func(org string) string {
 			id := scan(`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url, credentials) VALUES ($1, 'dd', 'datadog', 'https://otlp.example.com', $2) RETURNING id`, org, envelope)
 			return fmt.Sprintf("id = '%s'", id)
