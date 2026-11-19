@@ -188,6 +188,10 @@ var _ = Describe("Postgres", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred(), "a v2 value is not an unopenable value")
 		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
 		Expect(sc.Text("x")).To(Equal("x"))
+		// The router holds no opened v2 value: it can neither log nor store it, and it cannot scrub it
+		// either. The gateway scrubs what it opens (#1174, not in this slice).
+		const opened = "koinon_test_not-a-real-token-v2"
+		Expect(sc.Text(opened)).To(Equal(opened))
 	})
 
 	It("scrubs every repository epoch's home repository password, and fingerprints a new epoch", func(ctx SpecContext) {

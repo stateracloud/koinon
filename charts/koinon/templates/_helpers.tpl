@@ -391,6 +391,10 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # once a key is active (ADR 0097 decision 12.5 step 0). With agentgateway it seals v1, which agentgateway can read.
 - name: KOINON_GATEWAY_MCP_SEAL_V2
   value: "true"
+# Sealing starts only when this many pods of every component report that they read the sealed format
+# (ADR 0097 decision 12.5 step 1, internal/formatgate); KOINON_GATEWAY_MCP_SEAL_V2 can only close that gate.
+- name: KOINON_COMPAT_EXPECT
+  value: {{ printf "api=%d,reconciler=%d,gateway=%d" (int .Values.api.replicas) (int .Values.reconciler.replicas) (int .Values.gateway.mcp.koinon.replicas) | quote }}
 {{- end }}
 # The provider echo check (rc.6) sends one request through the gateway's LLM listener.
 - name: KOINON_GATEWAY_URL

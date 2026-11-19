@@ -144,3 +144,7 @@ grep -Fq 'custody kms' <<<"$notes_kms" || fail "NOTES report custody kms with a 
 # agentgateway driver reads plaintext files, so it keeps v1 (ADR 0097 decision 12, 12.5 step 0).
 env_is KOINON_GATEWAY_MCP_SEAL_V2 '"true"' "${gk[@]}"
 lacks "koinon-api seals v1 with the agentgateway MCP driver" 'KOINON_GATEWAY_MCP_SEAL_V2' --show-only templates/deployments.yaml
+# The write gate counts the pods that must report the sealed format (ADR 0097 12.5 step 1, internal/formatgate).
+env_is KOINON_COMPAT_EXPECT '"api=1,reconciler=1,gateway=2"' "${gk[@]}"
+env_is KOINON_COMPAT_EXPECT '"api=3,reconciler=2,gateway=4"' "${gk[@]}" --set api.replicas=3 --set reconciler.replicas=2 --set gateway.mcp.koinon.replicas=4
+lacks "no replica expectation with the agentgateway MCP driver" 'KOINON_COMPAT_EXPECT' --show-only templates/deployments.yaml

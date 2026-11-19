@@ -51,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/mcpcredfile"
@@ -612,7 +613,7 @@ func (s *Service) seal(org, id pgtype.UUID, value string) ([]byte, error) {
 				return nil, fmt.Errorf("mcpservers: seal credential to the gateway key: %w", err)
 			}
 			return json.Marshal(env)
-		case !errors.Is(err, gatewaykeys.ErrNoActiveKey):
+		case !errors.Is(err, gatewaykeys.ErrNoActiveKey) && !errors.Is(err, formatgate.ErrNotReady):
 			// A read that failed is not "no key": a silent v1 would put the plaintext back in the reconciler.
 			return nil, fmt.Errorf("mcpservers: gateway key: %w", err)
 		}

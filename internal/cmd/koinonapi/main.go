@@ -72,6 +72,7 @@ import (
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
@@ -221,7 +222,10 @@ type config struct {
 	gatewayMode project.GatewayMode
 	// sealMCPv2 is set by the chart when koinon-gateway serves every MCP path (gateway.mcp.driver=koinon): then
 	// a stored MCP credential is sealed to the gateway's key when one is active (ADR 0097 decision 12.5 step 0).
-	sealMCPv2            bool
+	sealMCPv2 bool
+	// compatExpect is the pods of each component the chart runs ("api=2,reconciler=1,gateway=2"). A format is
+	// written only when that many pods of each reader report that they read it (internal/formatgate).
+	compatExpect         string
 	egressAllowedHosts   string
 	providerAllowedHosts string
 }
@@ -348,6 +352,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
 	fs.BoolVar(&c.sealMCPv2, "gateway-mcp-seal-v2", false,
 		"seal a stored MCP credential to the gateway's public key (envelope v2) when a key is active, and as v1 otherwise; set only when koinon-gateway serves every MCP path, because agentgateway reads the credential as plaintext")
+	fs.StringVar(&c.compatExpect, "compat-expect", "", "pods of each component the chart runs, as component=count pairs; with --gateway-mcp-seal-v2 a credential is sealed to the gateway key only when that many pods of every reader report that they read it, and empty keeps sealing off")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
@@ -654,6 +659,24 @@ func serve(ctx context.Context, cfg config) error {
 	// The gateway's public key (ADR 0097 decision 12): koinon-api holds the active public key only, read
 	// from the table every reload interval. No caller seals a v2 envelope yet (slice 3); the key is held
 	// ready, and a row that fails its check is refused and logged.
+	// Every koinon-api pod reports the formats it reads, and prunes the rows of pods that are gone.
+	safego.GoOrStop(bgCtx, slog.Default(), "format-report", stop, func(ctx context.Context) {
+		r := formatgate.NewReporter(pool, formatgate.API)
+		r.Log = func(msg string, err error) { slog.Warn(msg, "error", err) }
+		go func() {
+			t := time.NewTicker(time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					_, _ = pool.Exec(ctx, `DELETE FROM component_reports WHERE reported_at < now() - interval '1 day'`)
+				}
+			}
+		}()
+		r.Run(ctx)
+	})
 	gatewayKeys := &gatewaykeys.PublicKeys{}
 	safego.GoOrStop(bgCtx, slog.Default(), "gateway-public-key", stop, func(ctx context.Context) {
 		gatewayKeys.Run(ctx, pool, func(f string, a ...any) { slog.Warn(fmt.Sprintf(f, a...)) })
@@ -733,7 +756,15 @@ func serve(ctx context.Context, cfg config) error {
 	// The driver gate (ADR 0097 decision 12.5 step 0): without it koinon-api seals v1 only.
 	var mcpRecipient mcpservers.RecipientSource
 	if cfg.sealMCPv2 {
-		mcpRecipient = gatewayKeys
+		// The flag can only close the gate: the gate also needs every pod of every reader to report that it
+		// reads the format (ADR 0097 decision 12.5 step 1).
+		expect, err := formatgate.ParseExpect(cfg.compatExpect)
+		if err != nil {
+			return fmt.Errorf("--compat-expect: %w", err)
+		}
+		mcpRecipient = formatgate.GatedKey{
+			Inner: gatewayKeys, Format: formatgate.MCPCredentialV2, Gate: formatgate.Gate{DB: pool, Expect: expect},
+		}
 	}
 	reg := metrics.NewRegistry()
 	apiMetrics := api.NewMetrics(reg)

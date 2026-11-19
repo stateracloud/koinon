@@ -785,16 +785,22 @@ move, once.
    stored changes yet.
 
    Known limits of slice 3, recorded so a later slice can close them:
-   - The write gate is `KOINON_GATEWAY_MCP_SEAL_V2`, which the chart sets only with the koinon driver. It does
-     not prove that every pod runs release N. In the upgrade that first sets it, an N-1 koinon-gateway
-     replica reads an `mcpv2-` file as plaintext. Start sealing in a release after the one that ships the
-     v2 reader, or add a gate that says every component is at N.
+   - The write gate is generic and lives in `internal/formatgate`. Each component reports the formats it reads
+     to `component_reports` (migration 00101; koinon-api, the reconciler and koinon-gateway, each pod once
+     per interval). koinon-api seals a v2 credential only when `Gate.Ready` finds a fresh report from every
+     pod the chart expects (`KOINON_COMPAT_EXPECT`, built from the replica counts) and no fresh report
+     that lacks the format. It fails closed: a missing report, a pod at N-1 and an unknown component all
+     give `ErrNotReady`, and the credential is then written as v1. A later format change registers by one
+     `Format` value in `formatgate.Formats` with its reader components, and its writer calls `Gate.Ready`.
+     `KOINON_GATEWAY_MCP_SEAL_V2` stays as an operator override. It can only close the gate. The gate does not
+     move sealing to N+1. A pod from before the reporter writes no row, so only the replica count shows it:
+     the gate stays closed until the expected number of pods report.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.
    - The trace router no longer scrubs MCP credential values: it cannot read v2 and the reconciler holds no key.
      koinon-gateway holds the plaintext, so it must scrub the values it opened from the spans it writes.
-     This is open work, not done here.
+     This is issue #1174, not done here. The router path logs and stores no opened v2 value (a spec checks it).
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.
 2. **Move (slice 4).** `koinon-api keys seal-mcp` runs under the KEK identity (the same identity as
