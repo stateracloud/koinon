@@ -311,7 +311,7 @@ type call struct {
 // charge adds the cost of what the call used to the agent's counter. A call that reported no
 // usage costs nothing here: the ledger prices the record on its own (ADR 0041).
 func (c *call) charge() {
-	if c.limit == nil || !(c.rec.InputKnown || c.rec.OutputKnown) {
+	if c.limit == nil || (!c.rec.InputKnown && !c.rec.OutputKnown) {
 		return
 	}
 	_, cost, err := c.price.Cost(pricing.Usage{
