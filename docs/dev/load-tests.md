@@ -75,39 +75,46 @@ and the Ginkgo label `load`. The unit tests of the harness (`loadtest_test.go`) 
 
 ## Baseline
 
-First run: commit `8f43c4b`, 15 s per level, 2 s warm-up. Machine: cloud VM, Linux 6.18, 4 vCPU (Intel Xeon
+First run: commit `64e9f063`, 15 s per level, 2 s warm-up. Machine: cloud VM, Linux 6.18, 4 vCPU (Intel Xeon
 2.10 GHz), 15.7 GiB, Go 1.27.4, Docker 29.10.0. The load generator, the fake server and `koinon-gateway`
-share these 4 cores. agentgateway is the pinned image (`sha256:60216aaf...`).
+share these 4 cores. agentgateway is the pinned image (`sha256:60216aaf...`). The client keeps a pool of
+idle connections for all sessions. (With the default pool of 2 idle connections per host, the client
+opens a new connection for nearly every call, and agentgateway shows transport errors from port
+exhaustion.)
 
 | driver | scenario | conc. | calls | errors | calls/s | p50 | p95 | p99 |
 |---|---|--:|--:|--:|--:|--:|--:|--:|
-| direct | tools/call | 1 | 27452 | 0 | 1830 | 0.48 ms | 0.94 ms | 1.51 ms |
-| direct | tools/call | 16 | 61168 | 0 | 4078 | 3.24 ms | 8.98 ms | 12.70 ms |
-| direct | tools/call | 64 | 73774 | 0 | 4918 | 11.34 ms | 30.81 ms | 42.53 ms |
-| direct | tools/call | 256 | 81121 | 0 | 5408 | 40.71 ms | 113.66 ms | 180.10 ms |
-| agentgateway | tools/call | 1 | 12068 | 0 | 805 | 1.14 ms | 1.90 ms | 2.71 ms |
-| agentgateway | tools/call | 16 | 35205 | 0 | 2347 | 5.88 ms | 14.55 ms | 20.67 ms |
-| agentgateway | tools/call | 64 | 29085 | 0 | 1939 | 26.30 ms | 82.62 ms | 120.50 ms |
-| agentgateway | tools/call | 256 | 6311 | 1444 (18.6 %) | 421 | 148.25 ms | 1308.77 ms | 2930.81 ms |
-| koinon-gateway | tools/call | 1 | 9041 | 0 | 603 | 1.39 ms | 3.45 ms | 6.29 ms |
-| koinon-gateway | tools/call | 16 | 25463 | 0 | 1698 | 7.42 ms | 22.99 ms | 30.81 ms |
-| koinon-gateway | tools/call | 64 | 24075 | 0 | 1605 | 35.57 ms | 83.86 ms | 102.14 ms |
-| koinon-gateway | tools/call | 256 | 15772 | 2563 (14.0 %) | 1051 | 163.32 ms | 495.29 ms | 610.29 ms |
+| direct | tools/call | 1 | 29654 | 0 | 1977 | 0.44 ms | 0.87 ms | 1.45 ms |
+| direct | tools/call | 16 | 73175 | 0 | 4878 | 2.69 ms | 7.57 ms | 10.51 ms |
+| direct | tools/call | 64 | 87682 | 0 | 5845 | 9.43 ms | 25.06 ms | 34.78 ms |
+| direct | tools/call | 256 | 99925 | 0 | 6662 | 34.86 ms | 88.27 ms | 129.92 ms |
+| agentgateway | tools/call | 1 | 13729 | 0 | 915 | 0.99 ms | 1.64 ms | 2.31 ms |
+| agentgateway | tools/call | 16 | 49532 | 0 | 3302 | 4.12 ms | 10.36 ms | 14.61 ms |
+| agentgateway | tools/call | 64 | 61934 | 0 | 4129 | 14.17 ms | 32.88 ms | 44.90 ms |
+| agentgateway | tools/call | 256 | 61400 | 0 | 4093 | 55.05 ms | 140.80 ms | 192.59 ms |
+| koinon-gateway | tools/call | 1 | 11674 | 0 | 778 | 1.05 ms | 2.62 ms | 5.69 ms |
+| koinon-gateway | tools/call | 16 | 29590 | 0 | 1973 | 6.11 ms | 20.42 ms | 27.57 ms |
+| koinon-gateway | tools/call | 64 | 27400 | 0 | 1827 | 29.72 ms | 76.35 ms | 89.47 ms |
+| koinon-gateway | tools/call | 256 | 17165 | 3556 (17.2 %) | 1144 | 140.62 ms | 416.00 ms | 542.84 ms |
+
+Latency is for successful calls. Throughput is successful calls per second.
 
 Long streams (64 calls, 10 s, 20 progress notifications each): direct 3840 of 3840 notifications
-arrive; agentgateway 3840 of 3840 (run alone, 0 errors); `koinon-gateway` 0 of 3840. `koinon-gateway`
-does not forward MCP progress notifications yet. The calls themselves finish with no error.
+arrive; agentgateway 3840 of 3840; `koinon-gateway` 0 of 3840. `koinon-gateway` does not forward MCP
+progress notifications yet. The calls themselves finish with no error.
 
 Disturbance runs (32 workers, calls of 1 s):
 
 - `koinon-gateway` drain: the first error comes after `--shutdown-delay`. The drain is correct.
-- agentgateway restart: the outage window is about 0.7 s (first error 4.0 s, last error 4.7 s).
+- agentgateway restart: the outage window is about 0.1 s (first error 4.0 s, last error 4.1 s).
 
 How to read this:
 
-- At 256 sessions both gateways drop calls. `koinon-gateway` returns "the MCP server did not answer"
-  (14 %). agentgateway rejects at the transport (18.6 %). The direct run has no errors, so the limit is in
-  the gateways, on this 4-core VM.
-- Run the stream scenario alone for a clean number. In a full run, the agentgateway stream row that follows
-  the 256-session level showed errors from the sessions of that level (94 %). A solo run had none.
+- At 256 sessions `koinon-gateway` drops calls ("the MCP server did not answer"). agentgateway and the
+  direct run have none. The limit is in `koinon-gateway`, on this 4-core VM.
+- At 1 to 64 sessions neither gateway has errors. agentgateway is faster than `koinon-gateway` at every
+  level. At 256 sessions agentgateway has 3.6 times the throughput of `koinon-gateway`, which also drops
+  calls.
+- A stream run is longer than its duration (calls that start before the end finish after it), so its
+  calls/s is a little high. Read its latency and its notification count.
 - Not measured yet: the model path (waits for #279) and budget overshoot.
