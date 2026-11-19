@@ -301,16 +301,18 @@ What the installer does:
 1. It reads the keys of the rustfs Deployment (a value, or a Secret reference) and opens a port-forward to the
    rustfs pod. The keys stay in the installer process. They are never written, printed or sent to a sandbox.
 2. For each architecture (`amd64`, `arm64`) it reads the object
-   `gvisor-assets/<arch>/<sha256>` in the snapshot bucket (`--storage-bucket`). The key has no `atespaces`
+   `gvisor-assets/<arch>/<sha256>.tar.zst` in the snapshot bucket (`--storage-bucket`). The key has no `atespaces`
    segment, so atelet's object-store plugin serves it. It is the layout `ate-setup` uses for the microVM assets.
 3. An object with the pinned SHA-256 is left as it is: a second run fetches and writes nothing.
    An object with another SHA-256 is an error. The installer never overwrites it. Delete the object if it is
    wrong, then run the installer again.
 4. A missing object is fetched from the source, checked against the pinned SHA-256 before the first byte
    goes to the store, written, read back and checked again.
+   The key and the SandboxConfig URL end in `.tar.zst`: atelet chooses the archive format from that suffix. An
+   object from an older installer, without the suffix, stays in the bucket. Nothing uses it. Delete it by hand.
 5. It creates the SandboxConfig `koinon-gvisor` (class `gvisor`, annotation
    `sandboxconfig.ate.dev/is-class-default: "true"`, so it is newer than `gvisor-default` and wins). Its
-   version `gvisor-<release>` has `s3://<bucket>/gvisor-assets/<arch>/<sha256>` and the same SHA-256 for each
+   version `gvisor-<release>` has `s3://<bucket>/gvisor-assets/<arch>/<sha256>.tar.zst` and the same SHA-256 for each
    architecture. A new release adds a version and keeps the old ones, because a snapshot restores its memory only on
    the version it was taken with. A version that exists with other assets is an error, never a rewrite.
 

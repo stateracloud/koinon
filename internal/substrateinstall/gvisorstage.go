@@ -21,8 +21,15 @@ var ErrDigestMismatch = errors.New("gvisor asset does not have the pinned SHA-25
 
 // gvisorAssetPrefix is the key prefix of staged gVisor tarballs in the snapshot bucket. It has no "atespaces"
 // segment, so the object-store plugin of atelet serves it (assets must not live under a snapshot location).
-// It follows the layout of ate-setup for the microVM assets: <prefix>/<arch>/<sha256>.
+// It follows the layout of ate-setup for the microVM assets: <prefix>/<arch>/<sha256><suffix>.
 const gvisorAssetPrefix = "gvisor-assets"
+
+// gvisorAssetSuffix ends every staged key, so it ends the s3:// URL of the SandboxConfig too. atelet chooses the
+// archive format from the suffix of the URL and refuses a URL without a known one (issue #1157). The pinned
+// tarball (gvisor.tar.zstd) is zstd, and atelet knows zstd as ".tar.zst". The digest is of the same bytes.
+// A key staged before this suffix existed (<prefix>/<arch>/<sha256>) stays in the store: the installer does not
+// read it, and no SandboxConfig names it. An operator can delete it.
+const gvisorAssetSuffix = ".tar.zst"
 
 // maxGVisorBytes bounds a download: the tarballs are about 60 MB.
 const maxGVisorBytes = 1 << 30
@@ -58,7 +65,7 @@ type StageResult struct {
 	Uploaded, Present []string
 }
 
-func gvisorKey(a gvisorArch) string { return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 }
+func gvisorKey(a gvisorArch) string { return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 + gvisorAssetSuffix }
 
 // gvisorSourceURL is the URL of the tarball of an architecture below the mirror base (empty is the public bucket).
 func gvisorSourceURL(mirror string, a gvisorArch) string {
