@@ -726,7 +726,7 @@ execution:
         - system:kube-controller-manager
       # Identities whose pods may use a tag instead of a digest. Default: platformControllers.
       # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
-      # then set this to [] (the chart check pins the default). Tracking issue: needs main (to be opened).
+      # then set this to [] (the chart check pins the default). Tracking issue: #1140.
       digestExemptIdentities: []
       # hostPath volumes allowed in the namespace: the device nodes of the vm tier (ADR 0075). Add
       # the credential-provider paths only when a platform needs them (GKE).
