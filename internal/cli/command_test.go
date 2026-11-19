@@ -98,6 +98,22 @@ var _ = Describe("the command stack", func() {
 		Expect(got.lease).To(Equal(9*time.Second), "the file beats the default")
 	})
 
+	It("reads a YAML list from the config file into a slice flag", func() {
+		cfg := filepath.Join(GinkgoT().TempDir(), "c.yaml")
+		Expect(os.WriteFile(cfg, []byte("token: t\ntiers:\n  - gvisor=hardened\n  - kata=vm\n"), 0o600)).To(Succeed())
+		v := cli.NewViper()
+		v.SetConfigFile(cfg)
+		Expect(v.ReadInConfig()).To(Succeed())
+
+		var tiers []string
+		root := tree(&got)
+		cli.Bind(root, v)
+		run, _, _ := root.Find([]string{"run"})
+		run.Flags().StringSliceVar(&tiers, "tiers", nil, "")
+		Expect(cli.Resolve(run, v)).To(Succeed())
+		Expect(tiers).To(Equal([]string{"gvisor=hardened", "kata=vm"}))
+	})
+
 	It("styles output only on a terminal without NO_COLOR", func() {
 		GinkgoT().Setenv("NO_COLOR", "1")
 		Expect(cli.Styled(os.Stdout)).To(BeFalse())

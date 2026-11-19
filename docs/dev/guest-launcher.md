@@ -128,6 +128,11 @@ Tracked on #1087 until the maintainer files separate issues:
    applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
 3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
+   Finding (slice c): Substrate v1.0.0 gives the driver no way to do this. `Container` has no
+   read-only field and no mount list. `Volume` has no mount path. `ImageVolumeSource` is read-only
+   but has no target. The guest ProcessService starts commands with only `CAP_KILL`,
+   `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so a command cannot remount `/`. The slice needs a
+   decision: see the question on the pull request of slice c.
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
    every other control applied; `require` still fails closed.
 
