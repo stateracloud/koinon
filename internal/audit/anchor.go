@@ -276,13 +276,21 @@ var anchorInconsistent = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "Orgs whose audit chain disagreed with the newest earlier anchor when a new anchor was written, by reason (hash_changed, seq_regressed); an alert on any increase says an org chain was rewritten or rolled back.",
 }, []string{"reason"})
 
-// RegisterAnchorMetric registers koinon_audit_anchor_age_seconds and koinon_audit_anchor_inconsistent_total
-// (AnchorJob, Anchor) on reg. Only koinon-api anchors, so only koinon-api registers them.
+// checkpointAge is koinon_audit_checkpoint_age_seconds: the seconds since the newest audit.checkpoint event
+// (since the process started while there is none). It has no labels (ADR 0023).
+var checkpointAge = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "koinon_audit_checkpoint_age_seconds",
+	Help: "Seconds since the newest audit.checkpoint event in the install chain (since the process started while there is none); an alert on it says signing checkpoints stopped (the signing key is unreadable, the chain disagrees with the last checkpoint, or the anchor job stopped).",
+})
+
+// RegisterAnchorMetric registers koinon_audit_anchor_age_seconds, koinon_audit_anchor_inconsistent_total
+// and koinon_audit_checkpoint_age_seconds (AnchorJob, Anchor) on reg. Only koinon-api anchors and signs
+// checkpoints, so only koinon-api registers them.
 func RegisterAnchorMetric(reg prometheus.Registerer) {
 	for _, r := range []string{InconsistentHashChanged, InconsistentSeqRegressed} {
 		anchorInconsistent.WithLabelValues(r)
 	}
-	reg.MustRegister(anchorAge, anchorInconsistent)
+	reg.MustRegister(anchorAge, anchorInconsistent, checkpointAge)
 }
 
 // AnchorDB is what AnchorJob needs of the database: transactions and plain queries (*pgxpool.Pool).
@@ -304,16 +312,75 @@ type AnchorJob struct {
 	// Poll is how often the job looks at the newest anchor; zero is the smaller of Interval and 30 seconds.
 	Poll time.Duration
 	Log  *slog.Logger
+	// Keys gives the checkpoint signing key (ADR 0100 decision 4.2). Nil turns checkpoints off, and
+	// koinon_audit_checkpoint_age_seconds then only grows.
+	Keys KeySource
 
 	started time.Time
 	state   string
+	cpState string
 }
 
-// Tick looks at the newest anchor, sets the gauge and writes an anchor when one is due.
+// Tick looks at the newest anchor, sets the gauge and writes an anchor when one is due, then signs a
+// checkpoint for the newest anchor when none covers it (so a checkpoint missed for a restart or an unreadable
+// key is made as soon as it can be, not at the next anchor).
 func (j *AnchorJob) Tick(ctx context.Context) {
 	if j.started.IsZero() {
 		j.started = time.Now()
 	}
+	j.anchorTick(ctx)
+	j.checkpointTick(ctx)
+}
+
+// checkpointTick sets koinon_audit_checkpoint_age_seconds and writes a checkpoint when one is due.
+func (j *AnchorJob) checkpointTick(ctx context.Context) {
+	age := time.Since(j.started).Seconds()
+	switch last, err := store.New(j.DB).GetLastInstallCheckpoint(ctx); {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		j.reportCheckpoint(ctx, "read", "cannot read the newest audit checkpoint", err)
+		return
+	default:
+		age = last.AgeSeconds
+	}
+	checkpointAge.Set(age)
+	if j.Keys == nil {
+		return
+	}
+	res, err := Checkpoint(ctx, j.DB, j.Keys, CheckpointOptions{})
+	switch {
+	case errors.Is(err, ErrInstallWriteDenied):
+		j.reportCheckpoint(ctx, "denied", "the database refuses koinon-api's audit checkpoint: the install audit writer role is not granted yet; retrying", err)
+	case errors.Is(err, ErrCheckpointInconsistent):
+		j.reportCheckpoint(ctx, "inconsistent", "the install audit chain does not hold the head of the last checkpoint, so no new checkpoint is signed: "+
+			"run the audit verify and compare with the checkpoint kept off the cluster", err)
+	case err != nil:
+		j.reportCheckpoint(ctx, "failed", "cannot sign an audit checkpoint; retrying", err)
+	case res.Written:
+		checkpointAge.Set(0)
+		j.cpState = ""
+		// The note is a public value: the log line is another off-cluster copy once the logs are shipped.
+		j.Log.Info(CheckpointLogMessage, "chain_seq", res.HeadSeq, "install_head", res.Head, "key_id", res.KeyID,
+			"key_added", res.KeyAdded, "note", res.Note)
+	default:
+		j.cpState = ""
+	}
+}
+
+// CheckpointLogMessage is the message of the log line of a signed checkpoint.
+const CheckpointLogMessage = "signed an audit checkpoint"
+
+// reportCheckpoint logs a checkpoint failure once per change of state.
+func (j *AnchorJob) reportCheckpoint(ctx context.Context, state, msg string, err error) {
+	if ctx.Err() != nil || state == j.cpState {
+		return
+	}
+	j.cpState = state
+	j.Log.Error(msg, "err", err)
+}
+
+// anchorTick is the anchor half of Tick.
+func (j *AnchorJob) anchorTick(ctx context.Context) {
 	age, none := time.Since(j.started).Seconds(), false
 	last, err := store.New(j.DB).GetLastInstallAnchor(ctx)
 	switch {
