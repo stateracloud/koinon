@@ -3,8 +3,12 @@
 package substrate_test
 
 import (
+	"errors"
+
 	"context"
 	"encoding/xml"
+	"github.com/minio/minio-go/v7"
+	"github.com/stateracloud/koinon/internal/execution"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -130,5 +134,15 @@ var _ = Describe("ObjectStore.ContentDigester", func() {
 	It("refuses a store without endpoint or bucket", func() {
 		_, err := substrate.ObjectStore{Endpoint: "x:1"}.ContentDigester()
 		Expect(err).To(HaveOccurred())
+	})
+})
+
+var _ = Describe("storeError", func() {
+	It("gives a gone snapshot the kind ErrNotFound", func() {
+		err := substrate.StoreError("RestoreSandbox", errors.New("x"))
+		Expect(err).To(HaveOccurred())
+		Expect(errors.Is(substrate.StoreError("RestoreSandbox", substrate.ErrNoObject), execution.ErrNotFound)).To(BeTrue())
+		Expect(errors.Is(substrate.StoreError("RestoreSandbox", minio.ErrorResponse{Code: "AccessDenied"}), execution.ErrPermissionDenied)).To(BeTrue())
+		Expect(errors.Is(substrate.StoreError("RestoreSandbox", minio.ErrorResponse{Code: "SlowDown"}), execution.ErrUnavailable)).To(BeTrue())
 	})
 })

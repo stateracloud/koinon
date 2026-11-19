@@ -52,7 +52,7 @@ type Substrate struct {
 	SnapshotStore SnapshotStore
 }
 
-// SnapshotStore reaches Substrate's snapshot bucket for the content digest. Give it a read-only key.
+// SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
 type SnapshotStore struct {
 	Endpoint, Region, Bucket string
 	// AccessKeyFile and SecretKeyFile each hold one value; the driver reads them at start.
@@ -62,6 +62,9 @@ type SnapshotStore struct {
 func (s SnapshotStore) set() bool { return s != SnapshotStore{} }
 
 func (s SnapshotStore) objectStore() (substrate.ObjectStore, error) {
+	if s.Endpoint == "" || s.Bucket == "" {
+		return substrate.ObjectStore{}, errors.New("--substrate-snapshot-endpoint and --substrate-snapshot-bucket are both required when any --substrate-snapshot-* flag is set")
+	}
 	o := substrate.ObjectStore{Endpoint: s.Endpoint, Region: s.Region, Bucket: s.Bucket}
 	for _, f := range []struct {
 		flag, path string
@@ -71,7 +74,7 @@ func (s SnapshotStore) objectStore() (substrate.ObjectStore, error) {
 		{"--substrate-snapshot-secret-key-file", s.SecretKeyFile, &o.SecretAccessKey},
 	} {
 		if f.path == "" {
-			return o, fmt.Errorf("%s is required with --substrate-snapshot-endpoint", f.flag)
+			return o, fmt.Errorf("%s is required with the snapshot store flags", f.flag)
 		}
 		b, err := os.ReadFile(f.path)
 		if err != nil {

@@ -15,10 +15,12 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 // ObjectStore is the S3-compatible bucket that holds Substrate's snapshots (rustfs on the generic
-// install, see docs/dev/substrate-install.md). The reader only reads: give it a read-only key.
+// install, see docs/dev/substrate-install.md). The reader only reads: give it a read-only key (docs/dev/substrate-install.md).
 // The credentials stay in Koinon's process and never reach a sandbox.
 type ObjectStore struct {
 	// Endpoint is a host:port or an http(s) URL; the scheme decides TLS (default https).
@@ -80,6 +82,25 @@ func snapshotObjectPrefix(uri, bucket string) (string, error) {
 	return p, nil
 }
 
+// errNoObject marks a snapshot address that holds no object any more.
+var errNoObject = errors.New("snapshot holds no object")
+
+// storeError gives an object-store error its kind (execution.ErrNotFound, ErrPermissionDenied or
+// ErrUnavailable), so the caller can tell a snapshot that is gone (start cold, ADR 0120 section 5.6)
+// from a store outage. Errors of the driver's own check stay plain.
+func storeError(op string, err error) error {
+	var mr minio.ErrorResponse
+	switch {
+	case errors.Is(err, errNoObject), errors.As(err, &mr) && (mr.Code == "NoSuchKey" || mr.Code == "NoSuchBucket"):
+		return fail(op, execution.ErrNotFound, "%v", err)
+	case errors.As(err, &mr) && (mr.Code == "AccessDenied" || mr.Code == "InvalidAccessKeyId" || mr.Code == "SignatureDoesNotMatch"):
+		return fail(op, execution.ErrPermissionDenied, "%v", err)
+	case errors.As(err, &mr), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return fail(op, execution.ErrUnavailable, "%v", err)
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 func contentDigest(ctx context.Context, c *minio.Client, bucket, uri string) (string, error) {
 	prefix, err := snapshotObjectPrefix(uri, bucket)
 	if err != nil {
@@ -93,7 +114,7 @@ func contentDigest(ctx context.Context, c *minio.Client, bucket, uri string) (st
 		keys = append(keys, o.Key)
 	}
 	if len(keys) == 0 {
-		return "", fmt.Errorf("substrate: snapshot %s holds no object", uri)
+		return "", fmt.Errorf("substrate: snapshot %s: %w", uri, errNoObject)
 	}
 	slices.Sort(keys)
 	h := sha256.New()
