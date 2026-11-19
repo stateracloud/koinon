@@ -37,11 +37,13 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
+	"github.com/stateracloud/koinon/internal/gateway/usagewire"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
 	"github.com/stateracloud/koinon/internal/mcpgateway/pgaudit"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/modelgateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/safego"
 )
@@ -50,10 +52,20 @@ import (
 // agent's URL does not change with the driver.
 const mcpPath = "/mcp"
 
+// usageFlushLimit bounds the last export at shutdown. The pod's grace period is the shutdown delay,
+// the drain timeout and 30 seconds, and the flush runs after the drain, so it must fit in the 30.
+const usageFlushLimit = 20 * time.Second
+
 type config struct {
 	listenAddr  string
 	healthAddr  string
 	metricsAddr string
+
+	// modelPath also serves the model path (ADR 0097 step 2, issue 279): the route of each model format,
+	// on the same listener. Off, the gateway serves the MCP path only.
+	modelPath bool
+	// mcpPath serves the MCP path. It is on unless a deployment runs the model path in pods of its own.
+	mcpPath bool
 
 	stateURL       string
 	stateTokenFile string
@@ -71,6 +83,9 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.listenAddr, "listen-addr", ":8080", "address of the MCP listener, where agents connect with their gateway key (path "+mcpPath+")")
 	fs.StringVar(&c.healthAddr, "health-addr", ":15021", "address of the health listener (/healthz, /readyz); empty disables it")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", ":15020", "address of the Prometheus listener (/metrics); empty disables it")
+	fs.BoolVar(&c.mcpPath, "mcp-path", true, "serve the MCP path (path "+mcpPath+")")
+	fs.BoolVar(&c.modelPath, "model-path", false,
+		"also serve the model path: the chat completions and Messages routes, with the usage tap; usage records go to koinon-api over OTLP")
 	fs.StringVar(&c.stateURL, "state-url", "",
 		"base URL of koinon-api's internal listener that serves the gateway State stream (for example http://koinon-api.koinon.svc:4318)")
 	fs.StringVar(&c.stateTokenFile, "state-token-file", "",
@@ -96,6 +111,9 @@ func (c *config) validate() error {
 	}
 	if c.listenAddr == "" {
 		return errors.New("--listen-addr must not be empty")
+	}
+	if !c.mcpPath && !c.modelPath {
+		return errors.New("--mcp-path=false needs --model-path: the gateway would serve nothing")
 	}
 	if c.shutdownDelay < 0 {
 		return errors.New("--shutdown-delay must not be negative")
@@ -178,13 +196,40 @@ func run(ctx context.Context, cfg config) error {
 		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
 	}
 	gw := mcpgateway.New(gopts)
+	var (
+		mg        *modelgateway.Gateway
+		exp       *usagewire.Exporter
+		modelHalf gateway.ModelPathGateway
+	)
+	if cfg.modelPath {
+		exp = usagewire.NewExporter(usagewire.ExporterOptions{
+			URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) }, Logger: log,
+		})
+		mg = modelgateway.New(modelgateway.Options{
+			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: otel.Tracer("koinon-gateway"), Logger: log,
+		})
+		modelHalf = mg
+		// A dropped record is a lost charge: both numbers are visible to an operator (ADR 0023: no labels).
+		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "koinon_gateway_usage_records_dropped_total",
+			Help: "Usage records the exporter dropped (queue full or refused by the receiver).",
+		}, func() float64 { return float64(exp.Dropped()) }))
+		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "koinon_gateway_usage_records_queued",
+			Help: "Usage records that wait for export.",
+		}, func() float64 { return float64(exp.Queued()) }))
+	}
+	var mcpHalf gateway.MCPGateway
+	if cfg.mcpPath {
+		mcpHalf = gw
+	}
 	copyID, err := stateclient.NewCopyID(cfg.podName)
 	if err != nil {
 		return err
 	}
 	sc, err := stateclient.New(stateclient.Config{
 		URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) },
-		CopyID: copyID, MCP: gw, Metrics: stateclient.NewMetrics(reg), Log: log,
+		CopyID: copyID, MCP: mcpHalf, Model: modelHalf, Metrics: stateclient.NewMetrics(reg), Log: log,
 	})
 	if err != nil {
 		return err
@@ -198,12 +243,21 @@ func run(ctx context.Context, cfg config) error {
 	// leaves the Service first.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
-	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, gw, log); err != nil {
+	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
+		return (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != "")
+	}, log); err != nil {
 		return err
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(mcpPath, gw.Handler())
+	if cfg.mcpPath {
+		mux.Handle(mcpPath, gw.Handler())
+	}
+	if mg != nil {
+		for _, p := range gateway.RoutePaths() {
+			mux.Handle(p, mg.Handler())
+		}
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.listenAddr)
 	if err != nil {
 		return fmt.Errorf("MCP listener: %w", err)
@@ -223,6 +277,12 @@ func run(ctx context.Context, cfg config) error {
 			}
 		}
 	})
+	// The exporter outlives the listener: a call that finishes during the drain still writes its record.
+	expCtx, stopExport := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopExport()
+	if exp != nil {
+		safego.Go(expCtx, log, "usage-export", func(ctx context.Context) { exp.Run(ctx, min(cfg.drain, usageFlushLimit)) })
+	}
 	safego.Go(ctx, log, "state-stream", func(ctx context.Context) { _ = sc.Run(ctx) })
 	log.Info("starting koinon-gateway", "version", project.Version, "listen", ln.Addr().String(), "copy", copyID)
 
@@ -241,11 +301,19 @@ func run(ctx context.Context, cfg config) error {
 	// Drain: new requests get 503 and the pool retires; a call in flight finishes first.
 	log.Info("draining koinon-gateway", "timeout", cfg.drain.String())
 	gw.Drain()
+	if mg != nil {
+		mg.Drain()
+	}
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.drain)
 	defer cancel()
 	if err := srv.Shutdown(sctx); err != nil {
 		_ = srv.Close()
 		log.Warn("drain deadline passed: open requests were closed", "err", err)
+	}
+	if exp != nil {
+		// Run flushes what is queued once its context ends; wait for it so the last records reach the ledger.
+		stopExport()
+		<-exp.Done()
 	}
 	stopHealth()
 	log.Info("stopped koinon-gateway")
@@ -254,7 +322,7 @@ func run(ctx context.Context, cfg config) error {
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is
 // not draining) on addr. An empty addr serves nothing.
-func serveHealth(life, term context.Context, addr string, gw *mcpgateway.Gateway, log *slog.Logger) error {
+func serveHealth(life, term context.Context, addr string, configured func() bool, log *slog.Logger) error {
 	if addr == "" {
 		return nil
 	}
@@ -264,7 +332,7 @@ func serveHealth(life, term context.Context, addr string, gw *mcpgateway.Gateway
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		// A replica with no config would refuse every key: it is not ready until the first
 		// revision applied. Once one has, a later State stream outage keeps the config in force.
-		if !applied.Load() && gw.Revision() != "" {
+		if !applied.Load() && configured() {
 			applied.Store(true)
 		}
 		if term.Err() != nil || !applied.Load() {

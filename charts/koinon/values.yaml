@@ -381,6 +381,29 @@ gateway:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+  # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
+  # koinon: also run koinon-gateway's model path, in pods of its own. Slice 1 brings it up and meters
+  # it; no agent is routed to it yet, and it does not yet enforce budgets or retry.
+  model:
+    driver: agentgateway
+    koinon:
+      image:
+        repository: gateway
+        tag: ""
+        digest: ""
+      replicas: 2
+      port: 8080
+      shutdownDelaySeconds: 5
+      drainTimeoutSeconds: 30
+      podDisruptionBudget:
+        maxUnavailable: 1
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {memory: 256Mi}
+      podAnnotations: {}
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
   kubernetes:
     # The GatewayClass of the existing controller.
     gatewayClassName: agentgateway

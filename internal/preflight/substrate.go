@@ -99,6 +99,9 @@ type SubstrateConfig struct {
 	NodeSelector map[string]string
 	// VMTier is true when the vm tier is in use: the nodes need the microVM devices.
 	VMTier bool
+	// GVisor is true when the gVisor sandbox class is in use: the nodes need user namespaces. NodeSelector
+	// picks the nodes that are probed.
+	GVisor bool
 	// ExpectedIssuer is the issuer the installer passes to ate-setup (--ateapi-expected-jwt-issuer). Empty
 	// means ate-setup reads the issuer from the API server's discovery document, as the probe does.
 	ExpectedIssuer string
@@ -260,13 +263,14 @@ func (c *Checker) SubstrateStaticPrerequisites(ctx context.Context) []Result {
 }
 
 // SubstrateProbePrerequisites runs the prerequisite checks that start pods in Substrate's namespace: the
-// node devices of the vm tier and the service-account issuer probe.
+// node devices of the vm tier, the user namespaces of the gVisor nodes and the service-account issuer probe.
 func (c *Checker) SubstrateProbePrerequisites(ctx context.Context) []Result {
 	c.defaultSubstrate()
 	var results []Result
 	if c.Config.Substrate.VMTier {
 		results = append(results, c.checkSubstrateDevices(ctx))
 	}
+	results = append(results, c.checkUserNamespaces(ctx))
 	return append(results, c.checkIssuer(ctx))
 }
 
@@ -929,8 +933,8 @@ type KubeSubstrateProber struct {
 	Image            string
 	ImagePullSecrets []string
 	Labels           map[string]string
-	// NodeSelector places the device probe on the worker nodes. The issuer probe does not use it: it
-	// checks the network path of the cluster, not of the workers.
+	// NodeSelector places the device probe on the worker nodes and picks the nodes of the user-namespace
+	// probe. The issuer probe does not use it: it checks the network path of the cluster, not of the workers.
 	NodeSelector map[string]string
 	Timeout      time.Duration
 	PollInterval time.Duration

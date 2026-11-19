@@ -121,6 +121,18 @@ func (q *Queries) GetInstallAuditChainHead(ctx context.Context) (InstallAuditCha
 	return i, err
 }
 
+const getInstallEventHash = `-- name: GetInstallEventHash :one
+SELECT hash FROM install_audit_events WHERE chain_seq = $1
+`
+
+// The hash of the install chain row at one chain_seq (a checkpoint names the row it signed).
+func (q *Queries) GetInstallEventHash(ctx context.Context, chainSeq int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getInstallEventHash, chainSeq)
+	var hash []byte
+	err := row.Scan(&hash)
+	return hash, err
+}
+
 const getLastInstallAnchor = `-- name: GetLastInstallAnchor :one
 SELECT id::text AS id_text, chain_seq, extract(epoch FROM now() - created_at)::float8 AS age_seconds
 FROM install_audit_events
@@ -140,6 +152,29 @@ func (q *Queries) GetLastInstallAnchor(ctx context.Context) (GetLastInstallAncho
 	row := q.db.QueryRow(ctx, getLastInstallAnchor)
 	var i GetLastInstallAnchorRow
 	err := row.Scan(&i.IDText, &i.ChainSeq, &i.AgeSeconds)
+	return i, err
+}
+
+const getLastInstallCheckpoint = `-- name: GetLastInstallCheckpoint :one
+SELECT chain_seq, extract(epoch FROM now() - created_at)::float8 AS age_seconds, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.checkpoint'
+ORDER BY chain_seq DESC
+LIMIT 1
+`
+
+type GetLastInstallCheckpointRow struct {
+	ChainSeq    int64
+	AgeSeconds  float64
+	SummaryText string
+}
+
+// The newest audit.checkpoint install event, its age by the database's clock and its summary as Postgres
+// prints it (ADR 0100 decision 4.2).
+func (q *Queries) GetLastInstallCheckpoint(ctx context.Context) (GetLastInstallCheckpointRow, error) {
+	row := q.db.QueryRow(ctx, getLastInstallCheckpoint)
+	var i GetLastInstallCheckpointRow
+	err := row.Scan(&i.ChainSeq, &i.AgeSeconds, &i.SummaryText)
 	return i, err
 }
 
@@ -741,6 +776,41 @@ func (q *Queries) ListInstallSettingsEvents(ctx context.Context) ([]InstallAudit
 			&i.RequestID,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstallSigningKeys = `-- name: ListInstallSigningKeys :many
+SELECT chain_seq, target_id, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.signing_key.added'
+ORDER BY chain_seq
+`
+
+type ListInstallSigningKeysRow struct {
+	ChainSeq    int64
+	TargetID    string
+	SummaryText string
+}
+
+// Every audit.signing_key.added event, oldest first: the public keys of the checkpoints (ADR 0100
+// decision 4.2). A rotated key stays listed, so an old checkpoint still verifies.
+func (q *Queries) ListInstallSigningKeys(ctx context.Context) ([]ListInstallSigningKeysRow, error) {
+	rows, err := q.db.Query(ctx, listInstallSigningKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInstallSigningKeysRow
+	for rows.Next() {
+		var i ListInstallSigningKeysRow
+		if err := rows.Scan(&i.ChainSeq, &i.TargetID, &i.SummaryText); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

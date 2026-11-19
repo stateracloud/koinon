@@ -181,9 +181,12 @@ type config struct {
 	guardAddr                                                            string
 	guardByteCap                                                         int
 	savedWorkSecret                                                      string
-	secretsNamespace                                                     string
-	kubeconfig                                                           string
-	githubAPIURL                                                         string
+	// auditSigningSecret names the Secret with the Ed25519 seed that signs audit checkpoints (ADR 0100
+	// decision 4.2); koinon-api creates it on first use and never overwrites it. Empty turns checkpoints off.
+	auditSigningSecret string
+	secretsNamespace   string
+	kubeconfig         string
+	githubAPIURL       string
 	// chartVersion is the Helm chart's version, which the chart passes; it is only recorded
 	// (platform.settings.observed).
 	chartVersion string
@@ -308,6 +311,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
 	c.kekWrapping.Flags(fs)
+	fs.StringVar(&c.auditSigningSecret, "audit-signing-secret", "",
+		"Secret with the Ed25519 key that signs audit checkpoints (ADR 0100 decision 4.2); created on first use, never overwritten, read by koinon-api alone; empty turns checkpoints off")
 	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
@@ -652,7 +657,7 @@ func serve(ctx context.Context, cfg config) error {
 	kekMonitor := &kekhealth.Monitor{Wrappers: wrappers, Metrics: kekMetrics, Recorder: &kekhealth.Recorder{Q: store.New(pool)}, Log: slog.Default()}
 	// The key events of the install audit chain (ADR 0100 decision 3): the keys this process generates,
 	// and the check on start that compares the whole key-set state with the last recorded one.
-	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.release, cfg.kekSecret, cfg.savedWorkSecret)
+	keyAudits := newKeyAudit(pool, kube, cfg.secretsNamespace, cfg.release, cfg.kekSecret, cfg.savedWorkSecret, cfg.auditSigningSecret)
 	switch {
 	case cfg.kekSecret != "" && kube != nil:
 		// The chart renders no key material (a render would make new keys every time, and a new
@@ -771,6 +776,14 @@ func serve(ctx context.Context, cfg config) error {
 	}
 	audit.RegisterAnchorMetric(reg)
 	anchorJob := &audit.AnchorJob{DB: pool, Interval: cfg.anchorInterval, Log: slog.Default()}
+	// Signed checkpoints (ADR 0100 decision 4.2) need the Kubernetes API for the signing Secret; without
+	// it, or without --audit-signing-secret, none is signed and the checkpoint age gauge only grows.
+	switch {
+	case cfg.auditSigningSecret != "" && kube != nil:
+		anchorJob.Keys = &kubeSigningKeys{kube: kube, namespace: cfg.secretsNamespace, name: cfg.auditSigningSecret, audits: keyAudits}
+	default:
+		slog.Warn("audit checkpoints are off: they need --audit-signing-secret and access to the Kubernetes API")
+	}
 	safego.GoOrStop(bgCtx, slog.Default(), "audit-anchor", stop, func(ctx context.Context) { anchorJob.Run(ctx) })
 	writerCheck := &audit.InstallWriterCheck{DB: pool, Log: slog.Default()}
 	writerCheck.Check(ctx)
@@ -1189,16 +1202,23 @@ func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, nam
 // ensureSavedWorkKey is savedWorkKey that also reports whether this call created the Secret (not a
 // concurrent replica, not an earlier start), so the start records keys.generated once.
 func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, name string) ([]byte, bool, error) {
+	return ensureRandomKeySecret(ctx, kube, namespace, name, savedwork.KeyFile)
+}
+
+// ensureRandomKeySecret returns the 32 bytes under dataKey of the Secret, creating the Secret with 32
+// random bytes when it does not exist and never overwriting one that does. created is true only for the
+// call that made the Secret. Both the saved-work key and the audit signing seed are made this way.
+func ensureRandomKeySecret(ctx context.Context, kube kubernetes.Interface, namespace, name, dataKey string) ([]byte, bool, error) {
 	secrets := kube.CoreV1().Secrets(namespace)
 	get := func() ([]byte, error) {
 		sec, err := secrets.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
-		if len(sec.Data[savedwork.KeyFile]) < 32 {
-			return nil, fmt.Errorf("the Secret %s/%s has no usable %q", namespace, name, savedwork.KeyFile)
+		if len(sec.Data[dataKey]) < 32 {
+			return nil, fmt.Errorf("the Secret %s/%s has no usable %q", namespace, name, dataKey)
 		}
-		return sec.Data[savedwork.KeyFile], nil
+		return sec.Data[dataKey], nil
 	}
 	key, err := get()
 	if err == nil || !apierrors.IsNotFound(err) {
@@ -1211,7 +1231,7 @@ func ensureSavedWorkKey(ctx context.Context, kube kubernetes.Interface, namespac
 	_, err = secrets.Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{project.Domain + "/managed-by": "koinon-api"}},
 		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{savedwork.KeyFile: k},
+		Data:       map[string][]byte{dataKey: k},
 	}, metav1.CreateOptions{FieldManager: "koinon-api"})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return nil, false, err

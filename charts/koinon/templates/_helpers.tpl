@@ -263,6 +263,11 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- if eq .Values.gateway.mcp.driver "koinon" }}true{{ end -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the model path (gateway.model.driver=koinon). Empty otherwise. */}}
+{{- define "koinon.modelKoinon" -}}
+{{- if eq .Values.gateway.model.driver "koinon" }}true{{ end -}}
+{{- end }}
+
 {{/* The MCP gateway's Service, fully qualified like koinon.gatewayHost. */}}
 {{- define "koinon.mcpGatewayHost" -}}
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
@@ -1070,6 +1075,10 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where agentgateway is;
 it carries no credentials.
 */}}
+{{/* The Secret koinon-api creates on its first checkpoint for the Ed25519 key that signs audit checkpoints (ADR 0100 decision 4.2). Helm never renders it, so an upgrade never overwrites the key. Only koinon-api reads it, through the Kubernetes API: no workload mounts it and no Role other than koinon-api's names it. Rotation: delete it (ADR 0100, signed checkpoints). */}}
+{{- define "koinon.auditSigningSecretName" -}}
+{{- include "koinon.componentName" (list . "audit-signing") -}}
+{{- end }}
 {{/* The Secret koinon-api creates on first use for the key that signs saved-work uploads (ADR 0054). koinon-agentd mounts it read-only (optional: it exists once koinon-api has started); it is not a KEK. */}}
 {{- define "koinon.savedWorkSecretName" -}}
 {{- include "koinon.componentName" (list . "saved-work") -}}

@@ -188,6 +188,7 @@ type Checker struct {
 	Issuer      IssuerResolver
 	IssuerProbe IssuerProber
 	Devices     DevicesProber
+	UserNS      UserNamespacesProber
 	Config      Config
 	// CallTimeout bounds each API and gateway call; the probes have their own timeouts.
 	CallTimeout time.Duration

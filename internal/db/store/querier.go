@@ -520,6 +520,8 @@ type Querier interface {
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
 	GetHomeRepositoryEpoch(ctx context.Context, arg GetHomeRepositoryEpochParams) (HomeRepositoryEpoch, error)
 	GetInstallAuditChainHead(ctx context.Context) (InstallAuditChainHead, error)
+	// The hash of the install chain row at one chain_seq (a checkpoint names the row it signed).
+	GetInstallEventHash(ctx context.Context, chainSeq int64) ([]byte, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The install ID (old issue 615): created once by a migration, never changed. KMS-wrapped KEKs are bound
@@ -532,6 +534,9 @@ type Querier interface {
 	GetLastGoodPriceSourceFetch(ctx context.Context, source string) (PriceSourceFetch, error)
 	// The newest audit.anchor install event and its age by the database's clock.
 	GetLastInstallAnchor(ctx context.Context) (GetLastInstallAnchorRow, error)
+	// The newest audit.checkpoint install event, its age by the database's clock and its summary as Postgres
+	// prints it (ADR 0100 decision 4.2).
+	GetLastInstallCheckpoint(ctx context.Context) (GetLastInstallCheckpointRow, error)
 	// The newest key event whose "after" is a key-set state (ADR 0100 decision 3, "Keys: not atomic, so
 	// checked on start"): keys.rewrap, keys.reencrypt and keys.forget carry counts, not a key set.
 	GetLastInstallKeyEvent(ctx context.Context) (InstallAuditEvent, error)
@@ -930,6 +935,9 @@ type Querier interface {
 	// Every platform.settings.observed event, oldest first. An event holds only the keys that changed, so
 	// the last recorded settings are the events applied in turn (ADR 0100 decision 3). A few rows per install.
 	ListInstallSettingsEvents(ctx context.Context) ([]InstallAuditEvent, error)
+	// Every audit.signing_key.added event, oldest first: the public keys of the checkpoints (ADR 0100
+	// decision 4.2). A rotated key stays listed, so an old checkpoint still verifies.
+	ListInstallSigningKeys(ctx context.Context) ([]ListInstallSigningKeysRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process

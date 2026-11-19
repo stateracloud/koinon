@@ -360,6 +360,13 @@ func anthropicSpec(env Env) {
 		})
 
 		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {
+			if env.NoTranslation {
+				code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{
+					"model": "claude-test", "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+				})
+				Expect(code).To(Equal(http.StatusNotFound), "no format translation: "+out)
+				return
+			}
 			// The tools filter is a per-model body field; it must not touch the type "function" tools of
 			// another route.
 			code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{

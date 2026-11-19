@@ -52,6 +52,12 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 14 }}
         {{- end }}
+        {{- if include "koinon.modelKoinon" . }}
+        # koinon-gateway's model path follows the State stream and sends its usage records here.
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "model-gateway") | nindent 14 }}
+        {{- end }}
     # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
     # to be sealed (an HMAC credential per upload). Home checkpoints (ADR 0032) also ask here for
     # each repository's password, which koinon-api opens with the KEK (an HMAC credential per request). Its own port, so agentd cannot reach the tools
@@ -242,6 +248,56 @@ spec:
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
+    {{- with .Values.networkPolicy.metricsFrom }}
+    - ports:
+        - port: stats
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}
+{{- if include "koinon.modelKoinon" . }}
+---
+# koinon-gateway (model path). It holds credentials, so its egress is as agentgateway's: DNS, koinon-api's
+# OTLP listener (the State stream) and the public internet, with the private ranges carved out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "model-gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "model-gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "model-gateway") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.otlpPort }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+        - ipBlock:
+            cidr: ::/0
+            except: ["fc00::/7", "fe80::/10", "::/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"]
+    {{- range .Values.networkPolicy.gatewayEgressTo }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+  ingress:
+    - ports:
+        - port: model
+      from:
+        # Only koinon-api calls this gateway until agents move to it.
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats
