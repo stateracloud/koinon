@@ -15,6 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -82,6 +85,32 @@ type isolationCase struct {
 	// (lists and creates). Called in the caller's own org they succeed, and
 	// the response must hold none of the other org's IDs.
 	ownOrgOK bool
+}
+
+// isolationCardURL is the base URL of a fake A2A agent on 127.0.0.1; CreateRemoteAgent reads its card.
+// The spec below sets it.
+var isolationCardURL string
+
+// serveIsolationAgent runs an agent that serves an agent card with one JSON-RPC interface on its own host.
+func serveIsolationAgent() *httptest.Server {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		c := &a2a.AgentCard{
+			Name: "isolation-fake", Version: "1", DefaultInputModes: []string{"text/plain"}, DefaultOutputModes: []string{"text/plain"},
+			SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(srv.URL+"/jsonrpc", a2a.TransportProtocolJSONRPC)},
+			Skills:              []a2a.AgentSkill{{ID: "chat", Name: "Chat", Description: "Chat", Tags: []string{"chat"}}},
+		}
+		body, err := a2av0.NewStaticAgentCardProducer(c).(a2asrv.AgentCardJSONProducer).CardJSON(r.Context())
+		if err != nil {
+			http.Error(w, "card", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	})
+	srv = httptest.NewServer(mux)
+	return srv
 }
 
 var isolationCases = map[string]isolationCase{
@@ -741,6 +770,14 @@ var isolationCases = map[string]isolationCase{
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
 		},
 	},
+	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.remoteAgents.CreateRemoteAgent(ctx, &remoteagentv1alpha1.CreateRemoteAgentRequest{
+				OrgId: org, Name: fmt.Sprintf("created-%d", dbSeq.Add(1)), CardUrl: isolationCardURL,
+			})
+		},
+	},
 	remoteagentv1alpha1connect.RemoteAgentServiceListRemoteAgentsProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
@@ -906,11 +943,8 @@ var isolationExempt = map[string]string{
 	budgetv1alpha1connect.PriceServiceGetPriceRefreshSettingsProcedure:   platformPricesReason,
 	budgetv1alpha1connect.PriceServiceCheckPriceSourcesProcedure:         platformPricesReason,
 	budgetv1alpha1connect.PriceServiceExplainPlatformPriceProcedure:      platformPricesReason,
-	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: "reads the agent card at the URL before it " +
-		"writes, so a call in the caller's own org needs a live A2A agent; it names no resource ID, and the org check is " +
-		"the one every RemoteAgentService RPC shares (the seven cases above and the specs of internal/remoteagents)",
-	authv1alpha1connect.AuthServiceWhoAmIProcedure:         "describes the caller's own session; takes no IDs",
-	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
+	authv1alpha1connect.AuthServiceWhoAmIProcedure:                       "describes the caller's own session; takes no IDs",
+	authv1alpha1connect.AuthServiceChangePasswordProcedure:               "changes the caller's own password; takes no IDs",
 	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
 		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
@@ -929,6 +963,9 @@ var _ = Describe("org isolation", func() {
 	It("never serves or changes one org's data for another org's user", func(ctx SpecContext) {
 		gh := githubtest.New()
 		DeferCleanup(gh.Server.Close)
+		agent := serveIsolationAgent()
+		DeferCleanup(agent.Close)
+		isolationCardURL = agent.URL
 		e := newEnv(ctx, envOptions{
 			keys:   secretstoretest.Keyring(),
 			github: github.NewClient(github.Options{BaseURL: gh.URL()}),
