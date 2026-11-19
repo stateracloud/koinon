@@ -44,10 +44,10 @@ if [[ $(uname -s) != Linux ]]; then
 	echo "load-gateway: the load suite runs in the cloud on Linux, never on a developer machine ($(uname -s))" >&2
 	exit 2
 fi
-command -v docker >/dev/null && docker info >/dev/null 2>&1 || {
+if ! command -v docker >/dev/null || ! docker info >/dev/null 2>&1; then
 	echo "load-gateway: Docker is needed (agentgateway runs in a container)" >&2
 	exit 2
-}
+fi
 
 out=${out:-$repo/load-results/$(date -u +%Y%m%dT%H%M%SZ)}
 mkdir -p "$out"
