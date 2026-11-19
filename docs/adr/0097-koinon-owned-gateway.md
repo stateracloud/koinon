@@ -786,7 +786,7 @@ move, once.
 
    Known limits of slice 3, recorded so a later slice can close them:
    - The write gate is generic and lives in `internal/formatgate`. Each component reports the formats it reads
-     to `component_reports` (migration 00101; koinon-api, the reconciler and koinon-gateway, each pod once
+     to `component_reports` (migration 00102; koinon-api, the reconciler and koinon-gateway, each pod once
      per interval). koinon-api seals a v2 credential only when `Gate.Ready` finds a fresh report from every
      pod the chart expects (`KOINON_COMPAT_EXPECT`, built from the replica counts) and no fresh report
      that lacks the format. It fails closed: a missing report, a pod at N-1 and an unknown component all
