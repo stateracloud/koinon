@@ -40,12 +40,18 @@ const (
 // NewMetrics registers the metrics on reg and sets every series to zero.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		Loaded: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "koinon_gateway_recipient_key_loaded",
-			Help: "Gateway recipient keys this process holds, by the state of the key's row."}, []string{"state"}),
-		Custody: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "koinon_gateway_recipient_key_custody",
-			Help: "1 for the custody of the key's wrapping key: kms (only the gateway identity unwraps) or local (the Secret holds the key unwrapped)."}, []string{"custody"}),
-		Failures: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "koinon_gateway_credential_open_failures_total",
-			Help: "Stored MCP credentials the gateway could not open, by reason."}, []string{"reason"}),
+		Loaded: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_gateway_recipient_key_loaded",
+			Help: "Gateway recipient keys this process holds, by the state of the key's row.",
+		}, []string{"state"}),
+		Custody: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "koinon_gateway_recipient_key_custody",
+			Help: "1 for the custody of the key's wrapping key: kms (only the gateway identity unwraps) or local (the Secret holds the key unwrapped).",
+		}, []string{"custody"}),
+		Failures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_open_failures_total",
+			Help: "Stored MCP credentials the gateway could not open, by reason.",
+		}, []string{"reason"}),
 	}
 	reg.MustRegister(m.Loaded, m.Custody, m.Failures)
 	for _, s := range []State{Pending, Active, Retiring} {
@@ -209,7 +215,7 @@ func readDir(dir string) (map[string]secretstore.StoredKEK, error) {
 		if de.IsDir() || !secretstore.ValidRecipientKeyID(de.Name()) {
 			continue // the kubelet's ..data links and dot files
 		}
-		b, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		b, err := os.ReadFile(filepath.Join(dir, de.Name())) //nolint:gosec // dir is the operator-set key mount; the name passed ValidRecipientKeyID
 		if err != nil {
 			return nil, err
 		}
@@ -224,7 +230,6 @@ func readDir(dir string) (map[string]secretstore.StoredKEK, error) {
 type PublicKeys struct {
 	mu     sync.RWMutex
 	active *secretstore.RecipientPublicKey
-	id     string
 	err    error
 }
 

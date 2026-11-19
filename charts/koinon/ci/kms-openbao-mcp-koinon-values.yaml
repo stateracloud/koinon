@@ -3,13 +3,19 @@
 openshell:
   address: openshell.openshell.svc:8080
   insecure: true
+bootstrapAdmin:
+  enabled: false
 secrets:
   kek:
     kms:
       backend: openbao
       openbao:
-        address: https://openbao.example:8200
+        address: https://openbao:8443
         key: koinon-kek
+        caConfigMap: openbao-ca
+      keyAdmin:
+        addKey: smoke-added-kek
+        activateIfNoActive: true
 gateway:
   mcp:
     driver: koinon

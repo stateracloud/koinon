@@ -829,6 +829,12 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 	GinkgoHelper()
 	ps := job.Spec.Template.Spec
 	for _, c := range append(slices.Clone(ps.InitContainers), ps.Containers...) {
+		// The gateway key-admin Job waits (--wait-loaded) until a gateway process reports that it holds
+		// the new key. No gateway runs while the plain Jobs run, so the wait cannot end here: the Job
+		// runs without it and stops at the pending key. The wait has its own specs in internal/gatewaykeys.
+		if strings.Contains(job.Name, "-gateway-key-admin-") {
+			c.Args = slices.DeleteFunc(slices.Clone(c.Args), func(a string) bool { return strings.HasPrefix(a, "--wait-loaded") })
+		}
 		w := rn.start(ctx, job.Name, ps, c, jobDeadline)
 		code, logs := w.ExitCode(ctx), w.Logs(ctx)
 		AddReportEntry("log "+w.Name, logs, ReportEntryVisibilityFailureOrVerbose)
