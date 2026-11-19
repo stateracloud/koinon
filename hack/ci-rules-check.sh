@@ -20,6 +20,8 @@
 #       Vitest `--retry N` on a command line, no Vitest `retry` above 0 (config or test file). A text scan: known limits
 #       are listed under rule T1 in docs/dev/ci-rules.md.
 #   T2  a flaky-test waiver `flaky-waiver: #<issue> until <YYYY-MM-DD>` is well formed and not past its date.
+#   T11 an Eventually window in a Go test is inside racescale.D(...), or has `// t11-ok: <reason>`. Files that have
+#       not moved yet are in hack/ci-rules-t11-baseline.txt; the list only shrinks.
 #   T7  every job of every workflow sets `timeout-minutes`. hack/runner-lint.sh is the check; this rule runs it and
 #       reports its real result (a tree without the lint falls back to counting ci.yml jobs).
 #
@@ -28,7 +30,7 @@
 # action pin age (hack/dep-age-check.sh), migrations (hack/migrate-lint.sh).
 #
 # Prior art: zizmor (excessive-permissions, unpinned-uses audits) covers W1 and W2 more deeply; it
-# arrives with part 2 of #579. This script keeps the Koinon-specific rules (Q1, Q6, T1, T2, T7) that no
+# arrives with part 2 of #579. This script keeps the Koinon-specific rules (Q1, Q6, T1, T2, T7, T11) that no
 # linter knows. actionlint does not check permissions or pins (github.com/rhysd/actionlint).
 #
 # Usage: hack/ci-rules-check.sh [root]    (default: the repository root)
@@ -375,6 +377,35 @@ elif [[ -f $ci ]]; then
 	fi
 else
 	verdict T7 report "no ci.yml"
+fi
+
+# --- T11 ------------------------------------------------------------------------------------------
+# An Eventually window in a Go test is a literal duration (`time.Second`, "5s") only inside racescale.D(...) or
+# with a `// t11-ok: <reason>` comment on its line. The window is the time that tells a hang from a slow machine;
+# under -race and -p it must grow with the machine. A file that has not moved yet is in
+# hack/ci-rules-t11-baseline.txt (one path per line): the list only shrinks, so a new or migrated file is checked.
+# A text scan of one line: a window on another line than the Eventually( call is found by its `).WithTimeout(`.
+# Consistently is exempt (it tests that time passes); so is a window that is a variable.
+t11_base=$root/hack/ci-rules-t11-baseline.txt
+t11_re='(Eventually\(|[)}]\.WithTimeout\(|^[[:space:]]*\}\)?,[[:space:]]*[^,]+\)\.(Should|ShouldNot)\()'
+t11_dur='(time\.(Nanosecond|Microsecond|Millisecond|Second|Minute|Hour)|"[0-9.]+(ms|s|m|h)")'
+t11_bad=()
+t11_known=0
+while IFS= read -r f; do
+	[[ $f == *_test.go ]] || continue
+	[[ -f $root/$f ]] || continue
+	hits=$(grep -n -E "$t11_re" "$root/$f" | sed -E 's/WithPolling\([^)]*\)//g' | grep -E "$t11_dur" | grep -v -E 'racescale\.D\(|t11-ok:|Consistently\(' || true)
+	[[ -n $hits ]] || continue
+	if [[ -f $t11_base ]] && grep -qxF -- "$f" "$t11_base"; then
+		t11_known=$((t11_known + 1))
+	else
+		t11_bad+=("$f:${hits%%:*}")
+	fi
+done < <(printf '%s\n' "${all_files[@]}")
+if [[ ${#t11_bad[@]} -eq 0 ]]; then
+	verdict T11 pass "no unscaled Eventually window outside the baseline ($t11_known files still in hack/ci-rules-t11-baseline.txt)"
+else
+	verdict T11 fail "Eventually window not in racescale.D (rule T11; file:line): ${t11_bad[*]:0:12}"
 fi
 
 exit "$failed"

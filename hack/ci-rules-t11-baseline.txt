@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Go test files that still have an Eventually window outside racescale.D (rule T11, docs/dev/ci-rules.md).
+# One path per line. The list only shrinks: wrap the windows of a file in racescale.D and delete its line.
+# A file that is not here fails the rule. Issue 994 moves the files one by one.
+internal/acp/acp_test.go
+internal/adminapi/audit_test.go
+internal/agentd/approvals_test.go
+internal/api/connections_test.go
+internal/api/run_now_test.go
+internal/audit/anchor_test.go
+internal/cmd/koinonapi/audit_test.go
+internal/cmd/koinonapi/keyaudit_test.go
+internal/cmd/koinongateway/gateway_test.go
+internal/cmd/koinongateway/load_test.go
+internal/declarative/declarative_test.go
+internal/declarative/run_test.go
+internal/execution/openshell/exec_test.go
+internal/execution/openshell/integration_test.go
+internal/execution/substrate/behaviour_test.go
+internal/gateway/kubernetes/budgets_test.go
+internal/gateway/standalone/agentgateway_test.go
+internal/gateway/standalone/reload_test.go
+internal/gateway/stateclient/client_test.go
+internal/gateway/stateserver/server_test.go
+internal/gateway/usagewire/usagewire_test.go
+internal/installid/installid_test.go
+internal/ledger/agentgateway_test.go
+internal/mcpask/mcpask_test.go
+internal/questions/questions_test.go
+internal/reconciler/gatewayplan/plan_test.go
+internal/runwatch/chunks_test.go
+internal/scheduler/scheduler_suite_test.go
+internal/secretstore/openbao/openbao_suite_test.go
+internal/triggers/schedule/schedule_test.go
+test/chartsmoke/leakguard_test.go
+test/chartsmoke/openbao_test.go
+test/chartsmoke/smoke_test.go
+test/drill/drill_test.go
+test/e2e/mcp_test.go
+test/e2e/quickstart_test.go
+test/e2e/stories_test.go
+test/escape/admission_kek_test.go
+test/escape/admission_mirror_test.go
+test/escape/admission_netpol_identity_test.go
+test/escape/admission_observer_test.go
+test/escape/admission_podfields_test.go
+test/escape/admission_test.go
+test/escape/admission_worker_test.go
+test/escape/gateway_test.go
+test/escape/netpol_test.go
+test/escape/sandbox_test.go

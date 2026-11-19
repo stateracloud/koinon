@@ -17,6 +17,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -96,7 +97,7 @@ const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
 // readySettle is how long koinon-agentd waits after the ready command before the first prompt:
 // OpenCode 2.2.0 announces the command and registers the server's tools on separate paths, the
 // tools after a 100 ms debounce (packages/core/src/tool/mcp.ts), so the command can come first.
-const readySettle = time.Second
+var readySettle = racescale.D(time.Second)
 
 // instructionsPath is where koinon-agentd writes the run's instructions before it starts the
 // harness; instructionsMarker is in the contract's instructions, and for a harness with
@@ -215,7 +216,7 @@ func describeContract(f definition) bool {
 		// ready does what koinon-agentd does between session/new or load and the first prompt.
 		ready := func(ctx context.Context) {
 			if f.readyCommand != "" {
-				Eventually(h.client.availableCommands).WithTimeout(30*time.Second).
+				Eventually(h.client.availableCommands).WithTimeout(racescale.D(30*time.Second)).
 					Should(ContainElement(f.readyCommand), "the harness never announced the Koinon MCP server")
 				time.Sleep(readySettle)
 			}
@@ -414,9 +415,9 @@ func describeContract(f definition) bool {
 				Expect(err).NotTo(HaveOccurred())
 				done <- stop
 			}()
-			Eventually(gw.hung).WithTimeout(time.Minute).Should(Receive())
+			Eventually(gw.hung).WithTimeout(racescale.D(time.Minute)).Should(Receive())
 			Expect(h.conn.Cancel(ctx, session)).To(Succeed())
-			Eventually(done).WithTimeout(time.Minute).Should(Receive(Equal(acp.StopCancelled)))
+			Eventually(done).WithTimeout(racescale.D(time.Minute)).Should(Receive(Equal(acp.StopCancelled)))
 			h.client.take()
 		})
 

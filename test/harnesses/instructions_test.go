@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -40,7 +41,7 @@ func startSession(ctx context.Context, f definition, sb *sandbox, cmd []string) 
 	session, err := h.conn.NewSession(ctx, workdir)
 	Expect(err).NotTo(HaveOccurred())
 	if f.readyCommand != "" {
-		Eventually(h.client.availableCommands).WithTimeout(30 * time.Second).Should(ContainElement(f.readyCommand))
+		Eventually(h.client.availableCommands).WithTimeout(racescale.D(30 * time.Second)).Should(ContainElement(f.readyCommand))
 		time.Sleep(readySettle)
 	}
 	if f.selectModel != nil {

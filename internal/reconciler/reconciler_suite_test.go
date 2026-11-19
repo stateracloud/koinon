@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -42,6 +43,9 @@ var (
 
 func TestReconciler(t *testing.T) {
 	RegisterFailHandler(Fail)
+	// A pass reads Postgres and the fakes under -race and -p: the 1 s default is too short (issues 994, 660).
+	// Eventually returns at the first success; the window only tells a hang from a slow machine.
+	SetDefaultEventuallyTimeout(racescale.D(10 * time.Second))
 	RunSpecs(t, "Reconciler Suite")
 }
 
@@ -196,6 +200,9 @@ type fakeModelGateway struct {
 	// cancelAt is when an Apply saw its context cancelled; applyAt are the starts of every Apply.
 	cancelAt time.Time
 	applyAt  []time.Time
+	// cancelLag is how long a cancelled Apply takes to return after it saw the cancel (a slow gateway
+	// call that unwinds, or a loaded runner). The loop logs why it stopped only after the pass returns.
+	cancelLag time.Duration
 }
 
 func (f *fakeModelGateway) canceledAt() time.Time {
@@ -241,7 +248,9 @@ func (f *fakeModelGateway) Apply(ctx context.Context, s gateway.State) (gateway.
 		case <-ctx.Done():
 			f.mu.Lock()
 			f.cancelAt = time.Now()
+			lag := f.cancelLag
 			f.mu.Unlock()
+			time.Sleep(lag)
 			return "", ctx.Err()
 		}
 	}
