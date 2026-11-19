@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/a2aout"
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -36,7 +37,11 @@ func (s *Service) Check(ctx context.Context, row store.RemoteAgent) (RemoteAgent
 	if err := s.hold.Err(); err != nil {
 		return RemoteAgent{}, err
 	}
-	secret, err := OpenCredential(s.keys, row.OrgID, row.ID, row.Credential)
+	var opener catalog.Opener = s.opener
+	if opener == nil && s.keys != nil {
+		opener = s.keys
+	}
+	secret, err := OpenCredential(opener, row.OrgID, row.ID, row.Credential)
 	if err != nil {
 		// The log carries the error, which names no secret; the stored reason is a fixed text.
 		s.log.Warn("remote agent check: credential not opened", "org", row.OrgID.String(), "agent", row.ID.String(), "err", err)

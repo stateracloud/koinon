@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
+	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
 )
@@ -265,7 +266,9 @@ type Reconciler struct {
 	// plan is the gateway side of a pass and its memory (internal/reconciler/gatewayplan).
 	plan *gatewayplan.Planner
 	mcp  *mcpservers.Service
-	m    *Metrics
+	// remoteAgents reads the cards of remote agents for the health check; it never seals a credential.
+	remoteAgents *remoteagents.Service
+	m            *Metrics
 
 	// supMu guards the supervisor image read from the gateway (supervisor.go).
 	supMu    sync.Mutex
@@ -386,6 +389,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, MCPKeyDir: cfg.MCPKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,

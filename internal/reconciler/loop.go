@@ -155,6 +155,8 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	queue := r.newWorkQueue(lctx)
 	defer queue.Stop()
 	fctx := gateway.WithFence(lctx, fence)
+	// The remote agent health check runs while this replica leads, so one replica reads each card.
+	safego.Go(lctx, r.log, "remote-agent-checker", func(ctx context.Context) { r.RunRemoteAgentChecker(ctx) })
 
 	for {
 		pctx, pcancel := context.WithTimeout(fctx, passTimeout)

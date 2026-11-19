@@ -132,6 +132,7 @@ type Card struct {
 type Service struct {
 	pool        *pgxpool.Pool
 	keys        Keys
+	opener      catalog.Opener
 	log         *slog.Logger
 	policy      catalog.URLPolicy
 	fetch       CardFetcher
@@ -153,6 +154,13 @@ func New(pool *pgxpool.Pool, keys Keys, log *slog.Logger) *Service {
 // each call and check (ADR 0120).
 func (s *Service) WithURLPolicy(p catalog.URLPolicy) *Service {
 	s.policy = p
+	return s
+}
+
+// WithOpener sets the key that opens credentials, for a process that never seals one (the reconciler).
+// Without it the Service opens with its Keys.
+func (s *Service) WithOpener(o catalog.Opener) *Service {
+	s.opener = o
 	return s
 }
 
