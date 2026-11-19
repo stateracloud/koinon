@@ -291,6 +291,34 @@ var _ = Describe("the budget stop of the model path", func() {
 		Expect(hits.Load()).To(BeZero())
 	})
 
+	It("lets a slow upload pass when the new generation has room", func(ctx SpecContext) {
+		cfg.SetLimit(agent, limit("0", "g1"))
+		apply(ctx)
+		reading := make(chan struct{})
+		var once sync.Once
+		slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = readSignal{ReadCloser: r.Body, first: func() { once.Do(func() { close(reading) }) }}
+			gw.Handler().ServeHTTP(w, r)
+		}))
+		DeferCleanup(slow.Close)
+		conn, err := net.Dial("tcp", slow.Listener.Addr().String())
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(conn.Close)
+		body := `{"model":"m","messages":[]}`
+		_, err = fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer %s\r\nContent-Length: %d\r\n\r\n%s", key.Material, len(body), body[:10])
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(reading).Should(BeClosed())
+		cfg.SetLimit(agent, limit("1", "g2")) // the ledger pushed room: the old generation was at its limit
+		apply(ctx)
+		_, err = conn.Write([]byte(body[10:]))
+		Expect(err).NotTo(HaveOccurred())
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(resp.Body.Close)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK), "the check reads the limit in force, not the one the request started with")
+		Expect(hits.Load()).To(BeEquivalentTo(1))
+	})
+
 	It("never lets a call through while applies retire the generation it checks", func(ctx SpecContext) {
 		cfg.SetLimit(agent, limit("0", "g0"))
 		apply(ctx)
