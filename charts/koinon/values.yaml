@@ -690,6 +690,12 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
+    # The guest server image that runs in every actor (`ate-env-guest`, built by the release workflow's
+    # env-guest job from github.com/agent-substrate/env; upstream publishes none). Empty means
+    # <image.registry>/ate-env-guest:<appVersion>. A digest reference (name@sha256:...) is allowed and
+    # is the one to pin. The release's env-guest job prints the digest. The driver reads this value in #1088;
+    # nothing in the chart reads it yet.
+    guestImage: ""
     # Required true with substrate: the harness does not yet run behind the guest launcher and the
     # gVisor tiers have no read-only root (issue #1088 slices b and c). Remove when both have merged.
     allowUnhardened: false
