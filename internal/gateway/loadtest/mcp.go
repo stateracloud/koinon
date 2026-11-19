@@ -5,7 +5,6 @@ package loadtest
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -97,7 +96,13 @@ func callOK(ctx context.Context, s *mcp.ClientSession, p *mcp.CallToolParams) er
 		return err
 	}
 	if res.IsError {
-		return errors.New("tool result is an error")
+		msg := ""
+		for _, c := range res.Content {
+			if t, ok := c.(*mcp.TextContent); ok {
+				msg += t.Text
+			}
+		}
+		return fmt.Errorf("tool result is an error: %s", strings.ReplaceAll(msg, "\n", " "))
 	}
 	return nil
 }

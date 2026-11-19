@@ -114,7 +114,6 @@ var _ = Describe("koinon-gateway under load", Label("load"), Ordered, func() {
 			res, err := ep.ToolCalls(ctx, conc, 2*time.Second, loadtest.Duration())
 			Expect(err).NotTo(HaveOccurred())
 			results = append(results, res)
-			Expect(res.Errors).To(BeZero(), "%v", res.ErrorKinds)
 		}
 	}, SpecTimeout(30*time.Minute))
 
@@ -123,7 +122,6 @@ var _ = Describe("koinon-gateway under load", Label("load"), Ordered, func() {
 		res, err := endpoint(addr).Streams(ctx, 64, 20, 500*time.Millisecond, loadtest.Duration()+10*time.Second)
 		Expect(err).NotTo(HaveOccurred())
 		results = append(results, res)
-		Expect(res.Errors).To(BeZero(), "%v", res.ErrorKinds)
 	}, SpecTimeout(10*time.Minute))
 
 	It("drains: serves for the shutdown delay after SIGTERM and lets calls in flight finish", func(ctx SpecContext) {

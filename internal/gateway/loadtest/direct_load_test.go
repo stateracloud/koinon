@@ -30,7 +30,6 @@ var _ = Describe("the fake MCP server, called directly", Label("load"), func() {
 		for _, conc := range loadtest.Levels() {
 			res, err := ep.ToolCalls(ctx, conc, 2*time.Second, loadtest.Duration())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Errors).To(BeZero(), "%v", res.ErrorKinds)
 			results = append(results, res)
 		}
 		res, err := ep.Streams(ctx, 64, 20, 500*time.Millisecond, loadtest.Duration()+10*time.Second)

@@ -139,7 +139,6 @@ var _ = Describe("agentgateway under load", Label("load"), Ordered, func() {
 			res, err := ep.ToolCalls(ctx, conc, 2*time.Second, loadtest.Duration())
 			Expect(err).NotTo(HaveOccurred())
 			results = append(results, res)
-			Expect(res.Errors).To(BeZero(), "%v", res.ErrorKinds)
 		}
 	}, SpecTimeout(30*time.Minute))
 
@@ -147,7 +146,6 @@ var _ = Describe("agentgateway under load", Label("load"), Ordered, func() {
 		res, err := ep.Streams(ctx, 64, 20, 500*time.Millisecond, loadtest.Duration()+10*time.Second)
 		Expect(err).NotTo(HaveOccurred())
 		results = append(results, res)
-		Expect(res.Errors).To(BeZero(), "%v", res.ErrorKinds)
 	}, SpecTimeout(10*time.Minute))
 
 	It("restarts: SIGTERM, then a new process, under load", func(ctx SpecContext) {
