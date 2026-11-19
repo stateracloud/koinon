@@ -78,7 +78,8 @@ var _ = Describe("Execution", func() {
 			_, _ = io.ReadAll(p.Stdout())
 			Expect(p.Close()).To(Succeed())
 			Expect(cl.Started("ws", name)[0][:4]).To(Equal([]string{
-				"/usr/local/bin/koinon-guest-launcher", "--policy", "/etc/koinon/guest-launcher/" + policy, "--"}))
+				"/usr/local/bin/koinon-guest-launcher", "--policy", "/etc/koinon/guest-launcher/" + policy, "--",
+			}))
 		}
 	})
 	It("refuses an unknown driver", func() {
