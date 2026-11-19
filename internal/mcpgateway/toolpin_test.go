@@ -26,6 +26,14 @@ type mutableUpstream struct {
 	calls int
 }
 
+// newSSEUpstream serves the same server over the legacy SSE transport, the only transport on which
+// the gateway keeps a stream open for the target's notifications.
+func newSSEUpstream() *mutableUpstream {
+	u := &mutableUpstream{srv: mcp.NewServer(&mcp.Implementation{Name: "mutable-sse", Version: "0"}, nil)}
+	u.http = httptest.NewServer(mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return u.srv }, nil))
+	return u
+}
+
 func newMutableUpstream() *mutableUpstream {
 	u := &mutableUpstream{srv: mcp.NewServer(&mcp.Implementation{Name: "mutable", Version: "0"}, nil)}
 	u.http = httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return u.srv }, nil))
@@ -187,6 +195,43 @@ var _ = Describe("pinned tool lists (#1132)", func() {
 		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_read"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeFalse())
+	})
+
+	It("checks a list again when the target sends list_changed, and refuses the new tool before any list", func(ctx SpecContext) {
+		sse := newSSEUpstream()
+		DeferCleanup(func() { sse.http.CloseClientConnections(); sse.http.Close() })
+		sse.set("read", "reads")
+		gw := mcpgateway.New(mcpgateway.Options{Guard: guard, Audit: &auditLog{}})
+		DeferCleanup(gw.Drain)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", gw.Handler())
+		f := httptest.NewServer(mux)
+		DeferCleanup(func() { f.CloseClientConnections(); f.Close() })
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{
+			Keys: []gateway.Key{key.Key},
+			MCPState: gateway.MCPState{
+				MCP:   []gateway.MCPTarget{{Name: "t", Org: "acme", URL: sse.http.URL, SSE: true}},
+				Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {{Target: "t", Tools: []string{"read", "extra"}}}},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, f.URL, key.Material)
+		Expect(toolNames(ctx, s)).To(ConsistOf("t_read"))
+		guard.mu.Lock()
+		before := guard.asked
+		guard.mu.Unlock()
+		sse.set("extra", "added later")
+		Eventually(func() int {
+			guard.mu.Lock()
+			defer guard.mu.Unlock()
+			return guard.asked
+		}).Should(BeNumerically(">", before), "the notification ran the same check")
+		calls := sse.called()
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_extra"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeTrue())
+		Expect(text(res)).To(ContainSubstring("changed since an admin approved it"))
+		Expect(sse.called()).To(Equal(calls))
 	})
 
 	It("withholds the whole list when the guard refuses", func(ctx SpecContext) {
