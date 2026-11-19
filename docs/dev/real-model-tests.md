@@ -206,6 +206,20 @@ to-corpus --dir DIR [--declarations FILE]` turns it into corpus lines:
   stderr, and its numbers measure nothing until you declare it.
 - `koinon-api run-evidence verify --dir DIR --deny <host>` fails when the export holds a host name you list.
 
+**Exporting a run from a running install (#966, ADR 0121).** The api pod is distroless: do not exec into it.
+Use the chart's run-evidence Job. It reads the KEK Secret through the Kubernetes API (`--kek-secret`),
+so it needs no mounted KEK directory, and it writes the scrubbed files to an S3 prefix.
+
+1. Make a Secret with the keys `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `endpoint` and `region`.
+2. Run `helm upgrade koinon charts/koinon --reuse-values --set runEvidence.export.enabled=true
+   --set runEvidence.export.org=<org id> --set runEvidence.export.run=<run id>
+   --set runEvidence.export.out=s3://<bucket>/<prefix> --set runEvidence.export.s3.existingSecret=<secret>`.
+3. Wait for the Job `<release>-run-evidence-<hash>` to complete. Its log has the counts, no key and no run data.
+4. Download the prefix, run `run-evidence verify` on it, then set `runEvidence.export.enabled=false`.
+
+The Job uses the koinon-api service account and adds no RBAC. Outside a cluster, use `--kek-dir` or
+`--kek-secret --kubeconfig`.
+
 What is still approximate: the feeds (a recorded corpus has the finished tool call, not agentd's exact
 report), the match count (the guard reports one match span), and calls that the guard never saw (own
 tools, the approval executor).

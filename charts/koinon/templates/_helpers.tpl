@@ -1232,6 +1232,71 @@ spec:
 {{- end }}
 
 {{/*
+The run-evidence export Job's pod template (run-evidence-export.yaml), as a string: the Job is named by its hash.
+dict root, re (values runEvidence.export).
+*/}}
+{{- define "koinon.runEvidencePod" -}}
+{{- $ := .root -}}
+{{- $re := .re -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "run-evidence") | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "koinon.componentName" (list $ "api") }}
+  # The token reads the KEK Secret through the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: run-evidence
+      image: {{ include "koinon.image" (list $ $.Values.api.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - run-evidence
+        - export
+        - {{ printf "--org=%s" $re.org | quote }}
+        - {{ printf "--run=%s" $re.run | quote }}
+        - {{ printf "--out=%s" $re.out | quote }}
+        - {{ printf "--kek-secret=%s" (include "koinon.kekSecretName" $) | quote }}
+        - --s3-endpoint=$(S3_ENDPOINT)
+        - --s3-region=$(S3_REGION)
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- range $env, $key := dict "S3_ENDPOINT" "endpoint" "S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}
+        - name: {{ $env }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $re.s3.existingSecret | quote }}
+              key: {{ $key }}
+        {{- end }}
+        {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
+        {{- include "koinon.kmsEnv" (dict "root" $ "role" "api") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $re.resources | nindent 8 }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{/*
 koinon.pricesRefreshMode is koinon-api's --prices-refresh (ADR 0098, maintainer decision 2026-11-07):
 prices.refresh.enabled unset is auto (koinon-api fetches OpenRouter only while an openrouter provider
 exists; the chart knows nothing about providers), false is off, true is on.
