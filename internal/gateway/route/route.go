@@ -179,6 +179,9 @@ func Compile(routes []Route) (*Table, error) {
 			return nil, fmt.Errorf("route name %q is used twice", r.Name)
 		}
 		seen[r.Name] = true
+		if r.Credential != "" && r.Org == "" {
+			return nil, fmt.Errorf("route %q: a platform route (no org) cannot carry a credential: one secret would serve every org", r.Name)
+		}
 		if r.Credential != "" {
 			if o, ok := credOwner[r.Credential]; ok && o.class != r.Class {
 				return nil, fmt.Errorf("credential %q serves classes %q and %q: one credential serves one route class", r.Credential, o.class, r.Class)
@@ -188,7 +191,11 @@ func Compile(routes []Route) (*Table, error) {
 			credOwner[r.Credential] = owner{org: r.Org, class: r.Class}
 		}
 	}
-	return &Table{routes: slices.Clone(routes)}, nil
+	cp := make([]Route, len(routes))
+	for i, r := range routes {
+		cp[i] = r.clone()
+	}
+	return &Table{routes: cp}, nil
 }
 
 // Routes returns a copy of the routes of the table.
@@ -196,7 +203,11 @@ func (t *Table) Routes() []Route {
 	if t == nil {
 		return nil
 	}
-	return slices.Clone(t.routes)
+	cp := make([]Route, len(t.routes))
+	for i, r := range t.routes {
+		cp[i] = r.clone()
+	}
+	return cp
 }
 
 // Request is what the gate decides on. It does not depend on net/http, so both drivers and the tests
@@ -221,8 +232,11 @@ func FromHTTP(r *http.Request) Request {
 	if host == "" {
 		host = r.URL.Host
 	}
-	scheme := r.URL.Scheme
-	if scheme == "" && r.TLS != nil {
+	// The scheme comes from the connection, never from the absolute-form URL, which a client
+	// can write as https over a plain connection. A proxy that terminates TLS for a CONNECT
+	// tunnel sets Request.Scheme itself.
+	scheme := ""
+	if r.TLS != nil {
 		scheme = "https"
 	}
 	return Request{
@@ -295,19 +309,12 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 	// reason keeps the most specific refusal among routes of the host, so a deny says why.
 	reason := ReasonNoRoute
 	rank := map[Reason]int{ReasonNoRoute: 0, ReasonOrgMismatch: 1, ReasonMethod: 2, ReasonPath: 3, ReasonQuery: 4}
-	// An org's own route wins over a platform route, so the order of the set never decides.
-	ordered := make([]Route, 0, len(t.routes))
-	for _, rt := range t.routes {
-		if rt.Org != "" {
-			ordered = append(ordered, rt)
-		}
-	}
-	for _, rt := range t.routes {
-		if rt.Org == "" {
-			ordered = append(ordered, rt)
-		}
-	}
-	for _, rt := range ordered {
+	// Among the routes that allow the request, an org's own route wins over a platform route, then
+	// the longest matching path prefix, then the route name. The order of the set never decides.
+	var best *Route
+	bestLen := -1
+	for i := range t.routes {
+		rt := &t.routes[i]
 		if rt.Host != host || rt.port() != port {
 			continue
 		}
@@ -315,20 +322,56 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 		switch {
 		case rt.Org != "" && rt.Org != actor.Org:
 			miss = ReasonOrgMismatch
-		case !slices.Contains(rt.Methods, strings.ToUpper(r.Method)):
+		case !slices.Contains(rt.Methods, r.Method):
 			miss = ReasonMethod
 		case !pathAllowed(rt.PathPrefixes, p):
 			miss = ReasonPath
 		case !queryAllowed(rt.QueryKeys, q):
 			miss = ReasonQuery
 		default:
-			return Decision{Allowed: true, Reason: ReasonAllowed, Route: rt}
+			l := matchLen(rt.PathPrefixes, p)
+			if best == nil || beats(rt, l, best, bestLen) {
+				best, bestLen = rt, l
+			}
+			continue
 		}
 		if rank[miss] > rank[reason] {
 			reason = miss
 		}
 	}
+	if best != nil {
+		return Decision{Allowed: true, Reason: ReasonAllowed, Route: best.clone()}
+	}
 	return Decision{Reason: reason}
+}
+
+// beats reports whether route a (matching with prefix length al) is preferred over b.
+func beats(a *Route, al int, b *Route, bl int) bool {
+	if (a.Org != "") != (b.Org != "") {
+		return a.Org != ""
+	}
+	if al != bl {
+		return al > bl
+	}
+	return a.Name < b.Name
+}
+
+// matchLen is the length of the longest prefix that matches p.
+func matchLen(prefixes []string, p string) int {
+	n := 0
+	for _, pre := range prefixes {
+		if pathAllowed([]string{pre}, p) && len(pre) > n {
+			n = len(pre)
+		}
+	}
+	return n
+}
+
+func (r Route) clone() Route {
+	r.Methods = slices.Clone(r.Methods)
+	r.PathPrefixes = slices.Clone(r.PathPrefixes)
+	r.QueryKeys = slices.Clone(r.QueryKeys)
+	return r
 }
 
 func splitAuthority(a string) (string, int, bool) {

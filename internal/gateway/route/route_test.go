@@ -69,7 +69,7 @@ var _ = Describe("forge and registry routes", func() {
 			Expect(d.Actor).To(Equal(acme))
 		})
 		It("allows a registry read for any org, with no credential", func() {
-			d := gate.Check(req(token(actortoken.Actor{Org: "zed", Agent: "a"}), "Registry.NPMJS.org:443", "head", "/left-pad", ""))
+			d := gate.Check(req(token(actortoken.Actor{Org: "zed", Agent: "a"}), "Registry.NPMJS.org:443", "HEAD", "/left-pad", ""))
 			Expect(d.Allowed).To(BeTrue(), string(d.Reason))
 			Expect(d.Route.Credential).To(BeEmpty())
 		})
@@ -126,7 +126,7 @@ var _ = Describe("forge and registry routes", func() {
 		It("prefers the org's route over a platform route, whatever the order", func() {
 			plat := route.Route{
 				Name: "plat", Class: route.ClassForge, Host: "git.example.com", Methods: []string{"GET"},
-				PathPrefixes: []string{"/acme"}, Credential: "forge-platform",
+				PathPrefixes: []string{"/acme"},
 			}
 			for _, rs := range [][]route.Route{{plat, forge}, {forge, plat}} {
 				t, err := route.Compile(rs)
@@ -134,6 +134,40 @@ var _ = Describe("forge and registry routes", func() {
 				d := route.NewGate(ver, t).Check(req(token(acme), "git.example.com", "GET", "/acme/app.git/info/refs", ""))
 				Expect(d.Route.Name).To(Equal("acme-forge"))
 			}
+		})
+
+		It("refuses a method that is not in the exact case of the rule", func() {
+			d := gate.Check(req(token(acme), "git.example.com", "get", "/acme/app.git/info/refs", ""))
+			Expect(d.Allowed).To(BeFalse())
+			Expect(d.Reason).To(Equal(route.ReasonMethod))
+		})
+		It("ignores an absolute-form https URL on a plain connection", func() {
+			r := httptest.NewRequest(http.MethodGet, "/left-pad", nil)
+			r.Host = "registry.npmjs.org"
+			r.URL.Scheme = "https"
+			r.Header.Set(route.TokenHeader, token(acme))
+			Expect(gate.Check(route.FromHTTP(r)).Allowed).To(BeFalse())
+		})
+		It("picks the longest matching prefix, whatever the order", func() {
+			wide := route.Route{
+				Name: "wide", Class: route.ClassForge, Org: "acme", Host: "git2.example.com",
+				Methods: []string{"GET"}, PathPrefixes: []string{"/"}, Credential: "ro-acme",
+			}
+			narrow := wide
+			narrow.Name, narrow.PathPrefixes, narrow.Credential = "narrow", []string{"/repos/acme"}, "rw-acme"
+			for _, rs := range [][]route.Route{{wide, narrow}, {narrow, wide}} {
+				t, err := route.Compile(rs)
+				Expect(err).NotTo(HaveOccurred())
+				d := route.NewGate(ver, t).Check(req(token(acme), "git2.example.com", "GET", "/repos/acme/x", ""))
+				Expect(d.Route.Credential).To(Equal("rw-acme"))
+			}
+		})
+		It("does not let a caller widen a compiled route through the returned values", func() {
+			d := gate.Check(req(token(acme), "git.example.com", "GET", "/acme/app.git/info/refs", ""))
+			d.Route.Methods[0] = "DELETE"
+			table.Routes()[0].PathPrefixes[0] = "/"
+			Expect(gate.Check(req(token(acme), "git.example.com", "DELETE", "/acme/app.git", "")).Allowed).To(BeFalse())
+			Expect(gate.Check(req(token(acme), "git.example.com", "GET", "/other", "")).Allowed).To(BeFalse())
 		})
 
 		It("refuses another org's grant", func() {
@@ -200,7 +234,7 @@ var _ = Describe("forge and registry routes", func() {
 
 		It("refuses one credential that serves two route classes", func() {
 			a, b := forge, npm
-			b.Credential = a.Credential
+			b.Credential, b.Org = a.Credential, a.Org
 			_, err := route.Compile([]route.Route{a, b})
 			Expect(err).To(MatchError(ContainSubstring("one route class")))
 		})
@@ -220,16 +254,22 @@ var _ = Describe("forge and registry routes", func() {
 			_, err := route.Compile([]route.Route{a, b})
 			Expect(err).NotTo(HaveOccurred())
 		})
+		It("refuses a credential on a platform route", func() {
+			Expect(bad(func(r *route.Route) { r.Credential = "shared" })).To(MatchError(ContainSubstring("platform route")))
+		})
 		It("refuses two routes with one name", func() {
 			_, err := route.Compile([]route.Route{npm, npm})
 			Expect(err).To(HaveOccurred())
 		})
 		It("holds a copy, so a later change of the input does not open a route", func() {
 			in := []route.Route{npm}
+			in[0].Methods = []string{"GET", "HEAD"}
 			t, err := route.Compile(in)
 			Expect(err).NotTo(HaveOccurred())
 			in[0].Host = "evil.example.net"
+			in[0].Methods[0] = "DELETE"
 			Expect(t.Routes()[0].Host).To(Equal("registry.npmjs.org"))
+			Expect(t.Routes()[0].Methods).To(Equal([]string{"GET", "HEAD"}))
 		})
 	})
 })

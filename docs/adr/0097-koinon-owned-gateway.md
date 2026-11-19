@@ -408,7 +408,7 @@ and accepts no other algorithm. `internal/gateway/route` is the route model: a r
 registry), org, one exact host and port, methods, path prefixes, query keys and a credential name, never a
 value. The gate refuses by default, has no audit-only mode, refuses the whole set when one route fails to
 load, refuses non-canonical paths instead of rewriting them, and refuses one credential on two route
-classes, and one credential on two orgs. It serves `https` only. The guest sends the token in the `Koinon-Actor-Token` header, and the gateway removes it before
+classes, and one credential on two orgs. It serves `https` only, and a platform route (no org) carries no credential. Among matching routes an org route wins, then the longest path prefix. The guest sends the token in the `Koinon-Actor-Token` header, and the gateway removes it before
 it forwards. Slice 2 puts the route set into the State stream and serves the routes in the gateway
 binary; slice 3 reads the credential from the secret store and drops the OpenShell transition profile.
 
