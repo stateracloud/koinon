@@ -8,7 +8,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// State maps a Koinon task state to the A2A task state (ADR 0122 decision 3).
+// State maps a Koinon task state to the A2A task state (ADR 0123 decision 3).
 //
 // Koinon's input_required means a person has to act: answer a question, approve or validate
 // (ADR 0065). All of these are the A2A `input-required` state. Koinon has no `auth-required` or

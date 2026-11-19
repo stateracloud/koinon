@@ -109,7 +109,7 @@ func (b PG) Thread(ctx context.Context, sc Scope, id pgtype.UUID, after int64) (
 		return store.Task{}, nil, ErrNotFound
 	}
 	// The timeline is read in pages up to a cap. A thread longer than the cap shows its first
-	// events only (ADR 0122, consequences); a wait reads after its message, so it is not affected.
+	// events only (ADR 0123, consequences); a wait reads after its message, so it is not affected.
 	var all []store.TaskEvent
 	for len(all) < maxTimelineEvents {
 		ev, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: sc.Org, TaskID: id, AfterSeq: after, MaxEvents: timelinePage})

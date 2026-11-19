@@ -13,7 +13,7 @@ import (
 )
 
 // CancelTaskAs cancels an open task on behalf of user, for a caller that is not a Connect session
-// (the A2A edge, ADR 0122). The caller has checked the role. It does what CancelTask does: queued
+// (the A2A edge, ADR 0123). The caller has checked the role. It does what CancelTask does: queued
 // runs are canceled and the task moves to canceled; a task that has ended is refused.
 func (s *Server) CancelTaskAs(ctx context.Context, org, user, id pgtype.UUID) (store.Task, error) {
 	c := caller{org: org, p: &auth.Principal{UserID: user}}
@@ -30,7 +30,7 @@ func (s *Server) CancelTaskAs(ctx context.Context, org, user, id pgtype.UUID) (s
 }
 
 // SendDirectMessageAs delivers a direct message for a caller that is not a Connect session (the A2A
-// edge, ADR 0122), with the checks and the path of SendDirectMessage: the message ID and text are
+// edge, ADR 0123), with the checks and the path of SendDirectMessage: the message ID and text are
 // bounded, and with durable on the message goes through the org's rate-limited queue (DB2). The
 // caller has checked the role.
 func (s *Server) SendDirectMessageAs(ctx context.Context, in DirectMessage) (DirectMessageResult, error) {

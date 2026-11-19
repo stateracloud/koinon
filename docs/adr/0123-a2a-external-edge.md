@@ -5,7 +5,7 @@ area: work-model
 tags: [api, auth, tasks]
 relates: ["0011", "0065", "0066", "0101", "0120"]
 ---
-# 0122. External A2A edge
+# 0123. External A2A edge
 
 - Status: Proposed
 - Date: 2026-11-19

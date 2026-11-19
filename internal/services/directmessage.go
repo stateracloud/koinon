@@ -61,7 +61,7 @@ type DirectMessage struct {
 	MessageID string
 	Text      string
 	// NoReopen refuses a thread whose task has completed, where a person's follow-up would reopen
-	// it. The A2A edge sets it: an A2A task that has ended takes no message (ADR 0122).
+	// it. The A2A edge sets it: an A2A task that has ended takes no message (ADR 0123).
 	NoReopen bool
 }
 

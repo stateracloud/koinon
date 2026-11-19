@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package a2aedge is the inbound external A2A edge (ADR 0122, issue 1129).
+// Package a2aedge is the inbound external A2A edge (ADR 0123, issue 1129).
 //
 // An external A2A client, such as a kagent agent, sends a message to one Koinon agent. The edge
 // maps the message to a direct-message thread, which is a task (ADR 0065, ADR 0066), and maps the
@@ -18,5 +18,5 @@
 // # What it never does
 //
 // It does not hold or forward a credential for the agent. The sandbox of the agent is not on this
-// path. Outbound calls to other A2A agents are a separate slice (ADR 0122).
+// path. Outbound calls to other A2A agents are a separate slice (ADR 0123).
 package a2aedge
