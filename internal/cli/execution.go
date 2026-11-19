@@ -130,7 +130,7 @@ func (e *Execution) Validate(openshellAddress string) error {
 			return err
 		}
 		if !e.Substrate.AllowUnhardened {
-			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the gVisor tiers have no read-only root and the runtime class to tier map has no flag yet (issue #1088 slice c)")
+			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the gVisor tiers have no read-only root yet (issue #1088 slice c)")
 		}
 		if cfg.DefaultTier == "" && len(cfg.RuntimeClassTiers) == 0 {
 			return errors.New("--substrate-default-tier or --substrate-runtime-class-tiers is required with --execution-driver=substrate: without a tier no guest process can start")
