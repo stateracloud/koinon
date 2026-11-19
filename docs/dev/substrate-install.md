@@ -81,6 +81,14 @@ message. Exit condition: upstream plans a generic install
 ([agent-substrate/substrate #1782](https://github.com/agent-substrate/substrate/issues/1782)); Koinon moves to
 it and drops the corrections and the script. There is no upstream Helm chart yet (#79), and Koinon does not fork.
 
+A test renders the real pinned tree with the generic overlay and checks the objects that `kubectl kustomize`
+makes (`TestGenericOverlayRendersThePinnedTree`): no `rustfsadmin`, the Secret references, the bucket-init Job and
+its bucket, `10Gi` and `20Gi`, and atelet at `--log-level=info`. It needs a clone of Substrate that holds the
+pinned commit in `KOINON_SUBSTRATE_SOURCE`, and `kubectl`. Without them it skips with the requirement names
+`substrate-source` and `kubectl`; `KOINON_REQUIRE` turns the skip into a failure. A second test
+(`TestRenderChecksFindWhatTheyLookFor`) runs the same checks on a small tree of the same shape and needs
+`kubectl` only.
+
 The storage preflight of `generic` fails, before anything is created, when a named StorageClass does not
 exist, or when a volume has no named class and the cluster has no default class.
 
