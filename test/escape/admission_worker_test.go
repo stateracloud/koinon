@@ -51,8 +51,10 @@ var (
 )
 
 // The digest of an image that exists only in these specs.
-const otherDigest = "registry.invalid/koinon-escape/other@sha256:1111111111111111111111111111111111111111111111111111111111111111"
-const workerDigest = "registry.invalid/koinon-escape/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+const (
+	otherDigest  = "registry.invalid/koinon-escape/other@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	workerDigest = "registry.invalid/koinon-escape/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+)
 
 // The ValidatingAdmissionPolicies of the Substrate driver's two namespaces (ADR 0120 section 6),
 // as `helm template` renders them, against a real API server (envtest): worker pods only from

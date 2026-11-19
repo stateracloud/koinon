@@ -66,8 +66,10 @@ var _ = Describe("The worker shape of the admission policy", func() {
 			sort.Strings(got)
 			Expect(got).To(Equal(capsOf(src, source)), "workerShapes."+class+".capabilities must equal "+source+" of Substrate")
 		}
-		for _, call := range []string{`WithRunAsUser(0)`, `WithRunAsGroup(0)`, `WithPrivileged(false)`,
-			`WithAllowPrivilegeEscalation(false)`, `WithDrop("ALL")`} {
+		for _, call := range []string{
+			`WithRunAsUser(0)`, `WithRunAsGroup(0)`, `WithPrivileged(false)`,
+			`WithAllowPrivilegeEscalation(false)`, `WithDrop("ALL")`,
+		} {
 			Expect(strings.Count(src, call)).To(BeNumerically(">=", 1), "Substrate sets "+call+" and the policy requires it")
 		}
 		Expect(src).To(ContainSubstring("SeccompProfileTypeUnconfined"))
