@@ -51,6 +51,11 @@
 #   job output that starts hack/e2e-bisect.sh. A dispatch with stories=true (the bisect) is not advisory. Its reports are
 #   $OUT/stories-junit.xml and $OUT/stories-report.json, its log $OUT/stories.log.
 #   SUITE=go also writes $OUT/junit.xml and $OUT/report.json (Ginkgo's JUnit and JSON reports); CI uploads $OUT.
+#   UPGRADE_FROM=<release tag> (SUITE=go, for example v0.1.0-rc.27) runs the N-1 to N upgrade e2e instead of the quickstart: it
+#   installs that release from its published chart and images, seeds it with that tag's own quickstart driver, runs
+#   `helm upgrade` to this build, and checks convergence (test/e2e/upgrade.sh, issue 519). It skips (exit 0) when the
+#   tag, the chart, the images or registry.k8s.io cannot be reached; KOINON_REQUIRE=e2e-upgrade makes that a failure.
+#   UPGRADE_STORIES=0 leaves out the run-1 story suite on the upgraded install.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -82,6 +87,20 @@ done
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/test/e2e"
+# UPGRADE_FROM=<tag>: the N-1 to N upgrade e2e (upgrade.sh, issue 519). Decide to skip before anything is built or started.
+if [[ -n ${UPGRADE_FROM:-} ]]; then
+  [[ $SUITE == go ]] || { echo "UPGRADE_FROM needs SUITE=go" >&2; exit 2; }
+  export UPGRADE_FROM
+  rc=0
+  "$here/upgrade.sh" check || rc=$?
+  if [[ $rc == 77 ]]; then
+    # testenv semantics: KOINON_REQUIRE listing e2e-upgrade (or all) turns the skip into a failure.
+    case ",${KOINON_REQUIRE:-}," in *,e2e-upgrade,* | *,all,*) echo "e2e-upgrade is required and cannot run (KOINON_REQUIRE=$KOINON_REQUIRE)" >&2; exit 1 ;; esac
+    echo "upgrade e2e skipped (see SKIP above)"
+    exit 0
+  fi
+  [[ $rc == 0 ]] || exit "$rc"
+fi
 OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/run.XXXXXX")}
 mkdir -p "$OUT"
 K=(kubectl --context "$CTX")
@@ -262,6 +281,17 @@ web)
   ;;
 esac
 
+if [[ -n ${UPGRADE_FROM:-} ]]; then
+  # The upgrade e2e replaces the install and the driver passes: it installs N-1 itself, seeds it, upgrades to this build.
+  step "upgrade e2e from $UPGRADE_FROM (upgrade.sh)"
+  OUT="$OUT" CLUSTER="$CLUSTER" FAKES="$FAKES" API_PORT="$API_PORT" GH_PORT="$GH_PORT" MCP_PORT="$MCP_PORT" MODEL_PORT="$MODEL_PORT" \
+    "$here/upgrade.sh" 2>&1 | tee "$OUT/upgrade.log"
+  done_step "Upgrade e2e: install N-1, seed, helm upgrade, converge, a new run"
+  status=0
+  printf '%s\n' "${summary[@]}"
+  exit 0
+fi
+
 # The quickstart clock starts here (ADR 0049).
 step "quickstart: helm install"
 T0=$(date +%s)
@@ -308,7 +338,7 @@ go)
   # The quickstart pass leaves out the stories (label stories): they are not part of the queue's or a pull
   # request's run. SUITE_LABEL, when set, is the whole filter (a developer's own choice).
   step "quickstart driver (go test ./test/e2e)"
-  driver "${SUITE_LABEL:-!stories}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
+  driver "${SUITE_LABEL:-!stories && !upgrade}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
   done_step "Quickstart driver"
   # The run-1 story suite (issue 992) is a second pass against the same install, before the escape and
   # backup steps change it. A red stories pass does not stop those steps; it fails the script at the end.

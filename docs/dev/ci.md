@@ -300,6 +300,21 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+### The N-1 to N upgrade e2e (issue #519)
+
+`UPGRADE_FROM=<release tag> make test-e2e-kind` (for example `UPGRADE_FROM=v0.1.0-rc.27`, `SUITE=go`) runs
+`test/e2e/upgrade.sh` instead of the quickstart pass. The script installs that release from its published chart and
+images, seeds it with that tag's own quickstart driver (built from a git worktree of the tag, so no client of this build
+talks to the older server), takes a snapshot of the database, runs `helm upgrade` to this build with the same values,
+and takes a second snapshot. The spec `test/e2e/upgrade_test.go` (label `upgrade`) judges the two with the rules of
+`test/e2e/upgradecheck`: same install ID and keys, no lost agent, task, run, sandbox or home checkpoint, the schema not
+behind, every Deployment available. Then the run-1 story suite (`UPGRADE_STORIES=0` leaves it out) starts new runs on
+the upgraded install. The check is not a required job: it is for the release drill and for a person who fixes an upgrade
+bug. Before v0.3 there is no upgrade promise (ADR 0099), so a red result is information, not a broken promise.
+
+The test skips (exit 0, with the reason) when the tag, its chart, its images or `registry.k8s.io` cannot be reached.
+`KOINON_REQUIRE=e2e-upgrade` makes that skip a failure; set it where the run must happen.
+
 The nightly run (`STORIES=1`, set by `e2e-kind.yml` on the `schedule` event and on a dispatch with `stories: true`, which the bisect passes, and by `make test-e2e-kind`) also runs
 the run-1 story suite, `test/e2e/stories_test.go` (label `stories`, issue #992), as a second driver pass against the
 same install: user stories through the generated Connect clients with the fake model (an agent from a template by UUID,
