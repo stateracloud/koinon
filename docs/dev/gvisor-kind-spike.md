@@ -2,223 +2,99 @@
 
 # Spike: gVisor in kind on a standard GitHub runner
 
-- Status: Draft (the claim is not proved; it needs one CI run)
+- Status: Complete
 - Date: 2026-11-19
 - Area: runtime-sandbox
 - Tags: isolation, e2e, ci
 
 Issue #1091 (slice 9a, epic #1082). The `dev` tier is gVisor on kind (ADR 0119 D3). The CI leg of #1091 uses
-standard runners and no KVM (ADR 0119 D10). This spike asks: does `runsc` run in a kind node on a
-standard `ubuntu-24.04` runner, and how long does the install take?
+standard runners and no KVM (ADR 0119 D10). This spike asked: does `runsc` run in a kind node on a standard
+`ubuntu-24.04` runner, and how long does the install take?
 
-**Result: not proved, not refuted.** This VM cannot run kind. One workflow dispatch can answer the question.
-The job is [below](#the-dispatch-job). No product code changes in this slice.
+**Result: proved.** A pod in a `gvisor` RuntimeClass runs in kind on a standard runner. It needs no AppArmor
+change and no larger runner.
 
-## What was proved
+## What was proved (in CI)
 
-Nothing about gVisor. The checks that did run:
+The workflow `.github/workflows/gvisor-kind-spike.yml` (PRs #1141, #1142, #1143, now on main) ran twice on
+`ubuntu-24.04` with the pinned kind node image (Kubernetes 1.37) and gVisor release `20261116.0`:
 
-| Check | Result |
-| --- | --- |
-| Docker daemon on this VM | Works (Docker 29.10.0). |
-| Pinned node image `kindest/node:v1.37.0@sha256:a1ed56cf...` (from `test/e2e/kind/up.sh`) | Present locally, so no pull was needed. |
-| `kind create cluster` with kind v0.33.0 and that image | **Fails** after 81 s. `kubeadm init` times out: the API server never starts. |
-| Cause | This VM has cgroup v1 (`Cgroup Version: 1`, `/sys/fs/cgroup` is `tmpfs`). kind warns "cgroup v1 is deprecated" and the control plane does not come up. A GitHub runner has cgroup v2, so this failure says nothing about the runner. |
-| `/dev/kvm` | Not present. Not needed for gVisor in `systrap` mode. |
-| `registry.k8s.io`, `quay.io`, `docker.io` | Refused by the egress proxy. `ghcr.io` and `registry-1.docker.io` answer. |
-| gVisor release bucket (`storage.googleapis.com/gvisor/...`) | The path I tried answered 404. I did not find the right path. This VM could not download `runsc`. |
+| Run | `kernel.apparmor_restrict_unprivileged_userns` | Result |
+| --- | --- | --- |
+| 44512255633 | 1 (the runner default, not changed) | Pass. The pod ran. Its `dmesg` shows "Starting gVisor..." and `/proc/version` shows "Linux version 4.19.0-gvisor". |
+| 44512260860 | 0 (set by the job) | Pass. Same result. |
 
-So this VM could not test: any gVisor start, the AppArmor restriction (the file
-`/proc/sys/kernel/apparmor_restrict_unprivileged_userns` does not exist here), the install time, and any
-Kubernetes 1.37 node behaviour.
+Step times from the two runs (GitHub job data):
 
-## What was only read
+| Step | Run 1 | Run 2 |
+| --- | --- | --- |
+| `kind create cluster` (node image in the runner cache or pulled) | 39 s | 42 s |
+| Install `runsc` and the shim in the node, restart containerd | 11 s | 11 s |
+| Pod in the `gvisor` class, to `Succeeded` | 3 s | 6 s |
 
-- **Runner image.** The `ubuntu-24.04` image `20261111.370.1` has kernel `7.0.0-1017-azure`, Docker 28.0.4 and
-  kind 0.33.0 (runner-images `Ubuntu2404-Readme.md`). The repo pins kind v0.33.0 in `hack/versions.env`, the same
-  version.
-- **Node image.** `test/e2e/kind/up.sh` pins `kindest/node:v1.37.0`, Kubernetes 1.37.0. This meets D8 (minimum
-  1.37). `hack/spike/kind/up.sh` pins the same image. `e2e-kind.yml` already creates this cluster on
-  `ubuntu-24.04`, so kind itself is known to work on the runner.
-- **User namespaces.** gVisor starts its sentry in a user namespace. PR 1124 and #1118 added a preflight that
-  reads `/proc/sys/user/max_user_namespaces` from a pod on each gVisor node (`internal/preflight/substrate_userns.go`).
-  I did not read this value on a runner, and I did not run the check.
-- **AppArmor.** Ubuntu 24.04 can restrict unprivileged user namespaces with
-  `kernel.apparmor_restrict_unprivileged_userns=1`. When it is 1, a process outside an AppArmor profile that
-  allows `userns` gets no capabilities in a new user namespace. The runner image may set the sysctl to 1 or 0:
-  I could not read its value. This is the main open risk (below).
-- **Docs of the repo.** `docs/dev/substrate-install.md` says the `generic` platform installs the `gvisor` class
-  only, and the `kind` platform uses `ate-setup --kind` unchanged. I did not read how `ate-setup` puts `runsc`
-  and the containerd shim on a kind node: `third_party/substrate` holds only protos, and the Substrate source
-  tree was not in this VM.
+So gVisor adds about 11 s of install to a kind cluster. The pull of `busybox` is inside the pod time.
 
-## The dispatch job
+## Facts the install step needs
 
-The main session must add this job (needs main: dispatch job). I cannot edit `.github/**`. Put this in a new workflow file, for example
-`.github/workflows/gvisor-kind-spike.yml`, run it once with `workflow_dispatch`, and delete it after the numbers
-are in this report. It does not use Substrate: it tests the one thing under the claim, `runsc` as a containerd
-runtime inside a kind node. If it passes, the next step is `koinon-api substrate install --platform kind` on
-the same cluster.
+1. `runsc` from `20261116.0` needs the `gvisor-bin/` helper directory (`gvisor_sentry` and others) next to the
+   binary. Without it the sandbox start fails: `sidecar "gvisor_sentry" not usable: stat
+   /usr/local/bin/gvisor-bin/gvisor_sentry: no such file or directory`. Copy the whole tarball contents, not one
+   binary.
+2. The release layout changed. Each release ships only `x86_64/gvisor.tar.bz2` with a `.sha512` file, under
+   `https://storage.googleapis.com/gvisor/releases/release/<YYYYMMDD.N>/`. The old `.../x86_64/runsc` URL
+   returns 404.
+3. Pin the release by date (`20261116.0`), not `latest`.
+4. kind nodes use the systemd cgroup driver, so `runsc` gets a config file with `systemd-cgroup = "true"`
+   (`/etc/containerd/runsc.toml`, linked by `ConfigPath` in the runtime options).
+5. The containerd config key is `io.containerd.cri.v1.runtime` (containerd 2.x in the node image). The job
+   appends the `runsc` runtime and restarts containerd, then waits for the node to be Ready.
 
-```yaml
-# SPDX-License-Identifier: Apache-2.0
-# Spike for #1091 slice 9a: does gVisor (runsc) run in kind on a standard runner? Dispatch only.
-name: gvisor-kind-spike
-on:
-  workflow_dispatch:
-    inputs:
-      userns_restrict:
-        description: "Value to set for kernel.apparmor_restrict_unprivileged_userns (empty: leave as the runner has it)"
-        required: false
-        default: ""
-      gvisor_release:
-        description: "gVisor release path under storage.googleapis.com/gvisor/releases/release/"
-        required: false
-        default: "latest"
-permissions:
-  contents: read
-jobs:
-  spike:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Runner facts
-        run: |
-          set -x
-          uname -r
-          sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          sysctl user.max_user_namespaces
-          stat -fc %T /sys/fs/cgroup
-          cat /sys/kernel/security/lsm
-          docker --version
-          kind version
-      - name: Set the AppArmor sysctl (only when asked)
-        if: inputs.userns_restrict != ''
-        env:
-          USERNS_RESTRICT: ${{ inputs.userns_restrict }}
-        run: |
-          [[ "$USERNS_RESTRICT" =~ ^[01]$ ]] || { echo "userns_restrict must be 0 or 1" >&2; exit 1; }
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns="$USERNS_RESTRICT"
-      - name: Create kind (pinned node image)
-        run: |
-          set -euo pipefail
-          t0=$(date +%s)
-          NODE_IMAGE=$(sed -n 's/^NODE_IMAGE=//p' test/e2e/kind/up.sh)
-          kind create cluster --name gv --image "$NODE_IMAGE" --kubeconfig "$RUNNER_TEMP/kc" --wait 120s
-          echo "kind create: $(( $(date +%s) - t0 ))s"
-      - name: Install runsc and the containerd shim in the node
-        env:
-          GVISOR_RELEASE: ${{ inputs.gvisor_release }}
-        run: |
-          set -euo pipefail
-          [[ "$GVISOR_RELEASE" =~ ^[a-z0-9.-]+$ ]] || { echo "bad gvisor_release" >&2; exit 1; }
-          t0=$(date +%s)
-          base="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/x86_64"
-          cd "$RUNNER_TEMP"
-          for f in runsc containerd-shim-runsc-v1; do
-            curl -fsSL -O "$base/$f" -O "$base/$f.sha512"
-            sha512sum -c "$f.sha512"
-            chmod +x "$f"
-            docker cp "$f" gv-control-plane:/usr/local/bin/"$f"
-          done
-          docker exec gv-control-plane runsc --version
-          docker exec gv-control-plane containerd --version
-          docker exec gv-control-plane grep -n '^version' /etc/containerd/config.toml
-          # kind nodes use the systemd cgroup driver, so runsc needs systemd-cgroup too.
-          docker exec gv-control-plane sh -c "printf '[runsc_config]\n  systemd-cgroup = \"true\"\n' > /etc/containerd/runsc.toml"
-          docker exec gv-control-plane sh -c "cat >> /etc/containerd/config.toml <<'EOF'
-          [plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc]
-            runtime_type = \"io.containerd.runsc.v1\"
-          [plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc.options]
-            TypeUrl = \"io.containerd.runsc.v1.options\"
-            ConfigPath = \"/etc/containerd/runsc.toml\"
-          EOF"
-          docker exec gv-control-plane systemctl restart containerd
-          kubectl --kubeconfig "$RUNNER_TEMP/kc" wait --for=condition=Ready node --all --timeout=120s
-          docker exec gv-control-plane crictl info | grep -A3 runsc
-          echo "runsc install: $(( $(date +%s) - t0 ))s"
-      - name: Run a pod in the gvisor RuntimeClass
-        env:
-          KUBECONFIG: ${{ runner.temp }}/kc
-        run: |
-          set -euo pipefail
-          t0=$(date +%s)
-          kubectl apply -f - <<'EOF'
-          apiVersion: node.k8s.io/v1
-          kind: RuntimeClass
-          metadata:
-            name: gvisor
-          handler: runsc
-          ---
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: gv-probe
-          spec:
-            runtimeClassName: gvisor
-            restartPolicy: Never
-            containers:
-              - name: probe
-                image: busybox:1.37
-                command: ["sh", "-c", "dmesg | head -3; cat /proc/version; cat /proc/sys/user/max_user_namespaces || true"]
-          EOF
-          kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/gv-probe --timeout=180s \
-            || { kubectl describe pod gv-probe; exit 1; }
-          kubectl logs gv-probe
-          echo "gvisor pod: $(( $(date +%s) - t0 ))s"
-      - name: Node logs on failure
-        if: failure()
-        run: |
-          docker exec gv-control-plane journalctl -u containerd --no-pager | tail -60 || true
-          sudo dmesg | grep -i apparmor | tail -20 || true
-```
+The working steps are in the workflow file on main. Do not copy them from this page.
 
-Notes on the job:
+## What was tried on the lane VM (not proof)
 
-- The `latest` gVisor path is the one in the gVisor install guide. I did not try it here.
-- The containerd config key `io.containerd.cri.v1.runtime` is the one for containerd 2.x. The node image has
-  containerd 2.x, but I did not check it. If the restart fails, read `/etc/containerd/config.toml` in the node.
-- `busybox:1.37` comes from docker.io. Use the registry caches of `test/e2e/kind/registry.sh` if the pull is
-  rate limited.
-- The job uses the kind and kubectl of the runner image (kind 0.33.0, the pinned version). Use
-  `hack/fetch-pinned.sh` as `e2e-kind.yml` does if the result must not depend on the image.
-- Run it twice: once with `userns_restrict` empty (the runner as it is) and once with `0`. The two runs say
-  whether the AppArmor sysctl matters.
+The lane VM could not run kind: it has cgroup v1, so `kubeadm init` failed after 81 s (`kind create cluster`
+with the pinned node image, kind v0.33.0). Three registries were blocked, and the VM could not fetch `runsc`
+(the old URL, fact 2). This VM said nothing about the runner. The first draft of the install steps, written
+here without a test, was wrong in two places: it copied one binary (fact 1) and used the old URL (fact 2).
+Main ran the corrected job.
 
-## Exact commands tried here
+## Runner facts
 
-```sh
-docker info
-kind create cluster --name gv-spike \
-  --image kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 \
-  --kubeconfig <scratch file> --wait 90s   # exit 1 after 81 s: cgroup v1 host
-kind delete cluster --name gv-spike
-```
+The `ubuntu-24.04` image `20261111.370.1` has kernel `7.0.0-1017-azure`, Docker 28.0.4 and kind 0.33.0
+(runner-images readme). The repo pins kind v0.33.0 in `hack/versions.env` and the node image
+`kindest/node:v1.37.0` in `test/e2e/kind/up.sh` (Kubernetes 1.37, meets D8).
 
-The install time was **not measured**. Fill it in from the job log (`kind create`, `runsc install`, `gvisor pod`).
+## CI job design for #1091
+
+The substrate leg on kind is one job in a new workflow file (a local lane or main adds it; a cloud lane cannot
+edit `.github/**`). It reuses the spike steps:
+
+1. Same runner, kind version and node image as `e2e-kind.yml`. Create the cluster with `test/e2e/kind/up.sh`
+   (without the OpenShell parts once #1094 removes them).
+2. Install `runsc` as in the spike: the `20261116.0` tarball, the sha512 check, `gvisor-bin/` copied with the
+   binary and the shim, `runsc.toml`, the containerd runtime, a containerd restart. Put the release and its
+   hash in `hack/versions.env` (ADR 0079: at least 3 days old) and read them from there.
+3. Install Substrate with `koinon-api substrate install --platform kind` (the `kind` platform of
+   `docs/dev/substrate-install.md`), then `helm install` with `execution.driver: substrate`.
+4. Run the quickstart e2e, the harness contract tests and the restore drill with the fake model server.
+5. List the job in `hack/ci-required.txt` as `advisory` first (`docs/dev/ci-rules.md`, ADR 0111).
+6. Keep the node-log step on failure (`journalctl -u containerd`, `crictl info`).
 
 ## Open risks
 
-1. **AppArmor.** If the runner has `kernel.apparmor_restrict_unprivileged_userns=1`, `runsc` may fail in the kind
-   node even when `user.max_user_namespaces` is large. The restriction applies to unprivileged user-namespace
-   creation; `runsc` runs as root in a privileged node, so it may not apply. This is not tested. The preflight of #1118 reads only the second value, so
-   it would pass and the first start would fail. If the first dispatch run fails and the second (value 0)
-   passes, the CI job sets the sysctl with `sudo sysctl -w` before `kind create`, and the preflight should
-   read the AppArmor sysctl too (new issue; no product change here).
-2. **Nested sandbox.** `runsc` runs inside a privileged docker container (the kind node), not on the host.
-   Some `runsc` platforms (`ptrace`, `kvm`) differ in what they need. I read that the `systrap` default needs
-   seccomp and `ptrace`-like rights, and that Docker allows them in a privileged node. Not tested.
-3. **Landlock and seccomp in the guest.** gVisor has no `landlock_*` calls (ADR 0075). ADR 0120 phase 3 covers
-   this. This spike says nothing about it.
-4. **Substrate on kind.** `ate-setup --kind` may stage `runsc` itself, or may expect it on the node. Not read.
-   The job above installs `runsc` by hand, so a pass proves the runtime, not the Substrate install.
-5. **Pin.** `latest` is not a pin. After the first run, pin the gVisor release and its SHA-512 in
-   `hack/versions.env` (ADR 0079: at least 3 days old).
-6. **Cache and speed.** The pulls of `busybox` and the Substrate images can be most of the install time. Measure
-   with and without the pull-through caches.
+1. **Substrate on kind.** The spike proves the runtime, not the Substrate install. `ate-setup --kind` may stage
+   `runsc` itself or may expect it on the node. If it stages its own copy, step 2 above is not needed. Read
+   its source before the job is written.
+2. **Release drift.** The release layout changed once. A new gVisor release can change it again. The pin and the
+   sha512 check make this fail loudly.
+3. **Landlock and seccomp in the guest.** gVisor has no `landlock_*` calls (ADR 0075). ADR 0120 phase 3
+   covers this. The spike says nothing about it.
+4. **Runner drift.** The AppArmor default may change in a new runner image. The #1118 preflight reads only
+   `user.max_user_namespaces`. Today the AppArmor value does not matter (both runs passed), so no preflight
+   change is needed now.
+5. **Image pulls.** The `busybox` pull and the Substrate images can be most of a real install time. Measure with
+   and without the pull-through caches of `test/e2e/kind/registry.sh`.
 
 ## Overlap with other lanes
 
