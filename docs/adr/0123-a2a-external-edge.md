@@ -14,7 +14,8 @@ relates: ["0011", "0065", "0066", "0101", "0120"]
 - Relates to: [0011](0011-agent-to-agent.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md), [0101](0101-agent-substrate-and-kagent-not-adopted.md), [0120](0120-execution-hardening-defaults.md)
 - Issue: [#1129](https://github.com/stateracloud/koinon/issues/1129)
 - Verification: Pending: a kind test with a kagent agent in each direction (issue 1129). The inbound
-  half is covered by specs with a fake backend.
+  half is covered by specs with a fake backend. The outbound client is covered by specs with a fake
+  external agent (v1.0 and v0.3).
 
 ## Context
 
@@ -92,10 +93,148 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    new key, credential or table.
 6. **Not served in this slice.** Streaming, task list, push notifications and the extended card
    return the A2A errors for an unsupported operation. The card says so in its capabilities.
-7. **Outbound edge (next slice).** A Koinon agent calls an external A2A agent through the gateway.
-   The route follows [0120](0120-execution-hardening-defaults.md): default-deny egress, enforced L7
-   rules, and the credential held by the gateway. The sandbox never holds it. This ADR is amended
-   when that slice is designed.
+7. **Outbound edge.** A Koinon agent calls an external A2A agent through the gateway, never from
+   the sandbox. The client is package `internal/a2aout`. It follows
+   [0120](0120-execution-hardening-defaults.md) and the other outbound clients:
+   - It dials through the platform URL policy (`URLPolicy.DialContext`), checked at dial time, with
+     no proxy and no redirect (issue 657). A name that passes the check and then resolves to a
+     denied address is refused at the dial.
+   - The credential is the one of the MCP target (`CredentialHeader`, `CredentialPrefix`,
+     `CredentialFile`). The gateway reads it on each request and sets it. It goes to the host of the
+     target only and only over https. The sandbox gets no credential: no env, image, home volume or
+     log holds it, and no error names it. The CA bundle and `insecureSkipVerify` of the target apply
+     to this client only. Both the MCP path and this client build the HTTP client with
+     `mcpgateway.NewTargetHTTPClient`, so one rule covers both.
+   - The agent card is read at `/.well-known/agent-card.json` under the target URL (a target with a
+     path works). It must offer a JSON-RPC interface with the scheme and host of the target. A card that points
+     to another host is refused: it cannot move the credential or the traffic. The client reads a
+     v1.0 card and a v0.3 card, and speaks both bindings (kagent serves v0.3).
+   - A response body has a size limit, and the text of a question or reply is cut at 64 KiB. It is
+     another party's text: quoted data.
+8. **Outbound turns and states.** The client follows the same A2A 1.0.0 rules as decision 2:
+   - A task that has ended (completed, failed, canceled, rejected) never gets a message. The client
+     reads the task first and refuses (`ErrTaskEnded`). A follow-up turn is a new task in the same
+     `contextId`, with `referenceTaskIds` to the task before it, and no task ID.
+   - An answer goes to a task that is `input-required` only, in the context of that task. A task
+     in `auth-required` takes no answer from the agent, and its text is not shown as a question.
+   - A send returns at once with the task by default. A blocking send is bounded by the request
+     timeout, and a task that runs longer would be lost to the caller, so the caller waits with
+     `GetTask`.
+   - A task ID is never reused. An agent that answers a follow-up with the task it follows, or
+     that answers in another context or for another task, is refused.
+   - The client does not subscribe. `SubscribeToTask` on a task that ended is an error in A2A
+     1.0.0, and a read of the task has no such race. The client waits with `GetTask`.
+   - The external state maps back to Koinon:
+
+     | A2A | Koinon |
+     | --- | --- |
+     | `TASK_STATE_SUBMITTED` | submitted |
+     | `TASK_STATE_WORKING` | working |
+     | `TASK_STATE_INPUT_REQUIRED` | input_required, with the question of the status message |
+     | `TASK_STATE_AUTH_REQUIRED` | input_required, reason `auth_required` |
+     | `TASK_STATE_COMPLETED` | completed |
+     | `TASK_STATE_CANCELED` | canceled |
+     | `TASK_STATE_FAILED` | failed |
+     | `TASK_STATE_REJECTED` | failed, reason `rejected` |
+
+     A state that is not in this table is an error. The client never guesses. `auth-required`
+     waits for a person: an admin adds the credential to the connection, because the sandbox never
+     supplies one. A message with no task is `completed`, with its text as the reply.
+9. **How an agent reaches the client: remote agents.** An external A2A agent is a first-class
+   resource of the org, a *remote agent*. It is not an MCP server and not a value of the
+   `mcp_transport` enum, which this ADR does not change. A remote agent has these fields:
+   - `name`: a DNS label of at most 24 characters, unique in the org (the same rule as an MCP server).
+   - `card_url`: the base URL of the external agent. The card is at `/.well-known/agent-card.json`
+     under it. The platform URL policy applies at registration, in the reconciler and at every dial.
+   - the credential: `credential_header`, `credential_prefix` and `credential`, the same three
+     fields and the same sealed envelope as `mcp_servers`, written through the same code
+     (`internal/mcpservers`: seal, open and the loader check). It is write-only in the API. A
+     credential needs an https URL. The sandbox never holds it (decision 7).
+   - `card_hash`, `card_checked_at`: see decision 11.
+   - health fields with the same meaning as `mcp_servers`: `health` (unknown, healthy, unhealthy),
+     `health_reason`, `health_checked_at`, `health_since`, `consecutive_failures`.
+   - `disabled_reason`, `created_by` and the timestamps.
+
+   The table is `remote_agents`, keyed by `(org_id, id)`. An agent may call a remote agent only if an
+   admin allows it: the table `agent_remote_agents` `(org_id, agent_id, remote_agent_id)` has
+   composite foreign keys to `agents` and `remote_agents`, and an agent with no row calls none (the
+   shape of `agent_mcp_servers`). The migration only adds tables and one column (decision 10), so
+   it follows the expand-only rule of ADR 0085 and `internal/db/AGENTS.md`.
+10. **The built-in gateway target and its three tools.** The MCP gateway serves one built-in target
+    per org, `<org slug>-agents`, besides the targets of the MCP servers. It has no upstream URL: the
+    gateway runs its tools itself, on top of `internal/a2aout`. It has three FIXED tools. The set is
+    not read from any card.
+
+    | Tool | Arguments | Effect |
+    | --- | --- | --- |
+    | `send_task` | `agent`, `message`, optional `context_id`, optional `task_id` | Sends one message. Returns the state and the reply text. |
+    | `get_task` | `agent`, `task_id` | Reads the task and returns the same. |
+    | `cancel_task` | `agent`, `task_id` | Cancels the task and returns the same. |
+
+    `agent` is the `name` of a remote agent. It is an argument, not part of the tool name, so a new
+    remote agent adds no tool and changes no `tools/list`. The gateway refuses a call to a remote
+    agent that the calling agent has no `agent_remote_agents` row for, that is disabled, that is
+    unhealthy, or that belongs to another org. The state names are the Koinon names of decision 8.
+    A task that needs input returns `input_required` with the question. The agent answers with
+    `send_task` and the same `task_id`.
+
+    The three tools use the existing MCP path, with no second path:
+    - **Rows.** The target needs a parent for `mcp_tools`. The org gets one built-in `mcp_servers`
+      row, named `agents`, with a new nullable column `builtin text` (the value `a2a`). A built-in row
+      has no URL, no credential and no transport. The remote-agent service creates it with the first
+      remote agent, and the reconciler serves it as a target with `Builtin: "a2a"` and no URL. The
+      tool list of the target is fixed in code, so the existing prober, which lists the target
+      through the gateway, writes one `mcp_tools` row for each tool, with a `content_hash` of the
+      fixed description and schema. The prober does not dial a built-in target.
+    - **Tiers and grants.** The tier of each tool is `ask` by default, as for every new MCP tool, and
+      an admin sets `auto` or `never` by the existing call. The ask tier goes through the approval
+      proxy of ADR 0057, which calls the built-in target after the approval. `agent_mcp_servers`
+      grants the target to an agent. A tool on a built-in row is set to `auto` only by an admin,
+      never by a default.
+    - **Guard and audit.** Every call passes `checkCall`, the span and the audit row like any other
+      call. The audit row names the target, the tool and the kind of credential. It never holds the
+      message, the reply, the remote agent card or a token (ADR 0023). The metric labels are fixed
+      (no org, agent, user or run ID). `send_task` has the sink class of an outbound message to a
+      third party, with `agent` as the address argument, so the leak guard of ADR 0084 sees the
+      message as data that leaves Koinon.
+    - **Credential.** The gateway reads the credential of the remote agent on each request, from the
+      same kind of file as an MCP credential, named by the ID of the remote agent and the hash of its
+      envelope. The agent never sets or sees it. `a2aout` gets the HTTP client from
+      `mcpgateway.NewTargetHTTPClient`, as decision 7 says.
+11. **The card is for admins only.** The text of the agent card (name, description, skills, examples)
+    is data from another party. It never reaches a model: not in a tool description, not in a tool
+    result, not in an error and not in a log. The tools of decision 10 do not change with the card.
+    An admin reads the card in the API (`GetRemoteAgentCard`), through the same checks, and the UI
+    shows it as quoted text.
+    - **Pin.** `card_hash` is the SHA-256 (hex) of the canonical JSON of the card (sorted keys,
+      no insignificant white space). The registration fetches the card and stores the hash. The
+      registration fails if the card cannot be read or does not pass the checks of decision 7.
+    - **Health check.** The reconciler prober reads the card of each enabled remote agent every 60
+      seconds, with the same limits as the MCP prober. A card that differs from `card_hash` is a
+      health finding: `health` is `unhealthy` with the reason `card_changed`. It is not an update.
+      The stored hash does not change, the gateway refuses `send_task`, `get_task` and `cancel_task`
+      for the remote agent, and the finding stays until an admin calls `AcceptRemoteAgentCard` with
+      the hash that the admin reviewed. If the card changed again since, the call fails with
+      `ABORTED` and nothing changes (the rule of `SetToolSink`). An unreachable card is an
+      `unhealthy` finding with another reason, and it recovers by itself.
+    - Per-agent tools from the skills of a card are not part of this decision. They need a pin of
+      `tools/list` ([#1132](https://github.com/stateracloud/koinon/issues/1132)) first. The koinon
+      gateway MCP path does not become the default before that issue closes. This ADR does not touch
+      `tools/list` handling.
+12. **A reply is an untrusted tool result.** The text of a remote agent (the reply and the question
+    of an `input_required` task) is the result of the tool call. It follows the same leg handling
+    as the result of any other tool: the guard's untrusted-input leg applies to every tool of the
+    built-in target, so a run that reads a reply is tainted as it is after any other untrusted tool
+    result. The text is cut at 64 KiB (decision 7). The result carries no instruction of the
+    platform. A remote agent can never turn a tier or a grant into another one.
+13. **Names of the interfaces.** Protobuf package `koinon.remoteagent.v1alpha1`, service
+    `RemoteAgentService`, with `ListRemoteAgents`, `CreateRemoteAgent`, `UpdateRemoteAgent`,
+    `DeleteRemoteAgent`, `GetRemoteAgentCard`, `AcceptRemoteAgentCard`, `GetAgentRemoteAgents` and
+    `SetAgentRemoteAgents`. The admin API has `/remote-agents`, `/remote-agents/{remoteAgentId}`,
+    `/remote-agents/{remoteAgentId}/card`, `/remote-agents/{remoteAgentId}/card/accept` and
+    `/agents/{agentId}/remote-agents`. The roles are the ones of the MCP server calls: admin and
+    owner. Each write has an audit event (`remote_agent.created`, `.updated`, `.deleted`,
+    `.card.accepted`, and `agent.remote_agents.set`). Proto fields are only added.
 
 ## Alternatives considered
 
@@ -122,7 +261,17 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   at once. It starts a new thread (a new context) for work in parallel.
 - Negative: `CancelTask` checks the turn in the edge only. A cancel can reach a turn that opened
   between the check and the cancel. The window is one request. _(inferred)_
-- Follow-ups: the outbound slice; pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
+- Negative: a Koinon agent sees no skill of an external agent. It sends free text to a remote agent
+  that it chose by name. The admin reads the card. A tool for each skill comes later, behind the
+  pin of #1132 (decision 11).
+- Negative: any change of a card, also a harmless one, stops the calls until an admin accepts it.
+  _(inferred)_
+- Negative: a built-in row in `mcp_servers` means that code which lists servers must skip it for
+  the URL policy, the credential and the prober (decision 10). _(inferred)_
+- Negative: the client polls. A long task costs one `GetTask` per interval.
+- Negative: an `auth-required` task has no automatic way out: a person adds the credential and
+  starts a new turn. _(inferred)_
+- Follow-ups: tools from the skills of a card, behind #1132; pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
 
 ## Open questions
 
