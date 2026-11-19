@@ -635,3 +635,12 @@ func TestRestartsTheAPIServerWhenAMatchingConfigWasNeverRolled(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(changed).To(BeFalse(), "rolled now, so a rerun does nothing")
 }
+
+func TestUsesGVisorFollowsTheInstalledSandboxClasses(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(substrateinstall.Profile{}.UsesGVisor()).To(BeTrue(), "the default classes are gvisor,microvm")
+	g.Expect(substrateinstall.Profile{SandboxClasses: "microvm,gvisor"}.UsesGVisor()).To(BeTrue())
+	g.Expect(substrateinstall.Profile{SandboxClasses: "microvm, gvisor"}.UsesGVisor()).To(BeTrue())
+	g.Expect(substrateinstall.Profile{SandboxClasses: "microvm"}.UsesGVisor()).To(BeFalse())
+	g.Expect(substrateinstall.Profile{Platform: substrateinstall.PlatformGeneric}.UsesGVisor()).To(BeTrue())
+}

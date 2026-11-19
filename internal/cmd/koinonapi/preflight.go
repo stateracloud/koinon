@@ -43,6 +43,7 @@ type preflightConfig struct {
 	substratePools        []string
 	substrateNodeSelector []string
 	substrateVMTier       bool
+	substrateGVisor       bool
 	substrateProbes       bool
 	substrateNamespace    string
 	substrateIssuer       string
@@ -83,8 +84,9 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringArrayVar(&c.substratePools, "substrate-worker-pool", nil, "<tier>=<WorkerPool name> that must be ready (repeatable)")
 	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
 	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
+	fs.BoolVar(&c.substrateGVisor, "substrate-gvisor", true, "the gVisor sandbox class is in use: probe each worker node for user.max_user_namespaces above 0 (gVisor starts its sentry in a user namespace)")
 	fs.StringVar(&c.substrateIssuer, "substrate-expected-issuer", "", "the service-account issuer Substrate trusts (ate-setup --ateapi-expected-jwt-issuer); empty is the issuer in the API server's discovery document")
-	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod and the device probe pod in the Substrate namespace")
+	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod and the user-namespace probe pods in the Substrate namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -103,7 +105,7 @@ func (c *preflightConfig) validate() error {
 	switch c.driver {
 	case "openshell":
 	case "substrate":
-		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, WorkerPools: map[string]string{}}
+		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{}}
 		for _, kv := range c.substratePools {
 			tier, name, ok := strings.Cut(kv, "=")
 			if !ok || tier == "" || name == "" {
@@ -171,6 +173,18 @@ func newPreflightCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return preflight.ServeNetPolProbe(cmd.Context(), "") },
 	}, newNetPolClientCommand(), newIssuerProbeCommand(), &cobra.Command{
+		Use:   "userns-probe",
+		Short: "Run inside the Substrate user-namespace probe pod: report the node's user.max_user_namespaces",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			n, err := preflight.ReadMaxUserNamespaces(preflight.MaxUserNamespacesPath)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), preflight.UserNamespacesLine(n))
+			return err
+		},
+	}, &cobra.Command{
 		Use:   "devices-probe",
 		Short: "Run inside the Substrate device probe pod: report that the node's devices were mounted",
 		Args:  cobra.NoArgs,
@@ -262,7 +276,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 				"app.kubernetes.io/name": "koinon", "app.kubernetes.io/part-of": "koinon",
 			},
 		}
-		checker.Issuer, checker.IssuerProbe, checker.Devices = preflight.NewIssuerResolver(kube), prober, prober
+		checker.Issuer, checker.IssuerProbe, checker.Devices, checker.UserNS = preflight.NewIssuerResolver(kube), prober, prober, prober
 	}
 	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
 		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()

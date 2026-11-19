@@ -92,6 +92,7 @@ type substrateCluster struct {
 	issuer  fakeIssuer
 	probe   *fakeIssuerProbe
 	devices fakeDevices
+	userns  preflight.UserNamespacesProber
 	config  preflight.Config
 }
 
@@ -123,7 +124,7 @@ func (c *substrateCluster) run(ctx context.Context) []preflight.Result {
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList", workerPoolGVR: "WorkerPoolList"}, c.dynamic...)
 	checker := &preflight.Checker{
 		Kube: kube, Dynamic: dyn, Config: c.config,
-		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices,
+		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices, UserNS: c.userns,
 	}
 	return checker.Run(ctx)
 }
@@ -132,7 +133,7 @@ var _ = Describe("Substrate checks", func() {
 	It("passes on a complete cluster and runs no OpenShell or Agent Sandbox check", func(ctx SpecContext) {
 		results := healthySubstrate().run(ctx)
 		Expect(checks(results)).To(Equal([]string{
-			"Kubernetes version", "Substrate node devices", "Service-account issuer", "Agent Substrate", "Substrate router",
+			"Kubernetes version", "Substrate node devices", "Substrate gVisor user namespaces", "Service-account issuer", "Agent Substrate", "Substrate router",
 			"Substrate worker pool (vm tier)", "NetworkPolicy enforcement",
 		}))
 		for _, r := range results {
