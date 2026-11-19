@@ -338,6 +338,19 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(err).NotTo(HaveOccurred())
 			return gg.CheckCall(ctx, mcpgateway.Call{Agent: ref, Target: mcpservers.TargetName(slug, server), Tool: tool, Arguments: raw})
 		}
+		// A JSON-RPC error that quotes private text is fingerprinted too. The quoted text appears in no
+		// earlier result, so only the error reply can make the guard match it (without the
+		// fingerprints the call below passes: the wiki sets the private leg only).
+		quoted := "Severance schedule for the Kestrel Aerospace layoffs: forty staff leave in June, with the payout set at nine months of salary each."
+		errBody, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "error": map[string]any{"code": -32000, "message": "failed near: " + quoted}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gg.Inspect(ctx, mcpgateway.Message{
+			Target: mcpservers.TargetName(slug, "wiki"), Agent: ref, Dir: mcpgateway.FromUpstream,
+			Kind: mcpgateway.KindError, Method: "tools/call", Tool: "read_page", Raw: errBody,
+		}).Refuse).To(BeFalse())
+		Expect(callOf("tracker", "post_message", map[string]any{"text": "note " + quoted}).Refuse).To(BeTrue(),
+			"private text quoted in an error reply is matched")
+
 		// A clean call passes. A private result is recorded; the same text sent to an external-high
 		// tool then needs a person, and the gateway has none in this slice, so it is refused.
 		Expect(callOf("tracker", "post_message", map[string]any{"text": "the build is green"}).Refuse).To(BeFalse())
@@ -347,16 +360,6 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(v.Reason).NotTo(BeEmpty())
 		Expect(v.Reason).NotTo(ContainSubstring("Halvorsen"))
 		Expect(approvals(ctx)).To(BeZero(), "the gateway guard has no approval route")
-
-		// A JSON-RPC error that quotes private text is fingerprinted too: the same text sent out later is caught.
-		errBody, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "error": map[string]any{"code": -32000, "message": "failed near: " + secretPage[100:320]}})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(gg.Inspect(ctx, mcpgateway.Message{
-			Target: mcpservers.TargetName(slug, "wiki"), Agent: ref, Dir: mcpgateway.FromUpstream,
-			Kind: mcpgateway.KindError, Method: "tools/call", Tool: "read_page", Raw: errBody,
-		}).Refuse).To(BeFalse())
-		Expect(callOf("tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[110:310]}).Refuse).To(BeTrue(),
-			"private text quoted in an error reply is still matched")
 
 		// The role holds nothing it does not use: no write to the catalog, no read of approvals, and an
 		// insert-only call log.
