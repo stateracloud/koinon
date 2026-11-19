@@ -171,3 +171,24 @@ JOIN install_audit_events e ON e.id = h.anchor_event_id
 LEFT JOIN audit_events a ON a.org_id = h.org_id AND a.chain_seq = h.chain_seq
 WHERE h.org_id = @org_id
 ORDER BY e.chain_seq;
+
+-- name: GetLastInstallCheckpoint :one
+-- The newest audit.checkpoint install event, its age by the database's clock and its summary as Postgres
+-- prints it (ADR 0100 decision 4.2).
+SELECT chain_seq, extract(epoch FROM now() - created_at)::float8 AS age_seconds, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.checkpoint'
+ORDER BY chain_seq DESC
+LIMIT 1;
+
+-- name: GetInstallEventHash :one
+-- The hash of the install chain row at one chain_seq (a checkpoint names the row it signed).
+SELECT hash FROM install_audit_events WHERE chain_seq = @chain_seq;
+
+-- name: ListInstallSigningKeys :many
+-- Every audit.signing_key.added event, oldest first: the public keys of the checkpoints (ADR 0100
+-- decision 4.2). A rotated key stays listed, so an old checkpoint still verifies.
+SELECT chain_seq, target_id, summary::text AS summary_text
+FROM install_audit_events
+WHERE action = 'audit.signing_key.added'
+ORDER BY chain_seq;

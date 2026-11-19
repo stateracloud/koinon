@@ -32,7 +32,8 @@ func newAuditCommand() *cobra.Command {
 		Short: "Audit-log tools",
 		Long:  "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api audit verify",
 	}
-	var dbURL, orgID, file, after, anchors string
+	var dbURL, orgID, file, after, anchors, checkpoint string
+	var publicKeys []string
 	var installOnly bool
 	verify := &cobra.Command{
 		Use:   "verify",
@@ -50,7 +51,10 @@ func newAuditCommand() *cobra.Command {
 				if orgID != "" || installOnly {
 					return errors.New("--file checks a file alone; it does not take --org or --install")
 				}
-				return verifyAuditFile(file, after, anchors, cmd.OutOrStdout())
+				return verifyAuditFile(file, after, anchors, checkpoint, publicKeys, cmd.OutOrStdout())
+			}
+			if checkpoint != "" || len(publicKeys) > 0 {
+				return errors.New("--checkpoint and --public-key need --file")
 			}
 			if after != "" {
 				return errors.New("--after needs --file")
@@ -74,9 +78,14 @@ func newAuditCommand() *cobra.Command {
 	verify.Flags().BoolVar(&installOnly, "install", false, "verify only the install chain")
 	verify.Flags().StringVar(&file, "file", "", "check this export file (\"-\" for stdin) instead of the database; needs no database")
 	verify.Flags().StringVar(&after, "after", "", "with --file: an earlier export that ends where this partial export starts")
+	verify.Flags().StringVar(&checkpoint, "checkpoint", "", "with --file: a signed checkpoint note (a file, \"-\" is not allowed); the install export must reach its head, and an org export is checked through --anchors")
+	verify.Flags().StringArrayVar(&publicKeys, "public-key", nil, "with --checkpoint: a public key that may sign it, a key line or a file of key lines; repeat it for rotated keys")
 	verify.Flags().StringVar(&anchors, "anchors", "", "with --file of an org export: an install export whose anchors the org's chain is checked against")
 	cli.EnvAlias(verify, "database-url", "DATABASE_URL")
 	root.AddCommand(verify)
+	for _, c := range checkpointCommands() {
+		root.AddCommand(c)
+	}
 
 	var anchorURL string
 	anchor := &cobra.Command{
@@ -184,8 +193,18 @@ func anchorAudit(ctx context.Context, db audit.Beginner, out io.Writer) error {
 // verifyAuditFile checks an export file, with no database. after is the path of an earlier export
 // that a partial file continues; anchors is the path of an install export whose anchors an org export
 // is checked against. It returns audit.ErrBroken when the file does not hold.
-func verifyAuditFile(path, after, anchors string, out io.Writer) error {
+func verifyAuditFile(path, after, anchors, checkpoint string, publicKeys []string, out io.Writer) error {
 	var opt audit.ExportVerifyOptions
+	var cp *audit.Note
+	if checkpoint != "" {
+		n, err := readCheckpoint(checkpoint, publicKeys, out)
+		if err != nil {
+			return err
+		}
+		cp = &n
+	} else if len(publicKeys) > 0 {
+		return errors.New("--public-key needs --checkpoint")
+	}
 	var r io.Reader = os.Stdin
 	if path != "-" {
 		f, err := os.Open(path) //nolint:gosec // the operator names the file to check
@@ -196,16 +215,26 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		r = f
 	}
 	var anchorOrg string
-	if anchors != "" {
+	if anchors != "" || cp != nil {
 		// The anchors are kept for this file's org only (an install export holds the heads of every
 		// org for every anchor): read the header line first, then hand it back to the verifier.
 		anchorOrg, r = peekExportOrg(r)
+	}
+	if cp != nil {
+		// A checkpoint pins the install chain. An install file is checked against it directly; an org
+		// file is checked against the anchors of an install export, and that export against the checkpoint.
+		switch {
+		case anchorOrg == "":
+			opt.Checkpoint = cp
+		case anchors == "":
+			return errors.New("--checkpoint pins an install export: give --anchors with an install export, or check the install export itself")
+		}
 	}
 	if anchors != "" {
 		// Verify without CollectAnchors first: that option is install-only inside VerifyExport, so
 		// an org file would fail with an internal option name before we can say --anchors needs
 		// an install export (#406 Bugbot).
-		inst, err := checkExportFile(anchors, false, "")
+		inst, err := checkExportFile(anchors, false, "", nil)
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -216,7 +245,7 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if inst.Header.Chain != audit.ChainInstall {
 			return fmt.Errorf("--anchors %s is an org export; give an install export", anchors)
 		}
-		inst, err = checkExportFile(anchors, true, anchorOrg)
+		inst, err = checkExportFile(anchors, true, anchorOrg, cp)
 		if err != nil {
 			return fmt.Errorf("--anchors %s: %w", anchors, err)
 		}
@@ -233,7 +262,7 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		if after == "-" {
 			return errors.New("--after must be a file path, not stdin")
 		}
-		prev, err := checkExportFile(after, false, "")
+		prev, err := checkExportFile(after, false, "", nil)
 		if err != nil {
 			return fmt.Errorf("--after %s: %w", after, err)
 		}
@@ -253,7 +282,10 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 		return err
 	}
 	ok := audit.WriteExportReport(out, res)
-	if after == "" && anchors == "" {
+	if res.CheckpointChecked {
+		_, _ = fmt.Fprintf(out, "ok      the file holds the signed checkpoint at install chain_seq %d\n", cp.ChainSeq)
+	}
+	if after == "" && anchors == "" && cp == nil {
 		_, _ = fmt.Fprintln(out, "note    "+aloneNote)
 	}
 	if !ok {
@@ -264,7 +296,7 @@ func verifyAuditFile(path, after, anchors string, out io.Writer) error {
 
 // aloneNote is what verify --file says when no --after pins the file (ADR 0100): the hashes only
 // show that the file agrees with itself, and anyone can write a file that does.
-const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after, or --anchors with an install export (later checkpoints), to pin it"
+const aloneNote = "a file verified alone proves internal consistency only, not authenticity; use --after, --anchors with an install export, or --checkpoint with the public key (kept off the cluster), to pin it"
 
 // peekExportOrg reads the header line of an export and returns its org_id (empty when the line is
 // not a header: the verifier then reports it) with a reader that still yields the whole stream.
@@ -278,13 +310,13 @@ func peekExportOrg(r io.Reader) (string, io.Reader) {
 
 // checkExportFile verifies one export file alone. collectAnchors keeps stream anchors on the result
 // (for --anchors on an install export), only the heads of anchorOrg when it is set.
-func checkExportFile(path string, collectAnchors bool, anchorOrg string) (audit.ExportResult, error) {
+func checkExportFile(path string, collectAnchors bool, anchorOrg string, cp *audit.Note) (audit.ExportResult, error) {
 	f, err := os.Open(path) //nolint:gosec // the operator names the file to check
 	if err != nil {
 		return audit.ExportResult{}, err
 	}
 	defer func() { _ = f.Close() }()
-	return audit.VerifyExport(f, audit.ExportVerifyOptions{CollectAnchors: collectAnchors, AnchorOrgID: anchorOrg})
+	return audit.VerifyExport(f, audit.ExportVerifyOptions{CollectAnchors: collectAnchors, AnchorOrgID: anchorOrg, Checkpoint: cp})
 }
 
 // verifyAudit verifies the install chain and every org's chain, or one org's with orgID, or the

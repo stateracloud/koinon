@@ -326,6 +326,11 @@ type ExportVerifyOptions struct {
 	// bounded by the anchor count, not anchors times orgs. Empty keeps every head. The heads are
 	// still all checked against heads_root before they are dropped.
 	AnchorOrgID string
+	// Checkpoint, on an install export, pins the file to a signed checkpoint (VerifyNote, already
+	// checked by the caller): the file must hold the checkpoint's chain_seq with the checkpoint's hash.
+	// A file that ends before it, or has another hash there, fails: the chain was rolled back or rewritten
+	// since the checkpoint was made (ADR 0100 decision 4.2). Not for an org export.
+	Checkpoint *Note
 }
 
 // ExportResult is the verdict on an export file.
@@ -350,6 +355,8 @@ type ExportResult struct {
 	StreamAnchors []ExportAnchor
 	// AnchorOrgID is the ExportVerifyOptions.AnchorOrgID StreamAnchors were collected with.
 	AnchorOrgID string
+	// CheckpointChecked is true when ExportVerifyOptions.Checkpoint was set and the file holds it.
+	CheckpointChecked bool
 }
 
 // OK reports whether the file holds.
@@ -398,7 +405,13 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 		if opt.CollectAnchors {
 			res.AnchorOrgID = opt.AnchorOrgID
 		}
+		if cp := opt.Checkpoint; cp != nil && cp.Origin != NoteOrigin(h.InstallID) {
+			return res, fmt.Errorf("audit export: the checkpoint is of %q, not of this install (%q)", cp.Origin, NoteOrigin(h.InstallID))
+		}
 	case ChainOrg:
+		if opt.Checkpoint != nil {
+			return res, errors.New("audit export: a checkpoint pins an install export; this one is an org chain (give the install export with --anchors)")
+		}
 		if h.OrgID == "" {
 			return res, fmt.Errorf("%w: an org export has no org_id", ErrExportFormat)
 		}
@@ -460,6 +473,7 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 		}
 	}
 	orgHashes := map[int64][]byte{} // org export: the hash of each wanted chain_seq in the file
+	var cpHash []byte               // install export: the hash the file has at the checkpoint's chain_seq
 	rows, last, prev, brk, err := walkFrom(start, startPrev, func(int64) ([]link, error) {
 		var page []link
 		for len(page) < verifyPage && !failed {
@@ -497,6 +511,9 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 			if l.bad == "" && wanted[ev.ChainSeq] {
 				orgHashes[ev.ChainSeq] = l.hash
 			}
+			if l.bad == "" && opt.Checkpoint != nil && ev.ChainSeq == opt.Checkpoint.ChainSeq {
+				cpHash = l.hash
+			}
 			// encoding/json keeps the last of two keys and another reader may keep the first, so a
 			// line with a key twice says two things: refuse it, as a summary with a key twice is (a key
 			// twice inside the summary is already reported as such). With chain_seq itself twice its
@@ -528,7 +545,29 @@ func VerifyExport(r io.Reader, opt ExportVerifyOptions) (ExportResult, error) {
 	if res.Break == nil && h.Chain == ChainOrg {
 		res.Break = checkOrgAnchors(&res, opt, orgHashes)
 	}
+	if res.Break == nil && opt.Checkpoint != nil {
+		if res.Break, err = checkCheckpoint(&res, *opt.Checkpoint, cpHash); err != nil {
+			return res, err
+		}
+	}
 	return res, nil
+}
+
+// checkCheckpoint checks an install export that verified against a signed checkpoint. A file that cannot
+// show the checkpoint's chain_seq (it starts after it) is an error, not a break: it proves nothing either way.
+func checkCheckpoint(res *ExportResult, cp Note, got []byte) (*Break, error) {
+	if res.Header.FromSeq > cp.ChainSeq {
+		return nil, fmt.Errorf("audit export: the file starts at chain_seq %d, after the checkpoint's chain_seq %d: export from chain_seq %d or earlier",
+			res.Header.FromSeq, cp.ChainSeq, cp.ChainSeq)
+	}
+	switch {
+	case res.End.Seq < cp.ChainSeq:
+		return &Break{Seq: res.End.Seq + 1, Reason: fmt.Sprintf("the file ends at chain_seq %d, before the checkpoint's chain_seq %d: rows were removed behind the checkpoint, or the file is older than it (export the chain after the checkpoint was made)", res.End.Seq, cp.ChainSeq)}, nil
+	case !bytes.Equal(got, cp.Hash):
+		return &Break{Seq: cp.ChainSeq, Reason: "the file has another hash at the checkpoint's chain_seq than the signed one: the install chain was rewritten behind the checkpoint"}, nil
+	}
+	res.CheckpointChecked = true
+	return nil, nil
 }
 
 // readAndCheckAnchorLine reads the anchor_heads line after an audit.anchor event and checks it

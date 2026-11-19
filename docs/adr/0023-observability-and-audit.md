@@ -213,6 +213,10 @@ calls and the agent's message chunks business events.
 
 - ~~Per-org chains vs one global chain.~~ Per org, see the 2026-10-26 amendment.
 - HMAC key custody or external anchoring (e.g. periodic signed checkpoint to object storage).
+  Resolved in part, 2026-11-19: ADR 0100 decision 4.2 (built in #334) signs a checkpoint after each
+  anchor with an Ed25519 key that only `koinon-api` uses. A copy of the note outside the cluster
+  stops a rewrite of any chain up to that note. Open still: an external witness or an RFC 3161
+  timestamp, against a compromised `koinon-api` that signs a false future checkpoint.
 - Which OCSF events are copied into audit vs only kept in OpenShell logs.
 
 ## Upstream verification

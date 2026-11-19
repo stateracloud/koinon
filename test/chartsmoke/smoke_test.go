@@ -315,6 +315,62 @@ func describeMode(name, valuesFile string) {
 			Expect(args[i+1]).To(Equal(release), "the chart passes .Release.Name")
 		})
 
+		// koinon-api makes the audit checkpoint signing key on its first checkpoint and is the only
+		// reader (ADR 0100 decision 4.2, #334): the chart gives it the Secret's name, renders no
+		// Secret of that name (an upgrade would overwrite the key) and no other workload mounts or
+		// reads it.
+		It("gives koinon-api the audit signing Secret name and no other workload a reference to it", func() {
+			api := r.deployment("koinon-api")
+			Expect(api).NotTo(BeNil())
+			args := api.Spec.Template.Spec.Containers[0].Args
+			i := slices.Index(args, "--audit-signing-secret")
+			Expect(i).To(BeNumerically(">=", 0), "koinon-api has --audit-signing-secret")
+			Expect(i + 1).To(BeNumerically("<", len(args)))
+			name := args[i+1]
+			Expect(name).To(HaveSuffix("-audit-signing"))
+
+			refers := func(spec corev1.PodSpec) bool {
+				for _, v := range spec.Volumes {
+					if (v.Secret != nil && v.Secret.SecretName == name) || v.Projected != nil && slices.ContainsFunc(v.Projected.Sources, func(p corev1.VolumeProjection) bool {
+						return p.Secret != nil && p.Secret.Name == name
+					}) {
+						return true
+					}
+				}
+				for _, c := range append(slices.Clone(spec.InitContainers), spec.Containers...) {
+					if slices.Contains(c.Args, name) || slices.Contains(c.Command, name) {
+						return true
+					}
+					for _, e := range c.Env {
+						if e.Value == name || (e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil && e.ValueFrom.SecretKeyRef.Name == name) {
+							return true
+						}
+					}
+					for _, ef := range c.EnvFrom {
+						if ef.SecretRef != nil && ef.SecretRef.Name == name {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			for _, d := range r.Deployments {
+				if d.Name == "koinon-api" {
+					Expect(refers(d.Spec.Template.Spec)).To(BeTrue(), "koinon-api names the Secret")
+					continue
+				}
+				Expect(refers(d.Spec.Template.Spec)).To(BeFalse(), "%s must not reference the audit signing Secret", d.Name)
+			}
+			for _, j := range r.Jobs {
+				Expect(refers(j.Spec.Template.Spec)).To(BeFalse(), "Job %s must not reference the audit signing Secret", j.Name)
+			}
+			for _, o := range r.Objects {
+				if sec, ok := o.(*corev1.Secret); ok {
+					Expect(sec.Name).NotTo(Equal(name), "the chart must not render the audit signing Secret")
+				}
+			}
+		})
+
 		// With the DBOS runtime on (ADR 0085), the executor ID is the pod name from the downward API,
 		// and the migrate Job (a pre-install hook, so it ran above) creates the tables the runtime
 		// needs before koinon-api starts.
