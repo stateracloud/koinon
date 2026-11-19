@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+# Spike for #1091 slice 9a: does gVisor (runsc) run in kind on a standard runner? It checks the AppArmor limit on
+# user namespaces, the pinned Kubernetes 1.37 kind node image and the install time. Dispatch only, not required.
+# Remove it when the slice 9 e2e job covers the same ground.
+name: gvisor-kind-spike
+on:
+  workflow_dispatch:
+    inputs:
+      userns_restrict:
+        description: "Value to set for kernel.apparmor_restrict_unprivileged_userns (empty: leave as the runner has it)"
+        required: false
+        default: ""
+      gvisor_release:
+        description: "gVisor release (a pinned YYYYMMDD.N under storage.googleapis.com/gvisor/releases/release/)"
+        required: false
+        default: "20261116.0"
+permissions:
+  contents: read
+concurrency:
+  group: gvisor-kind-spike-${{ github.ref }}-${{ inputs.userns_restrict }}-${{ inputs.gvisor_release }}
+  cancel-in-progress: false
+jobs:
+  spike:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runner facts
+        run: |
+          set -x
+          uname -r
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          sysctl user.max_user_namespaces
+          stat -fc %T /sys/fs/cgroup
+          cat /sys/kernel/security/lsm
+          docker --version
+          kind version
+      - name: Set the AppArmor sysctl (only when asked)
+        if: inputs.userns_restrict != ''
+        env:
+          USERNS_RESTRICT: ${{ inputs.userns_restrict }}
+        run: |
+          [[ "$USERNS_RESTRICT" =~ ^[01]$ ]] || { echo "userns_restrict must be 0 or 1" >&2; exit 1; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns="$USERNS_RESTRICT"
+      - name: Create kind (pinned node image)
+        run: |
+          set -euo pipefail
+          t0=$(date +%s)
+          NODE_IMAGE=$(sed -n 's/^NODE_IMAGE=//p' test/e2e/kind/up.sh)
+          kind create cluster --name gv --image "$NODE_IMAGE" --kubeconfig "$RUNNER_TEMP/kc" --wait 120s
+          echo "kind create: $(( $(date +%s) - t0 ))s"
+      - name: Install runsc and the containerd shim in the node
+        env:
+          GVISOR_RELEASE: ${{ inputs.gvisor_release }}
+        run: |
+          set -euo pipefail
+          [[ "$GVISOR_RELEASE" =~ ^[a-z0-9.-]+$ ]] || { echo "bad gvisor_release" >&2; exit 1; }
+          t0=$(date +%s)
+          base="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/x86_64"
+          cd "$RUNNER_TEMP"
+          mkdir gvisor-dl
+          cd gvisor-dl
+          curl -fsSL -O "$base/gvisor.tar.bz2" -O "$base/gvisor.tar.bz2.sha512"
+          sha512sum -c gvisor.tar.bz2.sha512
+          tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1 gvisor-bin
+          chmod +x runsc containerd-shim-runsc-v1
+          for f in runsc containerd-shim-runsc-v1; do
+            docker cp "$f" gv-control-plane:/usr/local/bin/"$f"
+          done
+          # runsc runs the sidecar binaries in gvisor-bin/ next to itself (gvisor.dev install guide).
+          docker cp -a gvisor-bin gv-control-plane:/usr/local/bin/gvisor-bin
+          docker exec gv-control-plane ls -l /usr/local/bin/gvisor-bin
+          docker exec gv-control-plane runsc --version
+          docker exec gv-control-plane containerd --version
+          docker exec gv-control-plane grep -n '^version' /etc/containerd/config.toml
+          # kind nodes use the systemd cgroup driver, so runsc needs systemd-cgroup too.
+          docker exec gv-control-plane sh -c "printf '[runsc_config]\n  systemd-cgroup = \"true\"\n' > /etc/containerd/runsc.toml"
+          docker exec gv-control-plane sh -c "cat >> /etc/containerd/config.toml <<'EOF'
+          [plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc]
+            runtime_type = \"io.containerd.runsc.v1\"
+          [plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runsc.options]
+            TypeUrl = \"io.containerd.runsc.v1.options\"
+            ConfigPath = \"/etc/containerd/runsc.toml\"
+          EOF"
+          docker exec gv-control-plane systemctl restart containerd
+          kubectl --kubeconfig "$RUNNER_TEMP/kc" wait --for=condition=Ready node --all --timeout=120s
+          docker exec gv-control-plane crictl info | grep -A3 runsc
+          echo "runsc install: $(( $(date +%s) - t0 ))s"
+      - name: Run a pod in the gvisor RuntimeClass
+        env:
+          KUBECONFIG: ${{ runner.temp }}/kc
+        run: |
+          set -euo pipefail
+          t0=$(date +%s)
+          kubectl apply -f - <<'EOF'
+          apiVersion: node.k8s.io/v1
+          kind: RuntimeClass
+          metadata:
+            name: gvisor
+          handler: runsc
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: gv-probe
+          spec:
+            runtimeClassName: gvisor
+            restartPolicy: Never
+            containers:
+              - name: probe
+                image: busybox:1.37
+                command: ["sh", "-c", "dmesg | head -3; cat /proc/version; cat /proc/sys/user/max_user_namespaces || true"]
+          EOF
+          kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/gv-probe --timeout=180s \
+            || { kubectl describe pod gv-probe; exit 1; }
+          kubectl logs gv-probe
+          echo "gvisor pod: $(( $(date +%s) - t0 ))s"
+      - name: Node logs on failure
+        if: failure()
+        run: |
+          docker exec gv-control-plane journalctl -u containerd --no-pager | tail -60 || true
+          sudo dmesg | grep -i apparmor | tail -20 || true

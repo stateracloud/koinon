@@ -288,7 +288,8 @@
                 "migrate": {"type": "string"},
                 "api": {"type": "string"},
                 "reconciler": {"type": "string"},
-                "agentd": {"type": "string"}
+                "agentd": {"type": "string"},
+                "mcpgateway": {"type": "string"}
               }
             }
           }
@@ -306,7 +307,8 @@
                 "migrate": {"$ref": "#/definitions/nonEmpty"},
                 "api": {"$ref": "#/definitions/nonEmpty"},
                 "reconciler": {"$ref": "#/definitions/nonEmpty"},
-                "agentd": {"$ref": "#/definitions/nonEmpty"}
+                "agentd": {"$ref": "#/definitions/nonEmpty"},
+                "mcpgateway": {"$ref": "#/definitions/nonEmpty"}
               }
             }
           }
@@ -383,7 +385,6 @@
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
                 "shutdownDelaySeconds": {"type": "integer", "minimum": 0},
                 "drainTimeoutSeconds": {"type": "integer", "minimum": 1},
-                "acceptOrgTargetsDropped": {"type": "boolean"},
                 "podDisruptionBudget": {
                   "type": "object",
                   "additionalProperties": false,
@@ -601,6 +602,29 @@
       "additionalProperties": false,
       "properties": {
         "opencode": {"$ref": "#/definitions/harness"}
+      }
+    },
+    "runEvidence": {
+      "description": "Run-evidence export Job (#966, ADR 0121).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "export": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "org": {"type": "string"},
+            "run": {"type": "string"},
+            "out": {"type": "string"},
+            "s3": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"existingSecret": {"type": "string"}}
+            },
+            "resources": {"type": "object"}
+          }
+        }
       }
     },
     "harnessPrepull": {

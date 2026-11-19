@@ -29,6 +29,7 @@
 package koinonapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -208,6 +209,10 @@ type config struct {
 	// providers and MCP servers may name.
 	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
 	gatewayMCPURL string
+	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. An agent reaches MCP
+	// through agentgateway until the follow-up that moves it (ADR 0097), so the check must use the URL the agent
+	// uses, which is not always the URL of approved calls. Empty: the check uses gatewayMCPURL.
+	gatewayMCPCheckURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
 	// gatewayMode is the chart's gateway.mode (standalone or kubernetes).
@@ -337,6 +342,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes; kubernetes cannot render a server's own CA, so the API refuses caBundle and insecureSkipVerify")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
+	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
 			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
@@ -967,8 +973,8 @@ func serve(ctx context.Context, cfg config) error {
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
 		// The live check of an agent's MCP tools (old issue 488): koinon-api reads the agent's gateway key
 		// and lists the tools as the agent; koinon-agentd gets names only, never the key.
-		if cfg.gatewayMCPURL != "" {
-			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: cfg.gatewayMCPURL, Key: keyFn})
+		if checkURL := cmp.Or(cfg.gatewayMCPCheckURL, cfg.gatewayMCPURL); checkURL != "" {
+			mux.Handle(mcpcheck.Path, mcpcheck.Server{Keys: mcpcheck.KubeAgentKeys{Client: kube, Namespace: cfg.secretsNamespace}, Gateway: checkURL, Key: keyFn})
 		}
 		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
 		// writer, asks per checkpoint and holds no key-encryption key.
@@ -1057,6 +1063,8 @@ type migrateOptions struct {
 	// of warning. The chart passes it on an external database, where no hook will create the role
 	// later: the Job fails with the remedy rather than koinon-api logging a refused write forever.
 	requireWriter bool
+	// waitGateway makes --grants-only wait for the gateway group role too (gateway.mcp.driver=koinon).
+	waitGateway bool
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -1078,9 +1086,15 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		// koinon_api's membership in the role: CNPG adds the managed role's inRoles on its own schedule,
 		// possibly after this hook succeeds. That is harmless: koinon-api retries every install write
 		// the database refuses (retryInstallWrite) until the membership lands (ADR 0100 decision 1.1a).
-		return grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
+		if err := grantInstallAuditWriter(waitCtx, wait, 2*time.Second, func(ctx context.Context) (bool, error) {
 			return migrations.GrantInstallAuditWriter(ctx, db)
-		})
+		}); err != nil {
+			return err
+		}
+		if o.waitGateway {
+			return waitGrantGateway(waitCtx, wait, 2*time.Second, db)
+		}
+		return grantGateway(waitCtx, db)
 	}
 
 	// On an external database nothing creates the install audit writer role later, so the chart
@@ -1123,6 +1137,9 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 			"on an external database create it (" + project.InstallAuditDocURL + ") and run koinon-api migrate again. " +
 			"Until then koinon-api writes no install audit event")
 	}
+	if err := grantGateway(ctx, db); err != nil {
+		return err
+	}
 	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
 	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
 	// on (the chart passes --durable to the migration Job when api.durable.enabled).
@@ -1130,6 +1147,42 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 		return nil
 	}
 	return durable.Migrate(ctx, dsn, slog.Default())
+}
+
+// grantGateway gives koinon-gateway's database role its privileges (ADR 0097 decision 5). The role
+// exists only when the chart's gateway switch is on, so a missing role is not an error: nothing
+// connects as it, and the next migrate or --grants-only run grants it once it exists.
+func grantGateway(ctx context.Context, db migrations.Execer) error {
+	granted, err := migrations.GrantGateway(ctx, db)
+	if err != nil {
+		return fmt.Errorf("grant the gateway role: %w", err)
+	}
+	if !granted {
+		slog.Info("the role " + migrations.GatewayRole + " does not exist, so it was granted nothing (the Koinon MCP gateway is off, or the role comes later)")
+	}
+	return nil
+}
+
+// waitGrantGateway calls GrantGateway every poll until the role exists and is granted, for as long as ctx
+// lasts. A new CloudNativePG managed role appears only after the Cluster update, so one call can find
+// nothing to grant on an upgrade.
+func waitGrantGateway(ctx context.Context, wait, poll time.Duration, db migrations.Execer) error {
+	for {
+		granted, err := migrations.GrantGateway(ctx, db)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			return fmt.Errorf("grant the gateway role: %w", err)
+		case granted:
+			slog.Info("granted the gateway role its privileges", "role", migrations.GatewayRole)
+			return nil
+		}
+		slog.Info("waiting for the gateway role", "role", migrations.GatewayRole)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the role %s did not appear within %s: the CloudNativePG Cluster has not reconciled its managed roles", migrations.GatewayRole, wait)
+		case <-time.After(poll):
+		}
+	}
 }
 
 // grantInstallAuditWriter calls grant every poll until it reports that it granted, for as long as

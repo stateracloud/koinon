@@ -17,12 +17,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/installid"
+	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/runevidence"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
@@ -35,14 +37,15 @@ func newRunEvidenceCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "run-evidence",
 		Short: "Export one run's evidence for a restore drill",
-		Long: "Run it in a koinon-api pod: kubectl exec deploy/koinon-api -- koinon-api run-evidence export --org O --run R --out DIR\n\n" +
+		Long: "On a running install use the chart's run-evidence Job (runEvidence.export in the chart values): it needs no exec into a pod. " +
+			"Elsewhere run it with --kek-dir (a mounted key-encryption keys Secret) or --kek-secret (read through the Kubernetes API).\n\n" +
 			"The export is JSON Lines: the run (with its sandbox enforcement mode), its traces (one per turn), its events, the leak " +
 			"guard's decisions and the outbound bytes per external sink. It carries no argument values, no secrets and no host names.",
 	}
 
 	var dbURL, org, run, out string
 	var s3 checkpoint.S3
-	var kekDir string
+	var kekDir, kekSecret, namespace, kubeconfig string
 	var wrapCfg wrapping.Config
 	var noOrgSecrets bool
 	export := &cobra.Command{
@@ -74,7 +77,7 @@ func newRunEvidenceCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			secrets, err := exportSecrets(cmd.Context(), pool, orgID, kekDir, wrapCfg, noOrgSecrets)
+			secrets, err := exportSecrets(cmd.Context(), pool, orgID, kekSource{dir: kekDir, secret: kekSecret, namespace: namespace, kubeconfig: kubeconfig}, wrapCfg, noOrgSecrets)
 			if err != nil {
 				return err
 			}
@@ -96,9 +99,13 @@ func newRunEvidenceCommand() *cobra.Command {
 	export.Flags().StringVar(&s3.AccessKeyID, "s3-access-key-id", "", "S3 access key ID")
 	export.Flags().StringVar(&s3.SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key (use the environment, not the command line)")
 	export.Flags().StringVar(&kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret, as koinon-api reads it; the export scrubs the org's stored credentials")
+	export.Flags().StringVar(&kekSecret, "kek-secret", "", "name of the key-encryption keys Secret; the export reads it through the Kubernetes API (the chart's run-evidence Job)")
+	export.Flags().StringVar(&namespace, "namespace", "", "namespace of the --kek-secret Secret")
+	export.Flags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	export.Flags().BoolVar(&noOrgSecrets, "no-org-secrets", false, "export without the org's stored credentials in the scrubber (only for an org that stores none)")
 	wrapCfg.Flags(export.Flags())
 	cli.EnvAlias(export, "database-url", "DATABASE_URL")
+	cli.EnvAlias(export, "namespace", "POD_NAMESPACE")
 	cli.EnvAlias(export, "s3-access-key-id", "AWS_ACCESS_KEY_ID")
 	cli.EnvAlias(export, "s3-secret-access-key", "AWS_SECRET_ACCESS_KEY")
 	_ = export.MarkFlagRequired("org")
@@ -196,15 +203,27 @@ func parseUUID(flag, v string) (pgtype.UUID, error) {
 	return pgtype.UUID{Bytes: u, Valid: true}, nil
 }
 
+// kekSource says where the export reads the key-encryption keys: a mounted directory or, in the
+// chart's run-evidence Job, the Secret itself through the Kubernetes API (read-only, as key-admin
+// reads it).
+type kekSource struct {
+	dir, secret, namespace, kubeconfig string
+	// client is the Kubernetes client of --kek-secret; nil builds one from kubeconfig or the pod. Tests set it.
+	client kubernetes.Interface
+}
+
 // exportSecrets is the org's secret set for the export's scrubber, built as the trace router builds
 // it (router.PGSecrets: the org's secret store and provider records, opened with the KEKs). It fails
 // when a stored envelope cannot be opened: the set would miss a value, and an export that cannot
-// remove a credential it cannot read must not be written. Without --kek-dir the export refuses
-// unless --no-org-secrets says the org stores none.
-func exportSecrets(ctx context.Context, pool *pgxpool.Pool, org pgtype.UUID, kekDir string, wc wrapping.Config, none bool) (*scrub.Secrets, error) {
-	if kekDir == "" {
+// remove a credential it cannot read must not be written. Without --kek-dir or --kek-secret the
+// export refuses unless --no-org-secrets says the org stores none.
+func exportSecrets(ctx context.Context, pool *pgxpool.Pool, org pgtype.UUID, kek kekSource, wc wrapping.Config, none bool) (*scrub.Secrets, error) {
+	if kek.dir != "" && kek.secret != "" {
+		return nil, errors.New("set --kek-dir or --kek-secret, not both")
+	}
+	if kek.dir == "" && kek.secret == "" {
 		if !none {
-			return nil, errors.New("--kek-dir is required, so the export can scrub the org's stored credentials (or --no-org-secrets for an org that stores none)")
+			return nil, errors.New("--kek-dir or --kek-secret is required, so the export can scrub the org's stored credentials (or --no-org-secrets for an org that stores none)")
 		}
 		return scrub.NewSecrets(), nil
 	}
@@ -212,10 +231,40 @@ func exportSecrets(ctx context.Context, pool *pgxpool.Pool, org pgtype.UUID, kek
 	if err != nil {
 		return nil, err
 	}
-	wrappers = wrappers.WithInstallID(installid.Source(pool))
-	keyring, err := secretstore.LoadDir(ctx, kekDir, wrappers)
+	keyring, err := loadKEKs(ctx, kek, wrappers.WithInstallID(installid.Source(pool)))
+	if err != nil {
+		return nil, err
+	}
+	return router.NewPGSecrets(pool, keyring, slog.Default()).Secrets(ctx, org)
+}
+
+// loadKEKs opens the key-encryption keys from the mounted directory or, with --kek-secret, from the
+// Secret through the Kubernetes API. It only reads.
+func loadKEKs(ctx context.Context, kek kekSource, wrappers secretstore.Wrappers) (*secretstore.Keyring, error) {
+	if kek.secret == "" {
+		ring, err := secretstore.LoadDir(ctx, kek.dir, wrappers)
+		if err != nil {
+			return nil, fmt.Errorf("load the key-encryption keys: %w", err)
+		}
+		return ring, nil
+	}
+	if kek.namespace == "" {
+		return nil, errors.New("--namespace (or $POD_NAMESPACE) is required with --kek-secret")
+	}
+	client := kek.client
+	if client == nil {
+		var err error
+		if client, err = keysKubeClient(kek.kubeconfig); err != nil {
+			return nil, err
+		}
+	}
+	ks, err := keyscli.KubeStore{Client: client, Namespace: kek.namespace, Name: kek.secret, Wrappers: wrappers}.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load the key-encryption keys: %w", err)
 	}
-	return router.NewPGSecrets(pool, keyring, slog.Default()).Secrets(ctx, org)
+	ring, err := secretstore.NewKeyring(ks.Keys, ks.Active)
+	if err != nil {
+		return nil, fmt.Errorf("load the key-encryption keys: %w", err)
+	}
+	return ring, nil
 }

@@ -5,8 +5,8 @@
 // from a header allowlist, taps the response for usage without keeping a body, and hands one usage
 // record per request to a sink. It does no format translation (ADR 0069).
 //
-// This slice (S1) serves, meters and refuses. It does not yet enforce budgets, retry or fail over:
-// those are S2 of issue #279, and the limits of the config are only counted.
+// It stops an agent whose spend reached its limit and charges each call after it ends (budget.go).
+// It does not retry or fail over: the Koinon config has no retry rule today (ADR 0097 decision 5).
 package modelgateway
 
 import (
@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // UsageSink gets one record per request that reached the model path's proxy stage. It must not block.
@@ -59,6 +61,9 @@ type Options struct {
 type Gateway struct {
 	o    Options
 	snap atomic.Pointer[snapshot]
+	bud  *budgets
+
+	applyMu sync.Mutex // keeps the live counters and the snapshot in step
 
 	mu    sync.Mutex
 	drain bool
@@ -84,7 +89,7 @@ func New(o Options) *Gateway {
 	if o.HTTPClient == nil {
 		o.HTTPClient = newHTTPClient()
 	}
-	g := &Gateway{o: o, keys: map[string]cachedKey{}}
+	g := &Gateway{o: o, bud: newBudgets(), keys: map[string]cachedKey{}}
 	g.snap.Store(&snapshot{})
 	return g
 }
@@ -99,8 +104,9 @@ func newHTTPClient() *http.Client {
 
 // route is one model an org serves.
 type route struct {
-	p gateway.Provider
-	m gateway.Model
+	p     gateway.Provider
+	m     gateway.Model
+	price pricing.Price // the model's price, parsed once: the charge after each call
 }
 
 // snapshot is one applied configuration. A request reads one snapshot.
@@ -124,6 +130,9 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
 	s := &snapshot{keys: map[string]gateway.Key{}, state: c.ModelState, routes: map[string]map[string]route{}}
+	// The snapshot owns its maps: a caller that changes its config later must not change the one in force.
+	s.state.Limits = maps.Clone(c.Limits)
+	s.state.Models = maps.Clone(c.Models)
 	for _, k := range c.Keys {
 		if k.ID == "" || !strings.HasPrefix(k.Hash, "sha256:") {
 			return "", fmt.Errorf("%w: key %q has no sha256 hash", ErrInvalidConfig, k.ID)
@@ -142,6 +151,13 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 			if m.Price == nil {
 				continue
 			}
+			price, err := pricing.Spec{Prices: wireOf(m.Price.Input, m.Price.Output, m.Price.CacheRead, m.Price.CacheWrite, m.Price.Reasoning), Tiers: tiersOf(m.Price.Tiers)}.Parse()
+			if err != nil {
+				// A price that cannot be parsed cannot be charged, so the model is not served.
+				g.o.Logger.Warn("model dropped", "provider", p.Name, "reason", "price")
+				g.o.Metrics.dropped("price")
+				continue
+			}
 			if _, err := gateway.RenderingOf(m); err != nil {
 				g.o.Logger.Warn("model dropped", "provider", p.Name, "reason", "format")
 				g.o.Metrics.dropped("format")
@@ -150,19 +166,32 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 			if s.routes[p.Org] == nil {
 				s.routes[p.Org] = map[string]route{}
 			}
-			s.routes[p.Org][m.Name] = route{p: p, m: m}
+			s.routes[p.Org][m.Name] = route{p: p, m: m, price: price}
 		}
-	}
-	if n := len(c.Limits); n > 0 {
-		// S1 meters; the budget stop with charge after the call is S2 (#279).
-		g.o.Logger.Warn("budget limits are not enforced by this gateway yet", "limits", n)
 	}
 	s.rev = revisionOf(c)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	g.snap.Store(s)
+	// One apply at a time. The live counters and the snapshot change together, under the lock of the
+	// counters: a request that reads the new snapshot finds its counters live, and a check that
+	// finds its counters retired finds the new snapshot published.
+	g.applyMu.Lock()
+	defer g.applyMu.Unlock()
+	g.bud.swap(s.state.Limits, func() { g.snap.Store(s) })
 	return s.rev, nil
+}
+
+func wireOf(in, out, cr, cw, re string) pricing.Wire {
+	return pricing.Wire{Input: in, Output: out, CacheRead: cr, CacheWrite: cw, Reasoning: re}
+}
+
+func tiersOf(ts []gateway.PriceTier) []pricing.WireTier {
+	var out []pricing.WireTier
+	for _, t := range ts {
+		out = append(out, pricing.WireTier{ContextOver: t.ContextOver, Prices: wireOf(t.Input, t.Output, t.CacheRead, t.CacheWrite, t.Reasoning)})
+	}
+	return out
 }
 
 // revisionOf derives the revision from the content, so equal configs give equal revisions.

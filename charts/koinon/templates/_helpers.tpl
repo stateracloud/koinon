@@ -283,6 +283,38 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- end }}
 
 {{/*
+The URL koinon-api uses for its live check of an agent's MCP tools. An agent still reaches MCP through
+agentgateway while the driver is koinon (ADR 0097), so the check goes to the URL the agent uses, and not
+to koinon-gateway, which serves koinon-api's approved calls (koinon.gatewayMCPURL).
+*/}}
+{{- define "koinon.gatewayMCPCheckURL" -}}
+{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- end }}
+
+{{/*
+The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
+mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
+(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both while agents reach MCP through it.
+*/}}
+{{- define "koinon.gatewayMCPKeysName" -}}
+{{- include "koinon.componentName" (list . "gateway-mcp-keys") }}
+{{- end }}
+
+{{/* Where a gateway pod mounts the MCP credentials Secret. */}}
+{{- define "koinon.gatewayMCPKeysDir" -}}/secrets/mcp{{- end }}
+
+{{/*
+koinon-gateway's own database login (gateway.mcp.driver=koinon). In cnpg mode the URL file is a
+ConfigMap (no password in it: the password is PGPASSWORD, from the generated Secret); in external mode the
+file is a key of the external Secret.
+*/}}
+{{- define "koinon.mcpGatewayDBURLConfigName" -}}
+{{- include "koinon.componentName" (list . "mcp-gateway-db") }}
+{{- end }}
+
+{{- define "koinon.mcpGatewayDBURLDir" -}}/etc/koinon/mcp-db{{- end }}
+
+{{/*
 The labels the agentgateway controller puts on the proxy pods of Koinon's Gateway (kubernetes mode):
 the Gateway's name is the label value. NetworkPolicies select the proxy by them.
 */}}
@@ -348,6 +380,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ include "koinon.gatewayMCPURL" . | quote }}
+# The live check of an agent's MCP tools uses the MCP URL the agent uses: agentgateway's, also when koinon-gateway serves the approved calls.
+- name: KOINON_GATEWAY_MCP_CHECK_URL
+  value: {{ include "koinon.gatewayMCPCheckURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
 - name: KOINON_GATEWAY_MODE
   value: {{ .Values.gateway.mode | quote }}
@@ -553,7 +588,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- define "koinon.ensureSecrets" -}}
 {{- $specs := list -}}
 {{- if eq .Values.postgres.mode "cnpg" -}}
-{{- range $role := list "migrate" "api" "reconciler" "agentd" -}}
+{{- $roles := list "migrate" "api" "reconciler" "agentd" -}}
+{{- if include "koinon.mcpKoinon" . -}}{{- $roles = append $roles "mcpgateway" -}}{{- end -}}
+{{- range $role := $roles -}}
 {{- if not (index $.Values.postgres.cnpg.existingSecrets $role) -}}
 {{- $labels := fromYaml (include "koinon.generatedLabels" (list $ "postgres")) | merge (dict "cnpg.io/reload" "true") -}}
 {{- $specs = append $specs (dict "name" (include "koinon.pgSecret" (list $ $role)) "type" "kubernetes.io/basic-auth" "username" (include "koinon.pgRole" $role) "labels" $labels) -}}
@@ -1228,6 +1265,71 @@ spec:
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml .ka.resources | nindent 8 }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{/*
+The run-evidence export Job's pod template (run-evidence-export.yaml), as a string: the Job is named by its hash.
+dict root, re (values runEvidence.export).
+*/}}
+{{- define "koinon.runEvidencePod" -}}
+{{- $ := .root -}}
+{{- $re := .re -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "run-evidence") | nindent 4 }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "koinon.componentName" (list $ "api") }}
+  # The token reads the KEK Secret through the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: run-evidence
+      image: {{ include "koinon.image" (list $ $.Values.api.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - run-evidence
+        - export
+        - {{ printf "--org=%s" $re.org | quote }}
+        - {{ printf "--run=%s" $re.run | quote }}
+        - {{ printf "--out=%s" $re.out | quote }}
+        - {{ printf "--kek-secret=%s" (include "koinon.kekSecretName" $) | quote }}
+        - --s3-endpoint=$(S3_ENDPOINT)
+        - --s3-region=$(S3_REGION)
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- range $env, $key := dict "S3_ENDPOINT" "endpoint" "S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}
+        - name: {{ $env }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $re.s3.existingSecret | quote }}
+              key: {{ $key }}
+        {{- end }}
+        {{- include "koinon.dbEnv" (list $ "api") | nindent 8 }}
+        {{- include "koinon.kmsEnv" (dict "root" $ "role" "api") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $re.resources | nindent 8 }}
       {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
       {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
       {{- with $mounts }}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	ateenvv1alpha "github.com/stateracloud/koinon/internal/gen/substrate/ateenv/v1alpha"
+	"github.com/stateracloud/koinon/internal/harness"
 )
 
 // stdinChunk is the most bytes one stdin message carries.
@@ -37,11 +40,14 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	if len(req.Command) == 0 {
 		return nil, fail(op, execution.ErrInvalid, "command is empty")
 	}
-	start := &ateenvv1alpha.StartProcessRequest{Command: req.Command, Cwd: req.Workdir, Stdin: true}
+	command := req.Command
 	if req.LoginShell {
 		// A login shell sources the user's profile; "$@" passes the command through unparsed.
-		start.Command = append([]string{"bash", "-lc", `exec "$@"`, "bash"}, req.Command...)
+		command = append([]string{"bash", "-lc", `exec "$@"`, "bash"}, command...)
 	}
+	// startProcess puts the launcher in front, as the outermost process, so the login shell and the
+	// command are both hardened.
+	start := &ateenvv1alpha.StartProcessRequest{Command: command, Cwd: req.Workdir, Stdin: true}
 	if req.Timeout > 0 {
 		start.Timeout = durationpb.New(req.Timeout)
 	}
@@ -68,9 +74,54 @@ func (d *Driver) Exec(ctx context.Context, workspace, sandbox string, req execut
 	return p, nil
 }
 
+// launcherPrefix returns the launcher command that goes in front of every Exec of the sandbox. A
+// process that starts through the ProcessService is a child of the guest server, so the image
+// ENTRYPOINT never hardens it (ADR 0119, 0120 section 4; docs/dev/guest-launcher.md). The tier comes
+// from the runtime class of the sandbox's template. When it is unknown the driver refuses the
+// command: an unwrapped process would run with less fencing than the tier promises.
+func (d *Driver) launcherPrefix(ctx context.Context, op string, k key) ([]string, error) {
+	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
+	if err != nil {
+		return nil, execution.GRPCError(op, err)
+	}
+	tk := key{k.atespace, actor.GetActorTemplate().GetName()}
+	d.mu.Lock()
+	tier, ok := d.tiers[tk]
+	d.mu.Unlock()
+	if !ok {
+		tmpl, err := d.control.GetActorTemplate(ctx, &ateapiv1.GetActorTemplateRequest{ActorTemplate: ref(tk.atespace, tk.actor)})
+		if err != nil {
+			return nil, execution.GRPCError(op, err)
+		}
+		tier = d.cfg.DefaultTier
+		if class := tmpl.GetWorkerSelector().GetMatchLabels()[RuntimeClassSelector]; class != "" {
+			if tier, ok = d.cfg.RuntimeClassTiers[class]; !ok {
+				return nil, fail(op, execution.ErrFailedPrecondition, "sandbox %s has runtime class %q, which has no isolation tier: no launcher policy applies", k, class)
+			}
+		}
+		if IsDerivedTemplate(tk.actor) { // a derived name is a hash of its content; any other may change
+			d.mu.Lock()
+			d.tiers[tk] = tier
+			d.mu.Unlock()
+		}
+	}
+	prefix, ok := harness.Descriptor{}.LauncherPrefix(tier)
+	if !ok {
+		return nil, fail(op, execution.ErrFailedPrecondition, "sandbox %s has no isolation tier (%q): no launcher policy applies", k, tier)
+	}
+	return prefix, nil
+}
+
 // startProcess starts a process, retrying while the guest daemon is not up yet: an actor runs
 // before its daemon listens.
 func (d *Driver) startProcess(ctx context.Context, op string, k key, req *ateenvv1alpha.StartProcessRequest) (*ateenvv1alpha.Process, error) {
+	// Every guest process starts here: Exec and the commands of Upload. The tier is read after the
+	// caller entered the gate, so a deleted and re-created sandbox cannot get the old tier's policy.
+	prefix, err := d.launcherPrefix(ctx, op, k)
+	if err != nil {
+		return nil, err
+	}
+	req.Command = slices.Concat(prefix, req.Command)
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
 	delay := d.cfg.PollInterval
 	for {

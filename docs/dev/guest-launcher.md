@@ -127,7 +127,8 @@ Tracked on #1087 until the maintainer files separate issues:
 
 1. Flavor images carry the launcher only. The guest server image `ate-env-guest` has no public build:
    Koinon builds it from the Substrate source and pins it by digest (ADR 0061 image rules). That needs the
-   upstream source and a registry, and waits for the lab (see the PR body of #1087). #1088 applies the exec prefix.
+   upstream source and a registry, and waits for the lab (see the PR body of #1087). The driver
+   applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
 3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with

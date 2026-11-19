@@ -77,6 +77,14 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
+        {{- if include "koinon.mcpKoinon" . }}
+        # koinon-gateway (MCP path) may reach the tools port. The platform tool servers also need the agent header, which
+        # the MCP path sets in #281; until then they work through agentgateway only.
+        # The guard runs inside the gateway process, so the guard port below has no such rule.
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 14 }}
+        {{- end }}
         {{- else }}
         # Kubernetes mode: the controller-managed proxy of Koinon's own Gateway, by the label the
         # controller puts on its pods (ADR 0058).
@@ -107,8 +115,9 @@ spec:
     {{- end }}
 {{- $closed := list "reconciler" "agentd" "migrate" }}
 {{- if include "koinon.kms" . }}{{ $closed = append $closed "key-admin" }}{{ end }}
+{{- if .Values.runEvidence.export.enabled }}{{ $closed = append $closed "run-evidence" }}{{ end }}
 {{- range $component := $closed }}
-{{- $jobOnly := has $component (list "migrate" "key-admin") }}
+{{- $jobOnly := has $component (list "migrate" "key-admin" "run-evidence") }}
 ---
 # {{ $component }} accepts no connections{{ if not $jobOnly }}, except Prometheus scrapes of /metrics from metrics.allowFrom{{ end }}.
 apiVersion: networking.k8s.io/v1
@@ -205,10 +214,10 @@ spec:
 {{- if include "koinon.mcpKoinon" . }}
 ---
 # koinon-gateway (MCP path). It holds credentials, so its egress is as agentgateway's: DNS, koinon-api's
-# OTLP listener (the State stream) and the public internet, with the private ranges carved out.
-# Known gap: it cannot reach koinon-api's tools and guard ports, which admit agentgateway only, so the
-# platform tool servers are not reachable through it yet. The slice that moves agents to this gateway
-# adds those ports and the ingress peers (see the PR text).
+# OTLP listener (the State stream), koinon-api's tools port (the platform tool servers, once #281 sets the agent header) and the public
+# internet, with the private ranges carved out. The leak guard runs in this process, so there is no
+# guard-port rule. The guard's database login reaches the Postgres pods on 5432 in cnpg mode; with
+# postgres.mode=external the egress to the database comes from networkPolicy.gatewayEgressTo.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -230,6 +239,15 @@ spec:
               {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
       ports:
         - port: {{ .Values.api.otlpPort }}
+        - port: {{ .Values.api.toolsPort }}
+    {{- if eq .Values.postgres.mode "cnpg" }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "koinon.pgCluster" . }}
+      ports:
+        - port: 5432
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

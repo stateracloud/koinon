@@ -209,6 +209,12 @@ func describeMode(name, valuesFile string) {
 			}
 			for _, j := range r.Jobs {
 				if _, _, hook := hookOf(&j.ObjectMeta); !hook {
+					if j.Labels["app.kubernetes.io/component"] == "run-evidence" {
+						// An operator-run Job (ADR 0121, #966): it exports one recorded run to S3,
+						// so it needs a run, a KEK Secret and a bucket this suite does not make.
+						// TestChartContract checks its render; the export code has its own tests.
+						continue
+					}
 					runJob(ctx, rn, j)
 				}
 			}
@@ -700,6 +706,10 @@ func describeMode(name, valuesFile string) {
 			Expect(w.ProbeHTTP(ctx, c.LivenessProbe, probeDeadline)).To(BeEmpty(), "liveness; logs:\n%s", w.Logs(ctx))
 			metrics := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("stats")}}}
 			Expect(w.ProbeHTTP(ctx, metrics, probeDeadline)).To(BeEmpty(), "/metrics; logs:\n%s", w.Logs(ctx))
+			// The leak guard's own login (koinon_mcpgateway, in koinon_gateway only) reaches the database
+			// through --database-url-file, and the migration's grants let it read what the guard reads.
+			Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+				Should(ContainSubstring("the leak guard reached its database"), "the gateway's login and grants work; logs:\n%s", w.Logs(ctx))
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
@@ -935,6 +945,7 @@ func bootstrapDatabase(ctx context.Context, dbURL string) {
 	for _, stmt := range []string{
 		`CREATE ROLE koinon_app NOLOGIN`,
 		`CREATE ROLE koinon_install_audit_writer NOLOGIN`,
+		`CREATE ROLE koinon_gateway NOLOGIN`,
 		`GRANT CONNECT ON DATABASE koinon TO koinon_app`,
 		`GRANT USAGE ON SCHEMA public TO koinon_app`,
 		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app`,
@@ -957,6 +968,8 @@ func createComponentRoles(ctx context.Context, dbURL string) {
 		{"koinon_api", "koinon_app, koinon_install_audit_writer"},
 		{"koinon_reconciler", "koinon_app"},
 		{"koinon_agentd", "koinon_app"},
+		// koinon-gateway's own login: in the gateway group only, never in koinon_app.
+		{"koinon_mcpgateway", "koinon_gateway"},
 	} {
 		stmt := fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s`, c.role, dbSecretPassword, c.groups)
 		_, err := conn.Exec(ctx, stmt)
