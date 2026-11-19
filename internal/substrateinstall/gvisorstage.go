@@ -65,7 +65,9 @@ type StageResult struct {
 	Uploaded, Present []string
 }
 
-func gvisorKey(a gvisorArch) string { return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 + gvisorAssetSuffix }
+func gvisorKey(a gvisorArch) string {
+	return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 + gvisorAssetSuffix
+}
 
 // gvisorSourceURL is the URL of the tarball of an architecture below the mirror base (empty is the public bucket).
 func gvisorSourceURL(mirror string, a gvisorArch) string {
