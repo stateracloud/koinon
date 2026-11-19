@@ -3,8 +3,11 @@
 package modelgateway_test
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -262,28 +265,100 @@ var _ = Describe("the budget stop of the model path", func() {
 	It("checks a slow upload against the limit in force when its body ends", func(ctx SpecContext) {
 		cfg.SetLimit(agent, limit("1", "g1"))
 		apply(ctx)
-		pr, pw := io.Pipe()
-		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", pr)
+		// A wrapper that tells when the handler first reads the body: it has loaded its snapshot by then.
+		reading := make(chan struct{})
+		var once sync.Once
+		slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = readSignal{ReadCloser: r.Body, first: func() { once.Do(func() { close(reading) }) }}
+			gw.Handler().ServeHTTP(w, r)
+		}))
+		DeferCleanup(slow.Close)
+		conn, err := net.Dial("tcp", slow.Listener.Addr().String())
 		Expect(err).NotTo(HaveOccurred())
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+key.Material)
+		DeferCleanup(conn.Close)
+		body := `{"model":"m","messages":[]}`
+		_, err = fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer %s\r\nContent-Length: %d\r\n\r\n%s", key.Material, len(body), body[:10])
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(reading).Should(BeClosed())
+		cfg.SetLimit(agent, limit("0", "g2")) // the ledger pushes a new generation, at its limit
+		apply(ctx)
+		_, err = conn.Write([]byte(body[10:]))
+		Expect(err).NotTo(HaveOccurred())
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(resp.Body.Close)
+		Expect(resp.StatusCode).To(Equal(http.StatusTooManyRequests))
+		Expect(hits.Load()).To(BeZero())
+	})
+
+	It("never lets a call through while applies retire the generation it checks", func(ctx SpecContext) {
+		cfg.SetLimit(agent, limit("0", "g0"))
+		apply(ctx)
+		stop := make(chan struct{})
+		var applier sync.WaitGroup
+		applier.Add(1)
+		go func() {
+			defer GinkgoRecover()
+			defer applier.Done()
+			for i := 1; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				c := cfg
+				c.Limits = nil
+				c.SetLimit(agent, limit("0", fmt.Sprintf("g%d", i)))
+				_, err := gw.ApplyModel(ctx, c)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}()
+		for range 300 {
+			code, _, _ := call(key.Material)
+			Expect(code).To(Equal(http.StatusTooManyRequests))
+		}
+		close(stop)
+		applier.Wait()
+		Expect(hits.Load()).To(BeZero(), "a zero limit never reaches the provider, whatever the applies do")
+	})
+
+	It("charges a call for an agent that got its limit while the call ran", func(ctx SpecContext) {
+		apply(ctx) // no limit yet
+		release := make(chan struct{})
+		hold.Store(&release)
 		done := make(chan int, 1)
 		go func() {
 			defer GinkgoRecover()
-			resp, err := http.DefaultClient.Do(req)
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = resp.Body.Close() }()
-			done <- resp.StatusCode
+			code, _, _ := call(key.Material)
+			done <- code
 		}()
-		_, err = pw.Write([]byte(`{"model":"m",`))
-		Expect(err).NotTo(HaveOccurred())
-		cfg.SetLimit(agent, limit("0", "g2")) // the ledger pushes a new generation, at its limit
+		Eventually(hits.Load).Should(BeEquivalentTo(1))
+		cfg.SetLimit(agent, limit("0.015", "g1"))
 		apply(ctx)
-		_, err = pw.Write([]byte(`"messages":[]}`))
+		close(release)
+		Eventually(done).Should(Receive(Equal(http.StatusOK)))
+		hold.Store(nil)
+		code, _, _ := call(key.Material) // $0.01 spent: this one still passes
+		Expect(code).To(Equal(http.StatusOK))
+		code, _, _ = call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests), "the call that ran while the limit arrived counted")
+	})
+
+	It("charges a cut stream at least the output bound of its request", func(ctx SpecContext) {
+		upSSE.Store(true)
+		cfg.SetLimit(agent, limit("0.05", "g1")) // the input bytes cost about $0.011: the 100 output tokens $0.1
+		apply(ctx)
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[],"max_tokens":100}`))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(pw.Close()).To(Succeed())
-		Eventually(done).Should(Receive(Equal(http.StatusTooManyRequests)))
-		Expect(hits.Load()).To(BeZero())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+key.Material)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		_, _ = io.Copy(io.Discard, resp.Body)
+		Expect(resp.Body.Close()).To(Succeed())
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		code, _, _ := call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests))
 	})
 
 	Describe("the retry markers", func() {
@@ -313,3 +388,14 @@ var _ = Describe("the budget stop of the model path", func() {
 		})
 	})
 })
+
+// readSignal calls first on the first Read of a request body.
+type readSignal struct {
+	io.ReadCloser
+	first func()
+}
+
+func (r readSignal) Read(p []byte) (int, error) {
+	r.first()
+	return r.ReadCloser.Read(p)
+}

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -129,6 +130,9 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
 	s := &snapshot{keys: map[string]gateway.Key{}, state: c.ModelState, routes: map[string]map[string]route{}}
+	// The snapshot owns its maps: a caller that changes its config later must not change the one in force.
+	s.state.Limits = maps.Clone(c.Limits)
+	s.state.Models = maps.Clone(c.Models)
 	for _, k := range c.Keys {
 		if k.ID == "" || !strings.HasPrefix(k.Hash, "sha256:") {
 			return "", fmt.Errorf("%w: key %q has no sha256 hash", ErrInvalidConfig, k.ID)
@@ -169,12 +173,12 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	// One apply at a time, and the live counters change before the snapshot: a request that reads
-	// the new snapshot finds its counters live, and one that read the old one finds them retired.
+	// One apply at a time. The live counters and the snapshot change together, under the lock of the
+	// counters: a request that reads the new snapshot finds its counters live, and a check that
+	// finds its counters retired finds the new snapshot published.
 	g.applyMu.Lock()
 	defer g.applyMu.Unlock()
-	g.bud.keep(s.state.Limits)
-	g.snap.Store(s)
+	g.bud.swap(s.state.Limits, func() { g.snap.Store(s) })
 	return s.rev, nil
 }
 

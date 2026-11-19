@@ -114,9 +114,11 @@ func (b *budgets) charge(a gateway.AgentRef, l gateway.Limit, cost money.USD, no
 	c.spent = sum
 }
 
-// keep makes limits the live set and drops the counters of generations the new config does not carry, so a retired generation does
-// not stay in memory (ADR 0023 bounds: the set follows the limits).
-func (b *budgets) keep(limits map[gateway.AgentRef]gateway.Limit) {
+// swap makes limits the live set, drops the counters of generations the new config does not carry
+// (a retired generation does not stay in memory: ADR 0023 bounds, the set follows the limits), and
+// runs publish while it still holds the lock. A check that finds a generation retired therefore
+// finds the snapshot that retired it already published, and one retry reads the new limit.
+func (b *budgets) swap(limits map[gateway.AgentRef]gateway.Limit, publish func()) {
 	live := make(map[counterKey]struct{}, len(limits))
 	for a, l := range limits {
 		live[counterKey{a, l.Generation}] = struct{}{}
@@ -129,4 +131,5 @@ func (b *budgets) keep(limits map[gateway.AgentRef]gateway.Limit) {
 			delete(b.c, k)
 		}
 	}
+	publish()
 }

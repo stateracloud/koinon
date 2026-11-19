@@ -307,11 +307,11 @@ type call struct {
 
 // overBudget reports whether the agent has reached the limit in force, and the wait until its
 // window ends. The limit is read from the current snapshot: a request that read its snapshot before
-// an apply must not be checked against a generation the apply retired. An apply can still land
-// between the read and the check, so it tries again, and a generation that stays retired lets the
-// call pass, as an agent without a limit.
+// an apply must not be checked against a generation the apply retired. The apply publishes the new
+// snapshot before a check can find the old generation retired, so one more read is enough. If an
+// apply retires the generation again and again, the call is refused (fail closed) with a short wait.
 func (g *Gateway) overBudget(a gateway.AgentRef) (bool, time.Duration) {
-	for range 3 {
+	for range 8 {
 		l, ok := g.snap.Load().state.Limits[a]
 		if !ok {
 			return false, 0
@@ -320,7 +320,7 @@ func (g *Gateway) overBudget(a gateway.AgentRef) (bool, time.Duration) {
 			return !ok, wait
 		}
 	}
-	return false, 0
+	return true, time.Second
 }
 
 // charge adds the cost of the call to the agent's counter, under the limit in force now: a call
