@@ -19,6 +19,9 @@ type Outcome struct {
 	Card *a2aout.Card
 	// Reason is the fixed text of a failed read (see reasonOf); empty when the read worked.
 	Reason string
+	// Seen is the updated_at of the row the read was made for. When the row changed since (an admin moved
+	// the URL, the credential or the pin), the result is for another agent and RecordCheck drops it.
+	Seen pgtype.Timestamptz
 }
 
 // ListCheckable returns the remote agents of one org that the health check reads.
@@ -44,16 +47,16 @@ func (s *Service) Check(ctx context.Context, row store.RemoteAgent) (RemoteAgent
 	if err != nil {
 		// The log carries the error, which names no secret; the stored reason is a fixed text.
 		s.log.Warn("remote agent check: credential not opened", "org", row.OrgID.String(), "agent", row.ID.String(), "err", err)
-		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: ReasonCredentialBad})
+		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: ReasonCredentialBad, Seen: row.UpdatedAt})
 	}
 	card, err := s.fetch(ctx, FetchRequest{
 		URL: row.CardUrl, Header: row.CredentialHeader.String, Prefix: row.CredentialPrefix, Secret: secret,
 		CABundle: row.CaBundle, InsecureSkipVerify: row.InsecureSkipVerify,
 	}, s.policy)
 	if err != nil {
-		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: reasonOf(err)})
+		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: reasonOf(err), Seen: row.UpdatedAt})
 	}
-	return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Card: card})
+	return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Card: card, Seen: row.UpdatedAt})
 }
 
 // RecordCheck records one health check on the locked row.
@@ -71,6 +74,11 @@ func (s *Service) RecordCheck(ctx context.Context, org, id pgtype.UUID, o Outcom
 		if err != nil {
 			return err
 		}
+		if o.Seen.Valid && !o.Seen.Time.Equal(cur.UpdatedAt.Time) {
+			// The row changed since the read: the result is stale. The next check reads the new row.
+			out = cur
+			return nil
+		}
 		p := store.RecordRemoteAgentCheckParams{
 			OrgID: org, ID: id, Health: cur.Health, HealthReason: cur.HealthReason, ConsecutiveFailures: cur.ConsecutiveFailures,
 			ObservedCardHash: cur.ObservedCardHash, ObservedCard: cur.ObservedCard,
@@ -81,7 +89,10 @@ func (s *Service) RecordCheck(ctx context.Context, org, id pgtype.UUID, o Outcom
 			if p.ConsecutiveFailures >= FailureThreshold {
 				p.Health = store.McpHealthUnhealthy
 			}
-			p.HealthReason = pgtype.Text{String: o.Reason, Valid: true}
+			if !cur.ObservedCardHash.Valid {
+				// An open finding keeps its reason: "card changed" is what an admin must act on.
+				p.HealthReason = pgtype.Text{String: o.Reason, Valid: true}
+			}
 		case o.Card.Hash != cur.CardHash:
 			p.CardRead, p.ConsecutiveFailures = true, 0
 			p.Health = store.McpHealthUnhealthy

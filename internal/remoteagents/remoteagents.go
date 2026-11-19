@@ -473,80 +473,89 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if patch.Credential != nil && patch.RemoveCredential {
 		return RemoteAgent{}, invalid("set a credential or remove it, not both")
 	}
+	// Phase 1 reads the row, checks the patch and reads the card at a new URL with no lock held: a slow
+	// agent must not hold a row lock or a connection. Phase 2 locks the row and refuses if it changed since.
+	cur, err := store.New(s.pool).GetRemoteAgent(ctx, store.GetRemoteAgentParams{OrgID: org, ID: rid})
+	if err != nil {
+		return RemoteAgent{}, mapErr(err)
+	}
+	u := cur.CardUrl
+	if patch.CardURL != nil {
+		u = *patch.CardURL
+	}
+	caBundle := cur.CaBundle
+	if patch.CABundle != nil {
+		caBundle = *patch.CABundle
+	}
+	insecure := cur.InsecureSkipVerify
+	if patch.InsecureSkipVerify != nil {
+		insecure = *patch.InsecureSkipVerify
+	}
+	header, prefix, cred := cur.CredentialHeader.String, cur.CredentialPrefix, cur.Credential
+	value, haveValue := "", false
+	switch {
+	case patch.RemoveCredential:
+		header, prefix, cred = "", "", nil
+	case patch.Credential != nil:
+		header, prefix = patch.Credential.Header, patch.Credential.Prefix
+		if header == "" {
+			header = "Authorization"
+		}
+		if patch.Credential.Value != nil {
+			value, haveValue = *patch.Credential.Value, true
+			if cred, err = s.seal(org, rid, value); err != nil {
+				return RemoteAgent{}, mapErr(err)
+			}
+		}
+		if len(cred) == 0 {
+			return RemoteAgent{}, invalid("a credential needs a value")
+		}
+	}
+	if err := ValidateCardURL(u, header, prefix); err != nil {
+		return RemoteAgent{}, mapErr(err)
+	}
+	if err := mcpservers.ValidateTLSTrust(u, caBundle, insecure); err != nil {
+		return RemoteAgent{}, mapErr(err)
+	}
+	if err := s.checkTargetTLS(caBundle, insecure); err != nil {
+		return RemoteAgent{}, mapErr(err)
+	}
+	if err := s.policy.Check(ctx, u); err != nil {
+		return RemoteAgent{}, mapErr(err)
+	}
+	p := store.UpdateRemoteAgentParams{
+		OrgID: org, ID: rid, CardUrl: u, CaBundle: caBundle, InsecureSkipVerify: insecure,
+		CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0),
+		// The envelope is rewritten only when this patch replaces or removes it: `keys rewrap` may have
+		// replaced the stored one since cur was read (see UpdateMCPServer).
+		SetCredentialMeta: patch.Credential != nil || patch.RemoveCredential,
+		SetCredential:     patch.RemoveCredential || haveValue, Credential: cred,
+	}
+	if u != cur.CardUrl {
+		// A different URL is a different agent. The card read at the new URL becomes the pin. The
+		// credential sent there is the one this patch sets, or the stored one when it stays.
+		secret := value
+		if !haveValue && len(cred) > 0 {
+			if secret, err = OpenCredential(s.keys, org, rid, cred); err != nil {
+				return RemoteAgent{}, mapErr(err)
+			}
+		}
+		card, err := s.read(ctx, FetchRequest{
+			URL: u, Header: header, Prefix: prefix, Secret: secret, CABundle: caBundle, InsecureSkipVerify: insecure,
+		})
+		if err != nil {
+			return RemoteAgent{}, mapErr(err)
+		}
+		p.SetCard, p.CardHash, p.Card = true, card.Hash, card.JSON
+	}
 	var out store.RemoteAgent
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		cur, err := q.GetRemoteAgentForUpdate(ctx, store.GetRemoteAgentForUpdateParams{OrgID: org, ID: rid})
+		locked, err := q.GetRemoteAgentForUpdate(ctx, store.GetRemoteAgentForUpdateParams{OrgID: org, ID: rid})
 		if err != nil {
 			return err
 		}
-		u := cur.CardUrl
-		if patch.CardURL != nil {
-			u = *patch.CardURL
-		}
-		caBundle := cur.CaBundle
-		if patch.CABundle != nil {
-			caBundle = *patch.CABundle
-		}
-		insecure := cur.InsecureSkipVerify
-		if patch.InsecureSkipVerify != nil {
-			insecure = *patch.InsecureSkipVerify
-		}
-		header, prefix, cred := cur.CredentialHeader.String, cur.CredentialPrefix, cur.Credential
-		value, haveValue := "", false
-		switch {
-		case patch.RemoveCredential:
-			header, prefix, cred = "", "", nil
-		case patch.Credential != nil:
-			header, prefix = patch.Credential.Header, patch.Credential.Prefix
-			if header == "" {
-				header = "Authorization"
-			}
-			if patch.Credential.Value != nil {
-				value, haveValue = *patch.Credential.Value, true
-				if cred, err = s.seal(org, rid, value); err != nil {
-					return err
-				}
-			}
-			if len(cred) == 0 {
-				return invalid("a credential needs a value")
-			}
-		}
-		if err := ValidateCardURL(u, header, prefix); err != nil {
-			return err
-		}
-		if err := mcpservers.ValidateTLSTrust(u, caBundle, insecure); err != nil {
-			return err
-		}
-		if err := s.checkTargetTLS(caBundle, insecure); err != nil {
-			return err
-		}
-		if err := s.policy.Check(ctx, u); err != nil {
-			return err
-		}
-		p := store.UpdateRemoteAgentParams{
-			OrgID: org, ID: rid, CardUrl: u, CaBundle: caBundle, InsecureSkipVerify: insecure,
-			CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0),
-			// The envelope is rewritten only when this patch replaces or removes it: `keys rewrap` may have
-			// replaced the stored one since cur was read (see UpdateMCPServer).
-			SetCredentialMeta: patch.Credential != nil || patch.RemoveCredential,
-			SetCredential:     patch.RemoveCredential || haveValue, Credential: cred,
-		}
-		if u != cur.CardUrl {
-			// A different URL is a different agent. The card read at the new URL becomes the pin. The
-			// credential sent there is the one this patch sets, or the stored one when it stays.
-			secret := value
-			if !haveValue && len(cred) > 0 {
-				if secret, err = OpenCredential(s.keys, org, rid, cred); err != nil {
-					return err
-				}
-			}
-			card, err := s.read(ctx, FetchRequest{
-				URL: u, Header: header, Prefix: prefix, Secret: secret, CABundle: caBundle, InsecureSkipVerify: insecure,
-			})
-			if err != nil {
-				return err
-			}
-			p.SetCard, p.CardHash, p.Card = true, card.Hash, card.JSON
+		if !locked.UpdatedAt.Time.Equal(cur.UpdatedAt.Time) {
+			return fmt.Errorf("%w: the remote agent changed while this update was prepared; read it again", ErrConflict)
 		}
 		if caBundle != "" && caBundle != cur.CaBundle {
 			if err := checkCABudget(ctx, q, org, rid, caBundle); err != nil {

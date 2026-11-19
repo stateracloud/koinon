@@ -227,6 +227,32 @@ var _ = Describe("remote agents", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("keeps the finding's reason when a later read fails", func(ctx SpecContext) {
+			r := create(ctx, "down", url)
+			id := pgtype.UUID{}
+			Expect(id.Scan(r.ID)).To(Succeed())
+			_, err := svc.RecordCheck(ctx, org, id, remoteagents.Outcome{Card: &a2aout.Card{Hash: hx("other"), JSON: "{}"}})
+			Expect(err).NotTo(HaveOccurred())
+			out, err := svc.RecordCheck(ctx, org, id, remoteagents.Outcome{Reason: remoteagents.ReasonUnreachable})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(out.HealthReason).To(Equal(remoteagents.ReasonCardChanged))
+			Expect(out.ConsecutiveFailures).To(Equal(1))
+		})
+
+		It("drops a result that was read for a row an admin changed since", func(ctx SpecContext) {
+			r := create(ctx, "stale", url)
+			rows, err := svc.ListCheckable(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			seen := rows[0].UpdatedAt
+			nu := url + "/new"
+			_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{CardURL: &nu})
+			Expect(err).NotTo(HaveOccurred())
+			out, err := svc.RecordCheck(ctx, org, rows[0].ID, remoteagents.Outcome{Card: &a2aout.Card{Hash: hx("old-url-card"), JSON: "{}"}, Seen: seen})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(out.CardChanged()).To(BeFalse())
+			Expect(out.Health).To(Equal(remoteagents.HealthUnknown))
+		})
+
 		It("checks through the fetcher and records the card", func(ctx SpecContext) {
 			fake.set(url, hx("h1"))
 			r := create(ctx, "polled", url)
@@ -242,12 +268,16 @@ var _ = Describe("remote agents", func() {
 			Expect(out.Health).To(Equal(remoteagents.HealthHealthy))
 
 			fake.set(url, hx("h9"))
+			rows, err = svc.ListCheckable(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
 			out, err = svc.Check(ctx, rows[0])
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.ObservedCardHash).To(Equal(hx("h9")))
 			Expect(out.CardHash).To(Equal(r.CardHash))
 
 			fake.err = a2aout.ErrCard
+			rows, err = svc.ListCheckable(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
 			out, err = svc.Check(ctx, rows[0])
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.ConsecutiveFailures).To(Equal(1))

@@ -4,6 +4,7 @@ package remoteagents
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -54,7 +55,10 @@ func (s *Service) SetAgentGrants(ctx context.Context, org pgtype.UUID, actor aud
 		for _, id := range ids {
 			ra, err := q.GetRemoteAgent(ctx, store.GetRemoteAgentParams{OrgID: org, ID: id})
 			if err != nil {
-				return invalid("remote agent %q does not exist", id.String())
+				if errors.Is(mapErr(err), ErrNotFound) {
+					return invalid("remote agent %q does not exist", id.String())
+				}
+				return err
 			}
 			names = append(names, map[string]any{"remoteAgent": ra.Name, "remoteAgentId": id.String()})
 		}

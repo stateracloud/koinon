@@ -137,9 +137,9 @@ message GetRemoteAgentCardRequest {
 message GetRemoteAgentCardResponse {
   string card_hash = 1;
   // card_json is the pinned canonical card. Data from another party: show it to an admin only.
-  string card_json = 2;
+  string card_json = 2 [debug_redact = true];
   string observed_card_hash = 3;
-  string observed_card_json = 4;
+  string observed_card_json = 4 [debug_redact = true];
 }
 
 message AcceptRemoteAgentCardRequest {

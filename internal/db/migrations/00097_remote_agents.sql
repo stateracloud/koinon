@@ -60,7 +60,10 @@ CREATE TABLE remote_agents (
     updated_at            timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, id),
     CHECK (credential IS NULL OR jsonb_typeof(credential) = 'object'),
-    CHECK ((credential IS NULL) = (credential_header IS NULL)),
+    -- A lost credential (keys forget) keeps its header name and prefix: the form then asks for the value only.
+    CONSTRAINT remote_agents_credential_header CHECK ((credential IS NULL) = (credential_header IS NULL)
+        OR (credential IS NULL AND credential_lost_at IS NOT NULL)),
+    CONSTRAINT remote_agents_credential_lost CHECK (credential_lost_at IS NULL OR credential IS NULL),
     CHECK (NOT (insecure_skip_verify AND ca_bundle <> '')),
     CHECK (NOT insecure_skip_verify OR lower(card_url) LIKE 'https://%'),
     CHECK ((observed_card_hash IS NULL) = (observed_card IS NULL)),
@@ -69,6 +72,10 @@ CREATE TABLE remote_agents (
 );
 
 CREATE UNIQUE INDEX remote_agents_org_name ON remote_agents (org_id, name);
+
+-- Writing an envelope clears the lost mark (00052). Named so it runs before set_updated_at.
+CREATE TRIGGER credential_lost_clear BEFORE UPDATE ON remote_agents
+    FOR EACH ROW EXECUTE FUNCTION credential_lost_clear('credential');
 
 CREATE TRIGGER remote_agents_set_updated_at BEFORE UPDATE ON remote_agents
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

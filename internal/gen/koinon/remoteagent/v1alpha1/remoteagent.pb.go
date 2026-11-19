@@ -1208,12 +1208,12 @@ const file_koinon_remoteagent_v1alpha1_remoteagent_proto_rawDesc = "" +
 	"\x19DeleteRemoteAgentResponse\"Z\n" +
 	"\x19GetRemoteAgentCardRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12&\n" +
-	"\x0fremote_agent_id\x18\x02 \x01(\tR\rremoteAgentId\"\xb2\x01\n" +
+	"\x0fremote_agent_id\x18\x02 \x01(\tR\rremoteAgentId\"\xbc\x01\n" +
 	"\x1aGetRemoteAgentCardResponse\x12\x1b\n" +
-	"\tcard_hash\x18\x01 \x01(\tR\bcardHash\x12\x1b\n" +
-	"\tcard_json\x18\x02 \x01(\tR\bcardJson\x12,\n" +
-	"\x12observed_card_hash\x18\x03 \x01(\tR\x10observedCardHash\x12,\n" +
-	"\x12observed_card_json\x18\x04 \x01(\tR\x10observedCardJson\"\x8b\x01\n" +
+	"\tcard_hash\x18\x01 \x01(\tR\bcardHash\x12 \n" +
+	"\tcard_json\x18\x02 \x01(\tB\x03\x80\x01\x01R\bcardJson\x12,\n" +
+	"\x12observed_card_hash\x18\x03 \x01(\tR\x10observedCardHash\x121\n" +
+	"\x12observed_card_json\x18\x04 \x01(\tB\x03\x80\x01\x01R\x10observedCardJson\"\x8b\x01\n" +
 	"\x1cAcceptRemoteAgentCardRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12&\n" +
 	"\x0fremote_agent_id\x18\x02 \x01(\tR\rremoteAgentId\x12,\n" +
