@@ -263,6 +263,11 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- if eq .Values.gateway.mcp.driver "koinon" }}true{{ end -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the model path (gateway.model.driver=koinon). Empty otherwise. */}}
+{{- define "koinon.modelKoinon" -}}
+{{- if eq .Values.gateway.model.driver "koinon" }}true{{ end -}}
+{{- end }}
+
 {{/* The MCP gateway's Service, fully qualified like koinon.gatewayHost. */}}
 {{- define "koinon.mcpGatewayHost" -}}
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}

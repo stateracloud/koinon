@@ -1,0 +1,267 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package modelgateway is Koinon's own model path (ADR 0097 step 2): a reverse proxy for the two
+// native formats, OpenAI chat completions and Anthropic Messages. It builds every upstream request
+// from a header allowlist, taps the response for usage without keeping a body, and hands one usage
+// record per request to a sink. It does no format translation (ADR 0069).
+//
+// This slice (S1) serves, meters and refuses. It does not yet enforce budgets, retry or fail over:
+// those are S2 of issue #279, and the limits of the config are only counted.
+package modelgateway
+
+import (
+	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/stateracloud/koinon/internal/gateway"
+)
+
+// UsageSink gets one record per request that reached the model path's proxy stage. It must not block.
+type UsageSink func(gateway.UsageRecord)
+
+// Options configures a [Gateway]. The zero value is usable.
+type Options struct {
+	// Sink gets the usage records. Nil drops them.
+	Sink UsageSink
+	// Tracer makes one span per model call. Nil makes none.
+	Tracer trace.Tracer
+	// HTTPClient is the upstream transport. Nil builds one with a pool sized for many streams to few
+	// hosts, no compression and no redirects.
+	HTTPClient *http.Client
+	// Metrics counts requests and failures with fixed label sets. Nil counts nothing.
+	Metrics *Metrics
+	// Logger gets the gateway's own log lines. They never carry bodies, keys or IDs of agents.
+	Logger *slog.Logger
+	// KeyTTL is how long a provider key file is cached. Zero means 30 seconds.
+	KeyTTL time.Duration
+	// Now is the clock. Nil means time.Now.
+	Now func() time.Time
+}
+
+// Gateway is the model path. It implements [gateway.ModelPathGateway].
+type Gateway struct {
+	o    Options
+	snap atomic.Pointer[snapshot]
+
+	mu    sync.Mutex
+	drain bool
+	keys  map[string]cachedKey
+}
+
+type cachedKey struct {
+	val string
+	at  time.Time
+}
+
+// New returns a Gateway that serves nothing until ApplyModel.
+func New(o Options) *Gateway {
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.DiscardHandler)
+	}
+	if o.KeyTTL == 0 {
+		o.KeyTTL = 30 * time.Second
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.HTTPClient == nil {
+		o.HTTPClient = newHTTPClient()
+	}
+	g := &Gateway{o: o, keys: map[string]cachedKey{}}
+	g.snap.Store(&snapshot{})
+	return g
+}
+
+func newHTTPClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DisableCompression = true // the tap reads plain bytes, and the client's own encoding is not forwarded
+	t.MaxIdleConns, t.MaxIdleConnsPerHost = 256, 64
+	t.ResponseHeaderTimeout = 0 // a model may think for minutes before its first byte
+	return &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// route is one model an org serves.
+type route struct {
+	p gateway.Provider
+	m gateway.Model
+}
+
+// snapshot is one applied configuration. A request reads one snapshot.
+type snapshot struct {
+	rev    gateway.Revision
+	keys   map[string]gateway.Key // by "sha256:" hash
+	state  gateway.ModelState
+	routes map[string]map[string]route // org -> model name -> route (priced models only)
+}
+
+// ErrInvalidConfig means ApplyModel refused the config; the gateway keeps the one it had.
+var ErrInvalidConfig = errors.New("modelgateway: invalid config")
+
+// ApplyModel implements gateway.ModelPathGateway. It is idempotent and returns once the new config
+// serves: a key of the config authenticates from the next request on.
+func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gateway.Revision, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := c.Validate(); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	s := &snapshot{keys: map[string]gateway.Key{}, state: c.ModelState, routes: map[string]map[string]route{}}
+	for _, k := range c.Keys {
+		if k.ID == "" || !strings.HasPrefix(k.Hash, "sha256:") {
+			return "", fmt.Errorf("%w: key %q has no sha256 hash", ErrInvalidConfig, k.ID)
+		}
+		s.keys[k.Hash] = k
+	}
+	for _, p := range c.Providers {
+		u, err := url.Parse(p.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			g.o.Logger.Warn("model provider dropped", "provider", p.Name, "reason", "base_url")
+			g.o.Metrics.dropped("base_url")
+			continue
+		}
+		for _, m := range p.Models {
+			// A model without a price is not served: its spend cannot be charged (ADR 0041).
+			if m.Price == nil {
+				continue
+			}
+			if _, err := gateway.RenderingOf(m); err != nil {
+				g.o.Logger.Warn("model dropped", "provider", p.Name, "reason", "format")
+				g.o.Metrics.dropped("format")
+				continue
+			}
+			if s.routes[p.Org] == nil {
+				s.routes[p.Org] = map[string]route{}
+			}
+			s.routes[p.Org][m.Name] = route{p: p, m: m}
+		}
+	}
+	if n := len(c.Limits); n > 0 {
+		// S1 meters; the budget stop with charge after the call is S2 (#279).
+		g.o.Logger.Warn("budget limits are not enforced by this gateway yet", "limits", n)
+	}
+	s.rev = revisionOf(c)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	g.snap.Store(s)
+	return s.rev, nil
+}
+
+// revisionOf derives the revision from the content, so equal configs give equal revisions.
+func revisionOf(c gateway.ModelConfig) gateway.Revision {
+	keys := make([]string, 0, len(c.Keys))
+	for _, k := range c.Keys {
+		keys = append(keys, k.ID+"|"+k.Agent.String()+"|"+k.Hash)
+	}
+	sort.Strings(keys)
+	// A map keyed by AgentRef does not encode as JSON, so the maps become lists sorted by agent.
+	limits := make([]any, 0, len(c.Limits))
+	for a, l := range c.Limits {
+		limits = append(limits, []any{a.String(), l})
+	}
+	models := make([]any, 0, len(c.Models))
+	for a, m := range c.Models {
+		models = append(models, []any{a.String(), m})
+	}
+	byAgent := func(x []any) {
+		sort.Slice(x, func(i, j int) bool { return x[i].([]any)[0].(string) < x[j].([]any)[0].(string) })
+	}
+	byAgent(limits)
+	byAgent(models)
+	b, err := json.Marshal([]any{keys, limits, c.Providers, models})
+	if err != nil {
+		// Every field is plain data: a failure is a bug, and a constant revision would hide it.
+		panic("modelgateway: revision: " + err.Error())
+	}
+	sum := sha256.Sum256(b)
+	return gateway.Revision("model-" + hex.EncodeToString(sum[:8]))
+}
+
+// Revision is the revision of the config in force, "" before the first ApplyModel.
+func (g *Gateway) Revision() gateway.Revision { return g.snap.Load().rev }
+
+// Drain makes the gateway refuse new requests with 503; a request in flight finishes.
+func (g *Gateway) Drain() {
+	g.mu.Lock()
+	g.drain = true
+	g.mu.Unlock()
+}
+
+func (g *Gateway) draining() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.drain
+}
+
+func (s *snapshot) authenticate(token string) (gateway.Key, bool) {
+	if token == "" {
+		return gateway.Key{}, false
+	}
+	h := gateway.HashKey(token)
+	k, ok := s.keys[h]
+	if !ok || subtle.ConstantTimeCompare([]byte(k.Hash), []byte(h)) != 1 {
+		return gateway.Key{}, false
+	}
+	return k, true
+}
+
+// resolve finds the route of a plain model name for an agent: the model must be served in the
+// agent's org and allowed to the agent.
+func (s *snapshot) resolve(agent gateway.AgentRef, model string) (route, bool) {
+	served := s.routes[agent.Org]
+	if served == nil {
+		return route{}, false
+	}
+	names := make([]string, 0, len(served))
+	for n := range served {
+		names = append(names, n)
+	}
+	if !slices.Contains(s.state.AllowedModels(agent, names), model) {
+		return route{}, false
+	}
+	return served[model], true
+}
+
+// providerKey returns the provider key of p, "" when it needs none. A key that is configured but
+// cannot be read fails closed: the request is not sent without it.
+func (g *Gateway) providerKey(p gateway.Provider) (string, error) {
+	if p.APIKeyFile == "" {
+		return "", nil
+	}
+	now := g.o.Now()
+	g.mu.Lock()
+	c, ok := g.keys[p.APIKeyFile]
+	g.mu.Unlock()
+	if ok && now.Sub(c.at) < g.o.KeyTTL {
+		return c.val, nil
+	}
+	b, err := os.ReadFile(p.APIKeyFile)
+	if err != nil {
+		return "", err
+	}
+	v := strings.TrimSpace(string(b))
+	g.mu.Lock()
+	g.keys[p.APIKeyFile] = cachedKey{val: v, at: now}
+	g.mu.Unlock()
+	return v, nil
+}
+
+var _ gateway.ModelPathGateway = (*Gateway)(nil)

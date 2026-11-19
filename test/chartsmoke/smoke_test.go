@@ -654,6 +654,37 @@ func describeMode(name, valuesFile string) {
 			Expect(*ps.TerminationGracePeriodSeconds).To(BeNumerically(">=", 60))
 		}, SpecTimeout(3*time.Minute))
 
+		// koinon-gateway (the model path, gateway.model.driver=koinon). The Docker network has no Service DNS,
+		// so it cannot reach koinon-api's State stream and must stay unready: that is what keeps a rollout
+		// from taking old pods away before a new pod can serve. It must still run, answer its liveness
+		// probe and serve /metrics, with the args, the mounts and the environment the chart gives it.
+		It("starts koinon-model-gateway, alive but not ready without a config", func(ctx SpecContext) {
+			d := r.deployment("koinon-model-gateway")
+			if d == nil {
+				Skip("gateway.model.driver is not koinon in this values file")
+			}
+			Expect(d.Spec.Replicas).NotTo(BeNil())
+			Expect(*d.Spec.Replicas).To(BeNumerically(">=", 2), "the model gateway runs two replicas at least")
+			ps := d.Spec.Template.Spec
+			Expect(ps.Containers).To(HaveLen(1))
+			c := ps.Containers[0]
+			w := rn.start(ctx, "koinon-model-gateway", ps, c, 0)
+			ready["koinon-model-gateway"] = []*workload{w}
+			accounted = append(accounted, "koinon-model-gateway")
+			Expect(c.LivenessProbe).NotTo(BeNil())
+			Expect(w.ProbeHTTP(ctx, c.LivenessProbe, probeDeadline)).To(BeEmpty(), "liveness; logs:\n%s", w.Logs(ctx))
+			metrics := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("stats")}}}
+			Expect(w.ProbeHTTP(ctx, metrics, probeDeadline)).To(BeEmpty(), "/metrics; logs:\n%s", w.Logs(ctx))
+			Expect(c.ReadinessProbe).NotTo(BeNil())
+			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
+			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
+			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			Expect(w.Running(ctx)).To(BeTrue(), "still running; logs:\n%s", w.Logs(ctx))
+			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
+			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
+			Expect(*ps.TerminationGracePeriodSeconds).To(BeNumerically(">=", 60))
+		}, SpecTimeout(3*time.Minute))
+
 		It("keeps every Deployment running and permitted", func(ctx SpecContext) {
 			time.Sleep(settleTime)
 			for name, ws := range ready {
