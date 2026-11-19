@@ -30,3 +30,8 @@ func (d *Driver) RouterCallsStarted(workspace, name string) uint64 {
 func (d *Driver) Resuspends(outcome string) float64 {
 	return testutil.ToFloat64(d.resuspends.WithLabelValues(outcome))
 }
+
+var (
+	StoreError  = storeError
+	ErrNoObject = errNoObject
+)

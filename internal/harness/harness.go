@@ -40,7 +40,7 @@ const launcherPolicyDir = "/etc/koinon/guest-launcher/"
 //
 // The vm tier gets the policy that requires Landlock and fails closed without it (ADR 0120
 // section 4.3); the gVisor tiers get the policy that applies Landlock when the kernel has it, with
-// the read-only root the driver mounts as the control (maintainer decision, issue #1087). A tier
+// no read-only root behind it: their root is writable by decision (issue #1150). A tier
 // this function does not know has no prefix: ok is false and the driver must not start the guest.
 // OpenShell paths ignore it.
 func (d Descriptor) LauncherPrefix(tier Tier) (prefix []string, ok bool) {

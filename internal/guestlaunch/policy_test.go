@@ -72,7 +72,7 @@ var _ = Describe("ParsePolicy", func() {
 func jsonList(l []string) string { return `["` + strings.Join(l, `","`) + `"]` }
 
 // The two image policies differ in the Landlock mode only (ADR 0120 section 4.2 and 4.3): the vm
-// tier fails closed, the gVisor tiers rely on the read-only root when the kernel has no Landlock.
+// tier fails closed, the gVisor tiers record the gap when the kernel has no Landlock (their root is writable by decision, issue #1150).
 var _ = Describe("the image policies", func() {
 	load := func(name string) guestlaunch.Policy {
 		f, err := os.Open("../../cmd/koinon-guest-launcher/" + name)
