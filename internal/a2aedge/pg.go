@@ -55,11 +55,11 @@ func (b PG) Agent(ctx context.Context, sc Scope) (Agent, error) {
 }
 
 // Deliver implements [Backend].
-func (b PG) Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, messageID, text string) (services.DirectMessageResult, error) {
+func (b PG) Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, turnSince int64, messageID, text string) (services.DirectMessageResult, error) {
 	res, err := b.Svc.SendDirectMessageAs(ctx, services.DirectMessage{
 		Org: sc.Org, Agent: sc.Agent, Task: task, User: sc.User, MessageID: messageID, Text: text,
 		// A message to a task that completed is refused. A message with the context starts the next turn.
-		NoReopen: task.Valid && !reopen,
+		NoReopen: task.Valid && !reopen, TurnSince: turnSince,
 	})
 	return res, mapService(err)
 }
@@ -78,7 +78,7 @@ func mapService(err error) error {
 			return ErrNotFound
 		case connect.CodeInvalidArgument:
 			return fmt.Errorf("%w: %s", ErrInvalid, ce.Message())
-		case connect.CodeFailedPrecondition, connect.CodeAlreadyExists, connect.CodeUnavailable:
+		case connect.CodeFailedPrecondition, connect.CodeAlreadyExists:
 			return fmt.Errorf("%w: %s", ErrRefused, ce.Message())
 		}
 	}

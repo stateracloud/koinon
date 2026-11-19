@@ -61,7 +61,7 @@ func (f *fake) Agent(context.Context, a2aedge.Scope) (a2aedge.Agent, error) {
 	return a2aedge.Agent{Name: "scout"}, nil
 }
 
-func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, reopen bool, mid, text string) (services.DirectMessageResult, error) {
+func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, reopen bool, since int64, mid, text string) (services.DirectMessageResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sc = sc
@@ -71,6 +71,11 @@ func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, re
 	// The rules of the real service: a thread that failed or was canceled takes no message. A
 	// completed thread is reopened (a new turn) only when the caller says so.
 	if task.Valid {
+		for _, e := range f.events {
+			if since > 0 && e.Seq > since && e.Kind == "status.changed" && strings.Contains(string(e.Payload), `"from":"completed"`) {
+				return services.DirectMessageResult{}, a2aedge.ErrRefused
+			}
+		}
 		switch f.task.State {
 		case store.TaskStateCanceled, store.TaskStateFailed:
 			return services.DirectMessageResult{}, a2aedge.ErrRefused
@@ -83,7 +88,7 @@ func (f *fake) Deliver(_ context.Context, sc a2aedge.Scope, task pgtype.UUID, re
 		}
 	}
 	f.seen[mid] = true
-	b, _ := json.Marshal(map[string]string{"text": text})
+	b, _ := json.Marshal(map[string]string{"text": text, "message_id": mid})
 	e := f.add("message", string(b))
 	e.ActorKind = store.TaskActorKindUser
 	if !task.Valid {
@@ -191,6 +196,7 @@ var _ = Describe("Handler", func() {
 
 	It("settles on input-required and shows the question", func() {
 		go func() {
+			defer GinkgoRecover()
 			time.Sleep(30 * time.Millisecond)
 			f.park("which region?")
 		}()
@@ -206,6 +212,7 @@ var _ = Describe("Handler", func() {
 		f.park("which region?")
 		f.task.State = store.TaskStateInputRequired
 		go func() {
+			defer GinkgoRecover()
 			time.Sleep(60 * time.Millisecond)
 			f.move(store.TaskStateCompleted)
 		}()
@@ -347,6 +354,26 @@ var _ = Describe("Handler", func() {
 			Expect(err).To(MatchError(a2a.ErrTaskNotFound))
 		})
 
+		It("answers a retried message with the task that holds it, not the last task", func() {
+			firstTurn()
+			next("m2", "second")
+			f.move(store.TaskStateCompleted)
+			next("m3", "third")
+			m := userMsg("m2", "second")
+			m.ContextID = contextID
+			res, err := send(m, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(res.(*a2a.Task).ID)).To(Equal(taskID2))
+			Expect(res.(*a2a.Task).Status.State).To(Equal(a2a.TaskStateCompleted))
+		})
+
+		It("refuses a message for a turn when a later turn started after the check", func() {
+			firstTurn()
+			next("m2", "second")
+			_, err := f.Deliver(ctx, a2aedge.Scope{}, taskUUID, false, 1, "late", "x")
+			Expect(err).To(MatchError(a2aedge.ErrRefused))
+		})
+
 		It("answers a question inside the same task", func() {
 			_, err := send(userMsg("m1", "deploy"), &a2a.SendMessageConfig{ReturnImmediately: true})
 			Expect(err).NotTo(HaveOccurred())
@@ -397,6 +424,6 @@ var _ = Describe("Handler", func() {
 // failing returns an error with database detail from Deliver.
 type failing struct{ *fake }
 
-func (f *failing) Deliver(context.Context, a2aedge.Scope, pgtype.UUID, bool, string, string) (services.DirectMessageResult, error) {
+func (f *failing) Deliver(context.Context, a2aedge.Scope, pgtype.UUID, bool, int64, string, string) (services.DirectMessageResult, error) {
 	return services.DirectMessageResult{}, errors.New("ERROR: invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)")
 }

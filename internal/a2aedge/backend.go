@@ -43,8 +43,10 @@ type Backend interface {
 	// result's Event holds the timeline entry of the message; it is nil for a replay. A completed
 	// thread is reopened (the next turn) only when reopen is set. Otherwise it is refused
 	// ([ErrRefused]), but a replay of a message that was taken before it completed returns the
-	// task. A thread that failed or was canceled is always refused.
-	Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, messageID, text string) (services.DirectMessageResult, error)
+	// task. A thread that failed or was canceled is always refused. A thread that was reopened after
+	// the event turnSince (0 means no check) is refused: the turn that the caller checked has ended.
+	// The check runs under the lock of the thread.
+	Deliver(ctx context.Context, sc Scope, task pgtype.UUID, reopen bool, turnSince int64, messageID, text string) (services.DirectMessageResult, error)
 	// Thread returns a thread of the agent and its timeline after sequence number after (0 is the
 	// whole timeline, up to a cap), or [ErrNotFound] for any other task.
 	Thread(ctx context.Context, sc Scope, task pgtype.UUID, after int64) (store.Task, []store.TaskEvent, error)

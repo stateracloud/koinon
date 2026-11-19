@@ -137,7 +137,8 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 		return nil, err
 	}
 	var thread pgtype.UUID
-	reopen := false
+	var reopen bool
+	var since int64
 	switch {
 	case m.TaskID != "":
 		// A message to a task answers the open turn. A turn that ended takes no message (A2A: a
@@ -157,11 +158,15 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 		case n > last:
 			return nil, a2a.ErrTaskNotFound
 		case n < last:
-			return nil, fmt.Errorf("%w: the task has ended; send the message with its contextId to start a new task", a2a.ErrUnsupportedOperation)
+			return nil, fmt.Errorf("%w: the task has ended; send a new message (with a new messageId) with its contextId to start a new task", a2a.ErrUnsupportedOperation)
 		}
 		// The last turn may have completed too. The delivery refuses it under the lock of the task,
-		// so that a retry of a message that was taken still gets its answer.
+		// so that a retry of a message that was taken still gets its answer. It also refuses the
+		// message when a follow-up opened a later turn since this check.
 		thread = id
+		if starts := turnStarts(ev); len(starts) > 0 {
+			since = ev[starts[n-1]].Seq
+		}
 	case m.ContextID != "":
 		// A message with a context and no task starts the next turn: a new task in the thread.
 		id, ok := parseUUID(m.ContextID)
@@ -173,21 +178,33 @@ func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 		}
 		thread, reopen = id, true
 	}
-	res, err := h.be.Deliver(ctx, sc, thread, reopen, m.ID, body)
+	res, err := h.be.Deliver(ctx, sc, thread, reopen, since, m.ID, body)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	// The message is written. From here the wait only reads.
 	marker := int64(0)
+	turn := 0
 	if res.Event != nil {
 		marker = res.Event.Seq
+	} else if _, ev, err := h.be.Thread(ctx, sc, res.Task.ID, 0); err == nil {
+		// A replay: the answer is the task that holds the message, which an earlier turn may be.
+		for _, e := range ev {
+			if e.Kind == kindMessage && e.ActorKind == store.TaskActorKindUser && decode(e.Payload).MessageID == m.ID {
+				marker = e.Seq
+				if t, _ := turnOfSeq(ev, e.Seq); t < Turns(ev) {
+					turn = t
+				}
+				break
+			}
+		}
 	}
 	var hist *int
 	if req.Config != nil {
 		hist = req.Config.HistoryLength
 	}
-	if req.Config != nil && req.Config.ReturnImmediately {
-		return h.view(ctx, sc, res.Task.ID, 0, hist)
+	if turn != 0 || (req.Config != nil && req.Config.ReturnImmediately) {
+		return h.view(ctx, sc, res.Task.ID, turn, hist)
 	}
 	select {
 	case h.waiters <- struct{}{}:

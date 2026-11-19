@@ -63,6 +63,11 @@ type DirectMessage struct {
 	// NoReopen refuses a thread whose task has completed, where a person's follow-up would reopen
 	// it. The A2A edge sets it: an A2A task that has ended takes no message (ADR 0123).
 	NoReopen bool
+	// TurnSince is the sequence number of the first message of the A2A turn the caller checked
+	// (0 means no check). The delivery refuses the message when a follow-up reopened the thread
+	// after that event: the turn the caller meant has ended and the thread is in a later turn. The
+	// check runs under the lock of the task.
+	TurnSince int64
 }
 
 // DirectMessageResult is what a direct message did.
@@ -170,6 +175,15 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 		}
 		if task.CreatedByKind != store.TaskCreatorKindTrigger || task.CreatedByTriggerID != DirectMessageTriggerID(agent.ID) {
 			return pgtype.UUID{}, connect.NewError(connect.CodeFailedPrecondition, "the task is not a direct-message thread; add the message to the task instead")
+		}
+		if in.TurnSince > 0 {
+			reopened, err := reopenedAfter(ctx, q, in.Org, task.ID, in.TurnSince)
+			if err != nil {
+				return pgtype.UUID{}, err
+			}
+			if reopened {
+				return pgtype.UUID{}, connect.NewError(connect.CodeFailedPrecondition, "the task has ended; the thread is in a later turn")
+			}
 		}
 		switch task.State {
 		case store.TaskStateCanceled, store.TaskStateFailed:

@@ -27,6 +27,8 @@ type payload struct {
 	Display  string `json:"display"`
 	Question string `json:"question"`
 	To       string `json:"to"`
+	// MessageID is the ID the sender chose.
+	MessageID string `json:"message_id"`
 }
 
 func decode(b []byte) payload {
@@ -118,6 +120,18 @@ func turnStarts(events []store.TaskEvent) []int {
 		}
 	}
 	return starts
+}
+
+// turnOfSeq returns the turn (counted from 1) that holds the event with sequence number seq, and
+// the sequence number of the first message of the turn.
+func turnOfSeq(events []store.TaskEvent, seq int64) (turn int, first int64) {
+	for n, i := range turnStarts(events) {
+		if events[i].Seq > seq {
+			break
+		}
+		turn, first = n+1, events[i].Seq
+	}
+	return max(turn, 1), first
 }
 
 // Turns reports how many turns (A2A tasks) the timeline holds. A thread has at least one.

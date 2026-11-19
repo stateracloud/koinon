@@ -4,6 +4,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -49,4 +50,33 @@ func (s *Server) SendDirectMessageAs(ctx context.Context, in DirectMessage) (Dir
 		return s.dm.deliver(ctx, in)
 	}
 	return s.DeliverDirectMessage(ctx, in)
+}
+
+// maxReopenScan bounds the events that reopenedAfter reads: 10 pages of 1000.
+const maxReopenScan = 10_000
+
+// reopenedAfter reports whether a follow-up reopened the completed task after the event with
+// sequence number seq. Each such reopening starts a new turn of the thread (ADR 0123). The caller
+// holds the lock of the task.
+func reopenedAfter(ctx context.Context, q *store.Queries, org, task pgtype.UUID, seq int64) (bool, error) {
+	for scanned := 0; scanned < maxReopenScan; {
+		ev, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: org, TaskID: task, AfterSeq: seq, MaxEvents: 1000})
+		if err != nil {
+			return false, err
+		}
+		for _, e := range ev {
+			var p struct {
+				From string `json:"from"`
+			}
+			if e.Kind == KindStatusChanged && json.Unmarshal(e.Payload, &p) == nil && p.From == string(store.TaskStateCompleted) {
+				return true, nil
+			}
+		}
+		if len(ev) < 1000 {
+			break
+		}
+		seq = ev[len(ev)-1].Seq
+		scanned += len(ev)
+	}
+	return false, nil
 }

@@ -40,7 +40,8 @@ type DirectMessageQueue struct {
 type dmInput struct {
 	Org, Agent, Task, User, MessageID, Text string
 	// NoReopen is new; a workflow recovered from before it runs with false, as it was sent.
-	NoReopen bool
+	NoReopen  bool
+	TurnSince int64
 }
 
 // dmOutput carries the result, and the API errors as data, because a workflow's error loses its
@@ -95,7 +96,7 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 				return dmOutput{}, err
 			}
 		}
-		m.MessageID, m.Text, m.NoReopen = in.MessageID, in.Text, in.NoReopen
+		m.MessageID, m.Text, m.NoReopen, m.TurnSince = in.MessageID, in.Text, in.NoReopen, in.TurnSince
 		res, err := d.srv.Load().DeliverDirectMessage(ctx, m)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = connect.NewError(connect.CodeNotFound, "agent or task not found")
@@ -119,7 +120,7 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 // from the org and the message ID, so a retried request attaches to the same workflow.
 func (d *DirectMessageQueue) deliver(ctx context.Context, in DirectMessage) (DirectMessageResult, error) {
 	org := idString(in.Org)
-	input := dmInput{Org: org, Agent: idString(in.Agent), Task: idString(in.Task), User: idString(in.User), MessageID: in.MessageID, Text: in.Text, NoReopen: in.NoReopen}
+	input := dmInput{Org: org, Agent: idString(in.Agent), Task: idString(in.Task), User: idString(in.User), MessageID: in.MessageID, Text: in.Text, NoReopen: in.NoReopen, TurnSince: in.TurnSince}
 	wfID := "dm:" + org + ":" + in.MessageID
 	h, err := durable.EnqueueForOrg[dmOutput](ctx, d.work, org, DirectMessageWorkflow, input, dbos.WithEnqueueWorkflowID(wfID))
 	if err != nil {

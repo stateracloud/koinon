@@ -55,11 +55,13 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    message, the org queue when durable work is on, and the same agent and trigger rules. The
    A2A message ID is the idempotency key. A retry of a message that was taken returns the task, also
    when the task has ended since. An agent takes A2A messages only if it has a `direct_message` trigger.
-   The edge shows no other task of the agent. the same path as a person who writes to the agent: the checks
-   of the message, the org queue when durable work is on, and the same agent and trigger rules. The
-   A2A message ID is the idempotency key. A retry of a message that was taken returns the task, also
-   when the task has ended since. An agent takes A2A messages only if it has a `direct_message` trigger.
    The edge shows no other task of the agent.
+
+   A retry of a message that was taken returns the task that holds the message, which can be an
+   earlier turn. A message to a task is checked against its turn twice: by the edge, and again
+   under the lock of the thread (the delivery refuses it when a follow-up reopened the thread after
+   the turn started). With durable work on, the workflow keeps the result under the message ID,
+   a refusal too. A client that is refused sends the next message with a new message ID.
 3. **State mapping.**
 
    | Koinon | A2A |
@@ -118,6 +120,8 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   over 10,000 events has a wrong turn count in `GetTask`, as above.
 - Negative: a thread has one open turn at a time, so a client cannot run two tasks in one context
   at once. It starts a new thread (a new context) for work in parallel.
+- Negative: `CancelTask` checks the turn in the edge only. A cancel can reach a turn that opened
+  between the check and the cancel. The window is one request. _(inferred)_
 - Follow-ups: the outbound slice; pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
 
 ## Open questions
