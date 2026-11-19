@@ -30,18 +30,19 @@ const (
 
 // Reasons, the fixed label set of the decision metric (ADR 0023: no IDs).
 const (
-	ReasonInternal  = "internal"          // none or internal sink: carries nothing out
-	ReasonClean     = "clean"             // external, nothing matched, within the limits
-	ReasonBothLegs  = "both_legs"         // external-high with both legs: approval
-	ReasonTaint     = "taint"             // the payload carries private text: approval
-	ReasonURLRule   = "url_rule"          // the ADR 0084 URL shape rule or its budgets: refusal
-	ReasonCheck     = "check"             // the taint check ran out of a budget: refusal (fail closed)
-	ReasonAmbiguous = "ambiguous_address" // an address argument with more than one reading: refusal
-	ReasonError     = "error"             // the guard failed: refusal (fail closed)
-	ReasonIdentity  = "identity"          // the call does not come from a known agent: refusal
-	ReasonNoRun     = "no_run"            // an external call outside a running run: refusal
-	ReasonExempt    = "exempt"            // a call of Koinon's own executor or probe
-	ReasonAskTarget = "ask_target"        // approval-gated tool: mcpask records the one card
+	ReasonInternal    = "internal"          // none or internal sink: carries nothing out
+	ReasonClean       = "clean"             // external, nothing matched, within the limits
+	ReasonBothLegs    = "both_legs"         // external-high with both legs: approval
+	ReasonTaint       = "taint"             // the payload carries private text: approval
+	ReasonURLRule     = "url_rule"          // the ADR 0084 URL shape rule or its budgets: refusal
+	ReasonCheck       = "check"             // the taint check ran out of a budget: refusal (fail closed)
+	ReasonAmbiguous   = "ambiguous_address" // an address argument with more than one reading: refusal
+	ReasonError       = "error"             // the guard failed: refusal (fail closed)
+	ReasonIdentity    = "identity"          // the call does not come from a known agent: refusal
+	ReasonNoRun       = "no_run"            // an external call outside a running run: refusal
+	ReasonToolChanged = "tool_changed"      // the tool's text changed since an admin approved it: refusal (#1132)
+	ReasonExempt      = "exempt"            // a call of Koinon's own executor or probe
+	ReasonAskTarget   = "ask_target"        // approval-gated tool: mcpask records the one card
 	// ReasonFeedStalled marks a call decided while agentd's feed lagged: its legs were taken as both,
 	// so a person decides it, never a Decider (ADR 0091 decision 4, ADR 0092).
 	ReasonFeedStalled = "feed_stalled"

@@ -187,9 +187,9 @@ FOR UPDATE;
 
 -- name: InsertMCPTool :one
 INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,
-                       description_original_length, description_capped, description_cleaned)
+                       description_original_length, description_capped, description_cleaned, tool_json, tool_hash)
 VALUES (@org_id, @server_id, @name, @description, @input_schema, @content_hash, @read_only_hint,
-        @description_original_length, @description_capped, @description_cleaned)
+        @description_original_length, @description_capped, @description_cleaned, @tool_json, @tool_hash)
 RETURNING *;
 
 -- name: UpdateMCPToolContent :one
@@ -200,6 +200,7 @@ SET description = @description, input_schema = @input_schema, content_hash = @co
     read_only_hint = @read_only_hint, present = true, last_seen_at = now(),
     description_original_length = @description_original_length, description_capped = @description_capped,
     description_cleaned = @description_cleaned,
+    tool_json = @tool_json, tool_hash = @tool_hash,
     review_reason = @review_reason,
     -- The declaration described the old tool: it goes back to the default, external-high with the
     -- server's legs (ADR 0091 decision 2, the ADR 0057 rule). The caller audits the reset.
@@ -217,8 +218,19 @@ RETURNING *;
 UPDATE mcp_tools
 SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint,
     description_original_length = @description_original_length, description_capped = @description_capped,
-    description_cleaned = @description_cleaned
+    description_cleaned = @description_cleaned,
+    -- A tool waiting for review keeps the text that was flagged, so an admin approves what the review showed.
+    tool_json = CASE WHEN review_reason IS NULL THEN @tool_json ELSE tool_json END,
+    tool_hash = CASE WHEN review_reason IS NULL THEN @tool_hash ELSE tool_hash END
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
+
+-- name: AdoptMCPToolPin :exec
+-- A tool an admin reviewed before the pin existed, and whose description and schema did not change
+-- since: the text the server publishes now is the text that was reviewed, so it is the pin (#1132).
+UPDATE mcp_tools
+SET approved_json = tool_json, approved_hash = tool_hash, approved_at = now()
+WHERE org_id = @org_id AND server_id = @server_id AND name = @name
+  AND approved_hash IS NULL AND tool_hash IS NOT NULL AND tier_set_by IS NOT NULL AND review_reason IS NULL;
 
 -- name: MarkMCPToolsAbsent :exec
 -- Tools the server did not list this time.
@@ -228,7 +240,10 @@ WHERE org_id = @org_id AND server_id = @server_id AND present AND NOT (name = AN
 
 -- name: SetMCPToolTier :one
 UPDATE mcp_tools
-SET tier = @tier, review_reason = NULL, tier_set_by = @set_by, tier_set_at = now()
+SET tier = @tier, review_reason = NULL, tier_set_by = @set_by, tier_set_at = now(),
+    -- An admin who sets a tier approves the text the tool has now.
+    approved_json = COALESCE(tool_json, approved_json), approved_hash = COALESCE(tool_hash, approved_hash),
+    approved_at = CASE WHEN tool_hash IS NULL THEN approved_at ELSE now() END
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 
@@ -259,7 +274,9 @@ RETURNING o.name, o.sink_class AS old_sink_class, o.sink_derivation AS old_sink_
 
 -- name: AcknowledgeMCPToolReview :one
 UPDATE mcp_tools
-SET review_reason = NULL
+SET review_reason = NULL,
+    approved_json = COALESCE(tool_json, approved_json), approved_hash = COALESCE(tool_hash, approved_hash),
+    approved_at = CASE WHEN tool_hash IS NULL THEN approved_at ELSE now() END
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 

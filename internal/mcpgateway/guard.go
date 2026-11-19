@@ -232,6 +232,8 @@ type Metrics struct {
 	GuardFailures *prometheus.CounterVec
 	// Dropped counts config entries ApplyMCP left out, which closes their route, by reason.
 	Dropped *prometheus.CounterVec
+	// ToolsLeftOut counts tools a tools/list left out of what an agent sees, by reason (#1132).
+	ToolsLeftOut *prometheus.CounterVec
 }
 
 // NewMetrics creates the counters and registers them with reg (nil: not registered).
@@ -249,6 +251,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_gateway_mcp_config_dropped_total",
 			Help: "MCP config entries left out of the applied config, which closes their route, by reason.",
 		}, []string{"reason"}),
+		ToolsLeftOut: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_mcp_tools_left_out_total",
+			Help: "Tools the MCP path left out of a tools/list because they changed since approval, were over the limit or unusable, by reason.",
+		}, []string{"reason"}),
+	}
+	for _, r := range []string{leftChanged, leftOverLimit, leftUnusable, leftUnreadable} {
+		m.ToolsLeftOut.WithLabelValues(r)
 	}
 	for _, r := range []string{guardNotLoaded, guardPanic} {
 		m.GuardFailures.WithLabelValues(r)
@@ -257,7 +266,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Dropped.WithLabelValues(r)
 	}
 	if reg != nil {
-		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped)
+		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut)
 	}
 	return m
 }
@@ -265,6 +274,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 func (m *Metrics) guardFailure(reason string) {
 	if m != nil {
 		m.GuardFailures.WithLabelValues(reason).Inc()
+	}
+}
+
+func (m *Metrics) toolLeft(reason string) {
+	if m != nil {
+		m.ToolsLeftOut.WithLabelValues(reason).Inc()
 	}
 }
 

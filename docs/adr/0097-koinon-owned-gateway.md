@@ -873,6 +873,36 @@ twice the guess, go back to the maintainer).
    and the GLOSSARY; mark this decision "done". Before the marker names v0.3.
 6. **Follow-up issue, not in #1151:** provider keys and MCP sign-in tokens on the same scheme.
 
+### 13. Tool lists are pinned to the approved hash (amendment 2026-11-19, #1132)
+
+The text of a tool (its name, title, description, annotations and schemas) reaches the model as
+instructions. An upstream server can change this text at any time. The gateway therefore serves a tool
+list only when it matches what an admin approved.
+
+- `internal/mcptoolpin` defines the text and its hash. `Normalise` cleans each member with the
+  sanitiser of ADR 0057, and the hash covers the canonical JSON of the result. The sync and the gateway
+  both use it, so they cannot disagree about what a change is.
+- The sync (the prober) stores the observed text and its hash on the `mcp_tools` row. An admin decision
+  (a tier change or an acknowledgement) stores them again as the approved text and hash. A tool that was
+  reviewed before the pin existed is adopted at the next sync.
+- A tool whose observed hash differs from the approved hash is a change. The sync sets the review flag
+  and demotes an `auto` tool, as for a changed description.
+- At each `tools/list` (and each `notifications/tools/list_changed`, which runs the same check) the
+  gateway asks the guard (`ToolListChecker`). The guard returns the tools to serve and the names to
+  leave out. A tool whose hash equals the approved hash is served from the approved text. A changed tool
+  is left out of the list, and a call to it is refused without a call to the target. A tool that no admin
+  has approved yet is served as sanitised text, and a server that declares the untrusted-input leg sets
+  that leg. A list the guard cannot read is withheld, and both legs are set.
+- The gateway cuts a list over 256 tools. The tools past the limit are left out, not passed unchecked.
+  No path serves an unchecked list: a guard that is not loaded, that panics or that refuses withholds
+  the list.
+- The left-out set is kept in memory in each gateway replica. The database review flag that the sync
+  sets backs the call refusal. The metric `koinon_gateway_mcp_tools_left_out_total` has the label
+  `reason` only (ADR 0023).
+
+This completes decision 4 of ADR 0091 for tool lists. It does not change the tiers: an approved text is
+not an `auto` grant.
+
 ## Alternatives considered
 
 | Option | Why not |
