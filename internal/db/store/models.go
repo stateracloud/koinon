@@ -2058,6 +2058,23 @@ type GatewayProviderFailure struct {
 	UpdatedAt  pgtype.Timestamptz
 }
 
+type GatewayRecipientKey struct {
+	KeyID       string
+	Recipient   string
+	PublicKey   []byte
+	State       string
+	CreatedAt   pgtype.Timestamptz
+	ActivatedAt pgtype.Timestamptz
+	RetiringAt  pgtype.Timestamptz
+	RetiredAt   pgtype.Timestamptz
+}
+
+type GatewayRecipientKeyLoad struct {
+	KeyID    string
+	CopyID   string
+	LoadedAt pgtype.Timestamptz
+}
+
 type GatewayServedModel struct {
 	OrgID       pgtype.UUID
 	ModelID     pgtype.UUID

@@ -121,6 +121,80 @@ var gatewayGrants = []string{
 	`GRANT SELECT, INSERT, UPDATE, DELETE ON leak_guard_sessions, leak_guard_fingerprints, leak_guard_runs, leak_guard_open_calls, leak_guard_decisions TO ` + GatewayRole,
 	// The call log: insert only.
 	`GRANT INSERT ON mcp_call_log TO ` + GatewayRole,
+	// The gateway's own key (ADR 0097 12.3): the public rows it checks its private key against, the
+	// install ID that binds a KMS-wrapped key, and its report that it loaded a key. The report is an
+	// insert and a refresh of one column.
+	`GRANT SELECT ON gateway_recipient_keys, install_identity, kek_bound_only TO ` + GatewayRole,
+	`GRANT SELECT, INSERT ON gateway_recipient_key_loads TO ` + GatewayRole,
+	`GRANT UPDATE (loaded_at) ON gateway_recipient_key_loads TO ` + GatewayRole,
+}
+
+// GatewayKeyAdminRole is the NOLOGIN group role of the gateway key-admin Job's login (ADR 0097 12.3,
+// 12.4). It is the only role that may INSERT a public key or move its state. It has no read of the
+// sealed credential column: it asks gateway_recipient_key_in_use for a count.
+const GatewayKeyAdminRole = "koinon_gateway_key_admin"
+
+// GatewayResealRole is the NOLOGIN group role of the re-seal Job's login (ADR 0097 12.4). Its grant is
+// the one the compare-and-swap needs: SELECT on org_id, id and credential and UPDATE of credential on
+// mcp_servers, and the public rows to find the active key. Nothing else.
+const GatewayResealRole = "koinon_gateway_reseal"
+
+var gatewayKeyAdminGrants = []string{
+	// Insert a pending key, move its state, read the gateway's reports, and bind the wrapped key to the
+	// install (the install ID and the bound-only marker are read by the wrapper).
+	`GRANT SELECT, INSERT ON gateway_recipient_keys TO ` + GatewayKeyAdminRole,
+	`GRANT UPDATE (state, activated_at, retiring_at, retired_at) ON gateway_recipient_keys TO ` + GatewayKeyAdminRole,
+	`GRANT SELECT ON gateway_recipient_key_loads, install_identity, kek_bound_only TO ` + GatewayKeyAdminRole,
+	`GRANT EXECUTE ON FUNCTION gateway_recipient_key_in_use(text) TO ` + GatewayKeyAdminRole,
+}
+
+var gatewayResealGrants = []string{
+	`GRANT SELECT ON gateway_recipient_keys, install_identity, kek_bound_only TO ` + GatewayResealRole,
+	`GRANT SELECT (org_id, id, credential) ON mcp_servers TO ` + GatewayResealRole,
+	`GRANT UPDATE (credential) ON mcp_servers TO ` + GatewayResealRole,
+}
+
+// GrantGatewayKeyRoles gives GatewayKeyAdminRole and GatewayResealRole their privileges and returns the
+// roles it granted. A role that does not exist is skipped (the chart creates them only with the
+// gateway key switch), so the next migrate or --grants-only run grants it once it does.
+func GrantGatewayKeyRoles(ctx context.Context, db Execer) ([]string, error) {
+	var granted []string
+	// The shared application role keeps SELECT only. Default privileges may have given it more after the
+	// migration ran (the role can appear later), so close it again on every run.
+	var appExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'koinon_app')`).Scan(&appExists); err != nil {
+		return granted, err
+	}
+	if appExists {
+		for _, stmt := range []string{
+			`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON gateway_recipient_keys FROM koinon_app`,
+			`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON gateway_recipient_key_loads FROM koinon_app`,
+			`REVOKE EXECUTE ON FUNCTION gateway_recipient_key_in_use(text) FROM koinon_app`,
+		} {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				return granted, err
+			}
+		}
+	}
+	for _, r := range []struct {
+		role   string
+		grants []string
+	}{{GatewayKeyAdminRole, gatewayKeyAdminGrants}, {GatewayResealRole, gatewayResealGrants}} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, r.role).Scan(&exists); err != nil {
+			return granted, err
+		}
+		if !exists {
+			continue
+		}
+		for _, stmt := range r.grants {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				return granted, err
+			}
+		}
+		granted = append(granted, r.role)
+	}
+	return granted, nil
 }
 
 // GrantGateway gives GatewayRole its privileges and reports whether it did: false when the role does

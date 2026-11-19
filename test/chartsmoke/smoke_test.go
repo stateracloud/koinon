@@ -829,6 +829,12 @@ func runJob(ctx context.Context, rn *runner, job *batchv1.Job) {
 	GinkgoHelper()
 	ps := job.Spec.Template.Spec
 	for _, c := range append(slices.Clone(ps.InitContainers), ps.Containers...) {
+		// The gateway key-admin Job waits (--wait-loaded) until a gateway process reports that it holds
+		// the new key. No gateway runs while the plain Jobs run, so the wait cannot end here: the Job
+		// runs without it and stops at the pending key. The wait has its own specs in internal/gatewaykeys.
+		if strings.Contains(job.Name, "-gateway-key-admin-") {
+			c.Args = slices.DeleteFunc(slices.Clone(c.Args), func(a string) bool { return strings.HasPrefix(a, "--wait-loaded") })
+		}
 		w := rn.start(ctx, job.Name, ps, c, jobDeadline)
 		code, logs := w.ExitCode(ctx), w.Logs(ctx)
 		AddReportEntry("log "+w.Name, logs, ReportEntryVisibilityFailureOrVerbose)
@@ -946,6 +952,9 @@ func bootstrapDatabase(ctx context.Context, dbURL string) {
 		`CREATE ROLE koinon_app NOLOGIN`,
 		`CREATE ROLE koinon_install_audit_writer NOLOGIN`,
 		`CREATE ROLE koinon_gateway NOLOGIN`,
+		// The gateway key lifecycle (ADR 0097 decision 12): the key-admin Job's and the re-seal group roles.
+		`CREATE ROLE koinon_gateway_key_admin NOLOGIN`,
+		`CREATE ROLE koinon_gateway_reseal NOLOGIN`,
 		`GRANT CONNECT ON DATABASE koinon TO koinon_app`,
 		`GRANT USAGE ON SCHEMA public TO koinon_app`,
 		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app`,
@@ -970,6 +979,9 @@ func createComponentRoles(ctx context.Context, dbURL string) {
 		{"koinon_agentd", "koinon_app"},
 		// koinon-gateway's own login: in the gateway group only, never in koinon_app.
 		{"koinon_mcpgateway", "koinon_gateway"},
+		// The gateway key lifecycle logins: each in its own group role only.
+		{"koinon_gwkeyadmin", "koinon_gateway_key_admin"},
+		{"koinon_reseal", "koinon_gateway_reseal"},
 	} {
 		stmt := fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s`, c.role, dbSecretPassword, c.groups)
 		_, err := conn.Exec(ctx, stmt)

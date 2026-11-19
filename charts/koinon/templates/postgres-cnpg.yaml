@@ -50,6 +50,11 @@ spec:
         # The group role of koinon-gateway's leak guard. `koinon-api migrate` grants it exactly what the guard
         # reads and writes after the goose migrations (migrations.GrantGateway). It is not part of koinon_app.
         - CREATE ROLE koinon_gateway NOLOGIN
+        # The group roles of the gateway key lifecycle (ADR 0097 decision 12): the key-admin Job's login and the
+        # re-seal login. `koinon-api migrate` grants them (migrations.GrantGatewayKeyRoles). Neither is part of
+        # koinon_app: koinon-api may read the public keys and cannot write them.
+        - CREATE ROLE koinon_gateway_key_admin NOLOGIN
+        - CREATE ROLE koinon_gateway_reseal NOLOGIN
         - GRANT CONNECT ON DATABASE {{ $db }} TO koinon_app
         - GRANT USAGE ON SCHEMA public TO koinon_app
         - ALTER DEFAULT PRIVILEGES FOR ROLE {{ $migrate }} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app
@@ -66,6 +71,12 @@ spec:
         login: false
       {{- /* Managed as well as created above, for the reason the writer role is. */}}
       - name: koinon_gateway
+        ensure: present
+        login: false
+      - name: koinon_gateway_key_admin
+        ensure: present
+        login: false
+      - name: koinon_gateway_reseal
         ensure: present
         login: false
       {{- range $role := list "api" "reconciler" "agentd" }}
@@ -94,6 +105,18 @@ spec:
         inRoles: [koinon_gateway]
         passwordSecret:
           name: {{ include "koinon.pgSecret" (list . "mcpgateway") }}
+      {{- end }}
+      {{- if include "koinon.gwKey" . }}
+      {{- /* The gateway key lifecycle logins: each a member of its own group role and of nothing else. */}}
+      {{- range $pair := list (list "gwkeyadmin" "koinon_gateway_key_admin") (list "reseal" "koinon_gateway_reseal") }}
+      - name: {{ include "koinon.pgRole" (index $pair 0) }}
+        ensure: present
+        login: true
+        inherit: true
+        inRoles: [{{ index $pair 1 }}]
+        passwordSecret:
+          name: {{ include "koinon.pgSecret" (list $ (index $pair 0)) }}
+      {{- end }}
       {{- end }}
   storage:
     size: {{ .Values.postgres.cnpg.storage.size }}

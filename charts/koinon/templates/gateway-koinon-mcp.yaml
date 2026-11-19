@@ -29,6 +29,7 @@ key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 {{- $delay := int $m.shutdownDelaySeconds }}
 {{- $dbDir := include "koinon.mcpGatewayDBURLDir" . }}
 {{- $mcpKeysDir := include "koinon.gatewayMCPKeysDir" . }}
+{{- $gwKey := include "koinon.gwKey" . }}
 {{- if eq .Values.postgres.mode "cnpg" }}
 ---
 # The URL of the guard's database login, without a password (the pod sets PGPASSWORD). It holds no secret.
@@ -48,6 +49,11 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+  {{- with include "koinon.gwKeyServiceAccountAnnotations" (dict "root" . "role" "gateway") | trim }}
+  # IRSA: the IAM role that may decrypt with the gateway's KMS key (recipientKey.kms.awskms.roleArns.gateway).
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
@@ -110,6 +116,9 @@ spec:
             - --database-url-file={{ $dbDir }}/url
             - --shutdown-delay={{ $delay }}s
             - --drain-timeout={{ $drain }}s
+            {{- if $gwKey }}
+            - --recipient-key-dir={{ include "koinon.gwKeyDir" . }}
+            {{- end }}
           env:
             {{- if eq .Values.postgres.mode "cnpg" }}
             - name: PGPASSWORD
@@ -127,6 +136,9 @@ spec:
                 resourceFieldRef:
                   resource: limits.memory
                   divisor: "1"
+            {{- if $gwKey }}
+            {{- include "koinon.gwKeyKmsEnv" (dict "root" . "role" "gateway") | trim | nindent 12 }}
+            {{- end }}
           ports:
             - name: mcp
               containerPort: {{ int $m.port }}
@@ -158,6 +170,19 @@ spec:
               readOnly: true
             {{- include "koinon.dbVolumeMount" . | nindent 12 }}
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
+            {{- if $gwKey }}
+            # The wrapped private keys (ADR 0097 12.3): only this Deployment mounts them. The Secret may not
+            # exist yet (the key-admin Job makes it), and the pod is ready without a key.
+            - name: gateway-key
+              mountPath: {{ include "koinon.gwKeyDir" . }}
+              readOnly: true
+            {{- if eq (include "koinon.kms" .) "openbao" }}
+            - name: gateway-kms-token
+              mountPath: {{ include "koinon.gwKeyTokenDir" . }}
+              readOnly: true
+            {{- end }}
+            {{- include "koinon.kmsVolumeMount" . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -181,6 +206,26 @@ spec:
         {{- end }}
         {{- include "koinon.dbVolume" . | nindent 8 }}
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
+        {{- if $gwKey }}
+        - name: gateway-key
+          secret:
+            secretName: {{ include "koinon.gwKeySecretName" . }}
+            optional: true
+            defaultMode: 0444
+        {{- if eq (include "koinon.kms" .) "openbao" }}
+        # The gateway pod mounts no automatic service account token. OpenBao's Kubernetes auth reads this one.
+        - name: gateway-kms-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+                  {{- with $m.recipientKey.kms.openbao.audience }}
+                  audience: {{ . | quote }}
+                  {{- end }}
+        {{- end }}
+        {{- include "koinon.kmsVolume" . | nindent 8 }}
+        {{- end }}
       {{- with $m.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

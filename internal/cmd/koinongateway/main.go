@@ -38,6 +38,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/usagewire"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
+	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
 	"github.com/stateracloud/koinon/internal/mcpgateway/pgaudit"
 	"github.com/stateracloud/koinon/internal/mcpguard"
@@ -46,6 +48,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelgateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
 
 // mcpPath is where the MCP endpoint is served. It is the path agentgateway served it at, so an
@@ -73,6 +76,10 @@ type config struct {
 	// databaseURLFile holds the connection string of the gateway's own database login (role
 	// migrations.GatewayRole). Empty: no guard, so org targets are not served (fail closed).
 	databaseURLFile string
+	// recipientKeyDir is the mounted Secret with the wrapped gateway recipient keys (ADR 0097 decision 12).
+	// Empty: the gateway loads no key. wrapping is the gateway's own wrapping key (never the KEK's).
+	recipientKeyDir string
+	wrapping        wrapping.Config
 
 	drain time.Duration
 	// shutdownDelay is how long the gateway keeps serving after SIGTERM, with /readyz at 503.
@@ -93,6 +100,10 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.databaseURLFile, "database-url-file", "",
 		"file with the Postgres connection string of the gateway's own login (a member of the role "+migrations.GatewayRole+"). "+
 			"With it the leak guard runs in the process and org MCP targets are served; without it the gateway serves platform targets only")
+	fs.StringVar(&c.recipientKeyDir, "recipient-key-dir", "",
+		"directory of the Secret with the gateway's wrapped recipient keys (one file per key ID). With it the gateway unwraps them, checks them against the gateway_recipient_keys rows and reports each loaded; "+
+			"it is not ready while a row needs a key it cannot unwrap. The key-wrapping flags (--kek-backend and the --openbao-* or --awskms-* flags) name the gateway's own wrapping key")
+	c.wrapping.Flags(fs)
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
@@ -142,6 +153,7 @@ func NewRootCommand() *cobra.Command {
 	cli.Bind(cmd, cli.NewViper())
 	cli.AllowEnv(cmd, "KOINON_MEMORY_LIMIT_BYTES")
 	c.flags(cmd.Flags())
+	cmd.AddCommand(newKeysCommand())
 	cli.EnvAlias(cmd, "pod-name", "POD_NAME")
 	for _, n := range []string{"state-url", "state-token-file"} {
 		if err := cmd.MarkFlagRequired(n); err != nil {
@@ -188,13 +200,19 @@ func run(ctx context.Context, cfg config) error {
 		Logger:  log,
 	}
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
+	var keys *gatewaykeys.Loader
 	if cfg.mcpPath && cfg.databaseURLFile != "" {
-		guard, audit, closeDB, err := openGuard(ctx, cfg.databaseURLFile, log, reg)
+		guard, audit, pool, err := openGuard(ctx, cfg.databaseURLFile, log, reg)
 		if err != nil {
 			return err
 		}
-		defer closeDB()
+		defer pool.Close()
 		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
+		if cfg.recipientKeyDir != "" {
+			if keys, err = startKeyLoader(ctx, cfg, pool, reg, log); err != nil {
+				return err
+			}
+		}
 	}
 	gw := mcpgateway.New(gopts)
 	var (
@@ -245,6 +263,11 @@ func run(ctx context.Context, cfg config) error {
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
 	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
+		if keys != nil {
+			if ok, _ := keys.Ready(); !ok {
+				return false
+			}
+		}
 		return (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != "")
 	}, log); err != nil {
 		return err
@@ -380,7 +403,7 @@ func (a logAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
 // writer. The guard's route stays closed (every message and call is refused) until the database has
 // answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
 // refusal (ADR 0120 section 2).
-func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, func(), error) {
+func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, *pgxpool.Pool, error) {
 	dsn, err := readSecretFile(urlFile, "the database URL")
 	if err != nil {
 		return nil, nil, nil, err
@@ -411,7 +434,25 @@ func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg promet
 			}
 		}
 	})
-	return ga, pgaudit.New(pool), pool.Close, nil
+	return ga, pgaudit.New(pool), pool, nil
+}
+
+// startKeyLoader builds the gateway's key loader on the guard's database login and runs it. The wrapping
+// key is the gateway's own; the gateway's identity may decrypt with it and may not encrypt (ADR 0097 12.3).
+// The first pass runs in the background: /readyz stays 503 until it passed once.
+func startKeyLoader(ctx context.Context, cfg config, pool *pgxpool.Pool, reg prometheus.Registerer, log *slog.Logger) (*gatewaykeys.Loader, error) {
+	ws, err := wrapping.New(ctx, cfg.wrapping, wrapping.Service, installid.BoundOnlySource(pool))
+	if err != nil {
+		return nil, fmt.Errorf("the gateway's key-wrapping key: %w", err)
+	}
+	copyID, err := stateclient.NewCopyID(cfg.podName)
+	if err != nil {
+		return nil, err
+	}
+	l := gatewaykeys.NewLoader(cfg.recipientKeyDir, pool, ws.WithInstallID(installid.Source(pool)), copyID, gatewaykeys.NewMetrics(reg))
+	l.Logf = func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) }
+	safego.Go(ctx, log, "recipient-keys", l.Run)
+	return l, nil
 }
 
 // multiAudit writes every row to each Audit. One failing writer does not stop the others, and the

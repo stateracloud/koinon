@@ -590,6 +590,7 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if eq .Values.postgres.mode "cnpg" -}}
 {{- $roles := list "migrate" "api" "reconciler" "agentd" -}}
 {{- if include "koinon.mcpKoinon" . -}}{{- $roles = append $roles "mcpgateway" -}}{{- end -}}
+{{- if include "koinon.gwKey" . -}}{{- $roles = concat $roles (list "gwkeyadmin" "reseal") -}}{{- end -}}
 {{- range $role := $roles -}}
 {{- if not (index $.Values.postgres.cnpg.existingSecrets $role) -}}
 {{- $labels := fromYaml (include "koinon.generatedLabels" (list $ "postgres")) | merge (dict "cnpg.io/reload" "true") -}}
@@ -1465,4 +1466,166 @@ releases on one cluster never render the same cluster-scoped name.
 {{- $e = append $e (printf "%s=%s" $class $tier) -}}
 {{- end -}}
 {{- join "," $e -}}
+{{- end }}
+
+{{/*
+The gateway recipient key (ADR 0097 decision 12, issue #1151): true when koinon-gateway serves the MCP path
+and gateway.mcp.koinon.recipientKey.enabled is on. Empty otherwise.
+*/}}
+{{- define "koinon.gwKey" -}}
+{{- if and (include "koinon.mcpKoinon" .) .Values.gateway.mcp.koinon.recipientKey.enabled }}true{{ end -}}
+{{- end }}
+
+{{/* The Secret that holds the wrapped gateway private keys. Only the key-admin Job writes it. */}}
+{{- define "koinon.gwKeySecretName" -}}
+{{- .Values.gateway.mcp.koinon.recipientKey.secretName | default (printf "%s-gateway-recipient-key" (include "koinon.fullname" .)) -}}
+{{- end }}
+
+{{/* The key-admin Job's service account. One name: the subject of the KMS role and of the guard. */}}
+{{- define "koinon.gwKeyAdminName" -}}
+{{- printf "%s-gateway-key-admin" (include "koinon.fullname" .) -}}
+{{- end }}
+
+{{/* Where the gateway pod mounts the wrapped keys, and its projected KMS token. */}}
+{{- define "koinon.gwKeyDir" -}}/etc/koinon/gateway-key{{- end }}
+{{- define "koinon.gwKeyTokenDir" -}}/var/run/secrets/koinon/gateway-kms{{- end }}
+
+{{/*
+The KMS settings of the gateway key (dict root, role: gateway or keyAdmin). The backend, server, region and CA
+are secrets.kek.kms's; the wrapping key and the roles are gateway.mcp.koinon.recipientKey.kms's. The key MUST
+differ from the KEK's: with the same key the custody boundary is gone, because koinon-api decrypts KEKs.
+Empty with the local backend (the gateway key is then held as it is).
+*/}}
+{{- define "koinon.gwKeyKmsEnv" -}}
+{{- $root := .root }}
+{{- $rk := $root.Values.gateway.mcp.koinon.recipientKey.kms }}
+{{- $kms := $root.Values.secrets.kek.kms }}
+{{- if eq (include "koinon.kms" $root) "openbao" }}
+{{- $o := $kms.openbao }}
+{{- $key := required "gateway.mcp.koinon.recipientKey.kms.openbao.key is required with the openbao backend" $rk.openbao.key }}
+{{- if eq $key $o.key }}{{ fail "gateway.mcp.koinon.recipientKey.kms.openbao.key must differ from secrets.kek.kms.openbao.key: koinon-api may decrypt with the KEK's key" }}{{ end }}
+- name: KOINON_KEK_BACKEND
+  value: openbao
+- name: KOINON_OPENBAO_ADDRESS
+  value: {{ $o.address | quote }}
+- name: KOINON_OPENBAO_TRANSIT_MOUNT
+  value: {{ $o.transitMount | default "transit" | quote }}
+- name: KOINON_OPENBAO_KEY
+  value: {{ $key | quote }}
+- name: KOINON_OPENBAO_AUTH_MOUNT
+  value: {{ $o.authMount | default "kubernetes" | quote }}
+- name: KOINON_OPENBAO_ROLE
+  value: {{ index $rk.openbao.roles .role | quote }}
+{{- with $o.namespace }}
+- name: KOINON_OPENBAO_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- with $o.timeout }}
+- name: KOINON_OPENBAO_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $o.caConfigMap }}
+- name: KOINON_OPENBAO_CA_FILE
+  value: /etc/koinon/openbao-ca/ca.crt
+{{- end }}
+{{- if eq .role "gateway" }}
+- name: KOINON_OPENBAO_TOKEN_FILE
+  value: {{ include "koinon.gwKeyTokenDir" $root }}/token
+{{- end }}
+{{- else if eq (include "koinon.kms" $root) "awskms" }}
+{{- $a := $kms.awskms }}
+{{- $key := required "gateway.mcp.koinon.recipientKey.kms.awskms.keyId is required with the awskms backend" $rk.awskms.keyId }}
+{{- if eq $key $a.keyId }}{{ fail "gateway.mcp.koinon.recipientKey.kms.awskms.keyId must differ from secrets.kek.kms.awskms.keyId: koinon-api may decrypt with the KEK's key" }}{{ end }}
+- name: KOINON_KEK_BACKEND
+  value: awskms
+- name: KOINON_AWSKMS_REGION
+  value: {{ $a.region | quote }}
+- name: KOINON_AWSKMS_KEY_ID
+  value: {{ $key | quote }}
+{{- with $a.endpoint }}
+- name: KOINON_AWSKMS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.stsEndpoint }}
+- name: KOINON_AWSKMS_STS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.timeout }}
+- name: KOINON_AWSKMS_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $a.caConfigMap }}
+- name: KOINON_AWSKMS_CA_FILE
+  value: /etc/koinon/awskms-ca/ca.crt
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/* The IRSA annotation of the gateway or key-admin ServiceAccount (dict root, role). Empty unless awskms. */}}
+{{- define "koinon.gwKeyServiceAccountAnnotations" -}}
+{{- if eq (include "koinon.kms" .root) "awskms" }}
+{{- with index .root.Values.gateway.mcp.koinon.recipientKey.kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+The gateway key-admin Job's pod template (gateway-recipient-key.yaml), as a string: the Job is named by its hash.
+dict root, sa, secret (Secret name), rk (values gateway.mcp.koinon.recipientKey).
+*/}}
+{{- define "koinon.gwKeyAdminPod" -}}
+{{- $ := .root -}}
+{{- $rk := .rk -}}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "key-admin") | nindent 4 }}
+  {{- with $rk.keyAdmin.rotationId }}
+  annotations:
+    # Changes the hash that names the Job: a new rotationId runs the action once more.
+    koinon.dev/rotation-id: {{ . | quote }}
+  {{- end }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ .sa }}
+  # The token signs in to the KMS (Kubernetes auth) and reaches the Kubernetes API.
+  automountServiceAccountToken: true
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: gateway-key-admin
+      image: {{ include "koinon.image" (list $ $.Values.gateway.mcp.koinon.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - keys
+        - {{ $rk.keyAdmin.action | default "init" | quote }}
+        - {{ printf "--secret=%s" .secret | quote }}
+        - {{ printf "--replicas=%d" (int $.Values.gateway.mcp.koinon.replicas) | quote }}
+        - {{ printf "--wait-loaded=%s" ($rk.keyAdmin.waitLoaded | default "10m") | quote }}
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- include "koinon.dbEnv" (list $ "gwkeyadmin") | nindent 8 }}
+        {{- include "koinon.gwKeyKmsEnv" (dict "root" $ "role" "keyAdmin") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $rk.keyAdmin.resources | nindent 8 }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- with $mounts }}
+      volumeMounts:
+        {{- . | nindent 8 }}
+      {{- end }}
+  {{- with $volumes }}
+  volumes:
+    {{- . | nindent 4 }}
+  {{- end }}
 {{- end }}
