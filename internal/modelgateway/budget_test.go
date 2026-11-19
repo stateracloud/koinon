@@ -30,6 +30,9 @@ var _ = Describe("the budget stop of the model path", func() {
 		clock    sync.Mutex
 		hits     atomic.Int64
 		upStatus atomic.Int64
+		upBody   atomic.Value // string: the provider's answer
+		upSSE    atomic.Bool  // answer with a stream that ends before its usage
+		hold     atomic.Pointer[chan struct{}]
 		key      gateway.IssuedKey
 	)
 	agent := gateway.AgentRef{Org: "acme", Name: "helper"}
@@ -68,12 +71,24 @@ var _ = Describe("the budget stop of the model path", func() {
 	BeforeEach(func() {
 		hits.Store(0)
 		upStatus.Store(http.StatusOK)
+		upBody.Store(`{"id":"x","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`)
+		upSSE.Store(false)
+		hold.Store(nil)
 		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			hits.Add(1)
+			if h := hold.Load(); h != nil {
+				<-*h
+			}
+			if upSSE.Load() {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("data: {\"choices\":[]}\n\n")) // no usage chunk, no [DONE]
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(int(upStatus.Load()))
 			// 7 + 3 tokens at $1000 per million tokens: $0.01 a call.
-			_, _ = w.Write([]byte(`{"id":"x","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`))
+			_, _ = w.Write([]byte(upBody.Load().(string)))
 		}))
 		DeferCleanup(up.Close)
 		now = time.Date(2026, 11, 19, 10, 30, 0, 0, time.UTC)
@@ -118,16 +133,24 @@ var _ = Describe("the budget stop of the model path", func() {
 		Expect(hits.Load()).To(BeEquivalentTo(2))
 	})
 
-	It("does not stop an agent without a limit, or another agent", func(ctx SpecContext) {
-		ok, err := gateway.NewKey(other)
+	It("does not stop an agent without a limit, or an agent with its own room", func(ctx SpecContext) {
+		free, err := gateway.NewKey(other)
 		Expect(err).NotTo(HaveOccurred())
-		cfg.Keys = append(cfg.Keys, ok.Key)
+		roomy := gateway.AgentRef{Org: "acme", Name: "roomy"}
+		room, err := gateway.NewKey(roomy)
+		Expect(err).NotTo(HaveOccurred())
+		cfg.Keys = append(cfg.Keys, free.Key, room.Key)
 		cfg.SetLimit(agent, limit("0", "g1"))
+		cfg.SetLimit(roomy, limit("1", "g1"))
 		apply(ctx)
 		for range 3 {
-			code, _, body := call(ok.Material)
-			Expect(code).To(Equal(http.StatusOK), body)
+			for _, k := range []string{free.Material, room.Material} {
+				code, _, body := call(k)
+				Expect(code).To(Equal(http.StatusOK), body)
+			}
 		}
+		code, _, _ := call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests))
 	})
 
 	It("starts a fresh count in the next window, and sends the wait the window leaves", func(ctx SpecContext) {
@@ -181,6 +204,49 @@ var _ = Describe("the budget stop of the model path", func() {
 		apply(ctx)
 		code, _, body = call(fresh.Material)
 		Expect(code).To(Equal(http.StatusTooManyRequests), "once loaded, the key meets its own limit: "+body)
+	})
+
+	It("stops a key whose call cannot be priced", func(ctx SpecContext) {
+		upBody.Store(`{"id":"x","choices":[],"usage":{"prompt_tokens":9000000000000000000,"completion_tokens":3}}`)
+		cfg.SetLimit(agent, limit("100", "g1"))
+		apply(ctx)
+		code, _, _ := call(key.Material)
+		Expect(code).To(Equal(http.StatusOK))
+		code, _, _ = call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests), "an overflow saturates the counter, it does not hide the spend")
+	})
+
+	It("charges a bound for a stream that ended before its usage", func(ctx SpecContext) {
+		upSSE.Store(true)
+		cfg.SetLimit(agent, limit("0.000005", "g1")) // the request's bytes alone cost more
+		apply(ctx)
+		code, _, _ := call(key.Material)
+		Expect(code).To(Equal(http.StatusOK))
+		code, _, _ = call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests))
+	})
+
+	It("charges a call that crosses a new generation to the generation in force when it ends", func(ctx SpecContext) {
+		cfg.SetLimit(agent, limit("0.015", "g1"))
+		apply(ctx)
+		release := make(chan struct{})
+		hold.Store(&release)
+		done := make(chan int, 1)
+		go func() {
+			defer GinkgoRecover()
+			code, _, _ := call(key.Material)
+			done <- code
+		}()
+		Eventually(hits.Load).Should(BeEquivalentTo(1)) // the call is at the provider
+		cfg.SetLimit(agent, limit("0.015", "g2"))
+		apply(ctx)
+		close(release)
+		Eventually(done).Should(Receive(Equal(http.StatusOK)))
+		hold.Store(nil)
+		code, _, _ := call(key.Material) // $0.01 spent under g2: this one still passes
+		Expect(code).To(Equal(http.StatusOK))
+		code, _, _ = call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests), "the in-flight call counted against g2")
 	})
 
 	Describe("the retry markers", func() {

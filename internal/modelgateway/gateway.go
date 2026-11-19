@@ -62,6 +62,8 @@ type Gateway struct {
 	snap atomic.Pointer[snapshot]
 	bud  *budgets
 
+	applyMu sync.Mutex // serialises ApplyModel
+
 	mu    sync.Mutex
 	drain bool
 	keys  map[string]cachedKey
@@ -167,8 +169,12 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	// One apply at a time, and the live counters change before the snapshot: a request that reads
+	// the new snapshot finds its counters live, and one that read the old one finds them retired.
+	g.applyMu.Lock()
+	defer g.applyMu.Unlock()
+	g.bud.keep(s.state.Limits)
 	g.snap.Store(s)
-	g.bud.keep(c.Limits)
 	return s.rev, nil
 }
 

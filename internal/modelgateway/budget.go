@@ -39,11 +39,14 @@ type counter struct {
 
 // budgets holds the spend counters of one gateway.
 type budgets struct {
-	mu sync.Mutex
-	c  map[counterKey]*counter
+	mu   sync.Mutex
+	c    map[counterKey]*counter
+	live map[counterKey]struct{} // the generations of the config in force; only these have a counter
 }
 
-func newBudgets() *budgets { return &budgets{c: map[counterKey]*counter{}} }
+func newBudgets() *budgets {
+	return &budgets{c: map[counterKey]*counter{}, live: map[counterKey]struct{}{}}
+}
 
 // windowOf returns the start of the window that contains now. Windows align to the Unix epoch, as
 // agentgateway's do: a 24 h window starts at midnight UTC.
@@ -73,7 +76,11 @@ func (b *budgets) roll(k counterKey, l gateway.Limit, now time.Time) *counter {
 func (b *budgets) check(a gateway.AgentRef, l gateway.Limit, now time.Time) (ok bool, retryAfter time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	c := b.roll(counterKey{a, l.Generation}, l, now)
+	k := counterKey{a, l.Generation}
+	if _, ok := b.live[k]; !ok {
+		return true, 0 // a request that read a config an apply has since replaced: no counter for it
+	}
+	c := b.roll(k, l, now)
 	if c.spent < l.Amount {
 		return true, 0
 	}
@@ -84,7 +91,8 @@ func (b *budgets) check(a gateway.AgentRef, l gateway.Limit, now time.Time) (ok 
 	return false, 0
 }
 
-// charge adds the cost of a finished call. An overflow saturates: a call that cannot be added up
+// charge adds the cost of a finished call, to the window that holds the end of the call (the
+// ledger dates a record by its start: the two differ only for a call across a window edge). An overflow saturates: a call that cannot be added up
 // must stop the key, not lose the spend.
 func (b *budgets) charge(a gateway.AgentRef, l gateway.Limit, cost money.USD, now time.Time) {
 	if cost <= 0 {
@@ -92,7 +100,11 @@ func (b *budgets) charge(a gateway.AgentRef, l gateway.Limit, cost money.USD, no
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	c := b.roll(counterKey{a, l.Generation}, l, now)
+	k := counterKey{a, l.Generation}
+	if _, ok := b.live[k]; !ok {
+		return // the generation is retired: its spend is in the ledger's next net amount
+	}
+	c := b.roll(k, l, now)
 	sum, err := c.spent.Add(cost)
 	if err != nil {
 		sum = money.USD(math.MaxInt64)
@@ -100,7 +112,7 @@ func (b *budgets) charge(a gateway.AgentRef, l gateway.Limit, cost money.USD, no
 	c.spent = sum
 }
 
-// keep drops the counters of generations the new config does not carry, so a retired generation does
+// keep makes limits the live set and drops the counters of generations the new config does not carry, so a retired generation does
 // not stay in memory (ADR 0023 bounds: the set follows the limits).
 func (b *budgets) keep(limits map[gateway.AgentRef]gateway.Limit) {
 	live := make(map[counterKey]struct{}, len(limits))
@@ -109,6 +121,7 @@ func (b *budgets) keep(limits map[gateway.AgentRef]gateway.Limit) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.live = live
 	for k := range b.c {
 		if _, ok := live[k]; !ok {
 			delete(b.c, k)

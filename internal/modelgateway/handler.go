@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -308,21 +310,38 @@ type call struct {
 	price pricing.Price
 }
 
-// charge adds the cost of what the call used to the agent's counter. A call that reported no
-// usage costs nothing here: the ledger prices the record on its own (ADR 0041).
+// charge adds the cost of the call to the agent's counter, under the limit in force now: a call
+// that started under an older generation is charged to the current one, which the ledger computed
+// before it saw this call. A call that reports usage is priced on it. A 2xx call that ended before
+// its usage arrived (a cut or canceled stream) is charged a bound, as the ledger does for an
+// aborted call: the request bytes at 4 bytes a token as input, and the request's max_tokens as
+// output. The next generation replaces the bound with the ledger's own figure. A price that cannot
+// be computed stops the key (fail closed).
 func (c *call) charge() {
-	if c.limit == nil || (!c.rec.InputKnown && !c.rec.OutputKnown) {
+	if c.limit == nil {
 		return
 	}
-	_, cost, err := c.price.Cost(pricing.Usage{
+	cur, ok := c.g.snap.Load().state.Limits[c.agent]
+	if !ok {
+		return
+	}
+	u := pricing.Usage{
 		Input: c.rec.InputTokens, CacheRead: c.rec.CacheReadTokens, CacheWrite: c.rec.CacheWriteTokens,
 		Output: c.rec.OutputTokens, Reasoning: c.rec.ReasoningTokens,
-	})
+	}
+	switch {
+	case c.rec.InputKnown || c.rec.OutputKnown:
+	case c.rec.Status >= 200 && c.rec.Status < 300 && c.rec.Error != "":
+		u = pricing.Usage{Input: max(c.rec.RequestBytes, 0) / 4, Output: c.rec.MaxTokens}
+	default:
+		return // an error answer or a refusal: nothing was generated
+	}
+	_, cost, err := c.price.Cost(u)
 	if err != nil {
 		c.g.o.Logger.Error("model call cannot be priced", "reason", "cost")
-		return
+		cost = money.USD(math.MaxInt64)
 	}
-	c.g.bud.charge(c.agent, *c.limit, cost, c.g.o.Now())
+	c.g.bud.charge(c.agent, cur, cost, c.g.o.Now())
 }
 
 // emit finishes the record and sends it, once.
