@@ -105,7 +105,7 @@ func New(ctx context.Context, o Options) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCard, err)
 	}
-	card.SupportedInterfaces = sameHost(card.SupportedInterfaces, base.Host)
+	card.SupportedInterfaces = sameOrigin(card.SupportedInterfaces, base)
 	if len(card.SupportedInterfaces) == 0 {
 		return nil, fmt.Errorf("%w: no JSON-RPC interface on %s", ErrCardHost, base.Host)
 	}
@@ -130,15 +130,16 @@ func resolveCard(ctx context.Context, hc *http.Client, baseURL string) (*a2a.Age
 		}
 		return a2av0.NewAgentCardParser()(b)
 	}
-	return r.Resolve(ctx, baseURL)
+	return r.Resolve(ctx, baseURL, agentcard.WithPath(".well-known/agent-card.json"))
 }
 
-// sameHost keeps the JSON-RPC interfaces of the card that are on host.
-func sameHost(in []*a2a.AgentInterface, host string) []*a2a.AgentInterface {
+// sameOrigin keeps the JSON-RPC interfaces of the card that have the scheme and the host of the
+// target: a card cannot move the traffic to another host or from https to http.
+func sameOrigin(in []*a2a.AgentInterface, base *url.URL) []*a2a.AgentInterface {
 	var out []*a2a.AgentInterface
 	for _, i := range in {
 		u, err := url.Parse(i.URL)
-		if err != nil || u.Host != host || i.ProtocolBinding != a2a.TransportProtocolJSONRPC {
+		if err != nil || u.Host != base.Host || u.Scheme != base.Scheme || i.ProtocolBinding != a2a.TransportProtocolJSONRPC {
 			continue
 		}
 		out = append(out, i)
@@ -170,9 +171,11 @@ type Request struct {
 	// After starts a new task in ContextID that follows an ended task (a follow-up turn). The new
 	// message carries it in referenceTaskIds. It needs ContextID, and excludes AnswerTask.
 	After a2a.TaskID
-	// ReturnImmediately returns at once with the task as it stands. Otherwise the agent waits
-	// until the task is settled, up to its own limit, and [Client.Await] can wait further.
-	ReturnImmediately bool
+	// Block asks the agent to hold the request until the task is settled. It is bounded by
+	// RequestTimeout: a task that runs longer fails the call and the caller loses the task ID,
+	// and a retry can start a second task. The default returns at once with the task, and
+	// [Client.Await] waits.
+	Block bool
 }
 
 // Result is what the external agent answered, in Koinon's terms.
@@ -222,7 +225,9 @@ func (c *Client) Send(ctx context.Context, r Request) (*Result, error) {
 		if Ended(t.Status.State) {
 			return nil, fmt.Errorf("%w: %s is %s", ErrTaskEnded, r.AnswerTask, t.Status.State)
 		}
-		if t.Status.State != a2a.TaskStateInputRequired && t.Status.State != a2a.TaskStateAuthRequired {
+		// auth-required is not answered from here: it needs a credential, which the sandbox never
+		// supplies (ADR 0120). A person fixes the connection.
+		if t.Status.State != a2a.TaskStateInputRequired {
 			return nil, fmt.Errorf("%w: %s is %s", ErrNotAwaitingInput, r.AnswerTask, t.Status.State)
 		}
 		if r.ContextID != "" && t.ContextID != r.ContextID {
@@ -237,7 +242,7 @@ func (c *Client) Send(ctx context.Context, r Request) (*Result, error) {
 	defer cancel()
 	res, err := c.c.SendMessage(rctx, &a2a.SendMessageRequest{
 		Message: msg,
-		Config:  &a2a.SendMessageConfig{ReturnImmediately: r.ReturnImmediately},
+		Config:  &a2a.SendMessageConfig{ReturnImmediately: !r.Block},
 	})
 	if err != nil {
 		return nil, wrap(err)
@@ -251,8 +256,8 @@ func (c *Client) Send(ctx context.Context, r Request) (*Result, error) {
 		return nil, fmt.Errorf("%w: the agent answered a follow-up with task %s", ErrTaskIDReused, out.TaskID)
 	case r.AnswerTask != "" && out.TaskID != "" && out.TaskID != r.AnswerTask:
 		return nil, fmt.Errorf("%w: answered %s, got task %s", ErrTaskMismatch, r.AnswerTask, out.TaskID)
-	case r.ContextID != "" && out.ContextID != "" && out.ContextID != r.ContextID:
-		return nil, fmt.Errorf("%w: sent %s, got %s", ErrContextMismatch, r.ContextID, out.ContextID)
+	case msg.ContextID != "" && out.ContextID != "" && out.ContextID != msg.ContextID:
+		return nil, fmt.Errorf("%w: sent %s, got %s", ErrContextMismatch, msg.ContextID, out.ContextID)
 	}
 	return out, nil
 }
@@ -287,6 +292,9 @@ func (c *Client) Cancel(ctx context.Context, id a2a.TaskID) (*Result, error) {
 	t, err := c.c.CancelTask(rctx, &a2a.CancelTaskRequest{ID: id})
 	if err != nil {
 		return nil, wrap(err)
+	}
+	if t.ID != id {
+		return nil, fmt.Errorf("%w: asked %s, got %s", ErrTaskMismatch, id, t.ID)
 	}
 	return fromTask(t)
 }
@@ -348,7 +356,9 @@ func fromTask(t *a2a.Task) (*Result, error) {
 	r := &Result{
 		TaskID: t.ID, ContextID: t.ContextID, State: st, Reason: reason, External: t.Status.State,
 	}
-	if st == store.TaskStateInputRequired && t.Status.Message != nil {
+	// The text of an auth-required task is a request for a credential: it is not a question for the
+	// agent to answer.
+	if st == store.TaskStateInputRequired && reason == ReasonNone && t.Status.Message != nil {
 		r.Question = clip(text(t.Status.Message.Parts))
 	}
 	var parts []string

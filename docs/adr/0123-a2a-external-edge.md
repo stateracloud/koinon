@@ -23,7 +23,6 @@ relates: ["0011", "0065", "0066", "0101", "0120"]
 kagent agents speak A2A. A Koinon agent must be able to take a task from such an agent, and (second
 slice) send a task to one.
 
-
 Koinon already has a work model ([0065](0065-work-model-tasks-inbox.md)): a task has one owning
 agent, a state, and a timeline of events. A message to an agent starts a direct-message thread
 ([0066](0066-triggers-and-scheduling.md)). The task states are close to the A2A states.
@@ -106,7 +105,8 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
      log holds it, and no error names it. The CA bundle and `insecureSkipVerify` of the target apply
      to this client only. Both the MCP path and this client build the HTTP client with
      `mcpgateway.NewTargetHTTPClient`, so one rule covers both.
-   - The agent card must offer a JSON-RPC interface on the host of the target. A card that points
+   - The agent card is read at `/.well-known/agent-card.json` under the target URL (a target with a
+     path works). It must offer a JSON-RPC interface with the scheme and host of the target. A card that points
      to another host is refused: it cannot move the credential or the traffic. The client reads a
      v1.0 card and a v0.3 card, and speaks both bindings (kagent serves v0.3).
    - A response body has a size limit, and the text of a question or reply is cut at 64 KiB. It is
@@ -115,7 +115,11 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    - A task that has ended (completed, failed, canceled, rejected) never gets a message. The client
      reads the task first and refuses (`ErrTaskEnded`). A follow-up turn is a new task in the same
      `contextId`, with `referenceTaskIds` to the task before it, and no task ID.
-   - An answer goes to a task that is `input-required` only, in the context of that task.
+   - An answer goes to a task that is `input-required` only, in the context of that task. A task
+     in `auth-required` takes no answer from the agent, and its text is not shown as a question.
+   - A send returns at once with the task by default. A blocking send is bounded by the request
+     timeout, and a task that runs longer would be lost to the caller, so the caller waits with
+     `GetTask`.
    - A task ID is never reused. An agent that answers a follow-up with the task it follows, or
      that answers in another context or for another task, is refused.
    - The client does not subscribe. `SubscribeToTask` on a task that ended is an error in A2A

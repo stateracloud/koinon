@@ -186,7 +186,7 @@ var _ = Describe("Client", func() {
 			f.afterGets = 2
 			c, err := connect()
 			Expect(err).NotTo(HaveOccurred())
-			r, err := c.Send(bgctx, a2aout.Request{Text: "summarise", ReturnImmediately: true})
+			r, err := c.Send(bgctx, a2aout.Request{Text: "summarise"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(r.State).To(Equal(store.TaskStateWorking))
 			Expect(r.Settled()).To(BeFalse())
@@ -247,6 +247,57 @@ var _ = Describe("Client", func() {
 				Expect(r.Reason).To(Equal(want.r), string(st))
 				Expect(r.External).To(Equal(st))
 			}
+		})
+
+		It("does not answer an auth-required task and shows no question for it", func() {
+			f.tasks["t1"] = task("t1", "c1", a2a.TaskStateAuthRequired, "paste your API token")
+			f.send = func(*a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+				return f.tasks["t1"], nil
+			}
+			c, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			r, err := c.Send(bgctx, a2aout.Request{Text: "x"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.Reason).To(Equal(a2aout.ReasonAuthRequired))
+			Expect(r.Question).To(BeEmpty())
+			f.mu.Lock()
+			n := len(f.sent)
+			f.mu.Unlock()
+			_, err = c.Send(bgctx, a2aout.Request{Text: "sk-fake", AnswerTask: "t1"})
+			Expect(errors.Is(err, a2aout.ErrNotAwaitingInput)).To(BeTrue())
+			Expect(f.sent).To(HaveLen(n))
+		})
+
+		It("returns at once by default and blocks only when asked", func() {
+			c, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Send(bgctx, a2aout.Request{Text: "x"})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Send(bgctx, a2aout.Request{Text: "y", Block: true})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f.sent[0].Config.ReturnImmediately).To(BeTrue())
+			Expect(f.sent[1].Config.ReturnImmediately).To(BeFalse())
+		})
+
+		It("refuses an answer in the context of another task when no context was given", func() {
+			f.tasks["t1"] = task("t1", "c1", a2a.TaskStateInputRequired, "?")
+			f.send = func(*a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+				return task("t1", "c2", a2a.TaskStateCompleted, ""), nil
+			}
+			c, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Send(bgctx, a2aout.Request{Text: "x", AnswerTask: "t1"})
+			Expect(errors.Is(err, a2aout.ErrContextMismatch)).To(BeTrue())
+		})
+
+		It("refuses a cancel answer for another task", func() {
+			f.tasks["t1"] = task("t1", "c1", a2a.TaskStateWorking, "")
+			f.tasks["t2"] = task("t2", "c1", a2a.TaskStateWorking, "")
+			c, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			f.tasks["t1"] = f.tasks["t2"] // the fake now answers t1 with task t2
+			_, err = c.Cancel(bgctx, "t1")
+			Expect(errors.Is(err, a2aout.ErrTaskMismatch)).To(BeTrue())
 		})
 
 		It("refuses an answer with a state the client does not know", func() {
@@ -403,6 +454,34 @@ var _ = Describe("Client", func() {
 			_, err = c.Send(bgctx, a2aout.Request{Text: "x"})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).NotTo(ContainSubstring(fakeToken))
+		})
+
+		It("refuses a card that names the same host over plain http", func() {
+			start(func(c *a2a.AgentCard) {
+				c.SupportedInterfaces = []*a2a.AgentInterface{a2a.NewAgentInterface(strings.Replace(srv.URL, "https://", "http://", 1)+"/jsonrpc", a2a.TransportProtocolJSONRPC)}
+			})
+			_, err := connect()
+			Expect(errors.Is(err, a2aout.ErrCardHost)).To(BeTrue())
+		})
+
+		It("reads the card under a target URL that has a path (kagent)", func() {
+			start(nil)
+			mux := http.NewServeMux()
+			var s *httptest.Server
+			mux.HandleFunc("GET /api/a2a/kagent/k8s/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+				c := card(s.URL + "/api/a2a/kagent/k8s")
+				body, _ := a2av0.NewStaticAgentCardProducer(c).(a2asrv.AgentCardJSONProducer).CardJSON(r.Context())
+				_, _ = w.Write(body)
+			})
+			mux.Handle("POST /api/a2a/kagent/k8s/jsonrpc", a2asrv.NewJSONRPCHandler(f))
+			s = httptest.NewTLSServer(mux)
+			DeferCleanup(s.Close)
+			Expect(os.WriteFile(target.CAFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw}), 0o600)).To(Succeed())
+			target.URL = s.URL + "/api/a2a/kagent/k8s/"
+			c, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			_, err = c.Send(bgctx, a2aout.Request{Text: "x"})
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("refuses a card that names another host, so the credential cannot be moved", func() {
