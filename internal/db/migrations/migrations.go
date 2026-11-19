@@ -81,8 +81,11 @@ func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 // provider key, a secret or an approval. It can read the sealed (encrypted) credential columns of
 // mcp_servers and connections, because the guard's queries select whole rows; the gateway is the only
 // process that may later hold the key to open them (ADR 0097 decision 5), so a column-level grant
-// follows when those queries name their columns. The chart creates the role and makes the
-// gateway's login a member; the migrate role has no CREATEROLE.
+// follows when those queries name their columns. The chart will create the role and make the
+// gateway's login a member (S4b of #278); until then nothing creates it. The grant runs on every
+// migrate and in --grants-only without waiting for the role, so a role that appears later gets its
+// grants at the next run; until then the gateway refuses every org call (fail closed). The migrate
+// role has no CREATEROLE.
 const GatewayRole = "koinon_gateway"
 
 // gatewayGrants are the privileges of GatewayRole. Each line names why the gateway needs it.

@@ -111,6 +111,8 @@ func (a *GatewayGuard) Inspect(ctx context.Context, m mcpgateway.Message) mcpgat
 		// No request of ours is behind it, or a method the guard does not read.
 		return a.unseen(ctx, agent, m)
 	case mcpgateway.KindNotification:
+		// No leg is set: the gateway relays none of a server's notifications to the agent today. A slice
+		// that relays one (progress, log) puts server text into the session and must revisit this line.
 		return mcpgateway.Verdict{}
 	case mcpgateway.KindRequest:
 		switch m.Method {

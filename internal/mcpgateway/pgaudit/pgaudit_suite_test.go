@@ -92,6 +92,16 @@ var _ = Describe("the Postgres audit writer", func() {
 		Expect(w.Record(ctx, row)).NotTo(Succeed())
 	})
 
+	It("cuts a tool name the agent chose that is longer than the column allows", func(ctx SpecContext) {
+		w := pgaudit.New(restricted)
+		row := mcpgateway.AuditRow{Agent: gateway.AgentRef{Org: "acme", Name: "reader"}, Target: "alpha",
+			Tool: strings.Repeat("t", 1000), Outcome: mcpgateway.OutcomeRefusedGrant}
+		Expect(w.Record(ctx, row)).To(Succeed())
+		var n int
+		Expect(admin.QueryRow(ctx, `SELECT max(length(tool)) FROM mcp_call_log`).Scan(&n)).To(Succeed())
+		Expect(n).To(BeNumerically("<=", 256))
+	})
+
 	It("cannot read, change or delete the log as the restricted role", func(ctx SpecContext) {
 		_, err := restricted.Exec(ctx, `SELECT 1 FROM mcp_call_log`)
 		Expect(err).To(HaveOccurred())
