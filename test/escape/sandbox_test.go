@@ -511,27 +511,8 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
 		for _, s := range sockets {
-			Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM", "ENOENT"), "the guest server socket %s accepted the agent user", s)
-		}
-	}, NodeTimeout(2*time.Minute))
-
-	// ateapi and atelet are Substrate's control plane and node agent. Only agentd's identity and the
-	// platform may call them (ADR 0120 section 3.3); the actor never. OpenShell has neither, so the
-	// spec skips on that driver (issue #1092; the Substrate leg comes with the driver, #1088).
-	It("cannot call ateapi or atelet", func(ctx SpecContext) {
-		if escapeDriver() == driverOpenShell {
-			Skip("not applicable on the OpenShell driver: it has no ateapi or atelet")
-		}
-		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
-		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
-		checks := make([]check, 0, len(ts))
-		for _, t := range ts {
-			checks = append(checks, tcp(t))
-		}
-		res := probe(ctx, checks...)
-		for _, c := range checks {
-			// A refusal at connect, not a timeout: a timeout could mean the network is down.
-			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH"), c["id"])
+			// ENOENT fails too: a mistyped path must not pass for a fence.
+			Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM"), "the guest server socket %s accepted the agent user, or does not exist", s)
 		}
 	}, NodeTimeout(2*time.Minute))
 
@@ -553,3 +534,36 @@ const driverOpenShell = "openshell"
 // escapeDriver is the execution driver the suite runs against (KOINON_ESCAPE_DRIVER, default
 // openshell). The specs that exist only for Substrate skip on the OpenShell driver.
 func escapeDriver() string { return envOr("KOINON_ESCAPE_DRIVER", driverOpenShell) }
+
+// substrateProbe runs probe checks in a Substrate sandbox and returns each check's result by id. The
+// Substrate driver (issue #1088) sets it; until then the Substrate specs skip, and fail under
+// KOINON_REQUIRE=substrate-driver.
+var substrateProbe func(ctx context.Context, checks ...check) map[string]any
+
+// ateapi and atelet are Substrate's control plane and node agent. Only agentd's identity and the
+// platform may call them (ADR 0120 section 3.3); the actor never. OpenShell has neither, so the
+// specs skip on that driver.
+var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
+	It("cannot call ateapi or atelet", func(ctx SpecContext) {
+		if escapeDriver() == driverOpenShell {
+			Skip("not applicable on the OpenShell driver: it has no ateapi or atelet")
+		}
+		if substrateProbe == nil {
+			if testenv.Required(os.Getenv(testenv.RequireVar), "substrate-driver") {
+				Fail("no Substrate probe (issue #1088), and KOINON_REQUIRE has substrate-driver")
+			}
+			Skip("the Substrate driver does not exist yet (issue #1088)")
+		}
+		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
+		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
+		checks := make([]check, 0, len(ts))
+		for _, t := range ts {
+			checks = append(checks, check{"id": "tcp " + t.String(), "op": "tcp", "host": t.host, "port": t.port})
+		}
+		res := substrateProbe(ctx, checks...)
+		for _, c := range checks {
+			// Refused by the guest's fence, like every other denial in this suite.
+			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM"), c["id"])
+		}
+	}, NodeTimeout(2*time.Minute))
+})

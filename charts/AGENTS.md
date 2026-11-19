@@ -21,6 +21,6 @@ The root AGENTS.md applies too; this file adds rules for `charts/`.
   startup input (old issue 284).
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`.
   Its OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`. The worker-pod
-  policy specs (label `substrate`, ADR 0120 section 6) run in the same target and skip until the chart
-  renders the worker policy (#1089).
+  policy specs (label `substrate`, ADR 0120 section 6) run in `make test-admission` and skip until the
+  chart renders the worker policy (#1089).
 - Details: `docs/dev/ci.md#chart-and-admission-tests`.

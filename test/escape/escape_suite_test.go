@@ -57,8 +57,8 @@
 //	                            exist (a missing one fails the spec); the built-in default list
 //	                            is skipped where a Service is absent.
 //	                            The live admission case skips unless the chart's policy is bound
-//	                            to the namespace. The Kata case fails when the variable is set
-//	                            and the sandbox is not under Kata.
+//	                            to the namespace. The microVM case fails when the variable is set
+//	                            and the sandbox is not in a microVM guest.
 //
 //	KOINON_ESCAPE_DRIVER        the execution driver under test (default openshell). The specs
 //	                            that exist only for Substrate skip on openshell

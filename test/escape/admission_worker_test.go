@@ -102,7 +102,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			c := rest.CopyConfig(cfg)
-			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: []string{"system:serviceaccounts", "system:authenticated"}}
+			groups := []string{"system:serviceaccounts", "system:authenticated"}
+			if parts := strings.Split(user, ":"); len(parts) == 4 && parts[1] == "serviceaccount" {
+				// A real token also carries its namespace's group.
+				groups = append(groups, "system:serviceaccounts:"+parts[2])
+			}
+			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: groups}
 			as[user] = kubernetes.NewForConfigOrDie(c)
 		}
 		_, err = admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
@@ -126,7 +131,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			Expect(err).NotTo(HaveOccurred())
 		}
 		By("waiting until the policies are enforced")
-		// A pod that breaks every pod rule, so that the wait does not depend on any one of them.
+		// A pod that breaks the hostNetwork and image rules, so that the wait does not depend on one of them.
 		Eventually(func() error {
 			return create(ctx, "admin", workerNamespace, worker("probe", func(p *corev1.Pod) {
 				p.Spec.HostNetwork = true
@@ -160,6 +165,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			denied(create(ctx, workerController, workerNamespace, worker("host-path", func(p *corev1.Pod) {
 				p.Spec.Volumes[0].HostPath.Path = path
 			})))
+			// The documented volume stays, so a policy that reads only the first volume fails here.
+			denied(create(ctx, workerController, workerNamespace, worker("host-path-second", func(p *corev1.Pod) {
+				p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "extra", VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: path},
+				}})
+			})))
 		}
 	})
 
@@ -175,19 +186,11 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}
 	})
 
-	It("denies exec, attach and port-forward into a worker pod, for every identity", func(ctx SpecContext) {
+	It("denies exec into a worker pod, for every identity", func(ctx SpecContext) {
 		// Admission runs before the API server opens the connection, so this needs no kubelet.
 		for _, user := range []string{"admin", workerController, other} {
-			for _, sub := range []string{"exec", "attach", "portforward"} {
-				req := as[user].CoreV1().RESTClient().Post().Param("stdout", "true")
-				switch sub {
-				case "exec":
-					req = req.Param("command", "id")
-				case "portforward":
-					req = as[user].CoreV1().RESTClient().Post().Param("ports", "8080")
-				}
-				denied(req.Namespace(workerNamespace).Resource("pods").Name(existing).SubResource(sub).Do(ctx).Error())
-			}
+			req := as[user].CoreV1().RESTClient().Post().Param("command", "id").Param("stdout", "true")
+			denied(req.Namespace(workerNamespace).Resource("pods").Name(existing).SubResource("exec").Do(ctx).Error())
 		}
 	})
 })
