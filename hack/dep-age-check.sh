@@ -495,6 +495,7 @@ tool_repo() {
 	CRANE) echo "google/go-containerregistry" ;;
 	BUILDX) echo "docker/buildx" ;;
 	ATE_ENV) echo "agent-substrate/env" ;; # a commit pin: dated by the commit's date
+	GVISOR) echo "google/gvisor" ;; # tag release-<version> (issue 1157)
 	esac
 }
 while IFS=$'\t' read -r file line; do
@@ -513,6 +514,7 @@ while IFS=$'\t' read -r file line; do
 		elif [[ -n $repo ]]; then
 			prefix=v
 			[[ $ver == v* || $ver =~ ^[0-9a-f]{40}$ ]] && prefix=
+			[[ $tool == GVISOR ]] && prefix=release-
 			once "pin $repo $prefix$ver" && check_github "$repo" "$prefix$ver"
 		else
 			# Fail closed: a tool whose release cannot be dated would skip the cooldown (ADR 0079).
