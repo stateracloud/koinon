@@ -116,8 +116,8 @@ func newServeCommand(v *viper.Viper) *cobra.Command {
 
 func newMigrateCommand() *cobra.Command {
 	var (
-		c                         config
-		grantsOnly, requireWriter bool
+		c                                      config
+		grantsOnly, requireWriter, waitGateway bool
 	)
 	cmd := &cobra.Command{
 		Use:   "migrate",
@@ -134,10 +134,13 @@ func newMigrateCommand() *cobra.Command {
 			if grantsOnly && requireWriter {
 				return errors.New("--grants-only and --require-install-writer are exclusive: --grants-only waits for the role")
 			}
+			if waitGateway && !grantsOnly {
+				return errors.New("--wait-gateway-role needs --grants-only")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return migrate(cmd.Context(), c.databaseURL, c.wait, migrateOptions{durable: c.durable, grantsOnly: grantsOnly, requireWriter: requireWriter})
+			return migrate(cmd.Context(), c.databaseURL, c.wait, migrateOptions{durable: c.durable, grantsOnly: grantsOnly, requireWriter: requireWriter, waitGateway: waitGateway})
 		},
 	}
 	c.databaseFlag(cmd.Flags())
@@ -149,6 +152,8 @@ func newMigrateCommand() *cobra.Command {
 		"its privileges (the chart's post-upgrade hook in CloudNativePG mode)")
 	fs.BoolVar(&requireWriter, "require-install-writer", false, "fail when the install audit writer role does not exist, "+
 		"instead of warning (the chart passes it on an external database, where nothing creates the role later; ADR 0100 decision 1.1a). It runs before any migration")
+	fs.BoolVar(&waitGateway, "wait-gateway-role", false, "with --grants-only: also wait for the Koinon MCP gateway's group role and grant it "+
+		"(the chart passes it when gateway.mcp.driver=koinon, so a new CloudNativePG managed role is granted before the hook ends)")
 	cli.EnvAlias(cmd, "database-url", "DATABASE_URL")
 	mustRequire(cmd, "database-url")
 	return cmd

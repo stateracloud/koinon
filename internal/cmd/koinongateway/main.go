@@ -187,7 +187,8 @@ func run(ctx context.Context, cfg config) error {
 		Audit:   logAudit{log: log},
 		Logger:  log,
 	}
-	if cfg.databaseURLFile != "" {
+	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
+	if cfg.mcpPath && cfg.databaseURLFile != "" {
 		guard, audit, closeDB, err := openGuard(ctx, cfg.databaseURLFile, log, reg)
 		if err != nil {
 			return err
@@ -398,11 +399,12 @@ func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg promet
 	ga := mcpguard.NewGatewayGuard(g, log)
 	safego.Go(ctx, log, "guard-load", func(ctx context.Context) {
 		for ctx.Err() == nil {
-			if err := ga.Load(ctx); err == nil {
+			err := ga.Load(ctx)
+			if err == nil {
 				log.Info("the leak guard reached its database")
 				return
 			}
-			log.Warn("the leak guard cannot reach its database; org targets stay closed")
+			log.Warn("the leak guard cannot reach its database; org targets stay closed", "err", err)
 			select {
 			case <-ctx.Done():
 			case <-time.After(2 * time.Second):

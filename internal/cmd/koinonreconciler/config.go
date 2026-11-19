@@ -59,7 +59,11 @@ type config struct {
 	gatewayDBURL       string
 	providerKeysSecret string
 	providerKeysDir    string
-	kekDir             string
+	// mcpKeysSecret and mcpKeysDir: the MCP credential files and CA bundles live in a Secret of their own,
+	// so koinon-gateway mounts no LLM provider key (ADR 0097 decision 5). Empty: they share the provider keys Secret.
+	mcpKeysSecret string
+	mcpKeysDir    string
+	kekDir        string
 	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
 	kekWrapping     wrapping.Config
 	keySettle       time.Duration

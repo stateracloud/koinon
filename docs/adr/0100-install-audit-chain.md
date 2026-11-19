@@ -544,7 +544,7 @@ contents. The list:
   `oidc-platform-admin-groups`, `session-idle-timeout`, `session-max-lifetime`, `public-url`,
   `trusted-origins`;
 - network and gateway: `egress-allowed-hosts`, `provider-allowed-hosts`, `guard-addr`,
-  `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `github-api-url`;
+  `leak-guard-byte-cap`, `gateway-url`, `gateway-mcp-url`, `gateway-mcp-check-url`, `github-api-url`;
 - keys and secrets: `kek-secret`, `kek-dir`, `kek-create`, the wrapping flags (`kek-backend`,
   `openbao-*`, `awskms-*`), `saved-work-secret`, `saved-work-addr`;
 - telemetry and scheduling: `otlp-addr`, `otlp-token-dir`, `otlp-traces-token-dir`, `durable`, `run-cap-sweep-interval`, `restore-hold`;

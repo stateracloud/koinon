@@ -186,6 +186,11 @@ func provisionOperatorSecrets(ctx context.Context, cl *cluster, r *rendered) []s
 			}
 			for _, k := range keys {
 				v := fakeValue(k)
+				if component, ok := components[k]; ok {
+					// A login URI of the operator's database Secret that a pod mounts as a file
+					// (koinon-mcp-gateway reads postgres.external.keys.mcpgateway).
+					v = dsnFor(component)
+				}
 				if k == "token" {
 					// A bearer token differs per Secret: koinon-api refuses the same token for
 					// /v1/logs and /v1/traces (issue 55).

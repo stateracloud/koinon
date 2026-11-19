@@ -114,6 +114,12 @@ type Config struct {
 	ProviderKeys ProviderKeyStore
 	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
 	ProviderKeyDir string
+	// MCPKeys receives the credential files and CA bundles of MCP servers (names mcp-..., mcpca-...), apart
+	// from the provider keys, so koinon-gateway mounts no provider key (ADR 0097 decision 5). Nil: they go to
+	// ProviderKeys, as in kubernetes mode.
+	MCPKeys ProviderKeyStore
+	// MCPKeyDir is where the gateway pods mount MCPKeys, for the rendered config. Empty: ProviderKeyDir.
+	MCPKeyDir string
 	// Prices finds the price of each served model; required (prices.NewResolver).
 	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
@@ -381,7 +387,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		plan: gatewayplan.New(gatewayplan.Config{
-			KeyDir: cfg.ProviderKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
+			KeyDir: cfg.ProviderKeyDir, MCPKeyDir: cfg.MCPKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
 			MCPAskURL: cfg.MCPAskURL, Logger: cfg.Logger, Wake: wake,
 		}),
 	}, nil
@@ -780,12 +786,17 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// that provider keeps serving with its previous file, or is left out until the file has arrived.
 	var written []string
 	var present map[string]bool
-	if len(draft.Files) > 0 {
-		var err error
-		if written, present, err = r.cfg.ProviderKeys.Put(ctx, draft.Files); err != nil {
+	for _, part := range r.splitKeyFiles(draft.Files) {
+		w, pr, err := part.store.Put(ctx, part.files)
+		if err != nil {
 			r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
-			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
+			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver %s: %w", part.what, err))...)
 		}
+		written = append(written, w...)
+		if present == nil {
+			present = map[string]bool{}
+		}
+		maps.Copy(present, pr)
 	}
 	plan, err := draft.Settle(ctx, written, present, planLookups{r})
 	if err != nil {
@@ -861,9 +872,21 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 			errs = append(errs, err)
 		}
 		if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
-			if err := r.cfg.ProviderKeys.Prune(ctx, plan.Keep); err != nil {
+			// With a store of its own for MCP files, the provider keys Secret keeps no MCP file: an
+			// earlier version wrote them there, and the prune removes them once the new Secret has them.
+			keepProviders, keepMCP := plan.Keep, map[string]bool(nil)
+			if r.cfg.MCPKeys != nil {
+				keepProviders, keepMCP = splitKeep(plan.Keep)
+			}
+			if err := r.cfg.ProviderKeys.Prune(ctx, keepProviders); err != nil {
 				r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 				errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
+			}
+			if r.cfg.MCPKeys != nil {
+				if err := r.cfg.MCPKeys.Prune(ctx, keepMCP); err != nil {
+					r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
+					errs = append(errs, fmt.Errorf("reconciler: prune MCP credentials: %w", err))
+				}
 			}
 		}
 	}

@@ -74,7 +74,7 @@ spec:
         - name: migrate-grants
           image: {{ include "koinon.image" (list . .Values.api.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["migrate", "--grants-only", "--wait", {{ .Values.migrations.wait | quote }}]
+          args: ["migrate", "--grants-only", "--wait", {{ .Values.migrations.wait | quote }}{{ if include "koinon.mcpKoinon" . }}, "--wait-gateway-role"{{ end }}]
           env:
             {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
           securityContext:
