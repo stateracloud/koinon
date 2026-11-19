@@ -66,6 +66,17 @@ has "worker egress to Koinon names the API pods" 'app.kubernetes.io/component: a
 lacks "worker egress does not name the database" 'postgres|cnpg' "${wsub[@]}" "${np[@]}"
 lacks "worker NetworkPolicy has no public egress" '0\.0\.0\.0/0|::/0' "${wsub[@]}" "${np[@]}"
 has "the default API server rule uses the CIDR" 'cidr: "192.0.2.10/32"' "${wsub[@]}" "${np[@]}"
+# Worker pods (label ate.dev/worker-pool) get no API server route; the control-plane pods get it.
+has "a policy selects the worker pods" 'operator: Exists' "${wsub[@]}" "${np[@]}"
+has "a policy selects the control-plane pods" 'operator: DoesNotExist' "${wsub[@]}" "${np[@]}"
+has "the worker label is the pool label" 'key: ate.dev/worker-pool' "${wsub[@]}" "${np[@]}"
+has "two NetworkPolicies" 'name: koinon-substrate-control$' "${wsub[@]}" "${np[@]}"
+npdocs=$(render "${wsub[@]}" "${np[@]}")
+workers=$(awk '/^---/{d++} d>=1 && /name: koinon-substrate-workers/{f=1} f' <<<"$npdocs" | awk 'NR>1 && /^---/{exit} {print}')
+grep -Fq 'ate.dev/worker-pool' <<<"$workers" || fail "the workers policy must select the worker label"
+if grep -Eq '192\.0\.2\.10|6443|ipBlock' <<<"$workers"; then fail "worker pods must have no API server route"; fi
+control=$(awk '/name: koinon-substrate-control/{f=1} f' <<<"$npdocs")
+grep -Fq 'cidr: "192.0.2.10/32"' <<<"$control" || fail "the control-plane policy must carry the API server route"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs=null' >/dev/null 2>"$out/sub.err"; then fail "an empty apiServerCIDRs must not render"; fi
 grep -q 'apiServerCIDRs' "$out/sub.err" || fail "the empty-CIDR error must name apiServerCIDRs"
 if render "${wsub[@]}" --set execution.substrate.namespace=substrate-x >/dev/null 2>"$out/sub.err"; then fail "a namespace that differs from gatewayClientNamespaceSelector must not render"; fi
@@ -100,7 +111,10 @@ has "nodeSelector sits under spec.template" '^    nodeSelector:' "${wsub[@]}" "$
 has "the pull secrets go to a ServiceAccount" 'kind: ServiceAccount' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
 has "the ServiceAccount carries the pull secret (ADR 0061)" 'name: regcred' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
 has "the pool runs as that ServiceAccount" 'serviceAccountName: "?koinon-gvisor-worker"?' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
-lacks "no ServiceAccount without pull secrets" 'kind: ServiceAccount' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the chart ServiceAccount exists without pull secrets" 'kind: ServiceAccount' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+lacks "no pull secret on it when none is set" 'imagePullSecrets' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the worker ServiceAccount mounts no API token" 'automountServiceAccountToken: false' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the worker ServiceAccount mounts no API token with pull secrets" 'automountServiceAccountToken: false' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
 has "a named ServiceAccount is used as is" 'serviceAccountName: "?my-sa"?' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.serviceAccountName=my-sa "${pool[@]}"
 has "the WorkerPool spec override merges" 'foo: bar' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.spec.foo=bar "${pool[@]}"
 

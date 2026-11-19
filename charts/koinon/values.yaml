@@ -758,9 +758,11 @@ execution:
     # only the allowed peers. No CNI-specific feature.
     workerNetworkPolicy:
       enabled: true
-      # Pods the policy covers. Empty selects every pod in the namespace.
+      # Pods the policies cover. Empty selects every pod in the namespace. The chart adds the worker
+      # label (ate.dev/worker-pool) to split it in two policies: worker pods and control-plane pods.
       podSelector: {}
-      # CIDRs of the Kubernetes API server (the endpoint `kubectl get endpoints kubernetes` shows).
+      # CIDRs of the Kubernetes API server (the endpoint `kubectl get endpoints kubernetes` shows). Only
+      # the control-plane pods get this route; worker pods get none (ADR 0120 section 2.4).
       # Required while the policy is enabled: the render fails when empty, because the policy would cut
       # Substrate's control plane off from the Kubernetes API server. Find them with
       # `kubectl get endpoints kubernetes -n default`.
@@ -787,9 +789,10 @@ execution:
       nodeSelector: {}
       tolerations: []
       # Pull access: the pool's pods run as this ServiceAccount (spec.template.serviceAccountName).
-      # Empty with no pull secrets: Substrate makes its own `ateworker` ServiceAccount. Empty with
-      # imagePullSecrets set: the chart makes a ServiceAccount named like the pool that carries them;
-      # the Secrets must exist in the Substrate namespace.
+      # Empty: the chart makes a ServiceAccount named <pool>-worker with no API token mounted
+      # (automountServiceAccountToken false), and it carries imagePullSecrets when set (the Secrets must
+      # exist in the Substrate namespace). A ServiceAccount you name here is yours: set
+      # automountServiceAccountToken false on it.
       serviceAccountName: ""
       # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
       # does not know, template.labels and template.resources among them.

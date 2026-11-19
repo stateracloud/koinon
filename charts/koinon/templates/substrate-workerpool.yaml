@@ -5,7 +5,9 @@ creates no pool, and the preflight needs one per sandbox class. Off by default. 
 follows Substrate v1.0.0's WorkerPoolSpec: workerImage (required), replicas, sandboxClasses (exactly
 one entry, immutable) and spec.template.{nodeSelector,tolerations,serviceAccountName}. The spec has no
 imagePullSecrets: pull access is a ServiceAccount that carries them (koinon.imagePullSecrets, ADR 0061;
-the Secrets must exist in the Substrate namespace). workerPool.spec is merged over the generated spec.
+the Secrets must exist in the Substrate namespace). The chart makes that ServiceAccount, named like the
+pool plus -worker, unless the values name one; it never mounts an API token (automountServiceAccountToken
+false). A ServiceAccount that the values name must set that field itself. workerPool.spec is merged over the generated spec.
 The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer identity writes it
 (substrate-policy.yaml, workerPolicy.installerIdentities).
 */ -}}
@@ -17,7 +19,7 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- if not $p.workerImage }}{{- fail "execution.substrate.workerPool.workerImage is required when the WorkerPool is enabled (the worker image of the sandbox class, for example <registry>/ateworker-gvisor:v1.0.0)" }}{{- end }}
 {{- $pull := (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}
 {{- $sa := default $userSA $p.serviceAccountName }}
-{{- if and (not $sa) $pull }}{{- $sa = printf "%s-worker" $name }}{{- end }}
+{{- if not $sa }}{{- $sa = printf "%s-worker" $name }}{{- end }}
 {{- $tmpl := dict }}
 {{- with $p.nodeSelector }}{{- $_ := set $tmpl "nodeSelector" . }}{{- end }}
 {{- with $p.tolerations }}{{- $_ := set $tmpl "tolerations" . }}{{- end }}
@@ -33,7 +35,7 @@ metadata:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   {{- toYaml (mergeOverwrite $spec ($p.spec | default dict)) | nindent 2 }}
-{{- if and (not $p.serviceAccountName) (not $userSA) $pull }}
+{{- if and (not $p.serviceAccountName) (not $userSA) }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -42,7 +44,11 @@ metadata:
   namespace: {{ $s.namespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
+# The worker has no Kubernetes client (ADR 0120 section 2.4): no API token in the pod.
+automountServiceAccountToken: false
+{{- with $pull }}
 imagePullSecrets:
-  {{- toYaml $pull | nindent 2 }}
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 {{- end }}
 {{- end }}

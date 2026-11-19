@@ -2,10 +2,13 @@
 {{- /*
 NetworkPolicy for Substrate's namespace (execution.driver=substrate; ADR 0120 section 2, issue 1089).
 Standard networking.k8s.io/v1 only (no CNI-specific resource). The pods of the namespace may talk to
-each other, resolve names, and reach Koinon's gateway and API pods; the
-Kubernetes API server only when workerNetworkPolicy.apiServerCIDRs names it; nothing else leaves the
-namespace unless workerNetworkPolicy.extraEgress says so. Ingress comes from the namespace itself and
-from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7
+each other, resolve names, and reach Koinon's gateway and API pods; nothing else leaves the
+namespace unless workerNetworkPolicy.extraEgress says so. Two policies split the Kubernetes API server
+route: worker pods (label ate.dev/worker-pool, set by the WorkerPool controller) get none, because the
+worker has no Kubernetes client and its identity is a PodCertificate projection, not a ServiceAccount
+token (ADR 0120 section 2.4); the control-plane pods (atelet, ate-controller, ate-api, atenet, the
+podcert controller, the credential provider) get it only when workerNetworkPolicy.apiServerCIDRs names it. Ingress
+comes from the namespace itself and from Koinon's namespace. An actor's traffic to the outside runs through atenet and the gateway's L7
 rules, not through this policy. A CNI that does not enforce NetworkPolicy ignores all of it (the
 preflight's NetworkPolicy probe reports it).
 */ -}}
@@ -15,23 +18,29 @@ preflight's NetworkPolicy probe reports it).
 {{- if not $np.apiServerCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the policy would cut the Substrate control plane off from the Kubernetes API server. Name the API server's CIDRs (kubectl get endpoints kubernetes -n default), or set workerNetworkPolicy.enabled=false and fence the namespace yourself." }}{{- end }}
 {{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $s.namespace $s.gatewayClientNamespaceSelector }}
 {{- if ne $gwNS $s.namespace }}{{- fail (printf "execution.substrate.gatewayClientNamespaceSelector names namespace %q but execution.substrate.namespace is %q: the gateway would drop the worker traffic" $gwNS $s.namespace) }}{{- end }}
+{{- $workerLabel := "ate.dev/worker-pool" }}
+{{- range $kind := (list "workers" "control") }}
+{{- $sel := deepCopy ($np.podSelector | default dict) }}
+{{- $op := ternary "Exists" "DoesNotExist" (eq $kind "workers") }}
+{{- $_ := set $sel "matchExpressions" (append ($sel.matchExpressions | default list) (dict "key" $workerLabel "operator" $op)) }}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "koinon.fullname" . }}-substrate-workers
+  name: {{ include "koinon.fullname" $ }}-substrate-{{ $kind }}
   namespace: {{ $s.namespace | quote }}
   labels:
-    {{- include "koinon.commonLabels" . | nindent 4 }}
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
 spec:
   podSelector:
-    {{- toYaml ($np.podSelector | default dict) | nindent 4 }}
+    {{- toYaml $sel | nindent 4 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector: {}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+              kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
   egress:
     - to:
         - podSelector: {}
@@ -51,7 +60,7 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-{{- if $np.apiServerCIDRs }}
+{{- if eq $kind "control" }}
     - to:
         {{- range $np.apiServerCIDRs }}
         - ipBlock:
@@ -63,5 +72,6 @@ spec:
 {{- end }}
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
+{{- end }}
 {{- end }}
 {{- end }}
