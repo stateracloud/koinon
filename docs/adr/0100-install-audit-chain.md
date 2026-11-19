@@ -719,6 +719,66 @@ closes the ADR 0023 superuser gap and its open question on HMAC custody or exter
 compromised `koinon-api` can still sign a false checkpoint for the future; external witnesses or an
 RFC 3161 timestamp are a later step.
 
+**Amendment 2026-11-19: how signed checkpoints are built (issue 7, #334).**
+
+- **The key.** The Secret `<release>-audit-signing` holds one data key, `seed`: 32 random bytes, the
+  seed of an Ed25519 key. `koinon-api` makes it on the first checkpoint with a `get` and then a
+  `create`, as it does for the saved-work key. It never updates it. A replica that loses the race
+  reads the Secret the winner made. The first creation is recorded as `keys.generated`. The chart
+  adds no RBAC rule: the `get` and `create` of the `koinon-api` Role on Secrets are enough, and no
+  other Role names the Secret. `koinon-api` reads the Secret at each checkpoint through the
+  Kubernetes API, so a rotation needs no restart. No workload mounts it. The seed is never logged
+  and never put in an event.
+- **What is signed.** The anchor row of the install chain: its `chain_seq` and hash. It is not the
+  install head at signing time, because the checkpoint event is itself a later row. One checkpoint
+  follows each anchor. A tick that finds an anchor with no checkpoint signs it, so a missed tick is
+  made good on the next one. The note layout is the one above. The key name is the origin, so a
+  note names the install it speaks for, and the key hash is the first 4 bytes of
+  `sha256(name, "\n", 0x01, public key)` as in C2SP signed-note. The public key is kept as one
+  line, `<name>+<key id>+<base64 of 0x01 and the key>` (the C2SP vkey form).
+- **The events.** `audit.signing_key.added` (target kind `audit_signing_key`, target ID the key ID)
+  holds the public key. It is written in the same transaction as the first checkpoint of that key,
+  so a checkpoint never lacks its key. `audit.checkpoint` holds `anchor_seq`, `head` (hex), `key_id`
+  and the whole note. Both have the actor `koinon-api:audit-anchor`. The export of the install
+  chain carries both events, so the note is exported with the chain. There is no separate export
+  line for it.
+- **Signer rule.** Before it signs, the checkpoint code checks that the install chain still holds
+  the head of the last checkpoint (C2SP tlog-checkpoint: a signer never signs a chain that
+  disagrees with one it signed before). If not, it refuses (`ErrCheckpointInconsistent`), logs it
+  once and goes on trying. `koinon_audit_checkpoint_age_seconds` then grows. The gauge has no labels
+  (ADR 0023). It is the seconds since the newest `audit.checkpoint` event, or since the process
+  started while there is none.
+- **Verification.** `koinon-api audit verify --file <export> --checkpoint <note> --public-key <key>`
+  checks the note's signature against the keys it is given (a key line, or a file of key lines; a
+  rotated key stays valid for the notes it signed), then checks that the install export holds the
+  signed hash at the signed `chain_seq`. An export that ends before that `chain_seq`, or has another
+  hash there, fails. An export that starts after it cannot be checked and is an error: verify the
+  full export. For an org export, `--anchors <install export>` is also required. The install export
+  is checked against the checkpoint first, and each org chain then against the anchors under it, so
+  a rewritten org chain fails at the anchored `chain_seq`. `audit checkpoint` prints the newest note
+  and `audit public-keys` prints the published keys; both read the database, so run them in a
+  `koinon-api` pod.
+- **Operator steps** (the long form is in `koinon-docs`, ADR 0108).
+  - *Keep outside the cluster:* each public key when it is new (`audit public-keys`), and the newest
+    note and an export of the install chain at a rhythm you choose. A key you only read from the
+    database later proves nothing against someone who can rewrite the database.
+  - *Back up the Secret?* Only if you want the same key after a restore. Verification needs the
+    public key only. If the Secret is lost, the next checkpoint makes a new key. That is a rotation (below).
+  - *Rotate:* delete the Secret. The next checkpoint makes a new key and publishes it. Keep the old
+    public key: it still verifies the older notes. Old and new keys can be given together.
+- **Limits.** "Only `koinon-api` can read the key" holds for mounts and for Role rules that name the
+  Secret. It does not hold for the RBAC `get` verb: the reconciler has `get` on Secrets of its
+  namespace for the Secrets it makes (its writes are fenced by a ValidatingAdmissionPolicy, its reads
+  are not, because admission does not see a read). A change that closes this, for example a
+  separate namespace for the key or a reconciler Role limited by name, is a follow-up. A compromised
+  `koinon-api` can still sign a false checkpoint for the future. A checkpoint held outside the
+  cluster still fixes every chain up to its `chain_seq`.
+
+*Prior art.* C2SP signed-note and tlog-checkpoint (the sources of the anchor amendment above) give
+the note layout, the key hash and the signer rule. This code does not use a signed-note library.
+The body is three fixed lines. A key line needs a split at the first two plus signs only, because
+standard base64 can hold a plus sign (`ParsePublicKey`).
+
 ### 5. Read, export and retention
 
 **Read.** Only platform admins read the install chain. `AuditService.List` gains a `scope` field

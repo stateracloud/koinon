@@ -5,14 +5,18 @@ package audit_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -268,6 +272,38 @@ var _ = Describe("signed audit checkpoints", func() {
 		}
 		_, _, err := audit.VerifyNote([]byte(oldNote.Note), known[1:])
 		Expect(err).To(MatchError(audit.ErrNoteUnknownKey), "a verifier that pinned only the new key rejects the old note")
+	})
+
+	It("is written by the anchor job after each anchor, sets a gauge without labels, and logs the note but not the seed", func(ctx SpecContext) {
+		reg := prometheus.NewRegistry()
+		audit.RegisterAnchorMetric(reg)
+		gauge := func() float64 {
+			GinkgoHelper()
+			mfs, err := reg.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			for _, mf := range mfs {
+				if mf.GetName() == "koinon_audit_checkpoint_age_seconds" {
+					Expect(mf.GetMetric()[0].GetLabel()).To(BeEmpty(), "no labels (ADR 0023)")
+					return mf.GetMetric()[0].GetGauge().GetValue()
+				}
+			}
+			Fail("koinon_audit_checkpoint_age_seconds is not registered")
+			return 0
+		}
+		var logs bytes.Buffer
+		job := &audit.AnchorJob{DB: db, Interval: time.Hour, Keys: keys, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+		job.Tick(ctx)
+		var n int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'audit.checkpoint'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
+		Expect(gauge()).To(BeNumerically("<", 60))
+		Expect(logs.String()).To(ContainSubstring(audit.CheckpointLogMessage))
+		Expect(logs.String()).NotTo(ContainSubstring(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{keys.fill}, audit.SeedSize))))
+
+		By("another tick in the interval signs nothing more")
+		job.Tick(ctx)
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM install_audit_events WHERE action = 'audit.checkpoint'`).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
 	})
 
 	It("never lets a second replica sign the same anchor twice", func(ctx SpecContext) {

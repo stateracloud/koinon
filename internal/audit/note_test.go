@@ -116,3 +116,23 @@ func TestParsePublicKeyRejects(t *testing.T) {
 		}
 	}
 }
+
+// Standard base64 holds plus signs, so a public key line must split at the first two only.
+func TestPublicKeyWithPlusInBase64RoundTrips(t *testing.T) {
+	found := 0
+	for fill := range byte(200) {
+		k := testKey(t, "koinon.dev/install/x/audit", fill).Public()
+		parts := strings.SplitN(k.String(), "+", 3)
+		if !strings.Contains(parts[2], "+") {
+			continue
+		}
+		found++
+		p, err := audit.ParsePublicKey(k.String())
+		if err != nil || p.ID() != k.ID() {
+			t.Fatalf("seed byte %d: %v", fill, err)
+		}
+	}
+	if found == 0 {
+		t.Fatal("no test key had a plus sign in its base64")
+	}
+}

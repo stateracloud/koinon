@@ -124,7 +124,8 @@ func (p PublicKey) String() string {
 // ParsePublicKey reads the String form and checks the key ID against the key.
 func ParsePublicKey(s string) (PublicKey, error) {
 	s = strings.TrimSpace(s)
-	parts := strings.Split(s, "+")
+	// The name and the ID have no plus sign, but standard base64 can: split at the first two only.
+	parts := strings.SplitN(s, "+", 3)
 	if len(parts) != 3 {
 		return PublicKey{}, errors.New("a public key is <name>+<id>+<base64>")
 	}
