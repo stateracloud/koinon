@@ -51,6 +51,9 @@ var (
 
 // ErrCardMoved is returned by AcceptCard when the observed card is not the one the admin read: the health
 // check saw another card since. Callers map it to a conflict.
+// ErrChanged is an update that was prepared for a row that an admin or `keys rewrap` changed since.
+var ErrChanged = fmt.Errorf("%w: the remote agent changed while this update was prepared; read it again", ErrConflict)
+
 var ErrCardMoved = fmt.Errorf("%w: the observed card changed since it was read; read it again", ErrConflict)
 
 // InvalidError is a validation failure.
@@ -554,8 +557,8 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err != nil {
 			return err
 		}
-		if !locked.UpdatedAt.Time.Equal(cur.UpdatedAt.Time) {
-			return fmt.Errorf("%w: the remote agent changed while this update was prepared; read it again", ErrConflict)
+		if !sameSettings(locked, cur) {
+			return ErrChanged
 		}
 		if caBundle != "" && caBundle != cur.CaBundle {
 			if err := checkCABudget(ctx, q, org, rid, caBundle); err != nil {

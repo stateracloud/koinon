@@ -35,7 +35,7 @@ func remoteAgentProto(org string, r remoteagents.RemoteAgent) *remoteagentv1alph
 
 // remoteAgentError maps the service's errors; messages are safe to show.
 func (s *Server) remoteAgentError(err error) error {
-	if errors.Is(err, remoteagents.ErrCardMoved) {
+	if errors.Is(err, remoteagents.ErrCardMoved) || errors.Is(err, remoteagents.ErrChanged) {
 		return connect.NewError(connect.CodeAborted, err.Error())
 	}
 	return s.catalogError(err)

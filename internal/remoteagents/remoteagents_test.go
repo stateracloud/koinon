@@ -28,6 +28,7 @@ type fakeCards struct {
 	cards map[string]string
 	err   error
 	last  remoteagents.FetchRequest
+	hook  func()
 }
 
 // hx makes a valid card hash (64 hex characters) from a short label.
@@ -43,6 +44,10 @@ func (f *fakeCards) set(url, hash string) {
 }
 
 func (f *fakeCards) fetch(_ context.Context, r remoteagents.FetchRequest, _ catalog.URLPolicy) (*a2aout.Card, error) {
+	if h := f.hook; h != nil {
+		f.hook = nil
+		h()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.last = r
@@ -243,14 +248,40 @@ var _ = Describe("remote agents", func() {
 			r := create(ctx, "stale", url)
 			rows, err := svc.ListCheckable(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
-			seen := rows[0].UpdatedAt
+			Expect(rows).To(HaveLen(1))
+			Expect(rows[0].ID.String()).To(Equal(r.ID))
+			seen := rows[0]
 			nu := url + "/new"
 			_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{CardURL: &nu})
 			Expect(err).NotTo(HaveOccurred())
-			out, err := svc.RecordCheck(ctx, org, rows[0].ID, remoteagents.Outcome{Card: &a2aout.Card{Hash: hx("old-url-card"), JSON: "{}"}, Seen: seen})
+			out, err := svc.RecordCheck(ctx, org, rows[0].ID, remoteagents.Outcome{Card: &a2aout.Card{Hash: hx("old-url-card"), JSON: "{}"}, Seen: &seen})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.CardChanged()).To(BeFalse())
 			Expect(out.Health).To(Equal(remoteagents.HealthUnknown))
+		})
+
+		It("lets a health write land while an update reads the new card, and refuses an admin change", func(ctx SpecContext) {
+			r := create(ctx, "racy", url)
+			id := pgtype.UUID{}
+			Expect(id.Scan(r.ID)).To(Succeed())
+			nu := url + "/new"
+			// A health write between phase 1 and phase 2 of Update is not a conflict.
+			fake.hook = func() {
+				_, err := svc.RecordCheck(ctx, org, id, remoteagents.Outcome{Reason: remoteagents.ReasonUnreachable})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			up, err := svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{CardURL: &nu})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(up.CardURL).To(Equal(nu))
+			// An admin change between the phases is refused.
+			other := url + "/other"
+			fake.hook = func() {
+				u := url + "/third"
+				_, err := svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{CardURL: &u})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{CardURL: &other})
+			Expect(errors.Is(err, remoteagents.ErrChanged)).To(BeTrue())
 		})
 
 		It("checks through the fetcher and records the card", func(ctx SpecContext) {

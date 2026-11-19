@@ -3,6 +3,7 @@
 package remoteagents
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -19,9 +20,10 @@ type Outcome struct {
 	Card *a2aout.Card
 	// Reason is the fixed text of a failed read (see reasonOf); empty when the read worked.
 	Reason string
-	// Seen is the updated_at of the row the read was made for. When the row changed since (an admin moved
-	// the URL, the credential or the pin), the result is for another agent and RecordCheck drops it.
-	Seen pgtype.Timestamptz
+	// Seen is the row the read was made for. When an admin changed its URL, credential, TLS trust or pin
+	// since (see sameSettings), the result is for another agent and RecordCheck drops it. Health writes
+	// of the checker itself do not count.
+	Seen *store.RemoteAgent
 }
 
 // ListCheckable returns the remote agents of one org that the health check reads.
@@ -47,16 +49,16 @@ func (s *Service) Check(ctx context.Context, row store.RemoteAgent) (RemoteAgent
 	if err != nil {
 		// The log carries the error, which names no secret; the stored reason is a fixed text.
 		s.log.Warn("remote agent check: credential not opened", "org", row.OrgID.String(), "agent", row.ID.String(), "err", err)
-		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: ReasonCredentialBad, Seen: row.UpdatedAt})
+		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: ReasonCredentialBad, Seen: &row})
 	}
 	card, err := s.fetch(ctx, FetchRequest{
 		URL: row.CardUrl, Header: row.CredentialHeader.String, Prefix: row.CredentialPrefix, Secret: secret,
 		CABundle: row.CaBundle, InsecureSkipVerify: row.InsecureSkipVerify,
 	}, s.policy)
 	if err != nil {
-		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: reasonOf(err), Seen: row.UpdatedAt})
+		return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Reason: reasonOf(err), Seen: &row})
 	}
-	return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Card: card, Seen: row.UpdatedAt})
+	return s.RecordCheck(ctx, row.OrgID, row.ID, Outcome{Card: card, Seen: &row})
 }
 
 // RecordCheck records one health check on the locked row.
@@ -74,7 +76,7 @@ func (s *Service) RecordCheck(ctx context.Context, org, id pgtype.UUID, o Outcom
 		if err != nil {
 			return err
 		}
-		if o.Seen.Valid && !o.Seen.Time.Equal(cur.UpdatedAt.Time) {
+		if o.Seen != nil && !sameSettings(*o.Seen, cur) {
 			// The row changed since the read: the result is stale. The next check reads the new row.
 			out = cur
 			return nil
@@ -115,4 +117,12 @@ func (s *Service) RecordCheck(ctx context.Context, org, id pgtype.UUID, o Outcom
 		return RemoteAgent{}, fmt.Errorf("remoteagents: record check: %w", mapErr(err))
 	}
 	return toRemoteAgent(out), nil
+}
+
+// sameSettings says whether two reads of a row agree on what an admin owns: where the agent is, how it is
+// reached and which card is pinned. Health and check fields change at every check and do not count.
+func sameSettings(a, b store.RemoteAgent) bool {
+	return a.CardUrl == b.CardUrl && a.CardHash == b.CardHash && bytes.Equal(a.Credential, b.Credential) &&
+		a.CredentialHeader == b.CredentialHeader && a.CredentialPrefix == b.CredentialPrefix &&
+		a.CredentialLostAt.Valid == b.CredentialLostAt.Valid && a.CaBundle == b.CaBundle && a.InsecureSkipVerify == b.InsecureSkipVerify
 }
