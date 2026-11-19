@@ -6,7 +6,7 @@
 
 sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
-	--set execution.substrate.allowUnhardened=true
+	--set execution.substrate.allowUnhardened=true --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
 # OpenShell stays the default: no Substrate input reaches any component.
@@ -33,7 +33,7 @@ for flag in sandboxObserver sandboxNetworkPolicy sandboxLimitRange; do
 	if render "${sub[@]}" --set "$flag.enabled=true" >/dev/null 2>"$out/sub.err"; then fail "$flag.enabled with substrate must not render"; fi
 	grep -q "$flag.enabled" "$out/sub.err" || fail "the $flag error must name it"
 done
-if render --set execution.driver=substrate >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
+if render --set execution.driver=substrate --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}' >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
 grep -q 'controlAddress' "$out/sub.err" || fail "the missing-address error must name execution.substrate.controlAddress"
 if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown driver must not render"; fi
 # Substrate is refused until the guest launcher and the read-only root land (#1088 slices b and c).
@@ -50,4 +50,4 @@ for gm in standalone kubernetes; do
 	has "substrate admits Substrate's namespace ($gm)" 'kubernetes.io/metadata.name: ate-system' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "substrate has no openshell.ai/managed-by peer ($gm)" 'openshell.ai/managed-by' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 done
-has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: substrate-x' "${sub[@]}" --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x --show-only templates/networkpolicy.yaml
+has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: substrate-x' "${sub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x --show-only templates/networkpolicy.yaml

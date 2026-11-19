@@ -7,14 +7,14 @@
 
 wsub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
-	--set execution.substrate.allowUnhardened=true
+	--set execution.substrate.allowUnhardened=true --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 pol=(--show-only templates/substrate-policy.yaml)
 np=(--show-only templates/substrate-networkpolicy.yaml)
 pool=(--show-only templates/substrate-workerpool.yaml)
 
 # Nothing of it renders with the default driver.
-lacks "no worker policy with the openshell driver" 'worker-pods|worker-connect'
+lacks "no worker policy with the openshell driver" 'worker-(pods|connect|objects)'
 lacks "no worker NetworkPolicy with the openshell driver" 'substrate-workers'
 lacks "no WorkerPool with the openshell driver" 'kind: WorkerPool'
 
@@ -24,9 +24,9 @@ has "worker CONNECT policy" 'name: koinon-koinon-worker-connect$' "${wsub[@]}" "
 has "policies are native ValidatingAdmissionPolicies" 'kind: ValidatingAdmissionPolicyBinding' "${wsub[@]}" "${pol[@]}"
 lacks "no Kyverno" '[Kk]yverno' "${wsub[@]}" "${pol[@]}"
 has "bound to the Substrate namespace" 'kubernetes.io/metadata.name: "ate-system"' "${wsub[@]}" "${pol[@]}"
-has "the Substrate namespace is configurable" 'kubernetes.io/metadata.name: "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x "${pol[@]}"
+has "the Substrate namespace is configurable" 'kubernetes.io/metadata.name: "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"
 has "the controller identity defaults to ate-controller in the namespace" 'system:serviceaccount:ate-system:ate-controller' "${wsub[@]}" "${pol[@]}"
-has "the controller identity follows the namespace" 'system:serviceaccount:substrate-x:ate-controller' "${wsub[@]}" --set execution.substrate.namespace=substrate-x "${pol[@]}"
+has "the controller identity follows the namespace" 'system:serviceaccount:substrate-x:ate-controller' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"
 has "the controller identity is configurable" 'system:serviceaccount:other:ctl' "${wsub[@]}" --set 'execution.substrate.workerPolicy.controllerIdentities={system:serviceaccount:other:ctl}' "${pol[@]}"
 has "Kubernetes workload controllers may create the control plane's pods" 'system:serviceaccount:kube-system:replicaset-controller' "${wsub[@]}" "${pol[@]}"
 has "images are pinned by digest" "@sha256:\[a-f0-9\]\{64\}" "${wsub[@]}" "${pol[@]}"
@@ -52,8 +52,8 @@ has "the object guard covers the workload kinds" 'resources: \[deployments, repl
 has "the object guard covers jobs and cronjobs" 'resources: \[jobs, cronjobs\]' "${wsub[@]}" "${pol[@]}"
 has "the installer group defaults to system:masters" 'g in \[\\"system:masters\\"\]' "${wsub[@]}" "${pol[@]}"
 has "installer identities are configurable" 'system:admin' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
-has "the controller may change metadata of Substrate objects only" "request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && object.spec == oldObject.spec" "${wsub[@]}" "${pol[@]}"
-lacks "the policies are off when disabled" 'worker-pods|worker-connect' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
+has "the controller may change metadata of Substrate objects only" "request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has\(object.spec\) && has\(oldObject.spec\) && object.spec == oldObject.spec" "${wsub[@]}" "${pol[@]}"
+lacks "the policies are off when disabled" 'worker-(pods|connect|objects)' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
 if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.validationActions={Nope}' >/dev/null 2>&1; then fail "an unknown validation action must not render"; fi
 
 # NetworkPolicy: default-deny shape in the Substrate namespace, standard API only.
@@ -65,7 +65,14 @@ has "worker egress to Koinon names the gateway pods" 'app.kubernetes.io/componen
 has "worker egress to Koinon names the API pods" 'app.kubernetes.io/component: api' "${wsub[@]}" "${np[@]}"
 lacks "worker egress does not name the database" 'postgres|cnpg' "${wsub[@]}" "${np[@]}"
 lacks "worker NetworkPolicy has no public egress" '0\.0\.0\.0/0|::/0' "${wsub[@]}" "${np[@]}"
-lacks "no API server rule without CIDRs" 'ipBlock' "${wsub[@]}" "${np[@]}"
+has "the default API server rule uses the CIDR" 'cidr: "192.0.2.10/32"' "${wsub[@]}" "${np[@]}"
+if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs=null' >/dev/null 2>"$out/sub.err"; then fail "an empty apiServerCIDRs must not render"; fi
+grep -q 'apiServerCIDRs' "$out/sub.err" || fail "the empty-CIDR error must name apiServerCIDRs"
+if render "${wsub[@]}" --set execution.substrate.namespace=substrate-x >/dev/null 2>"$out/sub.err"; then fail "a namespace that differs from gatewayClientNamespaceSelector must not render"; fi
+grep -q 'gatewayClientNamespaceSelector' "$out/sub.err" || fail "the namespace-mismatch error must name gatewayClientNamespaceSelector"
+has "a matching namespace and selector render" 'namespace: "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${np[@]}"
+has "replication controllers are guarded" 'replicationcontrollers' "${wsub[@]}" "${pol[@]}"
+has "the digest rule skips metadata-only updates" "object.spec == oldObject.spec) || variables.tagAllowed" "${wsub[@]}" "${pol[@]}"
 has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={10.0.0.1/32}' "${np[@]}"
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
 lacks "the NetworkPolicy is off when disabled" 'substrate-workers' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false

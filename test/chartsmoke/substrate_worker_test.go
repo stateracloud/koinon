@@ -20,7 +20,7 @@ var _ = Describe("substrate worker namespace", func() {
 		// Pods, CONNECT and the installer-written kinds: three policies, three bindings.
 		Expect(r.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 3))
 		Expect(r.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 3))
-		Expect(r.Ignored).To(HaveKeyWithValue("NetworkPolicy", BeNumerically(">=", 1)))
+		Expect(r.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
 	})
 
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {

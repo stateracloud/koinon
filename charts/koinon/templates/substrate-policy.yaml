@@ -76,7 +76,7 @@ spec:
       message: only the Substrate controller may change the labels of a pod in the Substrate namespace
     - expression: {{ printf "variables.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)" (toJson $w.allowedHostPaths) | quote }}
       message: {{ printf "hostPath is allowed only for %s in the Substrate namespace" (join ", " $w.allowedHostPaths) | quote }}
-    - expression: "variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
+    - expression: "(request.operation == 'UPDATE' && object.spec == oldObject.spec) || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
       message: images in the Substrate namespace must be pinned by digest (name@sha256:<64 hex digits>)
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -146,6 +146,10 @@ spec:
         apiVersions: ["*"]
         operations: [CREATE, UPDATE, DELETE]
         resources: [deployments, replicasets, daemonsets, statefulsets]
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [replicationcontrollers]
       - apiGroups: [batch]
         apiVersions: ["*"]
         operations: [CREATE, UPDATE, DELETE]
@@ -157,7 +161,7 @@ spec:
       expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
     # The Substrate controller changes metadata (finalizers, annotations) of its own objects, never the spec.
     - name: controllerMetadata
-      expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && object.spec == oldObject.spec" (toJson $controllers) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) | quote }}
   validations:
     - expression: "variables.installer || variables.kube || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"

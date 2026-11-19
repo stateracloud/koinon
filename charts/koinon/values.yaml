@@ -748,7 +748,9 @@ execution:
       # Pods the policy covers. Empty selects every pod in the namespace.
       podSelector: {}
       # CIDRs of the Kubernetes API server (the endpoint `kubectl get endpoints kubernetes` shows).
-      # Empty adds no API server rule.
+      # Required while the policy is enabled: the render fails when empty, because the policy would cut
+      # Substrate's control plane off from the Kubernetes API server. Find them with
+      # `kubectl get endpoints kubernetes -n default`.
       apiServerCIDRs: []
       # Extra egress rules, in networking.k8s.io/v1 form, for an object store or database outside
       # the cluster.

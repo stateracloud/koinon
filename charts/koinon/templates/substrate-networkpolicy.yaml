@@ -12,6 +12,9 @@ preflight's NetworkPolicy probe reports it).
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
 {{- $s := .Values.execution.substrate }}
 {{- $np := $s.workerNetworkPolicy }}
+{{- if not $np.apiServerCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the policy would cut the Substrate control plane off from the Kubernetes API server. Name the API server's CIDRs (kubectl get endpoints kubernetes -n default), or set workerNetworkPolicy.enabled=false and fence the namespace yourself." }}{{- end }}
+{{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $s.namespace $s.gatewayClientNamespaceSelector }}
+{{- if ne $gwNS $s.namespace }}{{- fail (printf "execution.substrate.gatewayClientNamespaceSelector names namespace %q but execution.substrate.namespace is %q: the gateway would drop the worker traffic" $gwNS $s.namespace) }}{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
