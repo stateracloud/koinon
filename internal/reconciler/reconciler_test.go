@@ -1342,6 +1342,17 @@ var _ = Describe("Reconciler", func() {
 		go func() { done <- r.Run(runCtx) }()
 		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
 		Eventually(applies.Load).WithTimeout(racescale.D(10*time.Second)).Should(BeNumerically(">=", 1), "the leader's first pass")
+		// The leader's first pass writes sandbox rows, and a row write can NOTIFY: a second pass may follow
+		// after the 200 ms debounce (#994: the count was 2 where this spec expected 1). Wait until no pass
+		// has come for three debounce periods, and count from there, so that only a wake of the ledger's own
+		// can add a pass between the two requests.
+		var settled int64
+		Eventually(func() bool {
+			before := applies.Load()
+			time.Sleep(racescale.D(600 * time.Millisecond))
+			settled = applies.Load()
+			return settled == before
+		}).WithTimeout(racescale.D(30*time.Second)).Should(BeTrue(), "the leader's own passes end")
 		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
 
 		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
@@ -1356,7 +1367,7 @@ var _ = Describe("Reconciler", func() {
 		// The ingest below the limit sends no NOTIFY (ledger/ingest.go: only a reserve change or an
 		// enforce crossing does), so no pass can run between the two requests. If a later change adds
 		// a wake, this check fails instead of the measured window silently changing.
-		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(1), "no pass runs below the limit")
+		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(settled), "no pass runs below the limit")
 		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
 
 		By("the request that reaches the limit")
