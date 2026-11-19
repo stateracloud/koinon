@@ -5,6 +5,7 @@ package mcpguard_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gstruct"
@@ -30,13 +32,16 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/mcpask"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -53,6 +58,9 @@ const secretPage = "Quarterly retention plan for the Northwind accounts: the ren
 	"Do not share the per-account margins outside the finance group."
 
 // escapeAll writes every character of s as a JSON \u escape.
+// sqlDB is a database/sql handle on the same database as p, for the helpers that take a migrations.Execer.
+func sqlDB(p *pgxpool.Pool) *sql.DB { return stdlib.OpenDBFromPool(p) }
+
 func escapeAll(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -275,6 +283,68 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 	It("lets a clean call to an external-high tool through, with no approval", func(ctx SpecContext) {
 		Expect(passed(call(ctx, "tracker", "post_message", map[string]any{"text": "the build is green"}))).To(BeTrue())
 		Expect(approvals(ctx)).To(BeZero())
+	})
+
+	It("serves the gateway as the restricted koinon_gateway role: the grants are enough, and the route is closed until Load", func(ctx SpecContext) {
+		Expect(pgtest.EnsureRole(ctx, sqlDB(pool), migrations.GatewayRole)).To(Succeed())
+		ok, err := migrations.GrantGateway(ctx, sqlDB(pool))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(BeTrue())
+		cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
+		Expect(err).NotTo(HaveOccurred())
+		cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+			_, err := c.Exec(ctx, `SET ROLE `+migrations.GatewayRole)
+			return err
+		}
+		restricted, err := pgxpool.NewWithConfig(ctx, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(restricted.Close)
+
+		gg := mcpguard.NewGatewayGuard(mcpguard.New(restricted, mcpguard.Options{OwnTargets: []string{"github", "koinon"}}), nil)
+		Expect(gg.Loaded()).To(MatchError(mcpguard.ErrNotLoaded))
+		Expect(gg.Load(ctx)).To(Succeed())
+		Expect(gg.Loaded()).To(Succeed())
+
+		ref := gateway.AgentRef{Org: slug, Name: agent.ID.String()}
+		read := func(server, tool, text string) mcpgateway.Verdict {
+			GinkgoHelper()
+			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}}})
+			Expect(err).NotTo(HaveOccurred())
+			return gg.Inspect(ctx, mcpgateway.Message{
+				Target: mcpservers.TargetName(slug, server), Agent: ref, Dir: mcpgateway.FromUpstream,
+				Kind: mcpgateway.KindResult, Method: "tools/call", Tool: tool, Raw: body,
+			})
+		}
+		callOf := func(server, tool string, args map[string]any) mcpgateway.Verdict {
+			GinkgoHelper()
+			raw, err := json.Marshal(args)
+			Expect(err).NotTo(HaveOccurred())
+			return gg.CheckCall(ctx, mcpgateway.Call{Agent: ref, Target: mcpservers.TargetName(slug, server), Tool: tool, Arguments: raw})
+		}
+		// A clean call passes. A private result is recorded; the same text sent to an external-high
+		// tool then needs a person, and the gateway has none in this slice, so it is refused.
+		Expect(callOf("tracker", "post_message", map[string]any{"text": "the build is green"}).Refuse).To(BeFalse())
+		Expect(read("wiki", "read_page", secretPage).Refuse).To(BeFalse())
+		v := callOf("tracker", "post_message", map[string]any{"text": "fyi: " + secretPage[40:300]})
+		Expect(v.Refuse).To(BeTrue())
+		Expect(v.Reason).NotTo(BeEmpty())
+		Expect(v.Reason).NotTo(ContainSubstring("Halvorsen"))
+		Expect(approvals(ctx)).To(BeZero(), "the gateway guard has no approval route")
+
+		// The role holds nothing it does not use: no write to the catalog, no read of approvals, and an
+		// insert-only call log.
+		can := func(table, priv string) bool {
+			GinkgoHelper()
+			var ok bool
+			Expect(pool.QueryRow(ctx, `SELECT has_table_privilege($1, $2, $3)`, migrations.GatewayRole, table, priv).Scan(&ok)).To(Succeed())
+			return ok
+		}
+		Expect(can("mcp_servers", "UPDATE")).To(BeFalse())
+		Expect(can("approval_requests", "SELECT")).To(BeFalse())
+		Expect(can("audit_events", "INSERT")).To(BeFalse())
+		Expect(can("mcp_call_log", "INSERT")).To(BeTrue())
+		Expect(can("mcp_call_log", "SELECT")).To(BeFalse())
+		Expect(can("mcp_call_log", "UPDATE")).To(BeFalse())
 	})
 
 	It("parks a call whose payload carries private text for an approval", func(ctx SpecContext) {

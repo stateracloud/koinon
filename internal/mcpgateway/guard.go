@@ -66,6 +66,9 @@ type Message struct {
 	// of the request it answers, or "" when the gateway did not send that request (an unmatched
 	// response).
 	Method string
+	// Tool is the tool name of a tools/call: on the request, and on the result or error that answers
+	// it. It is "" for any other message.
+	Tool string
 	// Raw is the message as it is on the wire. The guard reads it and keeps no reference to it.
 	Raw []byte
 }

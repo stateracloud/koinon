@@ -74,3 +74,42 @@ func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 	}
 	return true, nil
 }
+
+// GatewayRole is the NOLOGIN group role of koinon-gateway's database login (ADR 0097 decision 5,
+// #278). It is the gateway's only database privilege: it reads what the leak guard decides on,
+// writes the guard's own state and inserts the call log, and nothing else. It cannot read a
+// credential, a provider key, a secret or an approval. The chart creates the role and makes the
+// gateway's login a member; the migrate role has no CREATEROLE.
+const GatewayRole = "koinon_gateway"
+
+// gatewayGrants are the privileges of GatewayRole. Each line names why the gateway needs it.
+var gatewayGrants = []string{
+	// The guard identifies the caller and the server, reads the tool declarations, the org's leak-guard
+	// settings and the code-host connection's repository list (mcpguard, orgsettings.LeakGuardOf).
+	`GRANT SELECT ON orgs, agents, mcp_servers, mcp_tools, runs, agent_sandboxes,
+		org_settings, org_fetch_trusted_hosts, org_code_host_repos, org_code_host_readings, connections TO ` + GatewayRole,
+	// The guard's own state: sessions, fingerprints, open calls, the feed, the decision record.
+	`GRANT SELECT, INSERT, UPDATE, DELETE ON leak_guard_sessions, leak_guard_fingerprints, leak_guard_runs, leak_guard_open_calls, leak_guard_decisions TO ` + GatewayRole,
+	// The call log: insert only.
+	`GRANT INSERT ON mcp_call_log TO ` + GatewayRole,
+}
+
+// GrantGateway gives GatewayRole its privileges and reports whether it did: false when the role does
+// not exist yet. Like GrantInstallAuditWriter it runs as the table owner after the goose migrations on
+// every migrate and in "migrate --grants-only", and is idempotent: on a Helm upgrade of a
+// CloudNativePG cluster the role may appear only after the migrate hook.
+func GrantGateway(ctx context.Context, db Execer) (bool, error) {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, GatewayRole).Scan(&exists); err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	for _, stmt := range gatewayGrants {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
