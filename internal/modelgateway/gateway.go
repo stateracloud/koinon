@@ -172,7 +172,25 @@ func revisionOf(c gateway.ModelConfig) gateway.Revision {
 		keys = append(keys, k.ID+"|"+k.Agent.String()+"|"+k.Hash)
 	}
 	sort.Strings(keys)
-	b, _ := json.Marshal([]any{keys, c.ModelState})
+	// A map keyed by AgentRef does not encode as JSON, so the maps become lists sorted by agent.
+	limits := make([]any, 0, len(c.Limits))
+	for a, l := range c.Limits {
+		limits = append(limits, []any{a.String(), l})
+	}
+	models := make([]any, 0, len(c.Models))
+	for a, m := range c.Models {
+		models = append(models, []any{a.String(), m})
+	}
+	byAgent := func(x []any) {
+		sort.Slice(x, func(i, j int) bool { return x[i].([]any)[0].(string) < x[j].([]any)[0].(string) })
+	}
+	byAgent(limits)
+	byAgent(models)
+	b, err := json.Marshal([]any{keys, limits, c.Providers, models})
+	if err != nil {
+		// Every field is plain data: a failure is a bug, and a constant revision would hide it.
+		panic("modelgateway: revision: " + err.Error())
+	}
 	sum := sha256.Sum256(b)
 	return gateway.Revision("model-" + hex.EncodeToString(sum[:8]))
 }

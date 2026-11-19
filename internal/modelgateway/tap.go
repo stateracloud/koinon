@@ -33,6 +33,7 @@ const maxUsageObject = 64 << 10
 // counts is the usage as the provider reported it, in the record's disjoint buckets.
 type counts struct {
 	in, out, cacheRead, cacheWrite, reasoning int64
+	rawOut                                    int64 // the output as reported, thinking included
 	inKnown, outKnown, reasoningKnown         bool
 }
 
@@ -75,7 +76,7 @@ func (c *counts) merge(f modelformat.Format, w *wireUsage) {
 			c.cacheWrite = nonNeg(*w.CacheCreation)
 		}
 		if w.OutputTokens != nil {
-			c.out, c.outKnown = nonNeg(*w.OutputTokens), true
+			c.rawOut, c.outKnown = nonNeg(*w.OutputTokens), true
 			if w.OutputDetails != nil && w.OutputDetails.ThinkingTokens != nil {
 				c.reasoning, c.reasoningKnown = nonNeg(*w.OutputDetails.ThinkingTokens), true
 			}
@@ -93,12 +94,16 @@ func (c *counts) merge(f modelformat.Format, w *wireUsage) {
 			if w.CompletionDetails != nil && w.CompletionDetails.ReasoningTokens != nil {
 				c.reasoning, c.reasoningKnown = min(nonNeg(*w.CompletionDetails.ReasoningTokens), total), true
 			}
-			c.out, c.outKnown = total, true
+			c.rawOut, c.outKnown = total, true
 		}
 	}
 	// The thinking is part of the output the provider reported; the record's buckets are disjoint.
-	if c.reasoningKnown && c.outKnown {
-		c.out = max(c.out-c.reasoning, 0)
+	// Computed from the raw value each time, so a later event that reports no output cannot subtract twice.
+	if c.outKnown {
+		c.out = c.rawOut
+		if c.reasoningKnown {
+			c.out = max(c.rawOut-c.reasoning, 0)
+		}
 	}
 }
 

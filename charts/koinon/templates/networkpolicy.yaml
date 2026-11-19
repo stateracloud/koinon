@@ -297,7 +297,7 @@ spec:
         # Only koinon-api calls this gateway until agents move to it.
         - podSelector:
             matchLabels:
-              {{- toYaml $release | nindent 14 }}
+              {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats

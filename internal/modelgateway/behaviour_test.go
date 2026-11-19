@@ -15,7 +15,9 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
+	"github.com/stateracloud/koinon/internal/gateway/usagewire"
 	"github.com/stateracloud/koinon/internal/modelgateway"
 )
 
@@ -33,7 +35,13 @@ type sink struct {
 func (s *sink) put(r gateway.UsageRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.recs = append(s.recs, r)
+	// The suite judges the record the ledger reads: it goes through the wire encoding and the
+	// receiver's decoder, as it does between koinon-gateway and koinon-api.
+	out, rejected, _ := agentgateway.Decode(usagewire.Encode([]gateway.UsageRecord{r}))
+	if rejected != 0 || len(out) != 1 {
+		panic("modelgateway test: the usage record does not survive the wire")
+	}
+	s.recs = append(s.recs, out[0])
 }
 
 func (s *sink) of(keyID string) []gateway.UsageRecord {

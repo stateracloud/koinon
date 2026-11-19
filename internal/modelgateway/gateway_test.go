@@ -4,6 +4,7 @@ package modelgateway_test
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,8 +72,25 @@ var _ = Describe("the model path", func() {
 		resp := post("/v1/chat/completions", k.Material, `{"model":"m","messages":[]}`)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
 		Expect(time.Since(before)).To(BeNumerically("<", time.Second))
-		Expect(s.of(k.Key.ID)).To(HaveLen(1))
+		_, _ = io.Copy(io.Discard, resp.Body) // the record is written when the body ends
+		Eventually(func() int { return len(s.of(k.Key.ID)) }).Should(Equal(1))
 		Expect(s.of(k.Key.ID)[0]).To(And(HaveField("InputTokens", BeEquivalentTo(7)), HaveField("OutputTokens", BeEquivalentTo(3))))
+	})
+
+	It("gives different configs different revisions and equal configs the same one", func(ctx SpecContext) {
+		k1, _ := gateway.NewKey(agent)
+		k2, _ := gateway.NewKey(agent)
+		cfg.Keys = []gateway.Key{k1.Key}
+		a, err := gw.ApplyModel(ctx, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		again, _ := gw.ApplyModel(ctx, cfg)
+		Expect(again).To(Equal(a))
+		cfg.Keys = []gateway.Key{k1.Key, k2.Key}
+		b, _ := gw.ApplyModel(ctx, cfg)
+		Expect(b).NotTo(Equal(a))
+		cfg.Models = map[gateway.AgentRef][]string{agent: {"m"}}
+		c, _ := gw.ApplyModel(ctx, cfg)
+		Expect(c).NotTo(Equal(b))
 	})
 
 	It("refuses an unknown key, a missing key, an unknown model and a key in the query, all marked", func(ctx SpecContext) {

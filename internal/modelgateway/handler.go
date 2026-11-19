@@ -183,8 +183,12 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 // rendering's own, and the provider credential. Nothing else of the client's request leaves.
 func upstreamHeaders(in http.Header, rt route, rendering gateway.Rendering, secret string) http.Header {
 	h := http.Header{}
-	for _, name := range []string{"Accept", "Content-Type", "User-Agent"} {
+	for _, name := range gateway.ForwardedHeaders {
+		if name == "content-length" {
+			continue // the proxy sets it from the rewritten body
+		}
 		if v := in.Values(name); len(v) > 0 {
+			name = http.CanonicalHeaderKey(name)
 			h[name] = append([]string(nil), v...)
 		}
 	}

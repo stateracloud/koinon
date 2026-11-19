@@ -45,12 +45,13 @@ type ExporterOptions struct {
 type Exporter struct {
 	o ExporterOptions
 
-	mu      sync.Mutex
-	queue   []gateway.UsageRecord
-	dropped int64
-	sent    int64
-	wake    chan struct{}
-	done    chan struct{}
+	mu        sync.Mutex
+	queue     []gateway.UsageRecord
+	dropped   int64
+	headDrops int64 // records dropped from the head of a full queue
+	sent      int64
+	wake      chan struct{}
+	done      chan struct{}
 }
 
 // NewExporter returns an Exporter; Run sends.
@@ -79,6 +80,7 @@ func (e *Exporter) Record(r gateway.UsageRecord) {
 	if len(e.queue) >= e.o.MaxQueue {
 		e.queue = e.queue[1:]
 		e.dropped++
+		e.headDrops++
 	}
 	e.queue = append(e.queue, r)
 	full := len(e.queue) >= e.o.BatchSize
@@ -161,6 +163,7 @@ func (e *Exporter) flushOnce(ctx context.Context) error {
 	e.mu.Lock()
 	n := min(len(e.queue), e.o.BatchSize)
 	batch := append([]gateway.UsageRecord(nil), e.queue[:n]...)
+	snap := e.headDrops
 	e.mu.Unlock()
 	if n == 0 {
 		return nil
@@ -169,9 +172,9 @@ func (e *Exporter) flushOnce(ctx context.Context) error {
 		return err
 	}
 	e.mu.Lock()
-	// The queue only loses its head to the drop of a full queue, so the first n entries are the batch
-	// unless that happened meanwhile; then fewer of them are still queued.
-	e.queue = e.queue[min(n, len(e.queue)):]
+	// The queue only loses its head to the drop of a full queue. A record dropped meanwhile was one
+	// of the batch (and was counted as dropped), so only the rest of the batch is still queued.
+	e.queue = e.queue[min(max(n-int(e.headDrops-snap), 0), len(e.queue)):]
 	e.sent += int64(n)
 	e.mu.Unlock()
 	return nil

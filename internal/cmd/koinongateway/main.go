@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"go.opentelemetry.io/otel"
@@ -45,6 +46,10 @@ import (
 // mcpPath is where the MCP endpoint is served. It is the path agentgateway served it at, so an
 // agent's URL does not change with the driver.
 const mcpPath = "/mcp"
+
+// usageFlushLimit bounds the last export at shutdown. The pod's grace period is the shutdown delay,
+// the drain timeout and 30 seconds, and the flush runs after the drain, so it must fit in the 30.
+const usageFlushLimit = 20 * time.Second
 
 type config struct {
 	listenAddr  string
@@ -181,6 +186,15 @@ func run(ctx context.Context, cfg config) error {
 			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: otel.Tracer("koinon-gateway"), Logger: log,
 		})
 		modelHalf = mg
+		// A dropped record is a lost charge: both numbers are visible to an operator (ADR 0023: no labels).
+		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "koinon_gateway_usage_records_dropped_total",
+			Help: "Usage records the exporter dropped (queue full or refused by the receiver).",
+		}, func() float64 { return float64(exp.Dropped()) }))
+		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "koinon_gateway_usage_records_queued",
+			Help: "Usage records that wait for export.",
+		}, func() float64 { return float64(exp.Queued()) }))
 	}
 	var mcpHalf gateway.MCPGateway
 	if cfg.mcpPath {
@@ -244,7 +258,7 @@ func run(ctx context.Context, cfg config) error {
 	expCtx, stopExport := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopExport()
 	if exp != nil {
-		safego.Go(expCtx, log, "usage-export", func(ctx context.Context) { exp.Run(ctx, cfg.drain) })
+		safego.Go(expCtx, log, "usage-export", func(ctx context.Context) { exp.Run(ctx, min(cfg.drain, usageFlushLimit)) })
 	}
 	safego.Go(ctx, log, "state-stream", func(ctx context.Context) { _ = sc.Run(ctx) })
 	log.Info("starting koinon-gateway", "version", project.Version, "listen", ln.Addr().String(), "copy", copyID)

@@ -94,6 +94,33 @@ var _ = Describe("the exporter", func() {
 		Eventually(e.Done()).Should(BeClosed())
 	}, SpecTimeout(20*time.Second))
 
+	It("does not remove records it never sent when a full queue drops its head during a post", func(ctx SpecContext) {
+		release := make(chan struct{})
+		var posts atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if posts.Add(1) == 1 {
+				<-release
+			}
+		}))
+		DeferCleanup(srv.Close)
+		e := usagewire.NewExporter(usagewire.ExporterOptions{
+			URL: srv.URL, Token: func() (string, error) { return "x", nil }, MaxQueue: 4, BatchSize: 2, Interval: 10 * time.Millisecond,
+		})
+		for _, id := range []string{"a", "b", "c", "d"} {
+			e.Record(record(id))
+		}
+		rctx, stop := context.WithCancel(ctx)
+		go e.Run(rctx, time.Second)
+		Eventually(posts.Load).Should(BeNumerically(">=", 1))
+		// The batch (a, b) is in flight. Two more records push both out of the full queue.
+		e.Record(record("e"))
+		e.Record(record("f"))
+		close(release)
+		Eventually(e.Queued).Should(BeZero())
+		Expect(posts.Load()).To(BeNumerically(">=", 2), "c, d, e and f were still sent")
+		stop()
+	}, SpecTimeout(20*time.Second))
+
 	It("drops the oldest record of a full queue and counts it", func() {
 		e := usagewire.NewExporter(usagewire.ExporterOptions{URL: "http://127.0.0.1:1", Token: func() (string, error) { return "x", nil }, MaxQueue: 2})
 		for _, id := range []string{"a", "b", "c"} {
