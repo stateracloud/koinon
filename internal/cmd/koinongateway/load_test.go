@@ -52,8 +52,12 @@ var _ = Describe("koinon-gateway under load", Label("load"), Ordered, func() {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		ch := make(chan error, 1)
-		go func() { ch <- run(ctx, cfg) }()
-		DeferCleanup(cancel)
+		fin := make(chan struct{})
+		go func() { ch <- run(ctx, cfg); close(fin) }()
+		DeferCleanup(func() {
+			cancel()
+			Eventually(fin, 30*time.Second).Should(BeClosed(), "the replica stops before the next spec")
+		})
 		Eventually(func() bool {
 			resp, err := http.Get("http://" + cfg.healthAddr + "/readyz")
 			if err != nil {
@@ -117,7 +121,7 @@ var _ = Describe("koinon-gateway under load", Label("load"), Ordered, func() {
 		}
 	}, SpecTimeout(30*time.Minute))
 
-	It("holds long streams open and forwards their progress", func(ctx SpecContext) {
+	It("holds long streams open", func(ctx SpecContext) {
 		addr, _, _ := replica(time.Second)
 		res, err := endpoint(addr).Streams(ctx, 64, 20, 500*time.Millisecond, loadtest.Duration()+10*time.Second)
 		Expect(err).NotTo(HaveOccurred())

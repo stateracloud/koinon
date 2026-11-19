@@ -63,4 +63,4 @@ CLAUDE.local.md
 .obsidian/
 .smart-env/
 /build/
-/load-results/
+load-results/

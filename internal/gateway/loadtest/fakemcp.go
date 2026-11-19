@@ -72,6 +72,6 @@ func StartFakeMCP(ctx context.Context) (*FakeMCP, error) {
 // Stop ends the process and removes its binary.
 func (f *FakeMCP) Stop() {
 	_ = f.cmd.Process.Kill()
-	_, _ = f.cmd.Process.Wait()
+	_ = f.cmd.Wait()
 	_ = os.RemoveAll(f.dir)
 }

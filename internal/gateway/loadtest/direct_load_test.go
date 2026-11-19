@@ -34,7 +34,7 @@ var _ = Describe("the fake MCP server, called directly", Label("load"), func() {
 		}
 		res, err := ep.Streams(ctx, 64, 20, 500*time.Millisecond, loadtest.Duration()+10*time.Second)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Notes["progressReceived"]).To(Equal(res.Notes["progressExpected"]), "the fake server sends every notification")
+		Expect(res.Notes["progressReceived"]).To(BeNumerically(">=", res.Notes["progressExpected"]), "the fake server sends every notification")
 		results = append(results, res)
 		Expect(loadtest.Save(results)).To(Succeed())
 	}, SpecTimeout(30*time.Minute))

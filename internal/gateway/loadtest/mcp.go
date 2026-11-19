@@ -32,6 +32,16 @@ type Endpoint struct {
 	StreamTool string
 }
 
+// transport is shared by every client of the suite. The default transport keeps 2 idle connections per
+// host, so with many sessions nearly every call would open a new TCP connection and the run would
+// measure the ephemeral port range (TIME_WAIT), not the gateway.
+var transport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 0
+	t.MaxIdleConnsPerHost = 4096
+	return t
+}()
+
 type headerRT struct{ headers map[string]string }
 
 func (h headerRT) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -39,7 +49,7 @@ func (h headerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	for k, v := range h.headers {
 		r.Header.Set(k, v)
 	}
-	return http.DefaultTransport.RoundTrip(r)
+	return transport.RoundTrip(r)
 }
 
 // connect opens one MCP session. onProgress, when set, counts progress notifications.
@@ -120,8 +130,9 @@ func (e Endpoint) ToolCalls(ctx context.Context, conc int, warmup, d time.Durati
 }
 
 // Streams is the long-stream scenario: each call holds its response stream open for about
-// steps*interval and receives steps progress notifications. The result's note "progressLost" counts
-// the notifications a gateway dropped (expected minus received over the completed calls).
+// steps*interval and receives steps progress notifications. The notes progressExpected (completed calls
+// times steps) and progressReceived (all calls, also those that failed after some) show whether a
+// gateway forwards them: received is at least expected when it does.
 func (e Endpoint) Streams(ctx context.Context, conc, steps int, interval, d time.Duration) (Result, error) {
 	var got, calls atomic.Int64
 	res, err := e.run(ctx, Spec{

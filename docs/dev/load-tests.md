@@ -28,7 +28,7 @@ want to know what it costs in latency and throughput. Or you record a new baseli
 A worker that gets an error closes its session and opens a new one for its next call, as a client does.
 The open is part of that call's time and its error. A failed call is not in the latency numbers.
 
-Each run has a 2 s warm-up that is not counted. The numbers are: calls, errors, error rate, calls per
+The `tools/call` runs have a 2 s warm-up that is not counted (the stream, drain and restart runs have none). The numbers are: calls, errors, error rate, calls per
 second (successful calls over the run length), and p50, p95, p99 and max latency (nearest rank).
 
 Not in the suite yet:
@@ -62,8 +62,8 @@ How it is built:
 - Both go through the same client (`internal/gateway/loadtest`).
 
 Files, by driver: `internal/gateway/loadtest` (harness, direct run), `internal/gateway/standalone/load_test.go`
-(agentgateway), `internal/cmd/koinongateway/load_test.go` (koinon-gateway). All have the build tag `load`
-and the Ginkgo label `load`.
+(agentgateway), `internal/cmd/koinongateway/load_test.go` (koinon-gateway). The driver tests have the build tag `load`
+and the Ginkgo label `load`. The unit tests of the harness (`loadtest_test.go`) have neither and run in `make test`: they are fast and need no Docker.
 
 ## Cloud VM notes
 

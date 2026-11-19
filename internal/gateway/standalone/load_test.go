@@ -169,5 +169,7 @@ var _ = Describe("agentgateway under load", Label("load"), Ordered, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		results = append(results, res)
+		Expect(res.Errors).To(BeNumerically(">", 0), "the restart is seen by the callers")
+		Expect(res.LastError).To(BeNumerically("<", res.Duration-5*time.Second), "calls succeed again after the restart")
 	}, SpecTimeout(10*time.Minute))
 })
