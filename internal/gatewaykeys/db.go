@@ -56,7 +56,7 @@ func (r Row) PublicKey() (secretstore.RecipientPublicKey, error) {
 }
 
 // ErrNotMigrated means the table does not exist: the migrations have not run.
-var ErrNotMigrated = errors.New("gatewaykeys: the database has no gateway_recipient_keys table (migration 00097)")
+var ErrNotMigrated = errors.New("gatewaykeys: the database has no gateway_recipient_keys table (migration 00098)")
 
 func undefinedTable(err error) bool {
 	var pgErr *pgconn.PgError
