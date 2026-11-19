@@ -218,7 +218,10 @@ RETURNING *;
 UPDATE mcp_tools
 SET present = true, last_seen_at = now(), read_only_hint = @read_only_hint,
     description_original_length = @description_original_length, description_capped = @description_capped,
-    description_cleaned = @description_cleaned, tool_json = @tool_json, tool_hash = @tool_hash
+    description_cleaned = @description_cleaned,
+    -- A tool waiting for review keeps the text that was flagged, so an admin approves what the review showed.
+    tool_json = CASE WHEN review_reason IS NULL THEN @tool_json ELSE tool_json END,
+    tool_hash = CASE WHEN review_reason IS NULL THEN @tool_hash ELSE tool_hash END
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name;
 
 -- name: AdoptMCPToolPin :exec

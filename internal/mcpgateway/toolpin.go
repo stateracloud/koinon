@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -51,6 +52,13 @@ type ToolListChecker interface {
 	CheckToolList(ctx context.Context, l ToolList) ToolListVerdict
 }
 
+const reasonToolListUnreadable = "refused: the gateway could not check the tool list before this call"
+
+// toolPinTTL is how long a (target, agent) list check holds for the calls of one replica. A call after
+// it checks the list again first, so a replica that never listed (another replica served the list, a
+// restart) still refuses a changed tool.
+const toolPinTTL = 30 * time.Second
+
 const reasonToolChanged = "refused: the tool changed since an admin approved it; an admin must review it again"
 
 // checkToolList runs the list check, if the guard has one. A guard that panics withholds the list.
@@ -85,11 +93,16 @@ const (
 type leftOutSet struct {
 	mu sync.Mutex
 	m  map[poolKey]map[string]struct{}
+	at map[poolKey]time.Time
 }
 
 func (s *leftOutSet) set(k poolKey, names []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.at == nil {
+		s.at = map[poolKey]time.Time{}
+	}
+	s.at[k] = time.Now()
 	if len(names) == 0 {
 		delete(s.m, k)
 		return
@@ -102,6 +115,14 @@ func (s *leftOutSet) set(k poolKey, names []string) {
 		set[n] = struct{}{}
 	}
 	s.m[k] = set
+}
+
+// fresh reports whether a list check of k finished within ttl.
+func (s *leftOutSet) fresh(k poolKey, ttl time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.at[k]
+	return ok && time.Since(t) < ttl
 }
 
 func (s *leftOutSet) has(k poolKey, tool string) bool {
@@ -117,6 +138,11 @@ func (s *leftOutSet) forget(target string) {
 	for k := range s.m {
 		if k.target == target {
 			delete(s.m, k)
+		}
+	}
+	for k := range s.at {
+		if k.target == target {
+			delete(s.at, k)
 		}
 	}
 }
@@ -192,7 +218,7 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 	case v.Refuse:
 		g.o.Metrics.toolLeft(leftUnreadable)
 		g.o.Logger.Warn("tools/list: list withheld", "target", t.Name)
-		g.left.set(key, nil)
+		// The tools an earlier list left out stay out, and the check is no longer fresh: a call checks again.
 		return nil, nil, false
 	case v.Passthrough:
 		g.left.set(key, left)
@@ -214,7 +240,7 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 	}
 	for _, n := range v.Left {
 		g.o.Metrics.toolLeft(leftChanged)
-		g.o.Logger.Warn("tools/list: tool left out; it changed since it was approved", "target", t.Name, "tool", n)
+		g.o.Logger.Warn("tools/list: tool left out; it changed since it was approved", "target", t.Name, "tool", logName(n))
 	}
 	left = append(left, v.Left...)
 	g.left.set(key, left)
@@ -248,4 +274,31 @@ func (g *Gateway) refresh(t gateway.MCPTarget, agent gateway.AgentRef) {
 		return
 	}
 	g.vetted(ctx, t, agent, got)
+}
+
+// logName cuts a server's tool name for a log line.
+func logName(n string) string {
+	if len(n) > 128 {
+		return n[:128]
+	}
+	return n
+}
+
+// checksToolLists reports whether the guard decides on tool lists.
+func (f failClosed) checksToolLists() bool {
+	_, ok := f.g.(ToolListChecker)
+	return ok && f.loaded()
+}
+
+// recheck lists the target for the agent and runs the check before a call, when no check of this
+// replica is fresh. It returns false when the list could not be checked: the call is refused.
+func (g *Gateway) recheck(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) bool {
+	lctx, cancel := context.WithTimeout(ctx, g.o.ListTimeout)
+	defer cancel()
+	got, err := g.targetTools(lctx, t, agent)
+	if err != nil {
+		return false
+	}
+	_, _, ok := g.vetted(lctx, t, agent, got)
+	return ok
 }

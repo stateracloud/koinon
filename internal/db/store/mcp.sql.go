@@ -1734,7 +1734,10 @@ const touchMCPTool = `-- name: TouchMCPTool :exec
 UPDATE mcp_tools
 SET present = true, last_seen_at = now(), read_only_hint = $1,
     description_original_length = $2, description_capped = $3,
-    description_cleaned = $4, tool_json = $5, tool_hash = $6
+    description_cleaned = $4,
+    -- A tool waiting for review keeps the text that was flagged, so an admin approves what the review showed.
+    tool_json = CASE WHEN review_reason IS NULL THEN $5 ELSE tool_json END,
+    tool_hash = CASE WHEN review_reason IS NULL THEN $6 ELSE tool_hash END
 WHERE org_id = $7 AND server_id = $8 AND name = $9
 `
 
