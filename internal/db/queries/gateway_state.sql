@@ -37,3 +37,8 @@ ON CONFLICT DO NOTHING;
 -- revision of its half).
 SELECT count(DISTINCT copy_id) FROM gateway_state_acks
 WHERE half = @half AND revision >= @revision AND copy_id = ANY(@copy_ids::text[]);
+
+-- name: InsertMCPCallLog :exec
+-- One row per tool call the gateway served. No arguments, results or token values (ADR 0097).
+INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms)
+VALUES (@org_slug, @agent, @target, @tool, @outcome, @verdict, @credential_kind, @duration_ms);

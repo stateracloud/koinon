@@ -81,6 +81,21 @@ var _ = Describe("koinon-gateway's startup", func() {
 		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--shutdown-delay", "-1s"}, nil)).NotTo(Succeed())
 	})
 
+	It("takes the guard's database login from --database-url-file, and refuses an empty or missing file before it serves anything", func() {
+		dsn := filepath.Join(GinkgoT().TempDir(), "dsn")
+		Expect(os.WriteFile(dsn, []byte("postgres://koinon_gateway@db.example/koinon\n"), 0o600)).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--database-url-file", dsn}, nil)).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), []string{}, map[string]string{
+			"KOINON_STATE_URL": stateURL, "KOINON_STATE_TOKEN_FILE": tokenFile, "KOINON_DATABASE_URL_FILE": dsn,
+		})).To(Succeed())
+		empty := filepath.Join(GinkgoT().TempDir(), "empty")
+		Expect(os.WriteFile(empty, []byte("\n"), 0o600)).To(Succeed())
+		for _, f := range []string{empty, filepath.Join(GinkgoT().TempDir(), "absent")} {
+			err := run(context.Background(), config{stateURL: stateURL, stateTokenFile: tokenFile, databaseURLFile: f, listenAddr: "127.0.0.1:0", drain: time.Second})
+			Expect(err).To(HaveOccurred())
+		}
+	})
+
 	It("refuses an empty or missing token file before it serves anything", func() {
 		empty := filepath.Join(GinkgoT().TempDir(), "empty")
 		Expect(os.WriteFile(empty, []byte("\n"), 0o600)).To(Succeed())

@@ -2304,6 +2304,19 @@ type LocalCredential struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type McpCallLog struct {
+	ID             int64
+	CreatedAt      pgtype.Timestamptz
+	OrgSlug        string
+	Agent          string
+	Target         string
+	Tool           string
+	Outcome        string
+	Verdict        string
+	CredentialKind string
+	DurationMs     int32
+}
+
 type McpServer struct {
 	OrgID                  pgtype.UUID
 	ID                     pgtype.UUID

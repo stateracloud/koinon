@@ -705,6 +705,8 @@ type Querier interface {
 	// One decision of the MCP leak guard. The agent's running run is read in the same statement, so a
 	// decision costs one round trip. No argument, payload or matched text is stored.
 	InsertLeakGuardDecision(ctx context.Context, arg InsertLeakGuardDecisionParams) error
+	// One row per tool call the gateway served. No arguments, results or token values (ADR 0097).
+	InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogParams) error
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
