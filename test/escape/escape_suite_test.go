@@ -42,7 +42,7 @@
 //	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA
 //	                            comma-separated host:port lists that replace the default
 //	                            targets of the egress and metadata cases
-//	KOINON_ESCAPE_HOST_KERNEL   the nodes' uname -r; enables the Kata guest case (a manual
+//	KOINON_ESCAPE_HOST_KERNEL   the nodes' uname -r; enables the microVM guest case (a manual
 //	                            release gate); the case is skipped without it
 //	KOINON_ESCAPE_NAMESPACE     the workspace's Kubernetes namespace; enables the live
 //	                            admission case and the NetworkPolicy bypass case (spike 8.15),
@@ -57,8 +57,20 @@
 //	                            exist (a missing one fails the spec); the built-in default list
 //	                            is skipped where a Service is absent.
 //	                            The live admission case skips unless the chart's policy is bound
-//	                            to the namespace. The Kata case fails when the variable is set
-//	                            and the sandbox is not under Kata.
+//	                            to the namespace. The microVM case fails when the variable is set
+//	                            and the sandbox is not in a microVM guest.
+//
+//	KOINON_ESCAPE_DRIVER        the execution driver under test (default openshell). The specs
+//	                            that exist only for Substrate skip on openshell
+//	KOINON_ESCAPE_ATEAPI, KOINON_ESCAPE_ATELET
+//	                            host:port lists of ateapi and atelet; the "cannot call ateapi or
+//	                            atelet" spec needs both (Substrate driver only)
+//	KOINON_ESCAPE_GUEST_SOCKETS comma-separated unix socket paths of the guest server; the guest
+//	                            agent spec checks that the agent user cannot connect to them
+//	KOINON_ESCAPE_GUEST_VSOCK   any value: also check that the agent user cannot open an AF_VSOCK socket
+//
+// Label "substrate" marks the specs for the Substrate driver; "admission" and "substrate" together
+// are the worker-pod policies (ADR 0120 section 6), which skip until the chart renders them (#1089).
 //
 // Provider records hold dummy values, not real credentials: every request these specs make
 // outside the grant must be refused by the sandbox before it leaves the sandbox, and a refusal
