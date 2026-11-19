@@ -156,8 +156,12 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 	return u, nil
 }
 
-func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
-	base := g.o.HTTPClient.Transport
+// NewTargetHTTPClient returns the HTTP client of one upstream target for one agent: the target's CA
+// bundle or skipped verification applies to this client only, the credential is set on every request
+// (and only to the target's host, over https), and a redirect is never followed, so the credential
+// stays with the target. base nil is http.DefaultTransport. The MCP path and the A2A outbound client
+// (ADR 0123 decision 7) both build their clients here, so one rule covers both.
+func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gateway.AgentRef, src CredentialSource) (*http.Client, error) {
 	if base == nil {
 		base = http.DefaultTransport
 	}
@@ -176,11 +180,18 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 			return nil, err
 		}
 	}
-	hc := &http.Client{
-		Transport: &credentialTransport{base: base, target: t, agent: key.agent, src: g.o.Credentials},
+	return &http.Client{
+		Transport: &credentialTransport{base: base, target: t, agent: agent, src: src},
 		Timeout:   0,
 		// A target must not redirect the gateway: the credential stays with the target's host.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
+}
+
+func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
+	hc, err := NewTargetHTTPClient(g.o.HTTPClient.Transport, t, key.agent, g.o.Credentials)
+	if err != nil {
+		return nil, err
 	}
 	var inner mcp.Transport = &mcp.StreamableClientTransport{
 		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1,

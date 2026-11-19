@@ -62,7 +62,9 @@ half-fitting edit. The corrections:
 4. Credentials. The object-store root credentials are random keys in the Secret `koinon-rustfs-credentials`
    in the Substrate namespace, not the fixed `rustfsadmin`. The installer creates the Secret once and keeps
    it. A Secret that lacks a key is an error that names the Secret; the installer never rewrites it and never
-   prints a key.
+   prints a key. The installer makes no other key. The Koinon reconciler only reads the snapshot bucket
+   (`--substrate-snapshot-*`), so give it its own read-only key for that bucket, made by hand with the
+   store's own tools. Never give it the root key: that key can write and delete every snapshot.
 5. atelet logs at `info` (the kind overlay sets `debug`) and has no local-registry replacement.
 
 The kind route also brings its observability and sizing: an `otel-system` namespace with an OpenTelemetry collector

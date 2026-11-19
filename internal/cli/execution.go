@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,11 +39,52 @@ type Substrate struct {
 	RuntimeClassTiers []string
 	// DefaultTier is the tier of a sandbox that names no runtime class.
 	DefaultTier string
-	// AllowUnhardened acknowledges that the substrate path does not yet run the harness behind the
-	// guest launcher or mount the root read-only on the gVisor tiers (issue #1088 slices b and c).
-	// Validate refuses the substrate driver without it, so no install gets an unhardened guest by
-	// accident. Exit condition: both slices have merged; then the flag and chart value are removed.
+	// AllowUnhardened acknowledges that the guest image does not yet carry the launcher and the guest
+	// server, so the harness may not run behind the launcher (issue #1088 slice f; the driver already
+	// puts the launcher prefix on every Exec, slice b). A read-only root is not a reason: the gVisor
+	// tiers keep a writable root by decision (issue #1150, ADR 0120 section 4). Validate refuses the
+	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
+	// slice f has merged; then the flag and chart value are removed.
 	AllowUnhardened bool
+	// SnapshotStore is the S3-compatible bucket that holds the snapshots. Its endpoint and bucket
+	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
+	// #1088 slice e). The keys are files, never flags or values.
+	SnapshotStore SnapshotStore
+}
+
+// SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
+type SnapshotStore struct {
+	Endpoint, Region, Bucket string
+	// AccessKeyFile and SecretKeyFile each hold one value; the driver reads them at start.
+	AccessKeyFile, SecretKeyFile string
+}
+
+func (s SnapshotStore) set() bool { return s != SnapshotStore{} }
+
+func (s SnapshotStore) objectStore() (substrate.ObjectStore, error) {
+	if s.Endpoint == "" || s.Bucket == "" {
+		return substrate.ObjectStore{}, errors.New("--substrate-snapshot-endpoint and --substrate-snapshot-bucket are both required when any --substrate-snapshot-* flag is set")
+	}
+	o := substrate.ObjectStore{Endpoint: s.Endpoint, Region: s.Region, Bucket: s.Bucket}
+	for _, f := range []struct {
+		flag, path string
+		dst        *string
+	}{
+		{"--substrate-snapshot-access-key-file", s.AccessKeyFile, &o.AccessKeyID},
+		{"--substrate-snapshot-secret-key-file", s.SecretKeyFile, &o.SecretAccessKey},
+	} {
+		if f.path == "" {
+			return o, fmt.Errorf("%s is required with the snapshot store flags", f.flag)
+		}
+		b, err := os.ReadFile(f.path)
+		if err != nil {
+			return o, fmt.Errorf("%s: %w", f.flag, err)
+		}
+		if *f.dst = strings.TrimSpace(string(b)); *f.dst == "" {
+			return o, fmt.Errorf("%s: %s is empty", f.flag, f.path)
+		}
+	}
+	return o, nil
 }
 
 // DriverConfig is the substrate driver's configuration for these settings.
@@ -52,6 +94,15 @@ func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
 
 func (s Substrate) driverConfig(logger *slog.Logger) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
+	if s.SnapshotStore.set() {
+		o, err := s.SnapshotStore.objectStore()
+		if err != nil {
+			return cfg, err
+		}
+		if cfg.ContentDigest, err = o.ContentDigester(); err != nil {
+			return cfg, err
+		}
+	}
 	if s.DefaultTier != "" {
 		t, err := parseTier(s.DefaultTier)
 		if err != nil {
@@ -107,7 +158,12 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.CAFile, "substrate-ca-file", "", "CA file that signed ateapi's certificate; empty uses the system roots")
 	fs.StringVar(&e.Substrate.ServerName, "substrate-server-name", "", "name checked against ateapi's certificate")
-	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path runs the harness without the guest launcher and a read-only root until issue #1088 slices b and c land; required with --execution-driver=substrate")
+	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path may run the harness without the guest launcher until the guest image of issue #1088 slice f lands (the gVisor tiers keep a writable root, issue #1150); required with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.SnapshotStore.Endpoint, "substrate-snapshot-endpoint", "", "S3 endpoint (host:port or URL) of Substrate's snapshot bucket; with --substrate-snapshot-bucket and the two key files it turns on snapshots (without it they fail closed)")
+	fs.StringVar(&e.Substrate.SnapshotStore.Region, "substrate-snapshot-region", "", "region of the snapshot bucket")
+	fs.StringVar(&e.Substrate.SnapshotStore.Bucket, "substrate-snapshot-bucket", "", "snapshot bucket; a snapshot address in another bucket is refused")
+	fs.StringVar(&e.Substrate.SnapshotStore.AccessKeyFile, "substrate-snapshot-access-key-file", "", "file with the read-only access key id of the snapshot bucket")
+	fs.StringVar(&e.Substrate.SnapshotStore.SecretKeyFile, "substrate-snapshot-secret-key-file", "", "file with the read-only secret key of the snapshot bucket")
 	fs.StringSliceVar(&e.Substrate.RuntimeClassTiers, "substrate-runtime-class-tiers", nil, "class=tier entries (tier: vm, hardened or dev) that give each runtime class its isolation tier, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
@@ -130,7 +186,7 @@ func (e *Execution) Validate(openshellAddress string) error {
 			return err
 		}
 		if !e.Substrate.AllowUnhardened {
-			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the gVisor tiers have no read-only root yet (issue #1088 slice c)")
+			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the guest image does not yet carry the guest launcher (issue #1088 slice f)")
 		}
 		if cfg.DefaultTier == "" && len(cfg.RuntimeClassTiers) == 0 {
 			return errors.New("--substrate-default-tier or --substrate-runtime-class-tiers is required with --execution-driver=substrate: without a tier no guest process can start")

@@ -22,7 +22,7 @@ ARG ENTRY_SCRIPT
 # hadolint ignore=DL3022
 COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr/local/bin/koinon-guest-launcher
 # Two policies, one per tier family (ADR 0120 section 4.2 and 4.3): the vm tier fails closed without
-# Landlock, the gVisor tiers (hardened, dev) run it best effort behind the read-only root.
+# Landlock, the gVisor tiers (hardened, dev) run it best effort (their root is writable by decision, issue #1150).
 COPY --chmod=0644 policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
 # An exec-form ENTRYPOINT cannot expand a build argument, so a fixed path links to the harness's entry script.
 # The harness image ends as uid 10001 (harnesses/opencode/Dockerfile); /usr/local/bin belongs to root.

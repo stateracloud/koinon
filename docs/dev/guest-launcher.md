@@ -97,7 +97,7 @@ and 4.3; the driver picks by tier through `LauncherPrefix(tier)`):
 | Tier | File | Landlock |
 | --- | --- | --- |
 | `vm` | `cmd/koinon-guest-launcher/policy-vm.json` | `require`: no ABI 5 Landlock, no start (exit 70) |
-| `hardened`, `dev` (gVisor) | `cmd/koinon-guest-launcher/policy-gvisor.json` | `best_effort`: the read-only root is the control |
+| `hardened`, `dev` (gVisor) | `cmd/koinon-guest-launcher/policy-gvisor.json` | `best_effort`: the kernel may not offer it |
 
 ## The non-root gap
 
@@ -115,11 +115,13 @@ and the allowlist is restored as effective, inheritable and ambient for the non-
 
 On the hardened and dev tiers (gVisor) the launcher gets `policy-gvisor.json`, with Landlock
 `best_effort`: the kernel may not offer it (maintainer decision on #1087). The
-compensating control is a read-only root filesystem. Driver requirement for #1088: mount the root
-read-only, with only `/sandbox` and `/tmp` writable, so writes to `/etc`, `/usr` and `/var` stay
-blocked. When Landlock is unavailable the launcher logs one warning that names the read-only root as
-the control (ADR 0120 section 4, item 3: the `vm` tier fails closed through `policy-vm.json`,
-another tier records the gap).
+gVisor tiers keep a **writable root filesystem** by maintainer decision (2026-11-19, issue
+[#1150](https://github.com/stateracloud/koinon/issues/1150)). Substrate v1.0.0 sets the root of an actor
+container writable, and a read-only root breaks `MEMORY` snapshots (`runsc checkpoint: no checkpointable
+filesystems`). Koinon carries no Substrate patch. So without Landlock, a payload on these tiers can write to
+`/etc`, `/usr` and `/var`. The launcher's other controls (`no_new_privs`, capability drop, seccomp) stay. When
+Landlock is unavailable the launcher logs one warning that says so (ADR 0120 section 4, item 3: the `vm` tier
+fails closed through `policy-vm.json`, another tier records the gap). Each Substrate update reviews #1150.
 
 ## Open items
 
@@ -130,12 +132,8 @@ Tracked on #1087 until the maintainer files separate issues:
    upstream source and a registry, and waits for the lab (see the PR body of #1087). The driver
    applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
-3. #1088 must mount the root filesystem read-only on gVisor tiers (see "gVisor tiers" above).
-   Finding (slice c): Substrate v1.0.0 gives the driver no way to do this. `Container` has no
-   read-only field and no mount list. `Volume` has no mount path. `ImageVolumeSource` is read-only
-   but has no target. The guest ProcessService starts commands with only `CAP_KILL`,
-   `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so a command cannot remount `/`. The slice needs a
-   decision: see the question on the pull request of slice c.
+3. Read-only root on the gVisor tiers: decided against for now. See "gVisor tiers" above and issue #1150
+   (review at each Substrate update).
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
    every other control applied; `require` still fails closed.
 

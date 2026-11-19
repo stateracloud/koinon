@@ -14,7 +14,8 @@ relates: ["0011", "0065", "0066", "0101", "0120"]
 - Relates to: [0011](0011-agent-to-agent.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md), [0101](0101-agent-substrate-and-kagent-not-adopted.md), [0120](0120-execution-hardening-defaults.md)
 - Issue: [#1129](https://github.com/stateracloud/koinon/issues/1129)
 - Verification: Pending: a kind test with a kagent agent in each direction (issue 1129). The inbound
-  half is covered by specs with a fake backend.
+  half is covered by specs with a fake backend. The outbound client is covered by specs with a fake
+  external agent (v1.0 and v0.3).
 
 ## Context
 
@@ -92,10 +93,57 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
    new key, credential or table.
 6. **Not served in this slice.** Streaming, task list, push notifications and the extended card
    return the A2A errors for an unsupported operation. The card says so in its capabilities.
-7. **Outbound edge (next slice).** A Koinon agent calls an external A2A agent through the gateway.
-   The route follows [0120](0120-execution-hardening-defaults.md): default-deny egress, enforced L7
-   rules, and the credential held by the gateway. The sandbox never holds it. This ADR is amended
-   when that slice is designed.
+7. **Outbound edge.** A Koinon agent calls an external A2A agent through the gateway, never from
+   the sandbox. The client is package `internal/a2aout`. It follows
+   [0120](0120-execution-hardening-defaults.md) and the other outbound clients:
+   - It dials through the platform URL policy (`URLPolicy.DialContext`), checked at dial time, with
+     no proxy and no redirect (issue 657). A name that passes the check and then resolves to a
+     denied address is refused at the dial.
+   - The credential is the one of the MCP target (`CredentialHeader`, `CredentialPrefix`,
+     `CredentialFile`). The gateway reads it on each request and sets it. It goes to the host of the
+     target only and only over https. The sandbox gets no credential: no env, image, home volume or
+     log holds it, and no error names it. The CA bundle and `insecureSkipVerify` of the target apply
+     to this client only. Both the MCP path and this client build the HTTP client with
+     `mcpgateway.NewTargetHTTPClient`, so one rule covers both.
+   - The agent card is read at `/.well-known/agent-card.json` under the target URL (a target with a
+     path works). It must offer a JSON-RPC interface with the scheme and host of the target. A card that points
+     to another host is refused: it cannot move the credential or the traffic. The client reads a
+     v1.0 card and a v0.3 card, and speaks both bindings (kagent serves v0.3).
+   - A response body has a size limit, and the text of a question or reply is cut at 64 KiB. It is
+     another party's text: quoted data.
+8. **Outbound turns and states.** The client follows the same A2A 1.0.0 rules as decision 2:
+   - A task that has ended (completed, failed, canceled, rejected) never gets a message. The client
+     reads the task first and refuses (`ErrTaskEnded`). A follow-up turn is a new task in the same
+     `contextId`, with `referenceTaskIds` to the task before it, and no task ID.
+   - An answer goes to a task that is `input-required` only, in the context of that task. A task
+     in `auth-required` takes no answer from the agent, and its text is not shown as a question.
+   - A send returns at once with the task by default. A blocking send is bounded by the request
+     timeout, and a task that runs longer would be lost to the caller, so the caller waits with
+     `GetTask`.
+   - A task ID is never reused. An agent that answers a follow-up with the task it follows, or
+     that answers in another context or for another task, is refused.
+   - The client does not subscribe. `SubscribeToTask` on a task that ended is an error in A2A
+     1.0.0, and a read of the task has no such race. The client waits with `GetTask`.
+   - The external state maps back to Koinon:
+
+     | A2A | Koinon |
+     | --- | --- |
+     | `TASK_STATE_SUBMITTED` | submitted |
+     | `TASK_STATE_WORKING` | working |
+     | `TASK_STATE_INPUT_REQUIRED` | input_required, with the question of the status message |
+     | `TASK_STATE_AUTH_REQUIRED` | input_required, reason `auth_required` |
+     | `TASK_STATE_COMPLETED` | completed |
+     | `TASK_STATE_CANCELED` | canceled |
+     | `TASK_STATE_FAILED` | failed |
+     | `TASK_STATE_REJECTED` | failed, reason `rejected` |
+
+     A state that is not in this table is an error. The client never guesses. `auth-required`
+     waits for a person: an admin adds the credential to the connection, because the sandbox never
+     supplies one. A message with no task is `completed`, with its text as the reply.
+9. **How an agent reaches the client (next slice).** The gateway must hold the external agent as a
+   target, and an agent must call it as a tool. That needs a transport value or a kind on the
+   MCP server record, and with it a data-model and API change. It is not decided here. This ADR is
+   amended when that slice is designed.
 
 ## Alternatives considered
 
@@ -122,7 +170,12 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   at once. It starts a new thread (a new context) for work in parallel.
 - Negative: `CancelTask` checks the turn in the edge only. A cancel can reach a turn that opened
   between the check and the cancel. The window is one request. _(inferred)_
-- Follow-ups: the outbound slice; pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
+- Negative: a Koinon agent cannot yet call an external A2A agent. The client exists and has specs,
+  but no record and no agent tool reaches it (decision 9).
+- Negative: the client polls. A long task costs one `GetTask` per interval.
+- Negative: an `auth-required` task has no automatic way out: a person adds the credential and
+  starts a new turn. _(inferred)_
+- Follow-ups: the registration of an external agent and the agent tool (decision 9); pin the kagent version used by the e2e ([0101](0101-agent-substrate-and-kagent-not-adopted.md)).
 
 ## Open questions
 
