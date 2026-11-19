@@ -3,17 +3,18 @@
 package substrate_test
 
 import (
-	"errors"
-
 	"context"
 	"encoding/xml"
-	"github.com/minio/minio-go/v7"
-	"github.com/stateracloud/koinon/internal/execution"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/minio/minio-go/v7"
+
+	"github.com/stateracloud/koinon/internal/execution"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
