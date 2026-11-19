@@ -10,9 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -369,7 +370,11 @@ var _ = Describe("the default recipient suite", func() {
 
 var _ = Describe("the suite table against the RFC 9180 vectors of the Go tree", func() {
 	It("derives the vector's key pair for each accepted suite (KEM, KDF, AEAD IDs and key encoding)", func() {
-		raw, err := os.ReadFile(filepath.Join(runtime.GOROOT(), "src", "crypto", "hpke", "testdata", "rfc9180.json"))
+		root, err := exec.Command("go", "env", "GOROOT").Output()
+		if err != nil {
+			Skip("no go tool to find the HPKE test vectors: " + err.Error())
+		}
+		raw, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(root)), "src", "crypto", "hpke", "testdata", "rfc9180.json"))
 		if err != nil {
 			Skip("the Go source tree has no HPKE test vectors: " + err.Error())
 		}
