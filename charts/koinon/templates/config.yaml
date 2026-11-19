@@ -53,6 +53,15 @@ data:
         controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
         routerAddress: {{ .Values.execution.substrate.routerAddress | quote }}
         allowUnhardened: {{ .Values.execution.substrate.allowUnhardened | default false }}
+        {{- with .Values.execution.substrate.defaultTier }}
+        defaultTier: {{ . | quote }}
+        {{- end }}
+        {{- if .Values.execution.substrate.runtimeClassTiers }}
+        runtimeClassTiers:
+          {{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers }}
+          - {{ printf "%s=%s" $class $tier | quote }}
+          {{- end }}
+        {{- end }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt
