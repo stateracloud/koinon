@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.remoteagent.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1;remoteagentv1alpha1";
+
+// RemoteAgentService manages an org's remote agents: external A2A agents that the org's agents may call
+// (ADR 0123 decisions 9, 11 and 13). A remote agent is its own resource, not an MCP server. It is the
+// connect-rpc face of the same service layer the admin API uses. Admins and owners only.
+//
+// A remote agent is pinned to its agent card. Only an admin moves the pin: at registration, on a change of
+// the URL, or with AcceptRemoteAgentCard. The health check reads the card again; a card that differs from
+// the pin is a finding (observed_card_hash) and never an update. The card text is data from another party:
+// GetRemoteAgentCard returns it to an admin, and nothing else returns it. Credentials are write-only.
+service RemoteAgentService {
+  rpc ListRemoteAgents(ListRemoteAgentsRequest) returns (ListRemoteAgentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // CreateRemoteAgent registers an agent. It reads the agent card at card_url and pins it. A card that
+  // cannot be read, or that offers no interface on the host of card_url, is refused with INVALID_ARGUMENT.
+  // Audited as remote_agent.created.
+  rpc CreateRemoteAgent(CreateRemoteAgentRequest) returns (CreateRemoteAgentResponse);
+  // UpdateRemoteAgent changes an agent. A change of card_url reads the card at the new URL and moves the
+  // pin to it. Audited as remote_agent.updated.
+  rpc UpdateRemoteAgent(UpdateRemoteAgentRequest) returns (UpdateRemoteAgentResponse);
+  // DeleteRemoteAgent deletes an agent and the grants of it. Audited as remote_agent.deleted.
+  rpc DeleteRemoteAgent(DeleteRemoteAgentRequest) returns (DeleteRemoteAgentResponse);
+  // GetRemoteAgentCard returns the pinned card and the observed one. The text is data from another party.
+  rpc GetRemoteAgentCard(GetRemoteAgentCardRequest) returns (GetRemoteAgentCardResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // AcceptRemoteAgentCard moves the observed card to the pin. observed_card_hash must be the hash the
+  // admin read; if the health check saw another card since, the call fails with ABORTED. Audited as
+  // remote_agent.card.accepted.
+  rpc AcceptRemoteAgentCard(AcceptRemoteAgentCardRequest) returns (AcceptRemoteAgentCardResponse);
+
+  // GetAgentRemoteAgents returns the remote agents an agent may call. An agent with none calls none.
+  rpc GetAgentRemoteAgents(GetAgentRemoteAgentsRequest) returns (GetAgentRemoteAgentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetAgentRemoteAgents replaces them. Audited as agent.remote_agents.set.
+  rpc SetAgentRemoteAgents(SetAgentRemoteAgentsRequest) returns (SetAgentRemoteAgentsResponse);
+}
+
+// RemoteAgent holds no credential and no card text.
+message RemoteAgent {
+  string id = 1;
+  string org_id = 2;
+  // name is a DNS label of at most 24 characters. The model passes it as the agent argument of the
+  // built-in tools.
+  string name = 3;
+  // card_url is the base URL of the agent. Its card is at /.well-known/agent-card.json under it.
+  string card_url = 4;
+  bool has_credential = 5;
+  string credential_header = 6;
+  string credential_prefix = 7;
+  google.protobuf.Timestamp credential_lost_at = 8;
+  string ca_bundle = 9;
+  bool insecure_skip_verify = 10;
+  // card_hash is the SHA-256 (hex) of the pinned canonical card.
+  string card_hash = 11;
+  google.protobuf.Timestamp card_checked_at = 12;
+  // observed_card_hash is set while the health check saw a card that is not the pin and an admin did not
+  // accept it. It stays until an admin accepts it.
+  string observed_card_hash = 13;
+  // health is "unknown", "healthy" or "unhealthy".
+  string health = 14;
+  string health_reason = 15;
+  google.protobuf.Timestamp health_checked_at = 16;
+  google.protobuf.Timestamp health_since = 17;
+  int32 consecutive_failures = 18;
+  string disabled_reason = 19;
+  google.protobuf.Timestamp created_at = 20;
+  google.protobuf.Timestamp updated_at = 21;
+}
+
+message ListRemoteAgentsRequest {
+  string org_id = 1;
+}
+
+message ListRemoteAgentsResponse {
+  repeated RemoteAgent remote_agents = 1;
+}
+
+message CreateRemoteAgentRequest {
+  string org_id = 1;
+  string name = 2;
+  string card_url = 3;
+  // credential_header defaults to Authorization when credential_value is set.
+  string credential_header = 4;
+  string credential_prefix = 5;
+  string credential_value = 6 [debug_redact = true];
+  // ca_bundle is a PEM bundle of the one CA that signs the agent's certificate. https only, never with
+  // insecure_skip_verify.
+  string ca_bundle = 7;
+  bool insecure_skip_verify = 8;
+}
+
+message CreateRemoteAgentResponse {
+  RemoteAgent remote_agent = 1;
+}
+
+message UpdateRemoteAgentRequest {
+  string org_id = 1;
+  string remote_agent_id = 2;
+  // Unset fields stay. A credential_* field replaces the credential; credential_value unset keeps the
+  // stored secret.
+  optional string card_url = 3;
+  optional string credential_header = 4;
+  optional string credential_prefix = 5;
+  optional string credential_value = 6 [debug_redact = true];
+  bool remove_credential = 7;
+  optional string ca_bundle = 8;
+  optional bool insecure_skip_verify = 9;
+}
+
+message UpdateRemoteAgentResponse {
+  RemoteAgent remote_agent = 1;
+}
+
+message DeleteRemoteAgentRequest {
+  string org_id = 1;
+  string remote_agent_id = 2;
+}
+
+message DeleteRemoteAgentResponse {}
+
+message GetRemoteAgentCardRequest {
+  string org_id = 1;
+  string remote_agent_id = 2;
+}
+
+message GetRemoteAgentCardResponse {
+  string card_hash = 1;
+  // card_json is the pinned canonical card. Data from another party: show it to an admin only.
+  string card_json = 2;
+  string observed_card_hash = 3;
+  string observed_card_json = 4;
+}
+
+message AcceptRemoteAgentCardRequest {
+  string org_id = 1;
+  string remote_agent_id = 2;
+  string observed_card_hash = 3;
+}
+
+message AcceptRemoteAgentCardResponse {
+  RemoteAgent remote_agent = 1;
+}
+
+message GetAgentRemoteAgentsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentRemoteAgentsResponse {
+  repeated string remote_agent_ids = 1;
+}
+
+message SetAgentRemoteAgentsRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  repeated string remote_agent_ids = 3;
+}
+
+message SetAgentRemoteAgentsResponse {
+  repeated string remote_agent_ids = 1;
+}
