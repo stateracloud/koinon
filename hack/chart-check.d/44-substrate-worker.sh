@@ -84,11 +84,14 @@ has "worker hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$wpods" | tail -1)
 grep -Fq 'replicaset-controller' <<<"$tagline" || fail "the digest exemption must default to the platform controllers"
 if grep -Fq 'ate-controller' <<<"$tagline"; then fail "the Substrate controller must not be exempt from the digest rule by default"; fi
-tagline=$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}" | grep -A1 -E 'name: tagAllowed' | head -2 | tail -1)
+custom=$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}")
+tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$custom" | tail -1)
 grep -Fq 'system:serviceaccount:x:y' <<<"$tagline" || fail "digestExemptIdentities must set the exemption"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "digestExemptIdentities must replace the default list"; fi
-printf 'execution:\n  substrate:\n    workerPolicy:\n      digestExemptIdentities: []\n' >"$out/no-exempt.yaml"
-tagline=$(render "${wsub[@]}" -f "$out/no-exempt.yaml" "${pol[@]}" | grep -A1 -E 'name: tagAllowed' | head -2 | tail -1)
+mkdir -p "$out/values"
+printf 'execution:\n  substrate:\n    workerPolicy:\n      digestExemptIdentities: []\n' >"$out/values/no-exempt.yaml"
+none=$(render "${wsub[@]}" -f "$out/values/no-exempt.yaml" "${pol[@]}")
+tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$none" | tail -1)
 grep -Fq 'request.userInfo.username in []' <<<"$tagline" || fail "an empty digestExemptIdentities must exempt nobody"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "an empty digestExemptIdentities must not fall back to the platform controllers"; fi
 
