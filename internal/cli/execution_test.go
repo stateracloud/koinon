@@ -4,6 +4,7 @@ package cli_test
 
 import (
 	"io"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -48,6 +49,23 @@ var _ = Describe("Execution", func() {
 			e := cli.Execution{Driver: cli.DriverSubstrate, Substrate: s}
 			Expect(e.Validate("")).To(MatchError(ContainSubstring(c.want)))
 		}
+	})
+	It("builds the content digest from the snapshot store flags, or fails closed without them", func() {
+		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.ContentDigest).To(BeNil()) // snapshots fail closed in the driver
+		store := cli.SnapshotStore{Endpoint: "http://s3:9000", Bucket: "koinon-test"}
+		_, err = cli.Substrate{SnapshotStore: store}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("--substrate-snapshot-access-key-file")))
+		dir := GinkgoT().TempDir()
+		store.AccessKeyFile, store.SecretKeyFile = dir+"/access", dir+"/secret"
+		Expect(os.WriteFile(store.AccessKeyFile, []byte("koinon_test_not-a-real-key\n"), 0o600)).To(Succeed())
+		_, err = cli.Substrate{SnapshotStore: store}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("--substrate-snapshot-secret-key-file")))
+		Expect(os.WriteFile(store.SecretKeyFile, []byte("koinon_test_not-a-real-secret\n"), 0o600)).To(Succeed())
+		cfg, err = cli.Substrate{SnapshotStore: store}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.ContentDigest).NotTo(BeNil())
 	})
 	It("gives a substrate Exec the tier of the sandbox's runtime class", func(ctx SpecContext) {
 		cfg, err := cli.Substrate{
