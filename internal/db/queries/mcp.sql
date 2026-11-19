@@ -289,6 +289,18 @@ VALUES (@org_id, @agent_id, @server_id, sqlc.narg(tools));
 SELECT * FROM mcp_servers
 WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
 
+-- name: GetServedMCPServerForGuard :one
+-- GetServedMCPServerByName without the sealed credential column. The leak guard runs as the gateway's
+-- database role, which has a column-level grant on mcp_servers that leaves out `credential` (ADR 0097
+-- decision 5, #278): a SELECT * would be refused. Keep this list equal to migrations.GatewayMCPServerColumns.
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, source, managed_by_secret,
+       declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since,
+       consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input,
+       exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by,
+       admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
+FROM mcp_servers
+WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
+
 -- name: GetAgentMCPServer :one
 SELECT * FROM agent_mcp_servers
 WHERE org_id = @org_id AND agent_id = @agent_id AND server_id = @server_id;

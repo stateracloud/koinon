@@ -654,6 +654,10 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
+	// GetServedMCPServerByName without the sealed credential column. The leak guard runs as the gateway's
+	// database role, which has a column-level grant on mcp_servers that leaves out `credential` (ADR 0097
+	// decision 5, #278): a SELECT * would be refused. Keep this list equal to migrations.GatewayMCPServerColumns.
+	GetServedMCPServerForGuard(ctx context.Context, arg GetServedMCPServerForGuardParams) (GetServedMCPServerForGuardRow, error)
 	// An org's recorded USD spend of its system key since @since, for the key's daily budget.
 	GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSinceParams) (string, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
