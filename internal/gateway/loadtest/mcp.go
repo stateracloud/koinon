@@ -165,7 +165,7 @@ func (e Endpoint) run(ctx context.Context, spec Spec) (Result, error) {
 // WriteResults appends results to dir/results.jsonl (one JSON object per line), so a run that
 // stops half way keeps what it measured. dir is created when it is missing.
 func WriteResults(dir string, results ...Result) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "results.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // a results file the person asked for

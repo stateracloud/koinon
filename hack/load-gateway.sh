@@ -14,6 +14,7 @@
 # Settings (environment): KOINON_LOAD_DURATION (default 15s), KOINON_LOAD_CONCURRENCY (default
 # 1,16,64,256). Output: environment.txt (the machine), results.jsonl and report.md.
 # No cluster: every command here runs with KUBECONFIG=/dev/null.
+[ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

@@ -32,6 +32,7 @@ func StartFakeMCP(ctx context.Context) (*FakeMCP, error) {
 		return nil, err
 	}
 	bin := filepath.Join(dir, "koinon-fakemcp")
+	//nolint:gosec // fixed arguments, an output path this function made
 	if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin, "github.com/stateracloud/koinon/cmd/koinon-fakemcp").CombinedOutput(); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("build koinon-fakemcp: %w: %s", err, out)
@@ -43,8 +44,8 @@ func StartFakeMCP(ctx context.Context) (*FakeMCP, error) {
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
-	// Not CommandContext: the process outlives the call's context and Stop ends it.
-	cmd := exec.Command(bin, "-addr", "0.0.0.0:"+strconv.Itoa(port), "-value", FakeMCPToken, "-load-tools") //nolint:gosec // a binary this function built
+	// The process outlives the call's context (WithoutCancel) and Stop ends it.
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), bin, "-addr", "0.0.0.0:"+strconv.Itoa(port), "-value", FakeMCPToken, "-load-tools") //nolint:gosec // a binary this function built
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
