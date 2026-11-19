@@ -38,9 +38,8 @@ lacks "no Role names the audit signing Secret" "resourceNames:.*$sign"
 # never overwritten. (The Role has no rule for the signing Secret of its own.)
 api_role=$(render --show-only templates/rbac.yaml | awk 'BEGIN{RS="\n---\n"} /kind: Role\n/ && /name: koinon-api\n/ && !/RoleBinding/')
 grep -Eq 'verbs: \[get, list, watch, create\]' <<<"$api_role" || fail "koinon-api's Role gets and creates Secrets (it makes the audit signing Secret)"
-if grep -E 'verbs: \[[^]]*(update|patch)' <<<"$api_role" | grep -Eqv 'verbs: \[update\]$'; then
-	fail "koinon-api's Role updates or patches only through the KEK rule that names the KEK Secret"
-fi
+other_writes=$(grep -E 'verbs: \[[^]]*(update|patch)' <<<"$api_role" | grep -Ev 'verbs: \[update\]$' || true)
+[ -z "$other_writes" ] || fail "koinon-api's Role updates or patches only through the KEK rule that names the KEK Secret"
 upd=$(grep -B2 'verbs: \[update\]' <<<"$api_role" || true)
 grep -Fq 'resourceNames: [koinon-kek]' <<<"$upd" || fail "koinon-api's only Secret update rule names the KEK Secret"
 
