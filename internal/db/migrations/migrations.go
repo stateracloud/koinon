@@ -78,7 +78,10 @@ func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 // GatewayRole is the NOLOGIN group role of koinon-gateway's database login (ADR 0097 decision 5,
 // #278). It is the gateway's only database privilege: it reads what the leak guard decides on,
 // writes the guard's own state and inserts the call log, and nothing else. It cannot read a
-// credential, a provider key, a secret or an approval. The chart creates the role and makes the
+// provider key, a secret or an approval. It can read the sealed (encrypted) credential columns of
+// mcp_servers and connections, because the guard's queries select whole rows; the gateway is the only
+// process that may later hold the key to open them (ADR 0097 decision 5), so a column-level grant
+// follows when those queries name their columns. The chart creates the role and makes the
 // gateway's login a member; the migrate role has no CREATEROLE.
 const GatewayRole = "koinon_gateway"
 
