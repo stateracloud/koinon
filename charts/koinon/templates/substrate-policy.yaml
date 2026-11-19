@@ -17,7 +17,7 @@ pod's creator cannot choose.
 - objects: WorkerPool, SandboxConfig and CSIDriverConfig, and the workload kinds that make pods
   (Deployments, ReplicaSets, DaemonSets, StatefulSets, Jobs, CronJobs), are written only by the
   installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
-  Kubernetes' own controllers; the Substrate controller may change the metadata of its objects. Without
+  Kubernetes' own controllers; the Substrate controller may change the metadata of its objects and applies the Deployments of its WorkerPools. Without
   this, anyone who can write a Deployment here would get a privileged pod past the pod rules.
 A CEL error denies under failurePolicy Fail.
 */ -}}
@@ -160,10 +160,13 @@ spec:
     - name: kube
       expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
     # The Substrate controller changes metadata (finalizers, annotations) of its own objects, never the spec.
+    # The Substrate controller applies the Deployment of a WorkerPool (server-side apply creates and updates it).
+    - name: controllerOwn
+      expression: {{ printf "request.userInfo.username in %s && request.resource.group == 'apps' && request.resource.resource == 'deployments'" (toJson $controllers) | quote }}
     - name: controllerMetadata
       expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) | quote }}
   validations:
-    - expression: "variables.installer || variables.kube || variables.controllerMetadata"
+    - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
 ---
 apiVersion: admissionregistration.k8s.io/v1

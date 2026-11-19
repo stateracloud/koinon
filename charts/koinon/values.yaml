@@ -735,12 +735,15 @@ execution:
         - /dev/net/tun
         - /dev/vhost-vsock
         - /dev/vhost-net
+        # The worker's base directory (volume ate-base), mounted in every tier, gVisor too.
+        - /var/lib/ate
       # Who may write WorkerPool, SandboxConfig, CSIDriverConfig and the workload kinds (Deployment,
       # ReplicaSet, DaemonSet, StatefulSet, Job, CronJob) in the namespace: the installer (ate-setup and
-      # `helm upgrade`), by user name or by group. The default group is the cluster admins' own. Narrow
-      # it to the installer's identity on a real install.
+      # `helm upgrade`), by user name or by group. The default groups are the cluster admins' own
+      # (system:masters; kubeadm and kind admins are in kubeadm:cluster-admins). Set the group or user
+      # your platform gives the installer, and narrow it to the installer's identity on a real install.
       installerIdentities: []
-      installerGroups: [system:masters]
+      installerGroups: [system:masters, kubeadm:cluster-admins]
     # NetworkPolicy of the Substrate namespace: default-deny for pods that no rule below names, and
     # only the allowed peers. No CNI-specific feature.
     workerNetworkPolicy:
@@ -755,18 +758,30 @@ execution:
       # Extra egress rules, in networking.k8s.io/v1 form, for an object store or database outside
       # the cluster.
       extraEgress: []
-    # The default WorkerPool (ate.dev/v1): one shared pool per tier (D6). Off until Substrate's
-    # WorkerPool spec is verified on a cluster (issue #1089 question): the preflight needs a pool
-    # per tier either way, and ate-setup creates none.
+    # The default WorkerPool (ate.dev/v1): one shared pool per tier (D6). Off by default: ate-setup
+    # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
+    # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class
+    # (immutable), and node placement and the pull ServiceAccount live under spec.template.
     workerPool:
       enabled: false
       name: koinon-vm
       replicas: 1
-      sandboxClasses: [microvm]
+      # Required when enabled: the worker image of the sandbox class, for example
+      # <registry>/ateworker-gvisor:v1.0.0 (the chart pins no Substrate image).
+      workerImage: ""
+      # The one sandbox class of the pool: gvisor or microvm. It must be a class the Substrate install
+      # has (ate-setup --sandbox-classes; the generic platform and kind install gvisor only).
+      sandboxClass: gvisor
+      # spec.template.nodeSelector and spec.template.tolerations (at most 16).
       nodeSelector: {}
       tolerations: []
+      # Pull access: the pool's pods run as this ServiceAccount (spec.template.serviceAccountName).
+      # Empty with no pull secrets: Substrate makes its own `ateworker` ServiceAccount. Empty with
+      # imagePullSecrets set: the chart makes a ServiceAccount named like the pool that carries them;
+      # the Secrets must exist in the Substrate namespace.
+      serviceAccountName: ""
       # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
-      # does not know.
+      # does not know, template.labels and template.resources among them.
       spec: {}
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.

@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,8 +55,10 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		dryRun = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 	)
 	const (
-		other    = "system:serviceaccount:koinon:koinon-reconciler"
-		existing = "existing-worker"
+		other = "system:serviceaccount:koinon:koinon-reconciler"
+		// What kubeadm and kind give their admin: not system:masters.
+		kubeadmAdmin = "kubernetes-admin"
+		existing     = "existing-worker"
 	)
 
 	worker := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
@@ -93,7 +96,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		DeferCleanup(env.Stop)
 		admin = kubernetes.NewForConfigOrDie(cfg)
 		as = map[string]*kubernetes.Clientset{"admin": admin}
-		for _, user := range []string{workerController, other} {
+		for _, user := range []string{workerController, other, kubeadmAdmin} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-worker-" + strings.ReplaceAll(user, ":", "-")},
@@ -106,6 +109,9 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			if parts := strings.Split(user, ":"); len(parts) == 4 && parts[1] == "serviceaccount" {
 				// A real token also carries its namespace's group.
 				groups = append(groups, "system:serviceaccounts:"+parts[2])
+			}
+			if user == kubeadmAdmin {
+				groups = []string{"kubeadm:cluster-admins", "system:authenticated"}
 			}
 			c.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: groups}
 			as[user] = kubernetes.NewForConfigOrDie(c)
@@ -172,6 +178,34 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 				}})
 			})))
 		}
+	})
+
+	It("admits the base directory of the worker, /var/lib/ate", func(ctx SpecContext) {
+		Expect(create(ctx, workerController, workerNamespace, worker("ate-base", func(p *corev1.Pod) {
+			p.Spec.Volumes[0].HostPath.Path = "/var/lib/ate"
+		}))).To(Succeed())
+	})
+
+	It("lets the controller apply a Deployment, and the installer of kubeadm and kind write one", func(ctx SpecContext) {
+		deploy := func(name string) *appsv1.Deployment {
+			labels := map[string]string{"app": name}
+			return &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: labels},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: labels},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "worker", Image: workerDigest}}},
+					},
+				},
+			}
+		}
+		for _, user := range []string{workerController, kubeadmAdmin, "admin"} {
+			_, err := as[user].AppsV1().Deployments(workerNamespace).Create(ctx, deploy("by-"+strings.NewReplacer(":", "-", "_", "-").Replace(user)), dryRun)
+			Expect(err).NotTo(HaveOccurred(), user)
+		}
+		_, err := as[other].AppsV1().Deployments(workerNamespace).Create(ctx, deploy("by-other"), dryRun)
+		denied(err)
 	})
 
 	It("denies ephemeral containers in a worker pod, the controller's included", func(ctx SpecContext) {

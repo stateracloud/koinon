@@ -31,7 +31,7 @@ has "the controller identity is configurable" 'system:serviceaccount:other:ctl' 
 has "Kubernetes workload controllers may create the control plane's pods" 'system:serviceaccount:kube-system:replicaset-controller' "${wsub[@]}" "${pol[@]}"
 has "images are pinned by digest" "@sha256:\[a-f0-9\]\{64\}" "${wsub[@]}" "${pol[@]}"
 has "hostNetwork is denied" 'hostNetwork is not allowed' "${wsub[@]}" "${pol[@]}"
-has "hostPath is limited to the documented set" 'v.hostPath.path in \[\\"/dev/kvm\\",\\"/dev/net/tun\\",\\"/dev/vhost-vsock\\",\\"/dev/vhost-net\\"\]' "${wsub[@]}" "${pol[@]}"
+has "hostPath is limited to the documented set" 'v.hostPath.path in \[\\"/dev/kvm\\",\\"/dev/net/tun\\",\\"/dev/vhost-vsock\\",\\"/dev/vhost-net\\",\\"/var/lib/ate\\"\]' "${wsub[@]}" "${pol[@]}"
 has "ephemeral containers are denied" "request.subResource != 'ephemeralcontainers'" "${wsub[@]}" "${pol[@]}"
 has "exec, attach, port-forward and proxy are denied" 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy\]' "${wsub[@]}" "${pol[@]}"
 has "the validation actions deny" 'validationActions: \["Deny"\]' "${wsub[@]}" "${pol[@]}"
@@ -50,7 +50,7 @@ has "the object guard is on by default" 'name: koinon-koinon-worker-objects$' "$
 has "the object guard covers the three Substrate kinds" 'resources: \[workerpools, sandboxconfigs, csidriverconfigs\]' "${wsub[@]}" "${pol[@]}"
 has "the object guard covers the workload kinds" 'resources: \[deployments, replicasets, daemonsets, statefulsets\]' "${wsub[@]}" "${pol[@]}"
 has "the object guard covers jobs and cronjobs" 'resources: \[jobs, cronjobs\]' "${wsub[@]}" "${pol[@]}"
-has "the installer group defaults to system:masters" 'g in \[\\"system:masters\\"\]' "${wsub[@]}" "${pol[@]}"
+has "the installer group defaults to system:masters" 'g in \[\\"system:masters\\",\\"kubeadm:cluster-admins\\"\]' "${wsub[@]}" "${pol[@]}"
 has "installer identities are configurable" 'system:admin' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={system:admin}' "${pol[@]}"
 has "the controller may change metadata of Substrate objects only" "request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has\(object.spec\) && has\(oldObject.spec\) && object.spec == oldObject.spec" "${wsub[@]}" "${pol[@]}"
 lacks "the policies are off when disabled" 'worker-(pods|connect|objects)' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
@@ -77,10 +77,31 @@ has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
 lacks "the NetworkPolicy is off when disabled" 'substrate-workers' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 
-# WorkerPool: off by default, one shared pool when on, pulls with the release's pull secrets.
+# WorkerPool (Substrate v1.0.0 WorkerPoolSpec): off by default; workerImage is required; one sandbox
+# class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
+wp=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)
 lacks "no WorkerPool by default" 'kind: WorkerPool' "${wsub[@]}"
-has "the default WorkerPool" 'kind: WorkerPool' "${wsub[@]}" --set execution.substrate.workerPool.enabled=true "${pool[@]}"
-has "the WorkerPool is in the Substrate namespace" 'namespace: "ate-system"' "${wsub[@]}" --set execution.substrate.workerPool.enabled=true "${pool[@]}"
-has "the WorkerPool sandbox class" 'name: microvm' "${wsub[@]}" --set execution.substrate.workerPool.enabled=true "${pool[@]}"
-has "the WorkerPool pulls with the global pull secrets (ADR 0061)" 'name: regcred' "${wsub[@]}" --set execution.substrate.workerPool.enabled=true --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
-has "the WorkerPool spec override merges" 'foo: bar' "${wsub[@]}" --set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.spec.foo=bar "${pool[@]}"
+if render "${wsub[@]}" --set execution.substrate.workerPool.enabled=true >/dev/null 2>"$out/sub.err"; then fail "a WorkerPool without workerImage must not render"; fi
+grep -q 'workerImage' "$out/sub.err" || fail "the missing-image error must name workerImage"
+has "the default WorkerPool" 'kind: WorkerPool' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the WorkerPool is in the Substrate namespace" 'namespace: "ate-system"' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the WorkerPool carries workerImage" 'workerImage: registry.example/ateworker-gvisor:v1.0.0' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the WorkerPool default class is gvisor" 'name: gvisor' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "the WorkerPool class is configurable" 'name: microvm' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
+if render "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.sandboxClass=kata >/dev/null 2>&1; then fail "an unknown sandbox class must not render"; fi
+lacks "the WorkerPool has exactly one class" 'name: microvm' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+lacks "the WorkerPool spec has no imagePullSecrets or top-level nodeSelector" '^  (imagePullSecrets|nodeSelector|tolerations):' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.nodeSelector.pool=vm --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
+has "nodeSelector sits under spec.template" '^    nodeSelector:' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.nodeSelector.pool=vm "${pool[@]}"
+has "the pull secrets go to a ServiceAccount" 'kind: ServiceAccount' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
+has "the ServiceAccount carries the pull secret (ADR 0061)" 'name: regcred' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
+has "the pool runs as that ServiceAccount" 'serviceAccountName: "?koinon-vm-worker"?' "${wsub[@]}" "${wp[@]}" --set 'global.imagePullSecrets={regcred}' "${pool[@]}"
+lacks "no ServiceAccount without pull secrets" 'kind: ServiceAccount' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+has "a named ServiceAccount is used as is" 'serviceAccountName: "?my-sa"?' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.serviceAccountName=my-sa "${pool[@]}"
+has "the WorkerPool spec override merges" 'foo: bar' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.spec.foo=bar "${pool[@]}"
+
+# Admission against a real Substrate install (kind, v1.0.0): the worker's base directory, the controller's
+# Deployment writes and the kubeadm/kind installer group.
+has "the worker base directory is allowed" '/var/lib/ate' "${wsub[@]}" "${pol[@]}"
+has "the controller may write Deployments" "request.resource.group == 'apps' && request.resource.resource == 'deployments'" "${wsub[@]}" "${pol[@]}"
+has "the kubeadm admin group is an installer by default" 'kubeadm:cluster-admins' "${wsub[@]}" "${pol[@]}"
+has "system:masters stays an installer" 'system:masters' "${wsub[@]}" "${pol[@]}"

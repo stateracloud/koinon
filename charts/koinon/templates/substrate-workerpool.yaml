@@ -1,21 +1,27 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
 The default shared WorkerPool of the Substrate driver (ate.dev/v1; D6: shared pools on vm). ate-setup
-creates no pool, and the preflight needs one per tier. Off by default until the WorkerPool spec is
-verified on a cluster (issue 1089): the generated spec is sandboxClasses, replicas, nodeSelector and
-tolerations, and workerPool.spec is merged over it for the fields this chart does not know. Pods of
-the pool pull with koinon.imagePullSecrets (ADR 0061), (an unverified field name: see the issue 1089 question).
+creates no pool, and the preflight needs one per sandbox class. Off by default. The generated spec
+follows Substrate v1.0.0's WorkerPoolSpec: workerImage (required), replicas, sandboxClasses (exactly
+one entry, immutable) and spec.template.{nodeSelector,tolerations,serviceAccountName}. The spec has no
+imagePullSecrets: pull access is a ServiceAccount that carries them (koinon.imagePullSecrets, ADR 0061;
+the Secrets must exist in the Substrate namespace). workerPool.spec is merged over the generated spec.
 The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer identity writes it
 (substrate-policy.yaml, workerPolicy.installerIdentities).
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPool.enabled }}
 {{- $s := .Values.execution.substrate }}
 {{- $p := $s.workerPool }}
-{{- $spec := dict "replicas" $p.replicas "sandboxClasses" (list) }}
-{{- range $p.sandboxClasses }}{{- $_ := set $spec "sandboxClasses" (append (index $spec "sandboxClasses") (dict "name" .)) }}{{- end }}
-{{- with $p.nodeSelector }}{{- $_ := set $spec "nodeSelector" . }}{{- end }}
-{{- with $p.tolerations }}{{- $_ := set $spec "tolerations" . }}{{- end }}
-{{- with (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}{{- $_ := set $spec "imagePullSecrets" . }}{{- end }}
+{{- if not $p.workerImage }}{{- fail "execution.substrate.workerPool.workerImage is required when the WorkerPool is enabled (the worker image of the sandbox class, for example <registry>/ateworker-gvisor:v1.0.0)" }}{{- end }}
+{{- $pull := (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}
+{{- $sa := $p.serviceAccountName }}
+{{- if and (not $sa) $pull }}{{- $sa = printf "%s-worker" $p.name }}{{- end }}
+{{- $tmpl := dict }}
+{{- with $p.nodeSelector }}{{- $_ := set $tmpl "nodeSelector" . }}{{- end }}
+{{- with $p.tolerations }}{{- $_ := set $tmpl "tolerations" . }}{{- end }}
+{{- with $sa }}{{- $_ := set $tmpl "serviceAccountName" . }}{{- end }}
+{{- $spec := dict "workerImage" $p.workerImage "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
+{{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
 apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:
@@ -25,4 +31,16 @@ metadata:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   {{- toYaml (mergeOverwrite $spec ($p.spec | default dict)) | nindent 2 }}
+{{- if and (not $p.serviceAccountName) $pull }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa | quote }}
+  namespace: {{ $s.namespace | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+imagePullSecrets:
+  {{- toYaml $pull | nindent 2 }}
+{{- end }}
 {{- end }}
