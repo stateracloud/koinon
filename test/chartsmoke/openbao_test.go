@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -50,6 +51,9 @@ type kmsSettings struct {
 	// roles maps an OpenBao role to the ServiceAccount it binds; admin roles may encrypt.
 	roles map[string]string
 	admin map[string]bool
+	// roleKey maps an OpenBao role to the transit key it uses: the gateway's recipient key is wrapped
+	// by a key of its own, not the KEK's (ADR 0097 12.3).
+	roleKey map[string]string
 	// AWS KMS: the region, the key and the endpoints the pods call.
 	region, keyID, endpoint, stsEndpoint string
 	// caConfigMap is the ConfigMap the pods mount the KMS's CA from ("" when none).
@@ -70,7 +74,7 @@ func kmsOf(r *rendered) *kmsSettings {
 				continue
 			}
 			if k == nil {
-				k = &kmsSettings{backend: backend, roles: map[string]string{}, admin: map[string]bool{}}
+				k = &kmsSettings{backend: backend, roles: map[string]string{}, admin: map[string]bool{}, roleKey: map[string]string{}}
 			}
 			Expect(backend).To(Equal(k.backend), "%s uses another KMS than the other pods", c.Name)
 			sa := ps.ServiceAccountName
@@ -81,14 +85,19 @@ func kmsOf(r *rendered) *kmsSettings {
 			switch backend {
 			case "openbao":
 				caVolume = "openbao-ca"
-				k.address, k.transitMount, k.key, k.authMount = env["KOINON_OPENBAO_ADDRESS"], env["KOINON_OPENBAO_TRANSIT_MOUNT"], env["KOINON_OPENBAO_KEY"], env["KOINON_OPENBAO_AUTH_MOUNT"]
+				k.address, k.transitMount, k.authMount = env["KOINON_OPENBAO_ADDRESS"], env["KOINON_OPENBAO_TRANSIT_MOUNT"], env["KOINON_OPENBAO_AUTH_MOUNT"]
+				gateway := c.Name == "koinon-gateway" || c.Name == "gateway-key-admin"
+				if !gateway {
+					k.key = env["KOINON_OPENBAO_KEY"]
+				}
 				role := env["KOINON_OPENBAO_ROLE"]
 				Expect(role).NotTo(BeEmpty(), "%s signs in to OpenBao with a role", c.Name)
 				if prev, ok := k.roles[role]; ok {
 					Expect(prev).To(Equal(sa), "OpenBao role %s is used by two ServiceAccounts", role)
 				}
 				k.roles[role] = sa
-				k.admin[role] = k.admin[role] || slices.Contains(c.Args, "key-admin")
+				k.roleKey[role] = env["KOINON_OPENBAO_KEY"]
+				k.admin[role] = k.admin[role] || slices.Contains(c.Args, "key-admin") || c.Name == "gateway-key-admin"
 			case "awskms":
 				caVolume = "awskms-ca"
 				k.region, k.keyID, k.endpoint, k.stsEndpoint = env["KOINON_AWSKMS_REGION"], env["KOINON_AWSKMS_KEY_ID"], env["KOINON_AWSKMS_ENDPOINT"], env["KOINON_AWSKMS_STS_ENDPOINT"]
@@ -183,13 +192,16 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 	}).WithTimeout(time.Minute).Should(Succeed())
 
 	bao.post(ctx, "/v1/sys/mounts/"+k.transitMount, map[string]any{"type": "transit"})
-	bao.post(ctx, "/v1/"+k.transitMount+"/keys/"+k.key, map[string]any{})
-	bao.post(ctx, "/v1/sys/policies/acl/koinon-decrypt", map[string]any{
-		"policy": fmt.Sprintf(`path "%s/decrypt/%s" { capabilities = ["update"] }`, k.transitMount, k.key),
-	})
-	bao.post(ctx, "/v1/sys/policies/acl/koinon-key-admin", map[string]any{
-		"policy": fmt.Sprintf("path \"%[1]s/encrypt/%[2]s\" { capabilities = [\"update\"] }\npath \"%[1]s/decrypt/%[2]s\" { capabilities = [\"update\"] }", k.transitMount, k.key),
-	})
+	// One transit key and one pair of policies per key a role uses (the KEK's, and the gateway's own).
+	for _, key := range slices.Compact(slices.Sorted(maps.Values(k.roleKey))) {
+		bao.post(ctx, "/v1/"+k.transitMount+"/keys/"+key, map[string]any{})
+		bao.post(ctx, "/v1/sys/policies/acl/koinon-decrypt-"+key, map[string]any{
+			"policy": fmt.Sprintf(`path "%s/decrypt/%s" { capabilities = ["update"] }`, k.transitMount, key),
+		})
+		bao.post(ctx, "/v1/sys/policies/acl/koinon-key-admin-"+key, map[string]any{
+			"policy": fmt.Sprintf("path \"%[1]s/encrypt/%[2]s\" { capabilities = [\"update\"] }\npath \"%[1]s/decrypt/%[2]s\" { capabilities = [\"update\"] }", k.transitMount, key),
+		})
+	}
 
 	// Kubernetes auth: OpenBao calls the TokenReview API with a reviewer's token, the setup the
 	// operator guide describes for an OpenBao outside the cluster.
@@ -203,9 +215,9 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 		"disable_iss_validation": true,
 	})
 	for role, sa := range k.roles {
-		policy := "koinon-decrypt"
+		policy := "koinon-decrypt-" + k.roleKey[role]
 		if k.admin[role] {
-			policy = "koinon-key-admin"
+			policy = "koinon-key-admin-" + k.roleKey[role]
 		}
 		bao.post(ctx, "/v1/auth/"+k.authMount+"/role/"+role, map[string]any{
 			"bound_service_account_names":      []string{sa},

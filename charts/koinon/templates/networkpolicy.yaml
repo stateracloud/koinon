@@ -114,7 +114,8 @@ spec:
         {{- toYaml . | nindent 8 }}
     {{- end }}
 {{- $closed := list "reconciler" "agentd" "migrate" }}
-{{- if include "koinon.kms" . }}{{ $closed = append $closed "key-admin" }}{{ end }}
+{{- /* The gateway key Job carries the same component label as the KEK key-admin Job. */}}
+{{- if or (include "koinon.kms" .) (include "koinon.gwKey" .) }}{{ $closed = append $closed "key-admin" }}{{ end }}
 {{- if .Values.runEvidence.export.enabled }}{{ $closed = append $closed "run-evidence" }}{{ end }}
 {{- range $component := $closed }}
 {{- $jobOnly := has $component (list "migrate" "key-admin" "run-evidence") }}
@@ -217,7 +218,9 @@ spec:
 # OTLP listener (the State stream), koinon-api's tools port (the platform tool servers, once #281 sets the agent header) and the public
 # internet, with the private ranges carved out. The leak guard runs in this process, so there is no
 # guard-port rule. The guard's database login reaches the Postgres pods on 5432 in cnpg mode; with
-# postgres.mode=external the egress to the database comes from networkPolicy.gatewayEgressTo.
+# postgres.mode=external the egress to the database comes from networkPolicy.gatewayEgressTo. The same holds
+# for the KMS that wraps the gateway key (gateway.mcp.koinon.recipientKey): a KMS inside the private ranges
+# (an in-cluster OpenBao) needs a networkPolicy.gatewayEgressTo rule; AWS KMS is public and needs none.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
