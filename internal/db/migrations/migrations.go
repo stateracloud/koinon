@@ -90,8 +90,8 @@ func GrantInstallAuditWriter(ctx context.Context, db Execer) (bool, error) {
 const GatewayRole = "koinon_gateway"
 
 // GatewayMCPServerColumns are the columns of mcp_servers the gateway may read: every column except the
-// sealed `credential`. The guard's query GetServedMCPServerForGuard selects exactly these; a test keeps
-// the two lists and the database equal.
+// sealed `credential`. The guard's query GetServedMCPServerForGuard selects exactly these; specs in
+// internal/mcpguard keep the query, the row conversion and the database equal to it.
 var GatewayMCPServerColumns = []string{
 	"org_id", "id", "name", "url", "transport", "credential_header", "credential_prefix", "source",
 	"managed_by_secret", "declared_version", "removed_at", "disabled_reason", "health", "health_reason",
@@ -109,9 +109,6 @@ var GatewayConnectionColumns = []string{"org_id", "id", "removed_at", "secret_fi
 
 // gatewayGrants are the privileges of GatewayRole. Each line names why the gateway needs it.
 var gatewayGrants = []string{
-	// An earlier version granted whole-table SELECT on mcp_servers and connections. Drop it first, so a
-	// database that has it ends with the column grants below and nothing wider.
-	`REVOKE SELECT ON mcp_servers, connections FROM ` + GatewayRole,
 	// The guard identifies the server and reads the code-host connection's scope (mcpguard,
 	// orgsettings.LeakGuardOf), by named columns: the sealed credential columns are not among them.
 	`GRANT SELECT (` + strings.Join(GatewayMCPServerColumns, ", ") + `) ON mcp_servers TO ` + GatewayRole,
@@ -137,6 +134,20 @@ func GrantGateway(ctx context.Context, db Execer) (bool, error) {
 	}
 	if !exists {
 		return false, nil
+	}
+	// An earlier version granted whole-table SELECT on mcp_servers and connections. Drop it, so a database
+	// that has it ends with the column grants and nothing wider. Only when it is there: a revoke also
+	// removes the column grants, and a running gateway must not lose them on every migrate.
+	for _, table := range []string{"mcp_servers", "connections"} {
+		var wide bool
+		if err := db.QueryRowContext(ctx, `SELECT has_table_privilege($1, $2, 'SELECT')`, GatewayRole, table).Scan(&wide); err != nil {
+			return false, err
+		}
+		if wide {
+			if _, err := db.ExecContext(ctx, `REVOKE SELECT ON `+table+` FROM `+GatewayRole); err != nil {
+				return false, err
+			}
+		}
 	}
 	for _, stmt := range gatewayGrants {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -385,6 +386,11 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		// An earlier version granted whole-table SELECT. Granting again must take it away.
 		_, err := pool.Exec(ctx, `GRANT SELECT ON mcp_servers, connections TO `+migrations.GatewayRole)
 		Expect(err).NotTo(HaveOccurred())
+		// A failed assertion below must not leave the wide grant to the specs after this one.
+		DeferCleanup(func(ctx SpecContext) {
+			_, err := migrations.GrantGateway(ctx, sqlDB(pool))
+			Expect(err).NotTo(HaveOccurred())
+		})
 		ok, err := migrations.GrantGateway(ctx, sqlDB(pool))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
@@ -415,6 +421,13 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				}
 			}
 			Expect(readable).To(ConsistOf(want), table)
+			// Independent of the grant list: the sealed and the config columns are never readable.
+			Expect(readable).NotTo(ContainElements(
+				"credential", "secret_envelope", "secret_name", "config", "last_test"), table)
+			if table == "mcp_servers" {
+				// Every column but the sealed one is on the list: a new column is a decision, made in the list.
+				Expect(all).To(ConsistOf(append(slices.Clone(want), "credential")), table)
+			}
 		}
 
 		// The sealed columns are refused by the database itself, also in a query that names them or selects *.
@@ -1955,3 +1968,43 @@ func uuidOf(s string) pgtype.UUID {
 	Expect(u.Scan(s)).To(Succeed())
 	return u
 }
+
+var _ = Describe("the guard's server row (#278)", func() {
+	It("copies every column of the table but the sealed credential", func() {
+		var row store.GetServedMCPServerForGuardRow
+		rv := reflect.ValueOf(&row).Elem()
+		for i := range rv.NumField() {
+			f := rv.Field(i)
+			switch f.Kind() {
+			case reflect.String:
+				f.SetString("x")
+			case reflect.Bool:
+				f.SetBool(true)
+			case reflect.Int32:
+				f.SetInt(1)
+			case reflect.Struct:
+				// pgtype values: set the Valid flag and a non-zero payload where one exists.
+				f.FieldByName("Valid").SetBool(true)
+				if u := f.FieldByName("Bytes"); u.IsValid() && u.Kind() == reflect.Array {
+					u.Index(0).SetUint(1)
+				}
+				if t := f.FieldByName("String"); t.IsValid() {
+					t.SetString("x")
+				}
+				if t := f.FieldByName("Time"); t.IsValid() {
+					t.Set(reflect.ValueOf(time.Unix(1, 0)))
+				}
+			}
+		}
+		got := reflect.ValueOf(mcpguard.ServerOf(row))
+		Expect(got.NumField()-1).To(Equal(rv.NumField()), "the row has every column but credential")
+		for i := range got.NumField() {
+			name := got.Type().Field(i).Name
+			if name == "Credential" {
+				continue
+			}
+			Expect(got.Field(i).IsZero()).To(BeFalse(), "serverOf copies %s", name)
+		}
+		Expect(rv.NumField()).To(Equal(len(migrations.GatewayMCPServerColumns)))
+	})
+})
