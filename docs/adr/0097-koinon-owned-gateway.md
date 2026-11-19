@@ -744,12 +744,16 @@ RBAC text).
 | `local` | Yes, and so can the reconciler, if the Secret is in the release namespace | `Local` wraps with the identity function: the "wrapped" key is the key. No KMS holds the boundary. |
 
 On `local`, the Secret has a fixed name, so koinon-api (list) and the reconciler (get) can read the raw key. For `local`, v2 still removes the plaintext from the reconciler, from the MCP credentials Secret and
-from etcd. It does not give custody. The chart says so: the NOTES text and the metric
+from etcd. It does not give custody. The chart and the install status say so: the NOTES text and the metric
 `koinon_gateway_recipient_key_custody{custody="kms|none"}` (fixed labels, ADR 0023) show it, and the
 docs say "use a KMS backend for the gateway-only property". This is one code path in every backend; only
 the strength of the boundary differs, and the chart reports it.
 
-Open question 2 (below) asks whether `local` without custody is acceptable in v0.2.
+**Decided (maintainer, 2026-11-19, #1151).** There is one code path on every backend. The `local` backend
+still accepts MCP credentials, with no second namespace. Koinon reports the custody level of each install
+instead of hiding it: on `local` the report says "koinon-api can read the wrapping key"; on AWS KMS and
+OpenBao it says "gateway-only unwrap". The report is in the install status and in the docs. No text
+claims "koinon-api cannot decrypt" on the `local` backend.
 
 #### 12.4 Key ID, rotation and re-seal
 
@@ -889,7 +893,7 @@ twice the guess, go back to the maintainer).
 | Envoy in front, with a Koinon `ext_proc` server | Buys connection handling only. Koinon would still write the usage tap, reservation, guard and MCP aggregator, every stream chunk would cross gRPC, and operators would run one more component. Kept as an escape hatch if Go's connection handling ever proves to be the limit. Koinon borrows Envoy's designs instead: RLQS and Doorman lease expiry, and its timeout, stream-limit and drain defaults as a checklist. |
 | Seal MCP credentials to a transit key, encrypt-only for koinon-api and decrypt-only for the gateway (decision 12) | Decided against by the maintainer on 2026-11-19. The gateway-key envelope has one code path in every backend, `local` included. |
 | Narrower Secret RBAC for koinon-api in the release namespace (decision 12.3) | RBAC has no deny and no label selector, and koinon-api must list Secrets it cannot name. A key in a Secret there stays readable. |
-| A second namespace for the gateway key on every backend (decision 12.3) | Gives custody on `local` too, but the gateway needs Kubernetes API access (none today) and the chart gets a second namespace and Role. Kept as the stronger option for `local` (open question 2). |
+| A second namespace for the gateway key on every backend (decision 12.3) | Gives custody on `local` too, but the gateway needs Kubernetes API access (none today) and the chart gets a second namespace and Role. Not chosen on 2026-11-19: one code path and a custody report are enough (decision 12.3). |
 | A NaCl sealed box instead of HPKE (decision 12.1) | Not in the standard library, no `info` or `aad`, no algorithm name in the format. |
 | Let the gateway read ciphertext from Postgres and skip the reconciler's copy | The maintainer decided that the reconciler copies the ciphertext. Reading the column would need column grants on the sealed credential column (#278); revisit with slice 3. |
 | Move only the proxy out of koinon-api, keep the KEK there | Buys availability and scaling now, but koinon-api could still decrypt every key, so "keys stay out of the internet-facing process" would be false. Fixing it later means re-encrypting every stored credential and changing RBAC on running installs (ADR 0085). |
@@ -953,13 +957,8 @@ Tracked in #279 (the model path design).
 1. **OpenBao and the gateway-only key**: answered in decision 12.3. A separate transit key (or KMS
    key) wraps the gateway key, and only the gateway identity may decrypt with it. It works in all three
    DB modes, because the key lives in the KMS and not in the database. Closed.
-2. **`local` backend without custody** (maintainer decision needed, #1151). On `local`, koinon-api can
-   read the wrapped gateway key, because `Local` wraps with the identity function and the Secret is in
-   its namespace. Recommended (sustainable first): keep one code path, and report the custody level
-   (decision 12.3). The stronger option is a second namespace plus Kubernetes API access for the gateway;
-   it costs a new Role and a namespace in the chart. The cheapest option, no report, would claim
-   "koinon-api cannot decrypt" where it is false, and a later fix means a re-key and an RBAC change on
-   running installs (ADR 0085).
+2. **`local` backend without custody**: answered by the maintainer on 2026-11-19 (#1151), in decision
+   12.3. One code path on every backend, and Koinon reports the custody level per install. Closed.
 
 Decided and moved into the decision sections: gateway placement, MCP server-initiated requests and
 MCP replicas (step 2), unpriced models and runaway calls (step 3), all at the maintainer's 2026-11-06
