@@ -399,6 +399,19 @@ applying it twice. Acks are recorded and gate nothing; the reconciler still push
 full snapshots, ACK per resource type); here one revision number covers both halves, there is no NACK
 (a failed half is simply not acked) and the copy id stands in for the nonce.
 
+Record (2026-11-19, #1086 slice 1; the choices below are decided): the forge and registry routes and the
+actor identity token are two small packages with no cut-over yet. `internal/gateway/actortoken` mints and
+checks the token: a JWS signed with Ed25519, audience `koinon-gateway`, lifetime 300 to 3600 seconds
+(ADR 0120 section 1.2), claims `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `org`, `agent` and `run`. The
+minter holds the private key outside the guest and outside the gateway; the gateway holds public keys only
+and accepts no other algorithm. `internal/gateway/route` is the route model: a route names class (forge or
+registry), org, one exact host and port, methods, path prefixes, query keys and a credential name, never a
+value. The gate refuses by default, has no audit-only mode, refuses the whole set when one route fails to
+load, refuses non-canonical paths instead of rewriting them, and refuses one credential on two route
+classes, and one credential on two orgs. It serves `https` only, and a platform route (no org) carries no credential. Among matching routes an org route wins, then the longest path prefix. The guest sends the token in the `Koinon-Actor-Token` header, and the gateway removes it before
+it forwards. Slice 2 puts the route set into the State stream and serves the routes in the gateway
+binary; slice 3 reads the credential from the secret store and drops the OpenShell transition profile.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
