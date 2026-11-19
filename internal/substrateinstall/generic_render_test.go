@@ -81,7 +81,7 @@ func (r rendered) find(kind, name string) (object, bool) {
 func renderKustomize(t *testing.T, dir string) rendered {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command("kubectl", "kustomize", dir) //nolint:gosec // a fixed tool on a directory the test made
+	cmd := exec.CommandContext(t.Context(), "kubectl", "kustomize", dir)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.Env = append(os.Environ(), "KUBECONFIG=/dev/null")
 	if err := cmd.Run(); err != nil {
@@ -196,10 +196,10 @@ func TestGenericOverlayRendersThePinnedTree(t *testing.T) {
 	src := os.Getenv("KOINON_SUBSTRATE_SOURCE")
 	dir := t.TempDir()
 	archive := filepath.Join(t.TempDir(), "pin.tar")
-	if out, err := exec.Command("git", "-C", src, "archive", "--format=tar", "--output="+archive, substrateinstall.PinnedCommit).CombinedOutput(); err != nil { //nolint:gosec // git on a path the developer named
+	if out, err := exec.CommandContext(t.Context(), "git", "-C", src, "archive", "--format=tar", "--output="+archive, substrateinstall.PinnedCommit).CombinedOutput(); err != nil {
 		t.Fatalf("%s does not hold the pinned commit %s: %v\n%s", src, substrateinstall.PinnedCommit, err, out)
 	}
-	if out, err := exec.Command("tar", "-xf", archive, "-C", dir).CombinedOutput(); err != nil { //nolint:gosec // tar on the archive made above
+	if out, err := exec.CommandContext(t.Context(), "tar", "-xf", archive, "-C", dir).CombinedOutput(); err != nil {
 		t.Fatalf("export the pinned tree: %v\n%s", err, out)
 	}
 
