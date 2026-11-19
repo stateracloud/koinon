@@ -63,7 +63,9 @@ func GVisorSandboxConfig(bucket string, assets []StagedAsset) *unstructured.Unst
 // ApplySandboxConfig creates the SandboxConfig, or adds the version of the pinned release to an existing
 // one and makes it the default. It is idempotent: the same input changes nothing. It refuses (ErrDigestMismatch)
 // a config that already has the version name with other assets: a version is never rewritten, because
-// snapshots depend on it. It returns whether it changed the cluster.
+// snapshots depend on it. One exception (issue #1157): a version of the pinned release whose URLs are exactly the
+// ones of an installer from before the archive suffix is replaced as a whole, even its state. atelet refused those
+// URLs, so no sandbox ran on that version. It returns whether it changed the cluster.
 func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket string, assets []StagedAsset) (bool, error) {
 	client := dyn.Resource(sandboxConfigGVR)
 	want := GVisorSandboxConfig(bucket, assets)

@@ -303,6 +303,28 @@ func TestAVersionFromBeforeTheSuffixIsReplacedInPlace(t *testing.T) {
 	g.Expect(changed).To(BeFalse())
 }
 
+func TestASuffixLessVersionWithAnotherDigestOrBucketIsNeverRewritten(t *testing.T) {
+	g := NewWithT(t)
+	for name, mutate := range map[string]func(*[]substrateinstall.StagedAsset) string{
+		"another digest": func(a *[]substrateinstall.StagedAsset) string {
+			(*a)[0].SHA256 = strings.Repeat("c", 64)
+			return "snapshots"
+		},
+		"another bucket": func(*[]substrateinstall.StagedAsset) string { return "other-bucket" },
+	} {
+		dyn, _ := sandboxConfigClient()
+		legacy := stagedAssets()
+		for i := range legacy {
+			legacy[i].Key = strings.TrimSuffix(legacy[i].Key, ".tar.zst")
+		}
+		bucket := mutate(&legacy)
+		_, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, bucket, legacy)
+		g.Expect(err).NotTo(HaveOccurred(), name)
+		_, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+		g.Expect(err).To(MatchError(substrateinstall.ErrDigestMismatch), name)
+	}
+}
+
 func TestANewReleaseAddsAVersionAndKeepsTheOldOne(t *testing.T) {
 	g := NewWithT(t)
 	old := &unstructured.Unstructured{Object: map[string]any{
