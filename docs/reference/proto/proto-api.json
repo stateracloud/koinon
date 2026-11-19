@@ -9346,6 +9346,33 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "builtin",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "builtin names code that runs in koinon-gateway in place of an upstream URL (\"a2a\", ADR 0123)."
+            },
+            {
+              "name": "remote_agents",
+              "number": 11,
+              "type": "koinon.gateway.v1alpha1.RemoteAgent",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "handle_key_file",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "handle_key_file holds the key that signs the task and context handles of the built-in target."
             }
           ]
         },
@@ -9634,6 +9661,105 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RemoteAgent",
+          "fullName": "koinon.gateway.v1alpha1.RemoteAgent",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "RemoteAgent is one external A2A agent of a built-in \"a2a\" target (ADR 0123 decision 9).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_url",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_header",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_prefix",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "credential_file",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ca_file",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "insecure_skip_verify",
+              "number": 8,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "card_hash",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "card_hash is the pin: the SHA-256 of the canonical agent card, in hex."
+            },
+            {
+              "name": "agents",
+              "number": 10,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agents are the names of the Koinon agents that may call this remote agent."
             }
           ]
         },

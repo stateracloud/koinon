@@ -64,6 +64,7 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 		s.MCP = append(s.MCP, gateway.MCPTarget{
 			Name: t.GetName(), URL: t.GetUrl(), SSE: t.GetSse(), Org: t.GetOrg(),
 			CredentialHeader: t.GetCredentialHeader(), CredentialPrefix: t.GetCredentialPrefix(), CredentialFile: t.GetCredentialFile(), CAFile: t.GetCaFile(), InsecureSkipVerify: t.GetInsecureSkipVerify(),
+			Builtin: t.GetBuiltin(), HandleKeyFile: t.GetHandleKeyFile(), RemoteAgents: remoteAgentsFromProto(t.GetRemoteAgents()),
 		})
 	}
 	for _, at := range u.GetMcp().GetTools() {
@@ -218,6 +219,8 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 			CredentialFile: t.CredentialFile,
 			// The path of the target's public CA bundle.
 			CaFile: t.CAFile, InsecureSkipVerify: t.InsecureSkipVerify,
+			// The built-in target: the paths of its key and credentials, and the pin of each card.
+			Builtin: t.Builtin, HandleKeyFile: t.HandleKeyFile, RemoteAgents: remoteAgentsToProto(t.RemoteAgents),
 		})
 	}
 	slices.SortFunc(out.Targets, func(a, b *gwv1.MCPTarget) int {
@@ -232,6 +235,33 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 			return cmp.Or(cmp.Compare(x.GetTarget(), y.GetTarget()), slices.Compare(x.GetTools(), y.GetTools()), cmp.Compare(boolInt(x.GetAll()), boolInt(y.GetAll())))
 		})
 		out.Tools = append(out.Tools, at)
+	}
+	return out
+}
+
+func remoteAgentsToProto(rs []gateway.MCPRemoteAgent) []*gwv1.RemoteAgent {
+	var out []*gwv1.RemoteAgent
+	for _, r := range rs {
+		out = append(out, &gwv1.RemoteAgent{
+			Name: r.Name, Id: r.ID, CardUrl: r.CardURL,
+			CredentialHeader: r.CredentialHeader, CredentialPrefix: r.CredentialPrefix,
+			// The path the credential is mounted at, not the credential.
+			CredentialFile: r.CredentialFile,
+			CaFile:         r.CAFile, InsecureSkipVerify: r.InsecureSkipVerify, CardHash: r.CardHash, Agents: sortedCopy(r.Agents),
+		})
+	}
+	slices.SortFunc(out, func(a, b *gwv1.RemoteAgent) int { return cmp.Compare(a.GetName(), b.GetName()) })
+	return out
+}
+
+func remoteAgentsFromProto(rs []*gwv1.RemoteAgent) []gateway.MCPRemoteAgent {
+	var out []gateway.MCPRemoteAgent
+	for _, r := range rs {
+		out = append(out, gateway.MCPRemoteAgent{
+			Name: r.GetName(), ID: r.GetId(), CardURL: r.GetCardUrl(),
+			CredentialHeader: r.GetCredentialHeader(), CredentialPrefix: r.GetCredentialPrefix(), CredentialFile: r.GetCredentialFile(),
+			CAFile: r.GetCaFile(), InsecureSkipVerify: r.GetInsecureSkipVerify(), CardHash: r.GetCardHash(), Agents: slices.Clone(r.GetAgents()),
+		})
 	}
 	return out
 }

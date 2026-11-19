@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/gateway/v1alpha1/state.proto.
  */
 export const file_koinon_gateway_v1alpha1_state: GenFile = /*@__PURE__*/
-  fileDesc("CiNrb2lub24vZ2F0ZXdheS92MWFscGhhMS9zdGF0ZS5wcm90bxIXa29pbm9uLmdhdGV3YXkudjFhbHBoYTEiJQoSU3RyZWFtU3RhdGVSZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkiZAoSQWNrUmV2aXNpb25SZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkSEAoIcmV2aXNpb24YAiABKAMSKwoEaGFsZhgDIAEoDjIdLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkhhbGYiFQoTQWNrUmV2aXNpb25SZXNwb25zZSKvAQoLU3RhdGVVcGRhdGUSEAoIcmV2aXNpb24YASABKAMSKgoEa2V5cxgCIAMoCzIcLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLktleRIyCgVtb2RlbBgDIAEoCzIjLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLk1vZGVsU3RhdGUSLgoDbWNwGAQgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQU3RhdGUiJQoIQWdlbnRSZWYSCwoDb3JnGAEgASgJEgwKBG5hbWUYAiABKAkiUQoDS2V5EgoKAmlkGAEgASgJEjAKBWFnZW50GAIgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRSZWYSDAoEaGFzaBgDIAEoCSKtAQoKTW9kZWxTdGF0ZRIzCgZsaW1pdHMYASADKAsyIy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudExpbWl0EjQKCXByb3ZpZGVycxgCIAMoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByb3ZpZGVyEjQKBm1vZGVscxgDIAMoCzIkLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50TW9kZWxzIm0KCkFnZW50TGltaXQSMAoFYWdlbnQYASABKAsyIS5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudFJlZhItCgVsaW1pdBgCIAEoCzIeLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkxpbWl0IloKBUxpbWl0EgwKBHVuaXQYASABKAkSFwoPYW1vdW50X3BpY29fdXNkGAIgASgDEhYKDndpbmRvd19zZWNvbmRzGAMgASgDEhIKCmdlbmVyYXRpb24YBCABKAkiqwEKCFByb3ZpZGVyEgsKA29yZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSFAoMYXBpX2tleV9maWxlGAUgASgJEh4KFmFudGhyb3BpY193b3Jrc3BhY2VfaWQYBiABKAkSLgoGbW9kZWxzGAcgAygLMh4ua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTW9kZWwimAEKBU1vZGVsEgwKBG5hbWUYASABKAkSDgoGZm9ybWF0GAIgASgJEjMKCHRoaW5raW5nGAMgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuVGhpbmtpbmcSDQoFZ3VhcmQYBCABKAgSLQoFcHJpY2UYBSABKAsyHi5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5QcmljZSJoCghUaGlua2luZxIOCgZ0aGlua3MYASABKAkSCgoCb24YAiABKAkSCwoDb2ZmGAMgASgJEg8KB2Rpc3BsYXkYBCABKAkSDQoFYmV0YXMYBSADKAkSEwoLdXNhZ2Vfc3BsaXQYBiABKAkilQEKBVByaWNlEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCRIxCgV0aWVycxgGIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByaWNlVGllciJ8CglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEg0KBWlucHV0GAIgASgJEg4KBm91dHB1dBgDIAEoCRISCgpjYWNoZV9yZWFkGAQgASgJEhMKC2NhY2hlX3dyaXRlGAUgASgJEhEKCXJlYXNvbmluZxgGIAEoCSJPCgtBZ2VudE1vZGVscxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEg4KBm1vZGVscxgCIAMoCSJzCghNQ1BTdGF0ZRIzCgd0YXJnZXRzGAEgAygLMiIua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQVGFyZ2V0EjIKBXRvb2xzGAIgAygLMiMua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRUb29scyK+AQoJTUNQVGFyZ2V0EgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEgsKA3NzZRgDIAEoCBILCgNvcmcYBCABKAkSGQoRY3JlZGVudGlhbF9oZWFkZXIYBSABKAkSGQoRY3JlZGVudGlhbF9wcmVmaXgYBiABKAkSFwoPY3JlZGVudGlhbF9maWxlGAcgASgJEg8KB2NhX2ZpbGUYCCABKAkSHAoUaW5zZWN1cmVfc2tpcF92ZXJpZnkYCSABKAgicgoKQWdlbnRUb29scxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEjIKBmdyYW50cxgCIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlRvb2xHcmFudCI3CglUb29sR3JhbnQSDgoGdGFyZ2V0GAEgASgJEg0KBXRvb2xzGAIgAygJEgsKA2FsbBgDIAEoCCo6CgRIYWxmEhQKEEhBTEZfVU5TUEVDSUZJRUQQABIOCgpIQUxGX01PREVMEAESDAoISEFMRl9NQ1AQAjLoAQoTR2F0ZXdheVN0YXRlU2VydmljZRJiCgtTdHJlYW1TdGF0ZRIrLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0cmVhbVN0YXRlUmVxdWVzdBokLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0YXRlVXBkYXRlMAESbQoLQWNrUmV2aXNpb24SKy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlcXVlc3QaLC5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlc3BvbnNlIgOQAgJCVVpTZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vZ2F0ZXdheS92MWFscGhhMTtnYXRld2F5djFhbHBoYTFiBnByb3RvMw");
+  fileDesc("CiNrb2lub24vZ2F0ZXdheS92MWFscGhhMS9zdGF0ZS5wcm90bxIXa29pbm9uLmdhdGV3YXkudjFhbHBoYTEiJQoSU3RyZWFtU3RhdGVSZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkiZAoSQWNrUmV2aXNpb25SZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkSEAoIcmV2aXNpb24YAiABKAMSKwoEaGFsZhgDIAEoDjIdLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkhhbGYiFQoTQWNrUmV2aXNpb25SZXNwb25zZSKvAQoLU3RhdGVVcGRhdGUSEAoIcmV2aXNpb24YASABKAMSKgoEa2V5cxgCIAMoCzIcLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLktleRIyCgVtb2RlbBgDIAEoCzIjLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLk1vZGVsU3RhdGUSLgoDbWNwGAQgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQU3RhdGUiJQoIQWdlbnRSZWYSCwoDb3JnGAEgASgJEgwKBG5hbWUYAiABKAkiUQoDS2V5EgoKAmlkGAEgASgJEjAKBWFnZW50GAIgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRSZWYSDAoEaGFzaBgDIAEoCSKtAQoKTW9kZWxTdGF0ZRIzCgZsaW1pdHMYASADKAsyIy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudExpbWl0EjQKCXByb3ZpZGVycxgCIAMoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByb3ZpZGVyEjQKBm1vZGVscxgDIAMoCzIkLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50TW9kZWxzIm0KCkFnZW50TGltaXQSMAoFYWdlbnQYASABKAsyIS5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudFJlZhItCgVsaW1pdBgCIAEoCzIeLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkxpbWl0IloKBUxpbWl0EgwKBHVuaXQYASABKAkSFwoPYW1vdW50X3BpY29fdXNkGAIgASgDEhYKDndpbmRvd19zZWNvbmRzGAMgASgDEhIKCmdlbmVyYXRpb24YBCABKAkiqwEKCFByb3ZpZGVyEgsKA29yZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSFAoMYXBpX2tleV9maWxlGAUgASgJEh4KFmFudGhyb3BpY193b3Jrc3BhY2VfaWQYBiABKAkSLgoGbW9kZWxzGAcgAygLMh4ua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTW9kZWwimAEKBU1vZGVsEgwKBG5hbWUYASABKAkSDgoGZm9ybWF0GAIgASgJEjMKCHRoaW5raW5nGAMgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuVGhpbmtpbmcSDQoFZ3VhcmQYBCABKAgSLQoFcHJpY2UYBSABKAsyHi5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5QcmljZSJoCghUaGlua2luZxIOCgZ0aGlua3MYASABKAkSCgoCb24YAiABKAkSCwoDb2ZmGAMgASgJEg8KB2Rpc3BsYXkYBCABKAkSDQoFYmV0YXMYBSADKAkSEwoLdXNhZ2Vfc3BsaXQYBiABKAkilQEKBVByaWNlEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCRIxCgV0aWVycxgGIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByaWNlVGllciJ8CglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEg0KBWlucHV0GAIgASgJEg4KBm91dHB1dBgDIAEoCRISCgpjYWNoZV9yZWFkGAQgASgJEhMKC2NhY2hlX3dyaXRlGAUgASgJEhEKCXJlYXNvbmluZxgGIAEoCSJPCgtBZ2VudE1vZGVscxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEg4KBm1vZGVscxgCIAMoCSJzCghNQ1BTdGF0ZRIzCgd0YXJnZXRzGAEgAygLMiIua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQVGFyZ2V0EjIKBXRvb2xzGAIgAygLMiMua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRUb29scyKlAgoJTUNQVGFyZ2V0EgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEgsKA3NzZRgDIAEoCBILCgNvcmcYBCABKAkSGQoRY3JlZGVudGlhbF9oZWFkZXIYBSABKAkSGQoRY3JlZGVudGlhbF9wcmVmaXgYBiABKAkSFwoPY3JlZGVudGlhbF9maWxlGAcgASgJEg8KB2NhX2ZpbGUYCCABKAkSHAoUaW5zZWN1cmVfc2tpcF92ZXJpZnkYCSABKAgSDwoHYnVpbHRpbhgKIAEoCRI7Cg1yZW1vdGVfYWdlbnRzGAsgAygLMiQua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuUmVtb3RlQWdlbnQSFwoPaGFuZGxlX2tleV9maWxlGAwgASgJItoBCgtSZW1vdGVBZ2VudBIMCgRuYW1lGAEgASgJEgoKAmlkGAIgASgJEhAKCGNhcmRfdXJsGAMgASgJEhkKEWNyZWRlbnRpYWxfaGVhZGVyGAQgASgJEhkKEWNyZWRlbnRpYWxfcHJlZml4GAUgASgJEhcKD2NyZWRlbnRpYWxfZmlsZRgGIAEoCRIPCgdjYV9maWxlGAcgASgJEhwKFGluc2VjdXJlX3NraXBfdmVyaWZ5GAggASgIEhEKCWNhcmRfaGFzaBgJIAEoCRIOCgZhZ2VudHMYCiADKAkicgoKQWdlbnRUb29scxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEjIKBmdyYW50cxgCIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlRvb2xHcmFudCI3CglUb29sR3JhbnQSDgoGdGFyZ2V0GAEgASgJEg0KBXRvb2xzGAIgAygJEgsKA2FsbBgDIAEoCCo6CgRIYWxmEhQKEEhBTEZfVU5TUEVDSUZJRUQQABIOCgpIQUxGX01PREVMEAESDAoISEFMRl9NQ1AQAjLoAQoTR2F0ZXdheVN0YXRlU2VydmljZRJiCgtTdHJlYW1TdGF0ZRIrLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0cmVhbVN0YXRlUmVxdWVzdBokLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0YXRlVXBkYXRlMAESbQoLQWNrUmV2aXNpb24SKy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlcXVlc3QaLC5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlc3BvbnNlIgOQAgJCVVpTZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vZ2F0ZXdheS92MWFscGhhMTtnYXRld2F5djFhbHBoYTFiBnByb3RvMw");
 
 /**
  * @generated from message koinon.gateway.v1alpha1.StreamStateRequest
@@ -574,6 +574,25 @@ export type MCPTarget = Message<"koinon.gateway.v1alpha1.MCPTarget"> & {
    * @generated from field: bool insecure_skip_verify = 9;
    */
   insecureSkipVerify: boolean;
+
+  /**
+   * builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123).
+   *
+   * @generated from field: string builtin = 10;
+   */
+  builtin: string;
+
+  /**
+   * @generated from field: repeated koinon.gateway.v1alpha1.RemoteAgent remote_agents = 11;
+   */
+  remoteAgents: RemoteAgent[];
+
+  /**
+   * handle_key_file holds the key that signs the task and context handles of the built-in target.
+   *
+   * @generated from field: string handle_key_file = 12;
+   */
+  handleKeyFile: string;
 };
 
 /**
@@ -582,6 +601,74 @@ export type MCPTarget = Message<"koinon.gateway.v1alpha1.MCPTarget"> & {
  */
 export const MCPTargetSchema: GenMessage<MCPTarget> = /*@__PURE__*/
   messageDesc(file_koinon_gateway_v1alpha1_state, 16);
+
+/**
+ * RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
+ *
+ * @generated from message koinon.gateway.v1alpha1.RemoteAgent
+ */
+export type RemoteAgent = Message<"koinon.gateway.v1alpha1.RemoteAgent"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string id = 2;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string card_url = 3;
+   */
+  cardUrl: string;
+
+  /**
+   * @generated from field: string credential_header = 4;
+   */
+  credentialHeader: string;
+
+  /**
+   * @generated from field: string credential_prefix = 5;
+   */
+  credentialPrefix: string;
+
+  /**
+   * @generated from field: string credential_file = 6;
+   */
+  credentialFile: string;
+
+  /**
+   * @generated from field: string ca_file = 7;
+   */
+  caFile: string;
+
+  /**
+   * @generated from field: bool insecure_skip_verify = 8;
+   */
+  insecureSkipVerify: boolean;
+
+  /**
+   * card_hash is the pin: the SHA-256 of the canonical agent card, in hex.
+   *
+   * @generated from field: string card_hash = 9;
+   */
+  cardHash: string;
+
+  /**
+   * agents are the names of the Koinon agents that may call this remote agent.
+   *
+   * @generated from field: repeated string agents = 10;
+   */
+  agents: string[];
+};
+
+/**
+ * Describes the message koinon.gateway.v1alpha1.RemoteAgent.
+ * Use `create(RemoteAgentSchema)` to create a new message.
+ */
+export const RemoteAgentSchema: GenMessage<RemoteAgent> = /*@__PURE__*/
+  messageDesc(file_koinon_gateway_v1alpha1_state, 17);
 
 /**
  * @generated from message koinon.gateway.v1alpha1.AgentTools
@@ -603,7 +690,7 @@ export type AgentTools = Message<"koinon.gateway.v1alpha1.AgentTools"> & {
  * Use `create(AgentToolsSchema)` to create a new message.
  */
 export const AgentToolsSchema: GenMessage<AgentTools> = /*@__PURE__*/
-  messageDesc(file_koinon_gateway_v1alpha1_state, 17);
+  messageDesc(file_koinon_gateway_v1alpha1_state, 18);
 
 /**
  * @generated from message koinon.gateway.v1alpha1.ToolGrant
@@ -630,7 +717,7 @@ export type ToolGrant = Message<"koinon.gateway.v1alpha1.ToolGrant"> & {
  * Use `create(ToolGrantSchema)` to create a new message.
  */
 export const ToolGrantSchema: GenMessage<ToolGrant> = /*@__PURE__*/
-  messageDesc(file_koinon_gateway_v1alpha1_state, 18);
+  messageDesc(file_koinon_gateway_v1alpha1_state, 19);
 
 /**
  * Half is one of the two paths a gateway copy serves.

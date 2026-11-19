@@ -171,6 +171,27 @@ message MCPTarget {
   string credential_file = 7;
   string ca_file = 8;
   bool insecure_skip_verify = 9;
+  // builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123).
+  string builtin = 10;
+  repeated RemoteAgent remote_agents = 11;
+  // handle_key_file holds the key that signs the task and context handles of the built-in target.
+  string handle_key_file = 12;
+}
+
+// RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
+message RemoteAgent {
+  string name = 1;
+  string id = 2;
+  string card_url = 3;
+  string credential_header = 4;
+  string credential_prefix = 5;
+  string credential_file = 6;
+  string ca_file = 7;
+  bool insecure_skip_verify = 8;
+  // card_hash is the pin: the SHA-256 of the canonical agent card, in hex.
+  string card_hash = 9;
+  // agents are the names of the Koinon agents that may call this remote agent.
+  repeated string agents = 10;
 }
 
 message AgentTools {
