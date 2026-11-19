@@ -648,11 +648,9 @@ the code comes in the slices below. ADR 0091 needs no change: the leak guard doe
 credentials.
 
 **Problem.** Two processes can open a stored MCP credential today, and the gateway is not one of them.
-The reconciler holds the KEK and calls `mcpservers.OpenCredential` (`internal/reconciler/mcp.go`). It
-writes the plaintext to the MCP credentials Secret, so the plaintext is also in etcd. koinon-api mounts
+The reconciler holds the KEK and calls `mcpservers.OpenCredential` (`internal/reconciler/mcp.go`). It writes the plaintext into the Secret that also holds the provider keys, so the plaintext is also in etcd. koinon-api mounts
 the KEK, and its Role can `get`, `list` and `watch` every Secret in the namespace
-(`charts/koinon/templates/rbac.yaml`). Decision 5 says only the gateway may decrypt. This decision makes
-that true.
+(`charts/koinon/templates/rbac.yaml`). Decision 5 says only the gateway may decrypt. This decision makes that true for the static MCP credentials only. Provider keys stay plaintext in that Secret until slice 6.
 
 **Scope.** The static credential of an MCP server (`mcp_servers.credential`). Provider keys and MCP
 sign-in tokens (decision 5 names them) use the same mechanism later, in their own issue (slice 6). Their
@@ -680,7 +678,7 @@ envelopes stay at v1 until then.
 #### 12.2 Envelope v2
 
 The stored form is JSON in the same column. `fmt` tells the formats apart. A v1 reader refuses `fmt: 2`
-(`ErrUnsupportedFormat`), so an old binary fails closed on a new value.
+(`ErrUnsupportedFormat`), so an old binary fails closed on a new value. Fail closed is not enough for a rollout: 12.5 gives the order that keeps every component able to read what is written.
 
 ```json
 {
@@ -713,16 +711,14 @@ The stored form is JSON in the same column. `fmt` tells the formats apart. A v1 
 
 **What RBAC can do.** A narrower Secret Role for koinon-api is not possible in the release namespace.
 RBAC has no deny rule and no label selector. koinon-api must `list` and `watch` Secrets whose names it
-cannot know (the labelled declarative Secrets, per-agent Secrets), so it can read any Secret in its
-namespace. A Secret there cannot hide a key from it (the same finding as decision 5, now with the
+cannot know (the labelled declarative Secrets), so it can read any Secret in its namespace. The reconciler has `get` on Secrets by name, so it can read a Secret with a fixed name. A Secret there cannot hide a key from it (the same finding as decision 5, now with the
 RBAC text).
 
 **Decision.** The custody boundary is the KMS key that wraps the gateway private key.
 
 - The gateway's private key (32 bytes for X25519) is wrapped by the existing `secretstore.Wrapper`
   (`local`, `openbao`, `awskms`). It is stored in the same form as a wrapped KEK (`StoredKEK`: backend,
-  key ID, wrapped bytes, install ID). `Wrappers.Wrap`, `Unwrap`, install binding and `Probe` are used
-  as they are. Slice 1 adds a purpose tag to the AAD, so a wrapped gateway key can never be read as a KEK.
+  key ID, wrapped bytes, install ID). Install binding and `Probe` are reused. Slice 1 adds a purpose tag to the AAD (`kekAAD`, `kekInstallAAD`), so a wrapped gateway key can never be read as a KEK. The gateway builds its own `Wrappers` value with its own wrapping key, because one `Wrappers` has one primary key. The install binding needs `install_identity` and `kek_bound_only`: the gateway role and the re-seal role get SELECT on both (slice 2).
 - The wrapping key is a **separate** KMS key: an OpenBao transit key (default `koinon-gateway`) or an AWS
   KMS key, not the KEK's key. Its policy lets only the gateway's identity decrypt: the gateway's
   Kubernetes auth role in OpenBao, the gateway's IAM role in the AWS key policy. koinon-api and the
@@ -732,26 +728,22 @@ RBAC text).
   This follows the key-admin Job of ADR 0085 decision 12: one identity may encrypt, the users may only
   decrypt.
 - The wrapped private key sits in a Secret of the release namespace (`<release>-gateway-recipient-key`),
-  mounted into the gateway pods only. koinon-api can read the Secret, and it is useless to it: it is
-  ciphertext under a key koinon-api cannot use. The chart's `kek-guard` policy gets a third rule: only
-  the gateway key-admin identity may write or delete this Secret.
+  mounted into the gateway pods only. koinon-api can read the Secret, and it is ciphertext under a key koinon-api cannot use (on a KMS backend; see the table). The chart's `kek-guard` policy gets a third rule: only the gateway key-admin identity may CREATE, UPDATE or DELETE this Secret. CREATE is named, because koinon-api and the reconciler have `create` on Secrets. If the Secret exists when the Job runs and no `gateway_recipient_keys` row names it, the Job stops and reports it. It never adopts a key it did not make.
 - **The public keys** are not secret. They are rows of a new table `gateway_recipient_keys` (key ID,
   KEM, public key, state `active`, `retiring` or `retired`, times). koinon-api has SELECT only. The
   gateway key-admin role has INSERT and the state update. Triggers refuse any other UPDATE and any
-  DELETE (the pattern of `kek_bound_only`, migration 00049). So an attacker with koinon-api's database
-  login cannot make koinon-api seal to a key the attacker knows. At load, the gateway derives the public
+  DELETE (the pattern of `kek_bound_only`, migration 00049). The migration must revoke INSERT, UPDATE and DELETE on the table from the shared application role (`koinon_app` gets table rights by default privileges in cnpg mode). Triggers stop mistakes, not the table owner. With separate roles, an attacker with koinon-api's database login cannot make koinon-api seal to a key the attacker knows. With external mode and one shared role (`values.yaml` allows it), this protection does not hold. The chart documents that limit, and the docs recommend separate roles. At load, the gateway derives the public
   key from its private key and refuses a key whose row differs (fail closed, a run event, a metric).
-- **Pods and the Kubernetes API.** The gateway keeps `automountServiceAccountToken: false` (no
-  Kubernetes API access, as rbac.yaml says today). It reads the Secret as a mounted file.
+- **Pods and identity.** The gateway keeps no Kubernetes API access (rbac.yaml says so today) and reads the Secret as a mounted file. To sign in to the KMS it needs an identity token: a projected ServiceAccount token with its own audience, which the OpenBao role binds, or the IRSA webhook mount for AWS. It is mounted as a projected volume, not as an API token. Slice 2 adds it. The gateway key-admin Job needs the Kubernetes API to write the Secret, as the key-admin Job does today.
 
 **What each backend gives.**
 
 | KEK backend | koinon-api can open a stored MCP credential? | Why |
 | --- | --- | --- |
 | `openbao`, `awskms` | No | The wrapped key is useless without the gateway's decrypt right on the separate KMS key. |
-| `local` | Yes, if its Secret is in the release namespace | `Local` wraps with the identity function: the "wrapped" key is the key. No KMS holds the boundary. |
+| `local` | Yes, and so can the reconciler, if the Secret is in the release namespace | `Local` wraps with the identity function: the "wrapped" key is the key. No KMS holds the boundary. |
 
-For `local`, v2 still removes the plaintext from the reconciler, from the MCP credentials Secret and
+On `local`, the Secret has a fixed name, so koinon-api (list) and the reconciler (get) can read the raw key. For `local`, v2 still removes the plaintext from the reconciler, from the MCP credentials Secret and
 from etcd. It does not give custody. The chart says so: the NOTES text and the metric
 `koinon_gateway_recipient_key_custody{custody="kms|none"}` (fixed labels, ADR 0023) show it, and the
 docs say "use a KMS backend for the gateway-only property". This is one code path in every backend; only
@@ -761,20 +753,15 @@ Open question 2 (below) asks whether `local` without custody is acceptable in v0
 
 #### 12.4 Key ID, rotation and re-seal
 
-- A key pair is made by the gateway key-admin identity (a Job, as the key-admin Job of decision 12 of
-  ADR 0085): it generates the pair, wraps the private key, stores the Secret, inserts the public row as
+- A key pair is made by the gateway key-admin identity. It is a Job, like the key-admin Job of ADR 0085 decision 12. That Job renders only with a KMS, so the gateway key Job is a new template that renders on every backend, `local` included. On `local` it writes the key unwrapped (`Local` wraps with the identity function): it generates the pair, wraps the private key, stores the Secret, inserts the public row as
   `active`. It refuses to replace a key that rows still use. It runs once at install, before any v2
   value exists.
-- koinon-api reads the newest `active` public key at start and on its watch loop (the way it reloads
-  KEKs, `internal/kekhealth`). With no `active` row it seals v1, as today. This is what makes a rolling
-  upgrade safe: no binary writes v2 before the whole release can read it.
-- **Rotation.** (1) The key-admin identity adds a new pair as `active` and moves the old one to
-  `retiring`. (2) koinon-api seals new values to the new key. (3) A re-seal Job runs as the gateway
+- koinon-api reads the newest `active` public key at start and on a poll loop (the KEK loop is `Keyring.WatchDir`; this one reads the table). With no `active` row it seals v1, as today. A database check backs the loop: a trigger refuses a v2 credential whose `recipient_key_id` is not `active` or `retiring`, so a stale koinon-api pod can never write a value nobody can open. The rolling-upgrade order is in 12.5.
+- **Rotation.** (1) The key-admin identity adds a new pair as `pending`. The gateway pods load the key (the kubelet needs up to about a minute to update the mounted Secret) and report it loaded. Only then the key becomes `active` and the old one `retiring`. This is the settle step the reconciler already has for credential files, and it stops a 503 window. (2) koinon-api seals new values to the new key. (3) A re-seal Job runs as the gateway
   identity (it needs the private key), with its own database login whose role has UPDATE on the
   `credential` column only (a column grant). The gateway's normal role has SELECT and no UPDATE. For each v2 value under a `retiring` key, it opens
   the value, seals it to the active key, and writes it with a compare-and-swap on the old bytes, so a
-  write by koinon-api in between is not lost. (4) When no row names the old key (`keys verify`), the
-  old key becomes `retired`, and the key-admin identity deletes its wrapped private key. Rotation
+  write by koinon-api in between is not lost. (4) When no row names the old key (`keys verify`), the old key becomes `retired`, after a wait longer than the reload interval of koinon-api, and the key-admin identity deletes its wrapped private key. The trigger above is the last guard. Rotation
   re-seals; it never rewraps a DEK, because a DEK can be read only with the private key.
 - The gateway holds every `active` and `retiring` private key, and picks the key by `recipient_key_id`.
   An unknown key ID fails closed (12.6).
@@ -783,12 +770,12 @@ Open question 2 (below) asks whether `local` without custody is acceptable in v0
 
 #### 12.5 The one-time move of stored credentials to v2
 
-The gateway cannot open v1 (it has no KEK), and that is the point. A job that holds the KEK does the
+The gateway cannot open v1: it has no KEK, by design. A job that holds the KEK does the
 move, once.
 
-1. **Expand (slice 2 and 3).** The release adds `gateway_recipient_keys`, the key-admin Job, the writers
-   that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's
-   v2 reader. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
+0. **Gate on the driver.** The default MCP data plane is still agentgateway (`gateway.mcp.driver`), and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). Koinon's gateway is not the default before #1132. So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
+1. **Expand (slice 2 and 3).** Release N adds `gateway_recipient_keys`, the key-admin Job, the writers
+   that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule: run `keys seal-mcp --to-v1` first (the reverse move, under the KEK identity). Slice 4 builds it. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
    still reads those files (marked by the file name: `mcp-…` plaintext, `mcpv2-…` ciphertext). Nothing
    stored changes yet.
 2. **Move (slice 4).** `koinon-api keys seal-mcp` runs under the KEK identity (the same identity as
@@ -806,7 +793,7 @@ move, once.
 `none` until v0.3.0 ships, so no minor line is promised yet. Slices 2 to 5 must ship before the marker
 names v0.3. If slice 5 slips past that, then within v0.3 the release stays expand-only: the v1 reader, the
 plaintext files and the legacy gateway reader stay until v0.4, and the preflight rule above (v1 count
-must be zero to leave a release that has the reader) stays too. The new table is an add-only migration,
+must be zero to leave a release that has the reader) stays too. Old backups hold v1 values that the KEK still opens. After the move, operators should rotate the upstream MCP credentials to get the full property. The new table and `mcp_call_log.recipient_key_id` are add-only migrations,
 and `credential` keeps its column and type (both formats fit one `jsonb`), so no migration renames or
 drops anything.
 
@@ -816,8 +803,7 @@ drops anything.
 
 - `gateway_key.created`, `gateway_key.rotated`, `gateway_key.retired`: key ID, KEM, backend, the actor.
 - `mcp_credential.sealed_v2` batch rows from the move and the re-seal: counts, old and new key ID.
-- Each `mcp_call_log` row already records the credential used. It also records the `recipient_key_id`
-  of the envelope it opened.
+- Each `mcp_call_log` row already records the credential kind (`credential_kind`, migration 00096). Slice 3 adds a `recipient_key_id` column (add-only) for the key of the envelope it opened.
 - Metrics with fixed labels (ADR 0023): `koinon_gateway_recipient_key_loaded{state}`,
   `koinon_gateway_credential_open_failures_total{reason}` (`unknown_key`, `wrong_key`, `binding`,
   `format`, `unreachable`), and the custody gauge above.
@@ -842,8 +828,7 @@ The gateway still has no KEK.
 #### 12.7 Specs the code must have
 
 1. koinon-api cannot decrypt a stored credential: with the keyring and the wrapper koinon-api has (no
-   gateway key right), `Open` of a v2 value fails, on the real OpenBao and AWS fakes of
-   `secretstoretest` and on `local` with a split key set. A chart test checks koinon-api and the reconciler
+   gateway key right), `Open` of a v2 value fails, on the OpenBao and AWS fakes of `secretstoretest`. A `local` test with a split key set is artificial and does not prove the production property: on `local` koinon-api can read the key (12.3). A chart test checks koinon-api and the reconciler
    have no right on the gateway wrapping key (OpenBao policy text, AWS key policy example).
 2. The reconciler handles only ciphertext: a spec gives it a keyring with no gateway key and checks that
    the bytes in the MCP credentials Secret equal the database bytes and contain no plaintext (also in the
@@ -853,14 +838,13 @@ The gateway still has no KEK.
 4. A wrong key fails closed: unknown key ID, another key's pair, a changed `enc`, `sealed_dek`, `nonce` or
    `ciphertext`, a binding of another row, org, table or column, an unknown suite, `fmt: 1` where `fmt: 2`
    is required. Each gives 503 for the target and no upstream request.
-5. Golden files: `testdata/envelope_v2.json` opens (RFC 9180 vectors for the HPKE part); v1 golden files
+5. Golden files: `testdata/envelope_v2.json` opens (the RFC 9180 vectors in the Go source tree (`crypto/hpke/testdata`), reused for the HPKE part); v1 golden files
    still open.
 6. Rotation: a value sealed to the old key opens during the re-seal, and after it is under the new key; a
    concurrent write by koinon-api is not lost.
 7. The move: v1 becomes v2 once, a second run does nothing; `keys verify` reports zero; the preflight
    refuses an upgrade while the count is above zero.
-8. Column grants: the gateway database role cannot read a column it does not need (#278: this spec also
-   closes that open item), and cannot UPDATE any column; the re-seal role can UPDATE `credential` only; the
+8. Column grants: the gateway database role cannot read a column it does not need (the column grants of #278 are merged, and this spec keeps them), and cannot UPDATE any column; the re-seal role has SELECT on `org_id`, `id` and `credential` and UPDATE on `credential`, nothing else, which is what the compare-and-swap needs; the
    koinon-api role cannot INSERT or UPDATE `gateway_recipient_keys`.
 
 #### 12.8 Slices
@@ -870,14 +854,14 @@ twice the guess, go back to the maintainer).
 
 1. **`internal/secretstore` v2.** Envelope v2, HPKE seal and open, key ID, the purpose tag for wrapped
    gateway keys, golden file and fuzz. No caller. About 400 lines with tests.
-2. **Key lifecycle.** Migration `gateway_recipient_keys` with grants and triggers, the `koinon-gateway`
+2. **Key lifecycle.** Migration `gateway_recipient_keys` with grants (revoke on the shared role), triggers and the new database logins (gateway key-admin, re-seal) in the chart, cnpg roles and external-mode docs, the `koinon-gateway`
    key commands (init, rotate, retire), the gateway key-admin identity and Job, chart values, the
-   Secret, the `kek-guard` rule, OpenBao and AWS policy docs, the load and probe in the gateway, the
+   Secret, the `kek-guard` rule, OpenBao and AWS policy docs, the KMS identity token mount, the load and probe in the gateway, the `pending` to `active` report, the
    public-key load in koinon-api, metrics. Specs 1 (chart part) and 8.
 3. **Seal v2, copy ciphertext, open in the gateway.** `mcpservers` seals v2 when a key is `active`,
-   the reconciler copies `mcpv2-` files, the gateway opens them and fails closed, `keyscli` skips v2.
+   the reconciler copies `mcpv2-` files, the gateway opens them and fails closed (its `keyPath` and the planner accept `mcpv2-` names), the `keyscli` usage query and `AnyEnvelope` skip v2, `mcp_call_log.recipient_key_id`, and the driver gate of 12.5 step 0.
    Specs 1 to 5.
-4. **The move.** `keys seal-mcp`, `keys verify` count, the upgrade preflight, a kind e2e with `local`.
+4. **The move.** `keys seal-mcp` (and `--to-v1`), `keys verify` count, the upgrade preflight, a kind e2e with `local`.
    Spec 7. Rotation and re-seal Job (spec 6) land here too, because they share the compare-and-swap code.
 5. **Contract.** Remove the reconciler's open path, the plaintext files, the legacy gateway reader; docs
    and the GLOSSARY; mark this decision "done". Before the marker names v0.3.
