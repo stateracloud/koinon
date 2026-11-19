@@ -62,7 +62,7 @@ type Gateway struct {
 	snap atomic.Pointer[snapshot]
 	bud  *budgets
 
-	applyMu sync.Mutex // serialises ApplyModel
+	applyMu sync.Mutex // keeps the live counters and the snapshot in step
 
 	mu    sync.Mutex
 	drain bool

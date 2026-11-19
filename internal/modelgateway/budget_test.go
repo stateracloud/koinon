@@ -249,6 +249,43 @@ var _ = Describe("the budget stop of the model path", func() {
 		Expect(code).To(Equal(http.StatusTooManyRequests), "the in-flight call counted against g2")
 	})
 
+	It("charges a bound for a 200 answer that carries no usage", func(ctx SpecContext) {
+		upBody.Store(`{"id":"x","choices":[]}`)
+		cfg.SetLimit(agent, limit("0.000005", "g1"))
+		apply(ctx)
+		code, _, _ := call(key.Material)
+		Expect(code).To(Equal(http.StatusOK))
+		code, _, _ = call(key.Material)
+		Expect(code).To(Equal(http.StatusTooManyRequests), "a call without usage is not free")
+	})
+
+	It("checks a slow upload against the limit in force when its body ends", func(ctx SpecContext) {
+		cfg.SetLimit(agent, limit("1", "g1"))
+		apply(ctx)
+		pr, pw := io.Pipe()
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", pr)
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+key.Material)
+		done := make(chan int, 1)
+		go func() {
+			defer GinkgoRecover()
+			resp, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+			done <- resp.StatusCode
+		}()
+		_, err = pw.Write([]byte(`{"model":"m",`))
+		Expect(err).NotTo(HaveOccurred())
+		cfg.SetLimit(agent, limit("0", "g2")) // the ledger pushes a new generation, at its limit
+		apply(ctx)
+		_, err = pw.Write([]byte(`"messages":[]}`))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pw.Close()).To(Succeed())
+		Eventually(done).Should(Receive(Equal(http.StatusTooManyRequests)))
+		Expect(hits.Load()).To(BeZero())
+	})
+
 	Describe("the retry markers", func() {
 		It("marks what the gateway refuses and the provider's 403, and leaves the provider's other failures retryable", func(ctx SpecContext) {
 			apply(ctx)

@@ -72,28 +72,30 @@ func (b *budgets) roll(k counterKey, l gateway.Limit, now time.Time) *counter {
 }
 
 // check reports whether the agent may start a call under l. When it may not, retryAfter is the time
-// until the window ends (0 for a limit without a window, which only a new generation resets).
-func (b *budgets) check(a gateway.AgentRef, l gateway.Limit, now time.Time) (ok bool, retryAfter time.Duration) {
+// until the window ends (0 for a limit without a window, which only a new generation resets). live
+// is false when l's generation is retired: it has no counter and the caller must read the limit again.
+func (b *budgets) check(a gateway.AgentRef, l gateway.Limit, now time.Time) (ok bool, retryAfter time.Duration, live bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	k := counterKey{a, l.Generation}
 	if _, ok := b.live[k]; !ok {
-		return true, 0 // a request that read a config an apply has since replaced: no counter for it
+		return true, 0, false
 	}
 	c := b.roll(k, l, now)
 	if c.spent < l.Amount {
-		return true, 0
+		return true, 0, true
 	}
 	if w := l.AppliedWindow(); w > 0 {
 		end := time.Unix(c.windowStart, 0).Add(w)
-		return false, max(end.Sub(now), time.Second)
+		return false, max(end.Sub(now), time.Second), true
 	}
-	return false, 0
+	return false, 0, true
 }
 
-// charge adds the cost of a finished call, to the window that holds the end of the call (the
-// ledger dates a record by its start: the two differ only for a call across a window edge). An overflow saturates: a call that cannot be added up
-// must stop the key, not lose the spend.
+// charge adds the cost of a finished call, to the window that holds the end of the call. The ledger
+// dates a record by its start: the two differ only for a call across a window edge, and the later
+// window then counts a little more, which errs on the safe side. An overflow saturates: a call that
+// cannot be added up must stop the key, not lose the spend.
 func (b *budgets) charge(a gateway.AgentRef, l gateway.Limit, cost money.USD, now time.Time) {
 	if cost <= 0 {
 		return

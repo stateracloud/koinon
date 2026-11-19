@@ -146,13 +146,9 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	// The budget stop. It runs after the key and the model are known, so a key that is not loaded
 	// yet is an unknown key (401), never a budget refusal.
-	var limit *gateway.Limit
-	if l, ok := snap.state.Limits[key.Agent]; ok {
-		limit = &l
-		if ok, wait := g.bud.check(key.Agent, l, g.o.Now()); !ok {
-			g.refuseBudget(w, format, wait)
-			return
-		}
+	if refused, wait := g.overBudget(key.Agent); refused {
+		g.refuseBudget(w, format, wait)
+		return
 	}
 	rendering, _ := gateway.RenderingOf(rt.m)
 	for _, f := range rendering.Reject {
@@ -182,7 +178,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(fields["max_completion_tokens"], &maxTokens)
 	}
 	c := &call{
-		g: g, start: g.o.Now(), limit: limit, agent: key.Agent, price: rt.price,
+		g: g, start: g.o.Now(), agent: key.Agent, price: rt.price,
 		rec: gateway.UsageRecord{
 			RequestID: uuid.NewString(), KeyID: key.ID, Agent: key.Agent, Time: g.o.Now(),
 			Model: rt.m.Name, Format: format, Stream: stream, UpstreamKnown: true, Upstream: true,
@@ -303,24 +299,40 @@ type call struct {
 	span  trace.Span
 	rec   gateway.UsageRecord
 	once  sync.Once
-	// limit is the agent's limit at the start of the call, nil when it has none; price is the
-	// model's. The call is charged against them when it ends.
-	limit *gateway.Limit
+	// agent and price are the agent and the model's price. The call is charged against the agent's
+	// limit in force when it ends.
 	agent gateway.AgentRef
 	price pricing.Price
 }
 
+// overBudget reports whether the agent has reached the limit in force, and the wait until its
+// window ends. The limit is read from the current snapshot: a request that read its snapshot before
+// an apply must not be checked against a generation the apply retired. An apply can still land
+// between the read and the check, so it tries again, and a generation that stays retired lets the
+// call pass, as an agent without a limit.
+func (g *Gateway) overBudget(a gateway.AgentRef) (bool, time.Duration) {
+	for range 3 {
+		l, ok := g.snap.Load().state.Limits[a]
+		if !ok {
+			return false, 0
+		}
+		if ok, wait, live := g.bud.check(a, l, g.o.Now()); live {
+			return !ok, wait
+		}
+	}
+	return false, 0
+}
+
 // charge adds the cost of the call to the agent's counter, under the limit in force now: a call
 // that started under an older generation is charged to the current one, which the ledger computed
-// before it saw this call. A call that reports usage is priced on it. A 2xx call that ended before
-// its usage arrived (a cut or canceled stream) is charged a bound, as the ledger does for an
-// aborted call: the request bytes at 4 bytes a token as input, and the request's max_tokens as
-// output. The next generation replaces the bound with the ledger's own figure. A price that cannot
-// be computed stops the key (fail closed).
+// before it saw this call. A call that reports its whole usage is priced on it. A 2xx call whose
+// usage is missing or partial (a cut or canceled stream, or a provider that sends no usage) is
+// charged a bound for what is missing: the request bytes at 4 bytes a token as input, and the
+// request's max_tokens as output (0 when the request sets none: a gap, see the PR). A cut stream
+// is charged at least that output bound. The next generation replaces the bound with the ledger's
+// own figure. A non-2xx answer is not charged here (a gap, see the PR). A price that cannot be
+// computed stops the key (fail closed).
 func (c *call) charge() {
-	if c.limit == nil {
-		return
-	}
 	cur, ok := c.g.snap.Load().state.Limits[c.agent]
 	if !ok {
 		return
@@ -329,11 +341,14 @@ func (c *call) charge() {
 		Input: c.rec.InputTokens, CacheRead: c.rec.CacheReadTokens, CacheWrite: c.rec.CacheWriteTokens,
 		Output: c.rec.OutputTokens, Reasoning: c.rec.ReasoningTokens,
 	}
-	switch {
-	case c.rec.InputKnown || c.rec.OutputKnown:
-	case c.rec.Status >= 200 && c.rec.Status < 300 && c.rec.Error != "":
-		u = pricing.Usage{Input: max(c.rec.RequestBytes, 0) / 4, Output: c.rec.MaxTokens}
-	default:
+	if ok2xx := c.rec.Status >= 200 && c.rec.Status < 300; ok2xx {
+		if !c.rec.InputKnown {
+			u.Input = max(c.rec.RequestBytes, 0) / 4
+		}
+		if !c.rec.OutputKnown || c.rec.Error != "" {
+			u.Output = max(u.Output, c.rec.MaxTokens)
+		}
+	} else if !c.rec.InputKnown && !c.rec.OutputKnown {
 		return // an error answer or a refusal: nothing was generated
 	}
 	_, cost, err := c.price.Cost(u)
