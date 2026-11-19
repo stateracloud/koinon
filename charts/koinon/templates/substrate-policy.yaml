@@ -161,8 +161,12 @@ spec:
       expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
     # The Substrate controller changes metadata (finalizers, annotations) of its own objects, never the spec.
     # The Substrate controller applies the Deployment of a WorkerPool (server-side apply creates and updates it).
+    # It may not write any other workload kind. Its pod template follows the pod rules already at the
+    # Deployment, so a bad template fails here and not only when the ReplicaSet makes the pod. The digest
+    # rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet controller is
+    # digest-exempt (digestExemptIdentities, tracking issue #1140).
     - name: controllerOwn
-      expression: {{ printf "request.userInfo.username in %s && request.resource.group == 'apps' && request.resource.resource == 'deployments'" (toJson $controllers) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) (toJson $w.allowedHostPaths) | quote }}
     - name: controllerMetadata
       expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) | quote }}
   validations:

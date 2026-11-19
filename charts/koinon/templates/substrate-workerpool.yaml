@@ -12,10 +12,12 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPool.enabled }}
 {{- $s := .Values.execution.substrate }}
 {{- $p := $s.workerPool }}
+{{- $name := default (printf "koinon-%s" $p.sandboxClass) $p.name }}
+{{- $userSA := dig "template" "serviceAccountName" "" ($p.spec | default dict) }}
 {{- if not $p.workerImage }}{{- fail "execution.substrate.workerPool.workerImage is required when the WorkerPool is enabled (the worker image of the sandbox class, for example <registry>/ateworker-gvisor:v1.0.0)" }}{{- end }}
 {{- $pull := (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}
-{{- $sa := $p.serviceAccountName }}
-{{- if and (not $sa) $pull }}{{- $sa = printf "%s-worker" $p.name }}{{- end }}
+{{- $sa := default $userSA $p.serviceAccountName }}
+{{- if and (not $sa) $pull }}{{- $sa = printf "%s-worker" $name }}{{- end }}
 {{- $tmpl := dict }}
 {{- with $p.nodeSelector }}{{- $_ := set $tmpl "nodeSelector" . }}{{- end }}
 {{- with $p.tolerations }}{{- $_ := set $tmpl "tolerations" . }}{{- end }}
@@ -25,13 +27,13 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:
-  name: {{ $p.name | quote }}
+  name: {{ $name | quote }}
   namespace: {{ $s.namespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   {{- toYaml (mergeOverwrite $spec ($p.spec | default dict)) | nindent 2 }}
-{{- if and (not $p.serviceAccountName) $pull }}
+{{- if and (not $p.serviceAccountName) (not $userSA) $pull }}
 ---
 apiVersion: v1
 kind: ServiceAccount

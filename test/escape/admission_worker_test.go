@@ -206,6 +206,28 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}
 		_, err := as[other].AppsV1().Deployments(workerNamespace).Create(ctx, deploy("by-other"), dryRun)
 		denied(err)
+
+		// The controller may not write other workload kinds, nor a Deployment with a host-level template.
+		hostNet := deploy("host-net")
+		hostNet.Spec.Template.Spec.HostNetwork = true
+		_, err = as[workerController].AppsV1().Deployments(workerNamespace).Create(ctx, hostNet, dryRun)
+		denied(err)
+		bad := deploy("bad-path")
+		bad.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: "h", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc"}}}}
+		_, err = as[workerController].AppsV1().Deployments(workerNamespace).Create(ctx, bad, dryRun)
+		denied(err)
+		ds := &appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "by-controller"},
+			Spec: appsv1.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ds"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ds"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "worker", Image: workerDigest}}},
+				},
+			},
+		}
+		_, err = as[workerController].AppsV1().DaemonSets(workerNamespace).Create(ctx, ds, dryRun)
+		denied(err)
 	})
 
 	It("denies ephemeral containers in a worker pod, the controller's included", func(ctx SpecContext) {

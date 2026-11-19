@@ -758,13 +758,14 @@ execution:
       # Extra egress rules, in networking.k8s.io/v1 form, for an object store or database outside
       # the cluster.
       extraEgress: []
-    # The default WorkerPool (ate.dev/v1): one shared pool per tier (D6). Off by default: ate-setup
+    # The default WorkerPool (ate.dev/v1): one shared pool per sandbox class (D6). Off by default: ate-setup
     # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
     # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class
     # (immutable), and node placement and the pull ServiceAccount live under spec.template.
     workerPool:
       enabled: false
-      name: koinon-vm
+      # Empty derives koinon-<sandboxClass>, so a pool name never claims a tier its class does not give.
+      name: ""
       replicas: 1
       # Required when enabled: the worker image of the sandbox class, for example
       # <registry>/ateworker-gvisor:v1.0.0 (the chart pins no Substrate image).

@@ -685,7 +685,7 @@
               "additionalProperties": false,
               "properties": {
                 "enabled": {"type": "boolean"},
-                "name": {"$ref": "#/definitions/nonEmpty"},
+                "name": {"type": "string"},
                 "replicas": {"type": "integer", "minimum": 1},
                 "workerImage": {"type": "string"},
                 "sandboxClass": {"enum": ["gvisor", "microvm"]},
