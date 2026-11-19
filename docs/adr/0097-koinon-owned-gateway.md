@@ -669,9 +669,10 @@ envelopes stay at v1 until then.
   a new format. HPKE has both: `info` and `aad`, and a KEM ID.
 - **Suite.** KEM DHKEM(X25519, HKDF-SHA256) (`0x0020`), KDF HKDF-SHA256, AEAD AES-256-GCM. The
   envelope names the suite, so a later key can use DHKEM(P-256) (FIPS) or a hybrid post-quantum KEM
-  (`MLKEM768-X25519`, `0x647a`, in the same package) with no format change. Unverified: whether
-  Go's FIPS 140-3 mode accepts X25519 here. Slice 1 checks it, and uses P-256 for the default
-  if it does not.
+  (`MLKEM768-X25519`, `0x647a`, in the same package) with no format change. Checked in slice 1 (go1.27.4):
+  Go's FIPS 140-only mode refuses X25519 ("use of X25519 is not allowed in FIPS 140-only mode"). The code
+  has a second accepted suite, DHKEM(P-256, HKDF-SHA256) (`hpke-0010-0001-0002`), and
+  `DefaultRecipientSuite` returns it in that mode. A key keeps its suite for life.
 - **One DEK per value, as today.** The payload is sealed with AES-256-GCM under a fresh random 32-byte
   DEK, exactly as in v1. The DEK is the HPKE plaintext. The payload code does not change.
 
