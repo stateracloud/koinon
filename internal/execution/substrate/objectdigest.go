@@ -27,7 +27,7 @@ type ObjectStore struct {
 	// Bucket is the only bucket the reader opens. A snapshot URI that names another bucket is refused.
 	Bucket          string
 	AccessKeyID     string
-	SecretAccessKey string //nolint:gosec // a field name, not a credential
+	SecretAccessKey string
 }
 
 // ContentDigester returns the [Config.ContentDigest] function of the store.
