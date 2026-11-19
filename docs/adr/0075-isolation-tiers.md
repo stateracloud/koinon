@@ -214,8 +214,8 @@ _(Changed by [0120](0120-execution-hardening-defaults.md): the hardening of 0120
 ### The escape suite
 
 9. **"Not applicable" is a result of its own.** The suite reports each spec as passed, failed,
-   skipped or **not applicable**. The spec "runs in a Kata guest, not on the host kernel"
-   (`test/escape/sandbox_test.go:433-442`) is not applicable on `hardened` and `dev`, and it is
+   skipped or **not applicable**. The spec "runs in a microVM guest, not on the host kernel"
+   (`test/escape/sandbox_test.go`) is not applicable on `hardened` and `dev`, and it is
    never reported as passed there. Its report names the tier. A `hardened` qualification adds
    specs:
    - the sandbox runs with a non-identity UID map;
@@ -398,8 +398,8 @@ maintainer decided on 2026-11-17 to drop the Kata requirement.
   do not apply to it. That decision comes with the runtime's own issue; this amendment only removes
   the Kata name.
 - **Qualification (decisions 2 and 10).** Each runtime is qualified by its own escape-suite run before
-  the docs name it supported. The spec "runs in a Kata guest, not on the host kernel" (decision 9) is
-  read as "runs in a microVM guest, not on the host kernel"; renaming the spec is a test change, not
+  the docs name it supported. The spec "runs in a microVM guest, not on the host kernel" (decision 9) was
+  named "runs in a Kata guest, not on the host kernel" before the rename; renaming the spec is a test change, not
   part of this amendment.
 - **Decision 11 is changed:** its line "The Kata runtime class stays required for the `vm` tier" is
   replaced by "A microVM, as defined above, stays required for the `vm` tier". The other lines hold.

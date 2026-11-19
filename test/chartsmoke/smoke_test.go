@@ -209,6 +209,12 @@ func describeMode(name, valuesFile string) {
 			}
 			for _, j := range r.Jobs {
 				if _, _, hook := hookOf(&j.ObjectMeta); !hook {
+					if j.Labels["app.kubernetes.io/component"] == "run-evidence" {
+						// An operator-run Job (ADR 0121, #966): it exports one recorded run to S3,
+						// so it needs a run, a KEK Secret and a bucket this suite does not make.
+						// TestChartContract checks its render; the export code has its own tests.
+						continue
+					}
 					runJob(ctx, rn, j)
 				}
 			}

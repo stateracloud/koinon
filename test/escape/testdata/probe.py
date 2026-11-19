@@ -43,6 +43,18 @@ def tcp(c):
         s.close()
 
 
+def unix(c):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    try:
+        s.connect(c["path"])
+        return "open"
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def udp_dns(c):
     # A real query for example.com; an answer means UDP reached a resolver.
     q = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
@@ -217,6 +229,8 @@ def syscall(c):
             return err_name(e)
     if n == "raw_packet":
         return rawsock(socket.AF_PACKET)
+    if n == "vsock":
+        return rawsock40(40)
     if n == "raw_inet":
         return rawsock(socket.AF_INET)
     raise ValueError(n)
@@ -230,12 +244,21 @@ def rawsock(family):
         return err_name(e)
 
 
+def rawsock40(family):
+    # AF_VSOCK (40): the Substrate guest server's channel (docs/dev/guest-launcher.md).
+    try:
+        socket.socket(family, socket.SOCK_STREAM, 0).close()
+        return "ok"
+    except OSError as e:
+        return err_name(e)
+
+
 def kernel(_):
     with open("/proc/cpuinfo") as f:
         hypervisor = any(l.startswith("flags") and " hypervisor" in l for l in f)
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
