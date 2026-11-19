@@ -304,6 +304,11 @@ postgres:
       agentd: ""
       # The login of koinon-gateway's leak guard (gateway.mcp.driver=koinon only; ADR 0097 decision 5).
       mcpgateway: ""
+      # The logins of the gateway key lifecycle (gateway.mcp.koinon.recipientKey; ADR 0097 decision 12): the
+      # key-admin Job's login (group role koinon_gateway_key_admin) and the re-seal login (group role
+      # koinon_gateway_reseal; no Job uses it before the re-seal slice).
+      gwkeyadmin: ""
+      reseal: ""
   external:
     # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
     # the schema; the component roles need only DML. Components may share one role.
@@ -316,6 +321,14 @@ postgres:
       # The URI of koinon-gateway's own login, a member of the group role koinon_gateway and of no other
       # (gateway.mcp.driver=koinon only; create the role and the grants as in the install guide).
       mcpgateway: mcpgateway-uri
+      # The URIs of the gateway key lifecycle logins (gateway.mcp.koinon.recipientKey, key-admin and re-seal).
+      # Create the group roles koinon_gateway_key_admin and koinon_gateway_reseal and make each login a member
+      # of its own group role and of no other (`koinon-api migrate --grants-only` grants them). With one shared
+      # database role for every component (the "components may share one role" case above) the table grants do
+      # NOT separate the gateway key from koinon-api: koinon-api could then insert a public key. Use a
+      # separate role for the key-admin login, or accept that the database does not enforce this boundary.
+      gwkeyadmin: gwkeyadmin-uri
+      reseal: reseal-uri
 
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
@@ -385,6 +398,59 @@ gateway:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      # The gateway's recipient key (ADR 0097 decision 12, issue #1151): koinon-api seals each stored MCP
+      # credential to the public key, and only koinon-gateway holds the private key. The private key is
+      # wrapped by a KMS key of its own, never the KEK's: the gateway identity may decrypt with it, only the
+      # key-admin Job's identity may encrypt, and koinon-api and the reconciler have no right on it. The KMS
+      # server, region and CA are the ones of secrets.kek.kms; the backend is secrets.kek.kms.backend. With
+      # the local backend the Secret holds the private key as it is, and koinon-api can read it. Nothing then
+      # protects the key from koinon-api: the install reports this ("custody local"). Use a KMS for the
+      # custody boundary.
+      recipientKey:
+        enabled: true
+        # Empty: <fullname>-gateway-recipient-key. Only the key-admin Job writes it (see guard).
+        secretName: ""
+        # A native ValidatingAdmissionPolicy: only the key-admin Job's service account may create, change or
+        # delete that Secret. Turn it off only to remove the Secret on purpose.
+        guard:
+          enabled: true
+        kms:
+          openbao:
+            # The transit key that wraps the gateway key. It MUST differ from secrets.kek.kms.openbao.key.
+            # Policies: the gateway role update on <transitMount>/decrypt/<key>; the key-admin role update on
+            # <transitMount>/encrypt/<key> and <transitMount>/decrypt/<key>. Never grant create (a mistyped
+            # key name would make a new key). Bind each role to its service account
+            # (<fullname>-mcp-gateway, <fullname>-gateway-key-admin).
+            key: koinon-gateway
+            roles:
+              gateway: koinon-gateway
+              keyAdmin: koinon-gateway-key-admin
+            # The audience of the gateway pod's projected service account token (the pod mounts no
+            # automatic token). Empty is the API server's default audience.
+            audience: ""
+          awskms:
+            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). It MUST differ from
+            # secrets.kek.kms.awskms.keyId. Policies: the gateway role kms:Decrypt on it; the key-admin role
+            # kms:Encrypt and kms:Decrypt. With IRSA set both ARNs, the chart puts each on its ServiceAccount.
+            keyId: ""
+            roleArns:
+              gateway: ""
+              keyAdmin: ""
+        keyAdmin:
+          # init (the default): make the first key when there is none, and activate it once every gateway
+          # pod loaded it. rotate: add a new key; change rotationId to run it again. retire: retire each
+          # retiring key whose wait is over and that no stored credential names (it deletes its wrapped
+          # private key). The Job runs again whenever its inputs change; each run is idempotent.
+          action: init
+          rotationId: ""
+          # How long the Job waits for every gateway pod to load a new key before it leaves it pending.
+          waitLoaded: 10m
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
   # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
   # koinon: also run koinon-gateway's model path, in pods of its own. It meters, stops a key at its
   # budget and charges after each call (slice 2). It has no retry rule. No agent is routed to it yet.

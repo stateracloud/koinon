@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# koinon-gateway's MCP path with a gateway recipient key wrapped by OpenBao (ADR 0097 decision 12, issue #1151).
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+secrets:
+  kek:
+    kms:
+      backend: openbao
+      openbao:
+        address: https://openbao.example:8200
+        key: koinon-kek
+gateway:
+  mcp:
+    driver: koinon

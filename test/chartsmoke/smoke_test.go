@@ -946,6 +946,9 @@ func bootstrapDatabase(ctx context.Context, dbURL string) {
 		`CREATE ROLE koinon_app NOLOGIN`,
 		`CREATE ROLE koinon_install_audit_writer NOLOGIN`,
 		`CREATE ROLE koinon_gateway NOLOGIN`,
+		// The gateway key lifecycle (ADR 0097 decision 12): the key-admin Job's and the re-seal group roles.
+		`CREATE ROLE koinon_gateway_key_admin NOLOGIN`,
+		`CREATE ROLE koinon_gateway_reseal NOLOGIN`,
 		`GRANT CONNECT ON DATABASE koinon TO koinon_app`,
 		`GRANT USAGE ON SCHEMA public TO koinon_app`,
 		`ALTER DEFAULT PRIVILEGES FOR ROLE koinon IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO koinon_app`,
@@ -970,6 +973,9 @@ func createComponentRoles(ctx context.Context, dbURL string) {
 		{"koinon_agentd", "koinon_app"},
 		// koinon-gateway's own login: in the gateway group only, never in koinon_app.
 		{"koinon_mcpgateway", "koinon_gateway"},
+		// The gateway key lifecycle logins: each in its own group role only.
+		{"koinon_gwkeyadmin", "koinon_gateway_key_admin"},
+		{"koinon_reseal", "koinon_gateway_reseal"},
 	} {
 		stmt := fmt.Sprintf(`CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s`, c.role, dbSecretPassword, c.groups)
 		_, err := conn.Exec(ctx, stmt)
