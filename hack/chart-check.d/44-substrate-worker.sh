@@ -73,9 +73,10 @@ grep -Fq "c.securityContext.capabilities.drop == ['ALL']" <<<"$wpods" || fail "t
 grep -Fq 'c.securityContext.runAsUser == 0' <<<"$wpods" || fail "the worker container must run as user 0 (the shape of Substrate)"
 grep -Fq 'c.securityContext.runAsGroup == 0' <<<"$wpods" || fail "the worker container must run as group 0 (the shape of Substrate)"
 grep -Fq '!c.securityContext.allowPrivilegeEscalation' <<<"$wpods" || fail "the worker container must not escalate privilege"
-tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"]' || fail "the gVisor class capabilities must be the set of Substrate"
-tr -d '\134' <<<"$wpods" | grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"]' || fail "the micro-VM class capabilities must be the set of Substrate"
-if tr -d '\134' <<<"$wpods" | grep -Eq '"(ALL|SYS_PTRACE|SYS_MODULE|SYS_CHROOT)"'; then fail "no capability beyond the two Substrate sets"; fi
+wpodsu=$(tr -d '\134' <<<"$wpods")
+grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"]' <<<"$wpodsu" || fail "the gVisor class capabilities must be the set of Substrate"
+grep -Fq '["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"]' <<<"$wpodsu" || fail "the micro-VM class capabilities must be the set of Substrate"
+if grep -Eq '"(ALL|SYS_PTRACE|SYS_MODULE|SYS_CHROOT)"' <<<"$wpodsu"; then fail "no capability beyond the two Substrate sets"; fi
 grep -Fq '@sha256:[a-f0-9]{64}' <<<"$wpods" || fail "worker images must be pinned by digest"
 grep -Fq 'has(src.clusterTrustBundle)' <<<"$wpods" || fail "projected sources in worker pods must be an allowlist without Secret"
 grep -Fq 'secretKeyRef' <<<"$wpods" || fail "worker pods must not take a Secret in env"
@@ -124,7 +125,7 @@ connpol=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-wor
 connbind=$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-connect\n' <<<"$pdocs")
 grep -Fq "request.subResource in ['exec', 'attach', 'portforward']" <<<"$connpol" || fail "only exec, attach and port-forward may pass the CONNECT policy"
 grep -Fq 'variables.inControlPlane && variables.installer' <<<"$connpol" || fail "the CONNECT policy admits the installer in the control-plane namespace only"
-tr -d '\134' <<<"$connpol" | grep -Fq 'request.namespace == "ate-system"' || fail "inControlPlane must be the control-plane namespace"
+grep -Fq 'request.namespace == "ate-system"' <<<"$(tr -d '\134' <<<"$connpol")" || fail "inControlPlane must be the control-plane namespace"
 grep -Fq 'system:masters' <<<"$connpol" || fail "the CONNECT installer groups follow workerPolicy.installerGroups"
 grep -Fq 'auditAnnotations:' <<<"$connpol" || fail "a CONNECT request leaves an audit annotation"
 grep -Fq 'validationActions: ["Deny","Audit"]' <<<"$connbind" || fail "the CONNECT binding denies and audits"
@@ -190,7 +191,8 @@ if render "${wsub[@]}" "${imgpod[@]}" "${imgcidr[@]}" "${np[@]}" >/dev/null 2>"$
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={0.0.0.0/0}' "${np[@]}" >/dev/null 2>&1; then fail "the whole internet must not be an image source"; fi
 has "a matchExpressions pod selector can be the image source" 'matchExpressions' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].key=app' --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].operator=Exists' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000 "${np[@]}"
 grep -Fq 'one image source' "$out/img.err" || fail "the two-sources error must say that there is one image source"
-if grep -v '^[[:space:]]*#' <<<"$closed" | grep -Eq 'ate-idp-server|postgres|rustfs'; then fail "the default-deny egress policy names no app: it covers them all"; fi
+closedcode=$(grep -v '^[[:space:]]*#' <<<"$closed")
+if grep -Eq 'ate-idp-server|postgres|rustfs' <<<"$closedcode"; then fail "the default-deny egress policy names no app: it covers them all"; fi
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")
 control=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' <<<"$npdocs")
 grep -Fq 'namespace: "ate-workers"' <<<"$workers" || fail "the workers policy must be in the worker namespace"
