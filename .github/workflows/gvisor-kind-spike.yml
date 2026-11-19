@@ -11,14 +11,14 @@ on:
         required: false
         default: ""
       gvisor_release:
-        description: "gVisor release path under storage.googleapis.com/gvisor/releases/release/"
+        description: "gVisor release (a pinned YYYYMMDD.N under storage.googleapis.com/gvisor/releases/release/)"
         required: false
-        default: "latest"
+        default: "20261116.0"
 permissions:
   contents: read
 concurrency:
-  group: gvisor-kind-spike-${{ github.ref }}
-  cancel-in-progress: true
+  group: gvisor-kind-spike-${{ github.ref }}-${{ inputs.userns_restrict }}-${{ inputs.gvisor_release }}
+  cancel-in-progress: false
 jobs:
   spike:
     runs-on: ubuntu-24.04
@@ -60,10 +60,13 @@ jobs:
           t0=$(date +%s)
           base="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/x86_64"
           cd "$RUNNER_TEMP"
+          mkdir gvisor-dl
+          cd gvisor-dl
+          curl -fsSL -O "$base/gvisor.tar.bz2" -O "$base/gvisor.tar.bz2.sha512"
+          sha512sum -c gvisor.tar.bz2.sha512
+          tar -xjf gvisor.tar.bz2 runsc containerd-shim-runsc-v1
+          chmod +x runsc containerd-shim-runsc-v1
           for f in runsc containerd-shim-runsc-v1; do
-            curl -fsSL -O "$base/$f" -O "$base/$f.sha512"
-            sha512sum -c "$f.sha512"
-            chmod +x "$f"
             docker cp "$f" gv-control-plane:/usr/local/bin/"$f"
           done
           docker exec gv-control-plane runsc --version
