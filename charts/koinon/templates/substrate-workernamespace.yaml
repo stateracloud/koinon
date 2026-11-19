@@ -1,0 +1,18 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The namespace of the Substrate worker pools (execution.substrate.workerNamespace; ADR 0120 section 6).
+Worker pods need SYS_ADMIN and NET_ADMIN, so the chart creates this namespace apart from the control
+plane and labels it for the Pod Security level that these pods need (privileged; the admission
+policies of substrate-policy.yaml are the fence). The name label is what the policy bindings and the
+NetworkPolicies select on.
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") (or .Values.execution.substrate.workerPolicy.enabled .Values.execution.substrate.workerPool.enabled .Values.execution.substrate.workerNetworkPolicy.enabled) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.execution.substrate.workerNamespace | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+    kubernetes.io/metadata.name: {{ .Values.execution.substrate.workerNamespace | quote }}
+    pod-security.kubernetes.io/enforce: privileged
+{{- end }}

@@ -660,16 +660,27 @@
             "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},
             "gatewayClientNamespaceSelector": {"type": "object"},
             "namespace": {"$ref": "#/definitions/nonEmpty"},
+            "workerNamespace": {"$ref": "#/definitions/nonEmpty"},
             "workerPolicy": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
                 "enabled": {"type": "boolean"},
                 "validationActions": {"type": "array", "items": {"enum": ["Deny", "Warn", "Audit"]}},
+                "podCreators": {"type": "array", "items": {"type": "string"}},
                 "controllerIdentities": {"type": "array", "items": {"type": "string"}},
                 "platformControllers": {"type": "array", "items": {"type": "string"}},
                 "digestExemptIdentities": {"type": "array", "items": {"type": "string"}},
                 "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
+                "allowedCapabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}},
+                "nodeAgent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "serviceAccount": {"$ref": "#/definitions/nonEmpty"},
+                    "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}}
+                  }
+                },
                 "installerIdentities": {"type": "array", "items": {"type": "string"}},
                 "installerGroups": {"type": "array", "items": {"type": "string"}}
               }
@@ -679,7 +690,8 @@
               "additionalProperties": false,
               "properties": {
                 "enabled": {"type": "boolean"},
-                "podSelector": {"type": "object"},
+                "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "atenetEgressSelector": {"type": "object"},
                 "apiServerCIDRs": {"type": "array", "items": {"type": "string"}},
                 "extraEgress": {"type": "array", "items": {"type": "object"}}
               }

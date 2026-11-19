@@ -1,39 +1,51 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
-Native ValidatingAdmissionPolicies for Substrate's namespace (ADR 0120 section 6, issue 1089;
-NEVER Kyverno, no CNI-specific feature). Worker pods run privileged (D7), so this namespace holds
-nothing else and these rules are what fences them. Rules key on the requesting identity, which a
-pod's creator cannot choose.
-- pods: only the Substrate controller and Kubernetes' own workload controllers (the Deployments,
-  DaemonSets and StatefulSets of Substrate's control plane) create pods or change their spec. Every
-  image of every container and init container is pinned by digest (the platform controllers' pods
-  are exempt until Substrate publishes by digest: execution.substrate.workerPolicy.digestExemptIdentities).
-  No hostNetwork. hostPath only from workerPolicy.allowedHostPaths, on every volume. No ephemeral
-  containers, for any identity, the controller included;
-- CONNECT: pods/exec, attach, portforward, pods/proxy and services/proxy are denied to every identity with no exemption (a
-  process started that way is outside the guest launcher's and gateway's controls). Break-glass is not
-  an exemption: a cluster admin suspends the binding, which shows in the audit log and as GitOps drift.
-  It is its own policy because an options object has no spec or metadata;
-- objects: WorkerPool, SandboxConfig and CSIDriverConfig, and the workload kinds that make pods
-  (Deployments, ReplicaSets, DaemonSets, StatefulSets, Jobs, CronJobs), are written only by the
-  installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
-  Kubernetes' own controllers; the Substrate controller may change the metadata of its objects and applies the Deployments of its WorkerPools. Without
-  this, anyone who can write a Deployment here would get a privileged pod past the pod rules.
-A CEL error denies under failurePolicy Fail.
+Native ValidatingAdmissionPolicies for Substrate's two namespaces (ADR 0120 section 6, issue 1089;
+NEVER Kyverno, no CNI-specific feature). Worker pods run with SYS_ADMIN and NET_ADMIN (D7), so they
+live in their own namespace (execution.substrate.workerNamespace) and these rules fence them. Rules
+key on the requesting identity, which a pod's creator cannot choose.
+Worker namespace:
+- pods: only the ReplicaSet controller creates them, and only for a ReplicaSet (a controller
+  ownerReference). The ate-controller applies the pool Deployments. No hostNetwork, hostPID or
+  hostIPC; hostPath only from workerPolicy.allowedHostPaths; volumes of the kinds hostPath, emptyDir,
+  configMap, downwardAPI and projected only; no projected serviceAccountToken source and
+  automountServiceAccountToken not true (the worker has no Kubernetes client, ADR 0120 section 2.4);
+  added capabilities only from workerPolicy.allowedCapabilities; digests pinned (the platform
+  controllers' pods are exempt until Substrate publishes by digest: workerPolicy.digestExemptIdentities);
+  no ephemeral containers, for any identity;
+- objects: WorkerPool and the workload kinds that make pods are written only by the installer and by
+  Kubernetes' own controllers. The ate-controller applies the pool Deployments and may change the
+  metadata of its objects.
+Control-plane namespace (ate-system): the control plane and atelet. Its pods come from Kubernetes'
+workload controllers. No hostNetwork, no ephemeral containers, digests pinned (same exemption). A pod
+may mount a hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
+ownerReference) and runs as the node agent ServiceAccount (workerPolicy.nodeAgent.serviceAccount),
+and only for workerPolicy.nodeAgent.allowedHostPaths. Every other pod there gets no hostPath.
+Both namespaces: pods/exec, attach, portforward, pods/proxy and services/proxy are denied to every
+identity with no exemption (a process started that way is outside the guest launcher's and gateway's
+controls). Break-glass is not an exemption: a cluster admin suspends the binding, which shows in the
+audit log and as GitOps drift. The workload kinds, WorkerPool and CSIDriverConfig are written only by
+the installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
+Kubernetes' own controllers. Without this, anyone who can write a Deployment would get a privileged
+pod past the pod rules. A CEL error denies under failurePolicy Fail.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPolicy.enabled }}
 {{- $s := .Values.execution.substrate }}
 {{- $w := $s.workerPolicy }}
 {{- $ns := $s.namespace }}
+{{- $wns := $s.workerNamespace }}
+{{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace: worker pods run with extra capabilities and do not share a namespace with the control plane (ADR 0120 section 6)" }}{{- end }}
 {{- $base := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
 {{- $pods := printf "%s-worker-pods" $base }}
+{{- $ctlPods := printf "%s-control-pods" $base }}
 {{- $connect := printf "%s-worker-connect" $base }}
 {{- $objects := printf "%s-worker-objects" $base }}
 {{- $controllers := $w.controllerIdentities }}
 {{- if not $controllers }}{{- $controllers = list (printf "system:serviceaccount:%s:ate-controller" $ns) }}{{- end }}
-{{- $trusted := concat $controllers $w.platformControllers }}
+{{- $trusted := concat $w.podCreators $controllers }}
+{{- $platformTrusted := concat $controllers $w.platformControllers }}
 {{- $tagOK := $w.digestExemptIdentities }}
-{{- if not $tagOK }}{{- $tagOK = $w.platformControllers }}{{- end }}
+{{- $dsc := "system:serviceaccount:kube-system:daemon-set-controller" }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -51,33 +63,47 @@ spec:
   variables:
     - name: allContainers
       expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
+    - name: creator
+      expression: {{ printf "request.userInfo.username in %s" (toJson $w.podCreators) | quote }}
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson $trusted) | quote }}
     - name: tagAllowed
       expression: {{ printf "request.userInfo.username in %s" (toJson $tagOK) | quote }}
     - name: volumes
       expression: "has(object.spec.volumes) ? object.spec.volumes : []"
+    - name: unchanged
+      expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
   validations:
     - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
-      message: ephemeral containers are not allowed in the Substrate namespace
-    - expression: "request.operation != 'CREATE' || variables.trusted"
-      messageExpression: "'only the Substrate controller and Kubernetes workload controllers may create pods in the Substrate namespace, not ' + request.userInfo.username"
-    - expression: "request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec"
-      messageExpression: "'only the Substrate controller may change a pod spec in the Substrate namespace, not ' + request.userInfo.username"
+      message: ephemeral containers are not allowed in the worker namespace
+    - expression: "request.operation != 'CREATE' || variables.creator"
+      messageExpression: "'only the ReplicaSet controller may create pods in the worker namespace, not ' + request.userInfo.username"
+    - expression: "request.operation != 'CREATE' || (has(object.metadata.ownerReferences) && object.metadata.ownerReferences.exists(o, o.kind == 'ReplicaSet' && has(o.controller) && o.controller))"
+      message: a pod in the worker namespace must belong to a ReplicaSet (pools are Deployments that the Substrate controller applies)
+    - expression: "request.operation != 'UPDATE' || variables.trusted || variables.unchanged"
+      messageExpression: "'only the Substrate controller may change a pod spec in the worker namespace, not ' + request.userInfo.username"
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
-      message: hostNetwork is not allowed in the Substrate namespace
+      message: hostNetwork is not allowed in the worker namespace
     - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
-      message: hostPID and hostIPC are not allowed in the Substrate namespace
+      message: hostPID and hostIPC are not allowed in the worker namespace
     - expression: "!has(object.metadata.annotations) || object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))"
-      message: io.katacontainers.* annotations are not allowed in the Substrate namespace
+      message: io.katacontainers.* annotations are not allowed in the worker namespace
     - expression: >-
         request.operation != 'UPDATE' || variables.trusted ||
         (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})
-      message: only the Substrate controller may change the labels of a pod in the Substrate namespace
+      message: only the Substrate controller may change the labels of a pod in the worker namespace
     - expression: {{ printf "variables.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)" (toJson $w.allowedHostPaths) | quote }}
-      message: {{ printf "hostPath is allowed only for %s in the Substrate namespace" (join ", " $w.allowedHostPaths) | quote }}
-    - expression: "(request.operation == 'UPDATE' && object.spec == oldObject.spec) || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
-      message: images in the Substrate namespace must be pinned by digest (name@sha256:<64 hex digits>)
+      message: {{ printf "hostPath is allowed only for %s in the worker namespace" (join ", " $w.allowedHostPaths) | quote }}
+    - expression: "variables.volumes.all(v, has(v.hostPath) || has(v.emptyDir) || has(v.configMap) || has(v.downwardAPI) || has(v.projected))"
+      message: volumes in the worker namespace must be hostPath, emptyDir, configMap, downwardAPI or projected (no PVC, CSI, ephemeral, NFS or other network volume)
+    - expression: "variables.volumes.all(v, !has(v.projected) || v.projected.sources.all(src, !has(src.serviceAccountToken)))"
+      message: a projected serviceAccountToken volume is not allowed in the worker namespace (the worker has no Kubernetes client)
+    - expression: "!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken"
+      message: automountServiceAccountToken must not be true in the worker namespace
+    - expression: {{ printf "variables.allContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x in %s))" (toJson $w.allowedCapabilities) | quote }}
+      message: {{ printf "added capabilities in the worker namespace are limited to %s" (join ", " $w.allowedCapabilities) | quote }}
+    - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
+      message: images in the worker namespace must be pinned by digest (name@sha256:<64 hex digits>)
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -87,6 +113,67 @@ metadata:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
   policyName: {{ $pods }}
+  validationActions: {{ toJson $w.validationActions }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $wns | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $ctlPods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers, pods/resize]
+  variables:
+    - name: allContainers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in %s" (toJson $platformTrusted) | quote }}
+    - name: tagAllowed
+      expression: {{ printf "request.userInfo.username in %s" (toJson $tagOK) | quote }}
+    - name: volumes
+      expression: "has(object.spec.volumes) ? object.spec.volumes : []"
+    - name: unchanged
+      expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
+    # The node agent rule: the DaemonSet controller creates the pod for a DaemonSet, and it runs as the
+    # node agent ServiceAccount. Nothing else in this namespace gets a hostPath.
+    - name: nodeAgent
+      expression: {{ printf "request.userInfo.username in %s && has(object.metadata.ownerReferences) && object.metadata.ownerReferences.exists(o, o.kind == 'DaemonSet' && has(o.controller) && o.controller) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName in %s" (toJson (list $dsc)) (toJson (list $w.nodeAgent.serviceAccount)) | quote }}
+  validations:
+    - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
+      message: ephemeral containers are not allowed in the Substrate namespace
+    - expression: "request.operation != 'CREATE' || variables.trusted"
+      messageExpression: "'only the Substrate controller and Kubernetes workload controllers may create pods in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "request.operation != 'UPDATE' || variables.trusted || variables.unchanged"
+      messageExpression: "'only the Substrate controller may change a pod spec in the Substrate namespace, not ' + request.userInfo.username"
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: hostNetwork is not allowed in the Substrate namespace
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: hostPID and hostIPC are not allowed in the Substrate namespace
+    - expression: "!has(object.metadata.annotations) || object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))"
+      message: io.katacontainers.* annotations are not allowed in the Substrate namespace
+    - expression: {{ printf "variables.unchanged || variables.volumes.all(v, !has(v.hostPath) || (variables.nodeAgent && v.hostPath.path in %s))" (toJson $w.nodeAgent.allowedHostPaths) | quote }}
+      message: {{ printf "hostPath in the Substrate namespace is allowed only for the DaemonSet pod of ServiceAccount %s and only for %s" $w.nodeAgent.serviceAccount (join ", " $w.nodeAgent.allowedHostPaths) | quote }}
+    - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
+      message: images in the Substrate namespace must be pinned by digest (name@sha256:<64 hex digits>)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $ctlPods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $ctlPods }}
   validationActions: {{ toJson $w.validationActions }}
   matchResources:
     namespaceSelector:
@@ -123,8 +210,8 @@ spec:
   # No objectSelector: a CONNECT request's object is an options object without metadata.
   matchResources:
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns | quote }}
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: In, values: {{ toJson (list $ns $wns) }}}
 {{- /* Kubernetes' own controllers write the workload objects and delete everything with the namespace. */}}
 {{- $kube := concat $w.platformControllers (list "system:serviceaccount:kube-system:deployment-controller" "system:serviceaccount:kube-system:namespace-controller" "system:serviceaccount:kube-system:generic-garbage-collector") }}
 ---
@@ -159,16 +246,16 @@ spec:
       expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
     - name: kube
       expression: {{ printf "request.userInfo.username in %s" (toJson $kube) | quote }}
-    # The Substrate controller changes metadata (finalizers, annotations) of its own objects, never the spec.
-    # The Substrate controller applies the Deployment of a WorkerPool (server-side apply creates and updates it).
-    # It may not write any other workload kind. Its pod template follows the pod rules already at the
-    # Deployment, so a bad template fails here and not only when the ReplicaSet makes the pod. The digest
-    # rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet controller is
-    # digest-exempt (digestExemptIdentities, tracking issue #1140).
+    # The Substrate controller applies the Deployment of a WorkerPool in the worker namespace (server-side
+    # apply creates and updates it) and deletes it. It may not write any other workload kind, or
+    # anything in the control-plane namespace. The pod template follows the pod rules already at the
+    # Deployment, so a bad template fails here and not only when the ReplicaSet makes the pod. The
+    # digest rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet
+    # controller is digest-exempt (digestExemptIdentities, tracking issue #1140).
     - name: controllerOwn
-      expression: {{ printf "request.userInfo.username in %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) (toJson $w.allowedHostPaths) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
     - name: controllerMetadata
-      expression: {{ printf "request.userInfo.username in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) | quote }}
+      expression: {{ printf "request.userInfo.username in %s && request.namespace == %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) ($wns | quote) | quote }}
   validations:
     - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
@@ -184,6 +271,6 @@ spec:
   validationActions: {{ toJson $w.validationActions }}
   matchResources:
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns | quote }}
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: In, values: {{ toJson (list $ns $wns) }}}
 {{- end }}

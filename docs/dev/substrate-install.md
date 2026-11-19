@@ -321,6 +321,28 @@ process can then reach kernel code that otherwise needs privilege. Set the value
 gVisor sandboxes only, and leave the control plane nodes at 0. Use `--substrate-node-selector` so the check
 reads the same nodes.
 
+## Worker namespace and admission
+
+Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6). The chart creates it:
+`execution.substrate.workerNamespace`, default `ate-workers`. The default WorkerPool
+(`execution.substrate.workerPool`), its ServiceAccount and the worker NetworkPolicy live there. A
+WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
+controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
+
+- The pool always names the chart's worker ServiceAccount (`automountServiceAccountToken: false`). The
+  controller's own `ateworker` ServiceAccount leaves the field unset, and the admission rule refuses a
+  projected token, so a pool on `ateworker` does not start. If you name your own ServiceAccount, create it in
+  the worker namespace and set the field false.
+- `ate-system` keeps the control plane and atelet. Only the atelet pod (DaemonSet, ServiceAccount `atelet`)
+  may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
+- The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
+  (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- atelet needs no internet egress when the gVisor tarball comes from the cluster object store (an
+  `s3://` SandboxConfig; ADR 0120 section 6.7, not yet proven). After the policies apply, restart every
+  DaemonSet in `ate-system`, so that its pods pass the new rules.
+- `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
+  the same, add the gateway's SPIFFE ID to that list.
+
 ## Verified and unverified
 
 Verified against the Substrate v1.0.0 source (commit `b34fbee7`), its `ate-setup --help` and

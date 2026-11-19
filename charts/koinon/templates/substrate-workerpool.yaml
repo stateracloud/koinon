@@ -5,8 +5,8 @@ creates no pool, and the preflight needs one per sandbox class. Off by default. 
 follows Substrate v1.0.0's WorkerPoolSpec: workerImage (required), replicas, sandboxClasses (exactly
 one entry, immutable) and spec.template.{nodeSelector,tolerations,serviceAccountName}. The spec has no
 imagePullSecrets: pull access is a ServiceAccount that carries them (koinon.imagePullSecrets, ADR 0061;
-the Secrets must exist in the Substrate namespace). The chart makes that ServiceAccount, named like the
-pool plus -worker, unless the values name one; it never mounts an API token (automountServiceAccountToken
+the Secrets must exist in the worker namespace). The chart makes that ServiceAccount in the worker namespace (execution.substrate.workerNamespace),
+named like the pool plus -worker, unless the values name one; it never mounts an API token (automountServiceAccountToken
 false). A ServiceAccount that the values name must set that field itself. workerPool.spec is merged over the generated spec.
 The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer identity writes it
 (substrate-policy.yaml, workerPolicy.installerIdentities).
@@ -30,7 +30,7 @@ apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:
   name: {{ $name | quote }}
-  namespace: {{ $s.namespace | quote }}
+  namespace: {{ $s.workerNamespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 spec:
@@ -41,7 +41,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $sa | quote }}
-  namespace: {{ $s.namespace | quote }}
+  namespace: {{ $s.workerNamespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
 # The worker has no Kubernetes client (ADR 0120 section 2.4): no API token in the pod.

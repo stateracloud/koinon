@@ -157,13 +157,31 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 ### 6. Admission of workers and sandbox pods (D7)
 
 1. Admission policy is native `ValidatingAdmissionPolicy` only. Never Kyverno. No CNI-specific feature.
-2. **Worker pods run privileged, and Koinon accepts that on any node** (D7). The pods of the
-   Substrate worker and node agent need root, `SYS_ADMIN`, `NET_ADMIN` and hostPath mounts, and a
-   `privileged` Pod Security namespace. That namespace holds nothing else.
-3. Koinon's policies for these namespaces: worker and node-agent pods only in the Substrate namespace
-   and only from the controller identity; image digests pinned; no `hostNetwork`; no hostPath outside
-   the documented set; ephemeral containers and `pods/exec` into workers denied; the worker pool,
-   sandbox config and storage driver objects writable only by the installer identity.
+2. **Worker pods run with extra capabilities, and Koinon accepts that on any node** (D7). The pods of the
+   Substrate worker need root, `SYS_ADMIN`, `NET_ADMIN` and hostPath mounts, and a `privileged` Pod
+   Security namespace. They run in their own namespace (the chart value `execution.substrate.workerNamespace`,
+   default `ate-workers`), which the chart creates. That namespace holds nothing else. Substrate's
+   control plane and the node agent (atelet) stay in `ate-system`. A WorkerPool in another namespace
+   needs no Substrate change (checked on kind with Substrate v1.0.0).
+3. Koinon's policies, as native `ValidatingAdmissionPolicy` objects, one rule set for each namespace:
+   - **Worker namespace.** Only the ReplicaSet controller creates pods, and only for a ReplicaSet
+     (the Substrate controller applies the pool Deployments). Image digests pinned. No `hostNetwork`,
+     `hostPID` or `hostIPC`. hostPath only from a short list: `/dev/kvm`, `/dev/net/tun`,
+     `/dev/vhost-vsock`, `/dev/vhost-net` and `/var/lib/ate`. Volumes of the kinds hostPath, emptyDir,
+     configMap, downwardAPI and projected only (no PVC, CSI, ephemeral or network volume). No projected
+     `serviceAccountToken` source, and `automountServiceAccountToken` not true: the worker has no
+     Kubernetes client (section 2.4). A rule "must be false" would refuse the pool pods, which leave
+     the field unset, so the rule is "not true". The chart always names a worker ServiceAccount that sets
+     it false. The capabilities that a container adds have a ceiling (`SYS_ADMIN`, `NET_ADMIN`).
+     Ephemeral containers are denied.
+   - **Control-plane namespace.** Pods come from Kubernetes workload controllers. A pod may mount a
+     hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
+     `ownerReference`) and it runs as the ServiceAccount `atelet`, and only for the node agent's own list.
+     Every other pod there gets no hostPath. Digests pinned and no `hostNetwork`, as for workers.
+   - **Both.** `pods/exec`, `attach`, `portforward`, `pods/proxy` and `services/proxy` are denied to every
+     identity. The worker pool, sandbox config and storage driver objects, and every workload kind, are
+     writable only by the installer identity and by Kubernetes' own controllers. The Substrate controller
+     applies the pool Deployments in the worker namespace only.
 4. **A tainted node pool for workers.** The `hardened` tier requires the tainted pool
    ([0075](0075-isolation-tiers.md)); for the other tiers it is an operator option. The chart documents
    it and the preflight reports whether Koinon's own pods (API, gateway, reconciler, database) can run
@@ -172,6 +190,18 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    Sandbox controller creates sandbox pods (rules on the requesting identity, with no break-glass), the
    allowed runtime classes follow the tier, `hostNetwork`, ephemeral containers and
    `io.katacontainers.*` annotations are denied, and the supervisor image is pinned.
+
+6. **Network fence.** The worker namespace has one policy for every pod: egress only to the atenet-egress
+   pods, Koinon's gateway and DNS. Workers get no route to the Kubernetes API server. The control-plane
+   namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
+   "every pod without the worker label": a rule of the second form fails open for a pod that loses its
+   label. A pod with another label is not selected, so the list follows the Substrate manifests.
+7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
+   the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
+   an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
+   holds in the control-plane namespace too. Status: design. The `s3://` `SandboxConfig` from the cluster
+   store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
+   DaemonSet in `ate-system` after the policies apply.
 
 ### 7. OpenShell driver profile for the window
 
