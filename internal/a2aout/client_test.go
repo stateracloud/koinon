@@ -149,6 +149,12 @@ var _ = Describe("Client", func() {
 				Target: target, Agent: gateway.AgentRef{Org: "acme", Name: "scout"}, Policy: policy,
 				PollInterval: 5 * time.Millisecond, RequestTimeout: 5 * time.Second,
 			}
+			// The pin: the hash of the card as the agent serves it now. A spec that tests the pin sets its own.
+			// A target that cannot be read gets a hash that matches nothing, so New fails with its own error.
+			o.CardHash = strings.Repeat("0", 64)
+			if pin, err := a2aout.FetchCard(bgctx, o); err == nil {
+				o.CardHash = pin.Hash
+			}
 			for _, m := range mod {
 				m(&o)
 			}
@@ -439,7 +445,7 @@ var _ = Describe("Client", func() {
 			Expect(err).NotTo(HaveOccurred())
 			_, err = c.Send(bgctx, a2aout.Request{Text: "x"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(f.auth).To(HaveLen(2)) // the card and the call
+			Expect(f.auth).To(HaveLen(3)) // the card read for the pin, the card read by New and the call
 			for _, a := range f.auth {
 				Expect(a).To(Equal("Bearer " + fakeToken))
 			}
@@ -605,5 +611,112 @@ var _ = Describe("Client", func() {
 			Expect(r.State).To(Equal(store.TaskStateInputRequired))
 			Expect(r.Question).To(Equal("Which region?"))
 		})
+	})
+	Describe("the card pin (ADR 0123 decision 11)", func() {
+		BeforeEach(func() { start(nil) })
+
+		It("refuses a client with no card hash", func() {
+			_, err := connect(func(o *a2aout.Options) { o.CardHash = "" })
+			Expect(err).To(MatchError(a2aout.ErrCardUnpinned))
+		})
+
+		It("refuses a card with another hash, and does not send", func() {
+			_, err := connect(func(o *a2aout.Options) { o.CardHash = strings.Repeat("0", 64) })
+			Expect(err).To(MatchError(a2aout.ErrCardChanged))
+			Expect(f.sent).To(BeEmpty())
+		})
+
+		It("names nothing of the card in the refusal", func() {
+			_, err := connect(func(o *a2aout.Options) { o.CardHash = strings.Repeat("0", 64) })
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).NotTo(ContainSubstring("kagent-fake"))
+			Expect(err.Error()).NotTo(ContainSubstring(srv.URL))
+		})
+
+		It("stops the next client at once when the card changes", func() {
+			_, err := connect()
+			Expect(err).NotTo(HaveOccurred())
+			pin, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).NotTo(HaveOccurred())
+			// The server now serves a card with one more skill: the same agent, another card.
+			srv.Config.Handler = func() http.Handler {
+				mux := http.NewServeMux()
+				mux.HandleFunc("GET /.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+					c := card(srv.URL)
+					c.Skills = append(c.Skills, a2a.AgentSkill{ID: "new", Name: "New", Description: "New", Tags: []string{"new"}})
+					body, err := a2av0.NewStaticAgentCardProducer(c).(a2asrv.AgentCardJSONProducer).CardJSON(r.Context())
+					Expect(err).NotTo(HaveOccurred())
+					_, _ = w.Write(body)
+				})
+				return mux
+			}()
+			_, err = a2aout.New(bgctx, a2aout.Options{Target: target, Policy: policy, CardHash: pin.Hash})
+			Expect(err).To(MatchError(a2aout.ErrCardChanged))
+		})
+
+		It("reads the card with its hash and never needs the pin to do it", func() {
+			c, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Hash).To(MatchRegexp(`^[0-9a-f]{64}$`))
+			Expect(c.JSON).To(ContainSubstring("kagent-fake"))
+			again, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Hash).To(Equal(c.Hash))
+		})
+
+		It("sends the credential when it reads the card, and only over the target's own rules", func() {
+			withCredential()
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f.auth).To(ContainElement("Bearer " + fakeToken))
+		})
+
+		It("refuses a card that is over the size limit", func() {
+			start(func(c *a2a.AgentCard) { c.Description = strings.Repeat("x", a2aout.MaxCardBytes+1) })
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).To(MatchError(a2aout.ErrCard))
+		})
+
+		It("refuses a card that names another host, as registration must", func() {
+			start(func(c *a2a.AgentCard) {
+				c.SupportedInterfaces = []*a2a.AgentInterface{a2a.NewAgentInterface("https://elsewhere.example.com/jsonrpc", a2a.TransportProtocolJSONRPC)}
+			})
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			Expect(err).To(MatchError(a2aout.ErrCardHost))
+		})
+	})
+
+	Describe("CanonicalCard", func() {
+		It("gives the same hash for the same card in another key order and spacing", func() {
+			_, a, err := a2aout.CanonicalCard([]byte(`{"b": 1, "a": {"y": [1, 2], "x": "<&>"}}`))
+			Expect(err).NotTo(HaveOccurred())
+			canon, b, err := a2aout.CanonicalCard([]byte("{\n \"a\":{\"x\":\"<&>\",\"y\":[1,2]},\n\"b\":1}\n"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b).To(Equal(a))
+			Expect(string(canon)).To(Equal(`{"a":{"x":"<&>","y":[1,2]},"b":1}`))
+		})
+
+		It("gives another hash for another value, also in a field it does not know", func() {
+			_, a, _ := a2aout.CanonicalCard([]byte(`{"name":"x","extra":1}`))
+			_, b, _ := a2aout.CanonicalCard([]byte(`{"name":"x","extra":2}`))
+			Expect(a).NotTo(Equal(b))
+		})
+
+		It("keeps a large number as written", func() {
+			canon, _, err := a2aout.CanonicalCard([]byte(`{"n":12345678901234567890}`))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(canon)).To(Equal(`{"n":12345678901234567890}`))
+		})
+
+		DescribeTable("refuses what is not one JSON object",
+			func(raw string) {
+				_, _, err := a2aout.CanonicalCard([]byte(raw))
+				Expect(err).To(MatchError(a2aout.ErrCard))
+			},
+			Entry("not JSON", "<html>"),
+			Entry("an array", "[1]"),
+			Entry("two values", `{} {}`),
+			Entry("empty", ""),
+		)
 	})
 })

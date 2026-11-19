@@ -54,6 +54,9 @@ type Options struct {
 	MaxBody int64
 	// PollInterval is the time between two reads in [Client.Await]. Zero is 2 seconds.
 	PollInterval time.Duration
+	// CardHash is the pinned hash of the agent card (see [CanonicalCard]). [New] refuses a card with
+	// another hash. [FetchCard] ignores it: it reads the card to learn the hash.
+	CardHash string
 }
 
 // Client calls one external A2A agent on behalf of one Koinon agent. It holds no credential: the
@@ -65,10 +68,51 @@ type Client struct {
 	endpoint string
 }
 
-// New resolves the agent card of the target and returns a client for it. The card must offer an
-// interface on the host of the target: a card that points elsewhere is refused, so a card cannot
-// move the credential or the traffic to another host.
+// New resolves the agent card of the target, checks it against the pin and returns a client for it.
+// Options.CardHash is required: a card with another hash is refused with [ErrCardChanged], so a card that
+// changed since an admin read it stops the call at once (ADR 0123 decision 11). The card must offer an
+// interface on the host of the target: a card that points elsewhere is refused, so a card cannot move the
+// credential or the traffic to another host.
 func New(ctx context.Context, o Options) (*Client, error) {
+	if !validHash(o.CardHash) {
+		return nil, fmt.Errorf("%w: no card hash to check against", ErrCardUnpinned)
+	}
+	hc, base, o, err := open(o)
+	if err != nil {
+		return nil, err
+	}
+	if err := o.Policy.CheckStrict(ctx, o.Target.URL); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrEgressDenied, err)
+	}
+	rctx, cancel := context.WithTimeout(ctx, o.RequestTimeout)
+	defer cancel()
+	card, raw, err := resolveCard(rctx, hc, o.Target.URL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCard, err)
+	}
+	card.SupportedInterfaces = sameOrigin(card.SupportedInterfaces, base)
+	if len(card.SupportedInterfaces) == 0 {
+		return nil, fmt.Errorf("%w: no JSON-RPC interface on %s", ErrCardHost, base.Host)
+	}
+	// The pin comes before a client is built: a card with another hash gets no call and no credential.
+	if _, hash, err := CanonicalCard(raw); err != nil {
+		return nil, err
+	} else if hash != o.CardHash {
+		return nil, ErrCardChanged
+	}
+	c, err := a2aclient.NewFromCard(ctx, card,
+		a2aclient.WithJSONRPCTransport(hc),
+		a2av0.WithJSONRPCTransport(a2av0.JSONRPCTransportConfig{Client: hc}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCard, err)
+	}
+	return &Client{c: c, poll: o.PollInterval, timeout: o.RequestTimeout, endpoint: base.Host}, nil
+}
+
+// open applies the defaults of the options and builds the HTTP client of the target: the same client for
+// a call and for a card read, so one rule covers the credential, the TLS trust and the size limit.
+func open(o Options) (*http.Client, *url.URL, Options, error) {
 	if o.Credentials == nil {
 		o.Credentials = mcpgateway.StaticCredentials{}
 	}
@@ -83,10 +127,7 @@ func New(ctx context.Context, o Options) (*Client, error) {
 	}
 	base, err := url.Parse(o.Target.URL)
 	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" {
-		return nil, fmt.Errorf("%w: %q", ErrBadTarget, o.Target.URL)
-	}
-	if err := o.Policy.CheckStrict(ctx, o.Target.URL); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrEgressDenied, err)
+		return nil, nil, o, fmt.Errorf("%w: %q", ErrBadTarget, o.Target.URL)
 	}
 	rt := o.Transport
 	if rt == nil {
@@ -94,43 +135,28 @@ func New(ctx context.Context, o Options) (*Client, error) {
 	}
 	hc, err := mcpgateway.NewTargetHTTPClient(rt, o.Target, o.Agent, o.Credentials)
 	if err != nil {
-		return nil, err
+		return nil, nil, o, err
 	}
 	hc.Transport = &limitTransport{base: hc.Transport, max: o.MaxBody}
 	hc.Timeout = o.RequestTimeout
-
-	rctx, cancel := context.WithTimeout(ctx, o.RequestTimeout)
-	defer cancel()
-	card, err := resolveCard(rctx, hc, o.Target.URL)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCard, err)
-	}
-	card.SupportedInterfaces = sameOrigin(card.SupportedInterfaces, base)
-	if len(card.SupportedInterfaces) == 0 {
-		return nil, fmt.Errorf("%w: no JSON-RPC interface on %s", ErrCardHost, base.Host)
-	}
-	c, err := a2aclient.NewFromCard(ctx, card,
-		a2aclient.WithJSONRPCTransport(hc),
-		a2av0.WithJSONRPCTransport(a2av0.JSONRPCTransportConfig{Client: hc}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCard, err)
-	}
-	return &Client{c: c, poll: o.PollInterval, timeout: o.RequestTimeout, endpoint: base.Host}, nil
+	return hc, base, o, nil
 }
 
 // resolveCard reads the card. A v1.0 card is parsed first; a v0.3 card, which kagent serves, is
-// parsed by the compatibility parser.
-func resolveCard(ctx context.Context, hc *http.Client, baseURL string) (*a2a.AgentCard, error) {
+// parsed by the compatibility parser. raw is the body as the agent sent it: the pin hashes it, not the
+// parsed card, so a field this client does not know is part of the pin too.
+func resolveCard(ctx context.Context, hc *http.Client, baseURL string) (card *a2a.AgentCard, raw []byte, err error) {
 	r := agentcard.NewResolver(hc)
 	r.CardParser = func(b []byte) (*a2a.AgentCard, error) {
+		raw = append([]byte(nil), b...)
 		card, err := agentcard.DefaultCardParser(b)
 		if err == nil && len(card.SupportedInterfaces) > 0 {
 			return card, nil
 		}
 		return a2av0.NewAgentCardParser()(b)
 	}
-	return r.Resolve(ctx, baseURL, agentcard.WithPath(".well-known/agent-card.json"))
+	card, err = r.Resolve(ctx, baseURL, agentcard.WithPath(".well-known/agent-card.json"))
+	return card, raw, err
 }
 
 // sameOrigin keeps the JSON-RPC interfaces of the card that have the scheme and the host of the

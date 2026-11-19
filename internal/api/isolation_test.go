@@ -15,6 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -52,6 +55,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	remoteagentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
@@ -80,6 +85,32 @@ type isolationCase struct {
 	// (lists and creates). Called in the caller's own org they succeed, and
 	// the response must hold none of the other org's IDs.
 	ownOrgOK bool
+}
+
+// isolationCardURL is the base URL of a fake A2A agent on 127.0.0.1; CreateRemoteAgent reads its card.
+// The spec below sets it.
+var isolationCardURL string
+
+// serveIsolationAgent runs an agent that serves an agent card with one JSON-RPC interface on its own host.
+func serveIsolationAgent() *httptest.Server {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		c := &a2a.AgentCard{
+			Name: "isolation-fake", Version: "1", DefaultInputModes: []string{"text/plain"}, DefaultOutputModes: []string{"text/plain"},
+			SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(srv.URL+"/jsonrpc", a2a.TransportProtocolJSONRPC)},
+			Skills:              []a2a.AgentSkill{{ID: "chat", Name: "Chat", Description: "Chat", Tags: []string{"chat"}}},
+		}
+		body, err := a2av0.NewStaticAgentCardProducer(c).(a2asrv.AgentCardJSONProducer).CardJSON(r.Context())
+		if err != nil {
+			http.Error(w, "card", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	})
+	srv = httptest.NewServer(mux)
+	return srv
 }
 
 var isolationCases = map[string]isolationCase{
@@ -739,6 +770,56 @@ var isolationCases = map[string]isolationCase{
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
 		},
 	},
+	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.remoteAgents.CreateRemoteAgent(ctx, &remoteagentv1alpha1.CreateRemoteAgentRequest{
+				OrgId: org, Name: fmt.Sprintf("created-%d", dbSeq.Add(1)), CardUrl: isolationCardURL,
+			})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceListRemoteAgentsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.remoteAgents.ListRemoteAgents(ctx, &remoteagentv1alpha1.ListRemoteAgentsRequest{OrgId: org})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceUpdateRemoteAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.UpdateRemoteAgent(ctx, &remoteagentv1alpha1.UpdateRemoteAgentRequest{
+				OrgId: org, RemoteAgentId: f.remoteAgent, CaBundle: new("intruder"),
+			})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceDeleteRemoteAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.DeleteRemoteAgent(ctx, &remoteagentv1alpha1.DeleteRemoteAgentRequest{OrgId: org, RemoteAgentId: f.remoteAgent})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceGetRemoteAgentCardProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.GetRemoteAgentCard(ctx, &remoteagentv1alpha1.GetRemoteAgentCardRequest{OrgId: org, RemoteAgentId: f.remoteAgent})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceAcceptRemoteAgentCardProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.AcceptRemoteAgentCard(ctx, &remoteagentv1alpha1.AcceptRemoteAgentCardRequest{
+				OrgId: org, RemoteAgentId: f.remoteAgent, ObservedCardHash: f.remoteAgentCardHash,
+			})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceGetAgentRemoteAgentsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.GetAgentRemoteAgents(ctx, &remoteagentv1alpha1.GetAgentRemoteAgentsRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	remoteagentv1alpha1connect.RemoteAgentServiceSetAgentRemoteAgentsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.remoteAgents.SetAgentRemoteAgents(ctx, &remoteagentv1alpha1.SetAgentRemoteAgentsRequest{
+				OrgId: org, AgentId: f.agent.GetId(), RemoteAgentIds: []string{f.remoteAgent},
+			})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceGetAgentServersProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.GetAgentServers(ctx, &mcpserverv1alpha1.GetAgentServersRequest{OrgId: org, AgentId: f.agent.GetId()})
@@ -882,6 +963,9 @@ var _ = Describe("org isolation", func() {
 	It("never serves or changes one org's data for another org's user", func(ctx SpecContext) {
 		gh := githubtest.New()
 		DeferCleanup(gh.Server.Close)
+		agent := serveIsolationAgent()
+		DeferCleanup(agent.Close)
+		isolationCardURL = agent.URL
 		e := newEnv(ctx, envOptions{
 			keys:   secretstoretest.Keyring(),
 			github: github.NewClient(github.Options{BaseURL: gh.URL()}),
@@ -931,7 +1015,7 @@ func foreignIDs(f orgFixture) []string {
 	return []string{
 		f.org, f.agent.GetId(), f.draft.GetId(), f.ticket.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
-		f.mcpServer, f.traceDest, f.trustedHost,
+		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost,
 	}
 }
 
@@ -982,6 +1066,13 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	thirty := 30
 	Expect(lg.SetMatchThreshold(ctx, orgID, audit.System("koinon-test:spec"), &thirty)).To(Succeed())
+	// A remote agent with a pinned card and an observed one, inserted directly: the isolation cases only name it.
+	f.remoteAgentCardHash = fmt.Sprintf("%064x", dbSeq.Add(1))
+	pinHash := fmt.Sprintf("%064x", dbSeq.Add(1))
+	Expect(e.pool.QueryRow(ctx,
+		`INSERT INTO remote_agents (org_id, name, card_url, card_hash, card, observed_card_hash, observed_card)
+		 VALUES ($1, 'isolated', 'https://agent.example.com', $2, '{}', $3, '{"x":1}') RETURNING id`,
+		f.org, pinHash, f.remoteAgentCardHash).Scan(&f.remoteAgent)).To(Succeed())
 	// A trace destination, inserted directly: the isolation cases only name it.
 	Expect(e.pool.QueryRow(ctx,
 		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,
@@ -1016,6 +1107,8 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND url = 'https://mcp.example.com/mcp'`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND tier = 'ask' AND review_reason IS NULL`, org),
 		count(ctx, e, `SELECT count(*) FROM agent_mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM remote_agents WHERE org_id = $1 AND ca_bundle = '' AND observed_card_hash IS NOT NULL`, org),
+		count(ctx, e, `SELECT count(*) FROM agent_remote_agents WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM trace_destinations WHERE org_id = $1 AND name = 'isolated'`, org),
 		count(ctx, e, `SELECT count(*) FROM org_trace_settings WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),

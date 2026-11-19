@@ -105,6 +105,7 @@ Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
 | `--postgres-storage-size`, `--rustfs-storage-class`, `--rustfs-storage-size` | none (Koinon patch) | `generic` only. See [What `generic` corrects](#what-generic-corrects). |
 | `--gcp-project-id`, `--snapshot-transfer-gsa-name` | the same names | `gke` only. |
 | `--setup-csi nfs\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`). `hostpath` and `both` are for kind only; `generic` refuses them. |
+| `--gvisor-mirror <base-url>` | none (Koinon step) | The installer host cannot reach `storage.googleapis.com`. See [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
@@ -146,7 +147,9 @@ Order of the step:
 7. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
    installer finds the router container by name (`atenet-router`), reads the flag in its command and
    arguments, and retries when the Deployment changed during the update.
-8. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
+8. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
+   object store" below.
+9. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
    namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
 
 The probe pods in the Substrate namespace use no image pull secrets: `--probe-image-pull-secrets` names
@@ -283,6 +286,62 @@ This is interim: it goes when the pinned Substrate writes the entry for every in
 
 When `ate-setup` fails, the installer keeps the pinned build and prints the exact `ate-setup delete ate-system`
 command that removes the partial install.
+
+## gVisor tarball in the cluster object store
+
+Substrate ships the SandboxConfig `gvisor-default`. It points at `gs://gvisor/...`, so atelet reads the
+gVisor tarball from the internet. Koinon keeps the Substrate namespaces closed to the internet (ADR 0120
+section 6), so the installer puts the pinned tarball in the cluster object store and applies a SandboxConfig
+that points there. Pods in the cluster then download the tarball with no egress to the internet. This is
+step 8 of the install, on the `kind` and `generic` platforms when the install has the gvisor class. On `gke`
+the `gs://` default stays: that route has no in-cluster object store.
+
+What the installer does:
+
+1. It reads the keys of the rustfs Deployment (a value, or a Secret reference) and opens a port-forward to the
+   rustfs pod. The keys stay in the installer process. They are never written, printed or sent to a sandbox.
+2. For each architecture (`amd64`, `arm64`) it reads the object
+   `gvisor-assets/<arch>/<sha256>` in the snapshot bucket (`--storage-bucket`). The key has no `atespaces`
+   segment, so atelet's object-store plugin serves it. It is the layout `ate-setup` uses for the microVM assets.
+3. An object with the pinned SHA-256 is left as it is: a second run fetches and writes nothing.
+   An object with another SHA-256 is an error. The installer never overwrites it. Delete the object if it is
+   wrong, then run the installer again.
+4. A missing object is fetched from the source, checked against the pinned SHA-256 before the first byte
+   goes to the store, written, read back and checked again.
+5. It creates the SandboxConfig `koinon-gvisor` (class `gvisor`, annotation
+   `sandboxconfig.ate.dev/is-class-default: "true"`, so it is newer than `gvisor-default` and wins). Its
+   version `gvisor-<release>` has `s3://<bucket>/gvisor-assets/<arch>/<sha256>` and the same SHA-256 for each
+   architecture. A new release adds a version and keeps the old ones, because a snapshot restores its memory only on
+   the version it was taken with. A version that exists with other assets is an error, never a rewrite.
+
+Limits:
+
+- Substrate picks the newest class default. If `ate-setup` is cleaned up and run again, `gvisor-default` is
+  newer and wins. The installer then prints a warning. Delete SandboxConfig `koinon-gvisor` and run the installer
+  again.
+- On a cluster that already has snapshots on an older `gvisor-default` version, the pools move to
+  `koinon-gvisor`, which has only the pinned release. Actors with snapshots on the older version cannot restore
+  their memory. New installs are not affected.
+- On the `kind` platform the bucket must exist. The platform creates only its own snapshot bucket, so a
+  different `--storage-bucket` fails with a message that names the bucket.
+- One tarball download has a limit of 20 minutes.
+
+The pinned release and its checksums are in `hack/versions.env` (`GVISOR_VERSION`, `GVISOR_SHA256_AMD64`,
+`GVISOR_SHA256_ARM64`) and in `internal/substrateinstall/gvisorpin.go`. A test compares the two. The
+release is the one of version `v7` of `gvisor-default` in the pinned Substrate.
+
+### Mirror and air-gapped installs
+
+The installer host fetches the tarball, not the cluster. By default it reads
+`https://storage.googleapis.com/gvisor/releases/release/<release>/<x86_64|aarch64>/gvisor.tar.zstd`. For a host without
+internet, copy those two files to a server that the host reaches and pass its base URL:
+`--gvisor-mirror https://mirror.example.com/gvisor`. The layout below the base is `<release>/<x86_64|aarch64>/gvisor.tar.zstd`.
+The pinned SHA-256 protects the content, so a mirror needs no trust. A wrong file fails with nothing written.
+
+To check an install: atelet logs name the asset with `s3://` and the pinned SHA-256, and no pod in the Substrate
+namespaces reaches `storage.googleapis.com`.
+
+Cost: a repeat run reads each object through the port-forward to compare its SHA-256 (about 60 MB for each architecture).
 
 ## Talos: user namespaces for gVisor
 

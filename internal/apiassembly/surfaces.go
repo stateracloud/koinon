@@ -69,7 +69,7 @@ func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembl
 	}
 	svc := services.New(out.Pool, services.Options{
 		SandboxResources: &set.SandboxResources, ScopeSync: scopeSync, ModelCheck: d.echo, Traces: d.traces, RestoreHold: d.hold,
-		Hub: pre.Hub, WatchPollInterval: set.WatchPoll, WatchHeartbeatInterval: set.WatchHeartbeat, WatchCancelGrace: set.WatchCancelGrace, Keys: d.keys, Tokens: d.tokens, Hosts: d.hosts, Approvals: d.approvals, Catalog: d.catalog, MCP: d.mcp, Notifier: pre.Notifier, DirectMessages: pre.DirectMessages, RunNow: pre.RunNow, URLPolicy: d.urlPolicy, Prices: pricing.Embedded(), Logger: out.Logger,
+		Hub: pre.Hub, WatchPollInterval: set.WatchPoll, WatchHeartbeatInterval: set.WatchHeartbeat, WatchCancelGrace: set.WatchCancelGrace, Keys: d.keys, Tokens: d.tokens, Hosts: d.hosts, Approvals: d.approvals, Catalog: d.catalog, MCP: d.mcp, RemoteAgents: d.remoteAgents, Notifier: pre.Notifier, DirectMessages: pre.DirectMessages, RunNow: pre.RunNow, URLPolicy: d.urlPolicy, Prices: pricing.Embedded(), Logger: out.Logger,
 	})
 	pool, kube := out.Pool, out.Kube
 	admin := adminapi.New(pool, d.catalog, d.tokens, out.Logger, pricing.Embedded()).WithMCP(d.mcp).WithOutward(outward.New(pool).WithRestoreHold(d.hold)).WithTriggers(svc).WithModelCheck(d.echo).
