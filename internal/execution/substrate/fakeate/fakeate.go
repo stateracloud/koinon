@@ -20,6 +20,7 @@ package fakeate
 import (
 	"context"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -354,4 +355,16 @@ func (c *Cluster) Crash(atespace, name, message string) {
 		a.state = ateapiv1.ActorState_ACTOR_STATE_CRASHED
 		a.crash = message
 	}
+}
+
+// Started returns every command the guest of an actor was asked to start, as the driver sent it
+// (a launcher prefix included).
+func (c *Cluster) Started(atespace, name string) [][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a, ok := c.actors[key{atespace, name}]
+	if !ok {
+		return nil
+	}
+	return slices.Clone(a.started)
 }
