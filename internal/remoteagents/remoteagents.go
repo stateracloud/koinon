@@ -90,7 +90,7 @@ const (
 	ReasonEgressDenied  = "the platform URL policy denies the agent's address"
 	ReasonCardInvalid   = "the agent card could not be read as an agent card"
 	ReasonCardHost      = "the agent card offers no interface on the host of the agent"
-	ReasonCredentialBad = "the credential could not be opened"
+	ReasonCredentialBad = "the credential could not be opened" //nolint:gosec // a fixed text, not a credential
 )
 
 // RemoteAgent is a remote agent as callers see it. It holds no credential and no card text.

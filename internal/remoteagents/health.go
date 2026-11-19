@@ -10,7 +10,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/a2aout"
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -37,7 +36,7 @@ func (s *Service) Check(ctx context.Context, row store.RemoteAgent) (RemoteAgent
 	if err := s.hold.Err(); err != nil {
 		return RemoteAgent{}, err
 	}
-	var opener catalog.Opener = s.opener
+	opener := s.opener
 	if opener == nil && s.keys != nil {
 		opener = s.keys
 	}

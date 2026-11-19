@@ -47,7 +47,7 @@ func (s *Service) defaultFetch(ctx context.Context, r FetchRequest, policy catal
 		if err != nil {
 			return nil, err
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 		t.CAFile = filepath.Join(dir, "ca.pem")
 		if err := os.WriteFile(t.CAFile, []byte(r.CABundle), 0o600); err != nil {
 			return nil, err
