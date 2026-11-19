@@ -306,9 +306,9 @@ func sandboxName(rawURL string) error {
 // ("intranet", "gitea") or a Service name that ends in ".svc" or ".svc.cluster" ("gitea.ns.svc"). The
 // sandbox DNS has no search domains, so the full ".svc.cluster.local" form (or the chart's cluster
 // domain) is the shortest name that resolves there. IP literals in any WHATWG form are not names.
-// Case and one trailing dot do not matter.
+// Case and trailing dots do not matter.
 func ShortName(host string) string {
-	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	host = strings.TrimRight(strings.ToLower(host), ".")
 	if host == "" {
 		return ""
 	}

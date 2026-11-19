@@ -42,6 +42,8 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("single label", "http://intranet", "intranet.<namespace>.svc.cluster.local"),
 		Entry("single label with a port", "http://intranet:8080/x", "intranet.<namespace>.svc.cluster.local"),
 		Entry("single label, trailing dot", "https://intranet./", "intranet.<namespace>.svc.cluster.local"),
+		Entry("single label, two trailing dots", "https://intranet../", "intranet.<namespace>.svc.cluster.local"),
+		Entry("Service name, two trailing dots", "https://gitea.ns.svc..", "gitea.ns.svc.cluster.local"),
 		Entry("single label, uppercase", "https://INTRANET", "intranet.<namespace>.svc.cluster.local"),
 		Entry("single label, userinfo", "https://user:pw@intranet", "intranet.<namespace>.svc.cluster.local"),
 		Entry("allow-listed single label", "http://intranet:80", "intranet.<namespace>.svc.cluster.local"),
@@ -101,7 +103,7 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 
 	It("SandboxDialContext refuses a short name before it dials, and passes a full name on", func(ctx SpecContext) {
 		dial := p.SandboxDialContext(&net.Dialer{})
-		for _, addr := range []string{"intranet:80", "gitea.ns.svc:443", "INTRANET.:80"} {
+		for _, addr := range []string{"intranet:80", "gitea.ns.svc:443", "INTRANET.:80", "intranet..:443"} {
 			_, err := dial(ctx, "tcp", addr)
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue(), addr)
