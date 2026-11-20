@@ -449,6 +449,30 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 				denied(create(ctx, daemonSetController, controlNamespace, atelet("bad-path", func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = path })))
 			}
 		})
+		// The installer patch of issue #1191: atelet gets the optional ConfigMap koinon-imagecache-ca, a read-only mount and
+		// SSL_CERT_DIR, and nothing else. The policy is not changed for it; these specs show that it admits that shape and
+		// keeps denying the shapes a weaker policy would let through (a CA by hostPath, a second image without a digest).
+		It("admits atelet with the image cache CA as a ConfigMap volume, a read-only mount and SSL_CERT_DIR (issue 1191)", func(ctx SpecContext) {
+			Expect(create(ctx, daemonSetController, controlNamespace, atelet("atelet-cache-ca", func(p *corev1.Pod) {
+				optional := true
+				p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "koinon-imagecache-ca", VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "koinon-imagecache-ca"}, Optional: &optional},
+				}})
+				c := &p.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "SSL_CERT_DIR", Value: "/etc/koinon/imagecache-ca:/etc/ssl/certs"})
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "koinon-imagecache-ca", MountPath: "/etc/koinon/imagecache-ca", ReadOnly: true})
+			}))).To(Succeed())
+		})
+		It("still denies a CA by hostPath, and an unpinned image beside atelet (issue 1191)", func(ctx SpecContext) {
+			denied(create(ctx, daemonSetController, controlNamespace, atelet("ca-unpinned-init-image", func(p *corev1.Pod) {
+				p.Spec.InitContainers = append(p.Spec.InitContainers, corev1.Container{Name: "ca", Image: "registry.invalid/koinon-escape/ca:v1"})
+			})))
+			denied(create(ctx, daemonSetController, controlNamespace, atelet("ca-host-path", func(p *corev1.Pod) {
+				p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "ca", VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "/etc/ssl/certs"},
+				}})
+			})))
+		})
 		It("gives every other pod there no hostPath, and keeps the digest and hostNetwork rules", func(ctx SpecContext) {
 			plain := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
 				return worker(name, append([]func(*corev1.Pod){func(p *corev1.Pod) { p.Spec.Volumes = nil }}, mutate...)...)

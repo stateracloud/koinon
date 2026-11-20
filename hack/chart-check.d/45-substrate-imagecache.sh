@@ -112,3 +112,31 @@ lacks "no Kyverno" '[Kk]yverno' "${isub[@]}" "${icache[@]}"
 
 # An IPv4-only except list renders no empty IPv6 except; a mixed list splits by family.
 has "an IPv6 except stays under ::/0" '"fc00::/7"' "${isub[@]}" --set 'execution.substrate.imageCache.egress.exceptCIDRs={10.0.0.0/8,fc00::/7}' "${icache[@]}"
+
+# atelet trusts the cache CA (issue #1191). The installer patches the atelet DaemonSet (internal/substrateinstall); this
+# hook Job fills the ConfigMap it mounts with the PUBLIC CA, and rolls atelet and the cache when the certificates change.
+icaf=(--show-only templates/substrate-imagecache-ca.yaml)
+lacks "no CA publishing without the cache" 'imagecache-ca' "${isub[@]}" --set execution.substrate.imageCache.enabled=false
+icadocs=$(render "${isub[@]}" "${icaf[@]}")
+icajob=$(idoc '\nkind: Job\n' <<<"$icadocs")
+grep -Fq 'helm.sh/hook: pre-install,pre-upgrade' <<<"$icajob" || fail "the CA Job is a pre-install and pre-upgrade hook"
+grep -Fq 'helm.sh/hook-weight: "-14"' <<<"$icajob" || fail "the CA Job runs after ensure-secrets (weight -15), which makes the TLS Secret"
+grep -Fq -- '- "--tls-secret=koinon-imagecache-tls"' <<<"$icajob" || fail "the CA Job reads the generated TLS Secret"
+grep -Fq -- '- "--substrate-namespace=ate-system"' <<<"$icajob" || fail "the CA Job writes to the Substrate namespace"
+grep -Fq -- '- "--cache-deployment=koinon-imagecache"' <<<"$icajob" || fail "the CA Job stamps the cache Deployment"
+grep -Fq 'readOnlyRootFilesystem: true' <<<"$icajob" || fail "the CA Job must have a read-only root"
+grep -Fq 'runAsNonRoot: true' <<<"$icajob" || fail "the CA Job must run as non-root"
+has "the CA Job reads an existing TLS Secret" '--tls-secret=my-tls' "${isub[@]}" --set execution.substrate.imageCache.tls.existingSecret=my-tls "${icaf[@]}"
+has "the CA Job follows the Substrate namespace" '--substrate-namespace=ate-other' "${isub[@]}" --set execution.substrate.namespace=ate-other --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=ate-other "${icaf[@]}"
+has "the CA Job has the pull secrets" 'name: koinon-pull' "${isub[@]}" --set 'global.imagePullSecrets={koinon-pull}' "${icaf[@]}"
+# RBAC: the Secret is read by name and never written; the key of the Secret has no route to the Substrate namespace.
+icarole=$(idoc '\nkind: Role\nmetadata:\n  name: koinon-imagecache-ca\n  labels' <<<"$icadocs")
+grep -Fq 'resourceNames: ["koinon-imagecache-tls"]' <<<"$icarole" || fail "the release Role reads the TLS Secret by name"
+if grep -Eq 'verbs: \[.*(update|create|delete|patch).*\]' <<<"$(awk '/resources: \[secrets\]/{f=1} f&&/verbs/{print; f=0}' <<<"$icarole")"; then fail "the CA Job must never write a Secret"; fi
+icasub=$(awk 'BEGIN{RS="---\n"} /kind: Role\n/ && /namespace: ate-system/ {print}' <<<"$icadocs")
+grep -Fq 'resourceNames: ["koinon-imagecache-ca"]' <<<"$icasub" || fail "the Substrate Role changes the one ConfigMap by name"
+grep -Fq 'resourceNames: ["atelet"]' <<<"$icasub" || fail "the Substrate Role patches the atelet DaemonSet by name"
+if grep -Eq 'resources: \[(secrets|pods|roles|rolebindings|serviceaccounts)' <<<"$icasub"; then fail "the Substrate Role must not reach Secrets, pods or RBAC"; fi
+lacks "the CA Job renders no key material" 'tls\.key|PRIVATE KEY' "${isub[@]}" "${icaf[@]}"
+lacks "no Kyverno in the CA Job" '[Kk]yverno' "${isub[@]}" "${icaf[@]}"
+[ "$(render "${isub[@]}" "${icaf[@]}")" == "$icadocs" ] || fail "the CA Job render must be deterministic"

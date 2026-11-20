@@ -197,31 +197,12 @@ const kindDir = "manifests/ate-install/kind"
 //	(b) the object store holds the Koinon snapshot bucket, not ate-snapshots;
 //	(c) the object store and PostgreSQL volumes have Koinon sizes and the named or default StorageClass;
 //	(d) the object store root credentials come from a Secret, not from the fixed rustfsadmin;
-//	(e) atelet logs at info (upstream's kind overlay sets debug) and without the local registry replacement.
+//	(e) atelet logs at info (upstream's kind overlay sets debug) and without the local registry replacement;
+//	(f) atelet trusts the CA of the image cache (imageCacheTrustPatch).
 func (p Profile) ApplyGenericOverlay(dir, namespace string) error {
 	kind := filepath.Join(dir, filepath.FromSlash(kindDir))
-	kustomization := filepath.Join(kind, "kustomization.yaml")
-	raw, err := os.ReadFile(kustomization) //nolint:gosec // inside the exported tree the installer made
-	if err != nil {
-		return fmt.Errorf("%w: read the kind kustomization of the pinned tree: %w", ErrGeneric, err)
-	}
-	if strings.Contains(string(raw), "\npatches:") {
-		return fmt.Errorf("%w: %s already has patches: the pinned tree changed and Koinon's corrections no longer fit", ErrGeneric, kindDir+"/kustomization.yaml")
-	}
-	patches := p.genericPatches(namespace)
-	var list strings.Builder
-	list.WriteString("\n# Koinon corrections for the generic platform (internal/substrateinstall/generic.go).\npatches:\n")
-	for _, pt := range patches {
-		out, err := yaml.Marshal(pt.obj)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(kind, pt.file), out, 0o600); err != nil {
-			return err
-		}
-		list.WriteString("  - path: " + pt.file + "\n")
-	}
-	if err := os.WriteFile(kustomization, append(raw, list.String()...), 0o600); err != nil { //nolint:gosec // inside the exported tree the installer made
+	// (f) atelet trusts the image cache CA (imagecache.go) is part of every kind-route install, not only generic.
+	if err := appendKindPatches(kind, append(p.genericPatches(namespace), imageCacheTrustPatch(namespace))); err != nil {
 		return err
 	}
 	// Edits that a patch cannot make: atelet args are a list of strings, and the PostgreSQL size is a JSON
@@ -237,6 +218,32 @@ func (p Profile) ApplyGenericOverlay(dir, namespace string) error {
 		}
 	}
 	return nil
+}
+
+// appendKindPatches writes the patch files into the kind overlay and lists them in its kustomization. The kustomization
+// must have no patches of its own: a pin that adds some no longer fits Koinon's corrections.
+func appendKindPatches(kind string, patches []koinonPatch) error {
+	kustomization := filepath.Join(kind, "kustomization.yaml")
+	raw, err := os.ReadFile(kustomization) //nolint:gosec // inside the exported tree the installer made
+	if err != nil {
+		return fmt.Errorf("%w: read the kind kustomization of the pinned tree: %w", ErrGeneric, err)
+	}
+	if strings.Contains(string(raw), "\npatches:") {
+		return fmt.Errorf("%w: %s already has patches: the pinned tree changed and Koinon's corrections no longer fit", ErrGeneric, kindDir+"/kustomization.yaml")
+	}
+	var list strings.Builder
+	list.WriteString("\n# Koinon corrections (internal/substrateinstall).\npatches:\n")
+	for _, pt := range patches {
+		out, err := yaml.Marshal(pt.obj)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(kind, pt.file), out, 0o600); err != nil {
+			return err
+		}
+		list.WriteString("  - path: " + pt.file + "\n")
+	}
+	return os.WriteFile(kustomization, append(raw, list.String()...), 0o600) //nolint:gosec // inside the exported tree the installer made
 }
 
 // replaceOnce replaces the one occurrence of old in the file, and fails when there is not exactly one.

@@ -101,6 +101,13 @@ var _ = Describe("koinon-api's startup", func() {
 		Expect(start(nil, "ensure-secrets", "--secrets=[]")).To(MatchError(ContainSubstring(`"namespace" not set`)))
 	})
 
+	It("needs the imagecache-ca Job's three inputs", func() {
+		args := []string{"imagecache-ca", "--tls-secret=koinon-imagecache-tls", "--substrate-namespace=ate-system"}
+		Expect(start(map[string]string{"POD_NAMESPACE": "koinon"}, args...)).To(Succeed())
+		Expect(start(nil, args...)).To(MatchError(ContainSubstring(`"namespace" not set`)))
+		Expect(start(map[string]string{"POD_NAMESPACE": "koinon"}, "imagecache-ca", "--tls-secret=x")).To(MatchError(ContainSubstring(`"substrate-namespace" not set`)))
+	})
+
 	It("needs the database only for the keys commands that read it", func() {
 		kek := map[string]string{"KOINON_KEK_DIR": "/keys"}
 		Expect(start(kek, "keys", "add")).To(MatchError(ContainSubstring("--database-url is required")))
