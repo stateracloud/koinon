@@ -10,8 +10,9 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   and no route to the API server (ADR 0120 section 2.4); its identity is a PodCertificate projection,
   not a ServiceAccount token. Ingress comes from the control-plane namespace (atelet, the router) and
   from Koinon's namespace; worker pods do not reach each other. NetworkPolicies add up: the per-pool
-  policy that Substrate's controller writes in this namespace can allow more than this one, and no
-  admission rule guards NetworkPolicy writes here (ADR 0120 section 6; exit condition: issue 1158). An actor's traffic to the outside runs through atenet and the gateway's
+  policy that Substrate's controller writes in this namespace is limited by the worker-netpol admission policy
+  (substrate-policy.yaml; ADR 0120 section 6, issue 1158): it may allow egress only to the control-plane namespace
+  and DNS, and only the installer and the controller write policies here. An actor's traffic to the outside runs through atenet and the gateway's
   L7 rules, not through this policy. Substrate's controller adds its own per-pool policy next to it.
 - Control-plane namespace: the policy selects the pods whose `app` label is in
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",

@@ -19,8 +19,8 @@ docof() { awk -v pat="$1" '/^---$/{ if (buf ~ pat) printf "%s\n---\n", buf; buf=
 
 
 # Nothing of it renders with the default driver.
-lacks "no worker policy with the openshell driver" 'worker-(pods|connect|objects)|control-pods'
-lacks "no worker NetworkPolicy with the openshell driver" 'substrate-(workers|control)'
+lacks "no worker policy with the openshell driver" 'worker-(pods|connect|objects|netpol)|control-pods'
+lacks "no worker NetworkPolicy with the openshell driver" 'name: koinon-substrate-(workers|control)'
 lacks "no WorkerPool with the openshell driver" 'kind: WorkerPool'
 lacks "no worker Namespace with the openshell driver" 'ate-workers'
 
@@ -148,7 +148,26 @@ rest=$(tr -d '\134' <<<"$objs" | grep -Fv '#' | sed "s/has(request.namespace) ? 
 if grep -Fq 'request.namespace' <<<"$rest"; then fail "the objects policy reads request.namespace outside the guard"; fi
 grep -Fq 'c.securityContext.privileged' <<<"$wpods" || fail "the worker pod rules must deny privileged containers"
 grep -Fq 'object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged)' <<<"$objs" || fail "the Deployment template must not be privileged"
-lacks "the policies are off when disabled" 'worker-(pods|connect|objects)|control-pods' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
+lacks "the policies are off when disabled" 'worker-(pods|connect|objects|netpol)|control-pods' "${wsub[@]}" --set execution.substrate.workerPolicy.enabled=false
+# NetworkPolicy writes in the worker namespace (issue #1158): NetworkPolicies add up, so the installer and the controller write
+# them, the controller's policies reach the control-plane namespace and DNS only, and the chart's own policy is the installer's.
+nppol=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$pdocs")
+npbind=$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$pdocs")
+grep -Fq 'resources: [networkpolicies]' <<<"$nppol" || fail "the NetworkPolicy guard must cover networkpolicies"
+grep -Fq 'operations: [CREATE, UPDATE, DELETE]' <<<"$nppol" || fail "the NetworkPolicy guard must cover create, update and delete"
+grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$npbind" || fail "the NetworkPolicy guard must bind to the worker namespace"
+if grep -Fq 'ate-system' <<<"$npbind"; then fail "the NetworkPolicy guard must not bind to the control-plane namespace"; fi
+grep -Fq 'validationActions: ["Deny"]' <<<"$npbind" || fail "the NetworkPolicy guard must deny"
+grep -Fq 'request.userInfo.username in ["system:serviceaccount:ate-system:ate-controller"]' <<<"$nppol" || fail "the NetworkPolicy guard must name the Substrate controller"
+grep -Fq 'request.name == "koinon-substrate-workers"' <<<"$nppol" || fail "the controller must not write the chart's worker NetworkPolicy"
+grep -Fq 'has(r.to) && size(r.to) > 0' <<<"$nppol" || fail "an egress rule of the controller needs a to list (no to means every destination)"
+grep -Fq '!has(p.ipBlock)' <<<"$nppol" || fail "the controller's NetworkPolicy must have no ipBlock peer"
+grep -Fq "== \"ate-system\"" <<<"$nppol" || fail "the controller's egress must reach the control-plane namespace"
+grep -Fq "q.port == 53" <<<"$nppol" || fail "the DNS peer must be limited to port 53"
+if grep -Fq 'request.namespace' <<<"$(grep -Fv '#' <<<"$nppol")"; then fail "the NetworkPolicy guard must not read request.namespace (the binding selects the namespace)"; fi
+has "the NetworkPolicy guard follows the worker namespace" 'kubernetes.io/metadata.name: "pools-x"' "${wsub[@]}" --set execution.substrate.workerNamespace=pools-x "${pol[@]}"
+has "the NetworkPolicy guard follows the control-plane namespace" 'metadata.name.\] == "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"
+has "the NetworkPolicy guard follows the installer identities" '\\"ops-x\\"' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={ops-x}' "${pol[@]}"
 if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.validationActions={Nope}' >/dev/null 2>&1; then fail "an unknown validation action must not render"; fi
 
 # The worker Namespace: created by the chart, with the Pod Security level these pods need.
@@ -226,7 +245,7 @@ grep -q 'gatewayClientNamespaceSelector' "$out/sub.err" || fail "the namespace-m
 has "a matching namespace and selector render" 'namespace: "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${np[@]}"
 has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={10.0.0.1/32}' "${np[@]}"
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
-lacks "the NetworkPolicies are off when disabled" 'substrate-(workers|control)' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
+lacks "the NetworkPolicies are off when disabled" 'name: koinon-substrate-(workers|control)' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 
 # WorkerPool (Substrate v1.0.0 WorkerPoolSpec): off by default; workerImage is required; one sandbox
 # class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.

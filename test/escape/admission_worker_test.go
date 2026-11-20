@@ -16,12 +16,14 @@ import (
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -75,6 +77,10 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		// What kubeadm and kind give their admin: not system:masters.
 		kubeadmAdmin = "kubernetes-admin"
 		existing     = "existing-worker"
+		// The chart's NetworkPolicy of the worker namespace (release koinon), and a per-pool policy of the controller.
+		chartNetpol = "koinon-substrate-workers"
+		poolNetpol  = "pool-egress"
+		gcUser      = "system:serviceaccount:kube-system:generic-garbage-collector"
 	)
 
 	isTrue := true
@@ -129,7 +135,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		admin = kubernetes.NewForConfigOrDie(cfg)
 		as = map[string]*kubernetes.Clientset{"admin": admin}
 		asDyn = map[string]dynamic.Interface{"admin": dynamic.NewForConfigOrDie(cfg)}
-		for _, user := range []string{workerController, replicaSetController, daemonSetController, other, kubeadmAdmin} {
+		for _, user := range []string{workerController, replicaSetController, daemonSetController, other, kubeadmAdmin, gcUser} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-worker-" + strings.ReplaceAll(user, ":", "-")},
@@ -172,6 +178,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		Expect(err).NotTo(HaveOccurred())
 		_, err = admin.CoreV1().Pods(controlNamespace).Create(ctx, worker(existing), metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
+
+		// The NetworkPolicies the guard cases act on exist before the policies do.
+		for _, n := range []string{chartNetpol, poolNetpol} {
+			_, err = admin.NetworkingV1().NetworkPolicies(workerNamespace).Create(ctx, netpolEgress(n, toNamespace(controlNamespace)), metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
 
 		for _, p := range policies {
 			_, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, p, metav1.CreateOptions{})
@@ -570,6 +582,88 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		denied(connect("admin", controlNamespace, "proxy"))
 	})
 
+	It("guards NetworkPolicy writes in the worker namespace (issue 1158)", func(ctx SpecContext) {
+		write := func(user string, np *networkingv1.NetworkPolicy) error {
+			_, err := as[user].NetworkingV1().NetworkPolicies(workerNamespace).Create(ctx, np, dryRun)
+			return err
+		}
+		update := func(user string, np *networkingv1.NetworkPolicy) error {
+			_, err := as[user].NetworkingV1().NetworkPolicies(workerNamespace).Update(ctx, np, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+			return err
+		}
+		remove := func(user, name string) error {
+			return as[user].NetworkingV1().NetworkPolicies(workerNamespace).Delete(ctx, name, metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}})
+		}
+		current := func(name string) *networkingv1.NetworkPolicy {
+			np, err := admin.NetworkingV1().NetworkPolicies(workerNamespace).Get(ctx, name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			return np
+		}
+
+		// The installer writes anything, the controller writes egress to the control plane and to DNS.
+		for _, user := range []string{"admin", kubeadmAdmin} {
+			Expect(write(user, netpolEgress("by-"+strings.ReplaceAll(user, ":", "-"), toCIDR("0.0.0.0/0")))).To(Succeed(), user)
+		}
+		Expect(write(workerController, netpolEgress("ctl-control", toNamespace(controlNamespace)))).To(Succeed())
+		Expect(write(workerController, netpolPorts("ctl-dns", toDNS(), 53))).To(Succeed())
+		both := netpolEgress("ctl-both", toNamespace(controlNamespace))
+		both.Spec.Egress = append(both.Spec.Egress, netpolPorts("x", toDNS(), 53).Spec.Egress...)
+		Expect(write(workerController, both)).To(Succeed())
+		noEgress := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "ctl-none"}}
+		Expect(write(workerController, noEgress)).To(Succeed(), "no egress rule")
+		Expect(update(workerController, current(poolNetpol))).To(Succeed())
+		Expect(remove(workerController, poolNetpol)).To(Succeed())
+
+		// Every other identity is denied, a cluster admin outside the installer groups included.
+		for _, user := range []string{other, daemonSetController, replicaSetController} {
+			denied(write(user, netpolEgress("by-other", toNamespace(controlNamespace))))
+			denied(update(user, current(poolNetpol)))
+			denied(remove(user, poolNetpol))
+		}
+
+		// The controller's policies reach the control-plane namespace and DNS, and nothing else.
+		wide := map[string]*networkingv1.NetworkPolicy{
+			"allow-all-rule":      {Spec: networkingv1.NetworkPolicySpec{Egress: []networkingv1.NetworkPolicyEgressRule{{}}}},
+			"empty-namespace":     netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{}}),
+			"cidr":                netpolEgress("x", toCIDR("0.0.0.0/0")),
+			"same-namespace-pods": netpolEgress("x", networkingv1.NetworkPolicyPeer{PodSelector: &metav1.LabelSelector{}}),
+			"other-namespace":     netpolEgress("x", toNamespace("kube-public")),
+			"worker-namespace":    netpolEgress("x", toNamespace(workerNamespace)),
+			"all-namespaces":      netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpExists}}}}),
+			"expression-control":  netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": controlNamespace}, MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "x", Operator: metav1.LabelSelectorOpExists}}}}),
+			"extra-label":         netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": controlNamespace, "a": "b"}}}),
+			"other-label":         netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "ate"}}}),
+			"dns-any-port":        netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}}}),
+			"kube-system-443":     netpolPorts("x", toNamespace("kube-system"), 443),
+			"dns-and-other-port":  netpolPorts("x", toNamespace("kube-system"), 53, 8080),
+			"dns-pods":            netpolPorts("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: toNamespace("kube-system").NamespaceSelector, PodSelector: &metav1.LabelSelector{}}, 53),
+			"good-then-wide":      netpolEgress("x", toNamespace(controlNamespace), toCIDR("0.0.0.0/0")),
+		}
+		for name, np := range wide {
+			np.Name = "wide-" + name
+			denied(write(workerController, np))
+			Expect(write("admin", np)).To(Succeed(), name+": the installer is not limited")
+		}
+		// An update that widens a policy is denied too.
+		widened := current(poolNetpol)
+		widened.Spec.Egress = append(widened.Spec.Egress, networkingv1.NetworkPolicyEgressRule{})
+		denied(update(workerController, widened))
+		Expect(update("admin", widened)).To(Succeed())
+
+		// The chart's own policy is the floor: the controller neither writes nor deletes it.
+		denied(update(workerController, current(chartNetpol)))
+		denied(remove(workerController, chartNetpol))
+		Expect(update("admin", current(chartNetpol))).To(Succeed())
+		Expect(remove("admin", chartNetpol)).To(Succeed())
+
+		// Kubernetes' garbage collector deletes a policy and changes its metadata, never its spec.
+		Expect(remove(gcUser, poolNetpol)).To(Succeed())
+		meta := current(poolNetpol)
+		meta.Labels = map[string]string{"gc": "yes"}
+		Expect(update(gcUser, meta)).To(Succeed())
+		denied(update(gcUser, widened))
+	})
+
 	It("denies exec into a worker pod, for every identity", func(ctx SpecContext) {
 		// Admission runs before the API server opens the connection, so this needs no kubelet.
 		for _, user := range []string{"admin", workerController, other} {
@@ -666,3 +760,39 @@ func sandboxConfig(name string) *unstructured.Unstructured {
 		"spec":     map[string]any{"class": "gvisor"},
 	}}
 }
+
+// netpolEgress is a NetworkPolicy of the worker namespace with one egress rule that has the given peers.
+func netpolEgress(name string, peers ...networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      []networkingv1.NetworkPolicyEgressRule{{To: peers}},
+		},
+	}
+}
+
+// netpolPorts is a policy with one egress rule to peer on the given TCP ports.
+func netpolPorts(name string, peer networkingv1.NetworkPolicyPeer, ports ...int) *networkingv1.NetworkPolicy {
+	np := netpolEgress(name, peer)
+	for _, p := range ports {
+		port := intstr.FromInt32(int32(p))
+		proto := corev1.ProtocolTCP
+		np.Spec.Egress[0].Ports = append(np.Spec.Egress[0].Ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &port})
+	}
+	return np
+}
+
+func toNamespace(ns string) networkingv1.NetworkPolicyPeer {
+	return networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{
+		MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns},
+	}}
+}
+
+func toCIDR(cidr string) networkingv1.NetworkPolicyPeer {
+	return networkingv1.NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cidr}}
+}
+
+// toDNS is the peer of DNS (kube-system); a rule that uses it must name port 53 (netpolPorts).
+func toDNS() networkingv1.NetworkPolicyPeer { return toNamespace("kube-system") }
