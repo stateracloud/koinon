@@ -44,7 +44,7 @@ lacks "no podcert fence when switched off" 'podcert-default-deny' "${wsub[@]}" -
 lacks "no telemetry route when switched off" 'substrate-telemetry' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.telemetry.enabled=false
 has "the collector namespace is configurable" 'kubernetes.io/metadata.name: "mon"' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.telemetry.namespace=mon
 # Failures need a values file: --set cannot make an empty list. Each must stop at its own fail message.
-fv=$(mktemp); fe=$(mktemp)
+fv=$(mktemp "${TMPDIR:-/tmp}/fence-bad.XXXXXX"); fe=$(mktemp "${TMPDIR:-/tmp}/fence-err.XXXXXX")
 failmsg() { # failmsg <name> <yaml of workerNetworkPolicy> <regex of the message>
 	printf 'execution:\n  substrate:\n    workerNetworkPolicy:\n%s\n' "$2" >"$fv"
 	if render "${wsub[@]}" -f "$fv" "${fence[@]}" >/dev/null 2>"$fe"; then fail "$1 must fail the render"; return; fi
