@@ -171,6 +171,14 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		}
 	})
 
+	It("refuses <service>.<namespace> at any ndots when a search domain makes it a Service name", func() {
+		low := catalog.URLPolicy{Search: &catalog.ResolverSearch{Domains: catalog.SubstrateSearch.Domains, Ndots: 1, ClusterDomain: "cluster.local"}}
+		Expect(low.ShortName("gitea.ns")).NotTo(BeEmpty())
+		Expect(low.ShortName("kubernetes.default")).NotTo(BeEmpty())
+		Expect(low.ShortName("git.example.com")).To(BeEmpty())
+		Expect(low.ShortName("git.corp.local")).To(BeEmpty()) // three labels: not a Service name
+	})
+
 	DescribeTable("ShortName",
 		func(host string, short bool) {
 			Expect(p.ShortName(host) != "").To(Equal(short), host)

@@ -261,12 +261,13 @@ var _ = Describe("ConnectionService", func() {
 	})
 
 	It("names the short-name rule when a GitHub base URL is a search-path Service name (#1054)", func(ctx SpecContext) {
-		req := &connectionv1alpha1.CreateGitHubConnectionRequest{BaseUrl: "https://gitea.ns.svc"}
-		req.OrgId, req.AppId, req.InstallationId, req.PrivateKey = org, gh.AppID, gh.InstallationID, string(gh.PEM)
-		_, err := owner.conns.CreateGitHubConnection(ctx, req)
-		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
-		Expect(err).To(MatchError(ContainSubstring("short name")))
-		Expect(err).To(MatchError(ContainSubstring("gitea.ns.svc.cluster.local")))
+		for _, u := range []string{"https://gitea.ns.svc", "https://gitea.ns", "https://git.corp.local"} {
+			req := &connectionv1alpha1.CreateGitHubConnectionRequest{BaseUrl: u}
+			req.OrgId, req.AppId, req.InstallationId, req.PrivateKey = org, gh.AppID, gh.InstallationID, string(gh.PEM)
+			_, err := owner.conns.CreateGitHubConnection(ctx, req)
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), u)
+			Expect(err).To(MatchError(ContainSubstring("short name")), u)
+		}
 	})
 
 	It("reports failing checks at the step that caused them", func(ctx SpecContext) {

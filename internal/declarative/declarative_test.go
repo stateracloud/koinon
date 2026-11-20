@@ -869,7 +869,7 @@ var _ = Describe("Importer", func() {
 		})
 
 		It("ignores a connection Secret whose base URL is a private or internal host", func(ctx SpecContext) {
-			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres", "https://gitea.ns.svc", "https://gitea.ns.svc:443"} {
+			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres", "https://gitea.ns.svc", "https://gitea.ns.svc:443", "https://gitea.ns", "https://git.corp.local"} {
 				d := conn()
 				d["baseUrl"] = v
 				put(ctx, "gh", declarative.TypeConnection, slug, d)

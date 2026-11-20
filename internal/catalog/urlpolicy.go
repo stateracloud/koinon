@@ -274,7 +274,7 @@ func (p URLPolicy) dialer(d *net.Dialer, absolute bool) func(ctx context.Context
 			}
 			if addrs, err = p.lookup(ctx, name); err != nil {
 				if absolute {
-					return nil, invalid("the host %q does not resolve as an absolute name, and the sandbox resolves no search domains: %s", host, fullNameHint(host))
+					return nil, invalid("the host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
 				}
 				return nil, err
 			}
@@ -316,13 +316,15 @@ func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
 	return p.check(ctx, rawURL, true)
 }
 
-// CheckSandbox is Check for a URL that also becomes sandbox egress, such as a connector's base URL. The
-// sandbox resolves a name as an absolute name: its policy DNS has no search domains
-// (charts/koinon/templates/_helpers.tpl "koinon.gatewayHost", charts/koinon/values.yaml). The API pod
-// resolves names with search domains (ndots 5), so a name that only they resolve works in the API and
-// fails in the sandbox (#1054). CheckSandbox refuses such a name before any allow-list entry is read, and
-// applies the address rules to the addresses of the absolute lookup, which are the ones the sandbox uses.
-// Like Check, it passes a name that does not resolve at all.
+// CheckSandbox is Check for a URL that also becomes sandbox egress, such as a connector's base URL (#1054).
+// The guest resolves a name with the search list and ndots of URLPolicy.Search (default SubstrateSearch,
+// measured in a Substrate guest on kind), while the API pod resolves it with its own search domains. A name
+// that a search domain can turn into another name works in one place and fails or reaches a different
+// Service in the other. CheckSandbox refuses such a name (ShortName) before any allow-list entry is read.
+// It also looks the host up as an absolute name, as the guest does, and applies the address rules to those
+// addresses; a name that only the relative lookup resolves is refused. Like Check, it passes a name that
+// does not resolve at all. The guest still needs an egress policy that allows the name; that is the egress
+// layer's job, not this check's.
 func (p URLPolicy) CheckSandbox(ctx context.Context, rawURL string) error {
 	return p.checkSandbox(ctx, rawURL, false)
 }
@@ -362,7 +364,7 @@ func (p URLPolicy) checkSandbox(ctx context.Context, rawURL string, strict bool)
 			return invalid("the url's host %q is a short name: %s", host, fullNameHint(host))
 		}
 		if strict {
-			return invalid("the url's host %q does not resolve as an absolute name, and the sandbox resolves no search domains: %s", host, fullNameHint(host))
+			return invalid("the url's host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
 		}
 		return nil
 	}
@@ -447,10 +449,19 @@ func (p URLPolicy) ShortName(host string) string {
 	if strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster") {
 		return fullNameHint(host)
 	}
-	if strings.Count(host, ".") >= rs.Ndots {
-		return ""
+	suffix, icann := publicsuffix.PublicSuffix(host)
+	public := icann || strings.Contains(suffix, ".")
+	// <service>.<namespace>: the resolver falls back to the search list after the absolute name fails,
+	// at any ndots, so a search domain can turn it into a Service name.
+	if !public && strings.Count(host, ".") == 1 && domain != "" {
+		for _, d := range rs.Domains {
+			d = strings.Trim(strings.ToLower(d), ".")
+			if d == "svc."+domain || strings.HasSuffix(d, ".svc."+domain) {
+				return fullNameHint(host)
+			}
+		}
 	}
-	if suffix, icann := publicsuffix.PublicSuffix(host); icann || strings.Contains(suffix, ".") {
+	if strings.Count(host, ".") >= rs.Ndots || public {
 		return ""
 	}
 	return fullNameHint(host)
