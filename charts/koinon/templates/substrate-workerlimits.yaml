@@ -1,0 +1,71 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Resource limits of the Substrate worker namespace (execution.substrate.workerNamespace; issue 1161).
+- A LimitRange gives a container with no requests or limits the defaults of
+  workerLimits.limitRange, so no worker pod is BestEffort.
+- A ResourceQuota caps the pod count, CPU and memory of the whole namespace
+  (workerLimits.quota.hard). A pod that goes over it is refused at admission.
+The chart owns the namespace (substrate-workernamespace.yaml), so the chart owns these objects.
+Cluster-scoped objects: none. Native Kubernetes objects only, no CNI or CRD feature.
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerLimits.enabled }}
+{{- $l := .Values.execution.substrate.workerLimits }}
+{{- $ns := .Values.execution.substrate.workerNamespace }}
+{{- range $k, $_ := ($l.quota.hard | default dict) }}
+{{- if hasPrefix "limits." $k }}
+{{- if not (hasKey ($l.limitRange.default | default dict) (trimPrefix "limits." $k)) }}
+{{- fail (printf "execution.substrate.workerLimits: the quota sets %s but limitRange.default has no %s, so every pod without limits would be refused" $k (trimPrefix "limits." $k)) }}
+{{- end }}
+{{- else if hasPrefix "requests." $k }}
+{{- $r := trimPrefix "requests." $k }}
+{{- if not (or (hasKey ($l.limitRange.defaultRequest | default dict) $r) (hasKey ($l.limitRange.default | default dict) $r)) }}
+{{- fail (printf "execution.substrate.workerLimits: the quota sets %s but limitRange has no default for %s, so every pod without requests would be refused" $k $r) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if or $l.limitRange.defaultRequest $l.limitRange.default $l.limitRange.max }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "koinon.fullname" . }}-worker-limits
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      {{- with $l.limitRange.defaultRequest }}
+      defaultRequest:
+        {{- range $k, $v := . }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+      {{- end }}
+      {{- with $l.limitRange.default }}
+      default:
+        {{- range $k, $v := . }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+      {{- end }}
+      {{- with $l.limitRange.max }}
+      max:
+        {{- range $k, $v := . }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+      {{- end }}
+{{- end }}
+{{- if $l.quota.hard }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "koinon.fullname" . }}-worker-quota
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  hard:
+    {{- range $k, $v := $l.quota.hard }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+{{- end }}
+{{- end }}
