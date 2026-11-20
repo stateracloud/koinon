@@ -463,11 +463,11 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   the Bun notice and this paragraph.
 - **GPL.** poppler-utils is GPL-licensed and shipped unmodified from Ubuntu, with git, bash and
   coreutils: the same obligation. The written offer under GPL-2.0 section 3(b) / GPL-3.0 section
-  6(b) is generated at build time from the versions `dpkg-query` reports for those four packages
+  6(b) is generated at build time from the versions `dpkg-query` reports for every installed package
   (so it cannot name a version the image does not actually carry) and shipped at
   `/usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt`; it names `snapshot.ubuntu.com` under the
   snapshot ID below as the exact source (`apt source` against that snapshot) and offers to provide
-  it another way if that snapshot is unreachable. The build fails if any of the four packages is
+  it another way if that snapshot is unreachable. The build fails if any of the four packages above is
   missing from the offer.
 - **Rust tool dependency notices (#63, open).** ripgrep, fd and ast-grep are Rust binaries; their
   own top-level licences ship already (the table above), but the notices their dependency crates
@@ -479,13 +479,10 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   sandbox does not allow. Run the script on a machine without that restriction, commit the
   result, and wire the `COPY` and the build-time check into the Dockerfile the way the GPL offer
   and the OpenCode/Bun notices are wired in.
-- **Base image terms (#63, open).** `nvcr.io/nvidia/base/ubuntu` is an NVIDIA NGC Catalog image.
-  NVIDIA's general container terms (the "NVIDIA Deep Learning Container License") restrict
-  redistribution and bar using the container in a way that would subject it to an open source
-  licence; it is not confirmed whether that licence, or a more permissive one, governs this
-  specific base image, and NVIDIA's classification of "development" versus "deployment"
-  containers changes what redistribution it allows. This needs a maintainer's legal call before
-  v0.1.0: check the image's NGC catalog page and terms of use, and record the answer here.
+- **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
+  ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
+  were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
+  keeps each package's `/usr/share/doc/<pkg>/copyright` and the GPL source offer covers the base packages.
 - **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
   Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
   when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).

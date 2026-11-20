@@ -6,7 +6,7 @@
 # `make dev-kind-up` attaches to the cluster; no home lab:
 # the probe image is built from hack/spike/probe (or, when KOINON_OPENSHELL_IMAGE names an image that
 # pulls (it is no longer published; #167), pulled instead: no
-# nvcr.io or apt at run time, old issue 357) and pushed to the cluster's path on the local registry
+# registry login or apt at run time, old issue 357) and pushed to the cluster's path on the local registry
 # (test/e2e/kind/registry.sh, #45, #601); the node pulls it, nothing is `kind load`ed. PROBE_PULL_REPO=<repo> pulls
 # <repo>:<hack/probe-tag.sh tag> (the image ci.yml's harness-publish pushes on main) when
 # KOINON_OPENSHELL_IMAGE is unset, so the e2e needs no apt mirror (#482); a miss falls back to the build; the gateway is reached through a
