@@ -228,7 +228,9 @@ func serve(ctx context.Context, cfg config) error {
 		gatewayIDs = reconciler.KubeGatewayID{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
 	}
 	// One egress policy; the GitHub client (and its derived per-CA clients) dials through it.
-	urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)}
+	// The guest's resolver follows the cluster's DNS domain (#1054).
+	search := catalog.SubstrateSearchFor(cfg.clusterDomain)
+	urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts), Search: &search}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{

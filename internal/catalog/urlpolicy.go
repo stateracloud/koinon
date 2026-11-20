@@ -81,6 +81,47 @@ var SubstrateSearch = ResolverSearch{
 	ClusterDomain: "cluster.local",
 }
 
+// DefaultClusterDomain is the cluster DNS domain when no one sets another (the chart value clusterDomain).
+const DefaultClusterDomain = "cluster.local"
+
+// SubstrateSearchFor is SubstrateSearch for a cluster with another DNS domain: the guest copies the search
+// list of the worker pod, and that list is built from the cluster domain (ate-workers.svc.<domain>,
+// svc.<domain>, <domain>). An empty domain means DefaultClusterDomain.
+func SubstrateSearchFor(clusterDomain string) ResolverSearch {
+	d := strings.Trim(strings.ToLower(strings.TrimSpace(clusterDomain)), ".")
+	if d == "" {
+		d = DefaultClusterDomain
+	}
+	return ResolverSearch{
+		Domains:       []string{"ate-workers.svc." + d, "svc." + d, d},
+		Ndots:         SubstrateSearch.Ndots,
+		ClusterDomain: d,
+	}
+}
+
+// ValidateClusterDomain refuses a cluster domain that is not a DNS name (no trailing dot, no upper case,
+// no empty label), so a typo in the chart value fails at start instead of changing which names the
+// connector check accepts. An empty value is valid and means DefaultClusterDomain.
+func ValidateClusterDomain(domain string) error {
+	if domain == "" {
+		return nil
+	}
+	if len(domain) > 253 {
+		return fmt.Errorf("clusterDomain %q is longer than 253 characters", domain)
+	}
+	for _, label := range strings.Split(domain, ".") {
+		ok := label != "" && len(label) <= 63 && label[0] != '-' && label[len(label)-1] != '-'
+		for i := 0; ok && i < len(label); i++ {
+			c := label[i]
+			ok = c == '-' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+		}
+		if !ok {
+			return fmt.Errorf("clusterDomain %q is not a lower-case DNS name such as cluster.local (no trailing dot, no empty label)", domain)
+		}
+	}
+	return nil
+}
+
 func (p URLPolicy) search() ResolverSearch {
 	if p.Search == nil {
 		return SubstrateSearch
@@ -239,6 +280,44 @@ func whatwgIPv4(host string) (addr netip.Addr, numeric, ok bool) {
 	return netip.AddrFrom4(b), true, true
 }
 
+// endpoint reads a URL's host and port once, for every allow-list decision (#1054). host is lower case
+// without a trailing dot. hostport is "host:port" with the default port of the scheme made explicit
+// (http 80, https 443), so "host:443" matches both https://host and https://host:443. An allow-list entry
+// without a port matches every port of the host (the documented meaning of egress.allowedInternalHosts);
+// an entry with a port matches that port only. The port never changes the host decision: the host rules
+// read Hostname() only.
+func endpoint(u *url.URL) (host, hostport string) {
+	host = strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	port := u.Port()
+	if n, err := strconv.Atoi(port); err == nil {
+		port = strconv.Itoa(n) // 0443 is port 443
+	}
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	if port == "" {
+		return host, host
+	}
+	return host, net.JoinHostPort(host, port)
+}
+
+// checkPort refuses a port that no connection can use.
+func checkPort(u *url.URL) error {
+	port := u.Port()
+	if port == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return invalid("the url's port %q is not a port number from 1 to 65535", port)
+	}
+	return nil
+}
+
 // DialContext is a net.Dialer DialContext that connects only to addresses the policy allows. It is
 // for clients that call a URL Check accepted: it closes the window between the check and the
 // connection (DNS rebinding) by checking the addresses it dials. A host the platform allowed by
@@ -256,8 +335,13 @@ func (p URLPolicy) dialer(d *net.Dialer, absolute bool) func(ctx context.Context
 			return nil, err
 		}
 		given := strings.ToLower(host)
+		if absolute {
+			if err := p.sandboxHost(given, "the host"); err != nil {
+				return nil, err
+			}
+		}
 		host = strings.TrimSuffix(given, ".")
-		allowed := p.allowedName(host, host+":"+port)
+		allowed := p.allowedName(host, net.JoinHostPort(host, port))
 		if allowed && !absolute {
 			return d.DialContext(ctx, network, addr)
 		}
@@ -267,14 +351,11 @@ func (p URLPolicy) dialer(d *net.Dialer, absolute bool) func(ctx context.Context
 		} else {
 			name := host
 			if absolute {
-				if why := p.ShortName(given); why != "" {
-					return nil, invalid("the host %q is a short name: %s", host, why)
-				}
 				name += "."
 			}
 			if addrs, err = p.lookup(ctx, name); err != nil {
 				if absolute {
-					return nil, invalid("the host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
+					return nil, invalid("the host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, p.fullNameHint(host))
 				}
 				return nil, err
 			}
@@ -340,9 +421,8 @@ func (p URLPolicy) checkSandbox(ctx context.Context, rawURL string, strict bool)
 	if err != nil || u.Hostname() == "" {
 		return invalid("url must be an http(s) URL")
 	}
-	host := strings.ToLower(u.Hostname())
-	if why := p.ShortName(host); why != "" {
-		return invalid("the url's host %q is a short name: %s", host, why)
+	if err := p.sandboxHost(strings.ToLower(u.Hostname()), "the url's host"); err != nil {
+		return err
 	}
 	check := p.Check
 	if strict {
@@ -351,24 +431,21 @@ func (p URLPolicy) checkSandbox(ctx context.Context, rawURL string, strict bool)
 	if err := check(ctx, rawURL); err != nil {
 		return err
 	}
-	host = strings.TrimSuffix(host, ".")
+	host, hostport := endpoint(u)
 	if _, err := netip.ParseAddr(host); err == nil {
-		return nil
-	}
-	if _, numeric, _ := whatwgIPv4(host); numeric {
 		return nil
 	}
 	addrs, err := p.lookup(ctx, host+".")
 	if err != nil {
 		if _, relErr := p.lookup(ctx, host); relErr == nil {
-			return invalid("the url's host %q is a short name: %s", host, fullNameHint(host))
+			return invalid("the url's host %q is a short name: %s", host, p.fullNameHint(host))
 		}
 		if strict {
-			return invalid("the url's host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
+			return invalid("the url's host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, p.fullNameHint(host))
 		}
 		return nil
 	}
-	if p.allowedName(host, strings.ToLower(u.Host)) {
+	if p.allowedName(host, hostport) {
 		return nil
 	}
 	for _, a := range addrs {
@@ -386,19 +463,63 @@ func (p URLPolicy) SandboxDialContext(d *net.Dialer) func(ctx context.Context, n
 	return p.dialer(d, true)
 }
 
-func fullNameHint(host string) string {
+// sandboxHost is the host rule of the sandbox URL check and dial: a numeric host that a resolver could read
+// differently (numericHost), then a name that a search domain would expand (ShortName). host is lower case
+// and as written, with its trailing dot if it has one.
+func (p URLPolicy) sandboxHost(host, subject string) error {
+	if why := numericHost(host); why != "" {
+		return invalid("%s %q is not a plain IP address or a name: %s", subject, host, why)
+	}
+	if why := p.ShortName(host); why != "" {
+		return invalid("%s %q is a short name: %s", subject, host, why)
+	}
+	return nil
+}
+
+// numericHost returns a message for a host that is written with numbers but is not an address in the one form
+// that every resolver reads the same way, and "" for any other host. Resolvers disagree about numbers:
+// inet_aton and the WHATWG URL parser read 0x7f.1, 2130706433 and 0177.0.0.1 as 127.0.0.1, a DNS-only resolver
+// looks them up as names, and a trailing dot makes 10.0.0.1. a name for some and an address for others. A
+// check that read one way and a guest that read the other would apply the address rules to the wrong
+// host. So the rule is closed, not a list of forms: a host is allowed to be a number only when it is an
+// IPv4 address as four decimal numbers without leading zeros (10.0.0.1), or an IPv6 address
+// ([::1], [fd00::1]) without a zone, and in neither case with a trailing dot. Every other host whose last
+// label is a number (decimal, 0x hex or leading-0 octal, one to four labels, with or without a trailing
+// dot) is refused. A name whose last label is not a number (1.2.3.4.example.com) is a name.
+func numericHost(host string) string {
+	bare := strings.TrimSuffix(host, ".")
+	if a, err := netip.ParseAddr(bare); err == nil {
+		switch {
+		case bare != host:
+			return "an address with a trailing dot is a name to some resolvers; write the address without the dot"
+		case a.Zone() != "":
+			return "an IPv6 zone is not allowed; write the address without %zone"
+		}
+		return ""
+	}
+	if _, numeric, _ := whatwgIPv4(bare); numeric {
+		return "resolvers read a numeric host in different ways (0x7f.1, 2130706433 and 0177.0.0.1 are all 127.0.0.1 for some of them); write an IPv4 address as four decimal numbers (10.0.0.1), or use a DNS name"
+	}
+	return ""
+}
+
+func (p URLPolicy) fullNameHint(host string) string {
+	domain := strings.Trim(strings.ToLower(p.search().ClusterDomain), ".")
+	if domain == "" {
+		domain = DefaultClusterDomain
+	}
 	var full string
 	switch {
 	case strings.HasSuffix(host, ".svc"):
-		full = "such as " + host + ".cluster.local"
-	case strings.HasSuffix(host, ".svc.cluster"):
-		full = "such as " + host + ".local"
+		full = "such as " + host + "." + domain
+	case strings.HasSuffix(host, ".svc.cluster") && strings.HasPrefix(domain, "cluster."):
+		full = "such as " + host + strings.TrimPrefix(domain, "cluster")
 	case !strings.Contains(host, "."):
-		full = "such as " + host + ".<namespace>.svc.cluster.local"
+		full = "such as " + host + ".<namespace>.svc." + domain
 	case strings.Count(host, ".") == 1:
-		full = "such as " + host + ".svc.cluster.local"
+		full = "such as " + host + ".svc." + domain
 	default:
-		full = "the fully qualified name of the host (for a cluster Service, <service>.<namespace>.svc.<cluster domain>)"
+		full = "the fully qualified name of the host (for a cluster Service, <service>.<namespace>.svc." + domain + ")"
 	}
 	return "write the full name, " + full
 }
@@ -430,12 +551,12 @@ func (p URLPolicy) ShortName(host string) string {
 		return ""
 	}
 	if !strings.Contains(host, ".") {
-		return fullNameHint(host)
+		return p.fullNameHint(host)
 	}
 	rs := p.search()
 	if len(rs.Domains) == 0 {
 		if strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster") {
-			return fullNameHint(host)
+			return p.fullNameHint(host)
 		}
 		return ""
 	}
@@ -447,7 +568,7 @@ func (p URLPolicy) ShortName(host string) string {
 		return ""
 	}
 	if strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster") {
-		return fullNameHint(host)
+		return p.fullNameHint(host)
 	}
 	suffix, icann := publicsuffix.PublicSuffix(host)
 	public := icann || strings.Contains(suffix, ".")
@@ -457,20 +578,23 @@ func (p URLPolicy) ShortName(host string) string {
 		for _, d := range rs.Domains {
 			d = strings.Trim(strings.ToLower(d), ".")
 			if d == "svc."+domain || strings.HasSuffix(d, ".svc."+domain) {
-				return fullNameHint(host)
+				return p.fullNameHint(host)
 			}
 		}
 	}
 	if strings.Count(host, ".") >= rs.Ndots || public {
 		return ""
 	}
-	return fullNameHint(host)
+	return p.fullNameHint(host)
 }
 
 func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
 		return invalid("url must be an http(s) URL")
+	}
+	if err := checkPort(u); err != nil {
+		return err
 	}
 	host := strings.ToLower(u.Hostname())
 	for i := 0; i < len(host); i++ {
@@ -483,7 +607,7 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		// channel of a wildcard egress rule opens (ADR 0075, decision 13).
 		return invalid("the url's host %q is a pattern; name the host exactly, because wildcard hosts reopen a DNS exfiltration channel", host)
 	}
-	if p.allowedName(strings.TrimSuffix(host, "."), strings.ToLower(u.Host)) {
+	if name, hostport := endpoint(u); p.allowedName(name, hostport) {
 		return nil
 	}
 	deny := func(why string) error {

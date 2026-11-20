@@ -161,6 +161,25 @@ var _ = Describe("the push writer's egress", func() {
 		Expect(f.Snapshot("app").Branches).To(HaveKeyWithValue("koinon/ok", sha))
 	})
 
+	// Approved and saved-work pushes build their writer with SandboxDialContext (internal/approvals, #1054).
+	DescribeTable("dials through the sandbox rule: a short name or a numeric host never reaches the network",
+		func(host, want string) {
+			dial := gitpush.DialFunc(catalog.URLPolicy{AllowedHosts: []string{"127.0.0.1", "intranet", "gitea.ns.svc"}}.SandboxDialContext(&net.Dialer{Timeout: time.Second}))
+			_, port, err := net.SplitHostPort(strings.TrimPrefix(front.URL, "http://"))
+			Expect(err).NotTo(HaveOccurred())
+			before := fronted.Load()
+			w := writer("http://"+net.JoinHostPort(host, port), dial)
+			_, err = w.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "m\n", Files: files})
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(fronted.Load()).To(Equal(before), "a request reached the server")
+		},
+		Entry("a single label", "intranet", "short name"),
+		Entry("a Service name with .svc", "gitea.ns.svc", "short name"),
+		Entry("a decimal IPv4 form", "2130706433", "not a plain IP address or a name"),
+		Entry("a hex IPv4 form", "0x7f.1", "not a plain IP address or a name"),
+		Entry("an IPv4 address with a trailing dot", "127.0.0.1.", "not a plain IP address or a name"),
+	)
+
 	It("keeps the dial check on a host with a private CA", func() {
 		tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { fronted.Add(1) }))
 		DeferCleanup(tlsSrv.Close)

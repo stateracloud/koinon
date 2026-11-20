@@ -21,7 +21,7 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 	// with each search domain, whatever its number of dots (ndots only changes the order).
 	zone := map[string]bool{
 		"git.example.com": true, "gitea.ns.svc.cluster.local": true, "a.b.c.d.example.org": true,
-		"gitea.ns.svc.corp.example": true, "x.y.z.w.v.svc.cluster.local": true, "x.y.z.w.v.u.svc.cluster.local": true,
+		"gitea.ns.svc.corp.example": true, "1.2.3.4.example.com": true, "x.y.z.w.v.svc.cluster.local": true, "x.y.z.w.v.u.svc.cluster.local": true,
 		"git.example.com.svc.cluster.local": false,
 	}
 	search := []string{"koinon.svc.cluster.local", "svc.cluster.local", "cluster.local"}
@@ -106,8 +106,160 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("port", "https://git.example.com:8443"),
 		Entry("public IPv4 literal", "https://203.0.113.9:3000"),
 		Entry("public IPv6 literal", "https://[2001:db8::1]:3000"),
-		Entry("decimal IPv4 form", "https://3405803785"),
+		Entry("IPv4 with the default port written", "https://203.0.113.9:443"),
+		Entry("a name that starts with a number", "https://1.2.3.4.example.com"),
+		Entry("a name with a number inside", "https://git.example.com:08443"),
 	)
+
+	DescribeTable("refuses a numeric host that a resolver could read as another address (numeric hosts, #1054)",
+		func(ctx SpecContext, u string) {
+			for name, check := range checks {
+				err := check(ctx, u)
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), name+" "+u)
+				Expect(err.Error()).To(ContainSubstring("not a plain IP address or a name"), name+" "+u)
+			}
+		},
+		Entry("decimal IPv4 form", "https://3405803785"),
+		Entry("hex, one number", "https://0xcb007109"),
+		Entry("hex, two numbers", "https://0x7f.1"),
+		Entry("hex, four numbers", "https://0x7f.0x0.0x0.0x1"),
+		Entry("octal", "https://0177.0.0.1"),
+		Entry("leading zero in a decimal-looking part", "https://010.0.0.1"),
+		Entry("short form", "https://127.1"),
+		Entry("three parts", "https://10.1.2"),
+		Entry("trailing dot after four numbers", "https://10.0.0.1./"),
+		Entry("trailing dot after a hex form", "https://0x7f.1./"),
+		Entry("two trailing dots after a number", "https://10.0.0.1../"),
+		Entry("public address in a short form", "https://203.0.113"),
+		Entry("uppercase hex", "https://0X7F.1"),
+		Entry("number with a port", "https://3405803785:8443"),
+		Entry("number with userinfo", "https://u@0x7f.1"),
+		Entry("IPv6 with a zone", "https://[fe80::1%25eth0]/"),
+	)
+
+	It("refuses a numeric host in the dial too", func(ctx SpecContext) {
+		dial := p.SandboxDialContext(&net.Dialer{})
+		for _, addr := range []string{"3405803785:443", "0x7f.1:443", "10.0.0.1.:443", "0177.0.0.1:443", "127.1:80"} {
+			_, err := dial(ctx, "tcp", addr)
+			Expect(err).To(MatchError(ContainSubstring("not a plain IP address or a name")), addr)
+		}
+	})
+
+	It("reads the port once: it never changes the host decision (ports, #1054)", func(ctx SpecContext) {
+		for _, port := range []string{"", ":80", ":443", ":3000", ":8443", ":0443"} {
+			for name, check := range checks {
+				for _, host := range []string{"intranet", "gitea.ns", "gitea.ns.svc", "x.y.z.w.v", "0x7f.1", "10.0.0.1."} {
+					Expect(check(ctx, "https://"+host+port)).To(HaveOccurred(), name+" "+host+port)
+				}
+				for _, host := range []string{"git.example.com", "gitea.ns.svc.cluster.local", "203.0.113.9", "[2001:db8::1]"} {
+					Expect(check(ctx, "https://"+host+port)).To(Succeed(), name+" "+host+port)
+				}
+			}
+		}
+	})
+
+	DescribeTable("refuses a port that no connection can use",
+		func(ctx SpecContext, u string) {
+			for name, check := range checks {
+				Expect(check(ctx, u)).To(MatchError(ContainSubstring("port number from 1 to 65535")), name+" "+u)
+			}
+			Expect(p.Check(ctx, u)).To(MatchError(ContainSubstring("port number from 1 to 65535")), u)
+		},
+		Entry("zero", "https://git.example.com:0"),
+		Entry("too large", "https://git.example.com:65536"),
+		Entry("far too large", "https://git.example.com:99999999999999999999"),
+	)
+
+	Describe("the default port in the allow list", func() {
+		// 10.5.0.9 is private: only an allow-list entry lets it through.
+		allow := func(entries ...string) catalog.URLPolicy {
+			return catalog.URLPolicy{AllowedHosts: entries, Resolver: func(context.Context, string) ([]netip.Addr, error) {
+				return []netip.Addr{netip.MustParseAddr("10.5.0.9")}, nil
+			}}
+		}
+		DescribeTable("host:port entries",
+			func(ctx SpecContext, entry, u string, ok bool) {
+				pol := allow(entry)
+				for name, check := range map[string]func(context.Context, string) error{
+					"Check": pol.Check, "CheckStrict": pol.CheckStrict, "CheckSandbox": pol.CheckSandbox, "CheckSandboxStrict": pol.CheckSandboxStrict,
+				} {
+					if ok {
+						Expect(check(ctx, u)).To(Succeed(), name+" "+entry+" "+u)
+					} else {
+						Expect(check(ctx, u)).To(HaveOccurred(), name+" "+entry+" "+u)
+					}
+				}
+			},
+			Entry("https default port matches the explicit entry", "git.example.com:443", "https://git.example.com/x", true),
+			Entry("https written port matches", "git.example.com:443", "https://git.example.com:443/x", true),
+			Entry("http default port matches", "git.example.com:80", "http://git.example.com", true),
+			Entry("a leading zero is the same port", "git.example.com:443", "https://git.example.com:0443", true),
+			Entry("trailing dot and upper case", "git.example.com:443", "https://GIT.example.com.:443", true),
+			Entry("another port does not match", "git.example.com:443", "https://git.example.com:8443", false),
+			Entry("the http default is not the https entry", "git.example.com:443", "http://git.example.com", false),
+			Entry("an entry without a port allows every port", "git.example.com", "https://git.example.com:8443", true),
+			Entry("an entry without a port allows the default port", "git.example.com", "https://git.example.com", true),
+			Entry("an IPv6 entry with a port", "[fd00::1]:8443", "https://[fd00::1]:8443", true),
+		)
+
+		It("a port never turns a refused short name into an accepted one", func(ctx SpecContext) {
+			pol := allow("gitea.ns.svc:443", "gitea.ns.svc", "intranet:80", "intranet", "gitea.ns:443", "gitea.ns")
+			for _, u := range []string{"https://gitea.ns.svc", "https://gitea.ns.svc:443", "http://intranet", "http://intranet:80", "https://gitea.ns", "https://gitea.ns:443"} {
+				Expect(pol.CheckSandbox(ctx, u)).To(MatchError(ContainSubstring("short name")), u)
+				Expect(pol.CheckSandboxStrict(ctx, u)).To(MatchError(ContainSubstring("short name")), u)
+			}
+		})
+
+		It("the dial and the check agree on an entry with the default port", func(ctx SpecContext) {
+			pol := allow("git.example.com:443")
+			Expect(pol.CheckSandbox(ctx, "https://git.example.com")).To(Succeed())
+			// The check let the private address through by the entry; the dial must not refuse it as denied.
+			_, err := pol.SandboxDialContext(&net.Dialer{Timeout: 1})(ctx, "tcp", "git.example.com:443")
+			Expect(err).NotTo(MatchError(ContainSubstring("egress policy denies")))
+		})
+	})
+
+	Describe("the cluster domain", func() {
+		It("SubstrateSearchFor builds the worker pod's search list from the domain", func() {
+			Expect(catalog.SubstrateSearchFor("cluster.local")).To(Equal(catalog.SubstrateSearch))
+			Expect(catalog.SubstrateSearchFor("")).To(Equal(catalog.SubstrateSearch))
+			Expect(catalog.SubstrateSearchFor("corp.example")).To(Equal(catalog.ResolverSearch{
+				Domains:       []string{"ate-workers.svc.corp.example", "svc.corp.example", "corp.example"},
+				Ndots:         5,
+				ClusterDomain: "corp.example",
+			}))
+		})
+
+		It("a policy built for another domain accepts that domain's full name only", func(ctx SpecContext) {
+			s := catalog.SubstrateSearchFor("corp.example")
+			pol := catalog.URLPolicy{Search: &s, Resolver: resolver}
+			Expect(pol.CheckSandbox(ctx, "https://gitea.ns.svc.corp.example")).To(Succeed())
+			Expect(pol.CheckSandbox(ctx, "https://gitea.ns.svc.cluster.local")).To(MatchError(ContainSubstring("short name")))
+			Expect(pol.CheckSandbox(ctx, "https://gitea.ns.svc")).To(MatchError(ContainSubstring("gitea.ns.svc.corp.example")))
+		})
+
+		DescribeTable("ValidateClusterDomain",
+			func(domain string, ok bool) {
+				if ok {
+					Expect(catalog.ValidateClusterDomain(domain)).To(Succeed(), domain)
+				} else {
+					Expect(catalog.ValidateClusterDomain(domain)).To(HaveOccurred(), domain)
+				}
+			},
+			Entry("empty means the default", "", true),
+			Entry("default", "cluster.local", true),
+			Entry("another domain", "corp-1.example", true),
+			Entry("one label", "local", true),
+			Entry("trailing dot", "cluster.local.", false),
+			Entry("empty label", "cluster..local", false),
+			Entry("upper case", "Cluster.Local", false),
+			Entry("underscore", "cluster_x.local", false),
+			Entry("leading hyphen", "-a.local", false),
+			Entry("space", "a b.local", false),
+			Entry("label of 64 characters", strings.Repeat("a", 64)+".local", false),
+		)
+	})
 
 	It("still applies the platform rules after the short-name rule", func(ctx SpecContext) {
 		for name, check := range checks {

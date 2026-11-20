@@ -492,6 +492,14 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ .Values.github.apiUrl | default "https://api.github.com" | quote }}
 {{- end }}
 
+{{/* The cluster's DNS domain. koinon-api and koinon-reconciler check a connector's base URL against the
+resolver of a sandbox guest, which expands a short name with search domains built from it (#1054,
+internal/catalog/urlpolicy.go). The same value builds the full Service names elsewhere in this chart. */}}
+{{- define "koinon.clusterDomainEnv" -}}
+- name: KOINON_CLUSTER_DOMAIN
+  value: {{ .Values.clusterDomain | default "cluster.local" | quote }}
+{{- end }}
+
 {{/*
 The OpenShell gateway's host:port. The reconciler and agentd refuse to start without it, so the
 chart refuses to render without it (the install would otherwise end in crash-looping pods).

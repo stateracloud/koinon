@@ -124,6 +124,7 @@ spec:
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
             {{- if has $component (list "api" "reconciler") }}
             {{- include "koinon.githubEnv" $ | nindent 12 }}
+            {{- include "koinon.clusterDomainEnv" $ | nindent 12 }}
             {{- include "koinon.kekEnv" (dict "root" $ "component" $component) | nindent 12 }}
             {{- with include "koinon.providerEnv" $ | trim }}
             {{- . | nindent 12 }}

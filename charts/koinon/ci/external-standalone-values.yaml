@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # No client TLS Secret: the mesh provides mTLS (openshell.insecure).
+# A cluster domain other than the default: the API and the reconciler must start with it (#1054).
+clusterDomain: corp.example
 openshell:
   address: openshell.openshell.svc:8080
   insecure: true

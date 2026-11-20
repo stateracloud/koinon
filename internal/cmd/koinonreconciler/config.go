@@ -103,6 +103,7 @@ type config struct {
 	mcpGuardURL    string
 	koinonToolsURL string
 	githubAPIURL   string
+	clusterDomain  string
 }
 
 // gatewayEndpoint parses the agentgateway URL into the host and port the provider profile

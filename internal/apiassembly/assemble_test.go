@@ -91,6 +91,13 @@ var _ = Describe("Assemble", func() {
 		Expect(connect.CodeOf(err)).To(Equal(connect.CodeUnauthenticated))
 	})
 
+	It("refuses a cluster domain that is not a DNS name as an *InputError (#1054)", func() {
+		_, err := start(ready, apiassembly.Settings{ClusterDomain: "Cluster.Local."})
+		var input *apiassembly.InputError
+		Expect(errors.As(err, &input)).To(BeTrue(), "got %v", err)
+		Expect(input.Setting).To(Equal("cluster domain"))
+	})
+
 	It("refuses invalid allowed hosts as an *InputError", func() {
 		_, err := start(ready, apiassembly.Settings{EgressAllowedHosts: []string{"*.example.com"}})
 		var input *apiassembly.InputError
