@@ -778,7 +778,7 @@
                     "enabled": {"type": "boolean"},
                     "namespace": {"$ref": "#/definitions/nonEmpty"},
                     "podSelector": {"type": "object"},
-                    "ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}}
+                    "ports": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}}
                   }
                 },
                 "otelSystem": {
@@ -788,7 +788,7 @@
                     "enabled": {"type": "boolean"},
                     "namespace": {"$ref": "#/definitions/nonEmpty"},
                     "collectorApp": {"$ref": "#/definitions/nonEmpty"},
-                    "collectorReadPorts": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+                    "collectorReadPorts": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
                     "traceBackendApp": {"$ref": "#/definitions/nonEmpty"},
                     "traceBackendPort": {"type": "integer", "minimum": 1, "maximum": 65535},
                     "prometheusApp": {"$ref": "#/definitions/nonEmpty"},

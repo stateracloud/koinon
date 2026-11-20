@@ -935,7 +935,9 @@ execution:
       # egress policy blocks atelet's OTLP export ("OpenTelemetry SDK error ... deadline exceeded"). Substrate's
       # ate-otel-config points OTEL_EXPORTER_OTLP_ENDPOINT at opentelemetry-collector.otel-system.svc:4317 on the
       # kind route (kind/ate-otel-config.yaml:45). Only the OTLP ports are open, to the collector pods only. Set the
-      # namespace and selector when your cluster has another collector, or enabled=false when it has none.
+      # namespace and selector when your cluster has another collector, or enabled=false when it has none. On the GKE
+      # route Substrate's base ate-otel-config points at opentelemetry-collector.gke-managed-otel.svc (ate-otel-config.yaml:38):
+      # set namespace gke-managed-otel and the selector of that collector, and otelSystem.enabled=false (no otel-system there).
       telemetry:
         enabled: true
         namespace: otel-system
