@@ -98,7 +98,6 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		},
 		Entry("full cluster name", "https://gitea.ns.svc.cluster.local"),
 		Entry("full cluster name with port", "http://gitea.ns.svc.cluster.local:3000"),
-		Entry("full name with a custom cluster domain", "https://gitea.ns.svc.corp.example"),
 		Entry("trailing dot", "https://git.example.com./"),
 		Entry("absolute namespace-qualified name", "https://gitea.ns.svc.cluster.local./"),
 		Entry("five dots that resolve as given", "https://a.b.c.d.example.org"),
@@ -146,9 +145,35 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Expect(p.Check(ctx, "http://gitea.ns")).To(Succeed())
 	})
 
+	It("takes the cluster domain from the parameter", func(ctx SpecContext) {
+		custom := p
+		custom.Search = &catalog.ResolverSearch{Domains: catalog.SubstrateSearch.Domains, Ndots: 5, ClusterDomain: "corp.example"}
+		Expect(custom.CheckSandbox(ctx, "https://gitea.ns.svc.corp.example")).To(Succeed())
+		Expect(custom.CheckSandbox(ctx, "https://gitea.ns.svc.cluster.local")).To(HaveOccurred())
+		Expect(p.CheckSandbox(ctx, "https://gitea.ns.svc.corp.example")).To(MatchError(ContainSubstring("short name")))
+	})
+
+	It("reads the search list and ndots from the parameter", func() {
+		none := catalog.URLPolicy{Search: &catalog.ResolverSearch{}}
+		one := catalog.URLPolicy{Search: &catalog.ResolverSearch{Domains: []string{"cluster.local"}, Ndots: 1, ClusterDomain: "cluster.local"}}
+		for host, want := range map[string][3]bool{ // default, no search domains, ndots 1
+			"gitea.ns":      {true, false, false},
+			"gitea.ns.svc":  {true, true, true},
+			"gitea":         {true, true, true},
+			"gitea.ns.":     {false, false, false},
+			"a.b.c.d.e.f":   {false, false, false},
+			"a.b.c.corp":    {true, false, false},
+			"gitea.ns.corp": {true, false, false},
+		} {
+			Expect(p.ShortName(host) != "").To(Equal(want[0]), "default "+host)
+			Expect(none.ShortName(host) != "").To(Equal(want[1]), "no search domains "+host)
+			Expect(one.ShortName(host) != "").To(Equal(want[2]), "ndots 1 "+host)
+		}
+	})
+
 	DescribeTable("ShortName",
 		func(host string, short bool) {
-			Expect(catalog.ShortName(host) != "").To(Equal(short), host)
+			Expect(p.ShortName(host) != "").To(Equal(short), host)
 		},
 		Entry("empty", "", false),
 		Entry("label", "gitea", true),
@@ -161,6 +186,14 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("short IPv4 form", "127.1", false),
 		Entry("IPv6", "::1", false),
 		Entry("public name", "git.example.com", false),
+		Entry("two labels, not a public suffix", "gitea.ns", true),
+		Entry("two labels, public suffix", "gitea.dev", false),
+		Entry("three labels, not a public suffix", "git.corp.local", true),
+		Entry("a private-section suffix", "foo.github.io", false),
+		Entry("four dots, not a public suffix", "a.b.c.d.local", true),
+		Entry("five dots, at ndots", "a.b.c.d.e.local", false),
+		Entry("one trailing dot is absolute", "gitea.ns.", false),
+		Entry("full Service name for another cluster domain", "gitea.ns.svc.corp.example", true),
 	)
 
 	It("SandboxDialContext refuses a short name before it dials, and passes a full name on", func(ctx SpecContext) {

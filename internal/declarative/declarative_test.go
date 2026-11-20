@@ -796,14 +796,14 @@ var _ = Describe("Importer", func() {
 			DeferCleanup(tlsServer.Close)
 			ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
 			d := conn()
-			d["baseUrl"], d["caBundle"] = " https://GHES.example.test:8443/ ", ca
+			d["baseUrl"], d["caBundle"] = " https://GHES.example.com:8443/ ", ca
 			put(ctx, "gh", declarative.TypeConnection, slug, d)
 			Expect(imp.Sync(ctx)).To(Succeed())
 			rows, _ := store.New(pool).ListConnections(ctx, org)
 			Expect(rows).To(HaveLen(1))
 			site, err := codehost.SiteOf(rows[0].Config)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+			Expect(site.BaseURL).To(Equal("https://ghes.example.com:8443"))
 			Expect(site.CABundle).To(Equal(strings.TrimSpace(ca)))
 			var cfg connections.GitHubConfig
 			Expect(json.Unmarshal(rows[0].Config, &cfg)).To(Succeed())
@@ -816,7 +816,7 @@ var _ = Describe("Importer", func() {
 			Expect(imp.Sync(ctx)).To(Succeed())
 			rows, _ = store.New(pool).ListConnections(ctx, org)
 			site, _ = codehost.SiteOf(rows[0].Config)
-			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+			Expect(site.BaseURL).To(Equal("https://ghes.example.com:8443"))
 		})
 
 		It("imports a connection's CI directories, one per line or comma-separated", func(ctx SpecContext) {
@@ -858,7 +858,7 @@ var _ = Describe("Importer", func() {
 		})
 
 		It("ignores a connection Secret with a bad base URL or CA bundle", func(ctx SpecContext) {
-			for k, v := range map[string]string{"baseUrl": "http://ghes.example.test", "caBundle": "not pem"} {
+			for k, v := range map[string]string{"baseUrl": "http://ghes.example.com", "caBundle": "not pem"} {
 				d := conn()
 				d[k] = v
 				put(ctx, "gh", declarative.TypeConnection, slug, d)
@@ -882,7 +882,7 @@ var _ = Describe("Importer", func() {
 		Describe("a Gitea bot", func() {
 			giteaConn := func() map[string]string {
 				return map[string]string{
-					"name": "acme Gitea", "connector": "gitea", "baseUrl": " https://Git.example.test/gitea/ ",
+					"name": "acme Gitea", "connector": "gitea", "baseUrl": " https://Git.example.com/gitea/ ",
 					"readToken": "koinon_test_not-a-real-read-token", "writeToken": "koinon_test_not-a-real-write-token",
 					"ciDirs": "ci/pipelines",
 				}
@@ -902,7 +902,7 @@ var _ = Describe("Importer", func() {
 				Expect(string(c.SecretEnvelope)).NotTo(ContainSubstring("not-a-real"))
 				cfg, err := gitea.ParseConfig(c.Config)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(cfg.BaseURL).To(Equal("https://git.example.test/gitea"))
+				Expect(cfg.BaseURL).To(Equal("https://git.example.com/gitea"))
 				Expect(cfg.CIDirs).To(Equal([]string{"ci/pipelines"}))
 				Expect(cfg.ReadTokenSetAt).To(BeTemporally("~", time.Now(), time.Minute))
 
@@ -950,7 +950,7 @@ var _ = Describe("Importer", func() {
 					_, err := pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, name, url, code_host_connection_id) VALUES ($1, $2, $3, $4)`, org, name, u, rows[0].ID)
 					Expect(err).NotTo(HaveOccurred())
 				}
-				link("old-host", "https://git.example.test/mcp")
+				link("old-host", "https://git.example.com/mcp")
 				linked := func(name string) bool {
 					var ok bool
 					Expect(pool.QueryRow(ctx, `SELECT code_host_connection_id IS NOT NULL FROM mcp_servers WHERE org_id = $1 AND name = $2`, org, name).Scan(&ok)).To(Succeed())
@@ -967,8 +967,8 @@ var _ = Describe("Importer", func() {
 
 				By("a new host unlinks the server at the old one, and keeps one at the new host")
 				// Written straight to the table, past the check, as if linked for the move.
-				link("new-host", "https://git2.example.test/mcp")
-				d["baseUrl"] = "https://git2.example.test"
+				link("new-host", "https://git2.example.com/mcp")
+				d["baseUrl"] = "https://git2.example.com"
 				put(ctx, "gt", declarative.TypeConnection, slug, d)
 				Expect(imp.Sync(ctx)).To(Succeed())
 				Expect(linked("old-host")).To(BeFalse())
@@ -1000,7 +1000,7 @@ var _ = Describe("Importer", func() {
 				}
 
 				It("refuses a new connection whose host is an extra host of another connection, and creates nothing", func(ctx SpecContext) {
-					other(ctx, "git.example.test")
+					other(ctx, "git.example.com")
 					put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
 					Expect(imp.Sync(ctx)).To(Succeed())
 					rows, _ := store.New(pool).ListConnections(ctx, org)
@@ -1013,9 +1013,9 @@ var _ = Describe("Importer", func() {
 					Expect(imp.Sync(ctx)).To(Succeed())
 
 					By("another connection lists the new host")
-					other(ctx, "git2.example.test")
+					other(ctx, "git2.example.com")
 					d := giteaConn()
-					d["baseUrl"] = "https://git2.example.test"
+					d["baseUrl"] = "https://git2.example.com"
 					put(ctx, "gt", declarative.TypeConnection, slug, d)
 					Expect(imp.Sync(ctx)).To(Succeed())
 					Expect(refused(ctx)).To(BeTrue())
@@ -1023,15 +1023,15 @@ var _ = Describe("Importer", func() {
 					By("the connection's own list holds the new host")
 					_, err := pool.Exec(ctx, `UPDATE connections SET mcp_hosts = '{}' WHERE org_id = $1 AND display_name = 'forge'`, org)
 					Expect(err).NotTo(HaveOccurred())
-					_, err = pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['git3.example.test'] WHERE org_id = $1 AND source = 'secret'`, org)
+					_, err = pool.Exec(ctx, `UPDATE connections SET mcp_hosts = ARRAY['git3.example.com'] WHERE org_id = $1 AND source = 'secret'`, org)
 					Expect(err).NotTo(HaveOccurred())
-					d["baseUrl"] = "https://git3.example.test"
+					d["baseUrl"] = "https://git3.example.com"
 					put(ctx, "gt", declarative.TypeConnection, slug, d)
 					Expect(imp.Sync(ctx)).To(Succeed())
 
 					var base string
 					Expect(pool.QueryRow(ctx, `SELECT config->>'baseUrl' FROM connections WHERE org_id = $1 AND source = 'secret'`, org).Scan(&base)).To(Succeed())
-					Expect(base).To(Equal("https://git.example.test/gitea"), "the row keeps its old host")
+					Expect(base).To(Equal("https://git.example.com/gitea"), "the row keeps its old host")
 				})
 			})
 
@@ -1045,7 +1045,7 @@ var _ = Describe("Importer", func() {
 				Expect(rows[0].Connector).To(Equal("gitea"))
 				cfg, err := gitea.ParseConfig(rows[0].Config)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(cfg.BaseURL).To(Equal("https://git.example.test/gitea"))
+				Expect(cfg.BaseURL).To(Equal("https://git.example.com/gitea"))
 				var found bool
 				for _, e := range events(ctx) {
 					found = found || strings.Contains(e.Message, "cannot change from gitea to github")
@@ -1067,8 +1067,8 @@ var _ = Describe("Importer", func() {
 					Expect(logs.String()).NotTo(ContainSubstring("not-a-real"))
 				},
 				Entry("there is no base URL", func(d map[string]string) { delete(d, "baseUrl") }),
-				Entry("the base URL is http", func(d map[string]string) { d["baseUrl"] = "http://git.example.test" }),
-				Entry("the base URL has a glob in its path", func(d map[string]string) { d["baseUrl"] = "https://git.example.test/*" }),
+				Entry("the base URL is http", func(d map[string]string) { d["baseUrl"] = "http://git.example.com" }),
+				Entry("the base URL has a glob in its path", func(d map[string]string) { d["baseUrl"] = "https://git.example.com/*" }),
 				Entry("the base URL is an internal host", func(d map[string]string) { d["baseUrl"] = "https://10.0.0.1/gitea" }),
 				Entry("the base URL is a short name", func(d map[string]string) { d["baseUrl"] = "https://gitea.ns.svc/gitea" }),
 				Entry("the base URL is a single-label name", func(d map[string]string) { d["baseUrl"] = "https://intranet:3000/gitea" }),

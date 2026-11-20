@@ -205,14 +205,14 @@ var _ = Describe("ConnectionService", func() {
 		ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
 		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 			OrgId: org, DisplayName: "ghes", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
-			BaseUrl: " https://GHES.example.test:8443/ ", CaBundle: ca,
+			BaseUrl: " https://GHES.example.com:8443/ ", CaBundle: ca,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.com:8443"))
 		Expect(res.GetConnection().GetGithub().GetCaBundle()).To(Equal(strings.TrimSpace(ca)))
 		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+		Expect(got.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.com:8443"))
 
 		// github.com is the default and is not stored.
 		res, err = owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
@@ -243,8 +243,8 @@ var _ = Describe("ConnectionService", func() {
 
 	It("rejects a base URL that is not a bare https host and a CA bundle that is not certificates", func(ctx SpecContext) {
 		for _, req := range []*connectionv1alpha1.CreateGitHubConnectionRequest{
-			{BaseUrl: "http://ghes.example.test"},
-			{BaseUrl: "https://ghes.example.test/enterprise"},
+			{BaseUrl: "http://ghes.example.com"},
+			{BaseUrl: "https://ghes.example.com/enterprise"},
 			{BaseUrl: "https://10.0.0.1"},
 			{BaseUrl: "https://127.0.0.1:8443"},
 			{BaseUrl: "https://koinon-postgres"},
@@ -943,8 +943,8 @@ var _ = Describe("ConnectionService for Gitea", func() {
 			Expect(count(ctx, e, `SELECT count(*) FROM connections`)).To(BeZero())
 		},
 		Entry("no base URL", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "" }),
-		Entry("http", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "http://git.example.test" }),
-		Entry("a glob in the path", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://git.example.test/*" }),
+		Entry("http", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "http://git.example.com" }),
+		Entry("a glob in the path", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://git.example.com/*" }),
 		Entry("an internal host", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://10.0.0.1/gitea" }),
 		Entry("a search-path Service name (#1054)", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) {
 			r.BaseUrl = "https://gitea.ns.svc:3000/gitea"

@@ -286,7 +286,7 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return c.conns.CreateGiteaConnection(ctx, &connectionv1alpha1.CreateGiteaConnectionRequest{
-				OrgId: org, BaseUrl: "https://git.example.test", ReadToken: "koinon_test_not-a-real-read-token", WriteToken: "koinon_test_not-a-real-write-token",
+				OrgId: org, BaseUrl: "https://git.example.com", ReadToken: "koinon_test_not-a-real-read-token", WriteToken: "koinon_test_not-a-real-write-token",
 			})
 		},
 	},

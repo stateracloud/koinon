@@ -51,10 +51,10 @@ var _ = Describe("The repo.read grant on a connection's own host", func() {
 	})
 
 	It("renders only the connection's host for a GitHub Enterprise Server", func() {
-		read, ok, err := reconciler.GitHubReadAccessAt(cfg, "https://ghes.example.test")
+		read, ok, err := reconciler.GitHubReadAccessAt(cfg, "https://ghes.example.com")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ok).To(BeTrue())
-		Expect(hosts(read)).To(Equal([]string{"ghes.example.test"}))
+		Expect(hosts(read)).To(Equal([]string{"ghes.example.com"}))
 		e := read.Endpoints[0]
 		Expect(e.Port).To(BeEquivalentTo(443))
 		Expect(e.Protocol).To(Equal("rest"))
@@ -72,13 +72,13 @@ var _ = Describe("The repo.read grant on a connection's own host", func() {
 	})
 
 	It("keeps the port of the base URL", func() {
-		read, _, err := reconciler.GitHubReadAccessAt(cfg, "https://ghes.example.test:8443")
+		read, _, err := reconciler.GitHubReadAccessAt(cfg, "https://ghes.example.com:8443")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(read.Endpoints[0].Port).To(BeEquivalentTo(8443))
 	})
 
 	It("refuses a base URL that is not a bare https host", func() {
-		_, _, err := reconciler.GitHubReadAccessAt(cfg, "http://ghes.example.test")
+		_, _, err := reconciler.GitHubReadAccessAt(cfg, "http://ghes.example.com")
 		Expect(err).To(HaveOccurred())
 	})
 })
@@ -158,7 +158,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
 		Expect(err).NotTo(HaveOccurred())
-		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": "https://ghes.example.test"})
+		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": "https://ghes.example.com"})
 		Expect(err).NotTo(HaveOccurred())
 		conn, err := q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: org, ID: id, Connector: "github", DisplayName: "ghes", Config: config,
@@ -199,7 +199,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		Expect(profile).NotTo(BeNil())
 		Expect(profile.GetEndpoints()).To(HaveLen(1))
 		ep := profile.GetEndpoints()[0]
-		Expect(ep.GetHost()).To(Equal("ghes.example.test"))
+		Expect(ep.GetHost()).To(Equal("ghes.example.com"))
 		var paths []string
 		for _, rule := range ep.GetRules() {
 			paths = append(paths, rule.GetAllow().GetPath())
@@ -212,7 +212,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		rule := revs[len(revs)-1].GetNetworkPolicies()["github_read"]
 		Expect(rule).NotTo(BeNil())
 		Expect(rule.GetEndpoints()).To(HaveLen(1))
-		Expect(rule.GetEndpoints()[0].GetHost()).To(Equal("ghes.example.test"))
+		Expect(rule.GetEndpoints()[0].GetHost()).To(Equal("ghes.example.com"))
 		for _, e := range rule.GetEndpoints() {
 			for _, r := range e.GetRules() {
 				Expect(r.GetAllow().GetPath()).NotTo(HavePrefix("/repos/"), "no github.com API paths")
