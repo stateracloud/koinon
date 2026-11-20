@@ -931,6 +931,39 @@ execution:
       # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
       # or database outside the cluster.
       extraEgress: []
+      # The route of the control-plane pods (controlPlaneApps) to the telemetry collector. Without it the default-deny
+      # egress policy blocks atelet's OTLP export ("OpenTelemetry SDK error ... deadline exceeded"). Substrate's
+      # ate-otel-config points OTEL_EXPORTER_OTLP_ENDPOINT at opentelemetry-collector.otel-system.svc:4317 on the
+      # kind route (kind/ate-otel-config.yaml:45). Only the OTLP ports are open, to the collector pods only. Set the
+      # namespace and selector when your cluster has another collector, or enabled=false when it has none.
+      telemetry:
+        enabled: true
+        namespace: otel-system
+        podSelector:
+          matchLabels:
+            app: opentelemetry-collector
+        ports: [4317, 4318]
+      # Fence of the otel-system namespace (kind/otel-collector.yaml, kind/prometheus.yaml of Substrate v1.0.0): default
+      # deny, then one policy per app. Set enabled=false when the namespace does not exist (a cluster that has a managed
+      # collector in another namespace): a NetworkPolicy in a missing namespace fails the install.
+      otelSystem:
+        enabled: true
+        namespace: otel-system
+        collectorApp: opentelemetry-collector
+        # Prometheus reads these two ports of the collector (kind/otel-collector.yaml:192-194).
+        collectorReadPorts: [8889, 8888]
+        traceBackendApp: jaeger
+        traceBackendPort: 4317
+        prometheusApp: prometheus
+        # The metrics ports that Prometheus scrapes on the control-plane pods: the prometheus.io/port annotations of
+        # ate-api-server.yaml:80, atelet.yaml:143 and atenet-router.yaml:192.
+        scrapePorts: [9090]
+      # Fence of the namespace of the identity-certificate controller (pod-certificate-controller.yaml): default deny,
+      # and the Kubernetes API server for the controller. It serves no port and calls nothing else.
+      podcertSystem:
+        enabled: true
+        namespace: podcertificate-controller-system
+        app: podcertificate-controller
     # The default WorkerPool (ate.dev/v1): one shared pool per sandbox class (D6). Off by default: ate-setup
     # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
     # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class

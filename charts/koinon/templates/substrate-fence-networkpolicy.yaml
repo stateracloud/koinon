@@ -1,0 +1,232 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+NetworkPolicies for the two other namespaces that Substrate's setup makes, and the telemetry route of the
+control plane (execution.driver=substrate; issue 1172, follows issue 1089). Standard networking.k8s.io/v1 only.
+Same switch as substrate-networkpolicy.yaml: workerNetworkPolicy.enabled.
+- podcertificate-controller-system: the controller signs the identity certificates of workers, so the namespace is
+  fenced like ate-system. Default deny for ingress and egress. The pod needs the Kubernetes API server and nothing
+  else: it listens on no port (pod-certificate-controller.yaml:131-160 has no ports and no Service), it runs with
+  --in-cluster=true (line 149) and it resolves no name (dnsPolicy Default, line 205). It only signs for
+  --postgres-client-namespace=ate-system (line 159); it does not connect to that postgres.
+- otel-system: default deny for ingress and egress, then one policy per app (kind/otel-collector.yaml and
+  kind/prometheus.yaml of Substrate v1.0.0, b34fbee7). The collector receives OTLP on 4317 and 4318 from the
+  control-plane namespace (containerPort at kind/otel-collector.yaml:186-190) and its two read ports from
+  Prometheus (8889 and 8888, lines 192-194; the scrape job otel-collector-self in kind/prometheus.yaml:125). It
+  sends traces to Jaeger on 4317 (kind/otel-collector.yaml:93). Jaeger takes OTLP from the collector only.
+  Prometheus reads the Kubernetes API server (service discovery), the collector and the annotated ports of
+  the control-plane pods (kind/prometheus.yaml:71-77). Nothing else has a route. The Prometheus and Jaeger UI ports
+  have no ingress rule: reach them with kubectl port-forward, which a NetworkPolicy does not filter.
+- The control-plane namespace: atelet logged "OpenTelemetry SDK error ... deadline exceeded" because the default-deny
+  egress policy of substrate-networkpolicy.yaml has no rule for the collector (every pod of ate-system uses
+  ate-otel-config, kind/ate-otel-config.yaml:45, and the endpoint is in otel-system). The telemetry policy below
+  gives the control-plane apps egress to the collector on the OTLP ports only.
+A CNI that does not enforce NetworkPolicy ignores all of it (the preflight probe reports it).
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
+{{- $s := .Values.execution.substrate }}
+{{- $np := $s.workerNetworkPolicy }}
+{{- $ns := $s.namespace }}
+{{- $tel := $np.telemetry }}
+{{- $otel := $np.otelSystem }}
+{{- $pc := $np.podcertSystem }}
+{{- if and (or $otel.enabled $pc.enabled) (not $np.apiServerCIDRs) }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the fence of otel-system and podcertificate-controller-system would cut them off from the Kubernetes API server." }}{{- end }}
+{{- $otlp := list }}
+{{- range $tel.ports }}{{- $otlp = append $otlp (dict "port" . "protocol" "TCP") }}{{- end }}
+{{- if and (or $tel.enabled $otel.enabled) (not $tel.ports) }}{{- fail "execution.substrate.workerNetworkPolicy.telemetry.ports is empty: an empty port list in a NetworkPolicy would open every port" }}{{- end }}
+{{- if $tel.enabled }}
+{{- if not (or $tel.podSelector.matchLabels $tel.podSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.telemetry.podSelector needs matchLabels or matchExpressions: an empty selector would open every pod of the namespace" }}{{- end }}
+---
+# The control plane reaches the telemetry collector on its OTLP ports and nowhere else in {{ $tel.namespace }}.
+# NetworkPolicies add up, so this adds one route to the default-deny egress policy of the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-telemetry
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml $np.controlPlaneApps | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $tel.namespace | quote }}
+          podSelector:
+            {{- toYaml $tel.podSelector | nindent 12 }}
+      ports:
+        {{- toYaml $otlp | nindent 8 }}
+{{- end }}
+{{- if $otel.enabled }}
+{{- $on := $otel.namespace }}
+{{- if eq $on $ns }}{{- fail "execution.substrate.workerNetworkPolicy.otelSystem.namespace must differ from execution.substrate.namespace" }}{{- end }}
+---
+# Default deny for every pod of {{ $on }}: a pod that no policy below names has no route (fail closed).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-otel-default-deny
+  namespace: {{ $on | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# The collector: OTLP in from the control plane, the read ports in from Prometheus, traces out to Jaeger.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-otel-collector
+  namespace: {{ $on | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $otel.collectorApp | quote }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns | quote }}
+      ports:
+        {{- toYaml $otlp | nindent 8 }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ $otel.prometheusApp | quote }}
+      ports:
+        {{- range $otel.collectorReadPorts }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ $otel.traceBackendApp | quote }}
+      ports:
+        - {port: {{ $otel.traceBackendPort }}, protocol: TCP}
+---
+# The trace backend: OTLP in from the collector only. It calls nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-otel-trace-backend
+  namespace: {{ $on | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $otel.traceBackendApp | quote }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ $otel.collectorApp | quote }}
+      ports:
+        - {port: {{ $otel.traceBackendPort }}, protocol: TCP}
+---
+# Prometheus: DNS, the Kubernetes API server (service discovery), the collector read ports and the annotated metrics
+# ports of the control-plane pods. It has no ingress rule: reach it with kubectl port-forward.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-otel-prometheus
+  namespace: {{ $on | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $otel.prometheusApp | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ $otel.collectorApp | quote }}
+      ports:
+        {{- range $otel.collectorReadPorts }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+    {{- with $otel.scrapePorts }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns | quote }}
+      ports:
+        {{- range . }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- if $pc.enabled }}
+{{- $pn := $pc.namespace }}
+---
+# Default deny for every pod of {{ $pn }}, then the one route of the signing controller. No ingress: it serves no port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-podcert-default-deny
+  namespace: {{ $pn | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-podcert-controller
+  namespace: {{ $pn | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $pc.app | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+{{- end }}
+{{- end }}
