@@ -15,12 +15,15 @@ lacks "no worker LimitRange with the openshell driver" 'koinon-worker-(limits|qu
 # Both objects render in the worker namespace, with safe defaults.
 has "worker LimitRange" 'kind: LimitRange' "${wl[@]}" "${lim[@]}"
 has "worker ResourceQuota" 'kind: ResourceQuota' "${wl[@]}" "${lim[@]}"
-has "the LimitRange is in the worker namespace" 'namespace: "ate-workers"' "${wl[@]}" "${lim[@]}"
+lr=$(render "${wl[@]}" "${lim[@]}" | docof 'kind: LimitRange')
+grep -Fq 'namespace: "ate-workers"' <<<"$lr" || fail "the LimitRange must be in the worker namespace"
+rq=$(render "${wl[@]}" "${lim[@]}" | docof 'kind: ResourceQuota')
+grep -Fq 'namespace: "ate-workers"' <<<"$rq" || fail "the ResourceQuota must be in the worker namespace"
 has "the LimitRange sets default requests" 'defaultRequest:' "${wl[@]}" "${lim[@]}"
 has "the LimitRange sets default limits" '^      default:' "${wl[@]}" "${lim[@]}"
 has "the quota caps the pod count" '"pods": "20"' "${wl[@]}" "${lim[@]}"
-has "the quota caps CPU requests" '"requests.cpu": "16"' "${wl[@]}" "${lim[@]}"
-has "the quota caps memory limits" '"limits.memory": "64Gi"' "${wl[@]}" "${lim[@]}"
+has "the quota caps CPU requests" '"requests.cpu": "64"' "${wl[@]}" "${lim[@]}"
+has "the quota caps memory limits" '"limits.memory": "256Gi"' "${wl[@]}" "${lim[@]}"
 lacks "the default render has no per-container max" '^      max:' "${wl[@]}" "${lim[@]}"
 # The values change the render, and the namespace follows workerNamespace.
 has "quota values are settable" '"pods": "5"' "${wl[@]}" --set-string execution.substrate.workerLimits.quota.hard.pods=5 "${lim[@]}"
@@ -30,8 +33,13 @@ has "the limits follow the worker namespace" 'namespace: "pools-x"' "${wl[@]}" -
 # Off: no object. An empty map: no object of that kind.
 lacks "workerLimits.enabled=false renders no limits" 'name: koinon-worker-(limits|quota)$' "${wl[@]}" --set execution.substrate.workerLimits.enabled=false
 lacks "an empty quota renders no ResourceQuota" 'name: koinon-worker-quota$' "${wl[@]}" --set-json execution.substrate.workerLimits.quota.hard=null
-lacks "empty defaults render no LimitRange" 'name: koinon-worker-limits$' "${wl[@]}" --set-json execution.substrate.workerLimits.limitRange.defaultRequest=null --set-json execution.substrate.workerLimits.limitRange.default=null
+lacks "empty defaults render no LimitRange" 'name: koinon-worker-limits$' "${wl[@]}" --set-json execution.substrate.workerLimits.limitRange.defaultRequest=null --set-json execution.substrate.workerLimits.limitRange.default=null --set-json execution.substrate.workerLimits.quota.hard=null
 # Only the limits on: the namespace still renders, because the objects need it.
 has "the limits alone render the worker namespace" 'kind: Namespace' "${wl[@]}" --set execution.substrate.workerPolicy.enabled=false --set execution.substrate.workerNetworkPolicy.enabled=false --set execution.substrate.workerPool.enabled=false --show-only templates/substrate-workernamespace.yaml
-# A quota name that is not a string or number fails the schema.
+# A quota value that is not a string or number fails the schema.
 if render "${wl[@]}" --set-json execution.substrate.workerLimits.quota.hard='{"pods":[1]}' >/dev/null 2>"$out/wl.err"; then fail "a list as a quota value must fail the schema"; fi
+grep -q 'workerLimits' "$out/wl.err" || fail "the schema error must name workerLimits"
+# A quota key that no LimitRange default covers would refuse every unsized pod: the render fails.
+if render "${wl[@]}" --set-json execution.substrate.workerLimits.limitRange.default=null >/dev/null 2>"$out/wl2.err"; then fail "a limits.* quota without a default limit must fail the render"; fi
+grep -q 'limitRange.default' "$out/wl2.err" || fail "the guard error must name limitRange.default"
+if render "${wl[@]}" --set-string execution.substrate.workerLimits.quota.hard.requests\\.ephemeral-storage=1Gi >/dev/null 2>"$out/wl3.err"; then fail "a requests.* quota without a default request must fail the render"; fi

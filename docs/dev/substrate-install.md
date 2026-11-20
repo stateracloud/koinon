@@ -398,10 +398,13 @@ WorkerPool in another namespace needs no Substrate change (checked on kind with 
 controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
 
 - The chart sets resource limits in the worker namespace (`execution.substrate.workerLimits`, on by default). A
-  LimitRange gives a container with no requests or limits the defaults (250m CPU and 256Mi memory as requests, 2 CPU
-  and 2Gi as limits). A ResourceQuota caps the namespace at 20 pods, 16 CPU and 32Gi of requests, and 32 CPU and 64Gi
-  of limits. A pod over the quota is refused. Raise `workerLimits.quota.hard` for a large pool. A pool that sets its
-  own `template.resources` keeps them, and the quota counts them.
+  LimitRange gives a container with no requests or limits the defaults (500m CPU and 1Gi memory as requests, 8 CPU
+  and 16Gi as limits). A ResourceQuota caps the namespace at 20 pods, 64 CPU and 128Gi of requests, and 128 CPU and
+  256Gi of limits. A pod over the quota is refused. These defaults suit a small pool. A worker pod hosts many
+  sandboxes, so for a real pool set `workerPool.spec.template.resources` with both requests and limits (a pod with
+  requests above the default limit and no limit is refused), and raise `workerLimits.quota.hard`. The quota also
+  counts the old pod during a rollout, so keep room for the replicas plus the surge. To remove a key, set it to
+  `null`: an empty map keeps the defaults.
 - The pool names the chart's worker ServiceAccount (`automountServiceAccountToken: false`) unless the values name one. The
   controller's own `ateworker` ServiceAccount leaves the field unset, and the admission rule refuses a
   projected token, so a pool on `ateworker` does not start. If you name your own ServiceAccount, create it in

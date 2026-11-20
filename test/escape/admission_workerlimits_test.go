@@ -112,10 +112,10 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 			return err
 		}).WithContext(ctx).WithTimeout(racescale.D(30 * time.Second)).WithPolling(200 * time.Millisecond).Should(Succeed())
 		res := created.Spec.Containers[0].Resources
-		Expect(res.Requests.Cpu().String()).To(Equal("250m"))
-		Expect(res.Requests.Memory().String()).To(Equal("256Mi"))
-		Expect(res.Limits.Cpu().String()).To(Equal("2"))
-		Expect(res.Limits.Memory().String()).To(Equal("2Gi"))
+		Expect(res.Requests.Cpu().String()).To(Equal("500m"))
+		Expect(res.Requests.Memory().String()).To(Equal("1Gi"))
+		Expect(res.Limits.Cpu().String()).To(Equal("8"))
+		Expect(res.Limits.Memory().String()).To(Equal("16Gi"))
 	})
 
 	It("refuses a pod that goes over the CPU quota", func(ctx SpecContext) {
@@ -126,6 +126,7 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 		}), metav1.CreateOptions{})
 		Expect(apierrors.IsForbidden(err)).To(BeTrue(), "want a quota refusal, got %v", err)
 		Expect(err.Error()).To(ContainSubstring("exceeded quota"))
+		Expect(err.Error()).To(ContainSubstring("requests.cpu"))
 	})
 
 	It("refuses a pod over the pod count", func(ctx SpecContext) {
