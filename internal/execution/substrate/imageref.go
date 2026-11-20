@@ -42,6 +42,10 @@ func RewriteImage(ref, registry string, mirrors map[string]string) string {
 			host = "docker.io"
 		}
 		rest = strings.Join(parts[1:], "/")
+		// Docker Hub has no API alias: docker.io/alpine is docker.io/library/alpine.
+		if host == "docker.io" && !strings.Contains(rest, "/") {
+			rest = "library/" + rest
+		}
 	case len(parts) == 1:
 		rest = "library/" + ref
 	}

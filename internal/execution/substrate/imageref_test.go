@@ -26,6 +26,8 @@ var _ = Describe("RewriteImage", func() {
 			"cache.koinon.svc/ghcr.io/stateracloud/koinon/agent:1"+digest),
 		Entry("the host name is not case sensitive", "GHCR.io/org/app:1", "", mirrors, "cache.koinon.svc/ghcr.io/org/app:1"),
 		Entry("a bare name is docker.io/library", "busybox:1.36", "", mirrors, "cache.koinon.svc/docker.io/library/busybox:1.36"),
+		Entry("docker.io with one path element gets library", "docker.io/alpine:3", "", mirrors, "cache.koinon.svc/docker.io/library/alpine:3"),
+		Entry("index.docker.io with one path element gets library", "index.docker.io/alpine:3", "", mirrors, "cache.koinon.svc/docker.io/library/alpine:3"),
 		Entry("user/name is on docker.io", "acme/tool:2", "", mirrors, "cache.koinon.svc/docker.io/acme/tool:2"),
 		Entry("the other names of Docker Hub", "registry-1.docker.io/acme/tool:2", "", mirrors, "cache.koinon.svc/docker.io/acme/tool:2"),
 		Entry("a host with no entry and no registry stays", "quay.io/org/app:1", "", mirrors, "quay.io/org/app:1"),

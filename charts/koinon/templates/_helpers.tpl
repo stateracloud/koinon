@@ -80,6 +80,8 @@ through a pull-through cache. Mirror values may carry a path prefix (art.example
 {{- $host = lower (first $parts) -}}
 {{- if or (eq $host "index.docker.io") (eq $host "registry-1.docker.io") }}{{ $host = "docker.io" }}{{ end -}}
 {{- $rest = join "/" (rest $parts) -}}
+{{- /* Docker Hub has no API alias: docker.io/alpine is docker.io/library/alpine. */ -}}
+{{- if and (eq $host "docker.io") (not (contains "/" $rest)) }}{{ $rest = printf "library/%s" $rest }}{{ end -}}
 {{- else if eq (len $parts) 1 -}}
 {{- $rest = printf "library/%s" $ref -}}
 {{- end -}}

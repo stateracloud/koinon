@@ -52,6 +52,7 @@ grep -Fq '"stripPrefix": true' <<<"$icm" || fail "the sync entries must strip th
 if grep -Eq '"onDemand": false|pollInterval|"onlySigned"' <<<"$icm"; then fail "the cache syncs on demand only"; fi
 grep -Fq '"anonymousPolicy"' <<<"$icm" || fail "the cache must have an access policy"
 grep -Eq '"anonymousPolicy": \[\s*"read"\s*\]' <<<"$(tr -d '\n' <<<"$icm")" || fail "the cache allows anonymous read and nothing else"
+grep -Eq '"compat": \[\s*"docker2s2"\s*\]' <<<"$(tr -d '\n' <<<"$icm")" || fail "Zot needs http.compat docker2s2 for Docker media types"
 grep -Fq '"cert": "/etc/zot/tls/tls.crt"' <<<"$icm" || fail "the cache must serve TLS"
 grep -Fq '"tlsVerify": true' <<<"$icm" || fail "the cache must verify the upstream certificates"
 has "an upstream is configurable" '"destination": "/registry.example.com"' "${isub[@]}" --set 'execution.substrate.imageCache.upstreams[0].host=registry.example.com' --set 'execution.substrate.imageCache.upstreams[0].url=https://registry.example.com' "${icache[@]}"
@@ -108,3 +109,6 @@ has "an operator mirror reaches the driver" '"ghcr.io=m.example.com/ghcr"' "${is
 has "an operator registry reaches the driver" 'imageRegistry: "m.example.com/all"' "${isub[@]}" --set execution.substrate.imageCache.enabled=false --set execution.substrate.imageRegistry=m.example.com/all "${icfg[@]}"
 lacks "no cache TLS Secret when disabled" 'imagecache-tls' "${isub[@]}" --set execution.substrate.imageCache.enabled=false "${iens[@]}"
 lacks "no Kyverno" '[Kk]yverno' "${isub[@]}" "${icache[@]}"
+
+# An IPv4-only except list renders no empty IPv6 except; a mixed list splits by family.
+has "an IPv6 except stays under ::/0" '"fc00::/7"' "${isub[@]}" --set 'execution.substrate.imageCache.egress.exceptCIDRs={10.0.0.0/8,fc00::/7}' "${icache[@]}"

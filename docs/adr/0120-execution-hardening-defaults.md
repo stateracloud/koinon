@@ -218,8 +218,8 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      The namespace has no capability ceiling. A spec compares the sets with a vendored copy of the source at the
      pinned commit and fails on a change.
    - **One image source.** atelet reaches one image source (a pull-through cache): a pod selector for a cache in
-     the cluster, or an operator CIDR and port. Actor image references go through `global.registryMirrors` or
-     `global.imageRegistry`, with the digest kept. The mirror name is chosen once, because it is part of the actor
+     the cluster, or an operator CIDR and port. Actor image references are rewritten by the driver (item 9; the operator values
+     are `imageMirrors` and `imageRegistry`), with the digest kept. The mirror name is chosen once, because it is part of the actor
      template hash. The default in-cluster cache is in item 9.
    - **Installer connect.** The installer identities may run `exec`, `attach` and `portforward` in the control-plane
      namespace, because the installer opens a port-forward to the object store. Each request carries an audit
@@ -249,6 +249,12 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      installer patch of the atelet DaemonSet (a ConfigMap with `ca.crt` and `SSL_CERT_DIR`). The patch is not
      written and is not tested on a cluster. Tracked in the follow-up issue that main opens
      ("needs main"); the install doc has the manual steps.
+   - **Upgrade.** An existing Substrate install re-hashes every actor template (the rewritten image is in the hash).
+     The render fails when the values already set `imageSource.podSelector`, `imageSource.cidrs`, `imageMirrors` or
+     `imageRegistry`: set `imageCache.enabled=false` to keep them. The hook Job fails, and does not regenerate, when
+     the kept TLS Secret does not match the DNS names (a new namespace or cluster domain) or has expired. Delete the
+     Secret to make a new one. A new certificate needs a restart of the cache pod.
+   - **Zot.** The config sets `http.compat: [docker2s2]`: without it Zot refuses Docker media types.
    - **Open: not proven on a cluster.** The Zot sync configuration has not run against a live Zot, and the kind
      proof (an actor starts with atelet internet egress denied) is not done.
    - **Air gap.** The operator turns the cache off (`imageCache.enabled=false`) and sets `imageMirrors` (a map from

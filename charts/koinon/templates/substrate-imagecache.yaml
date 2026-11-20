@@ -27,7 +27,7 @@ No credential reaches a sandbox or a worker pod: the cache holds none (public up
 {{- end }}
 {{- $conf := dict "distSpecVersion" "1.1.0"
     "storage" (dict "rootDirectory" "/var/lib/zot" "gc" true "gcDelay" "1h" "gcInterval" "6h")
-    "http" (dict "address" "0.0.0.0" "port" (toString $c.port) "tls" (dict "cert" "/etc/zot/tls/tls.crt" "key" "/etc/zot/tls/tls.key") "accessControl" (dict "repositories" (dict "**" (dict "anonymousPolicy" (list "read") "defaultPolicy" (list)))))
+    "http" (dict "address" "0.0.0.0" "port" (toString $c.port) "compat" (list "docker2s2") "tls" (dict "cert" "/etc/zot/tls/tls.crt" "key" "/etc/zot/tls/tls.key") "accessControl" (dict "repositories" (dict "**" (dict "anonymousPolicy" (list "read") "defaultPolicy" (list)))))
     "log" (dict "level" "info")
     "extensions" (dict "sync" (dict "enable" true "registries" $registries)) }}
 apiVersion: v1
@@ -207,18 +207,24 @@ spec:
             cidr: {{ . | quote }}
         {{- end }}
         {{- else }}
+        {{- $v4 := list }}{{- $v6 := list }}
+        {{- range $c.egress.exceptCIDRs }}{{ if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}{{ end }}
         - ipBlock:
             cidr: 0.0.0.0/0
+            {{- with $v4 }}
             except:
-              {{- range $c.egress.exceptCIDRs }}{{ if not (contains ":" .) }}
+              {{- range . }}
               - {{ . | quote }}
-              {{- end }}{{ end }}
+              {{- end }}
+            {{- end }}
         - ipBlock:
             cidr: ::/0
+            {{- with $v6 }}
             except:
-              {{- range $c.egress.exceptCIDRs }}{{ if contains ":" . }}
+              {{- range . }}
               - {{ . | quote }}
-              {{- end }}{{ end }}
+              {{- end }}
+            {{- end }}
         {{- end }}
       ports:
         - {port: 443, protocol: TCP}
