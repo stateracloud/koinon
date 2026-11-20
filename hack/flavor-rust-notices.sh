@@ -35,7 +35,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-# shellcheck source=versions.env
+# shellcheck source=/dev/null
 . hack/versions.env
 
 harness_dir=harnesses/opencode
