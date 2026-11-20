@@ -931,6 +931,36 @@ execution:
       # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
       # or database outside the cluster.
       extraEgress: []
+    # Resource limits of the worker namespace (issue 1161; the intent of old issues 821 to 823). The chart
+    # creates the namespace, so it also creates the LimitRange and the ResourceQuota there (the sandbox
+    # LimitRange of the OpenShell driver is made by the reconciler instead). The LimitRange gives a container
+    # that has no requests or limits the defaults below, so a worker pod is never BestEffort. The ResourceQuota
+    # caps the total of the namespace: a pod that goes over it is refused at admission.
+    # A worker pod hosts many sandboxes in its own cgroup, so size the pool for real: set
+    # workerPool.spec.template.resources with BOTH requests and limits. A pod that sets only requests above the
+    # default limit is refused by the API server. The quota counts the old and the new pod during a rollout:
+    # keep room for replicas plus the surge. The defaults suit a small pool, not a production pool.
+    # To change a value, set its key. To remove one key, set it to null (`default: null`): Helm merges an empty
+    # map `{}` with the defaults and keeps them. The render fails when the quota names a limit or request that no
+    # LimitRange default covers (every unsized pod would be refused). Quote big numbers ("1000000").
+    workerLimits:
+      enabled: true
+      limitRange:
+        defaultRequest:
+          cpu: 500m
+          memory: 1Gi
+        default:
+          cpu: "8"
+          memory: 16Gi
+        # Optional per-container ceiling. Empty: none.
+        max: {}
+      quota:
+        hard:
+          pods: "20"
+          requests.cpu: "64"
+          requests.memory: 128Gi
+          limits.cpu: "128"
+          limits.memory: 256Gi
     # The default WorkerPool (ate.dev/v1): one shared pool per sandbox class (D6). Off by default: ate-setup
     # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
     # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class

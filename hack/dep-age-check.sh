@@ -156,12 +156,13 @@ check_npm() { # check_npm <package> <version>
 	report "npm $pkg $ver" "$([[ -n $t ]] && age_days "$t" || echo unknown)" "registry.npmjs.org ${t:-no answer}"
 }
 
-# check_url <url>: GitHub release assets, raw.githubusercontent.com tags and npm tarballs.
+# check_url <url>: GitHub release assets, raw.githubusercontent.com tags (plain "v1.2.3" and a
+# project-prefixed tag such as Bun's "bun-v1.4.4") and npm tarballs.
 check_url() {
 	local url=$1 m
 	if [[ $url =~ ^https://github\.com/([^/]+/[^/]+)/releases/download/([^/]+)/ ]]; then
 		check_github "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-	elif [[ $url =~ ^https://raw\.githubusercontent\.com/([^/]+/[^/]+)/(v?[0-9][^/]*)/ ]]; then
+	elif [[ $url =~ ^https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([A-Za-z0-9]*-?v?[0-9][^/]*)/ ]]; then
 		check_github "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 	elif [[ $url =~ ^https://registry\.npmjs\.org/(.+)/-/[^/]+-([0-9][^/]*)\.tgz$ ]]; then
 		m=${BASH_REMATCH[1]}
@@ -496,6 +497,7 @@ tool_repo() {
 	BUILDX) echo "docker/buildx" ;;
 	ATE_ENV) echo "agent-substrate/env" ;; # a commit pin: dated by the commit's date
 	GVISOR) echo "google/gvisor" ;; # tag release-<version> (issue 1157)
+	CARGO_ABOUT) echo "EmbarkStudios/cargo-about" ;; # #63
 	esac
 }
 while IFS=$'\t' read -r file line; do
@@ -515,6 +517,7 @@ while IFS=$'\t' read -r file line; do
 			prefix=v
 			[[ $ver == v* || $ver =~ ^[0-9a-f]{40}$ ]] && prefix=
 			[[ $tool == GVISOR ]] && prefix=release-
+			[[ $tool == CARGO_ABOUT ]] && prefix= # cargo-about tags its releases "0.9.3", not "v0.9.3" (#63)
 			once "pin $repo $prefix$ver" && check_github "$repo" "$prefix$ver"
 		else
 			# Fail closed: a tool whose release cannot be dated would skip the cooldown (ADR 0079).
