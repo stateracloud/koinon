@@ -314,7 +314,7 @@ func validUUID(s string) bool {
 			if c != '-' {
 				return false
 			}
-		case !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'):
+		case (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F'):
 			return false
 		}
 	}
