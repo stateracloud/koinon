@@ -63,7 +63,9 @@ type config struct {
 	// so koinon-gateway mounts no LLM provider key (ADR 0097 decision 5). Empty: they share the provider keys Secret.
 	mcpKeysSecret string
 	mcpKeysDir    string
-	kekDir        string
+	// mcpSealed: koinon-gateway serves every MCP path, so the reconciler may serve sealed credentials.
+	mcpSealed bool
+	kekDir    string
 	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
 	kekWrapping     wrapping.Config
 	keySettle       time.Duration

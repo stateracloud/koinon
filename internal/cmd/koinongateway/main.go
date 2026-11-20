@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/usagewire"
@@ -208,10 +209,20 @@ func run(ctx context.Context, cfg config) error {
 		}
 		defer pool.Close()
 		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
+		// The pod reports the formats it reads, so koinon-api seals a credential to the gateway key only when
+		// every gateway pod opens it (ADR 0097 decision 12.5 step 1). A pod without a key reads none.
+		rep := formatgate.NewReporter(pool, formatgate.Gateway)
+		if cfg.recipientKeyDir == "" {
+			rep.Reads = nil
+		}
+		rep.Log = func(msg string, err error) { log.Warn(msg, "error", err) }
+		go rep.Run(ctx)
 		if cfg.recipientKeyDir != "" {
 			if keys, err = startKeyLoader(ctx, cfg, pool, reg, log); err != nil {
 				return err
 			}
+			// Sealed MCP credentials (mcpv2- files) open with these keys; a refused one is counted.
+			gopts.Credentials = mcpgateway.StaticCredentials{Keys: keys.Keyring, OnOpenFailure: keys.CountFailure}
 		}
 	}
 	gw := mcpgateway.New(gopts)

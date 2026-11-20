@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -126,6 +127,12 @@ func serve(ctx context.Context, cfg config) error {
 	// Also not ready while the schema is outside the goose range this build supports (ADR 0085).
 	gate := schemagate.New(pool, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
 	safego.Go(ctx, log, "schema-gate", gate.Run)
+	// Every pod reports the formats it reads, standby pods too (ADR 0097 decision 12.5 step 1).
+	safego.Go(ctx, log, "format-report", func(ctx context.Context) {
+		rep := formatgate.NewReporter(pool, formatgate.Reconciler)
+		rep.Log = func(msg string, err error) { log.Warn(msg, "error", err) }
+		rep.Run(ctx)
+	})
 	if cfg.healthAddr != "" {
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -241,6 +248,7 @@ func serve(ctx context.Context, cfg config) error {
 			ProviderKeyDir:      cfg.providerKeysDir,
 			MCPKeys:             mcpKeyStore(kube, cfg),
 			MCPKeyDir:           cfg.mcpKeysDir,
+			MCPSealed:           cfg.mcpSealed,
 			URLPolicy:           urlPolicy,
 			ProviderKeySettle:   cfg.keySettle,
 			Harnesses:           cfg.harnesses(),

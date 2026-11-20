@@ -33,6 +33,10 @@ data:
       # The MCP credential files and CA bundles go to a Secret of their own, so koinon-gateway mounts no provider key.
       mcpKeysSecret: {{ include "koinon.gatewayMCPKeysName" . }}
       mcpKeysDir: {{ include "koinon.gatewayMCPKeysDir" . }}
+      {{- if include "koinon.mcpKoinon" . }}
+      # koinon-gateway opens sealed MCP credentials; with agentgateway the reconciler refuses them.
+      mcpSealed: true
+      {{- end }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.
       name: {{ include "koinon.componentName" (list . "gateway") }}

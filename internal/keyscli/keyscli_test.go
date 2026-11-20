@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/keyscli"
@@ -387,6 +388,40 @@ var _ = Describe("koinon-api keys", func() {
 		created, err = keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}.Ensure(ctx, now, used)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeTrue())
+	})
+
+	It("skips a v2 MCP credential: it counts no KEK use, is not an envelope for AnyEnvelope, and rewrap leaves it as it is (ADR 0097 decision 12)", func(ctx SpecContext) {
+		gk, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gatewaykeys.Insert(ctx, pool, gk.Public())).To(Succeed())
+		_, err = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Pending, gatewaykeys.Active)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx SpecContext) {
+			_, _ = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Active, gatewaykeys.Retiring)
+			_, _ = gatewaykeys.Move(ctx, pool, gk.ID(), gatewaykeys.Retiring, gatewaykeys.Retired)
+		})
+		svc := mcpservers.New(pool, ring(ctx), nil).WithURLPolicy(catalog.URLPolicy{Namespace: ns}).WithRecipient(activeRecipient{gk.Public()})
+		s, err := svc.Create(ctx, org, audit.User(user), user, mcpservers.Input{
+			Name: pgtest.Uniq("m"), URL: "https://mcp.example.com/mcp", CredentialPrefix: "Bearer ", CredentialValue: "fake-mcp-token",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var id pgtype.UUID
+		Expect(id.Scan(s.ID)).To(Succeed())
+		var before []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, id).Scan(&before)).To(Succeed())
+		Expect(secretstore.EnvelopeFormat(before)).To(Equal(secretstore.FormatV2))
+
+		for _, n := range usage(ctx) {
+			Expect(n).To(BeZero(), "a v2 value is sealed to no KEK")
+		}
+		used, err := keyscli.AnyEnvelope(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(used).To(BeFalse())
+
+		Expect(tool.Rewrap(ctx)).To(Succeed())
+		var after []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, id).Scan(&after)).To(Succeed())
+		Expect(after).To(Equal(before))
 	})
 
 	It("cannot change a key set it only reads from a directory", func(ctx SpecContext) {
@@ -1079,3 +1114,10 @@ var _ = Describe("koinon-api keys", func() {
 		})
 	})
 })
+
+// activeRecipient is a fixed gateway public key, the source koinon-api seals to.
+type activeRecipient struct {
+	pub secretstore.RecipientPublicKey
+}
+
+func (a activeRecipient) Current() (secretstore.RecipientPublicKey, error) { return a.pub, nil }

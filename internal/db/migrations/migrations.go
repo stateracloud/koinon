@@ -127,6 +127,9 @@ var gatewayGrants = []string{
 	`GRANT SELECT ON gateway_recipient_keys, install_identity, kek_bound_only TO ` + GatewayRole,
 	`GRANT SELECT, INSERT ON gateway_recipient_key_loads TO ` + GatewayRole,
 	`GRANT UPDATE (loaded_at) ON gateway_recipient_key_loads TO ` + GatewayRole,
+	// Its report of the formats it reads (internal/formatgate): one row per pod, refreshed on a timer.
+	`GRANT SELECT, INSERT ON component_reports TO ` + GatewayRole,
+	`GRANT UPDATE (reads, reported_at) ON component_reports TO ` + GatewayRole,
 }
 
 // GatewayKeyAdminRole is the NOLOGIN group role of the gateway key-admin Job's login (ADR 0097 12.3,

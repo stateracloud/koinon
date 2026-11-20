@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/sandboxres"
 )
@@ -30,6 +31,10 @@ type Settings struct {
 	// GatewayMode is the chart's gateway.mode. In kubernetes mode the gateway cannot render a
 	// per-server CA or a skipped certificate check, so the API refuses a save that sets either.
 	GatewayMode project.GatewayMode
+	// MCPRecipient, when set, is the gateway public key a stored MCP credential is sealed to (ADR 0097
+	// decision 12). Nil keeps every credential at v1. The caller sets it only when koinon-gateway serves every
+	// MCP path of the install.
+	MCPRecipient mcpservers.RecipientSource
 	// GitHubAPIURL is the base URL of the GitHub API.
 	GitHubAPIURL string
 	// WatchPoll is the backstop poll interval of WatchRun.

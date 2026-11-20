@@ -123,6 +123,9 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 		// The Kubernetes driver cannot render a per-target TLS policy (gateway.MCPTargetCA).
 		d.mcp.WithoutTargetTLS()
 	}
+	if set.MCPRecipient != nil {
+		d.mcp.WithRecipient(set.MCPRecipient)
+	}
 	d.remoteAgents = remoteagents.New(pool, d.catKeys, out.Logger).WithURLPolicy(d.urlPolicy).WithRestoreHold(d.hold)
 	if set.GatewayMode == project.GatewayKubernetes {
 		d.remoteAgents.WithoutTargetTLS()

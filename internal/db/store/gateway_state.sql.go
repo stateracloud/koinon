@@ -82,8 +82,8 @@ func (q *Queries) InsertGatewayStateRevision(ctx context.Context, arg InsertGate
 }
 
 const insertMCPCallLog = `-- name: InsertMCPCallLog :exec
-INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, duration_ms)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO mcp_call_log (org_slug, agent, target, tool, outcome, verdict, credential_kind, recipient_key_id, duration_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertMCPCallLogParams struct {
@@ -94,6 +94,7 @@ type InsertMCPCallLogParams struct {
 	Outcome        string
 	Verdict        string
 	CredentialKind string
+	RecipientKeyID string
 	DurationMs     int32
 }
 
@@ -107,6 +108,7 @@ func (q *Queries) InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogPara
 		arg.Outcome,
 		arg.Verdict,
 		arg.CredentialKind,
+		arg.RecipientKeyID,
 		arg.DurationMs,
 	)
 	return err

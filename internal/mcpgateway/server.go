@@ -277,9 +277,13 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		return refusedResult(reasonToolChanged)
 	}
 	if c, err := g.o.Credentials.Credential(ctx, t, agent); err == nil {
-		row.CredKind = c.Kind
+		row.CredKind, row.RecipientKeyID = c.Kind, c.RecipientKeyID
 	} else {
 		row.CredKind = CredentialError
+		var oe *OpenError
+		if errors.As(err, &oe) {
+			row.RecipientKeyID = oe.KeyID
+		}
 	}
 
 	// The call check is the ask tier and the request-side checks (ADR 0097 decision 5). It runs after

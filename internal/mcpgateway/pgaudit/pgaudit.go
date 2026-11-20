@@ -35,7 +35,7 @@ func (w *Writer) Record(ctx context.Context, r mcpgateway.AuditRow) error {
 	defer cancel()
 	return w.q.InsertMCPCallLog(ctx, store.InsertMCPCallLogParams{
 		OrgSlug: r.Agent.Org, Agent: r.Agent.Name, Target: r.Target, Tool: truncate(r.Tool, 256),
-		Outcome: string(r.Outcome), Verdict: truncate(r.Verdict, 1024), CredentialKind: r.CredKind,
+		Outcome: string(r.Outcome), Verdict: truncate(r.Verdict, 1024), CredentialKind: r.CredKind, RecipientKeyID: r.RecipientKeyID,
 		DurationMs: int32(min(r.Duration.Milliseconds(), 1<<31-1)), //nolint:gosec // bounded above
 	})
 }

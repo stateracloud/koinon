@@ -319,7 +319,7 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	out := map[string]int{}
 	for _, c := range Columns {
 		rows, err := t.Pool.Query(ctx, fmt.Sprintf(
-			`SELECT %[2]s->>'kek_id', count(*) FROM %[1]s WHERE %[2]s IS NOT NULL GROUP BY 1`, c.Table, c.Column))
+			`SELECT %[2]s->>'kek_id', count(*) FROM %[1]s WHERE %[2]s IS NOT NULL AND `+notV2(c.Column)+` GROUP BY 1`, c.Table, c.Column))
 		if err != nil {
 			return nil, err
 		}
@@ -416,12 +416,17 @@ func RefuseUsedID(ctx context.Context, used func(context.Context, string) (bool,
 	return nil
 }
 
-// AnyEnvelope reports whether any stored value is encrypted (so some KEK is needed to read it).
+// notV2 is the SQL condition that a stored envelope in col is not a v2 envelope (sealed to a gateway key,
+// ADR 0097 decision 12). A v2 envelope names no KEK, so no KEK query counts or lists it.
+func notV2(col string) string { return "(" + col + "->>'fmt') IS DISTINCT FROM '2'" }
+
+// AnyEnvelope reports whether any stored value is encrypted under a KEK (so some KEK is needed to read
+// it). A v2 value needs the gateway's key and no KEK.
 func AnyEnvelope(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	for _, c := range Columns {
 		var found bool
 		if err := pool.QueryRow(ctx, fmt.Sprintf(
-			`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL)`, c.Table, c.Column)).Scan(&found); err != nil {
+			`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL AND `+notV2(c.Column)+`)`, c.Table, c.Column)).Scan(&found); err != nil {
 			return false, err
 		}
 		if found {
@@ -1326,13 +1331,13 @@ type rowRef struct{ org, id string }
 func (t *Tool) rowIDs(ctx context.Context, c Column) ([]rowRef, error) {
 	if c.singleton() {
 		var found bool
-		if err := t.Pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL)`, c.Table, c.Column)).Scan(&found); err != nil || !found {
+		if err := t.Pool.QueryRow(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL AND `+notV2(c.Column)+`)`, c.Table, c.Column)).Scan(&found); err != nil || !found {
 			return nil, err
 		}
 		return []rowRef{{org: "platform", id: "platform"}}, nil
 	}
 	rows, err := t.Pool.Query(ctx, fmt.Sprintf(
-		`SELECT org_id::text, %[3]s::text FROM %[1]s WHERE %[2]s IS NOT NULL ORDER BY org_id, %[3]s`, c.Table, c.Column, c.rowKey()))
+		`SELECT org_id::text, %[3]s::text FROM %[1]s WHERE %[2]s IS NOT NULL AND `+notV2(c.Column)+` ORDER BY org_id, %[3]s`, c.Table, c.Column, c.rowKey()))
 	if err != nil {
 		return nil, err
 	}
@@ -1363,6 +1368,10 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 		}
 		if err != nil {
 			return err
+		}
+		// A v2 envelope names no KEK (ADR 0097 decision 12.2): no KEK command reads or changes it.
+		if f, ferr := secretstore.EnvelopeFormat(raw); ferr == nil && f == secretstore.FormatV2 {
+			return nil
 		}
 		var env secretstore.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {

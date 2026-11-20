@@ -2006,6 +2006,13 @@ type CodeHostPoller struct {
 	CreatedAt           pgtype.Timestamptz
 }
 
+type ComponentReport struct {
+	Component  string
+	Instance   string
+	Reads      []string
+	ReportedAt pgtype.Timestamptz
+}
+
 type Connection struct {
 	OrgID                  pgtype.UUID
 	ID                     pgtype.UUID
@@ -2338,6 +2345,7 @@ type McpCallLog struct {
 	Verdict        string
 	CredentialKind string
 	DurationMs     int32
+	RecipientKeyID string
 }
 
 type McpServer struct {

@@ -85,6 +85,8 @@ var recordedSettings = []platformSetting{
 	setting("gateway-url", kindURL),
 	setting("gateway-mcp-url", kindURL),
 	setting("gateway-mcp-check-url", kindURL),
+	setting("gateway-mcp-seal-v2", kindValue),
+	setting("compat-expect", kindValue),
 	setting("github-api-url", kindURL),
 	setting("cluster-domain", kindValue),
 

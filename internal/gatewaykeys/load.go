@@ -31,10 +31,11 @@ type Metrics struct {
 	Failures *prometheus.CounterVec // koinon_gateway_credential_open_failures_total{reason}
 }
 
-// Failure reasons of [Metrics.Failures]. Slice 3 counts the open failures; the reasons are fixed here.
+// Failure reasons of [Metrics.Failures]. The gateway counts a refused sealed credential by these reasons: no key of that ID (unknown_key), wrong bytes, binding or key (open), an envelope of a format or suite it does not know (format).
 const (
 	ReasonUnknownKey = "unknown_key"
 	ReasonOpen       = "open"
+	ReasonFormat     = "format"
 	ReasonKMS        = "kms_unreachable"
 )
 
@@ -61,7 +62,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, c := range []string{"kms", "local"} {
 		m.Custody.WithLabelValues(c).Set(0)
 	}
-	for _, r := range []string{ReasonUnknownKey, ReasonOpen, ReasonKMS} {
+	for _, r := range []string{ReasonUnknownKey, ReasonOpen, ReasonFormat, ReasonKMS} {
 		m.Failures.WithLabelValues(r).Add(0)
 	}
 	return m
@@ -229,6 +230,10 @@ func (l *Loader) logf(format string, args ...any) {
 		l.Logf(format, args...)
 	}
 }
+
+// CountFailure counts a stored credential the gateway refused, by one of the fixed Reason constants. The
+// gateway's credential source calls it.
+func (l *Loader) CountFailure(reason string) { l.failure(reason) }
 
 func (l *Loader) failure(reason string) {
 	if l.Metrics != nil {
