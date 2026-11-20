@@ -104,7 +104,15 @@ func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *re
 			r.Jobs = append(r.Jobs, o)
 		case *appsv1.Deployment:
 			r.Deployments = append(r.Deployments, o)
-		case *corev1.ConfigMap, *corev1.Secret, *corev1.ServiceAccount, *rbacv1.Role, *rbacv1.RoleBinding,
+		case *rbacv1.Role, *rbacv1.RoleBinding:
+			// A Role in another namespace (the Substrate worker namespace, issue #1162) has no
+			// namespace to land in on this cluster: the smoke suite does not apply it.
+			if ns := mustMeta(obj).GetNamespace(); ns != "" && ns != namespace {
+				r.Ignored[gvk.Kind]++
+				continue
+			}
+			r.Objects = append(r.Objects, obj)
+		case *corev1.ConfigMap, *corev1.Secret, *corev1.ServiceAccount,
 			*rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding:
 			r.Objects = append(r.Objects, obj)
 		default:
