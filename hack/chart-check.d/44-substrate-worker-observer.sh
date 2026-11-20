@@ -18,8 +18,12 @@ has "the observer is the reconciler" 'name: koinon-reconciler' "${wobs[@]}" "${w
 has "the worker namespace is configurable for the observer" 'namespace: "pools-x"' "${wobs[@]}" --set execution.substrate.workerNamespace=pools-x "${wobsT[@]}"
 obs=$(render "${wobs[@]}" "${wobsT[@]}")
 # Read-only: no verb but get, list and watch, and no wildcard.
-verbs=$(grep -E 'verbs:' <<<"$obs")
-[[ -n $verbs && -z $(grep -Ev 'verbs: \[get, list, watch\]' <<<"$verbs") ]] || fail "the worker observer must have get, list and watch only"
+nverbs=0
+while IFS= read -r line; do
+	nverbs=$((nverbs + 1))
+	[[ $line == *'verbs: [get, list, watch]' ]] || fail "the worker observer must have get, list and watch only"
+done < <(grep -E 'verbs:' <<<"$obs")
+((nverbs > 0)) || fail "the worker observer must have rules"
 if grep -Eq '\*|create|update|patch|delete|escalate|bind|impersonate' <<<"$(grep -E 'verbs:|resources:|apiGroups:' <<<"$obs")"; then fail "the worker observer must not write, bind or use a wildcard"; fi
 if grep -Eq 'secrets|pods/exec|pods/log|pods/attach|pods/portforward|pods/proxy|pods/ephemeralcontainers' <<<"$obs"; then fail "the worker observer must not read Secrets or reach pod subresources"; fi
 has "the observer reads pods and events" 'resources: \[pods, events\]' "${wobs[@]}" "${wobsT[@]}"
