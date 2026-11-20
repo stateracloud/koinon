@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -41,6 +42,10 @@ type keysOptions struct {
 	agents []string
 	// wrapping is how the KEKs are wrapped; zero is the default local Secret-held KEK.
 	wrapping wrapping.Config
+	// org, dryRun, toV1 and compatExpect are the flags of seal-mcp.
+	org          string
+	dryRun, toV1 bool
+	compatExpect string
 }
 
 // prompterFor decides whether a keys command may ask the person (cli.PrompterFor); tests replace it.
@@ -117,6 +122,12 @@ func newKeysCommand() *cobra.Command {
 	newRepos.Flags().StringSliceVar(&o.agents, "agent", nil, "an agent ID (repeat it, or separate IDs with commas)")
 	newRepos.MarkFlagsMutuallyExclusive("all", "agent")
 	newRepos.MarkFlagsOneRequired("all", "agent")
+	sealMCP := confirmed(sub("seal-mcp", "Seal every stored v1 MCP credential to the active gateway recipient key (envelope v2); idempotent, resumable, safe to rerun; run it with --dry-run first (ADR 0097 12.5 step 2)", cobra.NoArgs, true))
+	sealMCP.Flags().StringVar(&o.org, "org", "", "move only the credentials of this org (a UUID)")
+	sealMCP.Flags().BoolVar(&o.dryRun, "dry-run", false, "open every credential that would move and report the counts; write nothing")
+	sealMCP.Flags().BoolVar(&o.toV1, "to-v1", false, "the reverse move: seal v2 credentials to the KEK again (needs the private gateway key; refuses on a KMS or OpenBao install)")
+	sealMCP.Flags().StringVar(&o.compatExpect, "compat-expect", "", "the pods of each component the chart runs, as api=2,reconciler=1,gateway=2: the write gate that keeps v2 unsealed while a pod cannot read it")
+	cli.EnvAlias(sealMCP, "compat-expect", "KOINON_COMPAT_EXPECT")
 	add.Flags().StringVar(&o.id, "id", "", "the new KEK's ID (default kek-YYYYMMDD-xxxx)")
 	keys.AddCommand(
 		sub("status", "List the KEKs, the active one and the values each wraps", cobra.NoArgs, true),
@@ -127,6 +138,7 @@ func newKeysCommand() *cobra.Command {
 		started(confirmed(sub("reencrypt", "Seal every value again under a new data key (the compromise path)", cobra.NoArgs, true))),
 		confirmed(sub("forget [ID]", "Give up on a lost KEK: mark every value it sealed as lost and start new home repositories (on a terminal, pick it from a list without ID)", oneOrPrompt, true)),
 		newRepos,
+		sealMCP,
 		sub("verify", "Open every sealed value with the key set and report what does not open; read-only (the check after a restore)", cobra.NoArgs, true),
 		sub("compare", "Read the output of keys status of another install from standard input and check that this key set holds its KEKs with the same fingerprints and the same active KEK; only IDs and fingerprints cross (the check before and after a restore into a fresh namespace)", cobra.NoArgs, false),
 		sub("export", "Print the key set as a Secret manifest, the KEK backup (redirect it into a file; restore it with import)", cobra.NoArgs, false),
@@ -187,6 +199,16 @@ func runKeys(ctx context.Context, o keysOptions, cmd string, rest []string, out 
 		tool.UsedID = func(ctx context.Context, id string) (bool, error) { return kekIDUsedYet(ctx, pool, id) }
 	}
 	switch cmd {
+	case "seal-mcp":
+		if !o.toV1 && !o.dryRun {
+			expect, err := formatgate.ParseExpect(o.compatExpect)
+			if err != nil {
+				return fmt.Errorf("--compat-expect: %w", err)
+			}
+			gate := formatgate.Gate{DB: pool, Expect: expect}
+			tool.SealGate = func(ctx context.Context) error { return gate.Ready(ctx, formatgate.MCPCredentialV2) }
+		}
+		return tool.SealMCP(ctx, keyscli.SealMCPOptions{Org: o.org, DryRun: o.dryRun, ToV1: o.toV1})
 	case "status":
 		return tool.Status(ctx)
 	case "add":

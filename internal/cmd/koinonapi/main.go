@@ -1119,6 +1119,8 @@ type migrateOptions struct {
 	requireWriter bool
 	// waitGateway makes --grants-only wait for the gateway group role too (gateway.mcp.driver=koinon).
 	waitGateway bool
+	// requireMCPV2 refuses the migration while a stored MCP credential is still envelope v1.
+	requireMCPV2 bool
 }
 
 // migrate applies pending migrations, first waiting up to wait for the database: on a fresh install
@@ -1159,6 +1161,11 @@ func migrate(ctx context.Context, dsn string, wait time.Duration, o migrateOptio
 			return fmt.Errorf("%w: create the role and add koinon-api's login role to it "+
 				"("+project.InstallAuditDocURL+"), then run the migration again; no migration was applied; "+
 				"without it koinon-api records no install audit event", err)
+		}
+	}
+	if o.requireMCPV2 {
+		if err := checkNoV1MCPCredentials(ctx, db); err != nil {
+			return err
 		}
 	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
