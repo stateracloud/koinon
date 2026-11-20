@@ -792,6 +792,12 @@ execution:
     # The Substrate controller (ate-controller) applies the pool Deployments here. Must differ from
     # namespace.
     workerNamespace: ate-workers
+    # Read-only access of the Koinon reconciler to the worker namespace (templates/substrate-observer.yaml;
+    # issue #1162): get, list and watch on pods, events, Deployments, ReplicaSets and WorkerPools, so
+    # the operator can say why a sandbox does not start. No write, no Secret, no exec or log. It
+    # replaces the OpenShell pod observer, which the substrate driver cannot use.
+    workerObserver:
+      enabled: true
     # Admission (ADR 0120 section 6; native ValidatingAdmissionPolicy, never Kyverno). Worker namespace:
     # only the ReplicaSet controller creates pods, and only for a ReplicaSet (a pool Deployment that the
     # Substrate controller applied); no hostNetwork; hostPath only from allowedHostPaths; no volume

@@ -759,6 +759,7 @@
             "gatewayClientNamespaceSelector": {"type": "object"},
             "namespace": {"$ref": "#/definitions/nonEmpty"},
             "workerNamespace": {"$ref": "#/definitions/nonEmpty"},
+            "workerObserver": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
             "workerPolicy": {
               "type": "object",
               "additionalProperties": false,

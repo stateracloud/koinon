@@ -36,6 +36,10 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(fence.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
 		namespaces := helmRenderWith(ctx, values, showOnly("templates/substrate-workernamespace.yaml")...)
 		Expect(namespaces.Ignored).To(HaveKeyWithValue("Namespace", 1))
+		// The read-only observer access of the reconciler to the worker namespace (issue #1162).
+		observer := helmRenderWith(ctx, values, showOnly("templates/substrate-observer.yaml")...)
+		Expect(observer.Ignored).To(HaveKeyWithValue("Role", 1))
+		Expect(observer.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
 	})
 
 	// The default image cache (issue #1170): atelet's one image source is a Zot pull-through registry in

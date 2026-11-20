@@ -226,6 +226,10 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      annotation. No identity may do it in the worker namespace.
    - **Fence.** The control-plane namespace has one default-deny egress policy and per-app allow rules, so a pod with
      no rule has no egress.
+   - **Observer.** The Koinon reconciler may read the worker namespace, to say why a sandbox does not start: a
+     `Role` and `RoleBinding` (`substrate-observer.yaml`, issue #1162) with `get`, `list` and `watch` on pods, events,
+     Deployments, ReplicaSets and WorkerPools. No write, no Secret and no pod subresource. It replaces the OpenShell
+     pod observer ([0078](0078-sandbox-observer.md)) for this driver.
 9. **Amendment (issue #1170): the default image cache.**
    - **Decision.** With the Substrate driver the chart installs a Zot pull-through registry in the release namespace
      (`execution.substrate.imageCache`, on by default). It is the one image source of atelet. Only the cache has
