@@ -27,7 +27,7 @@ const (
 var ErrNoActiveGatewayKey = errors.New("no gateway recipient key is active: run the gateway key Job (init, then activate) first")
 
 // ErrToV1Unavailable means this install cannot open a v2 credential from this process.
-var ErrToV1Unavailable = errors.New("--to-v1 needs the private gateway key, which this identity cannot read: on a KMS or OpenBao install only koinon-gateway unwraps it, so a v2 credential cannot be moved back from here; set the credential again in the UI or API instead")
+var ErrToV1Unavailable = errors.New("--to-v1 needs the private gateway key, and this command has no keyring for it (on a KMS or OpenBao install only koinon-gateway can unwrap the key): a v2 credential cannot be moved back from here; set the credential again in the UI or API instead")
 
 // SealMCPOptions chooses what seal-mcp does.
 type SealMCPOptions struct {

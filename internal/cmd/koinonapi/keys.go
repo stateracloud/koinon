@@ -125,7 +125,7 @@ func newKeysCommand() *cobra.Command {
 	sealMCP := confirmed(sub("seal-mcp", "Seal every stored v1 MCP credential to the active gateway recipient key (envelope v2); idempotent, resumable, safe to rerun; run it with --dry-run first (ADR 0097 12.5 step 2)", cobra.NoArgs, true))
 	sealMCP.Flags().StringVar(&o.org, "org", "", "move only the credentials of this org (a UUID)")
 	sealMCP.Flags().BoolVar(&o.dryRun, "dry-run", false, "open every credential that would move and report the counts; write nothing")
-	sealMCP.Flags().BoolVar(&o.toV1, "to-v1", false, "the reverse move: seal v2 credentials to the KEK again (needs the private gateway key; refuses on a KMS or OpenBao install)")
+	sealMCP.Flags().BoolVar(&o.toV1, "to-v1", false, "the reverse move: seal v2 credentials to the KEK again (needs the private gateway key; this command has none on any backend, so it refuses)")
 	sealMCP.Flags().StringVar(&o.compatExpect, "compat-expect", "", "the pods of each component the chart runs, as api=2,reconciler=1,gateway=2: the write gate that keeps v2 unsealed while a pod cannot read it")
 	cli.EnvAlias(sealMCP, "compat-expect", "KOINON_COMPAT_EXPECT")
 	add.Flags().StringVar(&o.id, "id", "", "the new KEK's ID (default kek-YYYYMMDD-xxxx)")

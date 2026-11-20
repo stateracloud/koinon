@@ -1715,6 +1715,7 @@ dict root, sa (the gateway service account), rk (values gateway.mcp.koinon.recip
 {{- define "koinon.gwResealPod" -}}
 {{- $ := .root -}}
 {{- $rk := .rk -}}
+{{- if ne $.Values.postgres.mode "cnpg" }}{{- $_ := required "postgres.external.keys.reseal is required with gateway.mcp.koinon.recipientKey.reseal.enabled" $.Values.postgres.external.keys.reseal }}{{- end }}
 metadata:
   labels:
     {{- include "koinon.labels" (list $ "gateway-reseal") | nindent 4 }}

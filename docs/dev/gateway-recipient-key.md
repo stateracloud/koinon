@@ -78,11 +78,15 @@ After a rotation the new key is active. Credentials sealed to the old key stay r
 cannot retire while one names it. To move them, set
 `gateway.mcp.koinon.recipientKey.reseal.enabled=true` and a new `reseal.rotationId`. The chart then runs the
 Job `<release>-reseal-<hash>`: `koinon-gateway keys reseal`. It runs as the gateway service account, because
-only that identity can unwrap the old private key. Its database login is `koinon_reseal`, which can read the key
+the gateway identity holds the right to unwrap the old private key. (On `local`, koinon-api can read the key Secret too.) Its database login is `koinon_reseal`, which can read the key
 table and write only the credential column of `mcp_servers`. It writes with a compare-and-swap, so a row that
 changed meanwhile is skipped and the next run takes it. Use `reseal.dryRun=true` to count first, and
 `reseal.org` to limit it to one org. When the Job reports no credential left on the old key, run the
 `retire` key action.
+
+Run the re-seal in a later upgrade than the rotation. The Job must see the new key as active. If both Jobs
+run in one upgrade, the re-seal can find the old key still active, move nothing and end. Then change
+`rotationId` to run it again. The Job has no egress except DNS, the database and the KMS.
 
 ## OpenBao policy
 
