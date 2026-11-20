@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+// Vendored excerpt of agent-substrate/substrate cmd/atecontroller/internal/controllers/workerpool_apply.go, lines 377-468,
+// at commit b34fbee742906494b5eb4f1f36987176bf8770a4 (preflight.SubstratePinnedCommit). Apache-2.0, Copyright the Substrate authors.
+// When the pin moves, fetch the same lines again and compare with charts/koinon/values.yaml execution.substrate.workerPolicy.workerShapes.
+// This file is test data, not Go source to build.
+// workerGvisorCapabilities is the fixed capability set for gVisor workers.
+// runsc's gofer maps a full-range identity in a user namespace
+// (SETUID/SETGID, plus SETFCAP: since Linux 5.12, writing a uid_map that maps
+// uid 0 needs CAP_SETFCAP over the parent user namespace, and without it the
+// gofer fails with "cannot create gofer process: fork/exec /proc/self/exe:
+// operation not permitted"), worker mounts need SYS_ADMIN, actor networking
+// needs NET_ADMIN/NET_RAW, and rootfs ownership and modes need
+// DAC_OVERRIDE/FOWNER/CHOWN.
+//
+// The sandbox's user namespace supplies its own SYS_CHROOT (gofer) and
+// SYS_PTRACE (systrap); the outer worker needs neither, nor SETPCAP. That user
+// namespace comes from runsc's modifySpecForDirectfs, which creates an
+// identity-mapped userns only while directfs is on and --network is not host.
+// Both hold with the runsc flags in cmd/ateworker-gvisor/kodata/internal_flags.json;
+// setting --directfs=false or --network=host there moves the gofer and systrap
+// back into the worker's userns, where runsc only logs that it drops the
+// missing capabilities. Since Linux 5.8, creating the 0:0 overlay whiteouts
+// does not require MKNOD.
+var workerGvisorCapabilities = []corev1.Capability{
+	"NET_ADMIN", "SYS_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE",
+	"FOWNER", "CHOWN", "NET_RAW", "SETFCAP",
+}
+
+// workerMicroVMCapabilities retains virtiofsd's eight default child
+// capabilities, plus NET_ADMIN and SYS_ADMIN for worker networking and mounts.
+// MKNOD and FSETID preserve guest device-node creation and setgid files.
+// DAC_READ_SEARCH is not granted: virtiofsd only adds it to its child set to
+// open file handles, and virtiofsdArgs in cmd/ateworker-microvm/internal/kata
+// turns file handles off. Unlike gVisor, this runtime does not need NET_RAW.
+//
+// SETPCAP stays because virtiofsd's serving child drops its bounding set with
+// PR_CAPBSET_DROP, which libcap-ng only issues while CAP_SETPCAP is effective.
+// Without it the child keeps the worker's full bounding set, and a virtiofsd
+// built against unpatched libcap-ng (>= 0.8.1) refuses to start. Granting it
+// adds nothing reachable: the worker's permitted set already equals its
+// bounding set.
+//
+// The hypervisor devices are not capabilities: they come from atelet's device
+// plugin (see maybeApplyMicroVMPodShape).
+var workerMicroVMCapabilities = []corev1.Capability{
+	"NET_ADMIN", "SYS_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE",
+	"FOWNER", "CHOWN", "MKNOD", "SETFCAP", "FSETID", "SETPCAP",
+}
+
+// workerSecurityContext returns the worker container security context for a sandbox
+// class. Neither class runs privileged; they differ in their capability set.
+// Both declare seccomp Unconfined because their sandbox child pivot_root()s,
+// which the default profile denies. An empty class defaults to gVisor.
+func workerSecurityContext(class atev1.SandboxClass) *corev1ac.SecurityContextApplyConfiguration {
+	// Both runtimes mount inside the worker — runsc pivots root and the worker
+	// remounts /sys/fs/cgroup to nest per-actor cgroups; the micro-VM worker
+	// shares /run/kata-containers and remounts /proc/sys — and the default
+	// AppArmor profile denies mount (enforced on GKE COS and Ubuntu, a no-op on
+	// nodes that do not load AppArmor). A privileged worker got this implicitly;
+	// unprivileged must request it. Replacing Unconfined with a tailored profile
+	// per runtime is a follow-up.
+	sc := corev1ac.SecurityContext().
+		WithRunAsUser(0).
+		WithRunAsGroup(0).
+		WithPrivileged(false).
+		WithAllowPrivilegeEscalation(false).
+		WithAppArmorProfile(corev1ac.AppArmorProfile().
+			WithType(corev1.AppArmorProfileTypeUnconfined))
+
+	if class == atev1.SandboxClassMicroVM {
+		// Give up the default seccomp profile so virtiofsd keeps its own sandbox,
+		// which pivot_root()s — a syscall the profile denies whatever capabilities
+		// the worker holds. The trade favors containing the guest: virtiofsd parses
+		// requests from it, so its namespaces are part of the guest-to-host
+		// boundary, while the pod-wide profile mostly confines worker, which we
+		// trust. Both guest-facing processes confine themselves anyway, virtiofsd
+		// with its own seccomp filter and eight capabilities, cloud-hypervisor with
+		// per-thread filters.
+		return sc.
+			WithCapabilities(corev1ac.Capabilities().
+				WithDrop("ALL").
+				WithAdd(workerMicroVMCapabilities...)).
+			WithSeccompProfile(corev1ac.SeccompProfile().
+				WithType(corev1.SeccompProfileTypeUnconfined))
+	}
+	// runsc's sandbox child also pivot_root()s, so it needs the same relaxation:
+	// a cluster that defaults seccomp to RuntimeDefault denies the syscall whatever
+	// capabilities the worker holds, and the sandbox then dies during startup.
+	// Declare Unconfined explicitly so the worker does not depend on the cluster
+	// leaving the profile unset.
+	return sc.
+		WithCapabilities(corev1ac.Capabilities().
+			WithDrop("ALL").
+			WithAdd(workerGvisorCapabilities...)).
+		WithSeccompProfile(corev1ac.SeccompProfile().
+			WithType(corev1.SeccompProfileTypeUnconfined))
+}

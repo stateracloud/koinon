@@ -1,0 +1,268 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+NetworkPolicies of Substrate's two namespaces (execution.driver=substrate; ADR 0120 section 2, issue
+1089). Standard networking.k8s.io/v1 only (no CNI-specific resource). A CNI that does not enforce
+NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it).
+- Worker namespace (execution.substrate.workerNamespace): every pod is covered. Egress goes to the
+  atenet-egress pods and DNS, and nowhere else. The model route is not a worker route: the gateway
+  receives an actor's traffic from atenet in the control-plane namespace
+  (gatewayClientNamespaceSelector). The worker has no Kubernetes client
+  and no route to the API server (ADR 0120 section 2.4); its identity is a PodCertificate projection,
+  not a ServiceAccount token. Ingress comes from the control-plane namespace (atelet, the router) and
+  from Koinon's namespace; worker pods do not reach each other. NetworkPolicies add up: the per-pool
+  policy that Substrate's controller writes in this namespace can allow more than this one, and no
+  admission rule guards NetworkPolicy writes here (ADR 0120 section 6; exit condition: issue 1158). An actor's traffic to the outside runs through atenet and the gateway's
+  L7 rules, not through this policy. Substrate's controller adds its own per-pool policy next to it.
+- Control-plane namespace: the policy selects the pods whose `app` label is in
+  workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
+  which would fail open for a pod that lost its label). They talk to each other and to the worker
+  namespace, resolve names, reach Koinon's gateway and API pods, and reach the Kubernetes API server on
+  workerNetworkPolicy.apiServerCIDRs, which the render requires. A pod with another `app` label is not
+  selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
+  Ingress comes from both namespaces and from Koinon's namespace.
+  The other pods of the namespace have their own list each, so no Substrate pod is unfenced: a default-deny egress policy covers every pod of the namespace (so ate-idp-server, postgres
+  and rustfs have no egress at all), and per-app policies allow bucketInitJobs (the object store Job pod, selected by Job name),
+  imageSource (the node agent's one image source) and apiOnlyApps (k8s-credential-provider: DNS and the API
+  server only). Their ingress stays Substrate's own.
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
+{{- $s := .Values.execution.substrate }}
+{{- $np := $s.workerNetworkPolicy }}
+{{- $ns := $s.namespace }}
+{{- $wns := $s.workerNamespace }}
+{{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
+{{- if not $np.apiServerCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the policy would cut the Substrate control plane off from the Kubernetes API server. Name the API server's CIDRs (kubectl get endpoints kubernetes -n default), or set workerNetworkPolicy.enabled=false and fence the namespaces yourself." }}{{- end }}
+{{- if not $np.controlPlaneApps }}{{- fail "execution.substrate.workerNetworkPolicy.controlPlaneApps is empty: the control-plane policy would select no pod" }}{{- end }}
+{{- if not (or $np.atenetEgressSelector.matchLabels $np.atenetEgressSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let workers reach every pod in the control-plane namespace" }}{{- end }}
+{{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $ns $s.gatewayClientNamespaceSelector }}
+{{- if ne $gwNS $ns }}{{- fail (printf "execution.substrate.gatewayClientNamespaceSelector names namespace %q but execution.substrate.namespace is %q: the gateway would drop the worker traffic" $gwNS $ns) }}{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-workers
+  namespace: {{ $wns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns | quote }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+  egress:
+    - to:
+        # atenet-egress carries an actor's traffic out.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns | quote }}
+          podSelector:
+            {{- toYaml $np.atenetEgressSelector | nindent 12 }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" . }}-substrate-control
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml $np.controlPlaneApps | nindent 10 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $wns | quote }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+  egress:
+    - to:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $wns | quote }}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database.
+        {{- range (list "gateway" "api") }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list $ .) | nindent 14 }}
+        {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+{{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+---
+# The one default-deny egress policy of the control-plane namespace: every pod of the namespace has no egress unless a
+# policy below allows it per app (control plane, API-only pods, the bucket-init Job, the image source). A pod that no
+# list names, such as a pod of a later Substrate version, has no egress at all (fail closed). The pods that call
+# nothing (ate-idp-server, postgres, rustfs) need no other policy. Their ingress is Substrate's own
+# (ate-system-networkpolicies.yaml: default-deny-ingress at line 38, ate-idp-server at 168, postgres at 97; rustfs at
+# kind/rustfs.yaml:140), so this policy lists no Ingress type: a second ingress rule here would only add to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-default-deny-egress
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress: []
+{{- with $np.apiOnlyApps }}
+---
+# Pods that call the Kubernetes API server and nothing else: DNS and the API server CIDRs. Their ingress is
+# Substrate's own (k8s-credential-provider admits the egress gateway only; ate-system-networkpolicies.yaml lines 15-35
+# and 236-241), so this policy lists no Ingress type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-api-only
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml . | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        {{- range $np.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+{{- end }}
+{{- with $np.bucketInitJobs }}
+---
+# The bucket-init Job pod of the object store has no `app` label, so the Job name selects it. It needs DNS and the
+# object store S3 port, and nothing else (kind/rustfs.yaml:93-133 creates a bucket; the object store admits it at
+# kind/rustfs.yaml:140). Its ingress is Substrate's own, so this policy lists no Ingress type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-bucket-init
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: batch.kubernetes.io/job-name
+        operator: In
+        values:
+          {{- toYaml . | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ $np.objectStoreApp | quote }}
+      ports:
+        - {port: {{ $np.objectStorePort }}, protocol: TCP}
+{{- end }}
+{{- $img := $np.imageSource | default dict }}
+{{- $imgPods := dict }}
+{{- if or (dig "podSelector" "matchLabels" dict $img) (dig "podSelector" "matchExpressions" list $img) }}{{- $imgPods = $img.podSelector }}{{- end }}
+{{- $imgCIDRs := $img.cidrs | default list }}
+{{- range $imgCIDRs }}{{- if has . (list "0.0.0.0/0" "::/0") }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource.cidrs must name the image source, not the whole internet" }}{{- end }}{{- end }}
+{{- if and $imgPods $imgCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource names one image source: set podSelector (an in-cluster cache) or cidrs, not both" }}{{- end }}
+{{- if or $imgPods $imgCIDRs }}
+---
+# The node agent pulls actor images from ONE source: a pull-through cache of the operator. Nothing else of the
+# control plane reaches an image registry. Set imageSource to an in-cluster cache (podSelector, with a namespaceSelector
+# when the cache is in another namespace) or to an operator CIDR; the port is imageSource.port. Actor image references
+# are rewritten to this source with global.registryMirrors or global.imageRegistry (the digest is kept), so a pull
+# through the cache still verifies the digest. The policy lists no Ingress type: NetworkPolicies add up. Egress rules add up too:
+# extraEgress applies to every control-plane app, atelet included, so a route opened there is open to atelet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-image-source
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml ($img.apps | default (list "atelet")) | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- if $imgPods }}
+        - podSelector:
+            {{- toYaml $img.podSelector | nindent 12 }}
+          {{- with $img.namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- else }}
+        {{- range $imgCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- end }}
+      ports:
+        - {port: {{ required "execution.substrate.workerNetworkPolicy.imageSource.port is required with an image source" $img.port }}, protocol: TCP}
+{{- end }}
+{{- end }}

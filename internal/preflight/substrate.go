@@ -89,6 +89,8 @@ var SubstrateDevices = []string{"/dev/kvm", "/dev/net/tun", "/dev/vhost-vsock", 
 type SubstrateConfig struct {
 	// Namespace is Substrate's fixed namespace (ate-system).
 	Namespace string
+	// WorkerNamespace holds the WorkerPools (execution.substrate.workerNamespace, ate-workers).
+	WorkerNamespace string
 	// APIServerDeployment carries the release version in its image tag.
 	APIServerDeployment string
 	// RouterDeployment runs the router whose SPIFFE allow-list is checked.
@@ -111,6 +113,9 @@ type SubstrateConfig struct {
 func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	if s.Namespace == "" {
 		s.Namespace = "ate-system"
+	}
+	if s.WorkerNamespace == "" {
+		s.WorkerNamespace = "ate-workers"
 	}
 	if s.APIServerDeployment == "" {
 		s.APIServerDeployment = "ate-api-server"
@@ -427,7 +432,7 @@ func (c *Checker) checkWorkerPools(ctx context.Context) []Result {
 			results = append(results, Result{Check: check, Status: Fail, Message: fmt.Sprintf("reading the WorkerPool CRD: %v", err), Fix: substrateInstallDoc})
 			continue
 		}
-		results = append(results, c.checkWorkerPool(ctx, check, sub.Namespace, sub.WorkerPools[tier], crd))
+		results = append(results, c.checkWorkerPool(ctx, check, sub.WorkerNamespace, sub.WorkerPools[tier], crd))
 	}
 	return results
 }

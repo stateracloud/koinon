@@ -20,7 +20,8 @@ The root AGENTS.md applies too; this file adds rules for `charts/`.
   key, an RBAC rule) is covered by `make test-chart-smoke`; extend it when you add a component or a
   startup input (old issue 284).
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): `make test-admission`.
-  Its OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`. The worker-pod
-  policy specs (label `substrate`, ADR 0120 section 6) run in `make test-admission` and skip until the
-  chart renders the worker policy (#1089).
+  Its OpenShell cases run on kind: `make dev-kind-up`, then `make test-escape-kind`.
+- Admission policy of the Substrate driver's two namespaces (`charts/koinon/templates/substrate-policy.yaml`, ADR 0120 section 6): the
+  `escape admission substrate` specs in `make test-admission`. A change to it needs an assertion in
+  `hack/chart-check.d/44-substrate-worker.sh`.
 - Details: `docs/dev/ci.md#chart-and-admission-tests`.

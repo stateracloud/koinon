@@ -1,0 +1,55 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The default shared WorkerPool of the Substrate driver (ate.dev/v1; D6: shared pools on vm). ate-setup
+creates no pool, and the preflight needs one per sandbox class. Off by default. The generated spec
+follows Substrate v1.0.0's WorkerPoolSpec: workerImage (required), replicas, sandboxClasses (exactly
+one entry, immutable) and spec.template.{nodeSelector,tolerations,serviceAccountName}. The spec has no
+imagePullSecrets: pull access is a ServiceAccount that carries them (koinon.imagePullSecrets, ADR 0061;
+the Secrets must exist in the worker namespace). The chart makes that ServiceAccount in the worker namespace (execution.substrate.workerNamespace),
+named like the pool plus -worker, unless the values name one; it never mounts an API token (automountServiceAccountToken
+false). A ServiceAccount that the values name must set that field itself. workerPool.spec is merged over the generated spec.
+The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer identity writes it
+(substrate-policy.yaml, workerPolicy.installerIdentities).
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPool.enabled }}
+{{- $s := .Values.execution.substrate }}
+{{- $p := $s.workerPool }}
+{{- if eq $s.namespace $s.workerNamespace }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
+{{- $name := default (printf "koinon-%s" $p.sandboxClass) $p.name }}
+{{- $userSA := dig "template" "serviceAccountName" "" ($p.spec | default dict) }}
+{{- if not $p.workerImage }}{{- fail "execution.substrate.workerPool.workerImage is required when the WorkerPool is enabled (the worker image of the sandbox class, for example <registry>/ateworker-gvisor:v1.0.0)" }}{{- end }}
+{{- $pull := (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}
+{{- $sa := default $userSA $p.serviceAccountName }}
+{{- if not $sa }}{{- $sa = printf "%s-worker" $name }}{{- end }}
+{{- $tmpl := dict }}
+{{- with $p.nodeSelector }}{{- $_ := set $tmpl "nodeSelector" . }}{{- end }}
+{{- with $p.tolerations }}{{- $_ := set $tmpl "tolerations" . }}{{- end }}
+{{- with $sa }}{{- $_ := set $tmpl "serviceAccountName" . }}{{- end }}
+{{- $spec := dict "workerImage" (include "koinon.imageRef" (list . $p.workerImage)) "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
+{{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $s.workerNamespace | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  {{- toYaml (mergeOverwrite $spec ($p.spec | default dict)) | nindent 2 }}
+{{- if and (not $p.serviceAccountName) (not $userSA) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa | quote }}
+  namespace: {{ $s.workerNamespace | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+# The worker has no Kubernetes client (ADR 0120 section 2.4): no API token in the pod.
+automountServiceAccountToken: false
+{{- with $pull }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

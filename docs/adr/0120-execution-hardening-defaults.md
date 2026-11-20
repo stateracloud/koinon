@@ -38,7 +38,7 @@ decisions of 2026-11-18 add three constraints:
 - D2: per-binary credential binding is lost; per-route rules in the gateway replace it.
 - D5: disk and memory snapshots exist from the start, so the design carries short-lived tokens, snapshot
   encryption, snapshot access control and a verification path from the first day.
-- D7: privileged worker pods are accepted on any node; a tainted pool is an operator option.
+- D7: worker pods with extra capabilities (not `privileged`) are accepted on any node; a tainted pool is an operator option.
 
 ## Decision
 
@@ -164,13 +164,36 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 ### 6. Admission of workers and sandbox pods (D7)
 
 1. Admission policy is native `ValidatingAdmissionPolicy` only. Never Kyverno. No CNI-specific feature.
-2. **Worker pods run privileged, and Koinon accepts that on any node** (D7). The pods of the
-   Substrate worker and node agent need root, `SYS_ADMIN`, `NET_ADMIN` and hostPath mounts, and a
-   `privileged` Pod Security namespace. That namespace holds nothing else.
-3. Koinon's policies for these namespaces: worker and node-agent pods only in the Substrate namespace
-   and only from the controller identity; image digests pinned; no `hostNetwork`; no hostPath outside
-   the documented set; ephemeral containers and `pods/exec` into workers denied; the worker pool,
-   sandbox config and storage driver objects writable only by the installer identity.
+2. **Worker pods run with extra capabilities, and Koinon accepts that on any node** (D7). The pods of the
+   Substrate worker need root, `SYS_ADMIN`, `NET_ADMIN` and hostPath mounts, and a `privileged` Pod
+   Security namespace. They run in their own namespace (the chart value `execution.substrate.workerNamespace`,
+   default `ate-workers`), which the chart creates. That namespace holds nothing else. Substrate's
+   control plane and the node agent (atelet) stay in `ate-system`. A WorkerPool in another namespace
+   needs no Substrate change (checked on kind with Substrate v1.0.0).
+3. Koinon's policies, as native `ValidatingAdmissionPolicy` objects, one rule set for each namespace:
+   - **Worker namespace.** Only the ReplicaSet controller creates pods, and only for a ReplicaSet
+     (the Substrate controller applies the pool Deployments). Image digests pinned. No `hostNetwork`,
+     `hostPID` or `hostIPC`. hostPath only from a short list: `/dev/kvm`, `/dev/net/tun`,
+     `/dev/vhost-vsock`, `/dev/vhost-net` and `/var/lib/ate`. Volumes of the kinds hostPath, emptyDir,
+     configMap, downwardAPI and projected only (no PVC, CSI, ephemeral or network volume). No projected
+     `serviceAccountToken` source, and `automountServiceAccountToken` not true: the worker has no
+     Kubernetes client (section 2.4). A rule "must be false" would refuse the pool pods, which leave
+     the field unset, so the rule is "not true". The chart always names a worker ServiceAccount that sets
+     it false unless the values name a ServiceAccount (that one must set it). A container may add
+     capabilities, and use Unconfined seccomp and AppArmor profiles, only in the exact shape that Substrate sets
+     (amendment 6.8). `privileged`, an unmasked `/proc` and `hostPort` are denied.
+     Ephemeral containers are denied.
+   - **Control-plane namespace.** Pods come from Kubernetes workload controllers. A pod may mount a
+     hostPath only when the DaemonSet controller creates it for a DaemonSet (a controller
+     `ownerReference`) and it runs as the ServiceAccount `atelet`, and only for the node agent's own list: the hostPath volumes of atelet's manifest in Substrate v1.0.0
+     (`/var/lib/ate`, the kubelet `plugins` and `device-plugins`, `/dev` and two GKE credential paths), which
+     is not the worker list.
+     Every other pod there gets no hostPath. Digests pinned and no `hostNetwork`, as for workers.
+   - **Both.** `pods/proxy` and `services/proxy` are denied to every identity. `pods/exec`, `attach` and
+     `portforward` are denied in the worker namespace to every identity. In the control-plane namespace only the
+     installer identities may use them, with an audit annotation (amendment 6.8). The worker pool, sandbox config and storage driver objects, and every workload kind, are
+     writable only by the installer identity and by Kubernetes' own controllers. The Substrate controller
+     applies the pool Deployments in the worker namespace only.
 4. **A tainted node pool for workers.** The `hardened` tier requires the tainted pool
    ([0075](0075-isolation-tiers.md)); for the other tiers it is an operator option. The chart documents
    it and the preflight reports whether Koinon's own pods (API, gateway, reconciler, database) can run
@@ -179,6 +202,37 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    Sandbox controller creates sandbox pods (rules on the requesting identity, with no break-glass), the
    allowed runtime classes follow the tier, `hostNetwork`, ephemeral containers and
    `io.katacontainers.*` annotations are denied, and the supervisor image is pinned.
+
+6. **Network fence.** The worker namespace has one policy for every pod: egress only to the atenet-egress
+   pods and DNS. Workers get no route to the Kubernetes API server and none to the gateway: an actor's
+   traffic reaches the gateway through atenet. NetworkPolicies add up, so the per-pool policy that
+   Substrate's controller writes can widen worker egress, and no admission rule guards it yet (exit condition: [#1158](https://github.com/stateracloud/koinon/issues/1158)). The control-plane
+   namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
+   "every pod without the worker label": a rule of the second form fails open for a pod that loses its
+   label. A pod with another label is not selected, so the list follows the Substrate manifests.
+8. **Amendment (issue #1089, fix round 2).**
+   - **Worker shape.** Substrate sets one privilege shape on the worker container (`workerpool_apply.go:377-468`):
+     user and group 0, not privileged, no privilege escalation, drop `ALL`, add the capabilities of the class,
+     seccomp and AppArmor Unconfined. The policy accepts this shape only on the container named `worker` whose
+     image is a pinned worker image. Every other container in the namespace adds nothing and is never Unconfined.
+     The namespace has no capability ceiling. A spec compares the sets with a vendored copy of the source at the
+     pinned commit and fails on a change.
+   - **One image source.** atelet reaches one image source (a pull-through cache): a pod selector for a cache in
+     the cluster, or an operator CIDR and port. Actor image references go through `global.registryMirrors` or
+     `global.imageRegistry`, with the digest kept. The mirror name is chosen once, because it is part of the actor
+     template hash. The default in-cluster cache is a separate issue.
+   - **Installer connect.** The installer identities may run `exec`, `attach` and `portforward` in the control-plane
+     namespace, because the installer opens a port-forward to the object store. Each request carries an audit
+     annotation. No identity may do it in the worker namespace.
+   - **Fence.** The control-plane namespace has one default-deny egress policy and per-app allow rules, so a pod with
+     no rule has no egress.
+7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
+   the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
+   an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
+   holds in the control-plane namespace too. Status: the staging is built
+   ([#1157](https://github.com/stateracloud/koinon/issues/1157); `substrate-install.md`). The read by atelet from
+   the cluster store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
+   DaemonSet in `ate-system` after the policies apply.
 
 ### 7. OpenShell driver profile for the window
 
@@ -237,7 +291,7 @@ spec needs a new ADR.
 - Negative: the guest launcher ([#1087](https://github.com/stateracloud/koinon/issues/1087)) becomes
   a hard dependency of the `vm` tier. Memory snapshots cost a digest, an encryption step and a
   single-use restore, so they are slower to roll out than plain suspend.
-- Negative: privileged workers enlarge the per-node trusted base (an escape from the guest into the
+- Negative: workers with `SYS_ADMIN` enlarge the per-node trusted base (an escape from the guest into the
   VMM lands in a root pod). Section 6 limits the blast radius with policy and an optional pool. It does
   not remove the risk.
 - Negative: the loss of per-binary credential binding is real. A process in the guest that can reach a

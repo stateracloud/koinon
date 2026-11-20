@@ -170,7 +170,7 @@ The kubeconfig of the installer needs these rules:
 - `events`: list (the probe reads the kubelet event of a pod that did not start)
 - `customresourcedefinitions`: get
 - `deployments`: get, update in the Substrate namespace
-- `workerpools` (group `ate.dev`): get
+- `workerpools` (group `ate.dev`): get in the worker namespace (`--substrate-worker-namespace`)
 - non-resource URL `/.well-known/openid-configuration`: get
 
 `ate-setup` needs more (it creates the Substrate objects); those rules are those of Substrate.
@@ -388,6 +388,68 @@ Cost: user namespaces widen the kernel attack surface for every pod on those nod
 process can then reach kernel code that otherwise needs privilege. Set the value on the worker nodes that run
 gVisor sandboxes only, and leave the control plane nodes at 0. Use `--substrate-node-selector` so the check
 reads the same nodes.
+
+## Worker namespace and admission
+
+Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6). The chart creates it:
+`execution.substrate.workerNamespace`, default `ate-workers`. The default WorkerPool
+(`execution.substrate.workerPool`), its ServiceAccount and the worker NetworkPolicy live there. A
+WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
+controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
+
+- The pool names the chart's worker ServiceAccount (`automountServiceAccountToken: false`) unless the values name one. The
+  controller's own `ateworker` ServiceAccount leaves the field unset, and the admission rule refuses a
+  projected token, so a pool on `ateworker` does not start. If you name your own ServiceAccount, create it in
+  the worker namespace and set the field false.
+- `ate-system` keeps the control plane and atelet. Only the atelet pod (DaemonSet, ServiceAccount `atelet`)
+  may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
+- The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
+  (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
+  pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
+  no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server only. The `rustfs-bucket-init`
+  Job pod has no `app` label, so `bucketInitJobs` selects it by Job name and it gets DNS and the object store S3
+  port only (`objectStoreApp`, `objectStorePort`). A pod that a later Substrate version adds has no egress until a
+  list names it. Their ingress stays Substrate's own policies (`ate-system-networkpolicies.yaml`,
+  `kind/rustfs.yaml`), because NetworkPolicies add up. Confirm the lists against your Substrate manifests.
+- The worker container may have extra privileges in one exact shape, and only in the worker namespace. Substrate
+  sets it in `workerpool_apply.go` (lines 377-468 at the pinned commit): user and group 0, not privileged, no
+  privilege escalation, drop `ALL`, add the capabilities of the sandbox class, and seccomp and AppArmor
+  `Unconfined`. The policy accepts this shape only on the container named `worker` whose image is in
+  `workerPolicy.workerImages` (the pool `workerImage` is added when the pool is enabled). Every other container
+  adds no capability and uses no `Unconfined` profile. There is no capability ceiling: the class sets
+  (`workerPolicy.workerShapes`) are exact. A Ginkgo spec in `internal/preflight` compares them with a vendored copy
+  of the Substrate source and fails when a Substrate bump changes the shape. Update the vendored copy and the sets
+  together in that bump. With an empty image list the policy denies every worker container (fail closed).
+- atelet pulls actor images from one image source, such as a pull-through cache. Set `workerNetworkPolicy.imageSource`
+  to a `podSelector` (with a `namespaceSelector`) for a cache in the cluster, or to `cidrs` for a cache outside it,
+  and set `port`. Set one of them: the render fails when you set both, and with neither atelet has no image egress.
+  Actor image references must go through `global.registryMirrors` or `global.imageRegistry` (the digest is kept).
+  Choose the mirror name once: it is part of the actor template hash, so a change re-hashes every template.
+  Needs main: the driver side of the actor image rewrite is not in this chart.
+- In `ate-system`, `pods/exec`, `attach` and `portforward` are allowed for the identities in
+  `workerPolicy.installerIdentities` and `installerGroups` only, and each request gets the audit annotation `connect` (user, resource,
+  subresource, pod). The worker namespace stays fully denied, and the proxy subresources stay denied for everyone.
+  The audit annotation is written for allowed requests too. The binding also lists `Audit`, which records a refused request.
+- `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
+  ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
+  endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1
+  and 10.250.0.1). List both when in doubt.
+- atelet needs no internet egress when the gVisor tarball comes from the cluster object store. The installer
+  stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
+  issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.
+  The kind check must prove that atelet reads the `s3://` SandboxConfig `koinon-gvisor` with egress denied. After
+  the policies apply, restart every DaemonSet in `ate-system`, so that its pods pass the new rules.
+- The installer writes the SandboxConfig `koinon-gvisor`. It must run as an identity in
+  `workerPolicy.installerIdentities`, or the objects policy refuses the write.
+- Known limit (open, needs a decision from main): the preflight and install probe pods are bare pods with tag images
+  and, for the device probe, hostPath devices. The control-plane policy refuses them once the chart is installed.
+  Run `koinon-api substrate install` and the probes before `helm install`, or add a probe-identity rule.
+- The node agent rule accepts the per-controller `daemon-set-controller` ServiceAccount only. A cluster that runs
+  `kube-controller-manager` without `--use-service-account-credentials` must set `workerPolicy.podCreators` and
+  adjust the node agent rule to match.
+- `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
+  the same, add the gateway's SPIFFE ID to that list.
 
 ## Verified and unverified
 

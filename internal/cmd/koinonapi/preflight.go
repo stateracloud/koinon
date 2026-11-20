@@ -39,14 +39,15 @@ type preflightConfig struct {
 	probeNamePrefix  string
 	probeInstance    string
 
-	driver                string
-	substratePools        []string
-	substrateNodeSelector []string
-	substrateVMTier       bool
-	substrateGVisor       bool
-	substrateProbes       bool
-	substrateNamespace    string
-	substrateIssuer       string
+	driver                   string
+	substratePools           []string
+	substrateNodeSelector    []string
+	substrateVMTier          bool
+	substrateGVisor          bool
+	substrateProbes          bool
+	substrateNamespace       string
+	substrateWorkerNamespace string
+	substrateIssuer          string
 
 	netpolProbe      bool
 	netpolTimeout    time.Duration
@@ -81,6 +82,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.IntVar(&c.check.SupervisorTokenMaxSeconds, "supervisor-token-max-seconds", 0, "sandboxPolicy.supervisorTokenMaxSeconds: fail when the OpenShell gateway's supervisor token lifetime is above it")
 	fs.StringVar(&c.driver, "driver", "openshell", "execution.driver: openshell or substrate (substrate replaces the OpenShell and Agent Sandbox checks)")
 	fs.StringVar(&c.substrateNamespace, "substrate-namespace", "ate-system", "namespace of Agent Substrate")
+	fs.StringVar(&c.substrateWorkerNamespace, "substrate-worker-namespace", "ate-workers", "namespace of the WorkerPools (execution.substrate.workerNamespace)")
 	fs.StringArrayVar(&c.substratePools, "substrate-worker-pool", nil, "<tier>=<WorkerPool name> that must be ready (repeatable)")
 	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
 	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
@@ -105,7 +107,7 @@ func (c *preflightConfig) validate() error {
 	switch c.driver {
 	case "openshell":
 	case "substrate":
-		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{}}
+		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, WorkerNamespace: c.substrateWorkerNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{}}
 		for _, kv := range c.substratePools {
 			tier, name, ok := strings.Cut(kv, "=")
 			if !ok || tier == "" || name == "" {

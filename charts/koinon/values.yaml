@@ -782,6 +782,182 @@ execution:
     gatewayClientNamespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: ate-system
+    # Substrate's control-plane namespace (ate-api, ate-controller, atenet, atelet, the object store and
+    # the database). It must exist (koinon-api substrate install creates it) and holds nothing but
+    # Substrate (ADR 0120 section 6.2). Worker pods do not run here: see workerNamespace.
+    namespace: ate-system
+    # The namespace of the worker pools. The chart creates it, with the worker WorkerPool, the worker
+    # ServiceAccount and the worker NetworkPolicy. Worker pods need SYS_ADMIN and NET_ADMIN, so they
+    # live apart from the control plane and the admission rules below fence them (ADR 0120 section 6).
+    # The Substrate controller (ate-controller) applies the pool Deployments here. Must differ from
+    # namespace.
+    workerNamespace: ate-workers
+    # Admission (ADR 0120 section 6; native ValidatingAdmissionPolicy, never Kyverno). Worker namespace:
+    # only the ReplicaSet controller creates pods, and only for a ReplicaSet (a pool Deployment that the
+    # Substrate controller applied); no hostNetwork; hostPath only from allowedHostPaths; no volume
+    # kind other than hostPath, emptyDir, configMap, downwardAPI and projected; no projected
+    # serviceAccountToken and no automountServiceAccountToken true; added capabilities only from
+    # workerShapes; digests pinned (digestExemptIdentities); no ephemeral containers. The
+    # control-plane namespace: hostPath only for the node agent (nodeAgent); exec, attach and
+    # port-forward only for installerIdentities, with an audit annotation. Nobody execs, attaches or
+    # port-forwards into pods of the worker namespace.
+    workerPolicy:
+      enabled: true
+      validationActions: [Deny]
+      # Identities that may create worker pods. Their pods must also carry a ReplicaSet owner.
+      podCreators:
+        - system:serviceaccount:kube-system:replicaset-controller
+      # Identities that may change a pod spec and apply the pool Deployments. Empty means the
+      # Substrate controller, system:serviceaccount:<namespace>:ate-controller.
+      controllerIdentities: []
+      # Kubernetes' own workload controllers. They create the pods of Substrate's control plane
+      # (ate-api-server, atenet-router, atelet, the object store and the database) from Deployments,
+      # DaemonSets and StatefulSets that the installer identity wrote.
+      platformControllers:
+        - system:serviceaccount:kube-system:replicaset-controller
+        - system:serviceaccount:kube-system:daemon-set-controller
+        - system:serviceaccount:kube-system:statefulset-controller
+        - system:serviceaccount:kube-system:job-controller
+        - system:serviceaccount:kube-system:cronjob-controller
+        - system:kube-controller-manager
+      # Identities whose pods may use a tag instead of a digest. This list is used as written, so an
+      # empty list means every image needs a digest.
+      # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
+      # then set this to [] (the chart check pins the default). Tracking issue: #1140.
+      digestExemptIdentities:
+        - system:serviceaccount:kube-system:replicaset-controller
+        - system:serviceaccount:kube-system:daemon-set-controller
+        - system:serviceaccount:kube-system:statefulset-controller
+        - system:serviceaccount:kube-system:job-controller
+        - system:serviceaccount:kube-system:cronjob-controller
+        - system:kube-controller-manager
+      # hostPath volumes allowed in the worker namespace: the device nodes of the vm tier (ADR 0075).
+      allowedHostPaths:
+        - /dev/kvm
+        - /dev/net/tun
+        - /dev/vhost-vsock
+        - /dev/vhost-net
+        # The worker's base directory (volume ate-base), mounted in every tier, gVisor too.
+        - /var/lib/ate
+      # The worker images (name@sha256:...): the container named `worker` with one of these images is the
+      # worker container, the only container of the worker namespace that may add capabilities or have an
+      # Unconfined profile. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the
+      # registry mirrors) is added by the template. Empty and no pool: no container is a worker container and a
+      # worker pod does not start (fail closed). Use a digest. The digest rule has an interim exemption for the ReplicaSet controller (digestExemptIdentities, #1140), so a tag image also gets the shape until #1140 closes.
+      workerImages: []
+      # The exact shape that Substrate sets on the worker container, per sandbox class: runAsUser 0, runAsGroup 0,
+      # privileged false, allowPrivilegeEscalation false, drop ALL, and these added capabilities; seccomp and
+      # AppArmor Unconfined (cmd/atecontroller/internal/controllers/workerpool_apply.go:377-468 at the pinned
+      # commit, preflight.SubstratePinnedCommit). The namespace has no wider ceiling. A Go spec compares these lists with the
+      # vendored source of that commit and fails when the pin moves and the source changes
+      # (internal/preflight/substrate_workershape_test.go). Do not widen them.
+      workerShapes:
+        gvisor:
+          capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, NET_RAW, SETFCAP]
+        microvm:
+          capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, MKNOD, SETFCAP, FSETID, SETPCAP]
+      # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
+      # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this
+      # ServiceAccount. The list is atelet's own, not the worker list: the hostPath volumes of
+      # Substrate v1.0.0 manifests/ate-install/atelet.yaml (b34fbee7) lines 394-430. The last two are
+      # the GKE credential-provider paths; remove them on a platform without GKE.
+      nodeAgent:
+        serviceAccount: atelet  # atelet.yaml:145
+        allowedHostPaths:
+          - /var/lib/ate
+          - /var/lib/kubelet/plugins
+          - /var/lib/kubelet/device-plugins
+          - /dev
+          - /home/kubernetes/bin
+          - /etc/srv/kubernetes/cri_auth_config.yaml
+      # Who may write WorkerPool, SandboxConfig, CSIDriverConfig and the workload kinds (Deployment,
+      # ReplicaSet, DaemonSet, StatefulSet, Job, CronJob) in the namespaces: the installer (ate-setup and
+      # `helm upgrade`), by user name or by group. The default groups are the cluster admins' own
+      # (system:masters; kubeadm and kind admins are in kubeadm:cluster-admins). Set the group or user
+      # your platform gives the installer, and narrow it to the installer's identity on a real install.
+      installerIdentities: []
+      installerGroups: [system:masters, kubeadm:cluster-admins]
+    # NetworkPolicies of both namespaces. No CNI-specific feature.
+    # Worker namespace: worker pods may reach atenet-egress and DNS, and nothing else
+    # (ADR 0120 section 2.4). Control-plane namespace: the pods whose `app` label is in
+    # controlPlaneApps may reach each other, the worker namespace, the gateway, DNS and the Kubernetes
+    # API server. A pod with another `app` label is not selected by that policy (it is not fenced),
+    # so keep the list in step with the Substrate manifests.
+    workerNetworkPolicy:
+      enabled: true
+      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.0
+      # (b34fbee7) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
+      # atenet-router.yaml:189, atenet-egress.yaml:1179. A missing pod keeps the cluster default
+      # network rules; confirmed on kind at the READY head.
+      controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
+      # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
+      # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
+      # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
+      # only ingress rules for them. A pod that a later Substrate version adds has no egress until a list names it.
+      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerCIDRs. The installer
+      # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
+      apiOnlyApps: [k8s-credential-provider]
+      # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
+      # bucket-init Job (kind/rustfs.yaml:93-133). They get DNS and the object store S3 port only.
+      # The ONE image source of the node agent (ADR 0120 section 6, issue 1089): the pods in `apps` (atelet) get egress
+      # to it and to no other registry. Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
+      # when it runs in another namespace) OR to operator cidrs, with the port. Both set: the render fails. None set:
+      # the node agent has no image egress (fail closed), which a cluster that serves images from the node needs.
+      # Actor image references are rewritten to this source with global.registryMirrors or global.imageRegistry (the
+      # digest is kept). Choose the mirror name once: it is part of the actor template hash, so changing it
+      # re-hashes every template.
+      imageSource:
+        apps: [atelet]
+        port: 443
+        podSelector: {}
+        namespaceSelector: {}
+        cidrs: []
+      bucketInitJobs: [rustfs-bucket-init]
+      objectStoreApp: rustfs
+      objectStorePort: 9000
+      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1179), in the
+      # control-plane namespace.
+      atenetEgressSelector:
+        matchLabels:
+          app: atenet-egress
+      # CIDRs of the Kubernetes API server. Only the control-plane pods get this route; worker pods get none
+      # (ADR 0120 section 2.4). Required while the policy is enabled: the render fails when empty, because the
+      # policy would cut Substrate's control plane off from the Kubernetes API server. Name the address that
+      # the CNI matches, and no default holds for every cluster: a CNI that matches before the Service
+      # translation sees the ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`,
+      # for example 10.96.0.1 on kind by default, 10.250.0.1 in the kind e2e cluster); one that matches after
+      # it sees the endpoint (`kubectl get endpoints kubernetes -n default`). When in doubt, list both.
+      apiServerCIDRs: []
+      # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
+      # or database outside the cluster.
+      extraEgress: []
+    # The default WorkerPool (ate.dev/v1): one shared pool per sandbox class (D6). Off by default: ate-setup
+    # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
+    # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class
+    # (immutable), and node placement and the pull ServiceAccount live under spec.template.
+    workerPool:
+      enabled: false
+      # Empty derives koinon-<sandboxClass>, so a pool name never claims a tier its class does not give.
+      name: ""
+      replicas: 1
+      # Required when enabled: the worker image of the sandbox class, for example
+      # <registry>/ateworker-gvisor:v1.0.0 (the chart pins no Substrate image).
+      workerImage: ""
+      # The one sandbox class of the pool: gvisor or microvm. It must be a class the Substrate install
+      # has (ate-setup --sandbox-classes; the generic platform and kind install gvisor only).
+      sandboxClass: gvisor
+      # spec.template.nodeSelector and spec.template.tolerations (at most 16).
+      nodeSelector: {}
+      tolerations: []
+      # Pull access: the pool's pods run as this ServiceAccount (spec.template.serviceAccountName).
+      # Empty: the chart makes a ServiceAccount named <pool>-worker with no API token mounted
+      # (automountServiceAccountToken false) in the worker namespace, and it carries imagePullSecrets when
+      # set (the Secrets must exist in the worker namespace). A ServiceAccount you name here is yours: it
+      # must exist in the worker namespace and set automountServiceAccountToken false.
+      serviceAccountName: ""
+      # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
+      # does not know, template.labels and template.resources among them.
+      spec: {}
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
