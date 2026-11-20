@@ -41,8 +41,8 @@ _(Changed by [0119](0119-agent-substrate-execution-layer.md): how the Substrate 
    (`koinon.imageRef`): `global.registryMirrors` (per upstream host) wins over `global.imageRegistry` (one
    host for everything); path, tag and digest are kept. It covers Koinon's three images, the hook Jobs,
    the preflight probe pods, flavor images, standalone agentgateway and the CNPG image.
-3. **`global.imagePullSecrets`** (names or `{name}` maps; the old top-level `imagePullSecrets` is a
-   deprecated alias, merged and de-duplicated) goes on every pod the chart renders, including standalone
+3. **`global.imagePullSecrets`** (names or `{name}` maps; the old top-level `imagePullSecrets` was an
+   alias; it is removed and setting it fails the render, issue 1024) goes on every pod the chart renders, including standalone
    agentgateway and the CNPG Cluster (`spec.imagePullSecrets`), and into the preflight probe pods.
 4. **The default `sandboxPolicy.supervisorImages` is derived**: empty means OpenShell 0.1.7's supervisor
    image run through the same rewrite, so a mirror cannot make the admission policy deny every supervisor

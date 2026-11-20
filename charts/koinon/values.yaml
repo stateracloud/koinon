@@ -21,7 +21,7 @@ clusterDomain: cluster.local
 global:
   # Image pull Secrets (type kubernetes.io/dockerconfigjson, in the release namespace) for every pod
   # the chart renders and for the CNPG Cluster: [{name: regcred}]. A plain string also works:
-  # [regcred]. Merged with the deprecated top-level imagePullSecrets, de-duplicated.
+  # [regcred]. De-duplicated. The old top-level imagePullSecrets is removed: setting it fails the render.
   # Sandbox pods are not Koinon's to configure: set server.sandboxImagePullSecrets on the OpenShell
   # release (the preflight checks it).
   imagePullSecrets: []
@@ -43,9 +43,6 @@ image:
   registry: ghcr.io/stateracloud/koinon
   tag: ""
   pullPolicy: IfNotPresent
-# DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it. Exit: remove this key
-# when the first minor line ships (v0.3, ADR 0099) and the chart's upgrade notes say so (#1024).
-imagePullSecrets: []
 
 api:
   image:

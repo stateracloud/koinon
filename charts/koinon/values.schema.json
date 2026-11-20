@@ -106,7 +106,7 @@
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
       }
     },
-    "imagePullSecrets": {"$ref": "#/definitions/pullSecrets"},
+    "imagePullSecrets": {"$comment": "Removed (issue 1024). Kept in the schema so that setting it reaches the clear render-time failure in koinon.pullSecretNames.", "$ref": "#/definitions/pullSecrets"},
     "api": {
       "type": "object",
       "additionalProperties": false,

@@ -72,17 +72,19 @@ has "explicit supervisorImages are not rewritten" 'c.image in \["ghcr.io/nvidia/
 	--set global.imageRegistry=art.example.com/proxy --set 'sandboxPolicy.supervisorImages={ghcr.io/nvidia/openshell/supervisor:0.1.6}'
 has "preflight is told the supervisor pin" '--supervisor-images=art.example.com/proxy/nvidia/openshell/supervisor:0.1.7' --set global.imageRegistry=art.example.com/proxy
 lacks "no supervisor pin to check when the policy is off" '--supervisor-images' --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
-# (d) pull secrets: strings and {name} maps, merged with the deprecated top-level list, on every pod-bearing object.
-pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSecrets[1].name=other' --set 'imagePullSecrets[0].name=regcred')
+# (d) pull secrets: strings and {name} maps, de-duplicated, on every pod-bearing object.
+pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSecrets[1].name=other' --set 'global.imagePullSecrets[2].name=regcred')
 rendered=$(render "${pull_args[@]}")
 pods=$(grep -cE '^ *(containers|initContainers):' <<<"$rendered" || true)
 withsecrets=$(grep -cE '^ +imagePullSecrets:$' <<<"$rendered" || true)
 # Deployments (api, reconciler, agentd, gateway), the migrate, migrate-grants (cnpg mode, ADR 0100),
 # ensure-secrets, preflight and restore-release-check Jobs: 9 pod specs; the CNPG Cluster has its own imagePullSecrets (spec level).
 [[ $withsecrets == 10 ]] || fail "imagePullSecrets on $withsecrets objects, want 10 (9 pod specs and the CNPG Cluster); pod specs: $pods"
-[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated across the two lists"
+[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated within the list"
 has "pull secrets reach the preflight probe pods" '--probe-image-pull-secrets=regcred,other$' "${pull_args[@]}"
-has "the deprecated top-level list still works alone" '--probe-image-pull-secrets=old$' --set 'imagePullSecrets[0].name=old'
+# The removed top-level list fails the render and names the replacement (issue 1024); it is not silently ignored.
+if res=$(render --set 'imagePullSecrets[0].name=old' 2>&1); then fail "the removed top-level imagePullSecrets must fail the render"
+elif ! grep -Fq 'move its entries to global.imagePullSecrets' <<<"$res"; then fail "the top-level imagePullSecrets failure must name global.imagePullSecrets"; fi
 lacks "no imagePullSecrets without any" 'imagePullSecrets:'
 has "the preflight expects sandbox pull secrets with a pull secret" '--expect-sandbox-pull-secrets' --set 'global.imagePullSecrets[0]=x'
 has "the preflight expects sandbox pull secrets with a mirror" '--expect-sandbox-pull-secrets' --set global.imageRegistry=art.example.com

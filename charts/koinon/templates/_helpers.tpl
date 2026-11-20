@@ -129,13 +129,14 @@ seccompProfile:
 {{- end }}
 
 {{/*
-The image pull Secret names, as JSON: global.imagePullSecrets and the deprecated top-level
-imagePullSecrets, merged and de-duplicated. Each entry is {name: x} or a plain "x".
+The image pull Secret names, as JSON: global.imagePullSecrets, de-duplicated. Each entry is {name: x}
+or a plain "x". The top-level imagePullSecrets was removed (issue 1024): setting it fails the render.
 */}}
 {{- define "koinon.pullSecretNames" -}}
 {{- $names := list -}}
 {{- $g := .Values.global | default dict -}}
-{{- range concat ($g.imagePullSecrets | default list) (.Values.imagePullSecrets | default list) -}}
+{{- if hasKey .Values "imagePullSecrets" }}{{- fail "imagePullSecrets was removed: move its entries to global.imagePullSecrets (same format, a list of Secret names or {name: x} maps)" }}{{- end -}}
+{{- range ($g.imagePullSecrets | default list) -}}
 {{- if kindIs "string" . }}{{ $names = append $names . }}{{ else }}{{ $names = append $names .name }}{{ end -}}
 {{- end -}}
 {{- $names | uniq | toJson -}}
