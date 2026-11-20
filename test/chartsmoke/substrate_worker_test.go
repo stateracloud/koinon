@@ -24,11 +24,11 @@ func showOnly(template string) []string {
 var _ = Describe("substrate worker namespace", func() {
 	It("renders the worker policies and NetworkPolicy", func(ctx SpecContext) {
 		// Only the worker templates: the whole render holds other policies, and their count changes
-		// with the chart. Worker pods, control-plane pods, CONNECT and the installer-written kinds: four policies, four bindings.
+		// with the chart. Worker pods, control-plane pods, CONNECT, the installer-written kinds and the worker NetworkPolicy guard: five policies, five bindings.
 		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
 		policy := helmRenderWith(ctx, values, showOnly("templates/substrate-policy.yaml")...)
-		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 4))
-		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 4))
+		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 5))
+		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 5))
 		netpol := helmRenderWith(ctx, values, showOnly("templates/substrate-networkpolicy.yaml")...)
 		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 5))
 		namespaces := helmRenderWith(ctx, values, showOnly("templates/substrate-workernamespace.yaml")...)
