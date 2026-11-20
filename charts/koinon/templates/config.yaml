@@ -62,6 +62,16 @@ data:
           - {{ printf "%s=%s" $class $tier | quote }}
           {{- end }}
         {{- end }}
+        {{- $mirrors := include "koinon.imageMirrorEntries" . | fromJsonArray }}
+        {{- if $mirrors }}
+        imageMirrors:
+          {{- range $mirrors }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- end }}
+        {{- with .Values.execution.substrate.imageRegistry }}
+        imageRegistry: {{ . | quote }}
+        {{- end }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt

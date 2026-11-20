@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -62,8 +63,10 @@ type Spec struct {
 	// Username is written under the key "username".
 	Username string `json:"username"`
 	// Kind is empty for a username and a password, or KindAES256Key for a hex key.
-	Kind   string            `json:"kind,omitempty"`
-	Labels map[string]string `json:"labels,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	// DNSNames are the names of the certificate of a KindTLS Secret.
+	DNSNames []string          `json:"dnsNames,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
 }
 
 // Result is what Ensure did with one Secret.
@@ -85,7 +88,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
-		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken {
+		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken && sp.Kind != KindTLS {
 			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
 		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
@@ -93,6 +96,13 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case err == nil && sp.Kind == KindAES256Key:
 			if k := string(existing.Data[KeyKey]); !hexKey.MatchString(k) {
 				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not 64 hex characters; fix or delete it (it is not changed here)", namespace, sp.Name, KeyKey)
+			}
+			results = append(results, Result{Name: sp.Name})
+			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+			continue
+		case err == nil && sp.Kind == KindTLS:
+			if cerr := checkTLSData(existing.Data, sp.DNSNames, time.Now()); cerr != nil {
+				return results, fmt.Errorf("the Secret %s/%s exists but is not a usable TLS Secret: %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
 			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
@@ -130,7 +140,12 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 			return results, fmt.Errorf("read the Secret %s/%s: %w", namespace, sp.Name, err)
 		}
 		data := map[string][]byte{}
-		if sp.Kind == KindAES256Key || sp.Kind == KindBearerToken {
+		switch sp.Kind {
+		case KindTLS:
+			if data, err = newTLSData(sp.DNSNames, time.Now()); err != nil {
+				return results, fmt.Errorf("the Secret spec %s: %w", sp.Name, err)
+			}
+		case KindAES256Key, KindBearerToken:
 			b := make([]byte, 32)
 			if _, err := rand.Read(b); err != nil {
 				return results, fmt.Errorf("generate a key: %w", err)
@@ -140,7 +155,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 			} else {
 				data[KeyKey] = []byte(hex.EncodeToString(b))
 			}
-		} else {
+		default:
 			password, err := NewPassword()
 			if err != nil {
 				return results, err
@@ -149,6 +164,9 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 			data[PasswordKey] = []byte(password)
 		}
 		typ := sp.Type
+		if sp.Kind == KindTLS {
+			typ = corev1.SecretTypeTLS
+		}
 		if typ == "" {
 			typ = corev1.SecretTypeOpaque
 		}

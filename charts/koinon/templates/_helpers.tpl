@@ -504,6 +504,58 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- eq (.Values.execution.driver | default "openshell") "substrate" -}}
 {{- end }}
 
+{{/*
+The in-cluster image cache of the Substrate driver (issue #1170): "true" when the driver is substrate and
+execution.substrate.imageCache.enabled. The cache is a Zot pull-through registry in the release namespace; it is the one
+image source of the node agent, and the driver rewrites the registry host of every actor image to it.
+*/}}
+{{- define "koinon.imageCache" -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.imageCache.enabled -}}true{{- end -}}
+{{- end }}
+
+{{- define "koinon.imageCache.name" -}}
+{{- include "koinon.componentName" (list . "imagecache") -}}
+{{- end }}
+
+{{/* The TLS Secret of the cache: the operator's, or the one the ensure-secrets hook Job makes. */}}
+{{- define "koinon.imageCache.tlsSecret" -}}
+{{- .Values.execution.substrate.imageCache.tls.existingSecret | default (include "koinon.componentName" (list . "imagecache-tls")) -}}
+{{- end }}
+
+{{/* The address the node agent dials: <service>.<namespace>.svc:<port>. Part of the template hash of every actor. */}}
+{{- define "koinon.imageCache.host" -}}
+{{- printf "%s.%s.svc:%d" (include "koinon.imageCache.name" .) .Release.Namespace (int .Values.execution.substrate.imageCache.port) -}}
+{{- end }}
+
+{{/* The DNS names of the certificate of the cache, as JSON. */}}
+{{- define "koinon.imageCache.dnsNames" -}}
+{{- $n := include "koinon.imageCache.name" . -}}
+{{- $svc := printf "%s.%s" $n .Release.Namespace -}}
+{{- list $n $svc (printf "%s.svc" $svc) (printf "%s.svc.%s" $svc .Values.execution.substrate.imageCache.clusterDomain) | toJson -}}
+{{- end }}
+
+{{/*
+The "host=target" entries that rewrite the registry host of an actor image, as JSON (the driver's
+--substrate-image-mirrors). With the cache: each upstream host maps to <cache host>/<host>. Otherwise: the operator's
+execution.substrate.imageMirrors. The two together fail the render, because the node agent has one image source.
+*/}}
+{{- define "koinon.imageMirrorEntries" -}}
+{{- $s := .Values.execution.substrate -}}
+{{- $entries := list -}}
+{{- if include "koinon.imageCache" . -}}
+{{- if or $s.imageMirrors $s.imageRegistry -}}{{- fail "execution.substrate.imageCache.enabled is the one image source: do not set imageMirrors or imageRegistry with it. For an operator mirror set imageCache.enabled=false" -}}{{- end -}}
+{{- if not $s.imageCache.upstreams -}}{{- fail "execution.substrate.imageCache.upstreams is empty: the cache would sync nothing" -}}{{- end -}}
+{{- range $s.imageCache.upstreams -}}
+{{- $entries = append $entries (printf "%s=%s/%s" (lower .host) (include "koinon.imageCache.host" $) (lower .host)) -}}
+{{- end -}}
+{{- else -}}
+{{- range $host := keys ($s.imageMirrors | default dict) | sortAlpha -}}
+{{- $entries = append $entries (printf "%s=%s" (lower $host) (get $s.imageMirrors $host)) -}}
+{{- end -}}
+{{- end -}}
+{{- $entries | toJson -}}
+{{- end }}
+
 {{/* The namespaces whose pods may reach the gateway's model port: OpenShell's sandbox namespaces, or with the substrate driver the namespace atenet runs in. */}}
 {{- define "koinon.sandboxClientNamespaceSelector" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
@@ -609,6 +661,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end -}}
 {{- if not .Values.api.otlpTracesToken.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.otlpTracesTokenName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
+{{- end -}}
+{{- if and (include "koinon.imageCache" .) (not .Values.execution.substrate.imageCache.tls.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.imageCache.tlsSecret" .) "type" "kubernetes.io/tls" "kind" "tls" "dnsNames" (include "koinon.imageCache.dnsNames" . | fromJsonArray) "labels" (fromYaml (include "koinon.generatedLabels" (list . "imagecache")))) -}}
 {{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}

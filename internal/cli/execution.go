@@ -46,6 +46,11 @@ type Substrate struct {
 	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
 	// slice f has merged; then the flag and chart value are removed.
 	AllowUnhardened bool
+	// ImageMirrors are "host=target" entries: the registry host of an actor image and the image source
+	// of the node agent that replaces it (issue #1170). The path, tag and digest are kept.
+	ImageMirrors []string
+	// ImageRegistry replaces the registry host of an actor image that has no entry in ImageMirrors.
+	ImageRegistry string
 	// SnapshotStore is the S3-compatible bucket that holds the snapshots. Its endpoint and bucket
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
@@ -110,6 +115,21 @@ func (s Substrate) driverConfig(logger *slog.Logger) (substrate.Config, error) {
 		}
 		cfg.DefaultTier = t
 	}
+	cfg.ImageRegistry = strings.TrimSpace(s.ImageRegistry)
+	for _, entry := range s.ImageMirrors {
+		host, target, ok := strings.Cut(entry, "=")
+		host, target = strings.ToLower(strings.TrimSpace(host)), strings.TrimSpace(target)
+		if !ok || host == "" || target == "" {
+			return cfg, fmt.Errorf("--substrate-image-mirrors: %q is not host=target", entry)
+		}
+		if _, dup := cfg.ImageMirrors[host]; dup {
+			return cfg, fmt.Errorf("--substrate-image-mirrors: host %q is listed twice", host)
+		}
+		if cfg.ImageMirrors == nil {
+			cfg.ImageMirrors = map[string]string{}
+		}
+		cfg.ImageMirrors[host] = target
+	}
 	for _, entry := range s.RuntimeClassTiers {
 		class, tier, ok := strings.Cut(entry, "=")
 		class = strings.TrimSpace(class)
@@ -166,6 +186,8 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.SnapshotStore.SecretKeyFile, "substrate-snapshot-secret-key-file", "", "file with the read-only secret key of the snapshot bucket")
 	fs.StringSliceVar(&e.Substrate.RuntimeClassTiers, "substrate-runtime-class-tiers", nil, "class=tier entries (tier: vm, hardened or dev) that give each runtime class its isolation tier, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
+	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
 }
 

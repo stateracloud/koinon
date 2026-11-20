@@ -4,6 +4,8 @@ package ensuresecrets_test
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -213,5 +215,66 @@ var _ = Describe("Ensure with an unknown kind", func() {
 		Expect(err).To(MatchError(ContainSubstring("unknown kind")))
 		_, err = client.CoreV1().Secrets("koinon").Get(ctx, "x", metav1.GetOptions{})
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	Describe("a tls Secret", func() {
+		var out bytes.Buffer
+		BeforeEach(func() { out.Reset() })
+		names := []string{"cache", "cache.koinon.svc"}
+		spec := ensuresecrets.Spec{Name: "cache-tls", Kind: ensuresecrets.KindTLS, DNSNames: names}
+
+		It("creates a certificate for the names that its own CA signed, and logs no key", func(ctx SpecContext) {
+			client := fake.NewClientset()
+			_, err := ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{spec}, &out)
+			Expect(err).NotTo(HaveOccurred())
+			got, err := client.CoreV1().Secrets("koinon").Get(ctx, "cache-tls", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Type).To(Equal(corev1.SecretTypeTLS))
+			Expect(got.Data).To(HaveKey("tls.crt"))
+			Expect(got.Data).To(HaveKey("tls.key"))
+			Expect(got.Data).To(HaveKey("ca.crt"))
+			Expect(got.Data).NotTo(HaveKey("ca.key"))
+			pair, err := tls.X509KeyPair(got.Data["tls.crt"], got.Data["tls.key"])
+			Expect(err).NotTo(HaveOccurred())
+			leaf, err := x509.ParseCertificate(pair.Certificate[0])
+			Expect(err).NotTo(HaveOccurred())
+			pool := x509.NewCertPool()
+			Expect(pool.AppendCertsFromPEM(got.Data["ca.crt"])).To(BeTrue())
+			for _, n := range names {
+				_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: n})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: "other.example.com"})
+			Expect(err).To(HaveOccurred())
+			Expect(out.String()).To(ContainSubstring("secret cache-tls: created"))
+			Expect(out.String()).NotTo(ContainSubstring("PRIVATE KEY"))
+		})
+
+		It("keeps a valid Secret, and refuses a broken one without changing it", func(ctx SpecContext) {
+			client := fake.NewClientset()
+			_, err := ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{spec}, &out)
+			Expect(err).NotTo(HaveOccurred())
+			before, _ := client.CoreV1().Secrets("koinon").Get(ctx, "cache-tls", metav1.GetOptions{})
+			res, err := ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{spec}, &out)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(ConsistOf(ensuresecrets.Result{Name: "cache-tls"}))
+			after, _ := client.CoreV1().Secrets("koinon").Get(ctx, "cache-tls", metav1.GetOptions{})
+			Expect(after.Data).To(Equal(before.Data))
+
+			// A certificate that lacks a name, or a missing CA, is refused and left alone.
+			wider := spec
+			wider.DNSNames = append(append([]string{}, names...), "cache.other.svc")
+			_, err = ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{wider}, &out)
+			Expect(err).To(MatchError(ContainSubstring("does not verify for cache.other.svc")))
+			delete(before.Data, "ca.crt")
+			Expect(client.CoreV1().Secrets("koinon").Update(ctx, before, metav1.UpdateOptions{})).Error().NotTo(HaveOccurred())
+			_, err = ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{spec}, &out)
+			Expect(err).To(MatchError(ContainSubstring("holds no certificate")))
+		})
+
+		It("needs a DNS name", func(ctx SpecContext) {
+			_, err := ensuresecrets.Ensure(ctx, fake.NewClientset(), "koinon", []ensuresecrets.Spec{{Name: "t", Kind: ensuresecrets.KindTLS}}, &out)
+			Expect(err).To(MatchError(ContainSubstring("at least one DNS name")))
+		})
 	})
 })

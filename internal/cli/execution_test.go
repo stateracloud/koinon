@@ -43,12 +43,23 @@ var _ = Describe("Execution", func() {
 			{func(s *cli.Substrate) { s.RuntimeClassTiers = []string{"kata"} }, "is not class=tier"},
 			{func(s *cli.Substrate) { s.RuntimeClassTiers = []string{"kata=fast"} }, `class "kata"`},
 			{func(s *cli.Substrate) { s.RuntimeClassTiers = []string{"kata=vm", "kata=dev"} }, "listed twice"},
+			{func(s *cli.Substrate) { s.ImageMirrors = []string{"ghcr.io"} }, "is not host=target"},
+			{func(s *cli.Substrate) { s.ImageMirrors = []string{"ghcr.io=a", "GHCR.io=b"} }, "listed twice"},
 		} {
 			s := ok
 			c.s(&s)
 			e := cli.Execution{Driver: cli.DriverSubstrate, Substrate: s}
 			Expect(e.Validate("")).To(MatchError(ContainSubstring(c.want)))
 		}
+	})
+	It("reads the image source rewrite into the driver config", func() {
+		cfg, err := cli.Substrate{
+			DefaultTier: "dev", ImageRegistry: " mirror.example.com/all ",
+			ImageMirrors: []string{"GHCR.io=cache.koinon.svc/ghcr.io", "docker.io = cache.koinon.svc/docker.io"},
+		}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.ImageRegistry).To(Equal("mirror.example.com/all"))
+		Expect(cfg.ImageMirrors).To(Equal(map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io", "docker.io": "cache.koinon.svc/docker.io"}))
 	})
 	It("builds the content digest from the snapshot store flags, or fails closed without them", func() {
 		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
