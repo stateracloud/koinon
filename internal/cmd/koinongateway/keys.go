@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -99,7 +100,89 @@ func newKeysCommand() *cobra.Command {
 	rc.Flags().DurationVar(&o.grace, "grace", gatewaykeys.DefaultRetireGrace, "the wait between a key leaving active and its retirement; it must exceed koinon-api's reload interval")
 	cli.EnvAlias(root, "database-url", "DATABASE_URL")
 	cli.EnvAlias(root, "namespace", "POD_NAMESPACE")
+	root.AddCommand(o.resealCommand())
 	return root
+}
+
+// resealCommand is "keys reseal": the re-seal Job of a rotation (ADR 0097 12.4). It runs under the gateway's
+// identity (only the gateway unwraps its keys) and the re-seal database login, which may read and write only
+// the credential column.
+func (o *keysOptions) resealCommand() *cobra.Command {
+	var keyDir, org string
+	var dryRun bool
+	c := &cobra.Command{
+		Use:   "reseal",
+		Short: "Seal every stored MCP credential that names an older gateway key to the active key",
+		Long: "Idempotent and resumable: a credential already sealed to the active key is left alone. Each credential is one write that " +
+			"changes the row only if it is still the envelope that was read, so a credential the API writes meanwhile is not lost; a rerun moves it. " +
+			"When the report shows no credential on the old key, \"keys retire\" retires that key. The report holds counts and key IDs, never a value.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return o.reseal(cmd, keyDir, org, dryRun)
+		},
+	}
+	c.Flags().StringVar(&keyDir, "recipient-key-dir", "", "the mounted Secret with the wrapped gateway recipient keys")
+	c.Flags().StringVar(&org, "org", "", "re-seal only the credentials of this org (a UUID)")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "open every credential that would move and report the counts; write nothing")
+	return c
+}
+
+func (o *keysOptions) reseal(cmd *cobra.Command, keyDir, org string, dryRun bool) error {
+	if o.dbURL == "" {
+		return errors.New("--database-url is required")
+	}
+	if keyDir == "" {
+		return errors.New("--recipient-key-dir is required")
+	}
+	ctx, out := cmd.Context(), cmd.OutOrStdout()
+	pool, err := waitForPool(ctx, o.dbURL, o.wait)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	waitCtx, cancel := context.WithTimeout(ctx, o.wait)
+	install, err := installid.Wait(waitCtx, pool, 2*time.Second)
+	cancel()
+	if err != nil {
+		return err
+	}
+	ws, err := wrapping.New(ctx, o.wrapping, wrapping.Service, installid.BoundOnlySource(pool))
+	if err != nil {
+		return fmt.Errorf("the gateway's key-wrapping key: %w", err)
+	}
+	l := gatewaykeys.NewLoader(keyDir, pool, ws.WithInstallID(secretstore.StaticInstallID(install)), "reseal", nil)
+	l.NoReport = true
+	if err := l.Load(ctx); err != nil {
+		return fmt.Errorf("load the gateway keys: %w", err)
+	}
+	rep, err := gatewaykeys.Resealer{DB: pool, Keyring: l.Keyring, Org: org, DryRun: dryRun}.Run(ctx)
+	printReseal(out, rep, dryRun)
+	return err
+}
+
+func printReseal(out io.Writer, rep gatewaykeys.ResealReport, dryRun bool) {
+	if dryRun {
+		_, _ = fmt.Fprintf(out, "Dry run: %d MCP credential(s) would move to gateway key %s. Nothing was written.\n", rep.WouldMove, rep.KeyID)
+	} else {
+		_, _ = fmt.Fprintf(out, "%d MCP credential(s) moved to gateway key %s; %d skipped (changed during the run, run it again); %d failed.\n",
+			rep.Moved, rep.KeyID, rep.Skipped, rep.Failed)
+	}
+	from := make([]string, 0, len(rep.From))
+	for id := range rep.From {
+		from = append(from, id)
+	}
+	sort.Strings(from)
+	for _, id := range from {
+		_, _ = fmt.Fprintf(out, "  from %s: %d\n", id, rep.From[id])
+	}
+	kinds := make([]string, 0, len(rep.Failures))
+	for k := range rep.Failures {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	for _, k := range kinds {
+		_, _ = fmt.Fprintf(out, "  failed (%s): %d\n", k, rep.Failures[k])
+	}
 }
 
 func (o *keysOptions) run(cmd *cobra.Command, what string) error {

@@ -79,6 +79,9 @@ type Loader struct {
 	Metrics *Metrics
 	Keyring *secretstore.RecipientKeyring
 	Logf    func(format string, args ...any)
+	// NoReport makes Load skip the load report. The re-seal Job loads the keys to open credentials: it is
+	// not a gateway process, and its login may not write the reports (ADR 0097 12.4).
+	NoReport bool
 
 	mu    sync.Mutex
 	ready bool
@@ -218,6 +221,9 @@ func (l *Loader) load(ctx context.Context) error {
 	}
 	// Report the keys held, also when another key failed: a loaded key stays loaded.
 	for _, r := range loaded {
+		if l.NoReport {
+			break
+		}
 		if err := ReportLoaded(ctx, l.DB, r.KeyID, l.CopyID); err != nil {
 			errs = append(errs, err)
 		}

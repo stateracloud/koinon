@@ -1706,3 +1706,84 @@ spec:
     {{- . | nindent 4 }}
   {{- end }}
 {{- end }}
+
+{{/*
+The gateway re-seal Job's pod template (gateway-reseal.yaml), as a string: the Job is named by its hash.
+It runs under the gateway's service account, because only the gateway identity unwraps the private keys.
+dict root, sa (the gateway service account), rk (values gateway.mcp.koinon.recipientKey).
+*/}}
+{{- define "koinon.gwResealPod" -}}
+{{- $ := .root -}}
+{{- $rk := .rk -}}
+{{- if ne $.Values.postgres.mode "cnpg" }}{{- $_ := required "postgres.external.keys.reseal is required with gateway.mcp.koinon.recipientKey.reseal.enabled" $.Values.postgres.external.keys.reseal }}{{- end }}
+metadata:
+  labels:
+    {{- include "koinon.labels" (list $ "gateway-reseal") | nindent 4 }}
+  {{- with $rk.reseal.rotationId }}
+  annotations:
+    # Changes the hash that names the Job: a new rotationId runs the re-seal once more.
+    koinon.dev/rotation-id: {{ . | quote }}
+  {{- end }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ .sa }}
+  # As the gateway pod: no automatic token. The projected one below signs in to the KMS.
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  {{- with include "koinon.imagePullSecrets" $ | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  securityContext:
+    {{- include "koinon.podSecurityContext" $ | nindent 4 }}
+  containers:
+    - name: gateway-reseal
+      image: {{ include "koinon.image" (list $ $.Values.gateway.mcp.koinon.image) }}
+      imagePullPolicy: {{ $.Values.image.pullPolicy }}
+      args:
+        - keys
+        - reseal
+        - {{ printf "--recipient-key-dir=%s" (include "koinon.gwKeyDir" $) | quote }}
+        {{- if $rk.reseal.dryRun }}
+        - "--dry-run"
+        {{- end }}
+        {{- with $rk.reseal.org }}
+        - {{ printf "--org=%s" . | quote }}
+        {{- end }}
+      env:
+        {{- include "koinon.dbEnv" (list $ "reseal") | nindent 8 }}
+        {{- include "koinon.gwKeyKmsEnv" (dict "root" $ "role" "gateway") | trim | nindent 8 }}
+      securityContext:
+        {{- include "koinon.containerSecurityContext" $ | nindent 8 }}
+      terminationMessagePolicy: FallbackToLogsOnError
+      resources:
+        {{- toYaml $rk.reseal.resources | nindent 8 }}
+      volumeMounts:
+        - name: gateway-key
+          mountPath: {{ include "koinon.gwKeyDir" $ }}
+          readOnly: true
+        {{- if eq (include "koinon.kms" $) "openbao" }}
+        - name: gateway-kms-token
+          mountPath: {{ include "koinon.gwKeyTokenDir" $ }}
+          readOnly: true
+        {{- end }}
+        {{- include "koinon.dbVolumeMount" $ | nindent 8 }}
+        {{- include "koinon.kmsVolumeMount" $ | nindent 8 }}
+  volumes:
+    - name: gateway-key
+      secret:
+        secretName: {{ include "koinon.gwKeySecretName" $ }}
+        defaultMode: 0444
+    {{- if eq (include "koinon.kms" $) "openbao" }}
+    - name: gateway-kms-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 3600
+              {{- with $rk.kms.openbao.audience }}
+              audience: {{ . | quote }}
+              {{- end }}
+    {{- end }}
+    {{- include "koinon.dbVolume" $ | nindent 4 }}
+    {{- include "koinon.kmsVolume" $ | nindent 4 }}
+{{- end }}

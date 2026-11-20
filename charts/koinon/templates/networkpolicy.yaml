@@ -423,3 +423,43 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.postgres.cnpg.operatorNamespace }}
 {{- end }}
 {{- end }}
+{{- if and (include "koinon.gwKey" .) .Values.gateway.mcp.koinon.recipientKey.reseal.enabled }}
+---
+# gateway-reseal accepts no connections. It opens every MCP credential in plaintext, so its egress is as the
+# gateway's pods, without the public internet except what the KMS needs: DNS, the database, and the KMS. A KMS inside
+# the private ranges (an in-cluster OpenBao) needs a networkPolicy.gatewayEgressTo rule. AWS KMS is public.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "gateway-reseal") }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway-reseal") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "gateway-reseal") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    {{- if eq .Values.postgres.mode "cnpg" }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "koinon.pgCluster" . }}
+      ports:
+        - port: 5432
+    {{- end }}
+    {{- if eq (include "koinon.kms" .) "awskms" }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - port: 443
+    {{- end }}
+    {{- range .Values.networkPolicy.gatewayEgressTo }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- end }}

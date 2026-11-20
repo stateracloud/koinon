@@ -1,0 +1,35 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The gateway re-seal Job (ADR 0097 decision 12, issue #1151, slice 4): only with gateway.mcp.driver=koinon,
+gateway.mcp.koinon.recipientKey.enabled and recipientKey.reseal.enabled. It runs "koinon-gateway keys reseal":
+it opens each MCP credential that is sealed to an older gateway key and seals it again to the active key. The
+write is a compare-and-swap, so a credential that changed meanwhile is skipped and the next run takes it.
+
+It runs as the gateway service account, because only the gateway identity may unwrap the private keys in the
+KMS. It mounts the same Secret and projected token as the gateway pod. Its database login is the group role
+koinon_gateway_reseal: it reads the key table and writes only the credential column of mcp_servers. It makes no
+load report. Like the key-admin Job it is an ordinary release resource, named by a hash of its pod template.
+*/ -}}
+{{- if and (include "koinon.gwKey" .) .Values.gateway.mcp.koinon.recipientKey.reseal.enabled }}
+{{- $rk := .Values.gateway.mcp.koinon.recipientKey }}
+{{- $sa := include "koinon.componentName" (list . "mcp-gateway") }}
+{{- if not $rk.reseal.rotationId }}
+{{- fail "gateway.mcp.koinon.recipientKey.reseal.enabled needs a rotationId: the Job runs again on every change of its pod template, so each re-seal names itself" }}
+{{- end }}
+{{- $pod := include "koinon.gwResealPod" (dict "root" . "sa" $sa "rk" $rk) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-reseal-%s" (include "koinon.fullname" . | trunc 44 | trimSuffix "-") ($pod | sha256sum | trunc 10) }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway-reseal") | nindent 4 }}
+  annotations:
+    # After the migration (wave 1) and the key-admin Job: the key table must have an active key.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 3600
+  template:
+    {{- $pod | nindent 4 }}
+{{- end }}
