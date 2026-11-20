@@ -38,6 +38,17 @@ var _ = Describe("harness image base and labels", func() {
 		Expect(dockerfile).To(MatchRegexp(`image\.licenses="LicenseRef-koinon-image-notices"`))
 	})
 
+	It("sets the labels in the final stage, after the base image's own labels", func() {
+		// The base sets org.opencontainers.image.version=24.04 itself. A LABEL line after the last
+		// FROM is applied on top of it, so our value is the one that is left.
+		lastFrom := strings.LastIndex(dockerfile, "\nFROM ")
+		label := strings.Index(dockerfile, "\nLABEL org.opencontainers.image.title=")
+		Expect(lastFrom).To(BeNumerically(">=", 0))
+		Expect(label).To(BeNumerically(">", lastFrom), "the LABEL line must come after the final FROM")
+		Expect(dockerfile[label:]).To(ContainSubstring(`org.opencontainers.image.version="dev"`))
+		Expect(strings.Count(dockerfile, "image.version=")).To(Equal(1))
+	})
+
 	It("keeps the release script's licenses label in step and no Apache-2.0 only claim", func() {
 		b, err := os.ReadFile("../../hack/release-harness.sh")
 		Expect(err).NotTo(HaveOccurred())
