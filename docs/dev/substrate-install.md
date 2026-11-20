@@ -405,7 +405,8 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
 - **CA trust of atelet (issue #1191).** Substrate has no CA option, so Koinon does it in two parts:
   - The installer (`koinon-api substrate install`, kind and generic routes) adds one kustomize patch to the atelet
     DaemonSet. It mounts the optional ConfigMap `koinon-imagecache-ca` of `ate-system` at
-    `/etc/koinon/imagecache-ca` and sets `SSL_CERT_DIR` to that path. It adds no container and no image. Go adds the
+    `/etc/koinon/imagecache-ca` and sets `SSL_CERT_DIR` to that path and `/etc/ssl/certs` (the default directory, which the
+    variable would otherwise replace). It adds no container and no image. Go adds the
     certificates of that directory to the system roots of the atelet image, so public registries and the other TLS
     trust of atelet keep working.
   - The hook Job `<release>-imagecache-ca` (`koinon-api imagecache-ca`, pre-install and pre-upgrade, after
@@ -416,7 +417,10 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     the CA). A changed hash restarts the pod, so a new CA reaches atelet and a new certificate reaches the cache.
     A rotation takes effect on the next `helm upgrade`: change the Secret, then run `helm upgrade`. The hash does not
     cause a second restart after that.
-  - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist.
+  - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist or
+    has no patch (a Substrate from before this change, or the GKE route). The Job does not report success then.
+  - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet. The RBAC is a hook object: Helm
+    deletes it after the Job. `helm uninstall` leaves the ConfigMap `koinon-imagecache-ca`: delete it by hand.
   - The ConfigMap name is fixed (one Substrate install per cluster). The GKE route has no patch yet: the overlay
     directory of that route is not known to the installer (needs main: a follow-up issue).
 - **Air gap.** Set `imageCache.enabled=false`. Name your mirror with `imageMirrors` (a map from host to mirror

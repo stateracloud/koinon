@@ -32,7 +32,7 @@ func imageCacheTrustPatch(ns string) koinonPatch {
 			}},
 			"containers": []any{map[string]any{
 				"name":         imagecacheca.AteletContainer,
-				"env":          []any{map[string]any{"name": imagecacheca.EnvName, "value": imagecacheca.MountPath}},
+				"env":          []any{map[string]any{"name": imagecacheca.EnvName, "value": imagecacheca.CertDirs}},
 				"volumeMounts": []any{map[string]any{"name": imagecacheca.VolumeName, "mountPath": imagecacheca.MountPath, "readOnly": true}},
 			}},
 		}}},

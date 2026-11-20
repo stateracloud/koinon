@@ -262,7 +262,7 @@ func assertCacheTrustPatch(t *testing.T, dir string) {
 	c := ctrs[0].(map[string]any)
 	g.Expect(c["name"]).To(Equal("atelet"))
 	g.Expect(c).NotTo(HaveKey("image"), "the atelet image stays the digest-pinned one")
-	g.Expect(c["env"]).To(Equal([]any{map[string]any{"name": "SSL_CERT_DIR", "value": "/etc/koinon/imagecache-ca"}}))
+	g.Expect(c["env"]).To(Equal([]any{map[string]any{"name": "SSL_CERT_DIR", "value": "/etc/koinon/imagecache-ca:/etc/ssl/certs"}}))
 	g.Expect(c["volumeMounts"]).To(Equal([]any{map[string]any{"name": "koinon-imagecache-ca", "mountPath": "/etc/koinon/imagecache-ca", "readOnly": true}}))
 }
 

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,6 +43,9 @@ const (
 	MountPath = "/etc/koinon/imagecache-ca"
 	// VolumeName is the name of the volume in the atelet pod.
 	VolumeName = "koinon-imagecache-ca"
+	// CertDirs is the value of SSL_CERT_DIR: the mount, then the default directory of the image, which setting the
+	// variable would otherwise replace.
+	CertDirs = MountPath + ":/etc/ssl/certs"
 	// EnvName is the environment variable that points Go's system roots at MountPath.
 	EnvName = "SSL_CERT_DIR"
 	// DaemonSetName is the node agent of Substrate. The name is fixed by the pinned manifests.
@@ -88,6 +92,11 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 	leaf := secret.Data[tlsCertKey]
 	if len(leaf) == 0 {
 		return fmt.Errorf("%w: Secret %s/%s has no %s", ErrCA, p.Namespace, p.Secret, tlsCertKey)
+	}
+	// A Substrate that was installed before the installer patch (or on a route without it) would pull with no trust
+	// while this Job reports success: fail with the way out instead.
+	if err := checkPatched(ctx, client, p.SubstrateNamespace); err != nil {
+		return err
 	}
 	if err := upsertConfigMap(ctx, client, p.SubstrateNamespace, ca, out); err != nil {
 		return err
@@ -221,5 +230,38 @@ func stamp(ctx context.Context, out io.Writer, what, key, sum string, required b
 		return fmt.Errorf("patch %s: %w", what, err)
 	}
 	_, _ = fmt.Fprintf(out, "%s: new certificates, its pods restart\n", what)
+	return nil
+}
+
+// checkPatched fails when the atelet DaemonSet exists without the installer patch: the volume of the ConfigMap and
+// SSL_CERT_DIR on the atelet container. A missing DaemonSet is not checked here: the stamp step reports it.
+func checkPatched(ctx context.Context, client kubernetes.Interface, ns string) error {
+	ds, err := client.AppsV1().DaemonSets(ns).Get(ctx, DaemonSetName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	hasVolume, hasEnv := false, false
+	for _, v := range ds.Spec.Template.Spec.Volumes {
+		if v.Name == VolumeName && v.ConfigMap != nil && v.ConfigMap.Name == ConfigMapName {
+			hasVolume = true
+		}
+	}
+	for _, c := range ds.Spec.Template.Spec.Containers {
+		if c.Name != AteletContainer {
+			continue
+		}
+		for _, e := range c.Env {
+			if e.Name == EnvName && strings.Contains(e.Value, MountPath) {
+				hasEnv = true
+			}
+		}
+	}
+	if !hasVolume || !hasEnv {
+		return fmt.Errorf("DaemonSet %s/%s does not trust the image cache CA (volume %s: %t, %s: %t): run koinon-api substrate install on a kind or generic cluster; the gke route has no patch yet",
+			ns, DaemonSetName, VolumeName, hasVolume, EnvName, hasEnv)
+	}
 	return nil
 }

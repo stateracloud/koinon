@@ -459,12 +459,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 					ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "koinon-imagecache-ca"}, Optional: &optional},
 				}})
 				c := &p.Spec.Containers[0]
-				c.Env = append(c.Env, corev1.EnvVar{Name: "SSL_CERT_DIR", Value: "/etc/koinon/imagecache-ca"})
+				c.Env = append(c.Env, corev1.EnvVar{Name: "SSL_CERT_DIR", Value: "/etc/koinon/imagecache-ca:/etc/ssl/certs"})
 				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "koinon-imagecache-ca", MountPath: "/etc/koinon/imagecache-ca", ReadOnly: true})
 			}))).To(Succeed())
 		})
 		It("still denies a CA by hostPath, and an unpinned image beside atelet (issue 1191)", func(ctx SpecContext) {
-			denied(create(ctx, daemonSetController, controlNamespace, atelet("ca-init-container", func(p *corev1.Pod) {
+			denied(create(ctx, daemonSetController, controlNamespace, atelet("ca-unpinned-init-image", func(p *corev1.Pod) {
 				p.Spec.InitContainers = append(p.Spec.InitContainers, corev1.Container{Name: "ca", Image: "registry.invalid/koinon-escape/ca:v1"})
 			})))
 			denied(create(ctx, daemonSetController, controlNamespace, atelet("ca-host-path", func(p *corev1.Pod) {

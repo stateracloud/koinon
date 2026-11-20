@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"os"
 	"os/exec"
@@ -70,6 +71,15 @@ func tlsSecret(ca, leaf, key []byte) *corev1.Secret {
 }
 
 func ateletDS() *appsv1.DaemonSet {
+	ds := ateletDSUnpatched()
+	ds.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: imagecacheca.VolumeName, VolumeSource: corev1.VolumeSource{
+		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}}}}}
+	ds.Spec.Template.Spec.Containers = []corev1.Container{{Name: imagecacheca.AteletContainer, Env: []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}}}}
+	return ds
+}
+
+// ateletDSUnpatched is atelet as Substrate ships it, before the installer patch.
+func ateletDSUnpatched() *appsv1.DaemonSet {
 	return &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "atelet", Namespace: subNS}}
 }
 
@@ -153,6 +163,15 @@ var _ = Describe("Publish", func() {
 		var out bytes.Buffer
 		Expect(imagecacheca.Publish(ctx, c, params, &out)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("does not exist yet"))
+	})
+
+	It("fails, and changes nothing, when atelet has no installer patch", func(ctx SpecContext) {
+		ca, leaf, key := pki("cache")
+		c := fake.NewClientset(tlsSecret(ca, leaf, key), ateletDSUnpatched(), cacheDeploy())
+		err := imagecacheca.Publish(ctx, c, params, io.Discard)
+		Expect(err).To(MatchError(ContainSubstring("run koinon-api substrate install")))
+		_, err = c.CoreV1().ConfigMaps(subNS).Get(ctx, imagecacheca.ConfigMapName, metav1.GetOptions{})
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("fails with the way out when atelet is not installed", func(ctx SpecContext) {

@@ -204,7 +204,7 @@ func checkGenericRender(g Gomega, r rendered, bucket string) {
 	ateletC := firstContainerOf(atelet, "containers", "atelet")
 	g.Expect(ateletC).NotTo(BeNil(), "the atelet container")
 	g.Expect(ateletC["image"]).NotTo(BeEmpty())
-	g.Expect(envOf(atelet.containers("containers"), "atelet")["SSL_CERT_DIR"]["value"]).To(Equal("/etc/koinon/imagecache-ca"))
+	g.Expect(envOf(atelet.containers("containers"), "atelet")["SSL_CERT_DIR"]["value"]).To(Equal("/etc/koinon/imagecache-ca:/etc/ssl/certs"))
 	g.Expect(ateletC["volumeMounts"]).To(ContainElement(HaveKeyWithValue("mountPath", "/etc/koinon/imagecache-ca")))
 	var cacheVol map[string]any
 	for _, v := range atelet.get("spec", "template", "spec", "volumes").([]any) {
