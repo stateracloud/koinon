@@ -51,3 +51,13 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(r.Ignored).NotTo(HaveKey("WorkerPool"))
 	})
 })
+
+// The worker namespace limits (issue #1161): the LimitRange and the ResourceQuota reach the manifest.
+var _ = Describe("substrate worker limits", func() {
+	It("renders one LimitRange and one ResourceQuota", func(ctx SpecContext) {
+		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
+		limits := helmRenderWith(ctx, values, showOnly("templates/substrate-workerlimits.yaml")...)
+		Expect(limits.Ignored).To(HaveKeyWithValue("LimitRange", 1))
+		Expect(limits.Ignored).To(HaveKeyWithValue("ResourceQuota", 1))
+	})
+})
