@@ -36,8 +36,10 @@ func describeLicenceNotices(f definition) bool {
 
 		It("lets the sandbox user read every licence notice and the GPL source offer", func(ctx SpecContext) {
 			sb := newSandbox(f.image())
+			DeferCleanup(func() {
+				sb.remove(context.Background())
+			})
 			sb.start(ctx)
-			defer sb.remove(context.Background())
 			for _, name := range licenceNotices {
 				path := "/usr/share/doc/koinon-tools/" + name
 				out, stderr, code := sb.try(ctx, "cat", path)

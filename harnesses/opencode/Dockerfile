@@ -293,7 +293,8 @@ RUN printf '[include]\n\tpath = /etc/koinon/git/config\n\tpath = /sandbox/.koino
 # config's "instructions" key names it (see README.md).
 # /usr/share/doc/koinon-tools is in this list too: the licences stage's ADD (above) fetches each
 # file over HTTPS, and a remote-URL ADD with no --chmod defaults the file to 0600, root-only. That
-# left every licence notice unreadable by the sandbox user below until this line also covered it.
+# left the yq, ast-grep, DuckDB, OpenCode and Bun notices unreadable by the sandbox user below,
+# until this line also covered them (fd, ripgrep and GPL-SOURCE-OFFER.txt were already 0644).
 RUN chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon /usr/share/doc/koinon-tools
 USER 10001:10001
 WORKDIR /sandbox

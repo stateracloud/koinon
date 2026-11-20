@@ -252,8 +252,9 @@ WORKDIR /sandbox
 
 `/usr/share/doc/koinon-tools` is in that list too: a licences stage's `ADD` fetches each notice over
 HTTPS, and a remote-URL `ADD` with no `--chmod` defaults the file to 0600, root-only. Without this
-line every notice under it would be unreadable by the sandbox user, even though `GPL-SOURCE-OFFER.txt`
-and a tarball's own licence files (installed with `install -m 0644`) stay readable.
+line the notices that stage fetches would stay unreadable by the sandbox user. A tarball's own
+licence file (installed with `install -m 0644`) and `GPL-SOURCE-OFFER.txt` (written by shell
+redirect) are already readable; this line is there for the rest.
 
 ## Checklist for a new image
 
