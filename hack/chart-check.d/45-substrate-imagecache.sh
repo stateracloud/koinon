@@ -113,8 +113,9 @@ lacks "no Kyverno" '[Kk]yverno' "${isub[@]}" "${icache[@]}"
 # An IPv4-only except list renders no empty IPv6 except; a mixed list splits by family.
 has "an IPv6 except stays under ::/0" '"fc00::/7"' "${isub[@]}" --set 'execution.substrate.imageCache.egress.exceptCIDRs={10.0.0.0/8,fc00::/7}' "${icache[@]}"
 
-# atelet trusts the cache CA (issue #1191). The installer patches the atelet DaemonSet (internal/substrateinstall); this
-# hook Job fills the ConfigMap it mounts with the PUBLIC CA, and rolls atelet and the cache when the certificates change.
+# atelet trusts the cache CA (issue #1191). The installer patches the atelet DaemonSet on the kind and generic routes
+# (internal/substrateinstall); this hook Job adds the same patch where it is missing (the gke route, issue #1194), fills
+# the ConfigMap it mounts with the PUBLIC CA, and rolls atelet and the cache when the certificates change.
 icaf=(--show-only templates/substrate-imagecache-ca.yaml)
 lacks "no CA publishing without the cache" 'imagecache-ca' "${isub[@]}" --set execution.substrate.imageCache.enabled=false
 icadocs=$(render "${isub[@]}" "${icaf[@]}")
@@ -136,6 +137,9 @@ if grep -Eq 'verbs: \[.*(update|create|delete|patch).*\]' <<<"$(awk '/resources:
 icasub=$(awk 'BEGIN{RS="---\n"} /kind: Role\n/ && /namespace: ate-system/ {print}' <<<"$icadocs")
 grep -Fq 'resourceNames: ["koinon-imagecache-ca"]' <<<"$icasub" || fail "the Substrate Role changes the one ConfigMap by name"
 grep -Fq 'resourceNames: ["atelet"]' <<<"$icasub" || fail "the Substrate Role patches the atelet DaemonSet by name"
+# The Job adds the trust patch on a route without the installer patch (gke): it needs get and patch on atelet, by name only.
+atverbs=$(awk '/resourceNames: \["atelet"\]/{f=1} f&&/verbs/{print; f=0}' <<<"$icasub")
+[[ $atverbs == *get* && $atverbs == *patch* ]] || fail "the Substrate Role reads and patches atelet (the Job adds the trust patch on the gke route)"
 if grep -Eq 'resources: \[(secrets|pods|roles|rolebindings|serviceaccounts)' <<<"$icasub"; then fail "the Substrate Role must not reach Secrets, pods or RBAC"; fi
 lacks "the CA Job renders no key material" 'tls\.key|PRIVATE KEY' "${isub[@]}" "${icaf[@]}"
 lacks "no Kyverno in the CA Job" '[Kk]yverno' "${isub[@]}" "${icaf[@]}"

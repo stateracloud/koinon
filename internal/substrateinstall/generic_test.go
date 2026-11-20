@@ -281,6 +281,30 @@ func TestOverlayMakesAteletTrustTheImageCacheCA(t *testing.T) {
 	}
 }
 
+// TestEveryRouteTrustsTheImageCacheCA is the per-route spec of issue #1194. A new platform fails here until it names how
+// atelet gets the trust: the installer overlay (kind, generic) or the hook Job of the chart (every route, and the only
+// one for gke, whose overlay directory in the pinned tree the installer does not know).
+func TestEveryRouteTrustsTheImageCacheCA(t *testing.T) {
+	g := NewWithT(t)
+	overlay := map[substrateinstall.Platform]func(dir string) error{
+		substrateinstall.PlatformGeneric: func(dir string) error { return genericProfile().ApplyGenericOverlay(dir, "ate-system") },
+		substrateinstall.PlatformKind: func(dir string) error {
+			return substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(dir, "ate-system")
+		},
+		substrateinstall.PlatformGKE: nil, // no overlay: the hook Job adds the patch (internal/imagecacheca ensurePatched)
+	}
+	for _, platform := range substrateinstall.Platforms {
+		apply, known := overlay[platform]
+		g.Expect(known).To(BeTrue(), "platform %s must say how atelet trusts the image cache CA", platform)
+		if apply == nil {
+			continue
+		}
+		dir := writeTree(t, pinnedKindFiles())
+		g.Expect(apply(dir)).To(Succeed(), string(platform))
+		assertCacheTrustPatch(t, dir)
+	}
+}
+
 func TestKindOverlayChangesNothingElse(t *testing.T) {
 	g := NewWithT(t)
 	files := pinnedKindFiles()

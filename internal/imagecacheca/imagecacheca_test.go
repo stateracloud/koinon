@@ -73,7 +73,8 @@ func tlsSecret(ca, leaf, key []byte) *corev1.Secret {
 func ateletDS() *appsv1.DaemonSet {
 	ds := ateletDSUnpatched()
 	ds.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: imagecacheca.VolumeName, VolumeSource: corev1.VolumeSource{
-		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}}}}}
+		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}},
+	}}}
 	ds.Spec.Template.Spec.Containers = []corev1.Container{{Name: imagecacheca.AteletContainer, Env: []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}}}}
 	return ds
 }
@@ -165,13 +166,56 @@ var _ = Describe("Publish", func() {
 		Expect(out.String()).To(ContainSubstring("does not exist yet"))
 	})
 
-	It("fails, and changes nothing, when atelet has no installer patch", func(ctx SpecContext) {
+	It("adds the trust patch when atelet has none (the gke route, issue #1194)", func(ctx SpecContext) {
 		ca, leaf, key := pki("cache")
 		c := fake.NewClientset(tlsSecret(ca, leaf, key), ateletDSUnpatched(), cacheDeploy())
-		err := imagecacheca.Publish(ctx, c, params, io.Discard)
-		Expect(err).To(MatchError(ContainSubstring("run koinon-api substrate install")))
-		_, err = c.CoreV1().ConfigMaps(subNS).Get(ctx, imagecacheca.ConfigMapName, metav1.GetOptions{})
-		Expect(err).To(HaveOccurred())
+		var out bytes.Buffer
+		Expect(imagecacheca.Publish(ctx, c, params, &out)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("added the volume and SSL_CERT_DIR"))
+		ds, err := c.AppsV1().DaemonSets(subNS).Get(ctx, "atelet", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		spec := ds.Spec.Template.Spec
+		Expect(spec.Volumes).To(ConsistOf(SatisfyAll(
+			HaveField("Name", imagecacheca.VolumeName),
+			HaveField("ConfigMap.Name", imagecacheca.ConfigMapName),
+			HaveField("ConfigMap.Optional", HaveValue(BeTrue())),
+			HaveField("HostPath", BeNil()),
+			HaveField("Secret", BeNil()))))
+		Expect(spec.Containers).To(HaveLen(1), "no container is added")
+		Expect(spec.Containers[0].Image).To(BeEmpty(), "no image is added")
+		Expect(spec.Containers[0].Env).To(ConsistOf(corev1.EnvVar{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}))
+		Expect(spec.Containers[0].VolumeMounts).To(ConsistOf(corev1.VolumeMount{Name: imagecacheca.VolumeName, MountPath: imagecacheca.MountPath, ReadOnly: true}))
+		Expect(spec.InitContainers).To(BeEmpty())
+		Expect(ds.Spec.Template.Annotations).To(HaveKey(imagecacheca.AteletAnnotation))
+	})
+
+	It("keeps the other volumes, mounts and variables of atelet when it adds the patch", func(ctx SpecContext) {
+		ca, leaf, key := pki("cache")
+		ds := ateletDSUnpatched()
+		ds.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: "state"}}
+		ds.Spec.Template.Spec.Containers = []corev1.Container{{
+			Name: "atelet", Image: "atelet@sha256:0", Env: []corev1.EnvVar{{Name: "LOG", Value: "info"}},
+			VolumeMounts: []corev1.VolumeMount{{Name: "state", MountPath: "/state"}},
+		}}
+		c := fake.NewClientset(tlsSecret(ca, leaf, key), ds)
+		p := params
+		p.Deployment = ""
+		Expect(imagecacheca.Publish(ctx, c, p, io.Discard)).To(Succeed())
+		got, err := c.AppsV1().DaemonSets(subNS).Get(ctx, "atelet", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Spec.Template.Spec.Volumes).To(HaveLen(2))
+		ctr := got.Spec.Template.Spec.Containers[0]
+		Expect(ctr.Image).To(Equal("atelet@sha256:0"))
+		Expect(ctr.Env).To(HaveLen(2))
+		Expect(ctr.VolumeMounts).To(HaveLen(2))
+	})
+
+	It("does not patch atelet again when it already trusts the CA", func(ctx SpecContext) {
+		ca, leaf, key := pki("cache")
+		c := fake.NewClientset(tlsSecret(ca, leaf, key), ateletDS(), cacheDeploy())
+		var out bytes.Buffer
+		Expect(imagecacheca.Publish(ctx, c, params, &out)).To(Succeed())
+		Expect(out.String()).NotTo(ContainSubstring("added the volume"))
 	})
 
 	It("fails with the way out when atelet is not installed", func(ctx SpecContext) {

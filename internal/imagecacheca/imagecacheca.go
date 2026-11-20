@@ -26,6 +26,7 @@ import (
 	"io"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -93,9 +94,9 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 	if len(leaf) == 0 {
 		return fmt.Errorf("%w: Secret %s/%s has no %s", ErrCA, p.Namespace, p.Secret, tlsCertKey)
 	}
-	// A Substrate that was installed before the installer patch (or on a route without it) would pull with no trust
-	// while this Job reports success: fail with the way out instead.
-	if err := checkPatched(ctx, client, p.SubstrateNamespace); err != nil {
+	// A Substrate that was installed before the installer patch, or on a route without it (gke), would pull with no
+	// trust while this Job reports success: add the patch here.
+	if err := ensurePatched(ctx, client, p.SubstrateNamespace, out); err != nil {
 		return err
 	}
 	if err := upsertConfigMap(ctx, client, p.SubstrateNamespace, ca, out); err != nil {
@@ -233,16 +234,52 @@ func stamp(ctx context.Context, out io.Writer, what, key, sum string, required b
 	return nil
 }
 
-// checkPatched fails when the atelet DaemonSet exists without the installer patch: the volume of the ConfigMap and
-// SSL_CERT_DIR on the atelet container. A missing DaemonSet is not checked here: the stamp step reports it.
-func checkPatched(ctx context.Context, client kubernetes.Interface, ns string) error {
+// TrustPodSpec is the part of the atelet pod spec that makes atelet trust the CA: the optional ConfigMap volume, the
+// mount and SSL_CERT_DIR on the atelet container. It adds no container, no image, no hostPath and no Secret volume, so
+// the admission policy of the Substrate namespace has nothing new to allow. The installer patch (kind and generic) and
+// ensurePatched (every route, the gke route included) both use it, so the two cannot differ.
+func TrustPodSpec() map[string]any {
+	return map[string]any{
+		"volumes": []any{map[string]any{
+			"name":      VolumeName,
+			"configMap": map[string]any{"name": ConfigMapName, "optional": true},
+		}},
+		"containers": []any{map[string]any{
+			"name":         AteletContainer,
+			"env":          []any{map[string]any{"name": EnvName, "value": CertDirs}},
+			"volumeMounts": []any{map[string]any{"name": VolumeName, "mountPath": MountPath, "readOnly": true}},
+		}},
+	}
+}
+
+// ensurePatched adds the trust patch to the atelet DaemonSet when it is missing. The installer patch covers the kind and
+// generic routes. The gke route of ate-setup uses an overlay directory that the installer does not know (issue #1194), so
+// this step covers every route with the same strategic merge patch and needs no knowledge of the Substrate tree. A missing
+// DaemonSet is not handled here: the stamp step reports it. A patched DaemonSet is left alone, so nothing restarts twice.
+func ensurePatched(ctx context.Context, client kubernetes.Interface, ns string, out io.Writer) error {
 	ds, err := client.AppsV1().DaemonSets(ns).Get(ctx, DaemonSetName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
+		return fmt.Errorf("read DaemonSet %s/%s: %w", ns, DaemonSetName, err)
+	}
+	if trusts(ds) {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": TrustPodSpec()}}})
+	if err != nil {
 		return err
 	}
+	if _, err := client.AppsV1().DaemonSets(ns).Patch(ctx, DaemonSetName, types.StrategicMergePatchType, body, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("patch DaemonSet %s/%s to trust the image cache CA: %w", ns, DaemonSetName, err)
+	}
+	_, _ = fmt.Fprintf(out, "DaemonSet %s/%s had no image cache CA trust (a route without the installer patch): added the volume and %s\n", ns, DaemonSetName, EnvName)
+	return nil
+}
+
+// trusts reports whether the atelet DaemonSet has the volume of the ConfigMap and SSL_CERT_DIR on the atelet container.
+func trusts(ds *appsv1.DaemonSet) bool {
 	hasVolume, hasEnv := false, false
 	for _, v := range ds.Spec.Template.Spec.Volumes {
 		if v.Name == VolumeName && v.ConfigMap != nil && v.ConfigMap.Name == ConfigMapName {
@@ -259,9 +296,5 @@ func checkPatched(ctx context.Context, client kubernetes.Interface, ns string) e
 			}
 		}
 	}
-	if !hasVolume || !hasEnv {
-		return fmt.Errorf("DaemonSet %s/%s does not trust the image cache CA (volume %s: %t, %s: %t): run koinon-api substrate install on a kind or generic cluster; the gke route has no patch yet",
-			ns, DaemonSetName, VolumeName, hasVolume, EnvName, hasEnv)
-	}
-	return nil
+	return hasVolume && hasEnv
 }

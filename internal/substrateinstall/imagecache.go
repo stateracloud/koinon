@@ -25,17 +25,7 @@ func imageCacheTrustPatch(ns string) koinonPatch {
 	return koinonPatch{"koinon-atelet-imagecache-ca.yaml", map[string]any{
 		"apiVersion": "apps/v1", "kind": "DaemonSet",
 		"metadata": map[string]any{"name": imagecacheca.DaemonSetName, "namespace": ns},
-		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
-			"volumes": []any{map[string]any{
-				"name":      imagecacheca.VolumeName,
-				"configMap": map[string]any{"name": imagecacheca.ConfigMapName, "optional": true},
-			}},
-			"containers": []any{map[string]any{
-				"name":         imagecacheca.AteletContainer,
-				"env":          []any{map[string]any{"name": imagecacheca.EnvName, "value": imagecacheca.CertDirs}},
-				"volumeMounts": []any{map[string]any{"name": imagecacheca.VolumeName, "mountPath": imagecacheca.MountPath, "readOnly": true}},
-			}},
-		}}},
+		"spec":     map[string]any{"template": map[string]any{"spec": imagecacheca.TrustPodSpec()}},
 	}}
 }
 
