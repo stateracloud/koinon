@@ -298,6 +298,14 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Expect(p.Check(ctx, "http://gitea.ns")).To(Succeed())
 	})
 
+	It("denies Koinon's own namespace under the configured cluster domain without a lookup", func(ctx SpecContext) {
+		custom := p
+		custom.Search = &catalog.ResolverSearch{Domains: catalog.SubstrateSearch.Domains, Ndots: 5, ClusterDomain: "corp.example"}
+		for _, u := range []string{"https://koinon-api.koinon.svc.corp.example", "https://koinon-api.koinon.svc.cluster.local"} {
+			Expect(custom.Check(ctx, u)).To(MatchError(ContainSubstring("own namespace")), u)
+		}
+	})
+
 	It("takes the cluster domain from the parameter", func(ctx SpecContext) {
 		custom := p
 		custom.Search = &catalog.ResolverSearch{Domains: catalog.SubstrateSearch.Domains, Ndots: 5, ClusterDomain: "corp.example"}

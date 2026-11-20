@@ -29,7 +29,7 @@ import (
 //     Kubernetes Services' ClusterIPs;
 //   - single-label names (they resolve to Services in the gateway's own namespace through the search
 //     path) and `localhost`;
-//   - names in Koinon's own namespace: <name>.<namespace>.svc[.cluster.local] and <name>.<namespace>.
+//   - names in Koinon's own namespace: <name>.<namespace>.svc[.<cluster domain>] and <name>.<namespace>.
 //
 // It checks the URL when a provider is saved and again, with a fresh lookup, when the reconciler
 // renders it, which narrows DNS rebinding but cannot close it: the gateway resolves the name itself
@@ -645,7 +645,7 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		return deny("a name without a dot resolves to a Service in Koinon's namespace")
 	}
 	if ns := p.Namespace; ns != "" {
-		for _, suffix := range []string{"." + ns + ".svc", "." + ns + ".svc.cluster.local", "." + ns} {
+		for _, suffix := range []string{"." + ns + ".svc", "." + ns + ".svc." + p.search().ClusterDomain, "." + ns + ".svc." + DefaultClusterDomain, "." + ns} {
 			if strings.HasSuffix(host, suffix) {
 				return deny("it is in Koinon's own namespace")
 			}
