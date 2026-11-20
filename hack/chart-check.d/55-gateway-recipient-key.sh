@@ -170,7 +170,7 @@ has "re-seal Job signs in as the gateway role" 'value: "koinon-gateway"' "${gres
 has "re-seal Job reads a projected service account token" 'serviceAccountToken:' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" "${gkms[@]}"
 has "re-seal Job accepts no connections" '^# gateway-reseal accepts no connections' "${gk[@]}" "${gres[@]}" --show-only templates/networkpolicy.yaml
 has "re-seal Job limits its egress" 'policyTypes: \[Ingress, Egress\]' "${gk[@]}" "${gres[@]}" --show-only templates/networkpolicy.yaml
-if render "${gres_only[@]}" "${gk[@]}" "${gres[@]}" --set postgres.mode=external --set postgres.external.secretName=x >/dev/null 2>&1; then
+if render "${gres_only[@]}" "${gk[@]}" "${gres[@]}" --set postgres.mode=external --set postgres.external.secretName=x --set postgres.external.keys.reseal= >/dev/null 2>&1; then
 	fail "re-seal Job in external mode needs postgres.external.keys.reseal"
 fi
 rj() { render "${gres_only[@]}" "${gk[@]}" "$@" | grep -A2 '^kind: Job$' | sed -n 's/^  name: //p'; }
