@@ -33,8 +33,9 @@ oidc:
   platformAdminGroups: [koinon-platform]
 bootstrapAdmin:
   existingSecret: koinon-bootstrap-admin-gitops
-imagePullSecrets:
-  - name: ghcr-pull
+global:
+  imagePullSecrets:
+    - name: ghcr-pull
 harnessPrepull:
   enabled: true
   nodeSelector:
