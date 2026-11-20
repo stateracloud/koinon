@@ -389,6 +389,28 @@ process can then reach kernel code that otherwise needs privilege. Set the value
 gVisor sandboxes only, and leave the control plane nodes at 0. Use `--substrate-node-selector` so the check
 reads the same nodes.
 
+## The image cache
+
+With `execution.driver: substrate` the chart installs a Zot pull-through registry (`execution.substrate.imageCache`,
+on by default; ADR 0120 section 6, item 9). It is the one image source of atelet. Only the cache has internet egress,
+and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.io`, `quay.io`) on port 443.
+
+- **The rewrite.** The driver rewrites the registry of every actor image to
+  `<release>-imagecache.<namespace>.svc:5000/<host>/...` and keeps the path, the tag and the digest. atelet checks
+  the digest, so the cache needs no trust.
+- **The name is part of the template hash.** A new release name, namespace or port re-hashes every actor template.
+  Choose them once.
+- **TLS.** The ensure-secrets hook Job makes the Secret `<release>-imagecache-tls` (a new CA and a leaf, 10 years,
+  no rotation yet), or you set `imageCache.tls.existingSecret` to a `kubernetes.io/tls` Secret with `ca.crt`.
+- **CA trust of atelet (manual, not tested on a cluster).** Substrate has no CA option. Copy `ca.crt` from the
+  Secret into a ConfigMap in `ate-system`, mount it in the atelet DaemonSet and set `SSL_CERT_DIR` to include it,
+  through the installer patch. Until then atelet refuses the cache certificate. Needs a Koinon issue (needs main).
+- **Air gap.** Set `imageCache.enabled=false`. Name your mirror with `imageMirrors` (a map from host to mirror
+  prefix) or `imageRegistry`, and allow it with `workerNetworkPolicy.imageSource`. The chart refuses the cache and
+  an operator source together.
+- **Check.** `kubectl -n <namespace> get deploy <release>-imagecache`; the atelet logs name the cache host; the
+  Zot logs show the sync of the image; no pod in `ate-system` reaches the internet.
+
 ## Worker namespace and admission
 
 Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6). The chart creates it:

@@ -223,6 +223,12 @@ spec:
 {{- $imgPods := dict }}
 {{- if or (dig "podSelector" "matchLabels" dict $img) (dig "podSelector" "matchExpressions" list $img) }}{{- $imgPods = $img.podSelector }}{{- end }}
 {{- $imgCIDRs := $img.cidrs | default list }}
+{{- if include "koinon.imageCache" . }}
+{{- /* The chart runs the one image source (issue #1170): the cache pod, in Koinon's namespace. */ -}}
+{{- if or $imgPods $imgCIDRs }}{{- fail "execution.substrate.imageCache.enabled is the one image source of the node agent: do not set workerNetworkPolicy.imageSource.podSelector or .cidrs with it. For an operator mirror set imageCache.enabled=false" }}{{- end }}
+{{- $imgPods = dict "matchLabels" (include "koinon.selectorLabels" (list . "imagecache") | fromYaml) }}
+{{- $img = dict "apps" $img.apps "port" $s.imageCache.port "podSelector" $imgPods "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" .Release.Namespace)) }}
+{{- end }}
 {{- range $imgCIDRs }}{{- if has . (list "0.0.0.0/0" "::/0") }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource.cidrs must name the image source, not the whole internet" }}{{- end }}{{- end }}
 {{- if and $imgPods $imgCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource names one image source: set podSelector (an in-cluster cache) or cidrs, not both" }}{{- end }}
 {{- if or $imgPods $imgCIDRs }}

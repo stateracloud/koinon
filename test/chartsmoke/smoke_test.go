@@ -46,8 +46,9 @@ const (
 
 // thirdPartyDeployments are rendered Deployments the smoke test does not run: they are not
 // Koinon's binaries, so no Koinon flag or mount can break them. koinon-gateway is agentgateway,
-// whose configuration the reconciler writes at run time.
-var thirdPartyDeployments = []string{"koinon-gateway"}
+// whose configuration the reconciler writes at run time. koinon-imagecache is Zot, the Substrate
+// image cache (issue #1170); the chart-check assertions and the substrate spec cover its render.
+var thirdPartyDeployments = []string{"koinon-gateway", "koinon-imagecache"}
 
 // platformJobs are Jobs that inspect the cluster platform (Agent Sandbox, OpenShell, Kata, the
 // gateway controller), which envtest does not have. They must run their checks and report: exit 1

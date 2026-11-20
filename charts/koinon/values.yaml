@@ -914,7 +914,8 @@ execution:
       # to it and to no other registry. Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
       # when it runs in another namespace) OR to operator cidrs, with the port. Both set: the render fails. None set:
       # the node agent has no image egress (fail closed), which a cluster that serves images from the node needs.
-      # Actor image references are rewritten to this source with global.registryMirrors or global.imageRegistry (the
+      # With imageCache.enabled (the default) the chart sets this itself, and setting podSelector or cidrs fails the
+      # render. Actor image references are rewritten to the source with imageCache or imageMirrors / imageRegistry (the
       # digest is kept). Choose the mirror name once: it is part of the actor template hash, so changing it
       # re-hashes every template.
       imageSource:
@@ -978,6 +979,63 @@ execution:
         namespace: podcertificate-controller-system
         app: podcertificate-controller
 
+    # The ONE image source of the node agent (issue #1170, ADR 0120 section 6.9). atelet pulls every actor image itself,
+    # and the Substrate namespaces deny internet egress, so atelet reaches one pull-through cache. By default the chart runs
+    # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has internet egress, and
+    # atelet checks the manifest and every layer against the digest of the reference, so the cache needs no trust.
+    # Actor image references are rewritten to it in the driver (the digest is kept): <cache host>/<upstream host>/<path>.
+    # CHOOSE THE MIRROR NAME ONCE: the rewritten reference is part of the actor template hash, so a changed fullname,
+    # namespace or port, or a changed host list, re-hashes every template and snapshot.
+    # An operator mirror (an air-gapped cluster, Artifactory, Harbor): set imageCache.enabled=false, name the mirror in
+    # imageMirrors (and/or imageRegistry) and its address in workerNetworkPolicy.imageSource.cidrs and .port.
+    imageCache:
+      enabled: true
+      # Zot v2.1.23 (the multi-architecture index digest), pulled by the kubelet through global.registryMirrors.
+      image:
+        repository: project-zot/zot
+        registry: ghcr.io
+        tag: v2.1.23
+        digest: sha256:9d3de83ac2099e6f4843045b4c9b65b7e8baf40f92d28f54906dee9d4d390fd7
+      # The port of the cache pod and of its Service. The mirror host is <name>.<namespace>.svc:<port>.
+      port: 5000
+      # The upstream registries the cache syncs from, and no other. host is the registry host of an image reference;
+      # url is where the cache pulls it. A reference whose host is not listed is not rewritten, so atelet (which has no
+      # route to it) cannot pull it: add the host here, or leave it out on purpose. Docker Hub redirects blob downloads
+      # to a CDN, and the cache follows the redirect itself; atelet never sees the redirect host.
+      upstreams:
+        - {host: ghcr.io, url: "https://ghcr.io"}
+        - {host: docker.io, url: "https://registry-1.docker.io"}
+        - {host: quay.io, url: "https://quay.io"}
+      # Domain of the cluster, for the DNS names of the certificate (<name>.<namespace>.svc.<clusterDomain>).
+      clusterDomain: cluster.local
+      tls:
+        # A kubernetes.io/tls Secret in Koinon's namespace with ca.crt, tls.crt and tls.key, from your own CA. Empty: the
+        # ensure-secrets hook Job makes one with a new CA for the cache's DNS names (ten years; the CA key is not kept).
+        # atelet must trust the CA: see docs/dev/substrate-install.md, "The image cache".
+        existingSecret: ""
+      # Cache storage. Without persistence the layers live in an emptyDir that the kubelet evicts the pod over sizeLimit;
+      # the cache then starts empty and fetches again.
+      persistence:
+        enabled: false
+        size: 20Gi
+        storageClassName: ""
+        sizeLimit: 20Gi
+      # Egress of the cache pod: DNS, and TCP 443 to the internet except the ranges in exceptCIDRs. A NetworkPolicy
+      # cannot name a registry, so the allowed hosts are the upstreams list above (the sync extension fetches nothing
+      # else). To fence the route as well, give cidrs: the cache then reaches only those ranges on 443.
+      egress:
+        cidrs: []
+        exceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, fc00::/7, fe80::/10]
+      resources:
+        requests: {cpu: 50m, memory: 128Mi}
+        limits: {memory: 512Mi}
+      nodeSelector: {}
+      tolerations: []
+    # Operator mirror for the actor images (with imageCache.enabled=false): registry host -> mirror, and a mirror for every
+    # other host. Same rules as global.registryMirrors and global.imageRegistry (koinon.imageRef), which still rewrite only the
+    # images of the chart's own pods. The digest is kept.
+    imageMirrors: {}
+    imageRegistry: ""
     # Resource limits of the worker namespace (issue 1161; the intent of old issues 821 to 823). The chart
     # creates the namespace, so it also creates the LimitRange and the ResourceQuota there (the sandbox
     # LimitRange of the OpenShell driver is made by the reconciler instead). The LimitRange gives a container

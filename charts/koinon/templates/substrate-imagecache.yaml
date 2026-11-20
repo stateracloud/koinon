@@ -1,0 +1,231 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The in-cluster image cache of the Substrate driver (issue #1170, ADR 0120 section 6.9): a Zot registry that pulls
+through to the upstream registries on demand. It is the ONE image source of the node agent (atelet): atelet pulls every
+actor image itself, the Substrate namespaces deny internet egress, and a NetworkPolicy cannot allow a registry by name.
+Only this pod has egress to the internet. atelet checks the manifest and every layer against the digest of the
+reference, so the cache needs no trust. The driver rewrites the registry host of every actor image to
+<cache host>/<upstream host> and keeps the path, the tag and the digest.
+Renders only with execution.driver=substrate and execution.substrate.imageCache.enabled.
+- Zot config: the sync extension with onDemand only (no polling, no push), one registry entry per upstream. The local
+  repository name is the upstream host and the path (ghcr.io/org/name); stripPrefix hands the path to the upstream.
+  Anonymous read, nothing else: no one can push.
+- TLS: the Secret of imageCache.tls.existingSecret, or the one the ensure-secrets hook Job makes (a new CA, ten years).
+  atelet must trust its ca.crt (docs/dev/substrate-install.md).
+- NetworkPolicy: ingress from the image-source apps of the control-plane namespace (atelet) only; egress to DNS and TCP
+  443 outside the private ranges.
+- The image goes through koinon.imageRef and the pod through koinon.imagePullSecrets (ADR 0061).
+No credential reaches a sandbox or a worker pod: the cache holds none (public upstreams) and sees no actor identity.
+*/ -}}
+{{- if include "koinon.imageCache" . }}
+{{- $c := .Values.execution.substrate.imageCache }}
+{{- $name := include "koinon.imageCache.name" . }}
+{{- $np := .Values.execution.substrate.workerNetworkPolicy }}
+{{- $registries := list }}
+{{- range $c.upstreams }}
+{{- $registries = append $registries (dict "urls" (list .url) "onDemand" true "tlsVerify" true "maxRetries" 2 "retryDelay" "30s" "content" (list (dict "prefix" "**" "destination" (printf "/%s" (lower .host)) "stripPrefix" true))) }}
+{{- end }}
+{{- $conf := dict "distSpecVersion" "1.1.0"
+    "storage" (dict "rootDirectory" "/var/lib/zot" "gc" true "gcDelay" "1h" "gcInterval" "6h")
+    "http" (dict "address" "0.0.0.0" "port" (toString $c.port) "compat" (list "docker2s2") "tls" (dict "cert" "/etc/zot/tls/tls.crt" "key" "/etc/zot/tls/tls.key") "accessControl" (dict "repositories" (dict "**" (dict "anonymousPolicy" (list "read") "defaultPolicy" (list)))))
+    "log" (dict "level" "info")
+    "extensions" (dict "sync" (dict "enable" true "registries" $registries)) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+data:
+  config.json: |
+    {{- $conf | toPrettyJson | nindent 4 }}
+{{- if $c.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $c.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $c.persistence.size }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+spec:
+  # One replica: the layers live in one store. The old pod stops before the new one starts, so two pods never share the
+  # volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "imagecache") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "imagecache") | nindent 8 }}
+      annotations:
+        # A changed upstream list restarts the pod: Zot reads its config at start.
+        checksum/config: {{ $conf | toJson | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with include "koinon.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: zot
+          image: {{ include "koinon.imageRef" (list . (printf "%s/%s:%s%s" $c.image.registry $c.image.repository $c.image.tag (ternary (printf "@%s" $c.image.digest) "" (not (empty $c.image.digest))))) }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "/etc/zot/config.json"]
+          ports:
+            - name: registry
+              containerPort: {{ $c.port }}
+          readinessProbe:
+            httpGet: {path: /v2/, port: registry, scheme: HTTPS}
+          livenessProbe:
+            httpGet: {path: /v2/, port: registry, scheme: HTTPS}
+            initialDelaySeconds: 10
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+              readOnly: true
+            - name: tls
+              mountPath: /etc/zot/tls
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/zot
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tls
+          secret:
+            secretName: {{ include "koinon.imageCache.tlsSecret" . }}
+            defaultMode: 0444
+        - name: data
+          {{- if $c.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ $c.persistence.sizeLimit }}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "koinon.selectorLabels" (list . "imagecache") | nindent 4 }}
+  ports:
+    - name: registry
+      port: {{ $c.port }}
+      targetPort: registry
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "imagecache") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.execution.substrate.namespace | quote }}
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  {{- toYaml ($np.imageSource.apps | default (list "atelet")) | nindent 18 }}
+      ports:
+        - {port: {{ $c.port }}, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    # The upstream registries (a NetworkPolicy cannot name a host; the list of hosts is in the Zot config).
+    - to:
+        {{- if $c.egress.cidrs }}
+        {{- range $c.egress.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- else }}
+        {{- $v4 := list }}{{- $v6 := list }}
+        {{- range $c.egress.exceptCIDRs }}{{ if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}{{ end }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $v4 }}
+            except:
+              {{- range . }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- range . }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+      ports:
+        - {port: 443, protocol: TCP}
+{{- end }}

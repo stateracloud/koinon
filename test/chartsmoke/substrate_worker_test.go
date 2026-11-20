@@ -30,7 +30,7 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 5))
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 5))
 		netpol := helmRenderWith(ctx, values, showOnly("templates/substrate-networkpolicy.yaml")...)
-		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 5))
+		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 6))
 		// The fence of otel-system and podcertificate-controller-system and the telemetry route (issue #1172): seven policies.
 		fence := helmRenderWith(ctx, values, showOnly("templates/substrate-fence-networkpolicy.yaml")...)
 		Expect(fence.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
@@ -40,6 +40,17 @@ var _ = Describe("substrate worker namespace", func() {
 		observer := helmRenderWith(ctx, values, showOnly("templates/substrate-observer.yaml")...)
 		Expect(observer.Ignored).To(HaveKeyWithValue("Role", 1))
 		Expect(observer.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
+	})
+
+	// The default image cache (issue #1170): atelet's one image source is a Zot pull-through registry in
+	// Koinon's namespace. The sixth worker NetworkPolicy above is the image-source rule that selects it.
+	It("renders the in-cluster image cache by default", func(ctx SpecContext) {
+		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
+		cache := helmRenderWith(ctx, values, showOnly("templates/substrate-imagecache.yaml")...)
+		Expect(cache.Deployments).To(HaveLen(1))
+		Expect(cache.Deployments[0].Spec.Template.Spec.AutomountServiceAccountToken).To(HaveValue(BeFalse()))
+		Expect(cache.Ignored).To(HaveKeyWithValue("NetworkPolicy", 1))
+		Expect(cache.Ignored).To(HaveKeyWithValue("Service", 1))
 	})
 
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {

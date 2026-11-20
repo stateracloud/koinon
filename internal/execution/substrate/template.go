@@ -75,11 +75,14 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if err != nil {
 		return nil, err
 	}
+	// The node agent pulls from one image source: the registry of the reference is rewritten to it,
+	// and the digest is kept (issue #1170). The rewritten reference is what the hash covers.
+	image := RewriteImage(spec.Image, cfg.ImageRegistry, cfg.ImageMirrors)
 	t := &ateapiv1.ActorTemplate{
 		Metadata: &ateapiv1.ResourceMetadata{Atespace: workspace},
 		Containers: []*ateapiv1.Container{{
 			Name:    AgentContainer,
-			Image:   spec.Image,
+			Image:   image,
 			Command: spec.Command,
 		}},
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
@@ -96,7 +99,7 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		t.WorkerSelector = &ateapiv1.Selector{MatchLabels: map[string]string{RuntimeClassSelector: spec.RuntimeClassName}}
 	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v1\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d", workspace, spec.Image, spec.Command, cpu, mem,
+	_, _ = fmt.Fprintf(h, "v1\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d", workspace, image, spec.Command, cpu, mem,
 		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil

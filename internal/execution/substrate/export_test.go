@@ -35,3 +35,6 @@ var (
 	StoreError  = storeError
 	ErrNoObject = errNoObject
 )
+
+// RenderTemplateForTest renders the ActorTemplate of a spec.
+var RenderTemplateForTest = renderTemplate

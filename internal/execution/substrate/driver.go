@@ -85,6 +85,14 @@ type Config struct {
 	// none. A sandbox whose tier is unknown fails Exec with [execution.ErrFailedPrecondition]: the
 	// driver never starts a guest process, Upload's included, without the launcher.
 	DefaultTier harness.Tier
+	// ImageMirrors maps a registry host of an actor image (docker.io, ghcr.io, ...) to the image
+	// source of the node agent, for example "cache.koinon.svc/ghcr.io". The path, the tag and the digest
+	// of the reference are kept (see [RewriteImage]). The node agent reaches one image source only
+	// (ADR 0120 section 6), so every actor image goes through here. The rewritten reference is part of
+	// the template hash: a changed mirror name re-hashes every template.
+	ImageMirrors map[string]string
+	// ImageRegistry replaces the host of an image whose host has no entry in ImageMirrors.
+	ImageRegistry string
 	// DrainTimeout bounds each of the two waits of a suspend for the router calls that started
 	// before it: first for the short calls (stdin writes, uploads) to end by themselves, then,
 	// after they are cancelled, for them to return. It also bounds the wait for an actor that a
