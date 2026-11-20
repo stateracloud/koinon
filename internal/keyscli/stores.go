@@ -131,7 +131,7 @@ func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 	}
 	data, err := encodeKeySet(ctx, k.Wrappers, ks)
 	if err != nil {
-		// The KMS refused (or could not be reached) before any write: no key bytes left this process.
+		// The KMS refused (or could not be reached) before any write: no Secret holds the new KEK, so nothing is sealed under its ID.
 		return fmt.Errorf("%w: %w", ErrNotSaved, err)
 	}
 	s.Data, s.StringData = data, nil

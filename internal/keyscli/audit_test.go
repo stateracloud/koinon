@@ -459,6 +459,34 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(newKeySet(ctx).Keys).To(HaveKey(kekB))
 		})
 
+		It("keeps the ID spent when one abort meets two intents, or when the abort cannot be written", func(ctx SpecContext) {
+			write := func(action string) {
+				Expect((&keyscli.Auditor{Pool: pool}).Record(ctx, keyscli.Event{Command: "add", Action: action, TargetKind: "kek", TargetID: kekB})).To(Succeed())
+			}
+			write(keyscli.ActionAddIntent)
+			write(keyscli.ActionAddIntent)
+			write(keyscli.ActionAddAborted)
+			seen, err := keyscli.RecordedID(ctx, pool, kekB)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeTrue(), "an abort undoes one intent only")
+
+			tool.Store = saveProbe{Store: tool.Store, before: func(context.Context) error { return keyscli.ErrNotSaved }}
+			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(_ context.Context, e audit.InstallEvent) error {
+				if e.Action == keyscli.ActionAddAborted {
+					return errors.New("koinon_test database down")
+				}
+				_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+					b.Install(e)
+					return nil
+				})
+				return err
+			}}
+			Expect(tool.Add(ctx, "kek-20261023-abrt")).To(MatchError(ContainSubstring("stays spent: pick a new ID")))
+			seen, err = keyscli.RecordedID(ctx, pool, "kek-20261023-abrt")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeTrue())
+		})
+
 		It("keeps the change and says so when only the add event cannot be written", func(ctx SpecContext) {
 			var n int
 			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(context.Context, audit.InstallEvent) error {

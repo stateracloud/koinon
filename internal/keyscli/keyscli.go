@@ -363,7 +363,7 @@ func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 }
 
 // RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
-// keys.forget event for it, or a keys.add.intent event with no keys.add.aborted event after it, or the ID in the KEKs or Retired of any recorded key-set state (before or
+// keys.forget event for it, or more keys.add.intent events than keys.add.aborted events (each abort undoes one intent), or the ID in the KEKs or Retired of any recorded key-set state (before or
 // after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
 //
 // Add records the ID ([ActionAddIntent]) before it saves the Secret and fails closed when that write
@@ -375,9 +375,8 @@ func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error
 	err := pool.QueryRow(ctx, `SELECT EXISTS (
 SELECT 1 FROM install_audit_events
 WHERE (action IN ($1, $2) AND target_kind = 'kek' AND target_id = $3)
-   OR (action = $4 AND target_kind = 'kek' AND target_id = $3 AND NOT EXISTS (
-        SELECT 1 FROM install_audit_events a
-        WHERE a.action = $5 AND a.target_kind = 'kek' AND a.target_id = $3 AND a.chain_seq > install_audit_events.chain_seq))
+   OR ((SELECT count(*) FROM install_audit_events WHERE action = $4 AND target_kind = 'kek' AND target_id = $3)
+       > (SELECT count(*) FROM install_audit_events WHERE action = $5 AND target_kind = 'kek' AND target_id = $3))
    OR (action LIKE 'keys.%' AND (
         summary #> '{before,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
      OR summary #> '{after,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
@@ -980,7 +979,7 @@ func (t *Tool) abortAdd(ctx context.Context, id string, saveErr error) error {
 	if err := a.Record(ctx, Event{Command: "add", Action: ActionAddAborted, TargetKind: "kek", TargetID: id}); err != nil {
 		return fmt.Errorf("%w; the KEK ID %s could not be freed and stays spent: pick a new ID: %w", saveErr, id, err)
 	}
-	return fmt.Errorf("%w; no KEK was added and the ID %s is free: run the same command again once the KMS works", saveErr, id)
+	return fmt.Errorf("%w; no KEK was added and the ID %s is free: run the same command again once the cause is fixed", saveErr, id)
 }
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret
