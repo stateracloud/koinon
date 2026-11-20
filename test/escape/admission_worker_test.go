@@ -609,6 +609,13 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		both := netpolEgress("ctl-both", toNamespace(controlNamespace))
 		both.Spec.Egress = append(both.Spec.Egress, netpolPorts("x", toDNS(), 53).Spec.Egress...)
 		Expect(write(workerController, both)).To(Succeed())
+		// A narrower DNS peer is fine: a pod selector only narrows the namespace peer.
+		kubeDNS := toDNS()
+		kubeDNS.PodSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}}
+		Expect(write(workerController, netpolPorts("ctl-kube-dns", kubeDNS, 53))).To(Succeed())
+		fromControl := netpolEgress("ctl-ingress", toNamespace(controlNamespace))
+		fromControl.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{toNamespace(controlNamespace), toNamespace("koinon")}}}
+		Expect(write(workerController, fromControl)).To(Succeed())
 		noEgress := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "ctl-none"}}
 		Expect(write(workerController, noEgress)).To(Succeed(), "no egress rule")
 		Expect(update(workerController, current(poolNetpol))).To(Succeed())
@@ -636,7 +643,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			"dns-any-port":        netpolEgress("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}}}),
 			"kube-system-443":     netpolPorts("x", toNamespace("kube-system"), 443),
 			"dns-and-other-port":  netpolPorts("x", toNamespace("kube-system"), 53, 8080),
-			"dns-pods":            netpolPorts("x", networkingv1.NetworkPolicyPeer{NamespaceSelector: toNamespace("kube-system").NamespaceSelector, PodSelector: &metav1.LabelSelector{}}, 53),
+			"dns-named-port":      withPort(netpolPorts("x", toNamespace("kube-system"), 53), func(q *networkingv1.NetworkPolicyPort) { n := intstr.FromString("dns"); q.Port = &n }),
+			"dns-port-range":      withPort(netpolPorts("x", toNamespace("kube-system"), 53), func(q *networkingv1.NetworkPolicyPort) { e := int32(60); q.EndPort = &e }),
+			"ingress-any":         withIngress(netpolEgress("x", toNamespace(controlNamespace))),
+			"ingress-cidr":        withIngress(netpolEgress("x", toNamespace(controlNamespace)), toCIDR("0.0.0.0/0")),
+			"ingress-all-ns":      withIngress(netpolEgress("x", toNamespace(controlNamespace)), networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{}}),
+			"ingress-other-ns":    withIngress(netpolEgress("x", toNamespace(controlNamespace)), toNamespace("kube-public")),
 			"good-then-wide":      netpolEgress("x", toNamespace(controlNamespace), toCIDR("0.0.0.0/0")),
 		}
 		for name, np := range wide {
@@ -652,6 +664,8 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 
 		// The chart's own policy is the floor: the controller neither writes nor deletes it.
 		denied(update(workerController, current(chartNetpol)))
+		// Kubernetes' controllers never create a policy.
+		denied(write(gcUser, netpolEgress("by-gc", toNamespace(controlNamespace))))
 		denied(remove(workerController, chartNetpol))
 		Expect(update("admin", current(chartNetpol))).To(Succeed())
 		Expect(remove("admin", chartNetpol)).To(Succeed())
@@ -796,3 +810,14 @@ func toCIDR(cidr string) networkingv1.NetworkPolicyPeer {
 
 // toDNS is the peer of DNS (kube-system); a rule that uses it must name port 53 (netpolPorts).
 func toDNS() networkingv1.NetworkPolicyPeer { return toNamespace("kube-system") }
+
+func withPort(np *networkingv1.NetworkPolicy, mutate func(*networkingv1.NetworkPolicyPort)) *networkingv1.NetworkPolicy {
+	mutate(&np.Spec.Egress[0].Ports[0])
+	return np
+}
+
+// withIngress adds one ingress rule with the given peers (none: a rule that admits every source).
+func withIngress(np *networkingv1.NetworkPolicy, from ...networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
+	np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{From: from}}
+	return np
+}

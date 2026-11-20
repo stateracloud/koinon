@@ -37,7 +37,9 @@ workers more egress than the chart's policy allows. Only the installer, the Subs
 controllers may write them. The controller's policies (the per-pool policy) may allow egress only to the control-plane
 namespace and to DNS (kube-system, port 53): an egress rule needs a `to` list, no peer is an ipBlock, a same-namespace
 peer or a selector that is not a plain namespace name, and a DNS peer needs ports that are all 53. The controller
-may not write or delete the chart's own policy (<fullname>-substrate-workers). Kubernetes' own controllers may delete a policy and
+may not write or delete the chart's own policy (<fullname>-substrate-workers). Its ingress may come only from the control-plane
+namespace and Koinon's namespace. Open point: the controller may still change or delete other policies of the namespace, such as an
+operator's own fence (workerNetworkPolicy.enabled=false); the controller's policies carry no marker that the rule can key on. Kubernetes' own controllers may delete a policy and
 change its metadata (garbage collection, namespace deletion), never its spec.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPolicy.enabled }}
@@ -375,9 +377,19 @@ spec:
           'kubernetes.io/metadata.name' in p.namespaceSelector.matchLabels &&
           (p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == {{ toJson $ns }} ||
             (p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == 'kube-system' &&
-             !has(p.podSelector) &&
              has(r.ports) && size(r.ports) > 0 && r.ports.all(q, has(q.port) && q.port == 53 && !has(q.endPort))))))
       message: {{ printf "a NetworkPolicy of the Substrate controller in the worker namespace may allow egress only to namespace %s and to DNS (kube-system, port 53): no ipBlock, no pod in the worker namespace, no empty rule" $ns | quote }}
+    # Ingress adds up too: a listener in a worker that any host can reach is a way out past default-deny egress. The controller's
+    # policies admit ingress only from the control-plane namespace and Koinon's namespace, like the policy of the chart.
+    - expression: >-
+        variables.installer || !variables.controller || request.operation == 'DELETE' ||
+        !has(object.spec.ingress) || object.spec.ingress.all(r, has(r.from) && size(r.from) > 0 && r.from.all(p,
+          !has(p.ipBlock) && has(p.namespaceSelector) &&
+          (!has(p.namespaceSelector.matchExpressions) || size(p.namespaceSelector.matchExpressions) == 0) &&
+          has(p.namespaceSelector.matchLabels) && size(p.namespaceSelector.matchLabels) == 1 &&
+          'kubernetes.io/metadata.name' in p.namespaceSelector.matchLabels &&
+          p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] in {{ toJson (list $ns .Release.Namespace) }}))
+      message: {{ printf "a NetworkPolicy of the Substrate controller in the worker namespace may admit ingress only from namespaces %s and %s: no ipBlock, no empty rule" $ns .Release.Namespace | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

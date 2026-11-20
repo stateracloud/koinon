@@ -163,11 +163,17 @@ grep -Fq 'request.name == "koinon-substrate-workers"' <<<"$nppol" || fail "the c
 grep -Fq 'has(r.to) && size(r.to) > 0' <<<"$nppol" || fail "an egress rule of the controller needs a to list (no to means every destination)"
 grep -Fq '!has(p.ipBlock)' <<<"$nppol" || fail "the controller's NetworkPolicy must have no ipBlock peer"
 grep -Fq "== \"ate-system\"" <<<"$nppol" || fail "the controller's egress must reach the control-plane namespace"
+grep -Fq 'failurePolicy: Fail' <<<"$nppol" || fail "the NetworkPolicy guard must fail closed"
+grep -Fq 'variables.kube && (request.operation == '"'DELETE'"' || variables.specUnchanged)' <<<"$nppol" || fail "Kubernetes controllers may delete and change metadata only"
+grep -Fq '!has(q.endPort)' <<<"$nppol" || fail "the DNS peer must have no port range"
+grep -Fq 'size(p.namespaceSelector.matchLabels) == 1' <<<"$nppol" || fail "a peer must name exactly one namespace label"
+grep -Fq 'size(p.namespaceSelector.matchExpressions) == 0' <<<"$nppol" || fail "a peer must have no match expressions"
+grep -Fq 'in ["ate-system","koinon"]' <<<"$nppol" || fail "the controller's ingress must come from the control-plane and Koinon namespaces only"
 grep -Fq "q.port == 53" <<<"$nppol" || fail "the DNS peer must be limited to port 53"
 if grep -Fq 'request.namespace' <<<"$(grep -Fv '#' <<<"$nppol")"; then fail "the NetworkPolicy guard must not read request.namespace (the binding selects the namespace)"; fi
-has "the NetworkPolicy guard follows the worker namespace" 'kubernetes.io/metadata.name: "pools-x"' "${wsub[@]}" --set execution.substrate.workerNamespace=pools-x "${pol[@]}"
+grep -Fq 'kubernetes.io/metadata.name: "pools-x"' <<<"$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$(render "${wsub[@]}" --set execution.substrate.workerNamespace=pools-x "${pol[@]}")")" || fail "the NetworkPolicy guard follows the worker namespace"
 has "the NetworkPolicy guard follows the control-plane namespace" 'metadata.name.\] == "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"
-has "the NetworkPolicy guard follows the installer identities" '\\"ops-x\\"' "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={ops-x}' "${pol[@]}"
+grep -Fq 'ops-x' <<<"$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={ops-x}' "${pol[@]}")")" || fail "the NetworkPolicy guard follows the installer identities"
 if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.validationActions={Nope}' >/dev/null 2>&1; then fail "an unknown validation action must not render"; fi
 
 # The worker Namespace: created by the chart, with the Pod Security level these pods need.
