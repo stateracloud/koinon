@@ -170,6 +170,9 @@ grep -Fq 'size(p.namespaceSelector.matchLabels) == 1' <<<"$nppol" || fail "a pee
 grep -Fq 'size(p.namespaceSelector.matchExpressions) == 0' <<<"$nppol" || fail "a peer must have no match expressions"
 grep -Fq 'in ["ate-system","koinon"]' <<<"$nppol" || fail "the controller's ingress must come from the control-plane and Koinon namespaces only"
 grep -Fq "q.port == 53" <<<"$nppol" || fail "the DNS peer must be limited to port 53"
+grep -Fq 'has(r.ports) && size(r.ports) > 0' <<<"$nppol" || fail "the DNS peer needs explicit ports (no ports means every port)"
+grep -Fq 'has(r.from) && size(r.from) > 0' <<<"$nppol" || fail "an ingress rule of the controller needs a from list (no from means every source)"
+grep -Fq "request.operation == 'DELETE' ||" <<<"$nppol" || fail "a delete has no object: the rules that read the object must skip it"
 if grep -Fq 'request.namespace' <<<"$(grep -Fv '#' <<<"$nppol")"; then fail "the NetworkPolicy guard must not read request.namespace (the binding selects the namespace)"; fi
 grep -Fq 'kubernetes.io/metadata.name: "pools-x"' <<<"$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$(render "${wsub[@]}" --set execution.substrate.workerNamespace=pools-x "${pol[@]}")")" || fail "the NetworkPolicy guard follows the worker namespace"
 has "the NetworkPolicy guard follows the control-plane namespace" 'metadata.name.\] == "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"

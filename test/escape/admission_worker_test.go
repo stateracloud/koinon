@@ -204,6 +204,11 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		Eventually(func() error {
 			return create(ctx, "admin", controlNamespace, worker("probe-control", func(p *corev1.Pod) { p.Spec.HostNetwork = true }))
 		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(MatchError(ContainSubstring("ValidatingAdmissionPolicy")))
+		// The NetworkPolicy guard (issue 1158): an identity that may not write is denied once the guard is active.
+		Eventually(func() error {
+			_, err := as[other].NetworkingV1().NetworkPolicies(workerNamespace).Create(ctx, netpolEgress("probe-netpol", toNamespace(controlNamespace)), dryRun)
+			return err
+		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(MatchError(ContainSubstring("ValidatingAdmissionPolicy")))
 	}, NodeTimeout(3*time.Minute))
 
 	It("admits a compliant worker pod from the ReplicaSet controller (control)", func(ctx SpecContext) {
