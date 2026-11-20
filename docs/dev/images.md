@@ -37,8 +37,8 @@ one `ARG BASE` that carries its digest.
 
 ```dockerfile
 # syntax=docker/dockerfile:1.19@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
-# OpenShell's default sandbox base (ADR 0035), multi-arch index digest, checked 2026-10-22.
-ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3bdb76c7038bd4c90a090c21eb7c9f40686
+# Plain Ubuntu 24.04 (ADR 0035, amendment 2026-11-20), multi-arch index digest of noble-20260917.
+ARG BASE=docker.io/library/ubuntu:noble-20260917@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
 ```
 
 `hack/harness-base.sh` lets a mirror replace the base, but only with the same digest, so the base
@@ -169,7 +169,7 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       /var/cache/ldconfig/aux-cache /var/cache/debconf/*-old
 ```
 
-The base image has no CA bundle, which the snapshot's HTTPS needs. A throwaway stage fetches one from
+Plain Ubuntu has no CA bundle, which the snapshot's HTTPS needs. A throwaway stage fetches one from
 the archive over HTTP (apt checks it against the archive keyring), and the final image copies only
 that file; the pinned `ca-certificates` then regenerates it:
 

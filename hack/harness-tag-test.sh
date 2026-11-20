@@ -73,7 +73,7 @@ fb() { # <want rc> <want stdout> <HARNESS_BASE> <harness> <description>
   fi
 }
 fb 0 "" "" pinned "HARNESS_BASE unset: no build argument"
-fb 0 $'--build-arg\nBASE=mirror.example.invalid/nvcr.io/base/ubuntu:24.04@'"$pin" "mirror.example.invalid/nvcr.io/base/ubuntu:24.04@$pin" pinned "the pinned digest through a mirror"
+fb 0 $'--build-arg\nBASE=mirror.example.invalid/mirror/library/ubuntu:24.04@'"$pin" "mirror.example.invalid/mirror/library/ubuntu:24.04@$pin" pinned "the pinned digest through a mirror"
 fb 0 $'--build-arg\nBASE=registry.example.invalid/base/ubuntu:24.04@'"$pin" "registry.example.invalid/base/ubuntu:24.04@$pin" pinned "the default ref itself"
 fb 1 "" "mirror.example.invalid/base/ubuntu:24.04" pinned "a ref without the digest is refused"
 fb 1 "" "mirror.example.invalid/base/ubuntu:24.04@sha256:$(printf '%064d' 8)" pinned "another digest is refused"
@@ -88,7 +88,7 @@ fb 1 "" "mirror.example.invalid/x;true@$pin" pinned "a ; is refused"
 fb 1 "" "mirror.example.invalid/Upper/x@$pin" pinned "an uppercase path component is refused"
 fb 1 "" "mirror.example.invalid/x:@$pin" pinned "an empty tag is refused"
 fb 1 "" "mirror.example.invalid/x@sha256:$(printf '%063d' 7)Z" pinned "a malformed digest is refused"
-fb 0 $'--build-arg\nBASE=mirror.example.invalid:5000/nvcr.io/base/ubuntu@'"$pin" "mirror.example.invalid:5000/nvcr.io/base/ubuntu@$pin" pinned "a registry port and no tag pass"
+fb 0 $'--build-arg\nBASE=mirror.example.invalid:5000/mirror/library/ubuntu@'"$pin" "mirror.example.invalid:5000/mirror/library/ubuntu@$pin" pinned "a registry port and no tag pass"
 fb 0 $'--build-arg\nBASE=base_img/ubuntu-24.04:24.04_x@'"$pin" "base_img/ubuntu-24.04:24.04_x@$pin" pinned "no registry host, separators in path and tag pass"
 fb 2 "" "mirror.example.invalid/x@$pin" demo "a Dockerfile without a pinned ARG BASE= default: exit 2"
 fb 2 "" "mirror.example.invalid/x@$pin" nosuch "an unknown harness: exit 2"

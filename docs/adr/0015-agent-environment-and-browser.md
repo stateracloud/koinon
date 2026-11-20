@@ -58,7 +58,8 @@ _(Changed 2026-11-11: no auth type is allowlisted today and `copilot-device-flow
 - Negative: the pull-through cache and the allowlist are extra infrastructure _(inferred)_.
 - Negative: OpenShell publishes no harness images. Its default is plain
   `nvcr.io/nvidia/base/ubuntu:24.04`, so Koinon builds and maintains its flavor images
-  ([0035](0035-v01-flavors.md)).
+  ([0035](0035-v01-flavors.md)). Koinon's images use plain `docker.io/library/ubuntu` as the base
+  (amendment 2026-11-20).
 - Negative: OpenShell does not rewrite cookies, so browser sessions are an explicit, accepted
   in-sandbox credential.
 - Follow-ups: browser and self-installed tools ship in v0.5 ([0024](0024-roadmap.md)).
@@ -106,3 +107,10 @@ guest. The OpenShell driver, the default, keeps the plain image and its exec pat
 
 - [0032](0032-agent-home-checkpoints.md), [0035](0035-v01-flavors.md),
   [0044](0044-in-sandbox-credential-exception.md)
+
+## Amendment (2026-11-20)
+
+Koinon's flavor images are built on plain `docker.io/library/ubuntu:24.04`, pinned by digest, and not on
+OpenShell's default `nvcr.io/nvidia/base/ubuntu:24.04` (#1182). That image holds only Ubuntu 24.04
+content and has no stated licence for redistribution. The OpenShell default stays in the upstream
+verification entry above as a record of 2026-10-21. [0035](0035-v01-flavors.md) has the details.
