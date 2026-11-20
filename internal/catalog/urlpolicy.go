@@ -156,7 +156,7 @@ func deniedAddr(a netip.Addr) bool {
 // IPv6 literal, with or without a port ("[fd00::1]:11434", as written in a URL), is exact.
 func ValidateAllowedHosts(entries []string) error {
 	for _, e := range entries {
-		e = strings.TrimSpace(e)
+		e = unbracket(strings.TrimSpace(e))
 		if strings.ContainsAny(withoutIPv6Literal(e), "*?[]{}") {
 			return fmt.Errorf("egress.allowedInternalHosts entry %q is a pattern; list each host exactly (an IP or a CIDR is fine)", e)
 		}
@@ -184,7 +184,7 @@ func withoutIPv6Literal(e string) string {
 func (p URLPolicy) allowedAddr(a netip.Addr) bool {
 	a = a.Unmap()
 	for _, e := range p.AllowedHosts {
-		e = strings.TrimSpace(e)
+		e = unbracket(strings.TrimSpace(e))
 		if pre, err := netip.ParsePrefix(e); err == nil && pre.Contains(a) {
 			return true
 		}
@@ -195,9 +195,18 @@ func (p URLPolicy) allowedAddr(a netip.Addr) bool {
 	return false
 }
 
+// unbracket turns an entry such as "[fd00::1]" into "fd00::1", as the entry is written in a url.
+// An entry with a port ("[fd00::1]:443") stays as it is.
+func unbracket(e string) string {
+	if strings.HasPrefix(e, "[") && strings.HasSuffix(e, "]") {
+		return e[1 : len(e)-1]
+	}
+	return e
+}
+
 func (p URLPolicy) allowedName(host, hostport string) bool {
 	for _, a := range p.AllowedHosts {
-		a = strings.ToLower(strings.TrimSpace(a))
+		a = unbracket(strings.ToLower(strings.TrimSpace(a)))
 		if a != "" && (a == host || a == hostport) {
 			return true
 		}

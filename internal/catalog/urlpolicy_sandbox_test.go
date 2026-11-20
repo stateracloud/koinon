@@ -108,7 +108,7 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 		Entry("public IPv6 literal", "https://[2001:db8::1]:3000"),
 		Entry("IPv4 with the default port written", "https://203.0.113.9:443"),
 		Entry("a name that starts with a number", "https://1.2.3.4.example.com"),
-		Entry("a name with a number inside", "https://git.example.com:08443"),
+		Entry("a port with a leading zero", "https://git.example.com:08443"),
 	)
 
 	DescribeTable("refuses a numeric host that a resolver could read as another address (numeric hosts, #1054)",
@@ -200,6 +200,7 @@ var _ = Describe("URLPolicy for sandbox egress (#1054)", func() {
 			Entry("the http default is not the https entry", "git.example.com:443", "http://git.example.com", false),
 			Entry("an entry without a port allows every port", "git.example.com", "https://git.example.com:8443", true),
 			Entry("an entry without a port allows the default port", "git.example.com", "https://git.example.com", true),
+			Entry("an IPv6 entry without a port", "[fd00::1]", "https://[fd00::1]", true),
 			Entry("an IPv6 entry with a port", "[fd00::1]:8443", "https://[fd00::1]:8443", true),
 		)
 

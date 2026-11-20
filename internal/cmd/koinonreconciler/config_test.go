@@ -111,7 +111,7 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 		Expect(c.otlpTokenFile).To(Equal("/secrets/otlp/token"))
 	})
 
-	It("reads the cluster domain from KOINON_CLUSTER_DOMAIN or the flag, and refuses a value that is not a DNS name (#1054)", func() {
+	It("reads the cluster domain from the flag, and refuses a value that is not a DNS name (#1054)", func() {
 		c, err := parse(stripObserver(chartConfig))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.clusterDomain).To(BeEmpty(), "empty means the default, applied where the policy is built")
