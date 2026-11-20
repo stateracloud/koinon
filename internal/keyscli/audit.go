@@ -47,6 +47,10 @@ const (
 	// ID is in the chain before any key bytes under it exist, so [RecordedID] sees an ID whose add event
 	// was lost and whose KEK was then removed by hand.
 	ActionAddIntent = ActionAdd + ".intent"
+	// ActionAddAborted is the event Add writes when its Save failed before it wrote the Secret
+	// ([ErrNotSaved]): no key bytes exist under the ID, so [RecordedID] no longer counts the intent
+	// before it and the same ID can be added again.
+	ActionAddAborted = ActionAdd + ".aborted"
 )
 
 // Actors of the key events (ADR 0100 decision 2). The CLI's actor is audit.CLI("keys <command>").
