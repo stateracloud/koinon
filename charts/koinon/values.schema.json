@@ -446,6 +446,17 @@
                         "waitLoaded": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
                         "resources": {"$ref": "#/definitions/resources"}
                       }
+                    },
+                    "reseal": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {"type": "boolean"},
+                        "rotationId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{0,63}$"},
+                        "dryRun": {"type": "boolean"},
+                        "org": {"type": "string", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$"},
+                        "resources": {"$ref": "#/definitions/resources"}
+                      }
                     }
                   }
                 }

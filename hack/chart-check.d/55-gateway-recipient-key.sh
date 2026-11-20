@@ -148,3 +148,29 @@ lacks "koinon-api seals v1 with the agentgateway MCP driver" 'KOINON_GATEWAY_MCP
 env_is KOINON_COMPAT_EXPECT '"api=1,reconciler=1,gateway=2"' "${gk[@]}"
 env_is KOINON_COMPAT_EXPECT '"api=3,reconciler=2,gateway=4"' "${gk[@]}" --set api.replicas=3 --set reconciler.replicas=2 --set gateway.mcp.koinon.replicas=4
 lacks "no replica expectation with the agentgateway MCP driver" 'KOINON_COMPAT_EXPECT' --show-only templates/deployments.yaml
+
+# The re-seal Job (slice 4): off by default, and it needs a rotationId.
+gres_only=(--show-only templates/gateway-reseal.yaml)
+gres=(--set gateway.mcp.koinon.recipientKey.reseal.enabled=true --set gateway.mcp.koinon.recipientKey.reseal.rotationId=r1)
+lacks "no re-seal Job by default" 'gateway-reseal' "${gk[@]}"
+if render "${gres_only[@]}" "${gk[@]}" --set gateway.mcp.koinon.recipientKey.reseal.enabled=true >/dev/null 2>&1; then
+	fail "the re-seal Job without a rotationId must fail the render"
+fi
+has "re-seal Job runs keys reseal" '^            - reseal$' "${gres_only[@]}" "${gk[@]}" "${gres[@]}"
+has "re-seal Job reads the key directory" '"--recipient-key-dir=/etc/koinon/gateway-key"' "${gres_only[@]}" "${gk[@]}" "${gres[@]}"
+has "re-seal Job runs as the gateway service account" 'serviceAccountName: koinon-mcp-gateway' "${gres_only[@]}" "${gk[@]}" "${gres[@]}"
+has "re-seal Job has its own database login" 'koinon_reseal@' "${gres_only[@]}" "${gk[@]}" "${gres[@]}"
+has "re-seal Job uses the reseal password Secret" 'name: koinon-db-reseal' "${gres_only[@]}" "${gk[@]}" "${gres[@]}"
+has "re-seal Job can run as a dry run" '^            - "--dry-run"$' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" \
+	--set gateway.mcp.koinon.recipientKey.reseal.dryRun=true
+has "re-seal Job can name one org" '"--org=11111111-1111-1111-1111-111111111111"' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" \
+	--set gateway.mcp.koinon.recipientKey.reseal.org=11111111-1111-1111-1111-111111111111
+lacks "re-seal Job mounts no automatic token" 'automountServiceAccountToken: true' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" "${gkms[@]}"
+has "re-seal Job signs in as the gateway role" 'value: "koinon-gateway"' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" "${gkms[@]}"
+has "re-seal Job reads a projected service account token" 'serviceAccountToken:' "${gres_only[@]}" "${gk[@]}" "${gres[@]}" "${gkms[@]}"
+has "re-seal Job accepts no connections" '^# gateway-reseal accepts no connections' "${gk[@]}" "${gres[@]}" --show-only templates/networkpolicy.yaml
+rj() { render "${gres_only[@]}" "${gk[@]}" "$@" | grep -A2 '^kind: Job$' | sed -n 's/^  name: //p'; }
+r1=$(rj "${gres[@]}") r2=$(rj "${gres[@]}") r3=$(rj "${gres[@]}" --set gateway.mcp.koinon.recipientKey.reseal.rotationId=r2)
+[[ $r1 =~ ^koinon-reseal-[0-9a-f]{10}$ || $r1 =~ -reseal-[0-9a-f]{10}$ ]] || fail "re-seal Job name ends in -reseal-<hash>, got '$r1'"
+[[ $r1 == "$r2" ]] || fail "re-seal Job name is stable across renders"
+[[ $r1 != "$r3" ]] || fail "re-seal Job name changes with the rotationId"

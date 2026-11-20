@@ -116,9 +116,10 @@ spec:
 {{- $closed := list "reconciler" "agentd" "migrate" }}
 {{- /* The gateway key Job carries the same component label as the KEK key-admin Job. */}}
 {{- if or (include "koinon.kms" .) (include "koinon.gwKey" .) }}{{ $closed = append $closed "key-admin" }}{{ end }}
+{{- if and (include "koinon.gwKey" .) .Values.gateway.mcp.koinon.recipientKey.reseal.enabled }}{{ $closed = append $closed "gateway-reseal" }}{{ end }}
 {{- if .Values.runEvidence.export.enabled }}{{ $closed = append $closed "run-evidence" }}{{ end }}
 {{- range $component := $closed }}
-{{- $jobOnly := has $component (list "migrate" "key-admin" "run-evidence") }}
+{{- $jobOnly := has $component (list "migrate" "key-admin" "gateway-reseal" "run-evidence") }}
 ---
 # {{ $component }} accepts no connections{{ if not $jobOnly }}, except Prometheus scrapes of /metrics from metrics.allowFrom{{ end }}.
 apiVersion: networking.k8s.io/v1

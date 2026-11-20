@@ -780,7 +780,7 @@ move, once.
 
 0. **Gate on the driver.** The default MCP data plane is still agentgateway (`gateway.mcp.driver`), and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). Koinon's gateway is not the default before #1132. So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
 1. **Expand (slice 2 and 3).** Release N adds `gateway_recipient_keys`, the key-admin Job, the writers
-   that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule: run `keys seal-mcp --to-v1` first (the reverse move, under the KEK identity). Slice 4 builds it. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
+   that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule: run `keys seal-mcp --to-v1` first (the reverse move; it needs the gateway key, see 12.8 item 2). Slice 4 builds the engine. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
    still reads those files (marked by the file name: `mcp-…` plaintext, `mcpv2-…` ciphertext). Nothing
    stored changes yet.
 
@@ -812,13 +812,28 @@ move, once.
      This is issue #1174, not done here. The router path logs and stores no opened v2 value (a spec checks it).
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.
-2. **Move (slice 4).** `koinon-api keys seal-mcp` runs under the KEK identity (the same identity as
-   `keys reencrypt`; plaintext exists only in that process, never written, logged or sent). For each
-   v1 value it opens the value with the KEK and seals it to the `active` public key, with a
-   compare-and-swap write. It is idempotent: it skips v2 values. It writes one audit row per run
-   with counts and the key ID, and no value. `keys verify` reports the number of v1 MCP credentials
-   (zero when done). The upgrade preflight (the migration Job) refuses to go to a release without the v1
-   reader while that number is above zero, and says which command to run.
+2. **Move (slice 4, built in #1151).** `koinon-api keys seal-mcp` opens each v1 value with the KEK and seals it
+   to the `active` public key. Plaintext exists only in that process; it is never written, logged or sent.
+   The write is a compare-and-swap on the stored value: a row that changed meanwhile is skipped, and the
+   next run takes it. The command is idempotent (it skips v2 values), resumable, and takes `--org` and
+   `--dry-run`. A dry run opens each value and writes nothing. The command follows the write gate of
+   12.5 step 1: it refuses, and changes nothing, while any expected pod cannot read v2. One code path serves
+   every backend, because koinon-api holds only the public key. It writes one audit row per run with
+   counts and key IDs, and no value. The report names an org and a row ID for a failure, never a value.
+   `keys verify` and `keys status` print the number of v1 and v2 MCP credentials (v2 per key ID). The
+   upgrade preflight (the migration Job, `--require-mcp-v2`) refuses while a v1 credential remains, and
+   says which command to run. The release that has no v1 reader switches it on by default (slice 5).
+   - **`--to-v1`.** The reverse move needs the private gateway key, so only a process that holds the
+     keyring can run it. The `koinon-api` CLI has none, so there `--to-v1` fails closed and says so.
+     This is a change from the first text of this decision, which put it under the KEK identity: the KEK
+     cannot open v2. The engine takes the keyring as an injected hook. A gateway-side command can use it.
+   - **Custody.** On the `local` backend koinon-api can read the wrapping key, so nothing may claim it
+     cannot decrypt. Only on OpenBao or AWS KMS can only the gateway unwrap.
+   - **Rotation and re-seal.** A new key is `pending`, then `active`. A credential sealed to the old key
+     stays readable. `koinon-gateway keys reseal` (the chart's re-seal Job, spec 6) opens each v2 value that
+     names an older key with that key and seals it to the active key, with the same compare-and-swap
+     write. It runs as the gateway identity, with the `koinon_gateway_reseal` login, and makes no load
+     report. The old key retires only when no v2 credential names it.
 3. **Contract (slice 5).** Delete `OpenCredential` from the reconciler's path, the plaintext files and
    the gateway's legacy reader, and the reconciler's code that opens MCP credentials. The reconciler
    keeps its KEK for the other stored secrets (not in this scope).
@@ -896,7 +911,7 @@ twice the guess, go back to the maintainer).
 3. **Seal v2, copy ciphertext, open in the gateway** (done in #1151 slice 3; a v2 file is named `mcpv2-<org ID>-<server ID>-<8 hex>`, because the binding names the org and the gateway has only its slug; the trace router skips v2 values; the chart sets `KOINON_GATEWAY_MCP_SEAL_V2` only with `gateway.mcp.driver=koinon`). `mcpservers` seals v2 when a key is `active`,
    the reconciler copies `mcpv2-` files, the gateway opens them and fails closed (its `keyPath` and the planner accept `mcpv2-` names), the `keyscli` usage query and `AnyEnvelope` skip v2, `mcp_call_log.recipient_key_id`, and the driver gate of 12.5 step 0.
    Specs 1 to 5.
-4. **The move.** `keys seal-mcp` (and `--to-v1`), `keys verify` count, the upgrade preflight, a kind e2e with `local`.
+4. **The move** (done in #1151 slice 4). `keys seal-mcp` (and `--to-v1`), `keys verify` count, the upgrade preflight, the re-seal Job, a kind e2e with `local`.
    Spec 7. Rotation and re-seal Job (spec 6) land here too, because they share the compare-and-swap code.
 5. **Contract.** Remove the reconciler's open path, the plaintext files, the legacy gateway reader; docs
    and the GLOSSARY; mark this decision "done". Before the marker names v0.3.
