@@ -931,6 +931,33 @@ execution:
       # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
       # or database outside the cluster.
       extraEgress: []
+    # Resource limits of the worker namespace (issue 1161; the intent of old issues 821 to 823). The chart
+    # creates the namespace, so it also creates the LimitRange and the ResourceQuota there (the sandbox
+    # LimitRange of the OpenShell driver is made by the reconciler instead). The LimitRange gives a container
+    # that has no requests or limits the defaults below, so a worker pod is never BestEffort. The ResourceQuota
+    # caps the total of the namespace: a pod that goes over it is refused at admission. A worker pod that your
+    # WorkerPool sizes itself (workerPool.spec.template.resources) keeps its own values, and the quota counts
+    # them. The defaults are safe for a small pool: raise `quota.hard` for a bigger one. Quota names are the
+    # Kubernetes ResourceQuota names (pods, requests.cpu, requests.memory, limits.cpu, limits.memory, ...).
+    # An empty map renders no quota or no default of that kind.
+    workerLimits:
+      enabled: true
+      limitRange:
+        defaultRequest:
+          cpu: 250m
+          memory: 256Mi
+        default:
+          cpu: "2"
+          memory: 2Gi
+        # Optional per-container ceiling. Empty: none.
+        max: {}
+      quota:
+        hard:
+          pods: "20"
+          requests.cpu: "16"
+          requests.memory: 32Gi
+          limits.cpu: "32"
+          limits.memory: 64Gi
     # The default WorkerPool (ate.dev/v1): one shared pool per sandbox class (D6). Off by default: ate-setup
     # creates no pool, and the preflight needs one per sandbox class. The fields follow Substrate
     # v1.0.0's WorkerPoolSpec: workerImage is required, sandboxClasses takes exactly one class
