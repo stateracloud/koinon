@@ -239,6 +239,63 @@ func TestOverlayCorrectsTheKindRoute(t *testing.T) {
 	g.Expect(readFile(t, dir, "manifests/ate-install/kind/postgres/kustomization.yaml")).To(And(ContainSubstring("value: "+substrateinstall.DefaultPostgresStorageSize), Not(ContainSubstring("1Gi"))))
 }
 
+// assertCacheTrustPatch checks the patch of issue #1191: a ConfigMap volume and a plain env var on the atelet
+// container, and nothing the admission policy of the Substrate namespace restricts (no container, no image, no
+// hostPath, no Secret volume).
+func assertCacheTrustPatch(t *testing.T, dir string) {
+	t.Helper()
+	g := NewWithT(t)
+	obj := patchObject(t, dir, "koinon-atelet-imagecache-ca.yaml")
+	g.Expect(obj["kind"]).To(Equal("DaemonSet"))
+	g.Expect(obj["metadata"].(map[string]any)["name"]).To(Equal("atelet"))
+	podSpec := obj["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	g.Expect(podSpec).To(HaveLen(2), "only volumes and containers: no init container, no host setting")
+	vols := podSpec["volumes"].([]any)
+	g.Expect(vols).To(HaveLen(1))
+	vol := vols[0].(map[string]any)
+	g.Expect(vol).To(HaveLen(2), "a name and a ConfigMap, no hostPath and no Secret")
+	cm := vol["configMap"].(map[string]any)
+	g.Expect(cm["name"]).To(Equal("koinon-imagecache-ca"))
+	g.Expect(cm["optional"]).To(BeTrue(), "the installer runs before the chart: atelet must start without the ConfigMap")
+	ctrs := podSpec["containers"].([]any)
+	g.Expect(ctrs).To(HaveLen(1))
+	c := ctrs[0].(map[string]any)
+	g.Expect(c["name"]).To(Equal("atelet"))
+	g.Expect(c).NotTo(HaveKey("image"), "the atelet image stays the digest-pinned one")
+	g.Expect(c["env"]).To(Equal([]any{map[string]any{"name": "SSL_CERT_DIR", "value": "/etc/koinon/imagecache-ca"}}))
+	g.Expect(c["volumeMounts"]).To(Equal([]any{map[string]any{"name": "koinon-imagecache-ca", "mountPath": "/etc/koinon/imagecache-ca", "readOnly": true}}))
+}
+
+func TestOverlayMakesAteletTrustTheImageCacheCA(t *testing.T) {
+	g := NewWithT(t)
+	for name, apply := range map[string]func(dir string) error{
+		"generic": func(dir string) error { return genericProfile().ApplyGenericOverlay(dir, "ate-system") },
+		"kind": func(dir string) error {
+			return substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(dir, "ate-system")
+		},
+	} {
+		dir := writeTree(t, pinnedKindFiles())
+		g.Expect(apply(dir)).To(Succeed(), name)
+		g.Expect(readFile(t, dir, "manifests/ate-install/kind/kustomization.yaml")).To(ContainSubstring("  - path: koinon-atelet-imagecache-ca.yaml\n"), name)
+		assertCacheTrustPatch(t, dir)
+	}
+}
+
+func TestKindOverlayChangesNothingElse(t *testing.T) {
+	g := NewWithT(t)
+	files := pinnedKindFiles()
+	dir := writeTree(t, files)
+	g.Expect(substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(dir, "ate-system")).To(Succeed())
+	k := readFile(t, dir, "manifests/ate-install/kind/kustomization.yaml")
+	g.Expect(k).To(HavePrefix(kindKustomization))
+	g.Expect(strings.Count(k, "  - path: ")).To(Equal(1), "only the cache trust patch")
+	g.Expect(readFile(t, dir, "manifests/ate-install/kind/atelet/kustomization.yaml")).To(Equal(files["manifests/ate-install/kind/atelet/kustomization.yaml"]))
+	g.Expect(substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(writeTree(t, map[string]string{"cmd/ate-setup/main.go": "main"}), "ate-system")).To(MatchError(substrateinstall.ErrGeneric))
+	g.Expect(substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(writeTree(t, map[string]string{
+		"manifests/ate-install/kind/kustomization.yaml": kindKustomization + "patches:\n  - path: x.yaml\n",
+	}), "ate-system")).To(MatchError(substrateinstall.ErrGeneric), "a pin with patches of its own no longer fits")
+}
+
 func TestOverlayUsesTheSizesAndClassOfTheProfile(t *testing.T) {
 	g := NewWithT(t)
 	dir := writeTree(t, pinnedKindFiles())

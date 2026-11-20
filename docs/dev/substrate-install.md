@@ -402,14 +402,29 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
   Choose them once.
 - **TLS.** The ensure-secrets hook Job makes the Secret `<release>-imagecache-tls` (a new CA and a leaf, 10 years,
   no rotation yet), or you set `imageCache.tls.existingSecret` to a `kubernetes.io/tls` Secret with `ca.crt`.
-- **CA trust of atelet (manual, not tested on a cluster).** Substrate has no CA option. Copy `ca.crt` from the
-  Secret into a ConfigMap in `ate-system`, mount it in the atelet DaemonSet and set `SSL_CERT_DIR` to include it,
-  through the installer patch. Until then atelet refuses the cache certificate. Needs a Koinon issue (needs main).
+- **CA trust of atelet (issue #1191).** Substrate has no CA option, so Koinon does it in two parts:
+  - The installer (`koinon-api substrate install`, kind and generic routes) adds one kustomize patch to the atelet
+    DaemonSet. It mounts the optional ConfigMap `koinon-imagecache-ca` of `ate-system` at
+    `/etc/koinon/imagecache-ca` and sets `SSL_CERT_DIR` to that path. It adds no container and no image. Go adds the
+    certificates of that directory to the system roots of the atelet image, so public registries and the other TLS
+    trust of atelet keep working.
+  - The hook Job `<release>-imagecache-ca` (`koinon-api imagecache-ca`, pre-install and pre-upgrade, after
+    ensure-secrets) copies `ca.crt` of the TLS Secret into that ConfigMap. The Secret is the generated one or
+    `imageCache.tls.existingSecret`. The ConfigMap holds the public CA only. The Job refuses a `ca.crt` that holds
+    anything but certificates, and it never writes the private key.
+  - The Job also puts a hash on the pod template of atelet (the CA) and of the cache Deployment (the certificate and
+    the CA). A changed hash restarts the pod, so a new CA reaches atelet and a new certificate reaches the cache.
+    A rotation takes effect on the next `helm upgrade`: change the Secret, then run `helm upgrade`. The hash does not
+    cause a second restart after that.
+  - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist.
+  - The ConfigMap name is fixed (one Substrate install per cluster). The GKE route has no patch yet: the overlay
+    directory of that route is not known to the installer (needs main: a follow-up issue).
 - **Air gap.** Set `imageCache.enabled=false`. Name your mirror with `imageMirrors` (a map from host to mirror
   prefix) or `imageRegistry`, and allow it with `workerNetworkPolicy.imageSource`. The chart refuses the cache and
   an operator source together.
-- **Check.** `kubectl -n <namespace> get deploy <release>-imagecache`; the atelet logs name the cache host; the
-  Zot logs show the sync of the image; no pod in `ate-system` reaches the internet.
+- **Check.** `kubectl -n <namespace> get deploy <release>-imagecache`; the atelet logs name the cache host and show no
+  `x509: certificate signed by unknown authority`; `kubectl -n ate-system get cm koinon-imagecache-ca` holds one
+  certificate; the Zot logs show the sync of the image; no pod in `ate-system` reaches the internet.
 
 ## Worker namespace and admission
 

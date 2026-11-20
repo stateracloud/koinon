@@ -198,6 +198,32 @@ func checkGenericRender(g Gomega, r rendered, bucket string) {
 	for _, a := range args {
 		g.Expect(a).NotTo(ContainSubstring("localhost-registry-replacement"))
 	}
+
+	// (f) atelet trusts the image cache CA: SSL_CERT_DIR names the mount of the optional ConfigMap, and the atelet
+	// container keeps its image (the patch adds no container and no image).
+	ateletC := firstContainerOf(atelet, "containers", "atelet")
+	g.Expect(ateletC).NotTo(BeNil(), "the atelet container")
+	g.Expect(ateletC["image"]).NotTo(BeEmpty())
+	g.Expect(envOf(atelet.containers("containers"), "atelet")["SSL_CERT_DIR"]["value"]).To(Equal("/etc/koinon/imagecache-ca"))
+	g.Expect(ateletC["volumeMounts"]).To(ContainElement(HaveKeyWithValue("mountPath", "/etc/koinon/imagecache-ca")))
+	var cacheVol map[string]any
+	for _, v := range atelet.get("spec", "template", "spec", "volumes").([]any) {
+		if m, _ := v.(map[string]any); m["name"] == "koinon-imagecache-ca" {
+			cacheVol = m
+		}
+	}
+	g.Expect(cacheVol).NotTo(BeNil(), "the cache CA volume")
+	g.Expect(cacheVol["configMap"]).To(And(HaveKeyWithValue("name", "koinon-imagecache-ca"), HaveKeyWithValue("optional", true)))
+	g.Expect(cacheVol).NotTo(HaveKey("hostPath"))
+}
+
+func firstContainerOf(o object, list, name string) map[string]any {
+	for _, c := range o.containers(list) {
+		if c["name"] == name {
+			return c
+		}
+	}
+	return nil
 }
 
 // execRunner runs the real git for the export step of the installer.
@@ -484,6 +510,18 @@ func TestRenderChecksFindWhatTheyLookFor(t *testing.T) {
 		},
 		"a container that a patch made alone": func(t *testing.T) rendered {
 			return edit(t, r, "Deployment", "ate-api-server", func(o object) { delete(firstContainer(o, "initContainers", "objectstore-plugin"), "image") })
+		},
+		"no SSL_CERT_DIR on atelet": func(t *testing.T) rendered {
+			return edit(t, r, "DaemonSet", "atelet", func(o object) {
+				c := firstContainer(o, "containers", "atelet")
+				var keep []any
+				for _, e := range c["env"].([]any) {
+					if e.(map[string]any)["name"] != "SSL_CERT_DIR" {
+						keep = append(keep, e)
+					}
+				}
+				c["env"] = keep
+			})
 		},
 		"the fixed upstream credential": func(t *testing.T) rendered {
 			return edit(t, r, "", "", func(object) {})

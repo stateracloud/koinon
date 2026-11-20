@@ -28,7 +28,7 @@ func NewRootCommand() *cobra.Command {
 		Short: "Koinon's API server and operator commands",
 		Long: "koinon-api serves the Koinon API and web UI (serve, also what runs without a subcommand), " +
 			"applies the database migrations (migrate), checks the install prerequisites (preflight), " +
-			"creates generated Secrets (ensure-secrets), wraps new KEKs with a KMS (key-admin) and offers the operator " +
+			"creates generated Secrets (ensure-secrets), publishes the image cache CA to Substrate (imagecache-ca), wraps new KEKs with a KMS (key-admin) and offers the operator " +
 			"tools (keys, audit, org-limits, prices, model-metadata, restore).\n\n" +
 			"Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper case with " +
 			"dashes as underscores (--database-url is KOINON_DATABASE_URL). Secrets are read from files, never from flags.",
@@ -41,7 +41,7 @@ func NewRootCommand() *cobra.Command {
 	// reads KOINON_KEK_ACTIVE_PERIOD (--kek-active-period of the keys commands); serve ignores it.
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES", "KOINON_KEK_ACTIVE_PERIOD")
 	cli.DefaultTo(root, "serve")
-	root.AddCommand(newServeCommand(v), newMigrateCommand(), newPreflightCommand(), newSubstrateCommand(), newEnsureSecretsCommand(),
+	root.AddCommand(newServeCommand(v), newMigrateCommand(), newPreflightCommand(), newSubstrateCommand(), newEnsureSecretsCommand(), newImageCacheCACommand(),
 		newAuditCommand(), newKeysCommand(), newKeyAdminCommand(), newCheckpointsCommand(), newPricesCommand(), newModelMetadataCommand(), newOrgLimitsCommand(), newUsersCommand(), newRunEvidenceCommand(), newRestoreCommand())
 	return root
 }

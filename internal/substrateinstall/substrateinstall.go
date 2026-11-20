@@ -474,6 +474,11 @@ func (i *Installer) Install(ctx context.Context) error {
 		if setupEnv, err = WriteDockerShim(filepath.Join(setup.Root(), "shim"), os.Getenv("PATH")); err != nil {
 			return fmt.Errorf("write the docker shim: %w", err)
 		}
+	} else if platform == PlatformKind {
+		// The kind route keeps upstream's overlay, plus atelet's trust of the image cache CA (issue #1191).
+		if err := i.Profile.ApplyKindOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
+			return err
+		}
 	}
 	// Checks that need no namespace come first: a cluster that cannot run Substrate fails with nothing created.
 	static := i.Checker.SubstrateStaticPrerequisites(ctx)
