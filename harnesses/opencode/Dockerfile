@@ -137,7 +137,7 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::E
 
 FROM ${BASE}
 ARG UBUNTU_SNAPSHOT=20261027T000000Z
-# Our own labels (#1182). The base's title, vendor and version labels are replaced here. The release
+# Our own labels (#1182). These replace any label of the base image. The release
 # script sets the version, revision and source labels on top (hack/release-harness.sh). The licenses
 # label points to the notices: the image holds Apache-2.0 and MIT code, Ubuntu packages under many
 # licences (GPL and LGPL among them) and the tools of /usr/share/doc/koinon-tools.

@@ -172,7 +172,7 @@ except chartsmoke ^(cmd|internal|connectors|api|pricing|web)/.*_test\.go$
 job escape ^(charts/|test/escape/|internal/testing/testenv/)
 
 # --- harnesses: the suite's Go imports are added by hack/ci-changes.sh (go list graph) ----------------
-job harnesses ^(harnesses/|internal/(agentd|harness|acp)/|test/harnesses/|hack/harness-tag\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
+job harnesses ^(harnesses/|internal/(agentd|harness|acp)/|test/harnesses/|hack/harness-tag\.sh|hack/release-harness\.sh|hack/probe-tag\.sh|hack/spike/probe/|templates/)
 
 # --- opencodeplugin: tsc and node --test of Koinon's OpenCode plugins' CI-only dev project ----------
 # (ADR 0093 decision 4). A change under harnesses/opencode/plugins/ also matches `job harnesses` above

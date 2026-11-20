@@ -160,6 +160,7 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       > /etc/apt/sources.list.d/koinon-snapshot.sources \
  && { apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
       || { echo "package index update from snapshot.ubuntu.com (snapshot ${UBUNTU_SNAPSHOT}) failed after retries: most likely the snapshot mirror is unreachable; otherwise check UBUNTU_SNAPSHOT and the archive keyring" >&2; exit 1; }; } \
+ && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 upgrade -y \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
       ca-certificates=20260816ubuntu0.24.04.1 \
       git=1:2.43.0-1ubuntu7.4 \
