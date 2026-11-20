@@ -457,6 +457,26 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   Actor image references must go through `global.registryMirrors` or `global.imageRegistry` (the digest is kept).
   Choose the mirror name once: it is part of the actor template hash, so a change re-hashes every template.
   Needs main: the driver side of the actor image rewrite is not in this chart.
+- The image source must be an RFC 1918 IP address (10/8, 172.16/12, 192.168/16) or a registry with TLS. A plain-HTTP registry that you
+  name by host name, or at an address in another range (for example 100.64/10 or IPv6 ULA), fails in atelet with "server gave HTTP response to HTTPS client". So set `imageSource.cidrs` to the private address and
+  serve the registry on it, or put TLS on the registry and name it. An in-cluster cache by `podSelector` follows the
+  same rule: its address in the actor image references must be a private IP or a TLS name. Issue #1170 adds a default
+  in-cluster pull-through cache on this setting.
+- The two other namespaces of the Substrate setup have a NetworkPolicy fence, from the same switch
+  (`workerNetworkPolicy.enabled`). `podcertificate-controller-system` has default deny for ingress and egress, and the
+  controller reaches the Kubernetes API server (`apiServerCIDRs`) and nothing else
+  (`workerNetworkPolicy.podcertSystem`). `otel-system` has default deny and one policy per app: the collector takes
+  OTLP (4317, 4318) from `ate-system` and its read ports (8889, 8888) from Prometheus, and sends traces to Jaeger;
+  Jaeger takes OTLP from the collector only; Prometheus reaches DNS, the API server, the collector and the metrics
+  ports in `scrapePorts` (`workerNetworkPolicy.otelSystem`). The Prometheus and Jaeger UI ports have no ingress rule:
+  use `kubectl port-forward`. Set `otelSystem.enabled=false` when your cluster has no `otel-system` namespace,
+  because a NetworkPolicy in a missing namespace fails the install. Only Substrate's kind overlay makes `otel-system`:
+  on the GKE route set `otelSystem.enabled=false` and point `telemetry` at `gke-managed-otel` and its collector pods.
+- atelet and the other control-plane pods export OTLP to the collector in `otel-system`. The default-deny egress
+  policy of `ate-system` blocked that route, and atelet logged "OpenTelemetry SDK error ... deadline exceeded".
+  `workerNetworkPolicy.telemetry` opens the OTLP ports of the collector pods to the `controlPlaneApps` and nothing
+  else. Worker pods also export OTLP, and their egress stays atenet-egress and DNS only (ADR 0120 section 2.4), so their
+  export stays blocked: a known gap. Set `telemetry.namespace` and `telemetry.podSelector` for another collector.
 - In `ate-system`, `pods/exec`, `attach` and `portforward` are allowed for the identities in
   `workerPolicy.installerIdentities` and `installerGroups` only, and each request gets the audit annotation `connect` (user, resource,
   subresource, pod). The worker namespace stays fully denied, and the proxy subresources stay denied for everyone.

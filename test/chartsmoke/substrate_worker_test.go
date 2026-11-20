@@ -31,6 +31,9 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 4))
 		netpol := helmRenderWith(ctx, values, showOnly("templates/substrate-networkpolicy.yaml")...)
 		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 6))
+		// The fence of otel-system and podcertificate-controller-system and the telemetry route (issue #1172): seven policies.
+		fence := helmRenderWith(ctx, values, showOnly("templates/substrate-fence-networkpolicy.yaml")...)
+		Expect(fence.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
 		namespaces := helmRenderWith(ctx, values, showOnly("templates/substrate-workernamespace.yaml")...)
 		Expect(namespaces.Ignored).To(HaveKeyWithValue("Namespace", 1))
 	})
