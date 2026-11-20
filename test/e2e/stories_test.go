@@ -264,7 +264,7 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 
 		By("rule: every tool a server adds starts in tier ask")
 		Expect(tools).To(ConsistOf(
-			HaveField("Name", "read_item"), HaveField("Name", "write_item"), HaveField("Name", "fetch_url")))
+			HaveField("Name", "read_item"), HaveField("Name", "write_item"), HaveField("Name", "fetch_url"), HaveField("Name", "search_items")))
 		for _, t := range tools {
 			Expect(t.GetTier()).To(Equal(mcpserverv1alpha1.Tier_TIER_ASK), "tool %s starts in ask", t.GetName())
 			Expect(t.GetPresent()).To(BeTrue())

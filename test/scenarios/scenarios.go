@@ -48,6 +48,21 @@ var PullRequest = pullRequest{
 	TrackerReadTool:    "default-tracker_read_item",
 	TrackerGuardTool:   "default-tracker_write_item",
 	TrackerGuardArgs:   `{"title":"from the e2e guard"}`,
+	// TrackerCanary is the leak guard's true-positive control on an external-low tool, inside a task (#1051).
+	TrackerCanary: trackerCanary{
+		Prompt:     "tracker canary",
+		ReadTool:   "default-tracker_read_item",
+		SearchTool: "default-tracker_search_items",
+		// Text is fake private text the agent reads: read_item returns it for the title ReadTitle, so it never travels to the server. It is longer than the threshold of 24 canonical characters.
+		ReadTitle: "canary",
+		Text:      "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close",
+		// CleanQuery is the positive control: the same call without the leaked value.
+		CleanQuery: "kubernetes gateway api docs",
+		// BelowQuery has 20 canonical characters, below the threshold. The exact boundary is a guard-level test (#1133): the match is by k-grams, so this control catches a gross regression, not a one-character one.
+		BelowQuery: "koinon_test_not-a-real-to",
+		// AtQuery has exactly 24 canonical characters, the threshold: the text match catches it.
+		AtQuery: "koinon_test_not-a-real-token i",
+	},
 	Ledger: Ledger{
 		// StreamedInputTokens is what the script's first (tool call) turn reports as input. The
 		// streamed requests carry usage, so the run's input tokens reach at least this once the
@@ -93,6 +108,7 @@ type pullRequest struct {
 	TrackerAskTool, TrackerAskTarget, TrackerAskArgs string
 	TrackerGuardPrompt, TrackerReadTool              string
 	TrackerGuardTool, TrackerGuardArgs               string
+	TrackerCanary                                    trackerCanary
 	Ledger                                           Ledger
 }
 
@@ -101,6 +117,13 @@ type pullRequest struct {
 // the same helper, so a naming change is made once and every expectation follows.
 func (p pullRequest) Branch(agentDisplayName, agentID string) (string, error) {
 	return githubtools.FinalBranch(githubtools.AgentNamespace(agentDisplayName, agentID), p.Suggestion)
+}
+
+// trackerCanary is the in-task canary control of the leak guard on an external-low tool (#1051). The fake
+// model script (repo-helper.yaml, the turns that answer Prompt) reads Text, then calls SearchTool with
+// CleanQuery, BelowQuery, Text and AtQuery, in that order.
+type trackerCanary struct {
+	Prompt, ReadTool, ReadTitle, SearchTool, Text, CleanQuery, BelowQuery, AtQuery string
 }
 
 // Ledger is the shape the ledger has for a run of the scenario (ADR 0056, amendment 2026-10-29).
