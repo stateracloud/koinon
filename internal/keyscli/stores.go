@@ -117,16 +117,22 @@ func encodeKeySet(ctx context.Context, ws secretstore.Wrappers, ks KeySet) (map[
 	return data, nil
 }
 
+// ErrNotSaved marks a Save that failed before it wrote the Secret (the read of the Secret, or the
+// wrapping of a new KEK by the KMS). The Secret is unchanged, so a KEK ID that the command reserved is
+// free again. A failure of the update itself does not carry it: that write may have landed.
+var ErrNotSaved = errors.New("keyscli: the KEK Secret was not changed")
+
 // Save implements Store.
 func (k KubeStore) Save(ctx context.Context, ks KeySet) error {
 	secrets := k.Client.CoreV1().Secrets(k.Namespace)
 	s, err := secrets.Get(ctx, k.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("read the KEK Secret %s/%s: %w", k.Namespace, k.Name, err)
+		return fmt.Errorf("read the KEK Secret %s/%s: %w: %w", k.Namespace, k.Name, ErrNotSaved, err)
 	}
 	data, err := encodeKeySet(ctx, k.Wrappers, ks)
 	if err != nil {
-		return err
+		// The KMS refused (or could not be reached) before any write: no Secret holds the new KEK, so nothing is sealed under its ID.
+		return fmt.Errorf("%w: %w", ErrNotSaved, err)
 	}
 	s.Data, s.StringData = data, nil
 	// Update with the version this key set was loaded at, so a writer that changed the Secret since

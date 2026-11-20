@@ -363,7 +363,7 @@ func AddableID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error)
 }
 
 // RecordedID reports whether the install audit chain ever recorded the KEK ID: a keys.retire or
-// keys.forget or keys.add.intent event for it, or the ID in the KEKs or Retired of any recorded key-set state (before or
+// keys.forget event for it, or more keys.add.intent events than keys.add.aborted events (each abort undoes one intent), or the ID in the KEKs or Retired of any recorded key-set state (before or
 // after). The last covers a removal seen only as keys.observed, and a retire whose own event was lost.
 //
 // Add records the ID ([ActionAddIntent]) before it saves the Secret and fails closed when that write
@@ -374,13 +374,15 @@ func RecordedID(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error
 	var found bool
 	err := pool.QueryRow(ctx, `SELECT EXISTS (
 SELECT 1 FROM install_audit_events
-WHERE (action IN ($1, $2, $4) AND target_kind = 'kek' AND target_id = $3)
+WHERE (action IN ($1, $2) AND target_kind = 'kek' AND target_id = $3)
+   OR ((SELECT count(*) FROM install_audit_events WHERE action = $4 AND target_kind = 'kek' AND target_id = $3)
+       > (SELECT count(*) FROM install_audit_events WHERE action = $5 AND target_kind = 'kek' AND target_id = $3))
    OR (action LIKE 'keys.%' AND (
         summary #> '{before,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
      OR summary #> '{after,keks}' @> jsonb_build_array(jsonb_build_object('id', $3::text))
      OR summary #> '{before,retired}' @> to_jsonb($3::text)
      OR summary #> '{after,retired}' @> to_jsonb($3::text))))`,
-		ActionRetire, ForgetAction, id, ActionAddIntent).Scan(&found)
+		ActionRetire, ForgetAction, id, ActionAddIntent, ActionAddAborted).Scan(&found)
 	return found, err
 }
 
@@ -946,7 +948,7 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	// Record the ID durably before any key under it exists, in its own transaction (the Change's
 	// is still open until the add event, so it cannot carry the intent: it commits only after the
 	// Save). A failed write fails closed, with AuditOptional too: no Secret is saved, so no ID goes
-	// unrecorded. Once written, the ID is spent even if the Save then fails: a retry needs a new ID.
+	// unrecorded. Once written, the ID is spent when the Save fails after it may have written the Secret; a Save that failed before any write (the KMS refused to wrap the KEK) is undone with an aborted event, and the same ID can be added again.
 	if a := t.auditor(); a != nil {
 		if err := a.Record(ctx, Event{Command: "add", Action: ActionAddIntent, TargetKind: "kek", TargetID: id}); err != nil {
 			return fmt.Errorf("the KEK was not added; its ID could not be recorded in the install audit chain: %w", err)
@@ -954,6 +956,9 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 	}
 	ks.Keys[id] = key
 	if err := t.Store.Save(ctx, ks); err != nil {
+		if errors.Is(err, ErrNotSaved) {
+			return t.abortAdd(ctx, id, err)
+		}
 		return err
 	}
 	_, _ = fmt.Fprintf(t.Out, "Added KEK %s. Back up the KEK Secret now, then run: koinon-api keys activate %s\n", id, id)
@@ -961,6 +966,20 @@ func (t *Tool) Add(ctx context.Context, id string) error {
 		return err
 	}
 	return notAudited
+}
+
+// abortAdd frees the ID of an Add whose Save failed before it wrote the Secret ([ErrNotSaved]) by
+// recording ActionAddAborted. When that event cannot be written the ID stays spent, and the error says
+// so and what to do.
+func (t *Tool) abortAdd(ctx context.Context, id string, saveErr error) error {
+	a := t.auditor()
+	if a == nil {
+		return saveErr
+	}
+	if err := a.Record(ctx, Event{Command: "add", Action: ActionAddAborted, TargetKind: "kek", TargetID: id}); err != nil {
+		return fmt.Errorf("%w; the KEK ID %s could not be freed and stays spent: pick a new ID: %w", saveErr, id, err)
+	}
+	return fmt.Errorf("%w; no KEK was added and the ID %s is free: run the same command again once the cause is fixed", saveErr, id)
 }
 
 // Activate makes id the wrapping KEK. New values use it once the pods have the changed Secret

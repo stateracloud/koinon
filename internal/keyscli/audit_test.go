@@ -86,7 +86,7 @@ func (p saveProbe) Save(ctx context.Context, ks keyscli.KeySet) error {
 func keyEventsSince(ctx context.Context, mark int64) []keyEvent {
 	GinkgoHelper()
 	rows, err := pool.Query(ctx, `SELECT actor_kind, actor_id, action, target_kind, target_id, summary
-		FROM install_audit_events WHERE chain_seq > $1 AND starts_with(action, 'keys.') AND action NOT IN ('keys.forget', 'keys.add.intent') ORDER BY chain_seq`, mark)
+		FROM install_audit_events WHERE chain_seq > $1 AND starts_with(action, 'keys.') AND action NOT IN ('keys.forget', 'keys.add.intent', 'keys.add.aborted') ORDER BY chain_seq`, mark)
 	Expect(err).NotTo(HaveOccurred())
 	defer rows.Close()
 	var out []keyEvent
@@ -441,6 +441,50 @@ var _ = Describe("key events in the install audit chain", func() {
 			Expect(intentsSince(ctx, mark)).To(Equal([]string{kekB}))
 			Expect(newKeySet(ctx).Keys).NotTo(HaveKey(kekB))
 			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("IDs are never reused")))
+		})
+
+		It("frees the ID when the Save failed before it wrote the Secret, so the same add succeeds", func(ctx SpecContext) {
+			mark := auditMark(ctx)
+			tool.Store = saveProbe{Store: tool.Store, before: func(context.Context) error {
+				return fmt.Errorf("koinon_test kms refused: %w", keyscli.ErrNotSaved)
+			}}
+			Expect(tool.Add(ctx, kekB)).To(MatchError(ContainSubstring("the ID " + kekB + " is free")))
+			seen, err := keyscli.RecordedID(ctx, pool, kekB)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeFalse())
+			Expect(intentsSince(ctx, mark)).To(Equal([]string{kekB}), "the intent stays in the chain, followed by its abort")
+
+			tool.Store = ks
+			Expect(tool.Add(ctx, kekB)).To(Succeed())
+			Expect(newKeySet(ctx).Keys).To(HaveKey(kekB))
+		})
+
+		It("keeps the ID spent when one abort meets two intents, or when the abort cannot be written", func(ctx SpecContext) {
+			write := func(action string) {
+				Expect((&keyscli.Auditor{Pool: pool}).Record(ctx, keyscli.Event{Command: "add", Action: action, TargetKind: "kek", TargetID: kekB})).To(Succeed())
+			}
+			write(keyscli.ActionAddIntent)
+			write(keyscli.ActionAddIntent)
+			write(keyscli.ActionAddAborted)
+			seen, err := keyscli.RecordedID(ctx, pool, kekB)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeTrue(), "an abort undoes one intent only")
+
+			tool.Store = saveProbe{Store: tool.Store, before: func(context.Context) error { return keyscli.ErrNotSaved }}
+			tool.Audit = &keyscli.Auditor{Pool: pool, Write: func(_ context.Context, e audit.InstallEvent) error {
+				if e.Action == keyscli.ActionAddAborted {
+					return errors.New("koinon_test database down")
+				}
+				_, err := audit.InTx(ctx, pool, func(_ *store.Queries, b audit.Batch) error {
+					b.Install(e)
+					return nil
+				})
+				return err
+			}}
+			Expect(tool.Add(ctx, "kek-20261023-abrt")).To(MatchError(ContainSubstring("stays spent: pick a new ID")))
+			seen, err = keyscli.RecordedID(ctx, pool, "kek-20261023-abrt")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(seen).To(BeTrue())
 		})
 
 		It("keeps the change and says so when only the add event cannot be written", func(ctx SpecContext) {
@@ -926,6 +970,13 @@ var _ = Describe("key-admin Job events", func() {
 		return keyscli.KubeStore{Client: kube, Namespace: jobNS, Name: secret, Wrappers: admin}
 	}
 
+	jobStoreKeys := func(ctx context.Context) map[string][]byte {
+		GinkgoHelper()
+		got, err := jobStore().Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		return got.Keys
+	}
+
 	BeforeEach(func(ctx SpecContext) {
 		kube = fake.NewClientset()
 		kms = &secretstoretest.FakeKMS{}
@@ -937,6 +988,35 @@ var _ = Describe("key-admin Job events", func() {
 		out = &bytes.Buffer{}
 		// The chain's last state is whatever an earlier spec left; these specs start from no Secret.
 		recordLive(ctx, func(context.Context) (keyscli.KeySet, error) { return keyscli.KeySet{}, nil })
+	})
+
+	It("frees the KEK ID when the KMS refuses to wrap it, so the same --add-key retry succeeds", func(ctx SpecContext) {
+		Expect(job(true, "").Run(ctx)).To(Succeed())
+		mark := auditMark(ctx)
+		kms.DecryptOnly.Store(true)
+		err := job(true, kekB).Run(ctx)
+		Expect(err).To(MatchError(ContainSubstring("the ID " + kekB + " is free")))
+		Expect(err).To(MatchError(keyscli.ErrNotSaved))
+		Expect(jobStoreKeys(ctx)).NotTo(HaveKey(kekB), "the Secret is unchanged")
+		seen, err := keyscli.RecordedID(ctx, pool, kekB)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(seen).To(BeFalse(), "the intent was aborted")
+
+		kms.DecryptOnly.Store(false)
+		Expect(job(true, kekB).Run(ctx)).To(Succeed())
+		Expect(jobStoreKeys(ctx)).To(HaveKey(kekB))
+		Expect(actions(keyEventsSince(ctx, mark))).To(Equal([]string{keyscli.ActionAdd}))
+	})
+
+	It("keeps the ID spent when the Secret update fails after it may have written", func(ctx SpecContext) {
+		Expect(job(true, "").Run(ctx)).To(Succeed())
+		kube.PrependReactor("update", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("koinon_test update refused")
+		})
+		Expect(job(true, kekB).Run(ctx)).To(MatchError(ContainSubstring("update refused")))
+		seen, err := keyscli.RecordedID(ctx, pool, kekB)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(seen).To(BeTrue(), "the write may have landed, so the ID stays spent")
 	})
 
 	It("records the Secret it creates and the KEK it adds under the key-admin actor", func(ctx SpecContext) {
