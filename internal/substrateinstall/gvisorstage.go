@@ -3,6 +3,7 @@
 package substrateinstall
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,8 +22,35 @@ var ErrDigestMismatch = errors.New("gvisor asset does not have the pinned SHA-25
 
 // gvisorAssetPrefix is the key prefix of staged gVisor tarballs in the snapshot bucket. It has no "atespaces"
 // segment, so the object-store plugin of atelet serves it (assets must not live under a snapshot location).
-// It follows the layout of ate-setup for the microVM assets: <prefix>/<arch>/<sha256>.
+// It follows the layout of ate-setup for the microVM assets: <prefix>/<arch>/<sha256><suffix>.
 const gvisorAssetPrefix = "gvisor-assets"
+
+// archiveSuffixes are the archive formats atelet knows, with the suffix it needs in the URL. atelet chooses the
+// decompressor from the suffix of the asset URL only, and the suffix must match the real compression of the
+// bytes (issue #1157). So the suffix of a staged key comes from the bytes, never from a constant. Each suffix is
+// the one atelet accepts first for its format.
+var archiveSuffixes = []string{".tar.gz", ".tar.bz2", ".tar.zst", ".tar"}
+
+// ErrUnknownArchive is returned when the bytes of a tarball are not gzip, bzip2, zstd or plain tar.
+var ErrUnknownArchive = errors.New("gvisor asset is not a gzip, bzip2, zstd or tar archive")
+
+// archiveSuffix detects the format of an archive from the magic number at the start of head (at least the first
+// 262 bytes of the archive) and returns the suffix of its URL.
+func archiveSuffix(head []byte) (string, error) {
+	switch {
+	// The strong check goes first: the name of the first member of a plain tar can start with the bytes of
+	// another magic number.
+	case len(head) >= 262 && bytes.Equal(head[257:262], []byte("ustar")):
+		return ".tar", nil
+	case bytes.HasPrefix(head, []byte{0x1f, 0x8b}):
+		return ".tar.gz", nil
+	case bytes.HasPrefix(head, []byte("BZh")):
+		return ".tar.bz2", nil
+	case bytes.HasPrefix(head, []byte{0x28, 0xb5, 0x2f, 0xfd}):
+		return ".tar.zst", nil
+	}
+	return "", ErrUnknownArchive
+}
 
 // maxGVisorBytes bounds a download: the tarballs are about 60 MB.
 const maxGVisorBytes = 1 << 30
@@ -58,7 +86,31 @@ type StageResult struct {
 	Uploaded, Present []string
 }
 
-func gvisorKey(a gvisorArch) string { return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 }
+// gvisorKey is the object key of an architecture for an archive suffix: <prefix>/<arch>/<sha256><suffix>.
+func gvisorKey(a gvisorArch, suffix string) string {
+	return gvisorAssetPrefix + "/" + a.goArch + "/" + a.sha256 + suffix
+}
+
+// findStagedGVisor looks for the object of the pinned digest under each archive suffix. It returns the key of
+// the one that has the pinned digest. An object under any such key with another digest is an error
+// (ErrDigestMismatch), never overwritten. A key without a suffix (staged before issue #1157) is not looked at.
+func findStagedGVisor(ctx context.Context, store AssetStore, a gvisorArch) (key string, found bool, err error) {
+	for _, suffix := range archiveSuffixes {
+		k := gvisorKey(a, suffix)
+		sum, ok, err := store.Digest(ctx, k)
+		if err != nil {
+			return "", false, fmt.Errorf("read %s from the cluster object store: %w", k, err)
+		}
+		switch {
+		case !ok:
+		case sum == a.sha256:
+			return k, true, nil
+		default:
+			return "", false, fmt.Errorf("%w: the object %s in the cluster object store has SHA-256 %s, not %s. The installer does not overwrite it. Delete the object if it is wrong, then run the installer again", ErrDigestMismatch, k, sum, a.sha256)
+		}
+	}
+	return "", false, nil
+}
 
 // gvisorSourceURL is the URL of the tarball of an architecture below the mirror base (empty is the public bucket).
 func gvisorSourceURL(mirror string, a gvisorArch) string {
@@ -76,19 +128,16 @@ func gvisorSourceURL(mirror string, a gvisorArch) string {
 func StageGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, mirror string, out io.Writer) (StageResult, error) {
 	var res StageResult
 	for _, a := range gvisorArches {
-		key := gvisorKey(a)
-		sum, found, err := store.Digest(ctx, key)
+		key, found, err := findStagedGVisor(ctx, store, a)
 		if err != nil {
-			return res, fmt.Errorf("read %s from the cluster object store: %w", key, err)
+			return res, err
 		}
-		switch {
-		case found && sum == a.sha256:
+		if found {
 			_, _ = fmt.Fprintf(out, "gvisor %s %s: already in the cluster object store (%s)\n", GVisorRelease, a.goArch, key)
 			res.Present = append(res.Present, a.goArch)
-		case found:
-			return res, fmt.Errorf("%w: the object %s in the cluster object store has SHA-256 %s, not %s. The installer does not overwrite it. Delete the object if it is wrong, then run the installer again", ErrDigestMismatch, key, sum, a.sha256)
-		default:
-			if err := uploadGVisor(ctx, store, fetch, gvisorSourceURL(mirror, a), a, key); err != nil {
+		} else {
+			key, err = uploadGVisor(ctx, store, fetch, gvisorSourceURL(mirror, a), a)
+			if err != nil {
 				return res, err
 			}
 			_, _ = fmt.Fprintf(out, "gvisor %s %s: staged in the cluster object store (%s)\n", GVisorRelease, a.goArch, key)
@@ -99,47 +148,57 @@ func StageGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, mirr
 	return res, nil
 }
 
-func uploadGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, url string, a gvisorArch, key string) error {
+func uploadGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, url string, a gvisorArch) (string, error) {
 	// A stalled mirror must not hang the installer: one download gets a fixed time.
 	ctx, cancel := context.WithTimeout(ctx, gvisorDownloadTimeout)
 	defer cancel()
 	src, err := fetch.Open(ctx, url)
 	if err != nil {
-		return fmt.Errorf("fetch the gvisor tarball for %s from %s: %w. Use --gvisor-mirror for a mirror the cluster host can reach", a.goArch, redactURL(url), err)
+		return "", fmt.Errorf("fetch the gvisor tarball for %s from %s: %w. Use --gvisor-mirror for a mirror the cluster host can reach", a.goArch, redactURL(url), err)
 	}
 	defer func() { _ = src.Close() }()
-	tmp, err := os.CreateTemp("", "koinon-gvisor-*.tar.zstd")
+	tmp, err := os.CreateTemp("", "koinon-gvisor-*.tar")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = os.Remove(tmp.Name()); _ = tmp.Close() }()
 	h := sha256.New()
 	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(src, maxGVisorBytes+1))
 	if err != nil {
-		return fmt.Errorf("download the gvisor tarball for %s from %s: %w", a.goArch, redactURL(url), err)
+		return "", fmt.Errorf("download the gvisor tarball for %s from %s: %w", a.goArch, redactURL(url), err)
 	}
 	if n > maxGVisorBytes {
-		return fmt.Errorf("the gvisor tarball for %s from %s is larger than %d bytes", a.goArch, redactURL(url), int64(maxGVisorBytes))
+		return "", fmt.Errorf("the gvisor tarball for %s from %s is larger than %d bytes", a.goArch, redactURL(url), int64(maxGVisorBytes))
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != a.sha256 {
-		return fmt.Errorf("%w: %s has SHA-256 %s, not %s. Nothing was written to the cluster object store", ErrDigestMismatch, redactURL(url), got, a.sha256)
+		return "", fmt.Errorf("%w: %s has SHA-256 %s, not %s. Nothing was written to the cluster object store", ErrDigestMismatch, redactURL(url), got, a.sha256)
 	}
+	head := make([]byte, 262)
+	hn, err := tmp.ReadAt(head, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	suffix, err := archiveSuffix(head[:hn])
+	if err != nil {
+		return "", fmt.Errorf("%w: %s. Nothing was written to the cluster object store", err, redactURL(url))
+	}
+	key := gvisorKey(a, suffix)
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
+		return "", err
 	}
 	if err := store.Put(ctx, key, tmp, n); err != nil {
-		return fmt.Errorf("write %s to the cluster object store: %w", key, err)
+		return "", fmt.Errorf("write %s to the cluster object store: %w", key, err)
 	}
 	sum, found, err := store.Digest(ctx, key)
 	switch {
 	case err != nil:
-		return fmt.Errorf("read back %s from the cluster object store: %w", key, err)
+		return "", fmt.Errorf("read back %s from the cluster object store: %w", key, err)
 	case !found:
-		return fmt.Errorf("the object %s is not in the cluster object store after the write", key)
+		return "", fmt.Errorf("the object %s is not in the cluster object store after the write", key)
 	case sum != a.sha256:
-		return fmt.Errorf("%w: the object %s has SHA-256 %s after the write, not %s", ErrDigestMismatch, key, sum, a.sha256)
+		return "", fmt.Errorf("%w: the object %s has SHA-256 %s after the write, not %s", ErrDigestMismatch, key, sum, a.sha256)
 	}
-	return nil
+	return key, nil
 }
 
 // redactURL drops user info, query and fragment: a mirror URL can carry a token.

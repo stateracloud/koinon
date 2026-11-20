@@ -27,7 +27,7 @@ import (
 )
 
 // fakeBody stands for the tarball: the pin of the tests is its SHA-256 (PinGVisorForTest).
-var fakeBody = []byte("koinon_test_not-a-real-tarball")
+var fakeBody = append([]byte{0x28, 0xb5, 0x2f, 0xfd}, "koinon_test_not-a-real-tarball"...)
 
 type fakeStore struct {
 	mu      sync.Mutex
@@ -109,7 +109,8 @@ func TestFirstStageUploadsEveryArchitectureAfterTheDigestCheck(t *testing.T) {
 		"https://storage.googleapis.com/gvisor/releases/release/"+substrateinstall.GVisorRelease+"/aarch64/gvisor.tar.zstd"))
 	// The key has the digest, and no segment "atespaces": atelet's plugin refuses assets under a snapshot location.
 	for _, a := range res.Assets {
-		g.Expect(a.Key).To(Equal("gvisor-assets/" + a.Arch + "/" + a.SHA256))
+		g.Expect(a.Key).To(Equal("gvisor-assets/" + a.Arch + "/" + a.SHA256 + ".tar.zst"))
+		g.Expect(a.Key).To(HaveSuffix(".tar.zst"), "atelet chooses the archive format from the suffix")
 		g.Expect(strings.Split(a.Key, "/")).NotTo(ContainElement("atespaces"))
 	}
 }
@@ -126,6 +127,101 @@ func TestRepeatStageFetchesAndWritesNothing(t *testing.T) {
 	g.Expect(res.Uploaded).To(BeEmpty())
 	g.Expect(store.puts).To(BeEmpty())
 	g.Expect(fetch.calls).To(BeEmpty(), "an object with the pinned digest is not fetched again")
+}
+
+// archiveBodies has one fake body for each format that atelet knows. The bodies are not real archives: only the
+// magic numbers are real.
+func archiveBodies() map[string][]byte {
+	tar := make([]byte, 512)
+	copy(tar[257:], "ustar")
+	return map[string][]byte{
+		".tar.gz":  append([]byte{0x1f, 0x8b}, "koinon_test_not-a-real-tarball"...),
+		".tar.bz2": append([]byte("BZh9"), "koinon_test_not-a-real-tarball"...),
+		".tar.zst": fakeBody,
+		".tar":     tar,
+	}
+}
+
+func TestTheKeyAndTheSandboxConfigURLEndInTheSuffixOfTheRealFormat(t *testing.T) {
+	for suffix, body := range archiveBodies() {
+		t.Run(suffix, func(t *testing.T) {
+			g := NewWithT(t)
+			substrateinstall.PinGVisorForTest(t, body)
+			store, fetch := newStore(), &fakeFetcher{body: body}
+			res, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, a := range res.Assets {
+				g.Expect(a.Key).To(Equal("gvisor-assets/" + a.Arch + "/" + a.SHA256 + suffix))
+			}
+			dyn, get := sandboxConfigClient()
+			_, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", res.Assets)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, a := range res.Assets {
+				g.Expect(toJSON(t, get(t))).To(ContainSubstring(`"s3://snapshots/` + a.Key + `"`))
+			}
+			// A re-run finds the object under its suffix and writes nothing.
+			store.puts, fetch.calls = nil, nil
+			res, err = substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(res.Present).To(ConsistOf("amd64", "arm64"))
+			g.Expect(store.puts).To(BeEmpty())
+			g.Expect(fetch.calls).To(BeEmpty())
+		})
+	}
+}
+
+func TestAPlainTarWhoseFirstNameLooksLikeAnotherMagicNumberIsStillTar(t *testing.T) {
+	g := NewWithT(t)
+	tar := make([]byte, 512)
+	copy(tar, "BZh")
+	copy(tar[257:], "ustar")
+	suffix, err := substrateinstall.ArchiveSuffix(tar)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(suffix).To(Equal(".tar"))
+}
+
+func TestAnUnknownArchiveFormatIsAnErrorAndNothingIsWritten(t *testing.T) {
+	g := NewWithT(t)
+	body := []byte("koinon_test_not-an-archive")
+	substrateinstall.PinGVisorForTest(t, body)
+	store, fetch := newStore(), &fakeFetcher{body: body}
+	_, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).To(MatchError(substrateinstall.ErrUnknownArchive))
+	g.Expect(store.puts).To(BeEmpty())
+	_, err = substrateinstall.ArchiveSuffix(nil)
+	g.Expect(err).To(MatchError(substrateinstall.ErrUnknownArchive))
+}
+
+func TestAnObjectOfAnotherDigestUnderAnotherSuffixIsAnError(t *testing.T) {
+	g := NewWithT(t)
+	store, fetch := stageEnv(t)
+	key := strings.TrimSuffix(substrateinstall.GVisorKey("amd64"), ".tar.zst") + ".tar.gz"
+	store.objects[key] = []byte("not the tarball")
+	_, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).To(MatchError(substrateinstall.ErrDigestMismatch))
+	g.Expect(store.puts).To(BeEmpty())
+}
+
+func TestAKeyStagedWithoutTheSuffixIsLeftAloneAndTheNewKeyIsStaged(t *testing.T) {
+	g := NewWithT(t)
+	store, fetch := stageEnv(t)
+	newKey := substrateinstall.GVisorKey("amd64")
+	oldKey := strings.TrimSuffix(newKey, ".tar.zst")
+	g.Expect(oldKey).NotTo(Equal(newKey))
+	store.objects[oldKey] = fakeBody // staged by the code before the fix
+	res, err := substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(res.Uploaded).To(ConsistOf("amd64", "arm64"))
+	g.Expect(store.objects).To(HaveKey(newKey))
+	g.Expect(store.objects).To(HaveKey(oldKey), "the installer does not delete the old object")
+	g.Expect(store.puts).NotTo(ContainElement(oldKey))
+	// A second run is a no-op.
+	store.puts, fetch.calls = nil, nil
+	res, err = substrateinstall.StageGVisor(t.Context(), store, fetch, "", io.Discard)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(res.Present).To(ConsistOf("amd64", "arm64"))
+	g.Expect(store.puts).To(BeEmpty())
+	g.Expect(fetch.calls).To(BeEmpty())
 }
 
 func TestAnObjectWithAnotherDigestIsAnErrorAndNeverOverwritten(t *testing.T) {
@@ -203,8 +299,8 @@ func sandboxConfigClient(objs ...runtime.Object) (*dynamicfake.FakeDynamicClient
 
 func stagedAssets() []substrateinstall.StagedAsset {
 	return []substrateinstall.StagedAsset{
-		{Arch: "amd64", Key: "gvisor-assets/amd64/" + strings.Repeat("a", 64), SHA256: strings.Repeat("a", 64)},
-		{Arch: "arm64", Key: "gvisor-assets/arm64/" + strings.Repeat("b", 64), SHA256: strings.Repeat("b", 64)},
+		{Arch: "amd64", Key: "gvisor-assets/amd64/" + strings.Repeat("a", 64) + ".tar.zst", SHA256: strings.Repeat("a", 64)},
+		{Arch: "arm64", Key: "gvisor-assets/arm64/" + strings.Repeat("b", 64) + ".tar.zst", SHA256: strings.Repeat("b", 64)},
 	}
 }
 
@@ -228,7 +324,8 @@ func TestTheSandboxConfigHasAnS3URLAndTheSameDigestForEachArchitecture(t *testin
 	assets := v["assets"].(map[string]any)
 	for arch, ch := range map[string]string{"amd64": "a", "arm64": "b"} {
 		a := assets[arch].(map[string]any)["gvisor"].(map[string]any)
-		g.Expect(a["url"]).To(Equal("s3://snapshots/gvisor-assets/" + arch + "/" + strings.Repeat(ch, 64)))
+		g.Expect(a["url"]).To(Equal("s3://snapshots/gvisor-assets/" + arch + "/" + strings.Repeat(ch, 64) + ".tar.zst"))
+		g.Expect(a["url"]).To(HaveSuffix(".tar.zst"))
 		g.Expect(a["sha256"]).To(Equal(strings.Repeat(ch, 64)))
 	}
 	// Nothing in the SandboxConfig points at the internet.
@@ -254,6 +351,50 @@ func TestApplyingTheSameSandboxConfigTwiceChangesNothing(t *testing.T) {
 	g.Expect(changed).To(BeFalse())
 	for _, a := range dyn.Actions() {
 		g.Expect(a.GetVerb()).To(BeElementOf("get"), "a repeat run only reads")
+	}
+}
+
+func TestAVersionFromBeforeTheSuffixIsReplacedInPlace(t *testing.T) {
+	g := NewWithT(t)
+	dyn, get := sandboxConfigClient()
+	legacy := stagedAssets()
+	for i := range legacy {
+		legacy[i].Key = strings.TrimSuffix(legacy[i].Key, ".tar.zst")
+	}
+	_, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", legacy)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(toJSON(t, get(t))).NotTo(ContainSubstring(".tar.zst"))
+	changed, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeTrue())
+	cfg := get(t)
+	versions, _, _ := unstructured.NestedSlice(cfg.Object, "spec", "versions")
+	g.Expect(versions).To(HaveLen(1))
+	g.Expect(toJSON(t, cfg)).To(ContainSubstring("s3://snapshots/gvisor-assets/amd64/" + strings.Repeat("a", 64) + ".tar.zst"))
+	changed, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(changed).To(BeFalse())
+}
+
+func TestASuffixLessVersionWithAnotherDigestOrBucketIsNeverRewritten(t *testing.T) {
+	g := NewWithT(t)
+	for name, mutate := range map[string]func(*[]substrateinstall.StagedAsset) string{
+		"another digest": func(a *[]substrateinstall.StagedAsset) string {
+			(*a)[0].SHA256 = strings.Repeat("c", 64)
+			return "snapshots"
+		},
+		"another bucket": func(*[]substrateinstall.StagedAsset) string { return "other-bucket" },
+	} {
+		dyn, _ := sandboxConfigClient()
+		legacy := stagedAssets()
+		for i := range legacy {
+			legacy[i].Key = strings.TrimSuffix(legacy[i].Key, ".tar.zst")
+		}
+		bucket := mutate(&legacy)
+		_, err := substrateinstall.ApplySandboxConfig(t.Context(), dyn, bucket, legacy)
+		g.Expect(err).NotTo(HaveOccurred(), name)
+		_, err = substrateinstall.ApplySandboxConfig(t.Context(), dyn, "snapshots", stagedAssets())
+		g.Expect(err).To(MatchError(substrateinstall.ErrDigestMismatch), name)
 	}
 }
 
@@ -338,6 +479,10 @@ func TestInstallerStagesOnGenericAndSkipsGKE(t *testing.T) {
 		if want == 1 {
 			cfg := get(t)
 			g.Expect(toJSON(t, cfg)).To(ContainSubstring("s3://snapshots/gvisor-assets/amd64/"))
+			// The URL of the SandboxConfig is the staged key, with the suffix atelet needs.
+			for _, arch := range []string{"amd64", "arm64"} {
+				g.Expect(toJSON(t, cfg)).To(ContainSubstring(`"s3://snapshots/` + substrateinstall.GVisorKey(arch) + `"`))
+			}
 		}
 	}
 }
