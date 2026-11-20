@@ -291,7 +291,7 @@ func TestEveryRouteTrustsTheImageCacheCA(t *testing.T) {
 		substrateinstall.PlatformKind: func(dir string) error {
 			return substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(dir, "ate-system")
 		},
-		substrateinstall.PlatformGKE: nil, // no overlay: the hook Job adds the patch (internal/imagecacheca ensurePatched)
+		substrateinstall.PlatformGKE: nil, // no overlay: the hook Job adds the patch (internal/imagecacheca Publish)
 	}
 	for _, platform := range substrateinstall.Platforms {
 		apply, known := overlay[platform]

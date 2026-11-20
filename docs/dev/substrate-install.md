@@ -421,8 +421,8 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     Substrate from before this change, the installer does not know the overlay directory of the pinned tree, so the hook
     Job adds the same volume and `SSL_CERT_DIR` to the atelet DaemonSet itself (a strategic merge patch, one definition
     in `internal/imagecacheca`). The Job adds no container and no image, so the admission policy of the Substrate
-    namespace is not weakened. A DaemonSet that has the patch is not patched again. The first patch restarts atelet once.
-    A new run of `koinon-api substrate install` (a new `ate-setup` apply) can remove the patch on the gke route: run
+    namespace is not weakened. A DaemonSet that has the patch is not patched again. The patch and the hash stamp are one request, so atelet rolls once.
+    The admission policy `<release>-substrate-objects` lets only the installer identities write DaemonSets in the Substrate namespace (needs main: decide how the Job identity may patch atelet, issue #1194 review). A new run of `koinon-api substrate install` (a new `ate-setup` apply) can remove the patch on the gke route: run
     `helm upgrade` again and the Job adds it back.
   - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist.
   - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet. The RBAC is a hook object: Helm

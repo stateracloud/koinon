@@ -94,19 +94,20 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 	if len(leaf) == 0 {
 		return fmt.Errorf("%w: Secret %s/%s has no %s", ErrCA, p.Namespace, p.Secret, tlsCertKey)
 	}
-	// A Substrate that was installed before the installer patch, or on a route without it (gke), would pull with no
-	// trust while this Job reports success: add the patch here.
-	if err := ensurePatched(ctx, client, p.SubstrateNamespace, out); err != nil {
-		return err
-	}
 	if err := upsertConfigMap(ctx, client, p.SubstrateNamespace, ca, out); err != nil {
 		return err
 	}
 	caSum := Sum(ca)
 	tlsSum := Sum(leaf, ca)
+	// A Substrate that was installed before the installer patch, or on a route without it (gke), would pull with no
+	// trust while this Job reports success: the one patch below adds the trust. It comes after the ConfigMap exists.
+	needTrust, err := ateletLacksTrust(ctx, client, p.SubstrateNamespace)
+	if err != nil {
+		return err
+	}
 	// atelet must exist: the installer (koinon-api substrate install) runs before helm install. A missing one is an
 	// error with the way out, not a skipped step: the cache would be unreachable for every actor.
-	if err := stamp(ctx, out, "DaemonSet "+p.SubstrateNamespace+"/"+DaemonSetName, AteletAnnotation, caSum, true,
+	if err := stamp(ctx, out, "DaemonSet "+p.SubstrateNamespace+"/"+DaemonSetName, AteletAnnotation, caSum, true, needTrust,
 		func(ctx context.Context) (map[string]string, error) {
 			ds, err := client.AppsV1().DaemonSets(p.SubstrateNamespace).Get(ctx, DaemonSetName, metav1.GetOptions{})
 			if err != nil {
@@ -123,7 +124,7 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 		return nil
 	}
 	// The Deployment is created after this hook on the first install and reads the Secret when its pod starts.
-	return stamp(ctx, out, "Deployment "+p.Namespace+"/"+p.Deployment, CacheAnnotation, tlsSum, false,
+	return stamp(ctx, out, "Deployment "+p.Namespace+"/"+p.Deployment, CacheAnnotation, tlsSum, false, false,
 		func(ctx context.Context) (map[string]string, error) {
 			d, err := client.AppsV1().Deployments(p.Namespace).Get(ctx, p.Deployment, metav1.GetOptions{})
 			if err != nil {
@@ -208,7 +209,7 @@ func upsertConfigMap(ctx context.Context, client kubernetes.Interface, ns string
 
 // stamp sets the annotation on a pod template when it differs. A missing object is an error when required, else a
 // note: the object does not exist yet and its first pod reads the current certificates.
-func stamp(ctx context.Context, out io.Writer, what, key, sum string, required bool,
+func stamp(ctx context.Context, out io.Writer, what, key, sum string, required, addTrust bool,
 	read func(context.Context) (map[string]string, error), patch func(context.Context, []byte) error,
 ) error {
 	have, err := read(ctx)
@@ -219,11 +220,17 @@ func stamp(ctx context.Context, out io.Writer, what, key, sum string, required b
 	case err != nil:
 		return fmt.Errorf("read %s: %w", what, err)
 	}
-	if have[key] == sum {
+	if have[key] == sum && !addTrust {
 		_, _ = fmt.Fprintf(out, "%s is current\n", what)
 		return nil
 	}
-	body, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{key: sum}}}}})
+	// One patch, so the pods roll once: the annotation, and the trust spec when the route had no installer patch.
+	tmpl := map[string]any{"metadata": map[string]any{"annotations": map[string]string{key: sum}}}
+	if addTrust {
+		tmpl["spec"] = TrustPodSpec()
+		_, _ = fmt.Fprintf(out, "%s had no image cache CA trust (a route without the installer patch): adding the volume and %s\n", what, EnvName)
+	}
+	body, err := json.Marshal(map[string]any{"spec": map[string]any{"template": tmpl}})
 	if err != nil {
 		return err
 	}
@@ -237,7 +244,7 @@ func stamp(ctx context.Context, out io.Writer, what, key, sum string, required b
 // TrustPodSpec is the part of the atelet pod spec that makes atelet trust the CA: the optional ConfigMap volume, the
 // mount and SSL_CERT_DIR on the atelet container. It adds no container, no image, no hostPath and no Secret volume, so
 // the admission policy of the Substrate namespace has nothing new to allow. The installer patch (kind and generic) and
-// ensurePatched (every route, the gke route included) both use it, so the two cannot differ.
+// Publish (every route, the gke route included) both use it, so the two cannot differ.
 func TrustPodSpec() map[string]any {
 	return map[string]any{
 		"volumes": []any{map[string]any{
@@ -252,35 +259,24 @@ func TrustPodSpec() map[string]any {
 	}
 }
 
-// ensurePatched adds the trust patch to the atelet DaemonSet when it is missing. The installer patch covers the kind and
-// generic routes. The gke route of ate-setup uses an overlay directory that the installer does not know (issue #1194), so
-// this step covers every route with the same strategic merge patch and needs no knowledge of the Substrate tree. A missing
-// DaemonSet is not handled here: the stamp step reports it. A patched DaemonSet is left alone, so nothing restarts twice.
-func ensurePatched(ctx context.Context, client kubernetes.Interface, ns string, out io.Writer) error {
+// ateletLacksTrust reports whether the atelet DaemonSet exists without the trust patch. The installer patch covers the
+// kind and generic routes. The gke route of ate-setup uses an overlay directory that the installer does not know (issue
+// #1194), so Publish adds the patch there, with the same strategic merge patch that stamps the hash. A missing DaemonSet
+// is not handled here: the stamp step reports it.
+func ateletLacksTrust(ctx context.Context, client kubernetes.Interface, ns string) (bool, error) {
 	ds, err := client.AppsV1().DaemonSets(ns).Get(ctx, DaemonSetName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read DaemonSet %s/%s: %w", ns, DaemonSetName, err)
+		return false, fmt.Errorf("read DaemonSet %s/%s: %w", ns, DaemonSetName, err)
 	}
-	if trusts(ds) {
-		return nil
-	}
-	body, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": TrustPodSpec()}}})
-	if err != nil {
-		return err
-	}
-	if _, err := client.AppsV1().DaemonSets(ns).Patch(ctx, DaemonSetName, types.StrategicMergePatchType, body, metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("patch DaemonSet %s/%s to trust the image cache CA: %w", ns, DaemonSetName, err)
-	}
-	_, _ = fmt.Fprintf(out, "DaemonSet %s/%s had no image cache CA trust (a route without the installer patch): added the volume and %s\n", ns, DaemonSetName, EnvName)
-	return nil
+	return !trusts(ds), nil
 }
 
-// trusts reports whether the atelet DaemonSet has the volume of the ConfigMap and SSL_CERT_DIR on the atelet container.
+// trusts reports whether the atelet DaemonSet has the volume of the ConfigMap, its mount and SSL_CERT_DIR on the atelet container.
 func trusts(ds *appsv1.DaemonSet) bool {
-	hasVolume, hasEnv := false, false
+	hasVolume, hasEnv, hasMount := false, false, false
 	for _, v := range ds.Spec.Template.Spec.Volumes {
 		if v.Name == VolumeName && v.ConfigMap != nil && v.ConfigMap.Name == ConfigMapName {
 			hasVolume = true
@@ -295,6 +291,11 @@ func trusts(ds *appsv1.DaemonSet) bool {
 				hasEnv = true
 			}
 		}
+		for _, m := range c.VolumeMounts {
+			if m.Name == VolumeName && m.MountPath == MountPath {
+				hasMount = true
+			}
+		}
 	}
-	return hasVolume && hasEnv
+	return hasVolume && hasEnv && hasMount
 }

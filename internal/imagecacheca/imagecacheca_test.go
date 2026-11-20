@@ -75,7 +75,11 @@ func ateletDS() *appsv1.DaemonSet {
 	ds.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: imagecacheca.VolumeName, VolumeSource: corev1.VolumeSource{
 		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}},
 	}}}
-	ds.Spec.Template.Spec.Containers = []corev1.Container{{Name: imagecacheca.AteletContainer, Env: []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}}}}
+	ds.Spec.Template.Spec.Containers = []corev1.Container{{
+		Name:         imagecacheca.AteletContainer,
+		Env:          []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}},
+		VolumeMounts: []corev1.VolumeMount{{Name: imagecacheca.VolumeName, MountPath: imagecacheca.MountPath, ReadOnly: true}},
+	}}
 	return ds
 }
 
@@ -171,7 +175,7 @@ var _ = Describe("Publish", func() {
 		c := fake.NewClientset(tlsSecret(ca, leaf, key), ateletDSUnpatched(), cacheDeploy())
 		var out bytes.Buffer
 		Expect(imagecacheca.Publish(ctx, c, params, &out)).To(Succeed())
-		Expect(out.String()).To(ContainSubstring("added the volume and SSL_CERT_DIR"))
+		Expect(out.String()).To(ContainSubstring("adding the volume and SSL_CERT_DIR"))
 		ds, err := c.AppsV1().DaemonSets(subNS).Get(ctx, "atelet", metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		spec := ds.Spec.Template.Spec
@@ -210,12 +214,25 @@ var _ = Describe("Publish", func() {
 		Expect(ctr.VolumeMounts).To(HaveLen(2))
 	})
 
+	It("adds the trust patch when atelet has the volume and the variable but no mount", func(ctx SpecContext) {
+		ca, leaf, key := pki("cache")
+		ds := ateletDS()
+		ds.Spec.Template.Spec.Containers[0].VolumeMounts = nil
+		c := fake.NewClientset(tlsSecret(ca, leaf, key), ds)
+		p := params
+		p.Deployment = ""
+		Expect(imagecacheca.Publish(ctx, c, p, io.Discard)).To(Succeed())
+		got, err := c.AppsV1().DaemonSets(subNS).Get(ctx, "atelet", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+	})
+
 	It("does not patch atelet again when it already trusts the CA", func(ctx SpecContext) {
 		ca, leaf, key := pki("cache")
 		c := fake.NewClientset(tlsSecret(ca, leaf, key), ateletDS(), cacheDeploy())
 		var out bytes.Buffer
 		Expect(imagecacheca.Publish(ctx, c, params, &out)).To(Succeed())
-		Expect(out.String()).NotTo(ContainSubstring("added the volume"))
+		Expect(out.String()).NotTo(ContainSubstring("adding the volume"))
 	})
 
 	It("fails with the way out when atelet is not installed", func(ctx SpecContext) {
