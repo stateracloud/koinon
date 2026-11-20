@@ -33,6 +33,10 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 5))
 		namespaces := helmRenderWith(ctx, values, showOnly("templates/substrate-workernamespace.yaml")...)
 		Expect(namespaces.Ignored).To(HaveKeyWithValue("Namespace", 1))
+		// The read-only observer access of the reconciler to the worker namespace (issue #1162).
+		observer := helmRenderWith(ctx, values, showOnly("templates/substrate-observer.yaml")...)
+		Expect(observer.Ignored).To(HaveKeyWithValue("Role", 1))
+		Expect(observer.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
 	})
 
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {

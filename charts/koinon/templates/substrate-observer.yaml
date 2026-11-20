@@ -1,0 +1,54 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Read-only access of the Koinon reconciler to the Substrate worker namespace (issue #1162, ADR 0120
+section 6). The operator must say why a sandbox does not start: it reads the worker pods, their
+events, the Deployments and ReplicaSets that Substrate's controller applies, and the WorkerPool
+objects. It reads nothing else and writes nothing: the Role has only get, list and watch, and no
+Secret, no pods/exec, pods/log or pods/proxy rule (the CONNECT policy denies those verbs to every
+identity in this namespace anyway).
+
+This replaces the OpenShell pod observer (sandbox-observer.yaml, ADR 0078), which the substrate
+driver cannot use (its namespaces and pods are OpenShell's). It is an ordinary Role and RoleBinding
+that Helm applies: the chart creates the worker namespace (substrate-workernamespace.yaml) and the
+reconciler needs no right to create RoleBindings. Off with execution.substrate.workerObserver.enabled=false.
+*/ -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerObserver.enabled (or .Values.execution.substrate.workerPolicy.enabled .Values.execution.substrate.workerPool.enabled .Values.execution.substrate.workerNetworkPolicy.enabled) }}
+{{- $name := printf "%s-worker-observer" (include "koinon.fullname" .) }}
+{{- $ns := .Values.execution.substrate.workerNamespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [ate.dev]
+    resources: [workerpools]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "koinon.componentName" (list . "reconciler") }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}
