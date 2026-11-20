@@ -38,7 +38,7 @@ var _ = Describe("The repo.read grant of a Gitea connection", func() {
 	const (
 		readTok  = "koinon_test_not-a-real-read-token"
 		writeTok = "koinon_test_not-a-real-write-token"
-		base     = "https://git.example.test/gitea"
+		base     = "https://git.example.com/gitea"
 	)
 	var (
 		osg   *fakegateway.Gateway
@@ -128,7 +128,7 @@ var _ = Describe("The repo.read grant of a Gitea connection", func() {
 		Expect(profile.GetCredentials()[0].GetStablePlaceholder()).To(BeTrue())
 		Expect(profile.GetCredentials()[0].GetEnvVars()).To(Equal([]string{"GITHUB_TOKEN", "GH_TOKEN"}))
 		Expect(profile.GetEndpoints()).To(HaveLen(1))
-		Expect(profile.GetEndpoints()[0].GetHost()).To(Equal("git.example.test"))
+		Expect(profile.GetEndpoints()[0].GetHost()).To(Equal("git.example.com"))
 
 		By("everything OpenShell holds for the agent, except that one credential field, is token-free")
 		sb := osg.Sandbox(ws(), n().Sandbox)
@@ -157,7 +157,7 @@ var _ = Describe("The repo.read grant of a Gitea connection", func() {
 
 	It("allows clone, fetch and REST reads of the bound repository under the sub-path, and nothing else", func(ctx SpecContext) {
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		const h = "git.example.test"
+		const h = "git.example.com"
 		for _, bin := range []string{git, opencode} {
 			Expect(evaluate(bin, h, "GET", "/gitea/acme/widgets.git/info/refs?service=git-upload-pack").Allowed).To(BeTrue())
 			Expect(evaluate(bin, h, "POST", "/gitea/acme/widgets.git/git-upload-pack").Allowed).To(BeTrue())

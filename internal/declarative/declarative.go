@@ -501,7 +501,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		return connections.ErrNoKeyring
 	}
 	if d.Site.BaseURL != "" {
-		if err := i.URLPolicy.Check(ctx, d.Site.BaseURL); err != nil {
+		if err := i.URLPolicy.CheckSandbox(ctx, d.Site.BaseURL); err != nil {
 			return &invalidError{fmt.Errorf("%s: %w", KeyBaseURL, err)}
 		}
 	}

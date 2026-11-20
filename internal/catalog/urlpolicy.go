@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // URLPolicy decides which upstream URLs a provider or a remote MCP server may name. Providers are entered by org admins
@@ -48,6 +50,42 @@ type URLPolicy struct {
 	AllowedHosts []string
 	// Resolver looks a name up; default net.DefaultResolver.
 	Resolver func(ctx context.Context, host string) ([]netip.Addr, error)
+	// Search is the resolver of a sandbox guest, for CheckSandbox, CheckSandboxStrict and
+	// SandboxDialContext. Nil means SubstrateSearch. A value with no Domains is a guest with no search
+	// domains.
+	Search *ResolverSearch
+}
+
+// ResolverSearch is the resolv.conf of a sandbox guest: what its resolver does to a name that has no
+// trailing dot (#1054).
+type ResolverSearch struct {
+	// Domains is the search list. Empty means the guest has no search domains: it resolves every name as
+	// written, and the sandbox refuses a name that does not resolve as written.
+	Domains []string
+	// Ndots is the "options ndots" value: a name with fewer dots is tried with each search domain first.
+	Ndots int
+	// ClusterDomain is the cluster's DNS domain (the chart value clusterDomain). A Service name in full is
+	// <service>.<namespace>.svc.<ClusterDomain>.
+	ClusterDomain string
+}
+
+// SubstrateSearch is the resolv.conf measured in a Substrate gVisor actor on kind: the search list and
+// ndots come from the worker pod, so the first domain is the worker namespace, not the connector's
+// (Substrate internal/ateworker/actornet/etcfiles.go:24-38). The actor's DNS relay answers NXDOMAIN for a
+// name that its egress policy does not allow (Substrate internal/atunnel/dns/dnshandler.go:120-122): the
+// guest still needs an egress policy that allows the name after expansion. That is the egress layer's
+// job, not this check's.
+var SubstrateSearch = ResolverSearch{
+	Domains:       []string{"ate-workers.svc.cluster.local", "svc.cluster.local", "cluster.local"},
+	Ndots:         5,
+	ClusterDomain: "cluster.local",
+}
+
+func (p URLPolicy) search() ResolverSearch {
+	if p.Search == nil {
+		return SubstrateSearch
+	}
+	return *p.Search
 }
 
 var (
@@ -206,24 +244,44 @@ func whatwgIPv4(host string) (addr netip.Addr, numeric, ok bool) {
 // connection (DNS rebinding) by checking the addresses it dials. A host the platform allowed by
 // name is dialled as given.
 func (p URLPolicy) DialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return p.dialer(d, false)
+}
+
+// dialer is DialContext. With absolute it looks a name up as the sandbox does, as an absolute name with
+// no search domains, and dials the addresses of that one lookup, so the check and the connection agree.
+func (p URLPolicy) dialer(d *net.Dialer, absolute bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-		host = strings.ToLower(strings.TrimSuffix(host, "."))
-		if p.allowedName(host, host+":"+port) {
+		given := strings.ToLower(host)
+		host = strings.TrimSuffix(given, ".")
+		allowed := p.allowedName(host, host+":"+port)
+		if allowed && !absolute {
 			return d.DialContext(ctx, network, addr)
 		}
 		var addrs []netip.Addr
 		if ip, err := netip.ParseAddr(host); err == nil {
 			addrs = []netip.Addr{ip}
-		} else if addrs, err = p.lookup(ctx, host); err != nil {
-			return nil, err
+		} else {
+			name := host
+			if absolute {
+				if why := p.ShortName(given); why != "" {
+					return nil, invalid("the host %q is a short name: %s", host, why)
+				}
+				name += "."
+			}
+			if addrs, err = p.lookup(ctx, name); err != nil {
+				if absolute {
+					return nil, invalid("the host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
+				}
+				return nil, err
+			}
 		}
 		var last error
 		for _, a := range addrs {
-			if deniedAddr(a) && !p.allowedAddr(a) {
+			if !allowed && deniedAddr(a) && !p.allowedAddr(a) {
 				last = invalid("the host %q resolves to an address the egress policy denies", host)
 				continue
 			}
@@ -256,6 +314,157 @@ func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
 		return invalid("url must not contain '$': the gateway's config loader reads $NAME as an environment variable")
 	}
 	return p.check(ctx, rawURL, true)
+}
+
+// CheckSandbox is Check for a URL that also becomes sandbox egress, such as a connector's base URL (#1054).
+// The guest resolves a name with the search list and ndots of URLPolicy.Search (default SubstrateSearch,
+// measured in a Substrate guest on kind), while the API pod resolves it with its own search domains. A name
+// that a search domain can turn into another name works in one place and fails or reaches a different
+// Service in the other. CheckSandbox refuses such a name (ShortName) before any allow-list entry is read.
+// It also looks the host up as an absolute name, as the guest does, and applies the address rules to those
+// addresses; a name that only the relative lookup resolves is refused. Like Check, it passes a name that
+// does not resolve at all. The guest still needs an egress policy that allows the name; that is the egress
+// layer's job, not this check's.
+func (p URLPolicy) CheckSandbox(ctx context.Context, rawURL string) error {
+	return p.checkSandbox(ctx, rawURL, false)
+}
+
+// CheckSandboxStrict is CheckStrict with the rule of CheckSandbox, for rendering: any failure of the
+// absolute lookup refuses the URL.
+func (p URLPolicy) CheckSandboxStrict(ctx context.Context, rawURL string) error {
+	return p.checkSandbox(ctx, rawURL, true)
+}
+
+func (p URLPolicy) checkSandbox(ctx context.Context, rawURL string, strict bool) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return invalid("url must be an http(s) URL")
+	}
+	host := strings.ToLower(u.Hostname())
+	if why := p.ShortName(host); why != "" {
+		return invalid("the url's host %q is a short name: %s", host, why)
+	}
+	check := p.Check
+	if strict {
+		check = p.CheckStrict
+	}
+	if err := check(ctx, rawURL); err != nil {
+		return err
+	}
+	host = strings.TrimSuffix(host, ".")
+	if _, err := netip.ParseAddr(host); err == nil {
+		return nil
+	}
+	if _, numeric, _ := whatwgIPv4(host); numeric {
+		return nil
+	}
+	addrs, err := p.lookup(ctx, host+".")
+	if err != nil {
+		if _, relErr := p.lookup(ctx, host); relErr == nil {
+			return invalid("the url's host %q is a short name: %s", host, fullNameHint(host))
+		}
+		if strict {
+			return invalid("the url's host %q does not resolve as an absolute name, and a name without a trailing dot may be expanded by a search domain: %s", host, fullNameHint(host))
+		}
+		return nil
+	}
+	if p.allowedName(host, strings.ToLower(u.Host)) {
+		return nil
+	}
+	for _, a := range addrs {
+		if deniedAddr(a) && !p.allowedAddr(a) {
+			return invalid("the url's host %q is not allowed: it resolves to a loopback, link-local, private, shared or metadata address (a platform admin can allow it with egress.allowedInternalHosts)", host)
+		}
+	}
+	return nil
+}
+
+// SandboxDialContext is DialContext for clients of connector URLs. It refuses a short name, and it
+// resolves the host once, as an absolute name, as the sandbox does. It dials only the addresses of that
+// lookup, so a name that the API pod would expand through a search domain is never dialled.
+func (p URLPolicy) SandboxDialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return p.dialer(d, true)
+}
+
+func fullNameHint(host string) string {
+	var full string
+	switch {
+	case strings.HasSuffix(host, ".svc"):
+		full = "such as " + host + ".cluster.local"
+	case strings.HasSuffix(host, ".svc.cluster"):
+		full = "such as " + host + ".local"
+	case !strings.Contains(host, "."):
+		full = "such as " + host + ".<namespace>.svc.cluster.local"
+	case strings.Count(host, ".") == 1:
+		full = "such as " + host + ".svc.cluster.local"
+	default:
+		full = "the fully qualified name of the host (for a cluster Service, <service>.<namespace>.svc.<cluster domain>)"
+	}
+	return "write the full name, " + full
+}
+
+// ShortName returns, for a host that the guest's resolver would expand into a name other than the one
+// written, a message that names the full form to write; it returns "" for any other host. A single label
+// ("intranet") is refused in every case. With no search domains the rest of the rule is static too: a Service
+// name that ends in ".svc" or ".svc.cluster" ("gitea.ns.svc") is a search-path name in every cluster;
+// CheckSandbox adds the names that only a lookup shows ("gitea.ns"). With a search list (the Substrate
+// guest), the resolver tries a name with fewer dots than Ndots with each search domain first, so every such
+// name is refused unless it is the full Service form (<service>.<namespace>.svc.<ClusterDomain>) or a
+// public FQDN (its last label is in the public suffix list). A name with one trailing dot is absolute and
+// accepted, except a single label. IP literals in any WHATWG form are not names. Case does not matter; more
+// than one trailing dot is an empty label and is refused.
+func (p URLPolicy) ShortName(host string) string {
+	host = strings.ToLower(host)
+	absolute := strings.HasSuffix(host, ".")
+	host = strings.TrimSuffix(host, ".")
+	switch {
+	case host == "":
+		return ""
+	case strings.HasSuffix(host, "."):
+		return "the name has an empty label; write the full name without extra dots"
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return ""
+	}
+	if _, numeric, _ := whatwgIPv4(host); numeric {
+		return ""
+	}
+	if !strings.Contains(host, ".") {
+		return fullNameHint(host)
+	}
+	rs := p.search()
+	if len(rs.Domains) == 0 {
+		if strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster") {
+			return fullNameHint(host)
+		}
+		return ""
+	}
+	if absolute {
+		return ""
+	}
+	domain := strings.Trim(strings.ToLower(rs.ClusterDomain), ".")
+	if domain != "" && strings.HasSuffix(host, ".svc."+domain) && strings.Count(strings.TrimSuffix(host, ".svc."+domain), ".") >= 1 {
+		return ""
+	}
+	if strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster") {
+		return fullNameHint(host)
+	}
+	suffix, icann := publicsuffix.PublicSuffix(host)
+	public := icann || strings.Contains(suffix, ".")
+	// <service>.<namespace>: the resolver falls back to the search list after the absolute name fails,
+	// at any ndots, so a search domain can turn it into a Service name.
+	if !public && strings.Count(host, ".") == 1 && domain != "" {
+		for _, d := range rs.Domains {
+			d = strings.Trim(strings.ToLower(d), ".")
+			if d == "svc."+domain || strings.HasSuffix(d, ".svc."+domain) {
+				return fullNameHint(host)
+			}
+		}
+	}
+	if strings.Count(host, ".") >= rs.Ndots || public {
+		return ""
+	}
+	return fullNameHint(host)
 }
 
 func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error {

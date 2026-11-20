@@ -216,7 +216,7 @@ func (r *Reconciler) baseURLOf(ctx context.Context, w *work) (string, error) {
 	}
 	if site.BaseURL != "" {
 		// Checked again at render with a fresh lookup, as for provider URLs.
-		if err := r.cfg.URLPolicy.CheckStrict(ctx, site.BaseURL); err != nil {
+		if err := r.cfg.URLPolicy.CheckSandboxStrict(ctx, site.BaseURL); err != nil {
 			return "", fmt.Errorf("github grant: connection %s: %w", b.ConnectionID, err)
 		}
 	}
