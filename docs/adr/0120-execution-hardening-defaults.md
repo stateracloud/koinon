@@ -205,8 +205,10 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 
 6. **Network fence.** The worker namespace has one policy for every pod: egress only to the atenet-egress
    pods and DNS. Workers get no route to the Kubernetes API server and none to the gateway: an actor's
-   traffic reaches the gateway through atenet. NetworkPolicies add up, so the per-pool policy that
-   Substrate's controller writes can widen worker egress, and no admission rule guards it yet (exit condition: [#1158](https://github.com/stateracloud/koinon/issues/1158)). The control-plane
+   traffic reaches the gateway through atenet. NetworkPolicies add up, so a native ValidatingAdmissionPolicy guards every
+   NetworkPolicy write in the worker namespace ([#1158](https://github.com/stateracloud/koinon/issues/1158)): only the installer and
+   the Substrate controller write there, and the controller's policies (the per-pool policy) may allow egress only to the
+   control-plane namespace and to DNS. The controller does not write or delete the chart's own policy. The control-plane
    namespace has a policy keyed on an explicit list of `app` labels (the control-plane pods), not on
    "every pod without the worker label": a rule of the second form fails open for a pod that loses its
    label. A pod with another label is not selected, so the list follows the Substrate manifests.

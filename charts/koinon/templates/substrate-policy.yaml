@@ -32,6 +32,15 @@ audit log and as GitOps drift. The workload kinds, WorkerPool and CSIDriverConfi
 the installer (workerPolicy.installerIdentities or installerGroups, default system:masters) and by
 Kubernetes' own controllers. Without this, anyone who can write a Deployment would get a privileged
 pod past the pod rules. A CEL error denies under failurePolicy Fail.
+Worker namespace NetworkPolicies (issue 1158): NetworkPolicies add up, so any identity that can write one there can give
+workers more egress than the chart's policy allows. Only the installer, the Substrate controller and Kubernetes' own
+controllers may write them. The controller's policies (the per-pool policy) may allow egress only to the control-plane
+namespace and to DNS (kube-system, port 53): an egress rule needs a `to` list, no peer is an ipBlock, a same-namespace
+peer or a selector that is not a plain namespace name, and a DNS peer needs ports that are all 53. The controller
+may not write or delete the chart's own policy (<fullname>-substrate-workers). Its ingress may come only from the control-plane
+namespace and Koinon's namespace. Open point: the controller may still change or delete other policies of the namespace, such as an
+operator's own fence (workerNetworkPolicy.enabled=false); the controller's policies carry no marker that the rule can key on. Kubernetes' own controllers may delete a policy and
+change its metadata (garbage collection, namespace deletion), never its spec.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerPolicy.enabled }}
 {{- $s := .Values.execution.substrate }}
@@ -44,6 +53,7 @@ pod past the pod rules. A CEL error denies under failurePolicy Fail.
 {{- $ctlPods := printf "%s-control-pods" $base }}
 {{- $connect := printf "%s-worker-connect" $base }}
 {{- $objects := printf "%s-worker-objects" $base }}
+{{- $netpol := printf "%s-worker-netpol" $base }}
 {{- $controllers := $w.controllerIdentities }}
 {{- if not $controllers }}{{- $controllers = list (printf "system:serviceaccount:%s:ate-controller" $ns) }}{{- end }}
 {{- $trusted := concat $w.podCreators $controllers }}
@@ -322,4 +332,76 @@ spec:
     namespaceSelector:
       matchExpressions:
         - {key: kubernetes.io/metadata.name, operator: In, values: {{ toJson (list $ns $wns) }}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $netpol }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [networking.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [networkpolicies]
+  variables:
+    - name: installer
+      expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
+    - name: controller
+      expression: {{ printf "request.userInfo.username in %s" (toJson $controllers) | quote }}
+    # Kubernetes' own controllers: the garbage collector removes an owned policy and the namespace controller empties a
+    # namespace that is being deleted. They never write a spec.
+    - name: kube
+      expression: {{ printf "request.userInfo.username in %s" (toJson (list "system:serviceaccount:kube-system:generic-garbage-collector" "system:serviceaccount:kube-system:namespace-controller" "system:kube-controller-manager")) | quote }}
+    - name: specUnchanged
+      expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
+    # The policy of the chart is the floor of the namespace: the controller does not write or delete it.
+    - name: chartPolicy
+      expression: {{ printf "request.name == %s" (printf "%s-substrate-workers" (include "koinon.fullname" .) | toJson) | quote }}
+  validations:
+    - expression: "variables.installer || variables.controller || (variables.kube && (request.operation == 'DELETE' || variables.specUnchanged))"
+      messageExpression: "'only the installer and the Substrate controller may ' + (request.operation == 'DELETE' ? 'delete' : 'write') + ' a NetworkPolicy in the worker namespace, not ' + request.userInfo.username"
+    - expression: "variables.installer || !variables.controller || !variables.chartPolicy"
+      message: the Substrate controller must not write or delete the NetworkPolicy of the chart in the worker namespace
+    # The controller's policies reach the control-plane namespace and DNS only. An egress rule without `to` allows every
+    # destination, so it is denied.
+    - expression: >-
+        variables.installer || !variables.controller || request.operation == 'DELETE' ||
+        !has(object.spec.egress) || object.spec.egress.all(r, has(r.to) && size(r.to) > 0 && r.to.all(p,
+          !has(p.ipBlock) && has(p.namespaceSelector) &&
+          (!has(p.namespaceSelector.matchExpressions) || size(p.namespaceSelector.matchExpressions) == 0) &&
+          has(p.namespaceSelector.matchLabels) && size(p.namespaceSelector.matchLabels) == 1 &&
+          'kubernetes.io/metadata.name' in p.namespaceSelector.matchLabels &&
+          (p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == {{ toJson $ns }} ||
+            (p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] == 'kube-system' &&
+             has(r.ports) && size(r.ports) > 0 && r.ports.all(q, has(q.port) && q.port == 53 && !has(q.endPort))))))
+      message: {{ printf "a NetworkPolicy of the Substrate controller in the worker namespace may allow egress only to namespace %s and to DNS (kube-system, port 53): no ipBlock, no pod in the worker namespace, no empty rule" $ns | quote }}
+    # Ingress adds up too: a listener in a worker that any host can reach is a way out past default-deny egress. The controller's
+    # policies admit ingress only from the control-plane namespace and Koinon's namespace, like the policy of the chart.
+    - expression: >-
+        variables.installer || !variables.controller || request.operation == 'DELETE' ||
+        !has(object.spec.ingress) || object.spec.ingress.all(r, has(r.from) && size(r.from) > 0 && r.from.all(p,
+          !has(p.ipBlock) && has(p.namespaceSelector) &&
+          (!has(p.namespaceSelector.matchExpressions) || size(p.namespaceSelector.matchExpressions) == 0) &&
+          has(p.namespaceSelector.matchLabels) && size(p.namespaceSelector.matchLabels) == 1 &&
+          'kubernetes.io/metadata.name' in p.namespaceSelector.matchLabels &&
+          p.namespaceSelector.matchLabels['kubernetes.io/metadata.name'] in {{ toJson (list $ns .Release.Namespace) }}))
+      message: {{ printf "a NetworkPolicy of the Substrate controller in the worker namespace may admit ingress only from namespaces %s and %s: no ipBlock, no empty rule" $ns .Release.Namespace | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $netpol }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $netpol }}
+  validationActions: {{ toJson $w.validationActions }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $wns | quote }}
 {{- end }}
