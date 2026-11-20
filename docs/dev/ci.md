@@ -290,7 +290,7 @@ request-log assertion goes red.
 **External-low canary control (#1051).** An external-low call needs a running run (the guard refuses it
 outside a task), so the escape probe, which has no task, cannot hold this control. It is a task of step 6b
 (`leakGuardCanaryInTask` in `test/e2e/quickstart_test.go`), on the real path: the scripted model
-(`repo-helper.yaml`, turns for `tracker canary`) reads a fake canary, then calls `search_items`, which
+(`repo-helper.yaml`, turns for `tracker canary`) reads a fake canary (the fake server holds the text; it never travels to it), then calls `search_items`, which
 `mcpServerE2E` declares external-low. A clean query and a query below the threshold reach the fake server
 (the positive control). The canary and its first 30 characters (exactly the threshold) are held as taint
 approvals, and the server never sees them, not even after the approver denies them (the negative control).

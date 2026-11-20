@@ -1368,6 +1368,7 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentI
 	}
 	arg := func(q string) string { b, _ := json.Marshal(map[string]string{"query": q}); return string(b) }
 	before := len(searches())
+	all := len(fakeMCPRequests(ctx, fake))
 	res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 		OrgId: org, AgentId: agentID, Title: "Tracker canary",
 		Message: k.Prompt + ": read an item from the tracker, then search with what it says.",
@@ -1385,8 +1386,8 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentI
 	By("positive control: the same search without the leaked value, and a fragment below the threshold, reach the server")
 	got := searches()[before:]
 	Expect(got).To(HaveLen(2), "only the two searches that pass reach the server: %+v", got)
-	Expect(got[0].Args).To(Equal(arg(k.CleanQuery)))
-	Expect(got[1].Args).To(Equal(arg(k.BelowQuery)))
+	Expect(got[0].Args).To(MatchJSON(arg(k.CleanQuery)))
+	Expect(got[1].Args).To(MatchJSON(arg(k.BelowQuery)))
 	for _, r := range got {
 		Expect(r.Agent).To(Equal("default/" + agentID))
 	}
@@ -1410,13 +1411,14 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentI
 		_, err = c.Approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: ap.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 	}
-	Expect(held).To(ConsistOf(arg(k.Text), arg(k.AtQuery)))
+	Expect(held).To(ConsistOf(MatchJSON(arg(k.Text)), MatchJSON(arg(k.AtQuery))))
 
 	By("the canary never reaches the server, held or denied")
 	w.until(ctx, c, org, runID, 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
 		return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 	})
-	for _, r := range searches()[before:] {
+	// Every request the server logged since the task, not only the searches: the canary never travels to it.
+	for _, r := range fakeMCPRequests(ctx, fake)[all:] {
 		Expect(r.Args).NotTo(ContainSubstring(k.AtQuery), "the canary's first 30 characters reached the upstream server")
 		Expect(r.Args).NotTo(ContainSubstring("amber-falcon"), "the canary reached the upstream server")
 	}

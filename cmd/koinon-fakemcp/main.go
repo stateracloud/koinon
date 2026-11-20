@@ -92,13 +92,22 @@ func run(addr, httpAddr, header, value, certFile, keyFile string, loadTools bool
 	type args struct {
 		Title string `json:"title,omitempty"`
 	}
+	// canaryTitle asks read_item for the fixed fake private text of the leak guard's canary control (#1051): the
+	// agent names the item, the server holds the text, so the text never travels to the server. Keep canaryText
+	// equal to scenarios.PullRequest.TrackerCanary.Text.
+	const canaryTitle = "canary"
+	const canaryText = "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close"
 	for _, tool := range []string{"read_item", "write_item"} {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name: tool, Description: "Fake tool " + tool,
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: tool == "read_item"},
 		}, func(_ context.Context, req *mcp.CallToolRequest, in args) (*mcp.CallToolResult, any, error) {
 			recs.add(record{Time: time.Now(), Method: "TOOL", Tool: tool, Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tool + " ok: " + in.Title}}}, nil, nil
+			text := in.Title
+			if tool == "read_item" && in.Title == canaryTitle {
+				text = canaryText
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tool + " ok: " + text}}}, nil, nil
 		})
 	}
 	// fetch_url is the fetch-style tool: an argument that names a destination. Like the others it only

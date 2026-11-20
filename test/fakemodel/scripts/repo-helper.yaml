@@ -29,6 +29,16 @@ turns:
       inputTokens: 1600
       cachedInputTokens: 1400
       outputTokens: 18
+  # A denied approval ends the resumed run. The outcome line carries the target, so this turn comes before the
+  # "mcp:tracker" turn below.
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "denied by the approver"
+    text: The tracker searches with the canary were denied. I made no other search.
+    usage:
+      inputTokens: 1500
+      cachedInputTokens: 1350
+      outputTokens: 20
   # A task that asks for the remote MCP server's approval-gated tool (the e2e step for MC1): the agent
   # calls it through the gateway's "-ask" target, parks, and the resumed run reports the outcome.
   - when:
@@ -80,16 +90,8 @@ turns:
   # below the threshold of 24: it passes), the whole canary (the negative control: held for an approval) and the
   # canary's first 30 characters (exactly 24 canonical characters, the threshold: held). The script, not a model,
   # decides to send the canary, so the control never depends on a model's choice. The run parks on the two
-  # approvals; the test denies both, and the resumed run ends with the denial turn. Turns are told apart by the
+  # approvals; the test denies both, and the resumed run ends with the denial turn (first in the file). Turns are told apart by the
   # number of assistant messages.
-  - when:
-      systemContains: "# Repo helper"
-      userContains: "denied by the approver"
-    text: The tracker searches with the canary were denied. I made no other search.
-    usage:
-      inputTokens: 1500
-      cachedInputTokens: 1350
-      outputTokens: 20
   - when:
       systemContains: "# Repo helper"
       userContains: "tracker canary"
@@ -158,7 +160,7 @@ turns:
     toolCalls:
       - name: default-tracker_read_item
         arguments:
-          title: koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close
+          title: canary
     usage:
       inputTokens: 1200
       outputTokens: 40

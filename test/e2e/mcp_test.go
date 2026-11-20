@@ -318,7 +318,7 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 			g.Expect(names).To(ContainElement(HaveSuffix(scenarios.PullRequest.TrackerAskTool)))
 		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	})
-	var write, fetch string
+	var write, fetch, search string
 	Eventually(func(g Gomega) {
 		res, err := session.ListTools(ctx, nil)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -328,10 +328,13 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 				write = tl.Name
 			case strings.HasSuffix(tl.Name, "default-tracker_fetch_url"):
 				fetch = tl.Name
+			case strings.HasSuffix(tl.Name, "default-tracker_search_items"):
+				search = tl.Name
 			}
 		}
 		g.Expect(write).NotTo(BeEmpty(), "write_item is served on the server's own target once it is auto")
 		g.Expect(fetch).NotTo(BeEmpty(), "fetch_url is served on the server's own target once it is auto")
+		g.Expect(search).NotTo(BeEmpty(), "search_items is served on the server's own target once it is auto")
 	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 
 	stopped := func(name string, args map[string]any) {

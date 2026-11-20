@@ -92,7 +92,7 @@ var _ = Describe("the repo-helper scenario", func() {
 				}
 			}
 		}
-		Expect(read).To(Equal(c.Text))
+		Expect(read).To(Equal(c.ReadTitle), "the canary text stays on the server")
 		Expect(query).To(Equal(map[int]string{1: c.CleanQuery, 2: c.BelowQuery, 3: c.Text, 4: c.AtQuery}))
 		Expect(c.Text).To(HavePrefix(c.AtQuery))
 		Expect(c.Text).To(HavePrefix(c.BelowQuery))

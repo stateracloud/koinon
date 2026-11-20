@@ -53,11 +53,12 @@ var PullRequest = pullRequest{
 		Prompt:     "tracker canary",
 		ReadTool:   "default-tracker_read_item",
 		SearchTool: "default-tracker_search_items",
-		// Text is fake private text the agent reads. It is longer than the threshold of 24 canonical characters.
-		Text: "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close",
+		// Text is fake private text the agent reads: read_item returns it for the title ReadTitle, so it never travels to the server. It is longer than the threshold of 24 canonical characters.
+		ReadTitle: "canary",
+		Text:      "koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close",
 		// CleanQuery is the positive control: the same call without the leaked value.
 		CleanQuery: "kubernetes gateway api docs",
-		// BelowQuery has 20 canonical characters, below the threshold: the text match does not catch it.
+		// BelowQuery has 20 canonical characters, below the threshold. The exact boundary is a guard-level test (#1133): the match is by k-grams, so this control catches a gross regression, not a one-character one.
 		BelowQuery: "koinon_test_not-a-real-to",
 		// AtQuery has exactly 24 canonical characters, the threshold: the text match catches it.
 		AtQuery: "koinon_test_not-a-real-token i",
@@ -122,7 +123,7 @@ func (p pullRequest) Branch(agentDisplayName, agentID string) (string, error) {
 // model script (repo-helper.yaml, the turns that answer Prompt) reads Text, then calls SearchTool with
 // CleanQuery, BelowQuery, Text and AtQuery, in that order.
 type trackerCanary struct {
-	Prompt, ReadTool, SearchTool, Text, CleanQuery, BelowQuery, AtQuery string
+	Prompt, ReadTool, ReadTitle, SearchTool, Text, CleanQuery, BelowQuery, AtQuery string
 }
 
 // Ledger is the shape the ledger has for a run of the scenario (ADR 0056, amendment 2026-10-29).

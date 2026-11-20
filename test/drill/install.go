@@ -325,7 +325,7 @@ spec:
 }
 
 // FakeMCPManifest is the fake MCP server (cmd/koinon-fakemcp) in the fakes namespace. It serves
-// read_item, write_item and fetch_url, and refuses a request without the credential header; the drill
+// read_item, write_item, fetch_url and search_items, and refuses a request without the credential header; the drill
 // registers it with FakeMCPKey so the agent's ask-tier call parks for an approval.
 func FakeMCPManifest(ns, runID, image string, tls faketls.Set) string {
 	return fmt.Sprintf(`apiVersion: v1
