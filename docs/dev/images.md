@@ -245,10 +245,16 @@ install. The end of the file makes configuration and libraries read-only, drops 
 working directory:
 
 ```dockerfile
-RUN chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon
+RUN chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon /usr/share/doc/koinon-tools
 USER 10001:10001
 WORKDIR /sandbox
 ```
+
+`/usr/share/doc/koinon-tools` is in that list too: a licences stage's `ADD` fetches each notice over
+HTTPS, and a remote-URL `ADD` with no `--chmod` defaults the file to 0600, root-only. Without this
+line the notices that stage fetches would stay unreadable by the sandbox user. A tarball's own
+licence file (installed with `install -m 0644`) and `GPL-SOURCE-OFFER.txt` (written by shell
+redirect) are already readable; this line is there for the rest.
 
 ## Checklist for a new image
 
@@ -260,7 +266,8 @@ WORKDIR /sandbox
    `rm -rf /var/lib/apt/lists/*`; run `hack/apt-retries-test.sh`.
 5. A `licenses` stage and the files copied under `/usr/share/doc/`.
 6. UID/GID 10001, root-owned read-only files, `USER 10001:10001`, no Koinon binary in the image
-   ([ADR 0049](../adr/0049-v01-scope-decisions.md)).
+   ([ADR 0049](../adr/0049-v01-scope-decisions.md)). Include `/usr/share/doc/koinon-tools` in the
+   `chmod -R a+rX,go-w` line so every licence notice stays readable by that user.
 7. A Makefile target like `harness-opencode` that passes `--build-context common=harnesses/common`
    (a toolchain image built from another context inlines the downloader, as
    `hack/e2e-toolchain/Dockerfile` does), an entry in `HARNESSES` in the Makefile and the harness seam described in

@@ -418,6 +418,8 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
 
 | Tool | Version | Source | Licence |
 | --- | --- | --- | --- |
+| OpenCode | 2.2.6 | npm tarball (ADR 0052) | MIT |
+| Bun (statically linked into the OpenCode binary) | 1.4.4 | embedded in OpenCode's build | MIT; statically links JavaScriptCore/WebKit, **LGPL-2** |
 | git, ca-certificates | 2.43.0 | Ubuntu main | GPL-2.0; MPL-2.0 and others |
 | ripgrep (`rg`) | 15.2.0 | GitHub release, static musl build (replaces Ubuntu's universe 14.1.0) | Unlicense or MIT |
 | jq | 1.7.1 | Ubuntu main | MIT |
@@ -446,9 +448,44 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   rebuild gives the same packages; bump both on purpose to take security updates. The base has no
   CA bundle, so a throwaway stage borrows one over HTTP for the snapshot's HTTPS (apt checks the
   indexes against the Ubuntu archive keyring either way) and only that file is copied.
+- **OpenCode and Bun (#63).** The npm tarball holds only `package.json` (MIT) and the compiled
+  binary, with no `LICENSE` file, so OpenCode's MIT text is fetched from the tagged source
+  (`v2.2.6`) the same way as yq's, ast-grep's and DuckDB's. The binary itself is a static Bun
+  v1.4.4 build: `strings` on the fetched 2.2.6 tarball shows `Bun v1.4.4 (38afee6c8) Linux x64` and
+  JavaScriptCore (`JSC::`) symbols, confirming the embedding the old issue text described. Bun
+  statically links JavaScriptCore/WebKit under **LGPL-2**, which requires the image to let a
+  recipient relink a changed WebKit against the binary; rather than restate that obligation,
+  Bun's own `LICENSE.md` for `bun-v1.4.4` is fetched and shipped whole (it already carries Bun's
+  MIT notice, the LGPL-2 notice and the exact relink steps), at
+  `/usr/share/doc/koinon-tools/bun/LICENSE.md`. OpenCode's notice is at
+  `/usr/share/doc/koinon-tools/opencode/LICENSE`. Re-pinning OpenCode (old issue 54) must re-check
+  the embedding with `strings` on the new binary; if a future build no longer embeds Bun, drop
+  the Bun notice and this paragraph.
 - **GPL.** poppler-utils is GPL-licensed and shipped unmodified from Ubuntu, with git, bash and
-  coreutils: the same obligation. The source of the exact package versions is on
-  `snapshot.ubuntu.com` under the snapshot ID below (`apt source` against that snapshot).
+  coreutils: the same obligation. The written offer under GPL-2.0 section 3(b) / GPL-3.0 section
+  6(b) is generated at build time from the versions `dpkg-query` reports for those four packages
+  (so it cannot name a version the image does not actually carry) and shipped at
+  `/usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt`; it names `snapshot.ubuntu.com` under the
+  snapshot ID below as the exact source (`apt source` against that snapshot) and offers to provide
+  it another way if that snapshot is unreachable. The build fails if any of the four packages is
+  missing from the offer.
+- **Rust tool dependency notices (#63, open).** ripgrep, fd and ast-grep are Rust binaries; their
+  own top-level licences ship already (the table above), but the notices their dependency crates
+  carry do not yet. `hack/flavor-rust-notices.sh` and `about.toml`/`about.hbs` in this directory
+  are the generator (`cargo-about generate`, pinned in `hack/versions.env`) for a combined
+  `doc/THIRD_PARTY_NOTICES.md`, run against each tool's pinned tag's `Cargo.lock`; neither the
+  generated file nor the Dockerfile `COPY` for it exist yet, because generating it needs to run
+  `cargo-about` (a freshly downloaded binary) against live crates.io state, which this lane's
+  sandbox does not allow. Run the script on a machine without that restriction, commit the
+  result, and wire the `COPY` and the build-time check into the Dockerfile the way the GPL offer
+  and the OpenCode/Bun notices are wired in.
+- **Base image terms (#63, open).** `nvcr.io/nvidia/base/ubuntu` is an NVIDIA NGC Catalog image.
+  NVIDIA's general container terms (the "NVIDIA Deep Learning Container License") restrict
+  redistribution and bar using the container in a way that would subject it to an open source
+  licence; it is not confirmed whether that licence, or a more permissive one, governs this
+  specific base image, and NVIDIA's classification of "development" versus "deployment"
+  containers changes what redistribution it allows. This needs a maintainer's legal call before
+  v0.1.0: check the image's NGC catalog page and terms of use, and record the answer here.
 - **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
   Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
   when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).

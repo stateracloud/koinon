@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# cargo-about config for hack/flavor-rust-notices.sh (#63): the crate dependency notices for the
+# Rust tools this flavor ships (ripgrep, fd, ast-grep). Each tool's own top-level licence ships
+# separately (the Dockerfile's `licenses` and `tools` stages); this covers what their Cargo.lock
+# pulls in.
+#
+# The accepted list is the common permissive licences these tools' ecosystems use. cargo-about
+# fails generation on a crate whose licence is not on this list (or clarified below), which is the
+# point: a dependency bump that adds a licence Koinon has not reviewed must stop the build, not
+# ship quietly. Add to this list (or a [<crate>.clarify] block, see the cargo-about book) only after
+# checking the licence is one Koinon can redistribute under, and say so in the commit that adds it.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Unlicense",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "CC0-1.0",
+]
+
+# ignore-build-dependencies/ignore-dev-dependencies default to false in cargo-about; left at the
+# default on purpose, so a dependency that is build- or dev-only but still unapproved still fails
+# the generation instead of being silently dropped from the notice.
