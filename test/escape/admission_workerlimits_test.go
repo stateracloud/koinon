@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -109,7 +110,7 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 			var err error
 			created, err = cs.CoreV1().Pods(ns).Create(ctx, pod("unsized", corev1.ResourceRequirements{}), metav1.CreateOptions{})
 			return err
-		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+		}).WithContext(ctx).WithTimeout(racescale.D(30 * time.Second)).WithPolling(200 * time.Millisecond).Should(Succeed())
 		res := created.Spec.Containers[0].Resources
 		Expect(res.Requests.Cpu().String()).To(Equal("250m"))
 		Expect(res.Requests.Memory().String()).To(Equal("256Mi"))
