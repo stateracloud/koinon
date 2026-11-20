@@ -226,6 +226,10 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      annotation. No identity may do it in the worker namespace.
    - **Fence.** The control-plane namespace has one default-deny egress policy and per-app allow rules, so a pod with
      no rule has no egress.
+   - **Observer.** The Koinon reconciler may read the worker namespace, to say why a sandbox does not start: a
+     `Role` and `RoleBinding` (`substrate-observer.yaml`, issue #1162) with `get`, `list` and `watch` on pods, events,
+     Deployments, ReplicaSets and WorkerPools. No write, no Secret and no pod subresource. It replaces the OpenShell
+     pod observer ([0078](0078-sandbox-observer.md)) for this driver.
 7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
