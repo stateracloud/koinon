@@ -86,6 +86,7 @@ var recordedSettings = []platformSetting{
 	setting("gateway-mcp-url", kindURL),
 	setting("gateway-mcp-check-url", kindURL),
 	setting("github-api-url", kindURL),
+	setting("cluster-domain", kindValue),
 
 	// keys and secrets
 	{Flag: "kek-secret", Key: "kek-object", Kind: kindRef},

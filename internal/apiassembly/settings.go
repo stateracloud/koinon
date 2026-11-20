@@ -18,6 +18,9 @@ type Settings struct {
 	SandboxResources sandboxres.Policy
 	// EgressAllowedHosts are the internal hosts that providers and MCP servers may name.
 	EgressAllowedHosts []string
+	// ClusterDomain is the cluster's DNS domain (the chart value clusterDomain). The connector URL check reads it
+	// to know which full Service name a sandbox guest resolves (#1054). Empty means catalog.DefaultClusterDomain.
+	ClusterDomain string
 	// Namespace is the namespace of the secrets Koinon reads and writes.
 	Namespace string
 	// GatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
@@ -65,6 +68,9 @@ func (e *InputError) Unwrap() error { return e.Err }
 func (s Settings) Validate() error {
 	if err := catalog.ValidateAllowedHosts(s.EgressAllowedHosts); err != nil {
 		return &InputError{Setting: "egress allowed hosts", Err: err}
+	}
+	if err := catalog.ValidateClusterDomain(s.ClusterDomain); err != nil {
+		return &InputError{Setting: "cluster domain", Err: err}
 	}
 	return nil
 }

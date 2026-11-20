@@ -70,7 +70,9 @@ func buildDomain(out Outside, set Settings) (*domain, error) {
 	}
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
-	d.urlPolicy = catalog.URLPolicy{Namespace: set.Namespace, AllowedHosts: set.EgressAllowedHosts}
+	// The guest's resolver follows the cluster's DNS domain (#1054).
+	search := catalog.SubstrateSearchFor(set.ClusterDomain)
+	d.urlPolicy = catalog.URLPolicy{Namespace: set.Namespace, AllowedHosts: set.EgressAllowedHosts, Search: &search}
 	// One GitHub client, so connection checks and approved calls share its token cache. It and the
 	// Gitea provider dial Connection base URLs through the egress policy.
 	gh := out.GitHub

@@ -189,6 +189,7 @@ type config struct {
 	secretsNamespace   string
 	kubeconfig         string
 	githubAPIURL       string
+	clusterDomain      string
 	// chartVersion is the Helm chart's version, which the chart passes; it is only recorded
 	// (platform.settings.observed).
 	chartVersion string
@@ -337,6 +338,8 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 		"Helm release name that deployed this pod (the chart passes it); scopes the generated-Secret list to Secrets labelled koinon.dev/release=<name>, and is recorded in the install audit log")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
+	fs.StringVar(&c.clusterDomain, "cluster-domain", catalog.DefaultClusterDomain,
+		"the cluster's DNS domain (chart value clusterDomain); the connector URL check accepts a Service name only in its full <service>.<namespace>.svc.<domain> form")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
 		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener as koinon-api reaches it (for example http://koinon-gateway.koinon.svc:8080), for the provider echo check; empty disables the check")
@@ -730,7 +733,7 @@ func serve(ctx context.Context, cfg config) error {
 		Pool: pool, Kube: kube, Keyring: keyring, Binding: binding, BindingOwner: bindingOwner, Ready: gate.ReadyHandler(),
 	}, apiassembly.Settings{
 		SandboxResources: cfg.sandboxResources, EgressAllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts),
-		Namespace: cfg.secretsNamespace, GatewayMCPURL: cfg.gatewayMCPURL, GatewayURL: cfg.gatewayURL, GatewayMode: cfg.gatewayMode, GitHubAPIURL: cfg.githubAPIURL,
+		Namespace: cfg.secretsNamespace, GatewayMCPURL: cfg.gatewayMCPURL, GatewayURL: cfg.gatewayURL, GatewayMode: cfg.gatewayMode, GitHubAPIURL: cfg.githubAPIURL, ClusterDomain: cfg.clusterDomain,
 		WatchPoll: cfg.watchPoll, TrustedOrigins: splitList(cfg.trustedOrigins), RestoreHold: cfg.restoreHold,
 		GuardByteCap: cfg.guardByteCap, PublicURL: cfg.publicURL, OIDCIssuer: cfg.oidcIssuer, OIDCRedirectURL: cfg.oidcRedirectURL,
 		AcceptImporterDeletions: cfg.restoreAcceptImporterDeletions,

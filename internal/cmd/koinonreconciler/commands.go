@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/metrics"
@@ -172,6 +173,9 @@ func (c *config) finish(v *viper.Viper) error {
 			}
 		}
 	}
+	if err := catalog.ValidateClusterDomain(c.clusterDomain); err != nil {
+		return fmt.Errorf("--cluster-domain: %w", err)
+	}
 	orDefault(&c.gatewayClass, "agentgateway")
 	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	if c.gatewayMode == project.GatewayKubernetes {
@@ -292,6 +296,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.checkpointsReadOnly, "checkpoints-read-only", false, "restore-only checkpoints (checkpoints.readOnly; ADR 0110 decision 4): koinon-agentd writes no backup, so a recreation uses the newest complete snapshot or is blocked with that reason, and nothing waits for a backup")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
+	fs.StringVar(&c.clusterDomain, "cluster-domain", "", "the cluster's DNS domain (chart value clusterDomain); the connector URL check accepts a Service name only in its full <service>.<namespace>.svc.<domain> form (default cluster.local)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.mcpGuardURL, "mcp-guard-url", "", "koinon-api's MCP leak guard as agentgateway reaches it, http://host:port (ADR 0091); empty makes the gateway refuse every call to an org's MCP server")
 	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
