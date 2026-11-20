@@ -80,7 +80,7 @@ withsecrets=$(grep -cE '^ +imagePullSecrets:$' <<<"$rendered" || true)
 # Deployments (api, reconciler, agentd, gateway), the migrate, migrate-grants (cnpg mode, ADR 0100),
 # ensure-secrets, preflight and restore-release-check Jobs: 9 pod specs; the CNPG Cluster has its own imagePullSecrets (spec level).
 [[ $withsecrets == 10 ]] || fail "imagePullSecrets on $withsecrets objects, want 10 (9 pod specs and the CNPG Cluster); pod specs: $pods"
-[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated across the two lists"
+[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated within the list"
 has "pull secrets reach the preflight probe pods" '--probe-image-pull-secrets=regcred,other$' "${pull_args[@]}"
 # The removed top-level list fails the render and names the replacement (issue 1024); it is not silently ignored.
 if res=$(render --set 'imagePullSecrets[0].name=old' 2>&1); then fail "the removed top-level imagePullSecrets must fail the render"
