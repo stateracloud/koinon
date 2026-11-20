@@ -668,6 +668,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		gw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
+		leakGuardCanaryInTask(ctx, c, org, agent.GetId(), fake)
 		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway, leak guard)")
 	})
 
@@ -1336,4 +1337,88 @@ func (r ledgerRow) entry() scenarios.Entry {
 		UpstreamStatus: r.UpstreamStatus, Input: r.Input, Output: r.Output,
 		CostZero: r.Cost.Sign() == 0, ChargeWaived: r.ChargeWaived,
 	}
+}
+
+// leakGuardCanaryInTask is the leak guard's true-positive control on an external-low tool (#1051, ADR 0091),
+// on the real path: a task of the agent, the scripted model (repo-helper.yaml, no paid model), the harness in
+// its sandbox, the gateway with the real guard and the fake MCP server as the upstream. The script reads text
+// that holds a fake canary, which gives the session both legs, then calls search_items (external-low) with
+// four queries. The calls come from the script, not from a model's choice, so the control cannot pass because
+// a model refused to send the canary.
+//
+//   - positive control: the clean query, and the query below the threshold, pass and reach the server;
+//   - negative control: the canary, and its first 30 characters (the threshold), are held for an approval whose
+//     card names the taint and the external-low class, and the server never sees them, not even after the
+//     approver denies them.
+//
+// The URL refusal and the lengths above the threshold are covered at guard level (internal/mcpguard, #1133);
+// the byte cap only alerts (#1058) and is not asserted here. search_items is auto and declared external-low
+// by mcpServerE2E.
+func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentID, fake string) {
+	GinkgoHelper()
+	k := scenarios.PullRequest.TrackerCanary
+	By("a task whose agent reads text with a canary, then searches with it, is held by the guard on an external-low tool")
+	searches := func() (out []fakeMCPRecord) {
+		for _, r := range fakeMCPRequests(ctx, fake) {
+			if r.Tool == "search_items" {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	arg := func(q string) string { b, _ := json.Marshal(map[string]string{"query": q}); return string(b) }
+	before := len(searches())
+	res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		OrgId: org, AgentId: agentID, Title: "Tracker canary",
+		Message: k.Prompt + ": read an item from the tracker, then search with what it says.",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	runID := res.GetRun().GetId()
+	var seq int64
+	var evKinds []string
+	w := watchRun(context.WithoutCancel(ctx), c, org, runID, 0)
+	parked := w.until(ctx, c, org, runID, 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+		return r.GetState() == runv1alpha1.RunState_RUN_STATE_PARKED
+	})
+	Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
+
+	By("positive control: the same search without the leaked value, and a fragment below the threshold, reach the server")
+	got := searches()[before:]
+	Expect(got).To(HaveLen(2), "only the two searches that pass reach the server: %+v", got)
+	Expect(got[0].Args).To(Equal(arg(k.CleanQuery)))
+	Expect(got[1].Args).To(Equal(arg(k.BelowQuery)))
+	for _, r := range got {
+		Expect(r.Agent).To(Equal("default/" + agentID))
+	}
+
+	By("negative control: the canary and its first 30 characters are each held as a taint approval of an external-low call")
+	list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(list.GetApprovals()).To(HaveLen(2), "one approval for the canary and one for its first 30 characters")
+	var held []string
+	for _, a := range list.GetApprovals() {
+		d, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: a.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		ap := d.GetApproval()
+		Expect(ap.GetConnector()).To(Equal("mcp"))
+		Expect(ap.GetTool()).To(Equal("search_items"))
+		lg := ap.GetMcp().GetLeakGuard()
+		Expect(lg).NotTo(BeNil(), "the approval is the leak guard's")
+		Expect(lg.GetSinkClass()).To(Equal("external-low"))
+		Expect(lg.GetReasons()).To(ContainElement("taint"))
+		held = append(held, ap.GetArgsJson())
+		_, err = c.Approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: ap.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+	}
+	Expect(held).To(ConsistOf(arg(k.Text), arg(k.AtQuery)))
+
+	By("the canary never reaches the server, held or denied")
+	w.until(ctx, c, org, runID, 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+		return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
+	})
+	for _, r := range searches()[before:] {
+		Expect(r.Args).NotTo(ContainSubstring(k.AtQuery), "the canary's first 30 characters reached the upstream server")
+		Expect(r.Args).NotTo(ContainSubstring("amber-falcon"), "the canary reached the upstream server")
+	}
+	Expect(searches()[before:]).To(HaveLen(2))
 }

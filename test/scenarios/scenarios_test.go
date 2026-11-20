@@ -74,6 +74,31 @@ var _ = Describe("the repo-helper scenario", func() {
 		Expect(string(raw)).To(Equal(p.TrackerGuardArgs), "the e2e compares the approval's arguments to this exactly")
 	})
 
+	It("reads the canary, then searches with the clean, below, exact and threshold queries the canary control names", func() {
+		c := scenarios.PullRequest.TrackerCanary
+		query := map[int]string{} // assistant messages in the request -> the query of the turn
+		var read string
+		for _, t := range script.Turns {
+			if t.When.UserContains != c.Prompt {
+				continue
+			}
+			for _, call := range t.ToolCalls {
+				switch call.Name {
+				case c.ReadTool:
+					read, _ = call.Arguments["title"].(string)
+				case c.SearchTool:
+					Expect(t.When.AssistantTurns).NotTo(BeNil(), "search turns are told apart by the number of assistant messages")
+					query[*t.When.AssistantTurns], _ = call.Arguments["query"].(string)
+				}
+			}
+		}
+		Expect(read).To(Equal(c.Text))
+		Expect(query).To(Equal(map[int]string{1: c.CleanQuery, 2: c.BelowQuery, 3: c.Text, 4: c.AtQuery}))
+		Expect(c.Text).To(HavePrefix(c.AtQuery))
+		Expect(c.Text).To(HavePrefix(c.BelowQuery))
+		Expect(c.CleanQuery).NotTo(ContainSubstring(c.BelowQuery))
+	})
+
 	It("files the branch under the agent's namespace", func() {
 		got, err := scenarios.PullRequest.Branch("Repo Helper", "0194f2c0-1111-7000-8000-00000000abcd")
 		Expect(err).NotTo(HaveOccurred())

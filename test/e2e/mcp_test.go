@@ -141,7 +141,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	}
 	Expect(json.Unmarshal(body, &tools)).To(Succeed())
 	Expect(tools.Tools).To(ConsistOf(
-		HaveField("Name", "read_item"), HaveField("Name", "write_item"), HaveField("Name", "fetch_url")))
+		HaveField("Name", "read_item"), HaveField("Name", "write_item"), HaveField("Name", "fetch_url"), HaveField("Name", "search_items")))
 	for _, tl := range tools.Tools {
 		Expect(tl.Tier).To(Equal("ask"), "every new tool starts in the ask tier")
 		Expect(tl.ReadOnlyHint).To(Equal(tl.Name == "read_item"))
@@ -205,6 +205,19 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(readItemHash).NotTo(BeEmpty(), "read_item must be in the server's tool list: %+v", tools.Tools)
 	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/read_item/sink",
 		fmt.Sprintf(`{"contentHash":%q,"sink":{"sinkClass":"none","derivation":"fixed","addressArgs":[]}}`, readItemHash))
+	Expect(code).To(Equal(http.StatusOK), string(body))
+	// search_items is the search-style tool of the leak guard's canary control (#1051): its query is free
+	// text sent to an outside party, a small payload, so its class is fixed external-low. Its result legs
+	// stay unset (the server's, both).
+	searchHash := ""
+	for _, tl := range tools.Tools {
+		if tl.Name == "search_items" {
+			searchHash = tl.ContentHash
+		}
+	}
+	Expect(searchHash).NotTo(BeEmpty(), "search_items must be in the server's tool list: %+v", tools.Tools)
+	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/search_items/sink",
+		fmt.Sprintf(`{"contentHash":%q,"sink":{"sinkClass":"external-low","derivation":"fixed","addressArgs":[]}}`, searchHash))
 	Expect(code).To(Equal(http.StatusOK), string(body))
 	code, body = admin(ctx, http.MethodPut, "/agents/"+agentID+"/mcp-servers", fmt.Sprintf(`{"servers":[{"serverId":%q}]}`, srv.ID))
 	Expect(code).To(Equal(http.StatusOK), string(body))
@@ -277,12 +290,12 @@ func toolText(res *mcp.CallToolResult) string {
 // auto-tier tool of the same server must be stopped at the gateway by the guard, and never reach the
 // server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside
 // a task the same call is an approval of the exact call (step 6b's in-task case, internal/mcpguard).
-// write_item stays auto until the step ends: the in-task case calls it on the server's own target.
+// write_item and search_items stay auto until the step ends: the in-task cases call them on the server's own target.
 func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, agentID, key, private string) {
 	GinkgoHelper()
 	By("with both legs, an external-high call carrying what the session read is stopped by the leak guard")
 	// fetch_url, the fetch-style tool (its url argument names a destination), goes auto beside write_item.
-	tools := []string{"write_item", "fetch_url"}
+	tools := []string{"write_item", "fetch_url", "search_items"}
 	for _, t := range tools {
 		code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+t+"/tier", `{"tier":"auto"}`)
 		Expect(code).To(Equal(http.StatusOK), string(body))

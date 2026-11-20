@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command koinon-fakemcp is a fake remote MCP server for tests and e2e (plan item MC1). It serves three
-// tools (read_item, write_item and the fetch-style fetch_url, which names a destination) over Streamable HTTP at /mcp, refuses requests without the expected credential header, and
+// Command koinon-fakemcp is a fake remote MCP server for tests and e2e (plan item MC1). It serves four
+// tools (read_item, write_item, the fetch-style fetch_url, which names a destination, and the search-style
+// search_items) over Streamable HTTP at /mcp, refuses requests without the expected credential header, and
 // records what it receives at /_fake/requests, so a test can check that the gateway injected the
 // credential and what identity it forwarded. With -tls-cert-file and -tls-key-file it serves HTTPS
 // (ADR 0120: a credential goes only over HTTPS). It never makes a certificate itself: a test run makes
@@ -111,6 +112,19 @@ func run(addr, httpAddr, header, value, certFile, keyFile string, loadTools bool
 	}, func(_ context.Context, req *mcp.CallToolRequest, in fetchArgs) (*mcp.CallToolResult, any, error) {
 		recs.add(record{Time: time.Now(), Method: "TOOL", Tool: "fetch_url", Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fetch_url ok: " + in.URL}}}, nil, nil
+	})
+	// search_items is the search-style tool: its query argument is free text a call sends to an outside
+	// party. A test declares it external-low (fixed), so the leak guard's text match runs on the query
+	// (#1051). It only records the call, so a query the guard let through shows in /_fake/requests.
+	type searchArgs struct {
+		Query string `json:"query"`
+	}
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "search_items", Description: "Fake tool search_items: searches items by a query",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+	}, func(_ context.Context, req *mcp.CallToolRequest, in searchArgs) (*mcp.CallToolResult, any, error) {
+		recs.add(record{Time: time.Now(), Method: "TOOL", Tool: "search_items", Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "search_items ok: " + in.Query}}}, nil, nil
 	})
 	if loadTools {
 		addStreamTool(srv)

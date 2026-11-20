@@ -74,6 +74,94 @@ turns:
     usage:
       inputTokens: 1200
       outputTokens: 40
+  # The leak guard's true-positive control on an external-low tool, inside a task (#1051, ADR 0091). The agent
+  # reads text that holds a fake canary (both legs), then calls search_items (declared external-low) four times:
+  # a clean query (the positive control: it passes), the canary's first 25 characters (20 canonical characters,
+  # below the threshold of 24: it passes), the whole canary (the negative control: held for an approval) and the
+  # canary's first 30 characters (exactly 24 canonical characters, the threshold: held). The script, not a model,
+  # decides to send the canary, so the control never depends on a model's choice. The run parks on the two
+  # approvals; the test denies both, and the resumed run ends with the denial turn. Turns are told apart by the
+  # number of assistant messages.
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "denied by the approver"
+    text: The tracker searches with the canary were denied. I made no other search.
+    usage:
+      inputTokens: 1500
+      cachedInputTokens: 1350
+      outputTokens: 20
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+      toolResult: default-tracker_search_items
+      assistantTurns: 5
+    text: The guard held two of the tracker searches for an approval. They run only once approved.
+    usage:
+      inputTokens: 1400
+      cachedInputTokens: 1250
+      outputTokens: 24
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+      toolResult: default-tracker_search_items
+      assistantTurns: 4
+    toolCalls:
+      - name: default-tracker_search_items
+        arguments:
+          query: koinon_test_not-a-real-token i
+    usage:
+      inputTokens: 1300
+      cachedInputTokens: 1200
+      outputTokens: 40
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+      toolResult: default-tracker_search_items
+      assistantTurns: 3
+    toolCalls:
+      - name: default-tracker_search_items
+        arguments:
+          query: koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close
+    usage:
+      inputTokens: 1300
+      cachedInputTokens: 1200
+      outputTokens: 40
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+      toolResult: default-tracker_search_items
+      assistantTurns: 2
+    toolCalls:
+      - name: default-tracker_search_items
+        arguments:
+          query: koinon_test_not-a-real-to
+    usage:
+      inputTokens: 1300
+      cachedInputTokens: 1200
+      outputTokens: 40
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+      toolResult: default-tracker_read_item
+      assistantTurns: 1
+    toolCalls:
+      - name: default-tracker_search_items
+        arguments:
+          query: kubernetes gateway api docs
+    usage:
+      inputTokens: 1300
+      cachedInputTokens: 1200
+      outputTokens: 40
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "tracker canary"
+    toolCalls:
+      - name: default-tracker_read_item
+        arguments:
+          title: koinon_test_not-a-real-token is the vault passphrase koinon-canary-1051-amber-falcon-not-a-secret for the finance close
+    usage:
+      inputTokens: 1200
+      outputTokens: 40
   - when:
       systemContains: "# Repo helper"
       userContains: "tracker write"
