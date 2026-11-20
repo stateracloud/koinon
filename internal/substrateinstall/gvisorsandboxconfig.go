@@ -63,7 +63,9 @@ func GVisorSandboxConfig(bucket string, assets []StagedAsset) *unstructured.Unst
 // ApplySandboxConfig creates the SandboxConfig, or adds the version of the pinned release to an existing
 // one and makes it the default. It is idempotent: the same input changes nothing. It refuses (ErrDigestMismatch)
 // a config that already has the version name with other assets: a version is never rewritten, because
-// snapshots depend on it. It returns whether it changed the cluster.
+// snapshots depend on it. One exception (issue #1157): a version of the pinned release whose URLs are exactly the
+// ones of an installer from before the archive suffix is replaced as a whole, even its state. atelet refused those
+// URLs, so no sandbox ran on that version. It returns whether it changed the cluster.
 func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket string, assets []StagedAsset) (bool, error) {
 	client := dyn.Resource(sandboxConfigGVR)
 	want := GVisorSandboxConfig(bucket, assets)
@@ -84,12 +86,19 @@ func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket strin
 	newVersion := GVisorVersion(bucket, assets)
 	changed := false
 	found := false
-	for _, v := range versions {
+	for i, v := range versions {
 		m, ok := v.(map[string]any)
 		if !ok || m["name"] != gvisorVersionName() {
 			continue
 		}
 		found = true
+		if reflect.DeepEqual(m["assets"], legacyGVisorAssets(newVersion["assets"])) {
+			// The version of an installer from before the archive suffix (issue #1157). atelet refused its URLs,
+			// so no sandbox ran on it and no snapshot depends on it. Replace it in place.
+			versions[i] = newVersion
+			changed = true
+			continue
+		}
 		if !reflect.DeepEqual(m["assets"], newVersion["assets"]) {
 			return false, fmt.Errorf("%w: SandboxConfig %s has version %s with other assets than the staged ones. The installer does not rewrite a version. Delete the SandboxConfig if it is wrong, then run the installer again", ErrDigestMismatch, GVisorSandboxConfigName, gvisorVersionName())
 		}
@@ -120,6 +129,28 @@ func ApplySandboxConfig(ctx context.Context, dyn dynamic.Interface, bucket strin
 		return false, fmt.Errorf("update SandboxConfig %s: %w", GVisorSandboxConfigName, err)
 	}
 	return true, nil
+}
+
+// legacyGVisorAssets is the assets map as an installer from before the archive suffix wrote it: the same URLs
+// without the archive suffix.
+func legacyGVisorAssets(assets any) map[string]any {
+	out := map[string]any{}
+	byArch, _ := assets.(map[string]any)
+	for arch, a := range byArch {
+		g, _ := a.(map[string]any)["gvisor"].(map[string]any)
+		out[arch] = map[string]any{"gvisor": map[string]any{"url": trimArchiveSuffix(fmt.Sprint(g["url"])), "sha256": g["sha256"]}}
+	}
+	return out
+}
+
+// trimArchiveSuffix drops the archive suffix of a staged URL, when it has one.
+func trimArchiveSuffix(url string) string {
+	for _, suffix := range archiveSuffixes {
+		if strings.HasSuffix(url, suffix) {
+			return strings.TrimSuffix(url, suffix)
+		}
+	}
+	return url
 }
 
 // gvisorOrderWarning returns a warning when `gvisor-default` is as new as or newer than the Koinon config.
