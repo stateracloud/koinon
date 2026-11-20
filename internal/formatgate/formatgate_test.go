@@ -120,8 +120,10 @@ var _ = Describe("the gated key", func() {
 		gk, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
 		Expect(err).NotTo(HaveOccurred())
 		now := time.Now()
-		k := &formatgate.GatedKey{Inner: fixedKey{gk.Public()}, Gate: gate, Format: formatgate.MCPCredentialV2,
-			Hold: time.Minute, Now: func() time.Time { return now }}
+		k := &formatgate.GatedKey{
+			Inner: fixedKey{gk.Public()}, Gate: gate, Format: formatgate.MCPCredentialV2,
+			Hold: time.Minute, Now: func() time.Time { return now },
+		}
 
 		_, err = k.Current()
 		Expect(err).To(MatchError(formatgate.ErrNotReady), "the gate has only just opened")
