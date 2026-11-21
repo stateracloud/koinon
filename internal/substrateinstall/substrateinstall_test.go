@@ -257,7 +257,7 @@ func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
 	for _, n := range preflight.SubstrateCRDs {
 		crds = append(crds, crd(n, true))
 	}
-	i, r, _ := setup("37", true, []runtime.Object{router()}, crds...)
+	i, r, client := setup("37", true, []runtime.Object{router(), atelet()}, crds...)
 	// The CRDs are present but Substrate's api server is not: the full preflight after the install fails, setup ran once.
 	err := i.Install(t.Context())
 	g.Expect(err).To(MatchError(preflight.ErrFailed))
@@ -272,6 +272,10 @@ func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
 		ContainSubstring("--ingress-allowed-spiffe-ids="+preflight.SubstrateRouterSPIFFEID("ate-system")),
 		// The probed discovery issuer goes to ate-setup as a flag, so an EXPECTED_JWT_ISSUER in the environment cannot replace it.
 		ContainSubstring("--ateapi-expected-jwt-issuer=https://issuer.example.com")))
+	// The installer adds the image cache trust to atelet on every route (the gke route has no overlay patch, issue #1194).
+	ds, err := client.AppsV1().DaemonSets("ate-system").Get(t.Context(), "atelet", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(ds.Spec.Template.Spec.Volumes).To(ContainElement(HaveField("Name", "koinon-imagecache-ca")))
 	// ate-setup ran in the exported tree, and the tree is removed afterwards.
 	g.Expect(r.existed).To(BeTrue())
 	g.Expect(filepath.Base(r.ranIn)).To(Equal("src"))
@@ -643,4 +647,14 @@ func TestUsesGVisorFollowsTheInstalledSandboxClasses(t *testing.T) {
 	g.Expect(substrateinstall.Profile{SandboxClasses: "microvm, gvisor"}.UsesGVisor()).To(BeTrue())
 	g.Expect(substrateinstall.Profile{SandboxClasses: "microvm"}.UsesGVisor()).To(BeFalse())
 	g.Expect(substrateinstall.Profile{Platform: substrateinstall.PlatformGeneric}.UsesGVisor()).To(BeTrue())
+}
+
+// atelet is the DaemonSet that ate-setup leaves, without the image cache trust (the gke route has no overlay patch).
+func atelet() *appsv1.DaemonSet {
+	return &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "atelet", Namespace: "ate-system"},
+		Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "atelet", Image: "atelet@sha256:0"}},
+		}}},
+	}
 }

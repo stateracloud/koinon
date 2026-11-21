@@ -3,8 +3,8 @@
 The trust of atelet in the image cache (issue #1191, ADR 0120 section 6.9). atelet pulls every actor image through the
 cache over TLS, and Substrate has no CA option. The atelet DaemonSet mounts the ConfigMap koinon-imagecache-ca of the
 Substrate namespace and sets SSL_CERT_DIR to it. Go adds the certificates of that directory to the system roots of the
-image, so the public roots stay. The installer (koinon-api substrate install) adds that patch on the kind and generic
-routes. This Job adds it on any route that lacks it, the gke route included (issue #1194): same patch, no new container.
+image, so the public roots stay. The installer (koinon-api substrate install) adds that patch on every route (the overlay
+on kind and generic, a patch of the live DaemonSet after ate-setup on the others, issue #1194). This Job never adds it.
 This hook Job fills the ConfigMap ("koinon-api imagecache-ca"):
 - It copies ca.crt of the cache TLS Secret (the generated one or imageCache.tls.existingSecret) and nothing else. The
   private key never leaves the Secret, and a ca.crt that holds anything but certificates is refused.
@@ -12,7 +12,7 @@ This hook Job fills the ConfigMap ("koinon-api imagecache-ca"):
   CA). A rotated CA or leaf rolls both pods on the next helm upgrade: a pod reads its roots and its certificate at start.
   Helm and kubectl never write the stamp, so their next apply keeps it and does not restart the pods again.
 Order: the installer runs before helm install (atelet exists), ensure-secrets (weight -15) made the Secret, this Job
-(weight -14) publishes and, if atelet has no trust patch, adds it. The Job fails with the way out when atelet does not exist.
+(weight -14) publishes. The Job fails with the way out when atelet does not exist or has no trust patch.
 The Role in the Substrate namespace can only touch the one ConfigMap, create ConfigMaps and patch the atelet DaemonSet.
 Renders only with execution.driver=substrate and execution.substrate.imageCache.enabled.
 */ -}}
@@ -85,7 +85,7 @@ rules:
     resources: [configmaps]
     resourceNames: ["koinon-imagecache-ca"]
     verbs: [get, update]
-  # Stamps the restart hash on the pod template of atelet, and adds the trust patch when the route has none (gke).
+  # Stamps the restart hash on the pod template of atelet.
   - apiGroups: [apps]
     resources: [daemonsets]
     resourceNames: ["atelet"]

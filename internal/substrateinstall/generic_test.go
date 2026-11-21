@@ -291,7 +291,7 @@ func TestEveryRouteTrustsTheImageCacheCA(t *testing.T) {
 		substrateinstall.PlatformKind: func(dir string) error {
 			return substrateinstall.Profile{StorageBucket: "b"}.ApplyKindOverlay(dir, "ate-system")
 		},
-		substrateinstall.PlatformGKE: nil, // no overlay: the hook Job adds the patch (internal/imagecacheca Publish)
+		substrateinstall.PlatformGKE: nil, // no overlay: the installer adds the patch after ate-setup (internal/imagecacheca EnsureTrust, after ate-setup)
 	}
 	for _, platform := range substrateinstall.Platforms {
 		apply, known := overlay[platform]
@@ -451,7 +451,7 @@ func TestGenericInstallRunsAteSetupWithTheCorrectedTreeAndNoDocker(t *testing.T)
 	for _, n := range preflight.SubstrateCRDs {
 		crds = append(crds, crd(n, true))
 	}
-	i, r, client := setup("37", true, []runtime.Object{defaultClass("local"), router()}, crds...)
+	i, r, client := setup("37", true, []runtime.Object{defaultClass("local"), router(), atelet()}, crds...)
 	i.Profile = genericProfile()
 	r.tarFiles = pinnedKindFiles()
 	var out strings.Builder
