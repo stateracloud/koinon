@@ -1,0 +1,155 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The trust of atelet in the image cache (issue #1191, ADR 0120 section 6.9). atelet pulls every actor image through the
+cache over TLS, and Substrate has no CA option. The atelet DaemonSet mounts the ConfigMap koinon-imagecache-ca of the
+Substrate namespace and sets SSL_CERT_DIR to it. Go adds the certificates of that directory to the system roots of the
+image, so the public roots stay. The installer (koinon-api substrate install) adds that patch on every route (the overlay
+on kind and generic, a patch of the live DaemonSet after ate-setup on the others, issue #1194). This Job never adds it.
+This hook Job fills the ConfigMap ("koinon-api imagecache-ca"):
+- It copies ca.crt of the cache TLS Secret (the generated one or imageCache.tls.existingSecret) and nothing else. The
+  private key never leaves the Secret, and a ca.crt that holds anything but certificates is refused.
+- It stamps a hash of the certificates on the pod template of atelet (the CA) and of the cache (the certificate and the
+  CA). A rotated CA or leaf rolls both pods on the next helm upgrade: a pod reads its roots and its certificate at start.
+  Helm and kubectl never write the stamp, so their next apply keeps it and does not restart the pods again.
+Order: the installer runs before helm install (atelet exists), ensure-secrets (weight -15) made the Secret, this Job
+(weight -14) publishes. The Job fails with the way out when atelet does not exist or has no trust patch.
+The Role in the Substrate namespace can only touch the one ConfigMap, create ConfigMaps and patch the atelet DaemonSet.
+Renders only with execution.driver=substrate and execution.substrate.imageCache.enabled.
+*/ -}}
+{{- if include "koinon.imageCache" . }}
+{{- $name := include "koinon.componentName" (list . "imagecache-ca") }}
+{{- $sub := .Values.execution.substrate.namespace }}
+{{- $hook := "-14" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . "-19") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . "-19") | nindent 4 }}
+rules:
+  # Reads the one TLS Secret, by name. It never changes it.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ include "koinon.imageCache.tlsSecret" . | quote }}]
+    verbs: [get]
+  # Stamps the restart hash on the cache Deployment.
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [{{ include "koinon.imageCache.name" . | quote }}]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . "-18") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $sub }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . "-19") | nindent 4 }}
+rules:
+  # create cannot be limited by resourceNames: this Role can create any ConfigMap in the Substrate namespace.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: ["koinon-imagecache-ca"]
+    verbs: [get, update]
+  # Stamps the restart hash on the pod template of atelet.
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    resourceNames: ["atelet"]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $sub }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . "-18") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "imagecache-ca") | nindent 4 }}
+  annotations:
+    {{- include "koinon.ensureSecretsHook" (list . $hook) | nindent 4 }}
+    helm.sh/hook-output-log-policy: hook-failed,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "imagecache-ca") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: imagecache-ca
+          image: {{ include "koinon.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - imagecache-ca
+            - {{ printf "--tls-secret=%s" (include "koinon.imageCache.tlsSecret" .) | quote }}
+            - {{ printf "--substrate-namespace=%s" $sub | quote }}
+            - {{ printf "--cache-deployment=%s" (include "koinon.imageCache.name" .) | quote }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          resources:
+            {{- toYaml .Values.preflight.resources | nindent 12 }}
+{{- end }}

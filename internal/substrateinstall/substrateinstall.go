@@ -36,6 +36,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/stateracloud/koinon/internal/imagecacheca"
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
@@ -466,13 +467,19 @@ func (i *Installer) Install(ctx context.Context) error {
 		}
 	}()
 	var setupEnv []string
-	if platform == PlatformGeneric {
+	switch platform {
+	case PlatformGeneric:
 		// File work only, so a pin that no longer fits fails before anything is created.
 		if err := i.Profile.ApplyGenericOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
 			return err
 		}
 		if setupEnv, err = WriteDockerShim(filepath.Join(setup.Root(), "shim"), os.Getenv("PATH")); err != nil {
 			return fmt.Errorf("write the docker shim: %w", err)
+		}
+	case PlatformKind:
+		// The kind route keeps upstream's overlay, plus atelet's trust of the image cache CA (issue #1191).
+		if err := i.Profile.ApplyKindOverlay(setup.Dir(), i.Checker.Config.SubstrateOrDefault().Namespace); err != nil {
+			return err
 		}
 	}
 	// Checks that need no namespace come first: a cluster that cannot run Substrate fails with nothing created.
@@ -526,6 +533,10 @@ func (i *Installer) Install(ctx context.Context) error {
 		keepBuild = true
 		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again (the build directory %s stays so that command can run; delete it after the cleanup):\n  %s",
 			PinnedVersion, err, setup.Root(), cleanupCommand(setup, platform, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
+	}
+	// atelet trusts the image cache CA on every route: kind and generic have the overlay patch, gke gets it here (#1194).
+	if err := imagecacheca.EnsureTrust(ctx, i.Kube, i.Checker.Config.SubstrateOrDefault().Namespace, i.Out); err != nil {
+		return err
 	}
 	if _, err := i.EnsureAPIAuthentication(ctx, profile.ExpectedJWTIssuer); err != nil {
 		return err

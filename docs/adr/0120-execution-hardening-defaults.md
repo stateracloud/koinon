@@ -251,10 +251,11 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    - **TLS.** The cache serves TLS. The ensure-secrets hook Job makes the certificate (ECDSA P-256, 10 years, a CA
      and a leaf; the CA key is not kept) when it is missing, or the operator names a Secret
      (`imageCache.tls.existingSecret`). There is no rotation path yet.
-   - **Open: CA trust of atelet.** Substrate has no option for a CA, so atelet must trust the cache CA through an
-     installer patch of the atelet DaemonSet (a ConfigMap with `ca.crt` and `SSL_CERT_DIR`). The patch is not
-     written and is not tested on a cluster. Tracked in the follow-up issue that main opens
-     ("needs main"); the install doc has the manual steps.
+   - **CA trust of atelet.** Substrate has no option for a CA. The installer patches the atelet DaemonSet: it mounts the
+     optional ConfigMap `koinon-imagecache-ca` and sets `SSL_CERT_DIR` to it (the public roots stay). A chart hook Job
+     fills the ConfigMap with `ca.crt` of the TLS Secret, never the key, and stamps a hash on atelet and on the cache
+     pod, so a rotated CA or certificate restarts them at the next `helm upgrade`. The GKE route has no patch yet.
+     Details: docs/dev/substrate-install.md (issue #1191).
    - **Upgrade.** An existing Substrate install re-hashes every actor template (the rewritten image is in the hash).
      The render fails when the values already set `imageSource.podSelector`, `imageSource.cidrs`, `imageMirrors` or
      `imageRegistry`: set `imageCache.enabled=false` to keep them. The hook Job fails, and does not regenerate, when
