@@ -94,13 +94,10 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 	if len(leaf) == 0 {
 		return fmt.Errorf("%w: Secret %s/%s has no %s", ErrCA, p.Namespace, p.Secret, tlsCertKey)
 	}
-	if err := upsertConfigMap(ctx, client, p.SubstrateNamespace, ca, out); err != nil {
-		return err
-	}
 	caSum := Sum(ca)
 	tlsSum := Sum(leaf, ca)
-	// The installer owns the trust patch (EnsureTrust, every route). The admission policy lets this Job change only the
-	// hash annotation of atelet, so an atelet without the trust would pull with no trust while this Job reports
+	// The installer owns the trust patch (EnsureTrust, every route). The admission policy of PR 1193 lets this Job change
+	// only the hash annotation of atelet, so an atelet without the trust would pull with no trust while this Job reports
 	// success: fail with the way out instead.
 	lacks, err := ateletLacksTrust(ctx, client, p.SubstrateNamespace)
 	if err != nil {
@@ -109,6 +106,9 @@ func Publish(ctx context.Context, client kubernetes.Interface, p Params, out io.
 	if lacks {
 		return fmt.Errorf("%w: DaemonSet %s/%s does not trust the image cache CA (no volume %s, mount or %s): run koinon-api substrate install, which adds it on every route",
 			ErrCA, p.SubstrateNamespace, DaemonSetName, VolumeName, EnvName)
+	}
+	if err := upsertConfigMap(ctx, client, p.SubstrateNamespace, ca, out); err != nil {
+		return err
 	}
 	// atelet must exist: the installer (koinon-api substrate install) runs before helm install. A missing one is an
 	// error with the way out, not a skipped step: the cache would be unreachable for every actor.

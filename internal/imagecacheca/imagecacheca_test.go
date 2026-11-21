@@ -179,6 +179,8 @@ var _ = Describe("Publish", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ds.Spec.Template.Spec.Volumes).To(BeEmpty())
 		Expect(ds.Spec.Template.Annotations).To(BeEmpty())
+		_, err = c.CoreV1().ConfigMaps(subNS).Get(ctx, imagecacheca.ConfigMapName, metav1.GetOptions{})
+		Expect(err).To(HaveOccurred(), "a failed Job leaves no ConfigMap")
 	})
 
 	It("fails when the volume and the variable exist but the mount does not", func(ctx SpecContext) {

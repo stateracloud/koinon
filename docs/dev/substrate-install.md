@@ -422,8 +422,8 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     same volume, mount and `SSL_CERT_DIR` to the live atelet DaemonSet (one definition in `internal/imagecacheca`,
     `EnsureTrust`). It runs on every route and does nothing where the patch is there. It adds no container and no image,
     so the admission policy is not weakened. The hook Job never adds the patch: it changes only the hash annotation of
-    atelet, which the admission policy allows. A new run of `koinon-api substrate install` (a new `ate-setup` apply)
-    can remove the patch on the gke route and adds it back at its end.
+    atelet (an exception of the admission policy, PR 1193). Every run of `koinon-api substrate install` checks the patch at
+    its end and adds it when it is missing.
   - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist or has no trust patch.
   - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet. The RBAC is a hook object: Helm
     deletes it after the Job. `helm uninstall` leaves the ConfigMap `koinon-imagecache-ca`: delete it by hand.

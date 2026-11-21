@@ -282,7 +282,7 @@ func TestOverlayMakesAteletTrustTheImageCacheCA(t *testing.T) {
 }
 
 // TestEveryRouteTrustsTheImageCacheCA is the per-route spec of issue #1194. A new platform fails here until it names how
-// atelet gets the trust: the installer overlay (kind, generic) or the hook Job of the chart (every route, and the only
+// atelet gets the trust: the installer overlay (kind, generic) or the installer step after ate-setup, imagecacheca.EnsureTrust (every route, and the only
 // one for gke, whose overlay directory in the pinned tree the installer does not know).
 func TestEveryRouteTrustsTheImageCacheCA(t *testing.T) {
 	g := NewWithT(t)

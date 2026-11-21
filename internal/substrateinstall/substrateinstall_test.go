@@ -275,7 +275,9 @@ func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
 	// The installer adds the image cache trust to atelet on every route (the gke route has no overlay patch, issue #1194).
 	ds, err := client.AppsV1().DaemonSets("ate-system").Get(t.Context(), "atelet", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(ds.Spec.Template.Spec.Volumes).To(ContainElement(HaveField("Name", "koinon-imagecache-ca")))
+	g.Expect(ds.Spec.Template.Spec.Volumes).To(ContainElement(And(HaveField("Name", "koinon-imagecache-ca"), HaveField("ConfigMap.Optional", HaveValue(BeTrue())))))
+	g.Expect(ds.Spec.Template.Spec.Containers[0].Env).To(ContainElement(HaveField("Name", "SSL_CERT_DIR")))
+	g.Expect(ds.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(HaveField("MountPath", "/etc/koinon/imagecache-ca")))
 	// ate-setup ran in the exported tree, and the tree is removed afterwards.
 	g.Expect(r.existed).To(BeTrue())
 	g.Expect(filepath.Base(r.ranIn)).To(Equal("src"))
