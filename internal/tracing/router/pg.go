@@ -4,12 +4,10 @@ package router
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 	"time"
 
@@ -259,7 +257,8 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 				return nil, fmt.Errorf("reading %s: %w", c.table, err)
 			}
 			// A v2 envelope is sealed to the gateway's key (ADR 0097 decision 12): this router cannot open it, so it
-			// never logs or stores the value. The gateway alone can open it and must scrub its own spans (#1174). It is not
+			// never logs or stores the value. The gateway alone can open it, and it scrubs the value from what it emits
+			// (mcpgateway.CredentialScrub, #1174), so this router needs no MCP scrub for v2. It is not
 			// an unopenable value: skipping it must not stop the org's trace content.
 			if f, ferr := secretstore.EnvelopeFormat(raw); ferr == nil && f == secretstore.FormatV2 {
 				continue
@@ -300,23 +299,5 @@ func (s *PGSecrets) Secrets(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 	return scrub.NewSecrets(values...), nil
 }
 
-// authScheme matches the value of an Authorization-style header: the scheme, then the token.
-var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|digest)\s+(\S.*)$`)
-
-// withAuthParts adds the token after a known auth scheme (and, for Basic, the decoded user and
-// password), because a trace may carry the token alone, without the scheme word.
-func withAuthParts(v string) []string {
-	out := []string{v}
-	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
-	if m == nil {
-		return out
-	}
-	out = append(out, m[2])
-	if strings.EqualFold(m[1], "basic") {
-		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
-			out = append(out, string(dec))
-			out = append(out, strings.Split(string(dec), ":")...)
-		}
-	}
-	return out
-}
+// withAuthParts adds the token after a known auth scheme (see [scrub.AuthParts]).
+func withAuthParts(v string) []string { return scrub.AuthParts(v) }

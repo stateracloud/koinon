@@ -72,7 +72,7 @@ func (f failClosed) checkToolList(ctx context.Context, l ToolList) (v ToolListVe
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", l.Target, "kind", "tool_list")
+			f.log.ErrorContext(ctx, "guard panicked", "target", l.Target, "kind", "tool_list")
 			f.m.guardFailure(guardPanic)
 			v = ToolListVerdict{Refuse: true, Reason: reasonGuardFailed}
 		}
@@ -217,7 +217,7 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 	switch {
 	case v.Refuse:
 		g.o.Metrics.toolLeft(leftUnreadable)
-		g.o.Logger.Warn("tools/list: list withheld", "target", t.Name)
+		g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: list withheld", "target", t.Name)
 		// The tools an earlier list left out stay out, and the check is no longer fresh: a call checks again.
 		return nil, nil, false
 	case v.Passthrough:
@@ -240,7 +240,8 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 	}
 	for _, n := range v.Left {
 		g.o.Metrics.toolLeft(leftChanged)
-		g.o.Logger.Warn("tools/list: tool left out; it changed since it was approved", "target", t.Name, "tool", logName(n))
+		g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: tool left out; it changed since it was approved",
+			"target", t.Name, "tool", logName(g.o.Scrub.TextFor(agent.Org, n)))
 	}
 	left = append(left, v.Left...)
 	g.left.set(key, left)
@@ -266,17 +267,18 @@ func (g *Gateway) refresh(t gateway.MCPTarget, agent gateway.AgentRef) {
 		delete(g.refreshing, key)
 		g.mu.Unlock()
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), g.o.ListTimeout)
+	ctx, cancel := context.WithTimeout(WithScrubOrg(context.Background(), agent.Org), g.o.ListTimeout)
 	defer cancel()
 	got, err := g.targetTools(ctx, t, agent)
 	if err != nil {
-		g.o.Logger.Warn("tools/list_changed: relist failed", "target", t.Name, "error", errKind(err))
+		g.o.Logger.WarnContext(ctx, "tools/list_changed: relist failed", "target", t.Name, "error", errKind(err))
 		return
 	}
 	g.vetted(ctx, t, agent, got)
 }
 
-// logName cuts a server's tool name for a log line.
+// logName cuts a server's tool name for a log line. The caller scrubs the name first: a cut could split a
+// credential value, and the scrub matches whole values only.
 func logName(n string) string {
 	if len(n) > 128 {
 		return n[:128]

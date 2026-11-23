@@ -189,7 +189,7 @@ var _ = Describe("Postgres", Ordered, func() {
 		sc := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: set})
 		Expect(sc.Text("x")).To(Equal("x"))
 		// The router holds no opened v2 value: it can neither log nor store it, and it cannot scrub it
-		// either. The gateway scrubs what it opens (#1174, not in this slice).
+		// either. The gateway scrubs what it opens (mcpgateway.CredentialScrub, #1174).
 		const opened = "koinon_test_not-a-real-token-v2"
 		Expect(sc.Text(opened)).To(Equal(opened))
 	})

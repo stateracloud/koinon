@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -242,12 +243,33 @@ func secretForms(v string) []string {
 	forms = append(forms, ascii, asciiEscape(plain, true))
 	double := string(appendString(nil, plain))
 	forms = append(forms, double[1:len(double)-1])
-	q := url.QueryEscape(v)
-	forms = append(forms, q, url.PathEscape(v), strings.ToLower(q))
+	if strings.Contains(plain, "/") { // some JSON encoders (PHP, older Java) write / as \/
+		forms = append(forms, strings.ReplaceAll(plain, "/", `\/`))
+	}
+	q, path := url.QueryEscape(v), url.PathEscape(v)
+	// Go writes upper-case hex digits; other encoders write lower case. Only the digits change case: the
+	// value itself keeps its case. The whole-lower form stays for a URL that a server folds to lower case.
+	forms = append(forms, q, path, strings.ToLower(q), lowerHex(q), lowerHex(path))
 	b := []byte(v)
 	forms = append(forms, base64.StdEncoding.EncodeToString(b), base64.URLEncoding.EncodeToString(b),
 		base64.RawStdEncoding.EncodeToString(b), base64.RawURLEncoding.EncodeToString(b))
 	return forms
+}
+
+// lowerHex returns s with the hex digits of every %XX escape in lower case.
+func lowerHex(s string) string {
+	b := []byte(s)
+	for i := 0; i+2 < len(b); i++ {
+		if b[i] == '%' {
+			for j := i + 1; j <= i+2; j++ {
+				if b[j] >= 'A' && b[j] <= 'F' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			i += 2
+		}
+	}
+	return string(b)
 }
 
 // asciiEscape writes every non-ASCII rune of s as a \uXXXX escape (a surrogate pair above the
@@ -294,4 +316,50 @@ func (s *Secrets) openStart(in string) int {
 		}
 	}
 	return len(in) - s.nodes[cur].depth
+}
+
+// Redact replaces every verbatim match of the set (and of the encoded forms NewSecrets adds) with
+// [redacted:secret]. It applies no other rule: a caller that knows the exact values it must remove,
+// such as koinon-gateway with the credentials it opened (#1174), uses it where the shape rules of a
+// level would change ordinary text. A nil or empty set returns in unchanged.
+func (s *Secrets) Redact(in string) string {
+	if in == "" || s == nil || s.count == 0 {
+		return in
+	}
+	spans := s.find(in, nil)
+	if len(spans) == 0 {
+		return in
+	}
+	return (&Scrubber{}).apply(in, spans)
+}
+
+// authScheme matches the value of an Authorization-style header: the scheme, then the token.
+var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|digest)\s+(\S.*)$`)
+
+// AuthParts returns v and, when v starts with a known auth scheme, the token after it (and, for
+// Basic, the decoded "user:password" and the password), because a text may carry the token alone,
+// without the scheme word. The Basic user name is returned only when the password is shorter than
+// MinSecretLen: then the user name is the secret (an API key as the user, an empty or dummy password).
+// Otherwise it is an ordinary name and would be redacted in every text. Pass the result to NewSecrets.
+func AuthParts(v string) []string {
+	out := []string{v}
+	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return out
+	}
+	out = append(out, m[2])
+	if strings.EqualFold(m[1], "basic") {
+		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
+			out = append(out, string(dec))
+			if user, pass, ok := strings.Cut(string(dec), ":"); ok {
+				out = append(out, pass)
+				if len(pass) < MinSecretLen {
+					// An empty or dummy password ("x") means the user name carries the secret, as an
+					// API key sent as the Basic user does.
+					out = append(out, user)
+				}
+			}
+		}
+	}
+	return out
 }

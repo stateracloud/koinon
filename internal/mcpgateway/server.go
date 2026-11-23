@@ -72,6 +72,9 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		// The agent's request headers stop here: the upstream requests are built by the SDK client.
 		rctx := context.WithValue(context.WithValue(r.Context(), agentKey{}, key.Agent), reqKey{}, snap)
+		// The logs, spans and audit rows of the request belong to the agent's org: they are scrubbed with the
+		// credential values of that org only (#1174).
+		rctx = WithScrubOrg(rctx, key.Agent.Org)
 		mcpHandler.ServeHTTP(w, r.WithContext(rctx))
 	})
 }
@@ -111,13 +114,13 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 			}
 			switch method {
 			case "tools/list":
-				return g.listTools(ctx, agent), nil
+				return g.o.Scrub.ToolList(agent.Org, g.listTools(ctx, agent)), nil
 			case "tools/call":
 				r, ok := req.(*mcp.CallToolRequest)
 				if !ok {
 					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad tools/call"}
 				}
-				return g.callTool(ctx, agent, r.Params), nil
+				return g.o.Scrub.Result(agent.Org, g.callTool(ctx, agent, r.Params)), nil
 			}
 			return next(ctx, method, req)
 		}
@@ -146,7 +149,7 @@ func (g *Gateway) listTools(ctx context.Context, agent gateway.AgentRef) *mcp.Li
 			defer cancel()
 			got, err := g.targetTools(lctx, t, agent)
 			if err != nil {
-				g.o.Logger.Warn("tools/list: target skipped", "target", name, "error", errKind(err))
+				g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: target skipped", "target", name, "error", errKind(err))
 				return
 			}
 			// The text of each tool is the approved text, or it is left out (#1132).
@@ -185,7 +188,7 @@ func (g *Gateway) targetTools(ctx context.Context, t gateway.MCPTarget, agent ga
 			return nil, err
 		}
 		var tools []*mcp.Tool
-		for tool, err := range u.session.Tools(ctx, nil) {
+		for tool, err := range u.session.Tools(scrubCtx(ctx, agent), nil) {
 			if err != nil {
 				lastErr = err
 				break
@@ -195,7 +198,11 @@ func (g *Gateway) targetTools(ctx context.Context, t gateway.MCPTarget, agent ga
 		}
 		if lastErr == nil {
 			u.release()
-			return tools, nil
+			// A target can quote the credential it was sent in a tool's text. The list is scrubbed with the
+			// values of the org as it enters, so the tool-list check, the pin hash, the prober and the agent
+			// see one text (#1174). The guard's message inspection on the wire still sees the raw list: it must,
+			// to judge it.
+			return g.o.Scrub.Tools(agent.Org, tools), nil
 		}
 		u.release()
 		if ctx.Err() == nil {
@@ -203,6 +210,15 @@ func (g *Gateway) targetTools(ctx context.Context, t gateway.MCPTarget, agent ga
 		}
 	}
 	return nil, lastErr
+}
+
+// scrubCtx marks ctx with the org of agent, unless it is marked already: its logs and spans are scrubbed with
+// the values of that org.
+func scrubCtx(ctx context.Context, agent gateway.AgentRef) context.Context {
+	if _, ok := scrubOrgOf(ctx); ok {
+		return ctx
+	}
+	return WithScrubOrg(ctx, agent.Org)
 }
 
 // errKind is a loggable form of an error: its type, never its text, which can hold a URL with a token.
@@ -227,6 +243,7 @@ func refusedResult(text string) *mcp.CallToolResult {
 func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.CallToolParamsRaw) *mcp.CallToolResult {
 	start := time.Now()
 	row := AuditRow{Agent: agent}
+	ctx = scrubCtx(ctx, agent)
 	var span trace.Span
 	if g.o.Tracer != nil {
 		ctx, span = g.o.Tracer.Start(ctx, "mcp.tools/call")
@@ -234,6 +251,13 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	}
 	finish := func(o Outcome) {
 		row.Outcome, row.Duration = o, time.Since(start)
+		// A guard reason may quote the text it refused, and the tool name of an "all" grant is the
+		// agent's text. The audit row, its log line and the span never carry an opened credential. They
+		// belong to the agent's org, so only that org's values are removed: another org cannot change
+		// them (#1174).
+		row.Target = g.o.Scrub.TextFor(agent.Org, row.Target)
+		row.Tool = g.o.Scrub.TextFor(agent.Org, row.Tool)
+		row.Verdict = g.o.Scrub.TextFor(agent.Org, row.Verdict)
 		if span != nil {
 			span.SetAttributes(attribute.String("mcp.target", row.Target), attribute.String("mcp.tool", row.Tool),
 				attribute.String("mcp.outcome", string(o)), attribute.String("mcp.credential", row.CredKind))
@@ -243,7 +267,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		}
 		if g.o.Audit != nil {
 			if err := g.o.Audit.Record(ctx, row); err != nil {
-				g.o.Logger.Error("audit row not written", "error", errKind(err))
+				g.o.Logger.ErrorContext(ctx, "audit row not written", "error", errKind(err))
 			}
 		}
 	}
@@ -312,6 +336,10 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	if err == nil {
 		res, err = u.session.CallTool(cctx, &mcp.CallToolParams{Name: tool, Arguments: p.Arguments})
 		u.release()
+		if err == nil {
+			// The result is scrubbed with the values of the org as it enters (#1174).
+			res = g.o.Scrub.Result(agent.Org, res)
+		}
 		var je *jsonrpc.Error
 		if err != nil && !errors.As(err, &je) && cctx.Err() == nil {
 			g.evict(u) // a lost connection: the next call connects again

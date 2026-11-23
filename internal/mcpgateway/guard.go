@@ -169,7 +169,7 @@ func (f failClosed) Inspect(ctx context.Context, m Message) (v Verdict) {
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", m.Target, "kind", m.Kind.String())
+			f.log.ErrorContext(ctx, "guard panicked", "target", m.Target, "kind", m.Kind.String())
 			f.m.guardFailure(guardPanic)
 			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
 		}
@@ -189,7 +189,7 @@ func (f failClosed) checkCall(ctx context.Context, c Call) (v Verdict) {
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", c.Target, "kind", "call")
+			f.log.ErrorContext(ctx, "guard panicked", "target", c.Target, "kind", "call")
 			f.m.guardFailure(guardPanic)
 			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
 		}
@@ -235,7 +235,22 @@ type Metrics struct {
 	Dropped *prometheus.CounterVec
 	// ToolsLeftOut counts tools a tools/list left out of what an agent sees, by reason (#1132).
 	ToolsLeftOut *prometheus.CounterVec
+	// CredentialRedactions counts texts in which the gateway replaced an opened credential value, by path:
+	// "agent" (a tool list or a tool result an agent gets) or "telemetry" (a log record, a span, an audit row)
+	// (#1174).
+	CredentialRedactions *prometheus.CounterVec
+	// CredentialsTooShort counts opened credentials whose token is shorter than the scrub can match.
+	CredentialsTooShort prometheus.Counter
+	// CredentialEvictions counts opened values that a cap removed before Retain. A value removed so is no longer
+	// scrubbed: a rising count means that a cap is too low for the credentials in use.
+	CredentialEvictions prometheus.Counter
 }
+
+// The paths of CredentialRedactions.
+const (
+	redactAgent     = "agent"
+	redactTelemetry = "telemetry"
+)
 
 // NewMetrics creates the counters and registers them with reg (nil: not registered).
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -256,6 +271,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_gateway_mcp_tools_left_out_total",
 			Help: "Tools the MCP path left out of a tools/list because they changed since approval, were over the limit or unusable, by reason.",
 		}, []string{"reason"}),
+		CredentialRedactions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_redactions_total",
+			Help: "Texts in which koinon-gateway replaced an opened credential value, by path (agent or telemetry).",
+		}, []string{"path"}),
+		CredentialsTooShort: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_too_short_total",
+			Help: "Opened credentials whose token is too short for koinon-gateway to scrub from logs and results.",
+		}),
+		CredentialEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_evictions_total",
+			Help: "Opened credential values that koinon-gateway stopped scrubbing early because a cap was full.",
+		}),
+	}
+	for _, p := range []string{redactAgent, redactTelemetry} {
+		m.CredentialRedactions.WithLabelValues(p)
 	}
 	for _, r := range []string{leftChanged, leftOverLimit, leftUnusable, leftUnreadable} {
 		m.ToolsLeftOut.WithLabelValues(r)
@@ -267,7 +297,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Dropped.WithLabelValues(r)
 	}
 	if reg != nil {
-		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut)
+		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut, m.CredentialRedactions,
+			m.CredentialsTooShort, m.CredentialEvictions)
 	}
 	return m
 }
@@ -287,6 +318,24 @@ func (m *Metrics) toolLeft(reason string) {
 func (m *Metrics) noteDropped() {
 	if m != nil {
 		m.NotesDropped.Inc()
+	}
+}
+
+func (m *Metrics) redacted(path string) {
+	if m != nil {
+		m.CredentialRedactions.WithLabelValues(path).Inc()
+	}
+}
+
+func (m *Metrics) shortCredential() {
+	if m != nil {
+		m.CredentialsTooShort.Inc()
+	}
+}
+
+func (m *Metrics) evicted(n int) {
+	if m != nil {
+		m.CredentialEvictions.Add(float64(n))
 	}
 }
 
