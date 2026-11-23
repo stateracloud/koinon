@@ -293,18 +293,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 	}
 	checker := &preflight.Checker{Kube: kube, Dynamic: dyn, Config: cfg.check, CallTimeout: cfg.timeout}
 	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
-		prober := preflight.KubeSubstrateProber{
-			Client:           kube,
-			Namespace:        sub.WithDefaults().ProbeNamespace,
-			NamePrefix:       cfg.probeNamePrefix,
-			Image:            cfg.probeImage,
-			ImagePullSecrets: splitList(cfg.probePullSecrets),
-			NodeSelector:     sub.NodeSelector,
-			Timeout:          cfg.probeTimeout,
-			Labels: map[string]string{
-				"app.kubernetes.io/name": "koinon", "app.kubernetes.io/part-of": "koinon",
-			},
-		}
+		prober := substrateProber(cfg, kube, *sub)
 		checker.Issuer, checker.IssuerProbe, checker.Devices, checker.UserNS = preflight.NewIssuerResolver(kube), prober, prober, prober
 	}
 	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
@@ -381,4 +370,21 @@ func restConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return rc, nil
+}
+
+// substrateProber builds the prober of the Substrate preflight. Its pods run in the probe namespace, never in a
+// Substrate namespace: Substrate's admission policies refuse a bare pod there (issue #1176).
+func substrateProber(cfg preflightConfig, kube kubernetes.Interface, sub preflight.SubstrateConfig) preflight.KubeSubstrateProber {
+	return preflight.KubeSubstrateProber{
+		Client:           kube,
+		Namespace:        sub.WithDefaults().ProbeNamespace,
+		NamePrefix:       cfg.probeNamePrefix,
+		Image:            cfg.probeImage,
+		ImagePullSecrets: splitList(cfg.probePullSecrets),
+		NodeSelector:     sub.NodeSelector,
+		Timeout:          cfg.probeTimeout,
+		Labels: map[string]string{
+			"app.kubernetes.io/name": "koinon", "app.kubernetes.io/part-of": "koinon",
+		},
+	}
 }

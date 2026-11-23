@@ -159,9 +159,11 @@ Order of the step:
 10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
     namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
 
-The probe pods in the probe namespace use no image pull secrets: `--probe-image-pull-secrets` names
-Secrets of the release namespace, which do not exist there. How the probe namespace pulls the probe
-image is part of S2 (chart work).
+`koinon-api substrate install` gives the probe pods no image pull secrets: the probe namespace is new and has no
+Secrets. `koinon-api preflight --driver substrate` gives the probe pods the Secrets that
+`--probe-image-pull-secrets` names. These Secrets must exist in the probe namespace, not only in the release
+namespace. Make the probe namespace and copy them before the run, or use a probe image that needs no pull secret.
+How the probe namespace pulls the probe image is part of S2 (chart work).
 
 `koinon-api preflight --driver substrate` runs only the checks. It creates and removes the probe namespace in
 the same way, so it also runs after `helm install`.

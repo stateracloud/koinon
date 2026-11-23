@@ -532,7 +532,8 @@ needs (issue #1176). The rule reads the prefix length, so every spelling of a ra
 1.0.0.0/8, ::/0, 0::/0, 2000::/3):
 - IPv4: /16 or longer. /8 to /15 only inside private space (10.0.0.0/8, 172.16.0.0/12). Shorter than /8 never.
 - IPv6: /48 or longer. /7 to /47 only inside unique local space (fc00::/7). Shorter than /7 never.
-- No IPv4-mapped IPv6 range (::ffff:...): it is IPv4 space in another spelling.
+- No IPv6 range inside ::/8: it holds loopback, IPv4-mapped (::ffff:0:0/96) and NAT64 (64:ff9b::/96,
+  64:ff9b:1::/48) space, which is IPv4 space in another spelling.
 Argument: the CIDR string.
 */}}
 {{- define "koinon.narrowCIDR" -}}
@@ -555,6 +556,7 @@ Argument: the CIDR string.
 {{- if gt $bits 128 }}{{- fail (printf "%s: %s is not an IPv6 CIDR" $what $c) }}{{- end -}}
 {{- if contains "ffff:" $addr }}{{- if regexMatch "^(0{0,4}:){0,5}:?ffff:" $addr }}{{- fail (printf "%s: %s is an IPv4-mapped range: name the IPv4 CIDR" $what $c) }}{{- end }}{{- end -}}
 {{- $first := first (splitList ":" $addr) -}}
+{{- if regexMatch "^0{0,2}[0-9a-f]{0,2}$" $first }}{{- fail (printf "%s: %s is inside ::/8 (loopback, IPv4-mapped or NAT64 64:ff9b::/96 space): name the IPv4 CIDR or a global IPv6 range" $what $c) }}{{- end -}}
 {{- $ula := and (ge $bits 7) (regexMatch "^f[cd][0-9a-f]{2}$" $first) -}}
 {{- if and (lt $bits 48) (not $ula) }}{{- fail (printf "%s: %s is wider than one image source needs: use /48 or longer (/7 to /47 only inside fc00::/7)" $what $c) }}{{- end -}}
 {{- else -}}

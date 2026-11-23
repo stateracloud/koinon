@@ -75,6 +75,38 @@ var _ = Describe("Substrate probe namespace", func() {
 		Expect(got.Labels).To(Equal(map[string]string{"owner": "ops"}))
 	})
 
+	It("takes over a probe namespace that an earlier run left behind, so this run removes it", func(ctx SpecContext) {
+		client := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "probes", Labels: map[string]string{
+			"app.kubernetes.io/part-of": "koinon", "app.kubernetes.io/component": preflight.ProbeNamespaceComponent,
+		}}})
+		owned, err := preflight.ProbeNamespace{Client: client, Name: "probes"}.Ensure(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(owned).To(BeTrue())
+	})
+
+	It("waits until a terminating namespace is gone, then creates it again", func(ctx SpecContext) {
+		client := fake.NewClientset(&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "probes"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+		})
+		ns := preflight.ProbeNamespace{Client: client, Name: "probes", PollInterval: time.Millisecond, Timeout: 50 * time.Millisecond}
+		_, err := ns.Ensure(ctx)
+		Expect(err).To(MatchError(ContainSubstring("still terminating")))
+
+		go func() {
+			defer GinkgoRecover()
+			time.Sleep(20 * time.Millisecond)
+			Expect(client.CoreV1().Namespaces().Delete(ctx, "probes", metav1.DeleteOptions{})).To(Succeed())
+		}()
+		ns.Timeout = 5 * time.Second
+		created, err := ns.Ensure(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		got, err := client.CoreV1().Namespaces().Get(ctx, "probes", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Labels).To(HaveKeyWithValue("pod-security.kubernetes.io/enforce", "privileged"))
+	})
+
 	It("builds every probe pod in the prober's namespace", func() {
 		p := preflight.KubeSubstrateProber{Namespace: preflight.DefaultSubstrateProbeNamespace, NamePrefix: "t", Image: "img"}
 		for _, pod := range []*corev1.Pod{p.IssuerPod("https://kubernetes.default.svc"), p.DevicesPod(), p.UserNamespacesPod("node-a")} {

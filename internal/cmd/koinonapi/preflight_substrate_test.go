@@ -6,6 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/pflag"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/preflight"
 )
@@ -61,6 +62,17 @@ var _ = Describe("preflight --driver substrate", func() {
 		} {
 			_, err := parse(append([]string{"--driver=substrate", "--probe-image=img", "--netpol-probe=false"}, args...)...)
 			Expect(err).To(MatchError(ContainSubstring("is a Substrate namespace")), "%v", args)
+		}
+	})
+
+	It("gives the Substrate prober the probe namespace, not a Substrate namespace", func() {
+		for _, args := range [][]string{nil, {"--substrate-probe-namespace=probes"}} {
+			c, err := parse(append([]string{"--driver=substrate", "--probe-image=img", "--netpol-probe=false"}, args...)...)
+			Expect(err).NotTo(HaveOccurred())
+			p := substrateProber(*c, fake.NewClientset(), *c.check.Substrate)
+			Expect(p.Namespace).To(Equal(c.check.Substrate.ProbeNamespace))
+			Expect(p.Namespace).NotTo(BeElementOf("ate-system", "ate-workers"))
+			Expect(p.Image).To(Equal("img"))
 		}
 	})
 

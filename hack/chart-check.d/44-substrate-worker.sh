@@ -247,7 +247,7 @@ imgcidr=(--set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={198.5
 has "an operator CIDR can be the image source" 'cidr: "198.51.100.0/24"' "${wsub[@]}" "${imgcidr[@]}" "${np[@]}"
 if render "${wsub[@]}" "${imgpod[@]}" "${imgcidr[@]}" "${np[@]}" >/dev/null 2>"$out/img.err"; then fail "two image sources must not render"; fi
 # m2 (issue #1176): the prefix length decides, so every spelling of a wide range is refused, not only 0.0.0.0/0 and ::/0.
-for c in 0.0.0.0/0 0.0.0.0/1 1.0.0.0/8 100.64.0.0/10 172.32.0.0/12 10.0.0.0/7 ::/0 0::/0 0:0:0:0:0:0:0:0/0 2000::/3 2001:db8::/32 ::ffff:0:0/96 bogus 300.0.0.0/24; do
+for c in 0.0.0.0/0 0.0.0.0/1 1.0.0.0/8 100.64.0.0/10 172.32.0.0/12 10.0.0.0/7 ::/0 0::/0 0:0:0:0:0:0:0:0/0 2000::/3 2001:db8::/32 ::ffff:0:0/96 64:ff9b::/96 64:ff9b:1::/48 ::/48 ::/64 ::1/128 0064:ff9b::/96 bogus 300.0.0.0/24; do
 	if render "${wsub[@]}" --set "execution.substrate.workerNetworkPolicy.imageSource.cidrs={$c}" "${np[@]}" >/dev/null 2>"$out/cidr.err"; then fail "the image source $c is too wide and must not render"; fi
 	grep -Fq "imageSource.cidrs: $c" "$out/cidr.err" || fail "the error for $c must name imageSource.cidrs and the CIDR"
 done
