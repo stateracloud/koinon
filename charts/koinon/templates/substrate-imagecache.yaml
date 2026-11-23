@@ -11,7 +11,7 @@ Renders only with execution.driver=substrate and execution.substrate.imageCache.
   repository name is the upstream host and the path (ghcr.io/org/name); stripPrefix hands the path to the upstream.
   Anonymous read, nothing else: no one can push.
 - TLS: the Secret of imageCache.tls.existingSecret, or the one the ensure-secrets hook Job makes (a new CA, ten years).
-  atelet must trust its ca.crt (docs/dev/substrate-install.md).
+  atelet trusts its ca.crt through the installer patch and the hook Job of substrate-imagecache-ca.yaml.
 - NetworkPolicy: ingress from the image-source apps of the control-plane namespace (atelet) only; egress to DNS and TCP
   443 outside the private ranges.
 - The image goes through koinon.imageRef and the pod through koinon.imagePullSecrets (ADR 0061).

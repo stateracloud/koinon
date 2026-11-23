@@ -53,6 +53,27 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(cache.Ignored).To(HaveKeyWithValue("Service", 1))
 	})
 
+	// The CA of the cache reaches atelet (issue #1191): a pre-install hook Job after ensure-secrets copies the public CA
+	// to the Substrate namespace. It reads the Secret and sets the pod name space from the downward API, as the flags
+	// of "koinon-api imagecache-ca" need (internal/cmd/koinonapi/flags_test.go).
+	It("renders the hook Job that publishes the CA of the image cache", func(ctx SpecContext) {
+		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
+		ca := helmRenderWith(ctx, values, showOnly("templates/substrate-imagecache-ca.yaml")...)
+		Expect(ca.Jobs).To(HaveLen(1))
+		job := ca.Jobs[0]
+		Expect(job.Annotations).To(HaveKeyWithValue("helm.sh/hook", "pre-install,pre-upgrade"))
+		c := job.Spec.Template.Spec.Containers[0]
+		Expect(c.Args).To(ContainElements("imagecache-ca", "--substrate-namespace=ate-system"))
+		Expect(c.Args).To(ContainElement(HavePrefix("--tls-secret=")))
+		Expect(c.Args).To(ContainElement("--cache-deployment=koinon-imagecache"))
+		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("koinon-imagecache-ca"))
+		Expect(c.Env).To(ContainElement(HaveField("Name", "POD_NAMESPACE")))
+		// The Role and the RoleBinding of the Substrate namespace are ignored here (the suite applies no other
+		// namespace). The ones of the release namespace are objects.
+		Expect(ca.Ignored).To(HaveKeyWithValue("Role", 1))
+		Expect(ca.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
+	})
+
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {
 		r := helmRender(ctx, filepath.Join(chartDir, "ci", "external-standalone-values.yaml"))
 		Expect(r.Ignored).NotTo(HaveKey("WorkerPool"))
