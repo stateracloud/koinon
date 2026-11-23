@@ -32,6 +32,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 const (
@@ -54,10 +56,10 @@ const (
 	// AteletContainer is the container of the atelet pod.
 	AteletContainer = "atelet"
 	// AteletAnnotation is the pod-template annotation that holds the hash of the CA. A new hash rolls atelet.
-	AteletAnnotation = "koinon.dev/imagecache-ca-sha256"
+	AteletAnnotation = project.Domain + "/imagecache-ca-sha256"
 	// CacheAnnotation is the pod-template annotation that holds the hash of the cache certificates. A new hash rolls
 	// the cache pod, which reads its certificate at start.
-	CacheAnnotation = "koinon.dev/imagecache-tls-sha256"
+	CacheAnnotation = project.Domain + "/imagecache-tls-sha256"
 
 	tlsCertKey = "tls.crt"
 )

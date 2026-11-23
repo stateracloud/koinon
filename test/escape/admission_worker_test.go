@@ -81,6 +81,8 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		chartNetpol = "koinon-substrate-workers"
 		poolNetpol  = "pool-egress"
 		gcUser      = "system:serviceaccount:kube-system:generic-garbage-collector"
+		// The hook Job of issue #1191 (charts/koinon/templates/substrate-imagecache-ca.yaml). Not an installer identity.
+		caHook = "system:serviceaccount:koinon:koinon-imagecache-ca"
 	)
 
 	isTrue := true
@@ -135,7 +137,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		admin = kubernetes.NewForConfigOrDie(cfg)
 		as = map[string]*kubernetes.Clientset{"admin": admin}
 		asDyn = map[string]dynamic.Interface{"admin": dynamic.NewForConfigOrDie(cfg)}
-		for _, user := range []string{workerController, replicaSetController, daemonSetController, other, kubeadmAdmin, gcUser} {
+		for _, user := range []string{workerController, replicaSetController, daemonSetController, other, kubeadmAdmin, gcUser, caHook} {
 			// Full RBAC rights, so that only admission can say no.
 			_, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-worker-" + strings.ReplaceAll(user, ":", "-")},
@@ -178,6 +180,21 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		Expect(err).NotTo(HaveOccurred())
 		_, err = admin.CoreV1().Pods(controlNamespace).Create(ctx, worker(existing), metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
+
+		// The atelet DaemonSet and another one, which the CA stamp cases (issue 1191) update.
+		for _, name := range []string{"atelet", "other-ds"} {
+			_, err = admin.AppsV1().DaemonSets(controlNamespace).Create(ctx, &appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec: appsv1.DaemonSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}, Annotations: map[string]string{"keep": "me"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name, Image: workerDigest}}},
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
 
 		// The NetworkPolicies the guard cases act on exist before the policies do.
 		for _, n := range []string{chartNetpol, poolNetpol} {
@@ -481,6 +498,89 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			denied(create(ctx, replicaSetController, controlNamespace, worker("with-hostpath")))
 			denied(create(ctx, replicaSetController, controlNamespace, plain("host-network", func(p *corev1.Pod) { p.Spec.HostNetwork = true })))
 			denied(create(ctx, replicaSetController, controlNamespace, plain("tag", func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/x:v1" })))
+		})
+	})
+
+	// The CA hook Job of issue #1191 rolls atelet by one annotation on its pod template. The rule is narrow: one
+	// ServiceAccount, one DaemonSet, one UPDATE, one annotation key. The ServiceAccount is not an installer identity.
+	Describe("the image cache CA stamp (issue 1191)", func() {
+		const stamp = "koinon.dev/imagecache-ca-sha256"
+		update := func(ctx context.Context, user, name string, mutate func(*appsv1.DaemonSet)) error {
+			GinkgoHelper()
+			ds, err := admin.AppsV1().DaemonSets(controlNamespace).Get(ctx, name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			mutate(ds)
+			_, err = as[user].AppsV1().DaemonSets(controlNamespace).Update(ctx, ds, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+			return err
+		}
+		annotate := func(ds *appsv1.DaemonSet) {
+			ds.Spec.Template.Annotations[stamp] = strings.Repeat("ab", 32)
+		}
+		It("lets the hook Job change only the CA stamp of the atelet pod template", func(ctx SpecContext) {
+			Expect(update(ctx, caHook, "atelet", annotate)).To(Succeed())
+		})
+		It("denies every other change by the hook Job", func(ctx SpecContext) {
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Spec.Containers[0].Image = "registry.invalid/x:v1" }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) {
+				ds.Spec.Template.Spec.Containers[0].Env = append(ds.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "X", Value: "1"})
+			}))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) {
+				ds.Spec.Template.Spec.Volumes = append(ds.Spec.Template.Spec.Volumes, corev1.Volume{Name: "h", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
+			}))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) {
+				privileged := true
+				ds.Spec.Template.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: &privileged}
+			}))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Annotations["other"] = "x" }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { delete(ds.Spec.Template.Annotations, "keep") }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Labels["extra"] = "x" }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Labels = map[string]string{"x": "y"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Annotations = map[string]string{"x": "y"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) {
+				ds.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "gone", UID: "22222222-2222-2222-2222-222222222222"}}
+			}))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Finalizers = []string{"example.com/hold"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Finalizers = []string{"example.com/hold"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.MinReadySeconds = 3600 }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { limit := int32(1); ds.Spec.RevisionHistoryLimit = &limit }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Annotations[stamp] = "not-a-hash" }))
+		})
+		It("denies the stamp on another DaemonSet, and a create or a delete by the hook Job", func(ctx SpecContext) {
+			denied(update(ctx, caHook, "other-ds", annotate))
+			_, err := as[caHook].AppsV1().DaemonSets(controlNamespace).Create(ctx, &appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "new-ds"},
+				Spec: appsv1.DaemonSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "n"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "n"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "n", Image: workerDigest}}},
+					},
+				},
+			}, dryRun)
+			denied(err)
+			denied(as[caHook].AppsV1().DaemonSets(controlNamespace).Delete(ctx, "atelet", metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}}))
+		})
+		It("denies the stamp to every other identity", func(ctx SpecContext) {
+			denied(update(ctx, other, "atelet", annotate))
+			denied(update(ctx, workerController, "atelet", annotate))
+		})
+		It("denies the hook Job a stamp on a DaemonSet of the worker namespace", func(ctx SpecContext) {
+			_, err := admin.AppsV1().DaemonSets(workerNamespace).Create(ctx, &appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "atelet"},
+				Spec: appsv1.DaemonSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "atelet"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "atelet"}, Annotations: map[string]string{}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "atelet", Image: workerDigest}}},
+					},
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			ds, err := admin.AppsV1().DaemonSets(workerNamespace).Get(ctx, "atelet", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			ds.Spec.Template.Annotations = map[string]string{stamp: strings.Repeat("ab", 32)}
+			_, err = as[caHook].AppsV1().DaemonSets(workerNamespace).Update(ctx, ds, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+			denied(err)
 		})
 	})
 

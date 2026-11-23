@@ -65,9 +65,13 @@ var _ = Describe("substrate worker namespace", func() {
 		c := job.Spec.Template.Spec.Containers[0]
 		Expect(c.Args).To(ContainElements("imagecache-ca", "--substrate-namespace=ate-system"))
 		Expect(c.Args).To(ContainElement(HavePrefix("--tls-secret=")))
+		Expect(c.Args).To(ContainElement("--cache-deployment=koinon-imagecache"))
+		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("koinon-imagecache-ca"))
 		Expect(c.Env).To(ContainElement(HaveField("Name", "POD_NAMESPACE")))
-		Expect(ca.Ignored).To(HaveKeyWithValue("Role", 2))
-		Expect(ca.Ignored).To(HaveKeyWithValue("RoleBinding", 2))
+		// The Role and the RoleBinding of the Substrate namespace are ignored here (the suite applies no other
+		// namespace). The ones of the release namespace are objects.
+		Expect(ca.Ignored).To(HaveKeyWithValue("Role", 1))
+		Expect(ca.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
 	})
 
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {
