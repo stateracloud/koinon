@@ -71,6 +71,15 @@ const (
 	// ConnectionServiceDeleteGitHubLinkProcedure is the procedure name of the ConnectionService's
 	// DeleteGitHubLink RPC.
 	ConnectionServiceDeleteGitHubLinkProcedure = "/koinon.connection.v1alpha1.ConnectionService/DeleteGitHubLink"
+	// ConnectionServiceStartGitHubAppSetupProcedure is the procedure name of the ConnectionService's
+	// StartGitHubAppSetup RPC.
+	ConnectionServiceStartGitHubAppSetupProcedure = "/koinon.connection.v1alpha1.ConnectionService/StartGitHubAppSetup"
+	// ConnectionServiceContinueGitHubAppSetupProcedure is the procedure name of the ConnectionService's
+	// ContinueGitHubAppSetup RPC.
+	ConnectionServiceContinueGitHubAppSetupProcedure = "/koinon.connection.v1alpha1.ConnectionService/ContinueGitHubAppSetup"
+	// ConnectionServiceFinishGitHubAppSetupProcedure is the procedure name of the ConnectionService's
+	// FinishGitHubAppSetup RPC.
+	ConnectionServiceFinishGitHubAppSetupProcedure = "/koinon.connection.v1alpha1.ConnectionService/FinishGitHubAppSetup"
 )
 
 var (
@@ -185,6 +194,27 @@ var (
 			Procedure:  ConnectionServiceDeleteGitHubLinkProcedure,
 		}
 	})
+	connectionServiceStartGitHubAppSetupSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("StartGitHubAppSetup"),
+			Procedure:  ConnectionServiceStartGitHubAppSetupProcedure,
+		}
+	})
+	connectionServiceContinueGitHubAppSetupSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("ContinueGitHubAppSetup"),
+			Procedure:  ConnectionServiceContinueGitHubAppSetupProcedure,
+		}
+	})
+	connectionServiceFinishGitHubAppSetupSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("FinishGitHubAppSetup"),
+			Procedure:  ConnectionServiceFinishGitHubAppSetupProcedure,
+		}
+	})
 )
 
 // ConnectionServiceClient is a client for the koinon.connection.v1alpha1.ConnectionService service.
@@ -249,6 +279,19 @@ type ConnectionServiceClient interface {
 	// DeleteGitHubLink removes a GitHub link. A member removes their own link;
 	// admins and owners remove any link of the org. Audited.
 	DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error)
+	// StartGitHubAppSetup starts the guided setup of the org's own GitHub App
+	// (issue #1175): Koinon builds the App's manifest, and the browser posts it
+	// to GitHub, which creates the App. Admin or owner.
+	StartGitHubAppSetup(context.Context, *v1alpha1.StartGitHubAppSetupRequest) (*v1alpha1.StartGitHubAppSetupResponse, error)
+	// ContinueGitHubAppSetup takes the code GitHub sends back after it created
+	// the App. Koinon trades it for the App's private key and OAuth client and
+	// stores them in the secret store. The browser then installs the App. Admin
+	// or owner, the same user who started the setup.
+	ContinueGitHubAppSetup(context.Context, *v1alpha1.ContinueGitHubAppSetupRequest) (*v1alpha1.ContinueGitHubAppSetupResponse, error)
+	// FinishGitHubAppSetup takes the installation GitHub sends back after the
+	// install and makes the connection. Admin or owner, the same user who
+	// started the setup.
+	FinishGitHubAppSetup(context.Context, *v1alpha1.FinishGitHubAppSetupRequest) (*v1alpha1.FinishGitHubAppSetupResponse, error)
 }
 
 // NewConnectionServiceClient constructs a client for the
@@ -321,6 +364,19 @@ type ConnectionServiceHandler interface {
 	// DeleteGitHubLink removes a GitHub link. A member removes their own link;
 	// admins and owners remove any link of the org. Audited.
 	DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error)
+	// StartGitHubAppSetup starts the guided setup of the org's own GitHub App
+	// (issue #1175): Koinon builds the App's manifest, and the browser posts it
+	// to GitHub, which creates the App. Admin or owner.
+	StartGitHubAppSetup(context.Context, *v1alpha1.StartGitHubAppSetupRequest) (*v1alpha1.StartGitHubAppSetupResponse, error)
+	// ContinueGitHubAppSetup takes the code GitHub sends back after it created
+	// the App. Koinon trades it for the App's private key and OAuth client and
+	// stores them in the secret store. The browser then installs the App. Admin
+	// or owner, the same user who started the setup.
+	ContinueGitHubAppSetup(context.Context, *v1alpha1.ContinueGitHubAppSetupRequest) (*v1alpha1.ContinueGitHubAppSetupResponse, error)
+	// FinishGitHubAppSetup takes the installation GitHub sends back after the
+	// install and makes the connection. Admin or owner, the same user who
+	// started the setup.
+	FinishGitHubAppSetup(context.Context, *v1alpha1.FinishGitHubAppSetupRequest) (*v1alpha1.FinishGitHubAppSetupResponse, error)
 }
 
 // RegisterConnectionServiceHandler registers svc as the
@@ -343,6 +399,9 @@ func RegisterConnectionServiceHandler(server *connect.Server, svc ConnectionServ
 		connect.Method{Spec: connectionServiceListMyGitHubLinksSpec(), Handler: adapter.listMyGitHubLinks},
 		connect.Method{Spec: connectionServiceListGitHubLinksSpec(), Handler: adapter.listGitHubLinks},
 		connect.Method{Spec: connectionServiceDeleteGitHubLinkSpec(), Handler: adapter.deleteGitHubLink},
+		connect.Method{Spec: connectionServiceStartGitHubAppSetupSpec(), Handler: adapter.startGitHubAppSetup},
+		connect.Method{Spec: connectionServiceContinueGitHubAppSetupSpec(), Handler: adapter.continueGitHubAppSetup},
+		connect.Method{Spec: connectionServiceFinishGitHubAppSetupSpec(), Handler: adapter.finishGitHubAppSetup},
 	)
 }
 
@@ -407,6 +466,18 @@ func (UnimplementedConnectionServiceHandler) ListGitHubLinks(context.Context, *v
 
 func (UnimplementedConnectionServiceHandler) DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.DeleteGitHubLink is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) StartGitHubAppSetup(context.Context, *v1alpha1.StartGitHubAppSetupRequest) (*v1alpha1.StartGitHubAppSetupResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.StartGitHubAppSetup is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) ContinueGitHubAppSetup(context.Context, *v1alpha1.ContinueGitHubAppSetupRequest) (*v1alpha1.ContinueGitHubAppSetupResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.ContinueGitHubAppSetup is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) FinishGitHubAppSetup(context.Context, *v1alpha1.FinishGitHubAppSetupRequest) (*v1alpha1.FinishGitHubAppSetupResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.FinishGitHubAppSetup is not implemented")
 }
 
 type connectionServiceClient struct {
@@ -528,6 +599,30 @@ func (c *connectionServiceClient) ListGitHubLinks(ctx context.Context, req *v1al
 func (c *connectionServiceClient) DeleteGitHubLink(ctx context.Context, req *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error) {
 	var res v1alpha1.DeleteGitHubLinkResponse
 	if err := c.client.CallUnary(ctx, connectionServiceDeleteGitHubLinkSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) StartGitHubAppSetup(ctx context.Context, req *v1alpha1.StartGitHubAppSetupRequest) (*v1alpha1.StartGitHubAppSetupResponse, error) {
+	var res v1alpha1.StartGitHubAppSetupResponse
+	if err := c.client.CallUnary(ctx, connectionServiceStartGitHubAppSetupSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) ContinueGitHubAppSetup(ctx context.Context, req *v1alpha1.ContinueGitHubAppSetupRequest) (*v1alpha1.ContinueGitHubAppSetupResponse, error) {
+	var res v1alpha1.ContinueGitHubAppSetupResponse
+	if err := c.client.CallUnary(ctx, connectionServiceContinueGitHubAppSetupSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) FinishGitHubAppSetup(ctx context.Context, req *v1alpha1.FinishGitHubAppSetupRequest) (*v1alpha1.FinishGitHubAppSetupResponse, error) {
+	var res v1alpha1.FinishGitHubAppSetupResponse
+	if err := c.client.CallUnary(ctx, connectionServiceFinishGitHubAppSetupSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -709,6 +804,42 @@ func (h connectionServiceHandler) deleteGitHubLink(ctx context.Context, _ connec
 		return err
 	}
 	res, err := h.svc.DeleteGitHubLink(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) startGitHubAppSetup(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.StartGitHubAppSetupRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.StartGitHubAppSetup(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) continueGitHubAppSetup(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ContinueGitHubAppSetupRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ContinueGitHubAppSetup(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) finishGitHubAppSetup(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.FinishGitHubAppSetupRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.FinishGitHubAppSetup(ctx, &req)
 	if err != nil {
 		return err
 	}

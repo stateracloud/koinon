@@ -2105,6 +2105,23 @@ type GatewayStateRevision struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type GithubAppSetup struct {
+	OrgID          pgtype.UUID
+	StateHash      []byte
+	UserID         pgtype.UUID
+	ConnectionID   pgtype.UUID
+	DisplayName    string
+	BaseUrl        string
+	CaBundle       string
+	GithubOwner    string
+	AppID          pgtype.Int8
+	AppSlug        pgtype.Text
+	ClientID       pgtype.Text
+	SecretEnvelope []byte
+	CreatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
+}
+
 type GithubLinkFlow struct {
 	OrgID        pgtype.UUID
 	StateHash    []byte

@@ -74,6 +74,8 @@ type Fake struct {
 	polls      map[string]*pollFeed
 	codes      map[string]authCode
 	userTokens map[string]*userToken
+	manifests  map[string]Manifest // manifest codes not yet converted
+	created    *Manifest           // the App created from a manifest
 }
 
 // tokenInfo is what a minted token may do.
@@ -168,6 +170,7 @@ func NewUnstarted() *Fake {
 	f.routeRepos(mux)
 	f.routePolls(mux)
 	f.routeUserAuth(mux)
+	f.routeManifests(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})

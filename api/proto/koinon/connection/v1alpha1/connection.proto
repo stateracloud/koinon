@@ -101,6 +101,22 @@ service ConnectionService {
   // DeleteGitHubLink removes a GitHub link. A member removes their own link;
   // admins and owners remove any link of the org. Audited.
   rpc DeleteGitHubLink(DeleteGitHubLinkRequest) returns (DeleteGitHubLinkResponse);
+
+  // StartGitHubAppSetup starts the guided setup of the org's own GitHub App
+  // (issue #1175): Koinon builds the App's manifest, and the browser posts it
+  // to GitHub, which creates the App. Admin or owner.
+  rpc StartGitHubAppSetup(StartGitHubAppSetupRequest) returns (StartGitHubAppSetupResponse);
+
+  // ContinueGitHubAppSetup takes the code GitHub sends back after it created
+  // the App. Koinon trades it for the App's private key and OAuth client and
+  // stores them in the secret store. The browser then installs the App. Admin
+  // or owner, the same user who started the setup.
+  rpc ContinueGitHubAppSetup(ContinueGitHubAppSetupRequest) returns (ContinueGitHubAppSetupResponse);
+
+  // FinishGitHubAppSetup takes the installation GitHub sends back after the
+  // install and makes the connection. Admin or owner, the same user who
+  // started the setup.
+  rpc FinishGitHubAppSetup(FinishGitHubAppSetupRequest) returns (FinishGitHubAppSetupResponse);
 }
 
 // Tier is a scope's risk tier (ADR 0008).
@@ -488,3 +504,57 @@ message DeleteGitHubLinkRequest {
 }
 
 message DeleteGitHubLinkResponse {}
+
+// StartGitHubAppSetupRequest names the connection and where the App lives.
+message StartGitHubAppSetupRequest {
+  string org_id = 1;
+  // The connection's display name; it is also the App's name on GitHub,
+  // which must be unique there.
+  string display_name = 2;
+  // The GitHub organization that owns the App; empty for the admin's own
+  // account.
+  string github_owner = 3;
+  // A GitHub Enterprise Server base URL; empty for github.com.
+  string base_url = 4;
+  // PEM certificates that trust base_url, when no system root does.
+  string ca_bundle = 5;
+}
+
+// StartGitHubAppSetupResponse is the form the browser posts to GitHub: to
+// post_url, with the field "manifest". The setup works once and expires after
+// one hour.
+message StartGitHubAppSetupResponse {
+  string post_url = 1;
+  // The App manifest, as JSON text.
+  string manifest = 2;
+  // The setup's state. GitHub sends it back with each step.
+  string state = 3;
+}
+
+// ContinueGitHubAppSetupRequest carries what GitHub sent back after it
+// created the App.
+message ContinueGitHubAppSetupRequest {
+  string org_id = 1;
+  string state = 2;
+  string code = 3;
+}
+
+// ContinueGitHubAppSetupResponse holds the GitHub page that installs the App.
+message ContinueGitHubAppSetupResponse {
+  string install_url = 1;
+  string app_slug = 2;
+}
+
+// FinishGitHubAppSetupRequest carries what GitHub sent back after the
+// install.
+message FinishGitHubAppSetupRequest {
+  string org_id = 1;
+  string state = 2;
+  int64 installation_id = 3;
+}
+
+// FinishGitHubAppSetupResponse is the new connection and its first test.
+message FinishGitHubAppSetupResponse {
+  Connection connection = 1;
+  repeated CheckResult results = 2;
+}

@@ -88,10 +88,24 @@ format of the open questions above exact.
    does not count the author's approval.
 2. **One GitHub App for each customer org.** The org creates its own App through GitHub's manifest
    flow, from a guided setup in Koinon. There is no shared Stateracloud App: every self-hosted
-   install would then need its private key. The conversion returns the App's private key, its
-   OAuth client secret and its webhook secret. Koinon puts them in the secret store (the sealed
-   connection envelope, [0056](0056-model-providers-pricing-and-budgets-per-org.md)) and never in a sandbox. The webhook is off:
-   Koinon polls.
+   install would then need its private key. The webhook is off, because Koinon polls. The setup
+   has three steps, all by the same org admin, each within one hour of the step before it:
+   - Start. Koinon builds a private manifest with the permissions of the connector type's setup
+     guide (never a forbidden permission) and the Koinon pages GitHub returns to. The browser posts
+     the manifest to GitHub's "new App" page. Koinon stores only the hash of the one-time state.
+   - Continue. GitHub returns a one-time code. koinon-api trades it for the App's ID, private key
+     and OAuth client (`POST /app-manifests/{code}/conversions`) and seals the key and the client
+     secret at once in the secret store (the sealed connection envelope,
+     [0056](0056-model-providers-pricing-and-budgets-per-org.md)), under the connection ID the
+     setup reserved. They are never shown, logged or sent to a sandbox. Koinon does not keep a
+     webhook secret. Audit records `github_app.create`.
+   - Finish. After the install, GitHub returns the installation ID through the browser. koinon-api
+     makes sure, as the App, that the installation belongs to the App, then makes the connection
+     with the sealed envelope and tests it. The state then stops working.
+
+   An App made by hand still works through the old form, but it has no OAuth client, so its users
+   cannot link their GitHub login (item 5). The setup needs Koinon's public URL. If the setup
+   expires after GitHub created the App, the admin deletes that App on GitHub and starts again.
 3. **Commit trailers.** Every commit names `Requested-by`, `Approved-by` and `Koinon-Approval`
    (unchanged; `internal/approvals/execute.go`).
 4. **Pull request footer.** koinon-api appends a footer to the body of every agent pull request:

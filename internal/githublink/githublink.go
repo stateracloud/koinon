@@ -116,6 +116,9 @@ type Link struct {
 
 func (s *Service) redirectURI() string { return s.opts.PublicURL + CallbackPath }
 
+// PublicURL is Koinon's public URL, or "" when the operator did not set one.
+func (s *Service) PublicURL() string { return s.opts.PublicURL }
+
 // linker returns the GitHub provider and the loaded connection.
 func (s *Service) linker(ctx context.Context, org, connID pgtype.UUID) (Linker, codehost.Connection, error) {
 	row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: connID})

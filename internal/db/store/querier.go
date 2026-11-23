@@ -273,6 +273,10 @@ type Querier interface {
 	CreateConnectionWithEnvelope(ctx context.Context, arg CreateConnectionWithEnvelopeParams) (Connection, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
+	// The guided GitHub App setup (issue #1175). Every query takes @org_id (TestQueriesAreOrgScoped).
+	CreateGitHubAppSetup(ctx context.Context, arg CreateGitHubAppSetupParams) error
+	// SPDX-License-Identifier: Apache-2.0
+	//
 	// GitHub sign-in links (issue #1175). Every query takes @org_id (TestQueriesAreOrgScoped).
 	CreateGitHubLinkFlow(ctx context.Context, arg CreateGitHubLinkFlowParams) error
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
@@ -360,9 +364,11 @@ type Querier interface {
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
+	DeleteExpiredGitHubAppSetups(ctx context.Context, arg DeleteExpiredGitHubAppSetupsParams) error
 	DeleteExpiredGitHubLinkFlows(ctx context.Context, arg DeleteExpiredGitHubLinkFlowsParams) error
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	DeleteGitHubAppSetup(ctx context.Context, arg DeleteGitHubAppSetupParams) (int64, error)
 	DeleteGitHubUserLink(ctx context.Context, arg DeleteGitHubUserLinkParams) (GithubUserLink, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) (int64, error)
@@ -532,6 +538,9 @@ type Querier interface {
 	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
 	// while it was down keeps being served with the previous file until the new one has arrived.
 	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
+	// The setup of this state, started by this user and not expired. No row: unknown, used, expired or
+	// started by another user.
+	GetGitHubAppSetup(ctx context.Context, arg GetGitHubAppSetupParams) (GithubAppSetup, error)
 	GetGitHubUserLink(ctx context.Context, arg GetGitHubUserLinkParams) (GithubUserLink, error)
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
 	// The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
@@ -1589,6 +1598,8 @@ type Querier interface {
 	// is not served for them by design (ADR 0041), so it is failed with a reason instead of waiting.
 	// Runs after ClearGatewayProviderFailures; a failure the apply itself recorded stays.
 	SetGatewayUnpricedFailures(ctx context.Context, arg SetGatewayUnpricedFailuresParams) error
+	// Records the App GitHub created, once: a second conversion of the same setup changes nothing.
+	SetGitHubAppSetupApp(ctx context.Context, arg SetGitHubAppSetupAppParams) (int64, error)
 	// Sets the marker unless it is set: the first setting stays (the row is never updated).
 	SetKEKBoundOnly(ctx context.Context, setBy string) error
 	// The worker of epoch has read feed_read finished tool calls from the harness and recorded the first

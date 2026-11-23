@@ -107,7 +107,8 @@ func basicAuth(user, pass string) string {
 	return strings.TrimPrefix(r.Header.Get("Authorization"), "Basic ")
 }
 
-// userCall is one REST call with an Authorization header that is not an installation token.
+// userCall is one REST call with an Authorization header that is not an installation token, or
+// with none for an empty authorization (the manifest conversion).
 func (c *Client) userCall(ctx context.Context, method, path, authorization string, body, out any, want int) error {
 	var rd io.Reader
 	if body != nil {
@@ -123,7 +124,9 @@ func (c *Client) userCall(ctx context.Context, method, path, authorization strin
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", APIVersion)
-	req.Header.Set("Authorization", authorization)
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

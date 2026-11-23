@@ -7483,6 +7483,15 @@
               "deprecated": false
             },
             {
+              "name": "ContinueGitHubAppSetup",
+              "description": "ContinueGitHubAppSetup takes the code GitHub sends back after it created\nthe App. Koinon trades it for the App's private key and OAuth client and\nstores them in the secret store. The browser then installs the App. Admin\nor owner, the same user who started the setup.",
+              "requestType": "koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest",
+              "responseType": "koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "CreateGitHubConnection",
               "description": "CreateGitHubConnection creates a GitHub App connection. The private key\nis stored encrypted and never returned. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.CreateGitHubConnectionRequest",
@@ -7514,6 +7523,15 @@
               "description": "DeleteGitHubLink removes a GitHub link. A member removes their own link;\nadmins and owners remove any link of the org. Audited.",
               "requestType": "koinon.connection.v1alpha1.DeleteGitHubLinkRequest",
               "responseType": "koinon.connection.v1alpha1.DeleteGitHubLinkResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "FinishGitHubAppSetup",
+              "description": "FinishGitHubAppSetup takes the installation GitHub sends back after the\ninstall and makes the connection. Admin or owner, the same user who\nstarted the setup.",
+              "requestType": "koinon.connection.v1alpha1.FinishGitHubAppSetupRequest",
+              "responseType": "koinon.connection.v1alpha1.FinishGitHubAppSetupResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -7586,6 +7604,15 @@
               "description": "SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private\nkey, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is\nentered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector\nis required; the other settings stay. It clears the lost mark and the last test result. A\ndeclared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).\nAudited without the secret. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.SetConnectionSecretRequest",
               "responseType": "koinon.connection.v1alpha1.SetConnectionSecretResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "StartGitHubAppSetup",
+              "description": "StartGitHubAppSetup starts the guided setup of the org's own GitHub App\n(issue #1175): Koinon builds the App's manifest, and the browser posts it\nto GitHub, which creates the App. Admin or owner.",
+              "requestType": "koinon.connection.v1alpha1.StartGitHubAppSetupRequest",
+              "responseType": "koinon.connection.v1alpha1.StartGitHubAppSetupResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -7982,6 +8009,69 @@
           ]
         },
         {
+          "name": "ContinueGitHubAppSetupRequest",
+          "fullName": "koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "ContinueGitHubAppSetupRequest carries what GitHub sent back after it\ncreated the App.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "state",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "code",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ContinueGitHubAppSetupResponse",
+          "fullName": "koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "ContinueGitHubAppSetupResponse holds the GitHub page that installs the App.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "install_url",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "app_slug",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "CreateGitHubConnectionRequest",
           "fullName": "koinon.connection.v1alpha1.CreateGitHubConnectionRequest",
           "file": "koinon/connection/v1alpha1/connection.proto",
@@ -8284,6 +8374,69 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "FinishGitHubAppSetupRequest",
+          "fullName": "koinon.connection.v1alpha1.FinishGitHubAppSetupRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "FinishGitHubAppSetupRequest carries what GitHub sent back after the\ninstall.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "state",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "installation_id",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "FinishGitHubAppSetupResponse",
+          "fullName": "koinon.connection.v1alpha1.FinishGitHubAppSetupResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "FinishGitHubAppSetupResponse is the new connection and its first test.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "connection",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.Connection",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "results",
+              "number": 2,
+              "type": "koinon.connection.v1alpha1.CheckResult",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
         },
         {
           "name": "GetConnectionRequest",
@@ -9028,6 +9181,96 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StartGitHubAppSetupRequest",
+          "fullName": "koinon.connection.v1alpha1.StartGitHubAppSetupRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "StartGitHubAppSetupRequest names the connection and where the App lives.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The connection's display name; it is also the App's name on GitHub,\nwhich must be unique there."
+            },
+            {
+              "name": "github_owner",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The GitHub organization that owns the App; empty for the admin's own\naccount."
+            },
+            {
+              "name": "base_url",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A GitHub Enterprise Server base URL; empty for github.com."
+            },
+            {
+              "name": "ca_bundle",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "PEM certificates that trust base_url, when no system root does."
+            }
+          ]
+        },
+        {
+          "name": "StartGitHubAppSetupResponse",
+          "fullName": "koinon.connection.v1alpha1.StartGitHubAppSetupResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "StartGitHubAppSetupResponse is the form the browser posts to GitHub: to\npost_url, with the field \"manifest\". The setup works once and expires after\none hour.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "post_url",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "manifest",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The App manifest, as JSON text."
+            },
+            {
+              "name": "state",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The setup's state. GitHub sends it back with each step."
             }
           ]
         },

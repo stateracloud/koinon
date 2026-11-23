@@ -19,6 +19,7 @@ import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
 import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
+import { GitHubAppCreatedPage, GitHubAppInstalledPage } from '@/pages/github-app-setup-pages'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
 import { LoginPage } from '@/pages/login-page'
 import { TaskPage } from '@/pages/task-page'
@@ -84,6 +85,25 @@ export const newGitHubConnectionRoute = createRoute({
   path: '/connections/new/github',
   component: NewGitHubConnectionPage,
 })
+const searchString = (v: unknown) => (typeof v === 'string' && v.length <= 512 ? v : undefined)
+// GitHub sends the browser here during the guided App setup (issue #1175).
+export const githubAppCreatedRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/github/app-created',
+  validateSearch: (s: Record<string, unknown>): { code?: string; state?: string } => ({ code: searchString(s.code), state: searchString(s.state) }),
+  component: GitHubAppCreatedPage,
+})
+export const githubAppInstalledRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/github/app-installed',
+  validateSearch: (s: Record<string, unknown>): { installation_id?: string; setup_action?: string; state?: string } => ({
+    // A router may parse a numeric parameter as a number.
+    installation_id: typeof s.installation_id === 'number' ? String(s.installation_id) : searchString(s.installation_id),
+    setup_action: searchString(s.setup_action),
+    state: searchString(s.state),
+  }),
+  component: GitHubAppInstalledPage,
+})
 export const newGiteaConnectionRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/connections/new/gitea',
@@ -114,6 +134,8 @@ const routeTree = rootRoute.addChildren([
     agentRoute,
     connectionsRoute,
     newGitHubConnectionRoute,
+    githubAppCreatedRoute,
+    githubAppInstalledRoute,
     newGiteaConnectionRoute,
     connectionRoute,
     providersRoute,
