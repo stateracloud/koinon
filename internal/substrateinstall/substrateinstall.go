@@ -36,6 +36,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/stateracloud/koinon/internal/imagecacheca"
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
@@ -532,6 +533,10 @@ func (i *Installer) Install(ctx context.Context) error {
 		keepBuild = true
 		return fmt.Errorf("ate-setup %s: %w\nate-setup may have left a partial install. Remove it with the same pinned ate-setup, then run the installer again (the build directory %s stays so that command can run; delete it after the cleanup):\n  %s",
 			PinnedVersion, err, setup.Root(), cleanupCommand(setup, platform, i.Checker.Config.SubstrateOrDefault().Namespace, i.Kubeconfig, i.Context))
+	}
+	// atelet trusts the image cache CA on every route: kind and generic have the overlay patch, gke gets it here (#1194).
+	if err := imagecacheca.EnsureTrust(ctx, i.Kube, i.Checker.Config.SubstrateOrDefault().Namespace, i.Out); err != nil {
+		return err
 	}
 	if _, err := i.EnsureAPIAuthentication(ctx, profile.ExpectedJWTIssuer); err != nil {
 		return err

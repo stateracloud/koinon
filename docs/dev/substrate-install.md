@@ -419,17 +419,24 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     cause a second restart after that. On the first install the cache Deployment does not exist yet, so the Job cannot
     stamp it. The cache starts with the current Secret, and the first `helm upgrade` adds the stamp. That upgrade
     restarts the cache pod once.
+  - Every route gets the same patch. The installer adds it on the kind and generic routes through the overlay. On the
+    gke route the installer does not know the overlay directory of the pinned tree, so after `ate-setup` it adds the
+    same volume, mount and `SSL_CERT_DIR` to the live atelet DaemonSet (one definition in `internal/imagecacheca`,
+    `EnsureTrust`). It runs on every route and does nothing where the patch is there. It adds no container and no image,
+    so the admission policy is not weakened. The hook Job never adds the patch: it changes only the hash annotation of
+    atelet. Every run of `koinon-api substrate install` checks the patch at its end and adds it when it is missing.
   - Admission: the Job is not an installer identity. The policy `<ns>-<release>-worker-objects` admits one UPDATE by the
     Job's ServiceAccount: the atelet DaemonSet in `ate-system`, where only the template annotation
     `koinon.dev/imagecache-ca-sha256` changes. Any other change, DaemonSet, namespace, create or delete is denied.
     The rule renders only with the image cache.
   - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist or
-    has no patch (a Substrate from before this change, or the GKE route). The Job does not report success then.
+    has no trust patch (a Substrate from before this change). The Job does not report success then.
   - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet (admission limits that patch to
     the one annotation). The RBAC is a hook object: Helm
     deletes it after the Job. `helm uninstall` leaves the ConfigMap `koinon-imagecache-ca`: delete it by hand.
-  - The ConfigMap name is fixed (one Substrate install per cluster). The GKE route has no patch yet: the overlay
-    directory of that route is not known to the installer (needs main: a follow-up issue).
+  - **One Substrate install per cluster.** The ConfigMap name is fixed, because the installer does not know the release
+    name and one Substrate install has one atelet. Two releases that use the cache on one cluster share the ConfigMap:
+    do not do that. This limit is on purpose.
 - **Air gap.** Set `imageCache.enabled=false`. Name your mirror with `imageMirrors` (a map from host to mirror
   prefix) or `imageRegistry`, and allow it with `workerNetworkPolicy.imageSource`. The chart refuses the cache and
   an operator source together.

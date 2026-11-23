@@ -113,8 +113,8 @@ lacks "no Kyverno" '[Kk]yverno' "${isub[@]}" "${icache[@]}"
 # An IPv4-only except list renders no empty IPv6 except; a mixed list splits by family.
 has "an IPv6 except stays under ::/0" '"fc00::/7"' "${isub[@]}" --set 'execution.substrate.imageCache.egress.exceptCIDRs={10.0.0.0/8,fc00::/7}' "${icache[@]}"
 
-# atelet trusts the cache CA (issue #1191). The installer patches the atelet DaemonSet (internal/substrateinstall); this
-# hook Job fills the ConfigMap it mounts with the PUBLIC CA, and rolls atelet and the cache when the certificates change.
+# atelet trusts the cache CA (issue #1191). The installer patches the atelet DaemonSet on every route
+# (internal/substrateinstall, issue #1194); this hook Job fills the ConfigMap it mounts with the PUBLIC CA, and rolls atelet and the cache when the certificates change.
 icaf=(--show-only templates/substrate-imagecache-ca.yaml)
 lacks "no CA publishing without the cache" 'imagecache-ca' "${isub[@]}" --set execution.substrate.imageCache.enabled=false
 icadocs=$(render "${isub[@]}" "${icaf[@]}")
