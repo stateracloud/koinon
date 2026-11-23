@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -289,7 +291,7 @@ func toolText(res *mcp.CallToolResult) string {
 // auto-tier tool of the same server must be stopped at the gateway by the guard, and never reach the
 // server. The call is made outside a task, so the guard refuses it (an approval needs a run); inside
 // a task the same call is an approval of the exact call (step 6b's in-task case, internal/mcpguard).
-// write_item and search_items stay auto until the step ends: the in-task cases call them on the server's own target.
+// write_item, fetch_url and search_items stay auto until the step ends: the in-task cases call them on the server's own target.
 func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), session *mcp.ClientSession, fake, serverID, agentID, key, private string) {
 	GinkgoHelper()
 	By("with both legs, an external-high call carrying what the session read is stopped by the leak guard")
@@ -419,6 +421,49 @@ func portForward(ctx context.Context, kubectl, target, port string) string {
 		return err
 	}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(500 * time.Millisecond).Should(Succeed())
 	return addr
+}
+
+// setToolSinkE2E declares a tool's sink as the console does: it reads the tool's content hash first and
+// sends it with the declaration (sink is the JSON of the declaration).
+func setToolSinkE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), serverID, tool, sink string) {
+	GinkgoHelper()
+	code, body := admin(ctx, http.MethodGet, "/mcp-servers/"+serverID+"/tools")
+	Expect(code).To(Equal(http.StatusOK), string(body))
+	var list struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			ContentHash string `json:"contentHash"`
+		} `json:"tools"`
+	}
+	Expect(json.Unmarshal(body, &list)).To(Succeed())
+	hash := ""
+	for _, t := range list.Tools {
+		if t.Name == tool {
+			hash = t.ContentHash
+		}
+	}
+	Expect(hash).NotTo(BeEmpty(), "%s must be in the server's tool list: %s", tool, body)
+	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+tool+"/sink", fmt.Sprintf(`{"contentHash":%q,"sink":%s}`, hash, sink))
+	Expect(code).To(Equal(http.StatusOK), string(body))
+}
+
+// guardDecisions reads koinon_api_mcp_guard_decisions_total for one decision, reason and sink class from
+// koinon-api, where the leak guard runs behind the default gateway driver (agentgateway) with one
+// replica. The counter has fixed labels (ADR 0023), so the e2e compares it before and after a task.
+func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass string) float64 {
+	GinkgoHelper()
+	res, err := http.Get("http://" + portForward(ctx, kubectl, "deploy/koinon-api", "9090") + "/metrics")
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = res.Body.Close() }()
+	b, err := io.ReadAll(res.Body)
+	Expect(err).NotTo(HaveOccurred())
+	re := regexp.MustCompile(`(?m)^koinon_api_mcp_guard_decisions_total\{decision="` + regexp.QuoteMeta(decision) +
+		`",reason="` + regexp.QuoteMeta(reason) + `",sink_class="` + regexp.QuoteMeta(sinkClass) + `"\} (\S+)$`)
+	m := re.FindSubmatch(b)
+	Expect(m).NotTo(BeNil(), "koinon-api exports the guard's decisions for %s/%s/%s", decision, reason, sinkClass)
+	n, err := strconv.ParseFloat(string(m[1]), 64)
+	Expect(err).NotTo(HaveOccurred())
+	return n
 }
 
 // setToolTierE2E sets a tool's tier as the console does: it reads the tool's text hash first and sends
