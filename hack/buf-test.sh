@@ -49,7 +49,7 @@ PATH="$tmp/bin:$PATH" make -s breaking
 want_tool "make breaking" breaking --against '.git#branch=main'
 
 # 3. The preflight gate `proto` and `make generate` (hack/generate.sh): no bare buf call, they go through hack/buf.sh.
-bare='(^|[[:space:];&|])buf (lint|breaking|generate|build|format|--)'
+bare='(^|[[:space:];&|])buf (lint|breaking|generate|build|format|dep|export|convert|config|push|curl|registry|--)'
 ! grep -nE "^[^#]*$bare" hack/preflight.sh || fail "hack/preflight.sh calls a bare buf"
 grep -q 'hack/buf.sh lint' hack/preflight.sh || fail "preflight gate proto does not run hack/buf.sh lint"
 grep -q 'hack/buf.sh breaking' hack/preflight.sh || fail "preflight gate proto does not run hack/buf.sh breaking"
@@ -59,10 +59,10 @@ grep -q '^buf_sh=.*/buf.sh$' hack/generate.sh || fail "hack/generate.sh does not
 echo "ok: preflight and generate use hack/buf.sh"
 
 # 4. No script, Makefile or workflow runs a global buf or installs one with buf-action.
-for f in Makefile hack/*.sh .github/workflows/*.yml .github/actions/*/action.yml; do
+for f in Makefile hack/*.sh .github/workflows/*.y*ml .github/actions/*/action.yml; do
 	[[ -f $f && $f != hack/buf-test.sh && $f != hack/buf.sh && $f != hack/generate.sh && $f != hack/versions-check.sh && $f != hack/versions-check-test.sh ]] || continue
 	! grep -nE "^[^#]*$bare" "$f" | grep -vE 'echo|printf' || fail "$f calls a global buf"
-	! grep -nE 'uses:[[:space:]]*bufbuild/buf-action' "$f" || fail "$f installs buf with bufbuild/buf-action"
+	! grep -nE 'uses:[[:space:]]*bufbuild/buf-(setup-)?action' "$f" || fail "$f installs buf with bufbuild/buf-action"
 done
 echo "ok: no global buf, no buf-action"
 

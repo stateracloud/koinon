@@ -205,6 +205,7 @@ lane scripts - preflight
 gate go \.go$
 gate deps (^|/)(go\.mod|go\.sum|package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|Dockerfile[^/]*)$
 gate proto \.proto$
+gate proto ^hack/(buf\.sh|tools/buf/)
 gate migrate ^internal/db/migrations/
 gate adr ^(docs/(adr|research|spikes|metadata)/|hack/(adr-|doc-meta-))
 gate shell \.sh$
