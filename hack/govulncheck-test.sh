@@ -14,7 +14,7 @@ trap 'rm -rf "$tmp"' EXIT
 fail() { echo "govulncheck-test: $*" >&2; exit 1; }
 
 mkdir -p "$tmp/bin"
-# `go install pkg@version` (GOBIN set) writes a govulncheck that exits FAKE_VULN_RC; FAKE_INSTALL_RC fails the install.
+# `go install pkg@version` (GOBIN set) writes a govulncheck that exits FAKE_VULN_RC (FAKE_VULN_BIN_RC for a -mode=binary scan); FAKE_INSTALL_RC fails the install.
 cat >"$tmp/bin/go" <<'EOF'
 #!/usr/bin/env bash
 echo "go $*" >>"$FAKE_LOG"
@@ -26,7 +26,7 @@ if [[ $1 == build ]]; then # go build -modfile=M -o OUT PKG: writes a stand-in b
 fi
 [[ $1 == install ]] || exit 64
 [[ ${FAKE_INSTALL_RC:-0} -eq 0 ]] || { echo "go: fake proxy unreachable" >&2; exit "$FAKE_INSTALL_RC"; }
-printf '#!/usr/bin/env bash\necho "govulncheck $* [GOTOOLCHAIN=${GOTOOLCHAIN:-}]" >>"$FAKE_LOG"\nexit "${FAKE_VULN_RC:-0}"\n' >"$GOBIN/govulncheck"
+printf '#!/usr/bin/env bash\necho "govulncheck $* [GOTOOLCHAIN=${GOTOOLCHAIN:-}]" >>"$FAKE_LOG"\nrc=${FAKE_VULN_RC:-0}\n[[ ${1:-} != -mode=binary ]] || rc=${FAKE_VULN_BIN_RC:-0}\nexit $rc\n' >"$GOBIN/govulncheck"
 chmod +x "$GOBIN/govulncheck"
 EOF
 chmod +x "$tmp/bin/go"
@@ -91,7 +91,9 @@ printf 'module example.invalid/buf\n\ngo 1.27.3\n' >hack/tools/buf/go.mod
 run "the buf tool binary is scanned" 0 "no reachable known vulnerability" FAKE_VULN_RC=0
 grep -qF 'go build -modfile=hack/tools/buf/go.mod' "$FAKE_LOG" || fail "the buf tool was not built from its modfile: $(cat "$FAKE_LOG")"
 grep -q '^govulncheck -mode=binary ' "$FAKE_LOG" || fail "the buf binary was not scanned"
-run "a finding in the buf tool fails with 1" 1 "FAIL, a known vulnerability is reachable" FAKE_VULN_RC=3
+# The main scan is clean here, so only the binary scan returns 3: the finding must come from the buf binary.
+run "a finding in the buf tool fails with 1" 1 "FAIL, a known vulnerability is reachable" FAKE_VULN_RC=0 FAKE_VULN_BIN_RC=3
+grep -q '^govulncheck -mode=binary ' "$FAKE_LOG" || fail "the buf binary scan did not run in the finding case: $(cat "$FAKE_LOG")"
 run "a failed build of the buf tool fails with 2" 2 "FAILED to build github.com/bufbuild/buf/cmd/buf" FAKE_BUILD_RC=1
 : >"$FAKE_LOG"
 FAKE_VULN_RC=0 "$root/hack/govulncheck.sh" ./cmd/... >/dev/null 2>&1

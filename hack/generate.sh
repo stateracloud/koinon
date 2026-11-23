@@ -10,7 +10,9 @@
 
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+# The script's own directory, taken before the cd below: $0 may be relative to the caller's directory.
+script_dir=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$script_dir/.." && pwd)
 if [[ -n ${GENERATE_ROOT:-} ]]; then
 	echo "generate: warning: test hook GENERATE_ROOT is set; this run is not a real generate" >&2
 	root=$GENERATE_ROOT
@@ -22,7 +24,7 @@ GO=${GO:-go}
 # generated headers stay as they are. The version matches BUF_VERSION in hack/versions.env; a spec in
 # hack/cmd/generatecheck checks it. Test hook KOINON_TEST_BUF is read by hack/buf.sh. The path is the script's
 # own, not $root: GENERATE_ROOT fixtures have no hack/buf.sh.
-buf_sh=$(cd "$(dirname "$0")" && pwd)/buf.sh
+buf_sh=$script_dir/buf.sh
 buf() { GO=$GO "$buf_sh" "$@"; }
 
 # Paths buf (clean:true), sqlc and oapi-codegen may create, delete or rewrite.
