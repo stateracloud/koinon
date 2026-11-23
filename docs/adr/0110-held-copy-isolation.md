@@ -274,7 +274,7 @@ the guard off); runtime only (no way to choose read-only before the first start)
 - Surfaces: one admin REST and Connect method (`SetOutwardTargetDisabled`; _amended by [0116](0116-rpc-facts-and-request-entry.md), decided but not built yet: two methods, `DisableOutwardTarget` with `held: allow` and `EnableOutwardTarget` with `held: refuse`, and the old method is deprecated_), a switch on each target's UI page, and
   the declarative field `disabled: true` for the kinds that have declarative Secrets (providers, MCP servers,
   connections; the Secret wins, and the UI cannot enable an item its Secret disables).
-- **Disable is allowed while held** (it reaches nothing). **Enable is refused while held** with `restorehold.ErrHeld`,
+- **Disable is allowed while held** (it reaches nothing). **Enable is refused while held** with `restorehold.ErrHeld` _(amended by [0116](0116-rpc-facts-and-request-entry.md), decided but not built yet: the entry refuses `EnableOutwardTarget` through its `held: refuse` row)_,
   because an enabled target may be dialled (preflight, probe).
 - `restore status` lists every outward target with its enabled or disabled state (decision 7).
 

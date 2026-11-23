@@ -31,10 +31,11 @@ the call carry? Today each handler answers these questions in its own code:
   without any check of its own". That choice is right for callers that are not requests: `approvals.Execute` runs from
   `internal/apiassembly/domain.go`, and the importer, the sweepers, the A2A edge (`internal/services/a2aedge.go`) and
   remote agents (`internal/remoteagents/remoteagents.go`) call services too. For callers that are requests, the check
-  is spread over 12 `refuseWhileHeld` calls in the connection and binding handlers (`internal/services/hold.go`) and
-  the guards in the services. A new RPC can reach outward and nothing tests that it is held.
-- **Errors.** `TraceDestinationService` attaches `google.rpc.ErrorInfo` with 9 reason strings
-  (`internal/services/tracedestinations.go`). Other services map errors by hand, and the REST `Error` has only `code`
+  is spread over 9 `refuseWhileHeld` calls (`internal/services/hold.go`): 5 in `connections.go`, one each in
+  `bindings.go`, `tasks.go`, `directmessage.go` and `a2aedge.go`. The guards in the services add to them. A new RPC can reach outward and nothing tests that it is held.
+- **Errors.** `TraceDestinationService` attaches `google.rpc.ErrorInfo` with 8 reason strings
+  (`internal/services/tracedestinations.go`). Three more `withReason` calls exist: `PRICE_REFRESH_OFF` twice in
+  `platformprices.go` and one in `outward.go`. Other services map errors by hand, and the REST `Error` has only `code`
   and `message` (`internal/adminapi/adminapi.go`). The web reads raw error text in 94 places (#778).
 - **Request ID.** The REST path makes `req-` and 16 hex characters and returns `X-Request-Id`. The Connect path makes
   a UUID only in a handler that calls `requestCtx`, and it never returns it. The audit chain (ADR 0100) records the
@@ -60,23 +61,27 @@ A row holds:
 | `held` | `refuse` or `allow`. Required. There is no default value. |
 
 The registry spec (#672) fails when an RPC has no row, and when a row has no `held` value. A person must decide for a
-new RPC. This is how a new RPC that reaches outward cannot go live unheld by accident.
+new RPC. So a new RPC that reaches outward is never left unheld without a decision.
 
 ### 2. Hold: two layers with fixed roles
 
 - **The entry** refuses a request when the row says `held: refuse` and the install is held. It uses the existing
-  refusal (`FailedPrecondition` on Connect, `409` on REST, reason `INSTALL_HELD`).
+  refusal (`FailedPrecondition` on Connect, `409` on REST) and adds the reason `INSTALL_HELD`. The reason is new:
+  today the refusal has no reason string.
 - **The service-level hold check** (`restorehold.Guard`) stays only for callers that are not requests: approvals
   Execute, the importer, the sweepers, the A2A edge and remote agents. A spec lists those callers. A service that
   such a caller reaches keeps its guard. A caller that is a request does not need a guard of its own.
-- #775 deletes the checks that only requests reach. It must not delete the check that the A2A edge or any other
-  listed caller uses.
+- #775 deletes the checks that only requests reach. It must not delete the check that any listed caller uses.
+- **The A2A edge.** Today `a2aedge.go` calls `refuseWhileHeld` from `hold.go`, and `hold.go` is deleted last. In the
+  migration, the check of the A2A edge moves to the service-level guard (`restorehold.Guard`) before `hold.go` is
+  deleted (section 7). The other listed callers already use the guard.
 
 ### 3. `SetOutwardTargetDisabled` becomes two RPCs
 
 Add `DisableOutwardTarget` (`held: allow`) and `EnableOutwardTarget` (`held: refuse`). Deprecate
 `SetOutwardTargetDisabled`. The proto change is add-only (`make breaking` passes). On REST, `PUT
-/outward-targets/{kind}/{targetId}/disabled` disables, and a new `DELETE` on the same path enables. The behaviour of
+/outward-targets/{kind}/{targetId}/disabled` disables, and a new `DELETE` on the same path enables. This is option A of the 2026-11-19 comment. Today the REST `PUT` takes a `{disabled}` body
+(`api/admin/v1/openapi.yaml`); that body is deprecated. The behaviour of
 ADR 0110 decision 5 does not change: disable reaches nothing and is allowed while held, and enable is refused while
 held. Each row stays static.
 
@@ -97,6 +102,9 @@ spec calls each `raises` row with the floor Role and expects that refusal.
   `NOT_FOUND`, `INSTALL_HELD`) and a message. Reasons are add-only. The web shows the message for a reason it does not
   know.
 
+The details of sections 1, 4 and 5 are as in option A of the 2026-11-19 comment: the table is in Go next to the entry,
+the kind reasons, the add-only reasons and the web fallback.
+
 ### 6. Request ID: the entry always makes it, and returns it
 
 - The entry always makes the request ID, in one format, for both transports, and returns it in `X-Request-Id`.
@@ -109,6 +117,7 @@ spec calls each `raises` row with the floor Role and expects that refusal.
 - #783, #784 and #785 keep their waits on #770, #759, #746 and #731.
 - #787 is split. Each part of the old path is deleted when its last user moves: `problem()`, the per-file mappers,
   `mcpCaller`, `providerCaller`, `orgCaller` and `platformCaller`.
+- The check of the A2A edge moves to `restorehold.Guard` before `hold.go` is deleted.
 - `authorize`, `requestCtx`, `hold.go` and the comparison hook are deleted last. That pull request changes CODEOWNERS,
   so it merges with `--admin`.
 
@@ -150,7 +159,7 @@ Quick check (about 15 minutes), 2026-11-23.
 
 - **Kubernetes authorization attributes.** The API server builds one `Attributes` value for every request (verb,
   resource, and whether it is a resource request at all) and one `Authorizer` decides on it. Non-resource requests are a
-  named case, not an afterthought. We borrow the idea that one entry derives the facts and decides, and that the
+  named case that the code handles on purpose. We borrow the idea that one entry derives the facts and decides, and that the
   non-request case is named. We differ: our facts are a static table per RPC, not a value built per request, because
   our rules are few and a spec can list them.
   [`interfaces.go`](https://github.com/kubernetes/kubernetes/blob/43cbb94ee845ad387717fe851bf5f421b7284329/staging/src/k8s.io/apiserver/pkg/authorization/authorizer/interfaces.go#L35)
@@ -170,14 +179,16 @@ Quick check (about 15 minutes), 2026-11-23.
   decides `role` and `held`. Clients get a stable reason and a request ID on every refusal. The audit chain never holds
   a client-chosen ID.
 - Negative: two layers for the hold, so two places to read. The field rules of `raises` live in the domain, and the
-  table only names them. The REST request ID format changes once, and a deprecated RPC stays for one period.
-- Follow-ups: #772 to #788 (the entry on both paths, the table-driven hold spec, the refusal vocabulary, the web, the
+  table only names them. The REST request ID format changes once. A deprecated RPC stays for one period, and the REST `PUT` body
+  `{disabled}` is deprecated with it (option A, 2026-11-19 comment).
+- Follow-ups: the one request ID format is decided (one format for both transports); which format is chosen in #773.
+  #772 to #788 (the entry on both paths, the table-driven hold spec, the refusal vocabulary, the web, the
   handler groups and the removal of the old path); #672 (the registry spec); GLOSSARY entries (**RPC facts**,
   **Request entry**).
 
 ## Open questions
 
-None. The request ID format is chosen once in #773 and tested there.
+None.
 
 ## Links
 
