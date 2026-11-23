@@ -416,10 +416,17 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
   - The Job also puts a hash on the pod template of atelet (the CA) and of the cache Deployment (the certificate and
     the CA). A changed hash restarts the pod, so a new CA reaches atelet and a new certificate reaches the cache.
     A rotation takes effect on the next `helm upgrade`: change the Secret, then run `helm upgrade`. The hash does not
-    cause a second restart after that.
+    cause a second restart after that. On the first install the cache Deployment does not exist yet, so the Job cannot
+    stamp it. The cache starts with the current Secret, and the first `helm upgrade` adds the stamp. That upgrade
+    restarts the cache pod once.
+  - Admission: the Job is not an installer identity. The policy `<ns>-<release>-worker-objects` admits one UPDATE by the
+    Job's ServiceAccount: the atelet DaemonSet in `ate-system`, where only the template annotation
+    `koinon.dev/imagecache-ca-sha256` changes. Any other change, DaemonSet, namespace, create or delete is denied.
+    The rule renders only with the image cache.
   - The installer must run before `helm install`: the Job fails, and names that step, when atelet does not exist or
     has no patch (a Substrate from before this change, or the GKE route). The Job does not report success then.
-  - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet. The RBAC is a hook object: Helm
+  - The Job can create any ConfigMap in `ate-system` and patch the atelet DaemonSet (admission limits that patch to
+    the one annotation). The RBAC is a hook object: Helm
     deletes it after the Job. `helm uninstall` leaves the ConfigMap `koinon-imagecache-ca`: delete it by hand.
   - The ConfigMap name is fixed (one Substrate install per cluster). The GKE route has no patch yet: the overlay
     directory of that route is not known to the installer (needs main: a follow-up issue).

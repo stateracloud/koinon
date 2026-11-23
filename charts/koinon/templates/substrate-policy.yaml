@@ -315,8 +315,22 @@ spec:
       expression: {{ printf "request.userInfo.username in %s && variables.reqNamespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}
     - name: controllerMetadata
       expression: {{ printf "request.userInfo.username in %s && variables.reqNamespace in %s && request.operation == 'UPDATE' && request.resource.group == 'ate.dev' && has(object.spec) && has(oldObject.spec) && object.spec == oldObject.spec" (toJson $controllers) (toJson (list $ns $wns "")) | quote }}
+{{- if include "koinon.imageCache" . }}
+    # The image cache CA hook Job (issue #1191) restarts atelet when the CA changes: it writes one annotation on the
+    # pod template of the atelet DaemonSet and nothing else. The Job is not an installer identity. The rule admits
+    # only an UPDATE of the DaemonSet atelet in the control-plane namespace, by the Job's ServiceAccount, where the
+    # selector, the update strategy, the pod spec (images, env, volumes, security context) and the labels are
+    # unchanged and the annotations of the pod template differ at the one stamp key. A create, a delete, another
+    # DaemonSet, another namespace or any other change is denied.
+    - name: caStampOld
+      expression: "has(oldObject.spec.template.metadata.annotations) ? oldObject.spec.template.metadata.annotations : {}"
+    - name: caStampNew
+      expression: "has(object.spec.template.metadata.annotations) ? object.spec.template.metadata.annotations : {}"
+    - name: caStamp
+      expression: {{ printf "request.userInfo.username == %s && variables.reqNamespace == %s && request.operation == 'UPDATE' && request.resource.group == 'apps' && request.resource.resource == 'daemonsets' && object.metadata.name == 'atelet' && object.spec.template.spec == oldObject.spec.template.spec && object.spec.selector == oldObject.spec.selector && has(object.spec.updateStrategy) == has(oldObject.spec.updateStrategy) && (!has(object.spec.updateStrategy) || object.spec.updateStrategy == oldObject.spec.updateStrategy) && has(object.spec.template.metadata.labels) == has(oldObject.spec.template.metadata.labels) && (!has(object.spec.template.metadata.labels) || object.spec.template.metadata.labels == oldObject.spec.template.metadata.labels) && has(object.metadata.labels) == has(oldObject.metadata.labels) && (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels) && variables.caStampNew.all(k, k == 'koinon.dev/imagecache-ca-sha256' || (k in variables.caStampOld && variables.caStampOld[k] == variables.caStampNew[k])) && variables.caStampOld.all(k, k == 'koinon.dev/imagecache-ca-sha256' || k in variables.caStampNew)" (printf "system:serviceaccount:%s:%s" .Release.Namespace (include "koinon.componentName" (list . "imagecache-ca")) | quote) ($ns | quote) | quote }}
+{{- end }}
   validations:
-    - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata"
+    - expression: "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata{{ if include "koinon.imageCache" . }} || variables.caStamp{{ end }}"
       messageExpression: "'only the installer may write ' + request.resource.resource + ' in the Substrate namespace, not ' + request.userInfo.username"
 ---
 apiVersion: admissionregistration.k8s.io/v1

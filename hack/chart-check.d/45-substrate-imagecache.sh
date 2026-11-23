@@ -129,6 +129,14 @@ grep -Fq 'runAsNonRoot: true' <<<"$icajob" || fail "the CA Job must run as non-r
 has "the CA Job reads an existing TLS Secret" '--tls-secret=my-tls' "${isub[@]}" --set execution.substrate.imageCache.tls.existingSecret=my-tls "${icaf[@]}"
 has "the CA Job follows the Substrate namespace" '--substrate-namespace=ate-other' "${isub[@]}" --set execution.substrate.namespace=ate-other --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=ate-other "${icaf[@]}"
 has "the CA Job has the pull secrets" 'name: koinon-pull' "${isub[@]}" --set 'global.imagePullSecrets={koinon-pull}' "${icaf[@]}"
+# Admission: the hook Job may stamp the atelet pod template and nothing else (policy koinon-koinon-worker-objects). The rule
+# exists only with the cache, and the Job is not an installer identity.
+ipol=(--show-only templates/substrate-policy.yaml)
+ipdocs=$(render "${isub[@]}" "${ipol[@]}" | tr -d '\134')
+grep -Fq "request.userInfo.username == \"system:serviceaccount:koinon:koinon-imagecache-ca\"" <<<"$ipdocs" || fail "the stamp rule names the CA hook ServiceAccount of the release"
+grep -Fq "variables.installer || variables.kube || variables.controllerOwn || variables.controllerMetadata || variables.caStamp" <<<"$ipdocs" || fail "the objects policy admits the CA stamp"
+grep -Fq "object.spec.template.spec == oldObject.spec.template.spec" <<<"$ipdocs" || fail "the stamp rule keeps the pod spec unchanged"
+lacks "no CA stamp rule without the cache" 'caStamp' "${isub[@]}" --set execution.substrate.imageCache.enabled=false "${ipol[@]}"
 # RBAC: the Secret is read by name and never written; the key of the Secret has no route to the Substrate namespace.
 icarole=$(idoc '\nkind: Role\nmetadata:\n  name: koinon-imagecache-ca\n  labels' <<<"$icadocs")
 grep -Fq 'resourceNames: ["koinon-imagecache-tls"]' <<<"$icarole" || fail "the release Role reads the TLS Secret by name"
