@@ -336,9 +336,10 @@ jobs:
           export KO_DOCKER_REPO="$KOINON_IMAGE_REGISTRY/ate-env-guest"
           # The first push to a new GHCR package can be refused with DENIED for a moment (hack/push-retry-lib.sh).
           . "$GITHUB_WORKSPACE/hack/push-retry-lib.sh"
-          # ko prints the pushed image as <repository>@sha256:<digest> on stdout.
-          ref=$(push_retry ko build --bare --platform=linux/amd64 --tags "${TAG#v}" --sbom=spdx --sbom-dir="$RUNNER_TEMP/env-guest-sbom" ./cmd/ate-env-guest)
-          [[ $ref =~ ^[a-z0-9./-]+@sha256:[0-9a-f]{64}$ ]] || { echo "no digest ref from ko build: $ref" >&2; exit 1; }
+          # With --tags, ko prints <repository>:<tag>@sha256:<digest> on stdout; hack/ko-ref.sh turns it into
+          # <repository>@sha256:<digest>, the form the sign job signs and attests (#1219).
+          out=$(push_retry ko build --bare --platform=linux/amd64 --tags "${TAG#v}" --sbom=spdx --sbom-dir="$RUNNER_TEMP/env-guest-sbom" ./cmd/ate-env-guest)
+          ref=$("$GITHUB_WORKSPACE/hack/ko-ref.sh" <<<"$out")
           echo "ref=$ref" >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

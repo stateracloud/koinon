@@ -934,6 +934,7 @@ jobs:
       - run: hack/release-drill-wait-test.sh
       - run: hack/release-test-images-test.sh
       - run: hack/release-harness-test.sh
+      - run: hack/ko-ref-test.sh
       - run: hack/route-guard-test.sh
       - run: hack/contributor-gate-test.sh
       - run: hack/dep-age-check-test.sh
