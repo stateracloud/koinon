@@ -828,7 +828,12 @@ move, once.
      - **Threat scope.** The scrub is a backstop for a target that echoes its credential by accident. It does not
        stop a target that hides the value on purpose (hex, a hash, a split over two fields): that target already
        holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
-       own issue.
+       own issue. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
+       its org's audit row of a call changes. Only a reader of that org's audit can see this. A built-in target that
+       opens credentials must implement `CredentialBuiltin`; the gateway records only the values of those built-ins.
+     - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
+       in it until the next rebuild (one second or more later), so it can only over-scrub a process record. A value
+       that a call opens again while a removal runs is kept.
      The router path logs and stores no opened v2 value (a spec checks it). The router still scrubs v1 MCP values,
      which it can open.
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a

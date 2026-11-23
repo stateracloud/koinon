@@ -72,7 +72,7 @@ func (f failClosed) checkToolList(ctx context.Context, l ToolList) (v ToolListVe
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", l.Target, "kind", "tool_list")
+			f.log.ErrorContext(ctx, "guard panicked", "target", l.Target, "kind", "tool_list")
 			f.m.guardFailure(guardPanic)
 			v = ToolListVerdict{Refuse: true, Reason: reasonGuardFailed}
 		}
@@ -217,7 +217,7 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 	switch {
 	case v.Refuse:
 		g.o.Metrics.toolLeft(leftUnreadable)
-		g.o.Logger.Warn("tools/list: list withheld", "target", t.Name)
+		g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: list withheld", "target", t.Name)
 		// The tools an earlier list left out stay out, and the check is no longer fresh: a call checks again.
 		return nil, nil, false
 	case v.Passthrough:

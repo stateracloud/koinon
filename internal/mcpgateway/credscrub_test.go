@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -268,6 +269,34 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(sc.Text(fakeToken)).To(Equal("[redacted:secret]"))
 		Expect(sc.TextFor("org-a", "koinon_test_flood_29")).To(Equal("[redacted:secret]"), "the newest values stay")
 		Expect(sc.TextFor("org-a", "koinon_test_flood_00")).To(Equal("koinon_test_flood_00"), "the oldest values go")
+	})
+
+	It("builds the matcher of all orgs at most once a second while one org floods its cap", func() {
+		now := time.Unix(1_700_000_000, 0)
+		mcpgateway.SetScrubClock(sc, func() time.Time { return now })
+		sc.MaxOrgValues = 10
+		sc.AddFor("org-b", fakeToken)
+		before := mcpgateway.ScrubRebuilds(sc)
+		for i := range 200 {
+			sc.AddFor("org-a", fmt.Sprintf("koinon_test_flood_%03d", i))
+		}
+		Expect(mcpgateway.ScrubRebuilds(sc)).To(Equal(before), "an eviction does not force a rebuild")
+		Expect(sc.Text("koinon_test_flood_199 " + fakeToken)).To(Equal("[redacted:secret] [redacted:secret]"))
+		Expect(sc.TextFor("org-a", "koinon_test_flood_000")).To(Equal("koinon_test_flood_000"), "the org set drops it at once")
+		now = now.Add(2 * time.Second)
+		sc.AddFor("org-a", "koinon_test_flood_new")
+		Expect(mcpgateway.ScrubRebuilds(sc)).To(Equal(before + 1))
+		Expect(sc.Text("koinon_test_flood_000")).To(Equal("koinon_test_flood_000"), "the rebuild drops an evicted value")
+		Expect(sc.Text("koinon_test_flood_new " + fakeToken)).To(Equal("[redacted:secret] [redacted:secret]"))
+	})
+
+	It("never evicts a value that the fast path opened after the eviction read its time", func() {
+		var t atomic.Int64
+		t.Store(100)
+		Expect(mcpgateway.ScrubTouch(&t, 200)).To(BeTrue())
+		Expect(mcpgateway.ScrubEvict(&t, 100)).To(BeFalse(), "the value was opened again: it stays")
+		Expect(mcpgateway.ScrubEvict(&t, 200)).To(BeTrue())
+		Expect(mcpgateway.ScrubTouch(&t, 300)).To(BeFalse(), "an evicted value takes the slow path")
 	})
 
 	It("matches a new value at once, before the matcher of all orgs is rebuilt", func() {

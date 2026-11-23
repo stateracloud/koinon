@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ type CredentialScrub struct {
 	mu        sync.Mutex // serialises changes of sets
 	sets      atomic.Pointer[scrubSets]
 	lastPrune atomic.Int64 // unix nanoseconds
+	allBuilds atomic.Int64 // how often the matcher of all orgs was built, for specs
 	metrics   atomic.Pointer[Metrics]
 	log       atomic.Pointer[slog.Logger]
 	warned    sync.Map // scopedTarget -> struct{}: a short value was logged
@@ -88,6 +90,8 @@ type scrubSets struct {
 	all      *scrub.Secrets
 	pending  []string
 	allBuilt time.Time
+	// allDirty is set when a value was removed after all was built: the next rebuild drops it.
+	allDirty bool
 }
 
 var emptySecrets = scrub.NewSecrets()
@@ -237,9 +241,7 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 	if o, ok := s.sets.Load().byOrg[org]; ok && now.UnixNano()-s.lastPrune.Load() < int64(pruneEvery) {
 		known := true
 		for _, p := range parts {
-			if t, ok := o.last[p]; ok {
-				t.Store(now.UnixNano())
-			} else {
+			if t, ok := o.last[p]; !ok || !touch(t, now.UnixNano()) {
 				known = false
 			}
 		}
@@ -250,7 +252,7 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ss := s.sets.Load()
-	next := &scrubSets{byOrg: maps.Clone(ss.byOrg), all: ss.all, pending: slices.Clone(ss.pending), allBuilt: ss.allBuilt}
+	next := &scrubSets{byOrg: maps.Clone(ss.byOrg), all: ss.all, pending: slices.Clone(ss.pending), allBuilt: ss.allBuilt, allDirty: ss.allDirty}
 	changed := map[string]bool{}
 	removed := false
 	if len(parts) > 0 {
@@ -284,7 +286,7 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 		s.capLocked(next, changed)
 		removed = true
 	}
-	if len(changed) == 0 {
+	if len(changed) == 0 && (!next.allDirty || now.Sub(next.allBuilt) < allRebuildEvery) {
 		return
 	}
 	for o := range changed {
@@ -301,9 +303,14 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 			next.pending = append(next.pending, o)
 		}
 	}
-	// The matcher of all orgs is rebuilt at most once a second, and at once when a value was removed, so a removed
-	// value does not stay in it. Until then the changed orgs are pending: their own matchers are applied after it.
-	if removed || now.Sub(next.allBuilt) >= allRebuildEvery {
+	// The matcher of all orgs is rebuilt at most once a second. Until then the changed orgs are pending: their own
+	// matchers are applied after it, so a new value is never missed. A removed value stays in it until the next
+	// rebuild: it can only over-scrub process records for that time. A removal does not force a rebuild, so a flood
+	// at a cap costs one rebuild a second, not one for each eviction.
+	if removed {
+		next.allDirty = true
+	}
+	if now.Sub(next.allBuilt) >= allRebuildEvery && (next.allDirty || len(next.pending) > 0) {
 		all := map[string]bool{}
 		for _, o := range next.byOrg {
 			for v := range o.last {
@@ -311,7 +318,9 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 			}
 		}
 		next.all = scrub.NewSecrets(slices.Collect(maps.Keys(all))...)
+		s.allBuilds.Add(1)
 		next.pending = nil
+		next.allDirty = false
 		next.allBuilt = now
 	}
 	s.sets.Store(next)
@@ -332,9 +341,33 @@ func dropOldest(last map[string]*atomic.Int64, keep int) {
 	}
 	slices.SortFunc(all, func(a, b entry) int { return cmp.Compare(a.at, b.at) })
 	for _, e := range all[:max(0, len(all)-keep)] {
-		delete(last, e.value)
+		if evict(last[e.value], e.at) {
+			delete(last, e.value)
+		}
 	}
 }
+
+// evicted marks a time whose value a locked path removed. The fast path does not touch it: it takes the slow path,
+// which adds the value again.
+const evicted = math.MinInt64
+
+// touch sets the last open of a known value to now. It reports false when a locked path evicted the value first.
+func touch(t *atomic.Int64, now int64) bool {
+	for {
+		old := t.Load()
+		if old == evicted {
+			return false
+		}
+		if t.CompareAndSwap(old, now) {
+			return true
+		}
+	}
+}
+
+// evict marks a value as removed if its last open is still at. It reports false when the fast path opened the value
+// again after the caller read at: the value then stays. So a value that a call just opened is never removed from
+// under it.
+func evict(t *atomic.Int64, at int64) bool { return t.CompareAndSwap(at, evicted) }
 
 func countValues(ss *scrubSets) int {
 	n := 0
@@ -351,7 +384,8 @@ func (s *CredentialScrub) pruneLocked(next *scrubSets, now time.Time, changed ma
 	for org, o := range next.byOrg {
 		var last map[string]*atomic.Int64
 		for v, t := range o.last {
-			if now.Sub(time.Unix(0, t.Load())) <= s.retain() {
+			at := t.Load()
+			if now.Sub(time.Unix(0, at)) <= s.retain() || !evict(t, at) {
 				continue
 			}
 			if last == nil {
@@ -386,6 +420,9 @@ func (s *CredentialScrub) capLocked(next *scrubSets, changed map[string]bool) {
 	cloned := map[string]bool{}
 	for _, e := range all[:max(0, len(all)-keep)] {
 		o := next.byOrg[e.org]
+		if !evict(o.last[e.value], e.at) {
+			continue
+		}
 		if !cloned[e.org] {
 			o = &orgSet{last: maps.Clone(o.last)}
 			next.byOrg[e.org] = o

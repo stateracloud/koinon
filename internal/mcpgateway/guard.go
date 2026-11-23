@@ -169,7 +169,7 @@ func (f failClosed) Inspect(ctx context.Context, m Message) (v Verdict) {
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", m.Target, "kind", m.Kind.String())
+			f.log.ErrorContext(ctx, "guard panicked", "target", m.Target, "kind", m.Kind.String())
 			f.m.guardFailure(guardPanic)
 			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
 		}
@@ -189,7 +189,7 @@ func (f failClosed) checkCall(ctx context.Context, c Call) (v Verdict) {
 	}
 	defer func() {
 		if recover() != nil {
-			f.log.Error("guard panicked", "target", c.Target, "kind", "call")
+			f.log.ErrorContext(ctx, "guard panicked", "target", c.Target, "kind", "call")
 			f.m.guardFailure(guardPanic)
 			v = Verdict{Refuse: true, Reason: reasonGuardFailed}
 		}

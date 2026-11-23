@@ -149,7 +149,7 @@ func (g *Gateway) listTools(ctx context.Context, agent gateway.AgentRef) *mcp.Li
 			defer cancel()
 			got, err := g.targetTools(lctx, t, agent)
 			if err != nil {
-				g.o.Logger.Warn("tools/list: target skipped", "target", name, "error", errKind(err))
+				g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: target skipped", "target", name, "error", errKind(err))
 				return
 			}
 			// The text of each tool is the approved text, or it is left out (#1132).
@@ -267,7 +267,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		}
 		if g.o.Audit != nil {
 			if err := g.o.Audit.Record(ctx, row); err != nil {
-				g.o.Logger.Error("audit row not written", "error", errKind(err))
+				g.o.Logger.ErrorContext(ctx, "audit row not written", "error", errKind(err))
 			}
 		}
 	}
