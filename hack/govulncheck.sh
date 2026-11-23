@@ -65,10 +65,10 @@ rc=0
 # reaches them. Each pinned tool is built from its modfile and its binary is scanned. Only the default pattern
 # does this (a caller who names packages asks for those); a clean main scan runs first so its report stays first.
 if [[ $rc -eq 0 && $# -eq 0 ]]; then
-	for tool in github.com/bufbuild/buf/cmd/buf:hack/tools/buf; do
-		pkg=${tool%%:*}
-		dir=${tool##*:}
-		[[ -f $dir/go.mod ]] || continue
+	# One tool module so far (buf); a second one turns this block into a loop again.
+	pkg=github.com/bufbuild/buf/cmd/buf
+	dir=hack/tools/buf
+	if [[ -f $dir/go.mod ]]; then
 		if ! go build -modfile="$dir/go.mod" -o "$bindir/tool-${dir##*/}" "$pkg"; then
 			msg="COULD NOT DECIDE: FAILED to build $pkg from $dir/go.mod. This is not a pass; no retry (rule T1). Re-run by hand."
 			annotate "$msg"
@@ -76,8 +76,7 @@ if [[ $rc -eq 0 && $# -eq 0 ]]; then
 			exit 2
 		fi
 		"$bindir/govulncheck" -mode=binary "$bindir/tool-${dir##*/}" || rc=$?
-		[[ $rc -eq 0 ]] || break
-	done
+	fi
 fi
 case $rc in
 0) echo "govulncheck ${GOVULNCHECK_VERSION}: no reachable known vulnerability" ;;

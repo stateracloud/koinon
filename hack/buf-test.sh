@@ -5,6 +5,8 @@
 # `go tool` of hack/buf.sh), never a buf from the PATH and never bufbuild/buf-action. A stub `go` logs its
 # arguments and a poisoned `buf` on the PATH fails the test when it runs.
 
+# shellcheck disable=SC2016 # the stub scripts and grep patterns hold literal $ that must not expand
+
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
 
