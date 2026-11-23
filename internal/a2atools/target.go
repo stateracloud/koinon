@@ -41,8 +41,6 @@ const (
 type Options struct {
 	// Policy is the platform URL policy for every dial (ADR 0120).
 	Policy catalog.URLPolicy
-	// Credentials resolves the credential of a remote agent. Nil is [mcpgateway.StaticCredentials].
-	Credentials mcpgateway.CredentialSource
 	// Transport replaces the policy dialer. It is for tests only.
 	Transport http.RoundTripper
 	// RequestTimeout bounds one request to a remote agent. Zero is the a2aout default.
@@ -57,24 +55,13 @@ type Options struct {
 // Target is the built-in target of kind [gateway.BuiltinA2A]. It is safe for concurrent use.
 type Target struct{ o Options }
 
-var _ mcpgateway.CredentialBuiltin = (*Target)(nil)
+var _ mcpgateway.Builtin = (*Target)(nil)
 
 // New returns the target.
 func New(o Options) *Target {
 	if o.Wait <= 0 {
 		o.Wait = 30 * time.Second
 	}
-	if o.Credentials == nil {
-		o.Credentials = mcpgateway.StaticCredentials{}
-	}
-	return &Target{o: o}
-}
-
-// WrapCredentials returns a copy of t whose credential source is wrap(source). The gateway uses it to record
-// every credential the target opens in its credential scrub (#1174).
-func (t *Target) WrapCredentials(wrap func(mcpgateway.CredentialSource) mcpgateway.CredentialSource) mcpgateway.Builtin {
-	o := t.o
-	o.Credentials = wrap(o.Credentials)
 	return &Target{o: o}
 }
 
@@ -100,8 +87,9 @@ func fail(text string) mcpgateway.BuiltinResult {
 	return mcpgateway.BuiltinResult{Result: &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}}
 }
 
-// Call implements [mcpgateway.Builtin].
-func (t *Target) Call(ctx context.Context, tgt gateway.MCPTarget, agent gateway.AgentRef, tool string, raw json.RawMessage) mcpgateway.BuiltinResult {
+// Call implements [mcpgateway.Builtin]. The credential of a remote agent is read from creds only: it is the
+// gateway's source, which records each value in the credential scrub (#1174, #1221).
+func (t *Target) Call(ctx context.Context, creds mcpgateway.CredentialSource, tgt gateway.MCPTarget, agent gateway.AgentRef, tool string, raw json.RawMessage) mcpgateway.BuiltinResult {
 	var a args
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -137,7 +125,7 @@ func (t *Target) Call(ctx context.Context, tgt gateway.MCPTarget, agent gateway.
 	if err != nil {
 		return fail(textNoKey)
 	}
-	in := call{t: t, h: h, org: tgt.Org, agent: agent, ra: ra, a: a}
+	in := call{t: t, creds: creds, h: h, org: tgt.Org, agent: agent, ra: ra, a: a}
 	cred := mcpgateway.CredentialNone
 	if ra.CredentialHeader != "" {
 		cred = mcpgateway.CredentialStatic
@@ -158,6 +146,7 @@ func (t *Target) Call(ctx context.Context, tgt gateway.MCPTarget, agent gateway.
 // call is one tool call, with what the handles need.
 type call struct {
 	t     *Target
+	creds mcpgateway.CredentialSource
 	h     handles
 	org   string
 	agent gateway.AgentRef
@@ -167,7 +156,7 @@ type call struct {
 
 func (c *call) client(ctx context.Context) (*a2aout.Client, *mcpgateway.BuiltinResult) {
 	cl, err := a2aout.New(ctx, a2aout.Options{
-		Target: c.ra.Target(c.org), Agent: c.agent, Credentials: c.t.o.Credentials, Policy: c.t.o.Policy,
+		Target: c.ra.Target(c.org), Agent: c.agent, Credentials: c.creds, Policy: c.t.o.Policy,
 		Transport: c.t.o.Transport, RequestTimeout: c.t.o.RequestTimeout, PollInterval: c.t.o.PollInterval,
 		CardHash: c.ra.CardHash,
 	})

@@ -60,6 +60,7 @@ import (
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/sinkclass"
+	"github.com/stateracloud/koinon/internal/tracing/scrub"
 )
 
 // Errors are the catalog's, so every caller maps them the same way. Messages are safe to show.
@@ -491,6 +492,33 @@ func ValidateCredentialFields(rawURL, header, prefix, what string) error {
 	return nil
 }
 
+// MinCredentialBytes is the shortest credential value that a server or a remote agent can save, in bytes, with
+// no white space at the ends. The gateway removes a credential it opened from its logs, spans and agent
+// results (ADR 0097), but only a value of at least [scrub.MinSecretLen] bytes: a shorter one would match
+// ordinary words. So a shorter value is refused at save, and it is never sent upstream unscrubbed (#1221).
+const MinCredentialBytes = scrub.MinSecretLen
+
+// ReasonCredentialTooShort is the [InvalidError] reason of a credential value shorter than
+// [MinCredentialBytes].
+const ReasonCredentialTooShort = "CREDENTIAL_TOO_SHORT"
+
+// ValidateCredentialValue refuses a credential value shorter than [MinCredentialBytes]. An empty value is
+// not checked: it means no credential, and the caller decides if that is allowed. The value is never part
+// of the message. The remote agents (ADR 0123 decision 9) use it too.
+func ValidateCredentialValue(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(strings.TrimSpace(value)) < MinCredentialBytes {
+		return &InvalidError{
+			Msg: fmt.Sprintf("credential value must be at least %d bytes long, with no spaces at the ends: "+
+				"the gateway cannot remove a shorter value from its logs and results", MinCredentialBytes),
+			Reason: ReasonCredentialTooShort,
+		}
+	}
+	return nil
+}
+
 // MaxCABundleBytes bounds a server's CA bundle. Every bundle goes into the one Secret that serves all
 // orgs, so the cap is far lower than the code-host one (codehost.MaxCABundleBytes): a few
 // certificates need a few KiB.
@@ -629,6 +657,10 @@ func (s *Service) WithRecipient(r RecipientSource) *Service {
 func (s *Service) seal(org, id pgtype.UUID, value string) ([]byte, error) {
 	if value == "" {
 		return nil, nil
+	}
+	// Every path that saves a value seals it here, so a path that forgot the check still refuses it.
+	if err := ValidateCredentialValue(value); err != nil {
+		return nil, err
 	}
 	if s.recipient != nil {
 		pub, err := s.recipient.Current()
@@ -772,6 +804,9 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return Server{}, err
 	}
+	if err := ValidateCredentialValue(in.CredentialValue); err != nil {
+		return Server{}, err
+	}
 	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return Server{}, err
 	}
@@ -860,6 +895,11 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	if patch.Credential != nil && patch.RemoveCredential {
 		return Server{}, invalid("set a credential or remove it, not both")
+	}
+	if patch.Credential != nil && patch.Credential.Value != nil {
+		if err := ValidateCredentialValue(*patch.Credential.Value); err != nil {
+			return Server{}, err
+		}
 	}
 	var out store.McpServer
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {

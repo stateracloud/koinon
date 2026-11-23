@@ -47,6 +47,27 @@ var _ = Describe("remote MCP servers", func() {
 	var e *env
 	BeforeEach(func(ctx SpecContext) { e = newEnv(ctx) })
 
+	// The gateway scrubs an opened credential only from 8 bytes (ADR 0097), so a shorter one is refused at save
+	// (#1221). The fake values are short on purpose: 7 and 8 bytes.
+	It("refuses a credential of 7 bytes and takes 8, at create and at update", func(ctx SpecContext) {
+		code, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{
+			"name": "tracker", "url": "https://mcp.example.com/mcp", "credentialValue": "fake-07",
+		})
+		Expect(code).To(Equal(http.StatusBadRequest), string(raw))
+		Expect(string(raw)).To(ContainSubstring("at least 8 bytes"))
+		Expect(string(raw)).NotTo(ContainSubstring("fake-07"))
+		code, raw = e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{
+			"name": "tracker", "url": "https://mcp.example.com/mcp", "credentialValue": "fake-008",
+		})
+		Expect(code).To(Equal(http.StatusCreated), string(raw))
+		s := decode[mcpServerJSON](raw)
+		code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+s.ID, map[string]any{"credentialValue": "fake-07"})
+		Expect(code).To(Equal(http.StatusBadRequest), string(raw))
+		Expect(string(raw)).To(ContainSubstring("at least 8 bytes"))
+		code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+s.ID, map[string]any{"credentialValue": "fake-00008"})
+		Expect(code).To(Equal(http.StatusOK), string(raw))
+	})
+
 	It("creates, lists, changes and deletes a server without ever returning its credential", func(ctx SpecContext) {
 		code, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{
 			"name": "tracker", "url": "https://mcp.example.com/mcp", "credentialValue": "not-a-real-token", "credentialPrefix": "Bearer ",

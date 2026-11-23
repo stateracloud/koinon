@@ -517,7 +517,7 @@ func (e *scrubbedError) As(target any) bool {
 }
 
 // Source returns src with every credential it gives recorded before the caller can use it. The gateway wraps
-// its own source with it, and gives the wrapped source to every [CredentialBuiltin].
+// its own source with it, and gives the wrapped source to every call of a [Builtin].
 func (s *CredentialScrub) Source(src CredentialSource) CredentialSource {
 	if r, ok := src.(recordingSource); ok && r.s == s {
 		return src

@@ -49,6 +49,9 @@ func (s *Service) ApplyDeclared(ctx context.Context, org pgtype.UUID, d Declared
 	if err := ValidateRemote(in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix); err != nil {
 		return false, err
 	}
+	if err := ValidateCredentialValue(in.CredentialValue); err != nil {
+		return false, err
+	}
 	if err := ValidateTLSTrust(in.URL, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return false, err
 	}

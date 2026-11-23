@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -138,6 +139,36 @@ var _ = Describe("remote agents", func() {
 		var raw []byte
 		Expect(pool.QueryRow(ctx, `SELECT credential FROM remote_agents WHERE id = $1`, r.ID).Scan(&raw)).To(Succeed())
 		Expect(string(raw)).NotTo(ContainSubstring("koinon_test_not-a-real-token"))
+	})
+
+	// The gateway scrubs an opened credential only from 8 bytes (ADR 0097), so a shorter one is refused at
+	// save, before the card is read with it (#1221). The fake values are short on purpose: 7 and 8 bytes.
+	It("refuses a credential of 7 bytes and takes 8, at create and at update", func(ctx SpecContext) {
+		const short, long = "fake-07", "fake-008"
+		tooShort := func(err error) {
+			GinkgoHelper()
+			var inv *remoteagents.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+			Expect(inv.Reason).To(Equal(mcpservers.ReasonCredentialTooShort))
+			Expect(inv.Msg).NotTo(ContainSubstring(short), "the message never holds the value")
+		}
+		_, err := svc.Create(ctx, org, actor, user, remoteagents.Input{Name: "secured", CardURL: url, CredentialValue: short})
+		tooShort(err)
+		Expect(fake.last.Secret).To(BeEmpty(), "the card was not read with the value")
+		list, err := svc.List(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list).To(BeEmpty())
+
+		r, err := svc.Create(ctx, org, actor, user, remoteagents.Input{Name: "secured", CardURL: url, CredentialValue: long})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.HasCredential).To(BeTrue())
+
+		v := short
+		_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{Credential: &remoteagents.CredentialPatch{Header: "Authorization", Value: &v}})
+		tooShort(err)
+		v = "fake-00008"
+		_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{Credential: &remoteagents.CredentialPatch{Header: "Authorization", Value: &v}})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("re-pins on a URL change and keeps the pin on other changes", func(ctx SpecContext) {

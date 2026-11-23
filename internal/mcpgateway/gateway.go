@@ -53,9 +53,8 @@ type Options struct {
 	// ListTimeout bounds one target's part of a tools/list. Zero means 10 seconds.
 	ListTimeout time.Duration
 	// Builtins are the kinds of built-in target this process can run, by [gateway.MCPTarget.Builtin].
-	// A built-in target of another kind is not served. Nil serves none. A built-in that opens a
-	// credential implements [CredentialBuiltin]: New gives it a source wrapped with Scrub.Source, so the
-	// value is scrubbed too.
+	// A built-in target of another kind is not served. Nil serves none. Each call of a built-in gets
+	// Credentials wrapped with Scrub.Source, so a value it opens is scrubbed too ([Builtin.Call]).
 	Builtins map[string]Builtin
 	// Scrub removes the credential values the gateway opened from its logs, spans and the results it
 	// gives to agents (#1174). New wraps Logger, Tracer and Credentials with it. Nil makes one of its
@@ -110,16 +109,6 @@ func New(o Options) *Gateway {
 	o.Logger = slog.New(o.Scrub.Handler(o.Logger.Handler()))
 	o.Tracer = o.Scrub.Tracer(o.Tracer)
 	o.Scrub.use(o.Metrics, o.Logger)
-	if len(o.Builtins) > 0 {
-		builtins := make(map[string]Builtin, len(o.Builtins))
-		for kind, b := range o.Builtins {
-			if cb, ok := b.(CredentialBuiltin); ok {
-				b = cb.WrapCredentials(o.Scrub.Source)
-			}
-			builtins[kind] = b
-		}
-		o.Builtins = builtins
-	}
 	g := &Gateway{o: o, g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
 	g.snap.Store(&snapshot{})
 	return g

@@ -22,16 +22,12 @@ type Builtin interface {
 	// Call runs one tool for agent. t is the target as applied, so a call sees the config of the
 	// snapshot that authenticated the agent. It never returns an error: a failure is a result with
 	// IsError, whose text is fixed and names no URL, no card text and no remote error body.
-	Call(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef, tool string, args json.RawMessage) BuiltinResult
-}
-
-// CredentialBuiltin is a [Builtin] that opens credentials. [New] calls WrapCredentials with the
-// gateway's credential scrub, so every value the built-in opens is recorded before it is used and is
-// removed from the logs, spans and results of the gateway (#1174). WrapCredentials returns a copy of the
-// built-in whose credential source is wrap(source); it does not change the receiver.
-type CredentialBuiltin interface {
-	Builtin
-	WrapCredentials(wrap func(CredentialSource) CredentialSource) Builtin
+	//
+	// creds is the gateway's credential source, wrapped with its credential scrub: every value it gives is
+	// recorded before the built-in can use it, and is removed from the logs, spans and results of the
+	// gateway (#1174, ADR 0097). A built-in opens each credential through creds and through no source of
+	// its own, so a built-in cannot leave the scrub out (#1221).
+	Call(ctx context.Context, creds CredentialSource, t gateway.MCPTarget, agent gateway.AgentRef, tool string, args json.RawMessage) BuiltinResult
 }
 
 // BuiltinResult is the answer of a [Builtin] tool.
@@ -53,7 +49,7 @@ func (g *Gateway) callBuiltin(ctx context.Context, agent gateway.AgentRef, t gat
 		finish(OutcomeUpstreamError)
 		return refusedResult("the target is not available")
 	}
-	r := b.Call(cctx, t, agent, tool, args)
+	r := b.Call(cctx, g.o.Credentials, t, agent, tool, args)
 	// A built-in can quote a credential it opened. The result is scrubbed with the values of the org as it
 	// enters, so the guard, the audit and the agent see one text.
 	r.Result = g.o.Scrub.Result(agent.Org, r.Result)

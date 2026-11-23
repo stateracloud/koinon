@@ -69,7 +69,11 @@ func (s *Server) catalogError(err error) error {
 	var inv *catalog.InvalidError
 	switch {
 	case errors.As(err, &inv):
-		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+		ce := connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+		if inv.Reason != "" {
+			return withReason(ce, inv.Reason)
+		}
+		return ce
 	case errors.Is(err, catalog.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, "not found")
 	case errors.Is(err, mcpservers.ErrToolChanged):

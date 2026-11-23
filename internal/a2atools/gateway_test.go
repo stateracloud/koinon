@@ -108,6 +108,7 @@ var _ = Describe("the built-in target behind the MCP gateway", func() {
 		audit *auditLog
 		srv   *httptest.Server
 		gw    *mcpgateway.Gateway
+		sc    *mcpgateway.CredentialScrub
 		scout gateway.IssuedKey
 		evil  gateway.IssuedKey
 		cfg   gateway.MCPConfig
@@ -151,8 +152,9 @@ var _ = Describe("the built-in target behind the MCP gateway", func() {
 			},
 		}
 		guard, audit = &spyGuard{}, &auditLog{}
+		sc = mcpgateway.NewCredentialScrub()
 		gw = mcpgateway.New(mcpgateway.Options{
-			Guard: guard, Audit: audit, CallTimeout: 10 * time.Second, ListTimeout: 5 * time.Second,
+			Guard: guard, Audit: audit, Scrub: sc, CallTimeout: 10 * time.Second, ListTimeout: 5 * time.Second,
 			Builtins: map[string]mcpgateway.Builtin{gateway.BuiltinA2A: a2atools.New(a2atools.Options{Policy: policy(), RequestTimeout: 5 * time.Second, Wait: time.Second, PollInterval: 20 * time.Millisecond})},
 		})
 		_, err = gw.ApplyMCP(context.Background(), cfg)
@@ -191,6 +193,22 @@ var _ = Describe("the built-in target behind the MCP gateway", func() {
 		Expect(string(m.Raw)).To(ContainSubstring("canary-untrusted"))
 		Expect(audit.last().Outcome).To(Equal(mcpgateway.OutcomeOK))
 		Expect(audit.last().Tool).To(Equal("send_task"))
+	})
+
+	// The target opens the credential of the remote agent through the source the gateway gives to each call,
+	// so the value is in the gateway's scrub before it is sent, and a reply that quotes it is scrubbed
+	// (#1174, #1221). The spec fails if the target opens the credential through a source of its own.
+	It("opens the remote agent's credential through the gateway's scrub", func() {
+		Expect(sc.TextFor("acme", fakeToken)).To(Equal(fakeToken), "nothing is recorded before a call")
+		f.send = func(*a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+			return f.put(withReply(task("t1", "c1", a2a.TaskStateCompleted, ""), "my key is "+fakeToken)), nil
+		}
+		s := connect(srv.URL, scout.Material)
+		r := send(s, "acme-agents_send_task", map[string]any{"agent": "kagent", "message": "hi"})
+		Expect(r.IsError).To(BeFalse(), txt(r))
+		Expect(sc.TextFor("acme", fakeToken)).To(Equal("[redacted:secret]"), "the value was recorded for the caller's org")
+		Expect(txt(r)).NotTo(ContainSubstring(fakeToken))
+		Expect(txt(r)).To(ContainSubstring("my key is [redacted:secret]"))
 	})
 
 	It("hides a reply that the guard refuses", func() {
