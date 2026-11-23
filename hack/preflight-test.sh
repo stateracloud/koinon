@@ -29,6 +29,7 @@ stub() { # <name> <body>: a stub that logs its call (with KUBECONFIG) and then r
 	chmod +x "$tmp/bin/$1"
 }
 stub go 'case "$1 $2" in
+"tool "*) exit "${FAKE_BUF_RC:-0}" ;; # the pinned buf (#1169)
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
 "list ./...") echo example.com/m/a; echo example.com/m/test/harnesses ;;
 "list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/harnesses" ;; # go list -f {{.Dir}} ./...: absolute directories
@@ -38,9 +39,10 @@ esac
 exit 0'
 stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
-# `pnpm --dir web install` makes web/node_modules/.bin/protoc-gen-es unless FAKE_PNPM_INSTALL_FAIL is set.
-stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
+# `pnpm --dir web install` makes the protoc-gen-es plugin unless FAKE_PNPM_INSTALL_FAIL is set.
+stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/@bufbuild/protoc-gen-es/bin; : >web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
+stub node 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
 stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'
@@ -443,8 +445,8 @@ check "proto change selects proto" has '^proto:' "$tmp/d1"
 rc=$(pf "$tmp/d2" --only deps,proto)
 check "deps and proto pass: exit 0" eq "$rc" 0
 check "dep-age-check gets the base" has '^dep-age-check.sh origin/main' "$FAKE_LOG"
-check "buf lint ran" has '^buf lint' "$FAKE_LOG"
-check "buf breaking against the merge base" has '^buf breaking --against .git#ref=' "$FAKE_LOG"
+check "buf lint ran" has '^go tool -modfile=hack/tools/buf/go.mod buf lint' "$FAKE_LOG"
+check "buf breaking against the merge base" has '^go tool -modfile=hack/tools/buf/go.mod buf breaking --against .git#ref=' "$FAKE_LOG"
 export FAKE_DEP_AGE_CHECK_RC=1
 rc=$(pf "$tmp/d3" --only deps)
 check "dep-age failure fails preflight" eq "$rc" 1
@@ -456,8 +458,8 @@ check "buf failure fails preflight" eq "$rc" 1
 unset FAKE_BUF_RC
 rc=0
 PATH="$tmp/limited" "$repo/hack/preflight.sh" --only proto >"$tmp/d5" 2>&1 || rc=$?
-check "no buf: proto skipped, exit 0" eq "$rc" 0
-check "no buf: skip line" has '^proto skip' "$tmp/d5"
+check "no go: proto skipped, exit 0" eq "$rc" 0
+check "no go: skip line" has '^proto skip' "$tmp/d5"
 
 check "mktemp failure: fresh() fails" test "$mktemp_fail_rc" -ne 0
 check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep
