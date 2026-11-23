@@ -250,9 +250,18 @@ var _ = Describe("signed audit checkpoints", func() {
 			DeferCleanup(func(ctx SpecContext) { _ = tx.Rollback(ctx) })
 			_, err = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`)
 			Expect(err).NotTo(HaveOccurred())
+			// The tamper flips every bit of the first byte, so it always changes the hash. A fixed
+			// replacement byte leaves the row as it was in 1 run of 256 (#1203).
+			const signedRow = `(SELECT max((summary->'after'->>'anchor_seq')::bigint) FROM install_audit_events WHERE action = 'audit.checkpoint')`
+			var before []byte
+			Expect(tx.QueryRow(ctx, `SELECT hash FROM install_audit_events WHERE chain_seq = `+signedRow).Scan(&before)).To(Succeed())
 			// audit-lint:allow a tamper test: changes the signed row's hash past the triggers
-			_, err = tx.Exec(ctx, `UPDATE install_audit_events SET hash = '\x00' || substring(hash from 2) WHERE chain_seq = (SELECT max((summary->'after'->>'anchor_seq')::bigint) FROM install_audit_events WHERE action = 'audit.checkpoint')`)
+			tag, err := tx.Exec(ctx, `UPDATE install_audit_events SET hash = set_byte(hash, 0, get_byte(hash, 0) # 255) WHERE chain_seq = `+signedRow)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(tag.RowsAffected()).To(BeEquivalentTo(1), "the tamper must hit the signed row")
+			var after []byte
+			Expect(tx.QueryRow(ctx, `SELECT hash FROM install_audit_events WHERE chain_seq = `+signedRow).Scan(&after)).To(Succeed())
+			Expect(after).NotTo(Equal(before), "the tamper must change the hash")
 			_, err = audit.Checkpoint(ctx, tx, keys, audit.CheckpointOptions{})
 			Expect(err).To(MatchError(audit.ErrCheckpointInconsistent))
 		})
