@@ -31,11 +31,12 @@ the call carry? Today each handler answers these questions in its own code:
   without any check of its own". That choice is right for callers that are not requests: `approvals.Execute` runs from
   `internal/apiassembly/domain.go`, and the importer, the sweepers, the A2A edge (`internal/services/a2aedge.go`) and
   remote agents (`internal/remoteagents/remoteagents.go`) call services too. For callers that are requests, the check
-  is spread over 9 `refuseWhileHeld` calls (`internal/services/hold.go`): 5 in `connections.go`, one each in
-  `bindings.go`, `tasks.go`, `directmessage.go` and `a2aedge.go`. The guards in the services add to them. A new RPC can reach outward and nothing tests that it is held.
+  is spread over 8 handler calls of `refuseWhileHeld` (`internal/services/hold.go`): 5 in `connections.go`, one each in
+  `bindings.go`, `tasks.go` and `directmessage.go`. The A2A edge (`a2aedge.go`) makes a ninth call; it is not a request
+  handler. The guards in the services add to them. A new RPC can reach outward and nothing tests that it is held.
 - **Errors.** `TraceDestinationService` attaches `google.rpc.ErrorInfo` with 8 reason strings
-  (`internal/services/tracedestinations.go`). Three more `withReason` calls exist: `PRICE_REFRESH_OFF` twice in
-  `platformprices.go` and one in `outward.go`. Other services map errors by hand, and the REST `Error` has only `code`
+  (`internal/services/tracedestinations.go`). Three more `withReason` calls exist: `PLATFORM_ADMIN_REQUIRED` in
+  `platformprices.go` and `outward.go`, and `PRICE_REFRESH_OFF` in `platformprices.go`. Other services map errors by hand, and the REST `Error` has only `code`
   and `message` (`internal/adminapi/adminapi.go`). The web reads raw error text in 94 places (#778).
 - **Request ID.** The REST path makes `req-` and 16 hex characters and returns `X-Request-Id`. The Connect path makes
   a UUID only in a handler that calls `requestCtx`, and it never returns it. The audit chain (ADR 0100) records the
@@ -136,7 +137,7 @@ Taken from the options of the 2026-11-19 comment on #771.
 
 - **Hold: the entry only (delete all service guards).** A future workflow or sweeper that calls a service that was
   guarded is not held, and nothing finds that.
-- **Hold: the service layer only (today).** The table only records the answer for a spec. The 9 handler checks and the
+- **Hold: the service layer only (today).** The table only records the answer for a spec. The 8 handler calls plus the call on the A2A edge, and the
   per-file mappers stay, and #775 is dropped.
 - **Split vs predicate for `SetOutwardTargetDisabled`: a request predicate on the row** (`HeldWhen func(req) bool`).
   The table then holds code, and the spec must call every predicate with each value of the field. A service check kept
