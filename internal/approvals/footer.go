@@ -79,7 +79,11 @@ func RunURL(publicURL, taskID string) string {
 // text is removed, so only Koinon's footer carries it. The body is cut, if needed, so the whole fits
 // the code host's limit.
 func PullRequestBody(body string, f Footer) string {
-	body = strings.TrimSpace(strings.ReplaceAll(body, FooterMarker, ""))
+	// Remove until none is left: one pass can join the halves of a marker into a new one.
+	for strings.Contains(body, FooterMarker) {
+		body = strings.ReplaceAll(body, FooterMarker, "")
+	}
+	body = strings.TrimSpace(body)
 	footer := f.String()
 	room := githubtools.MaxBodyBytes - len(footer) - len("\n\n")
 	if len(body) > room {

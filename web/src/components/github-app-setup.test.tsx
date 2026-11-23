@@ -24,7 +24,7 @@ afterEach(() => {
 })
 
 describe('GitHubAppSetup', () => {
-  it('posts the manifest to GitHub', async () => {
+  it('posts the setup to the page that opens GitHub', async () => {
     const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {})
     const starts: StartGitHubAppSetupRequest[] = []
     const transport = createRouterTransport(({ service }) => {
@@ -46,8 +46,35 @@ describe('GitHubAppSetup', () => {
     expect(starts[0]).toMatchObject({ orgId, displayName: 'Acme agents', githubOwner: 'acme', baseUrl: '' })
     const form = submit.mock.contexts[0] as HTMLFormElement
     expect(form.method).toBe('post')
-    expect(form.action).toBe('https://github.example.test/organizations/acme/settings/apps/new?state=s')
-    expect((form.elements.namedItem('manifest') as HTMLInputElement).value).toBe('{"name":"Acme agents"}')
+    expect(new URL(form.action).pathname).toBe('/auth/github/app-setup/post')
+    expect((form.elements.namedItem('state') as HTMLInputElement).value).toBe(state)
+    expect(form.elements.namedItem('manifest')).toBeNull()
+  })
+
+  it('sends the CA bundle of a GitHub Enterprise Server', async () => {
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {})
+    const starts: StartGitHubAppSetupRequest[] = []
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.ADMIN }) })
+      service(ConnectionService, {
+        listConnectorTypes: () => ({ connectorTypes: [githubConnectorType()] }),
+        startGitHubAppSetup: (req: StartGitHubAppSetupRequest) => {
+          starts.push(req)
+          return { state }
+        },
+      })
+    })
+    renderApp(transport, '/connections/new/github')
+    await userEvent.type(await screen.findByLabelText('App name'), 'Acme agents')
+    await userEvent.type(screen.getByLabelText('GitHub Enterprise Server URL (optional)'), 'https://github.example.test')
+    const ca = screen.getByLabelText('CA bundle (optional)')
+    await userEvent.type(ca, 'not a certificate')
+    expect(screen.getByRole('button', { name: 'Create the App on GitHub' })).toBeDisabled()
+    await userEvent.clear(ca)
+    await userEvent.type(ca, '-----BEGIN CERTIFICATE-----\nkoinon-test\n-----END CERTIFICATE-----')
+    await userEvent.click(screen.getByRole('button', { name: 'Create the App on GitHub' }))
+    await waitFor(() => expect(starts).toHaveLength(1))
+    expect(starts[0]).toMatchObject({ baseUrl: 'https://github.example.test', caBundle: '-----BEGIN CERTIFICATE-----\nkoinon-test\n-----END CERTIFICATE-----' })
   })
 
   it('refuses a name GitHub does not allow and shows a server error', async () => {

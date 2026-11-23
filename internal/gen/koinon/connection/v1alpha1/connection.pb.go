@@ -3483,22 +3483,22 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12!\n" +
 	"\fgithub_owner\x18\x03 \x01(\tR\vgithubOwner\x12\x19\n" +
 	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
-	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\"j\n" +
+	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\"o\n" +
 	"\x1bStartGitHubAppSetupResponse\x12\x19\n" +
 	"\bpost_url\x18\x01 \x01(\tR\apostUrl\x12\x1a\n" +
-	"\bmanifest\x18\x02 \x01(\tR\bmanifest\x12\x14\n" +
-	"\x05state\x18\x03 \x01(\tR\x05state\"`\n" +
+	"\bmanifest\x18\x02 \x01(\tR\bmanifest\x12\x19\n" +
+	"\x05state\x18\x03 \x01(\tB\x03\x80\x01\x01R\x05state\"j\n" +
 	"\x1dContinueGitHubAppSetupRequest\x12\x15\n" +
-	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\x12\x12\n" +
-	"\x04code\x18\x03 \x01(\tR\x04code\"\\\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\x05state\x18\x02 \x01(\tB\x03\x80\x01\x01R\x05state\x12\x17\n" +
+	"\x04code\x18\x03 \x01(\tB\x03\x80\x01\x01R\x04code\"\\\n" +
 	"\x1eContinueGitHubAppSetupResponse\x12\x1f\n" +
 	"\vinstall_url\x18\x01 \x01(\tR\n" +
 	"installUrl\x12\x19\n" +
-	"\bapp_slug\x18\x02 \x01(\tR\aappSlug\"s\n" +
+	"\bapp_slug\x18\x02 \x01(\tR\aappSlug\"x\n" +
 	"\x1bFinishGitHubAppSetupRequest\x12\x15\n" +
-	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\x12'\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\x05state\x18\x02 \x01(\tB\x03\x80\x01\x01R\x05state\x12'\n" +
 	"\x0finstallation_id\x18\x03 \x01(\x03R\x0einstallationId\"\xa9\x01\n" +
 	"\x1cFinishGitHubAppSetupResponse\x12F\n" +
 	"\n" +

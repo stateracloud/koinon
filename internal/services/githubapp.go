@@ -35,7 +35,8 @@ import (
 // manifest Koinon builds:
 //
 //  1. StartGitHubAppSetup stores a setup under a one-time state (only its hash) and returns the
-//     manifest and GitHub's "new App" page. The browser posts the manifest there.
+//     manifest and GitHub's "new App" page. The browser posts the state to GitHubAppPostPath,
+//     which posts the manifest to that page under its own CSP.
 //  2. GitHub creates the App and sends the browser to /connections/new/github/app-created with a
 //     code. ContinueGitHubAppSetup trades the code for the App's private key and OAuth client and
 //     seals both at once, under the connection ID the setup reserved: they never leave the API
@@ -166,16 +167,9 @@ func (s *Server) StartGitHubAppSetup(ctx context.Context, req *connectionv1alpha
 		OrgID: c.org, StateHash: stateHash(state), UserID: c.actor(), ConnectionID: pgtype.UUID{Bytes: id, Valid: true},
 		DisplayName: name, BaseUrl: baseURL, CaBundle: caBundle, GithubOwner: owner,
 	}
-	postURL, err := h.ManifestPostURL(setupSite(row, t.Metadata.ID), owner, state)
+	postURL, manifest, err := manifestPost(h, t, publicURL, row, state)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
-	}
-	manifest, err := json.Marshal(github.NewManifest(t, name, github.ManifestURLs{
-		Home: publicURL, Created: publicURL + githubAppCreatedPath, Installed: publicURL + githubAppInstalledPath,
-		Callback: publicURL + githublink.CallbackPath,
-	}))
-	if err != nil {
-		return nil, s.dbError(err, "GitHub App setup")
 	}
 	now := time.Now()
 	err = s.inTx(ctx, func(q *store.Queries) error {
@@ -191,7 +185,24 @@ func (s *Server) StartGitHubAppSetup(ctx context.Context, req *connectionv1alpha
 	if err != nil {
 		return nil, s.dbError(err, "GitHub App setup")
 	}
-	return &connectionv1alpha1.StartGitHubAppSetupResponse{PostUrl: postURL, Manifest: string(manifest), State: state}, nil
+	return &connectionv1alpha1.StartGitHubAppSetupResponse{PostUrl: postURL, Manifest: manifest, State: state}, nil
+}
+
+// manifestPost is GitHub's "new App" page for the setup and the manifest the browser posts there.
+// Both follow from the setup row and its state, so the post page builds them again.
+func manifestPost(h githubAppSetupHost, t *connectors.Type, publicURL string, row store.GithubAppSetup, state string) (string, string, error) {
+	postURL, err := h.ManifestPostURL(setupSite(row, t.Metadata.ID), row.GithubOwner, state)
+	if err != nil {
+		return "", "", err
+	}
+	manifest, err := json.Marshal(github.NewManifest(t, row.DisplayName, github.ManifestURLs{
+		Home: publicURL, Created: publicURL + githubAppCreatedPath, Installed: publicURL + githubAppInstalledPath,
+		Callback: publicURL + githublink.CallbackPath,
+	}))
+	if err != nil {
+		return "", "", err
+	}
+	return postURL, string(manifest), nil
 }
 
 // appSetup loads the caller's live setup of state.
@@ -332,14 +343,10 @@ func (s *Server) FinishGitHubAppSetup(ctx context.Context, req *connectionv1alph
 		name: row.DisplayName, appID: row.AppID.Int64, installationID: req.GetInstallationId(), pemKey: pemKey,
 		baseURL: row.BaseUrl, caBundle: row.CaBundle, test: true,
 		connID: row.ConnectionID, envelope: row.SecretEnvelope, clientID: row.ClientID.String, appSlug: row.AppSlug.String,
+		setupState: row.StateHash,
 	})
 	if err != nil {
 		return nil, err
-	}
-	// The setup is used: its state works no more. The connection exists, so a failure here only
-	// leaves a row that expires.
-	if _, err := s.q.DeleteGitHubAppSetup(ctx, store.DeleteGitHubAppSetupParams{OrgID: c.org, StateHash: row.StateHash}); err != nil {
-		s.log.Warn("could not delete a used GitHub App setup", "org", c.org.String(), "err", err)
 	}
 	return &connectionv1alpha1.FinishGitHubAppSetupResponse{Connection: res.GetConnection(), Results: res.GetResults()}, nil
 }

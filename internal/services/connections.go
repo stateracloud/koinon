@@ -172,6 +172,9 @@ type githubCreate struct {
 	envelope []byte
 	clientID string
 	appSlug  string
+	// setupState is the hash of the setup's state. The setup row goes in the transaction that makes
+	// the connection, so a setup makes one connection only, also when two finishes race.
+	setupState []byte
 }
 
 // createGitHub validates and stores a GitHub connection, audits it and, on request, tests it.
@@ -258,6 +261,15 @@ func (s *Server) createGitHub(ctx context.Context, c caller, in githubCreate) (*
 		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
 		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
 			return err
+		}
+		if in.setupState != nil {
+			n, err := q.DeleteGitHubAppSetup(ctx, store.DeleteGitHubAppSetupParams{OrgID: c.org, StateHash: in.setupState})
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return errSetupNotFound()
+			}
 		}
 		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
 		if err != nil {

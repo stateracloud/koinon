@@ -528,15 +528,15 @@ message StartGitHubAppSetupResponse {
   // The App manifest, as JSON text.
   string manifest = 2;
   // The setup's state. GitHub sends it back with each step.
-  string state = 3;
+  string state = 3 [debug_redact = true];
 }
 
 // ContinueGitHubAppSetupRequest carries what GitHub sent back after it
 // created the App.
 message ContinueGitHubAppSetupRequest {
   string org_id = 1;
-  string state = 2;
-  string code = 3;
+  string state = 2 [debug_redact = true];
+  string code = 3 [debug_redact = true];
 }
 
 // ContinueGitHubAppSetupResponse holds the GitHub page that installs the App.
@@ -549,7 +549,7 @@ message ContinueGitHubAppSetupResponse {
 // install.
 message FinishGitHubAppSetupRequest {
   string org_id = 1;
-  string state = 2;
+  string state = 2 [debug_redact = true];
   int64 installation_id = 3;
 }
 

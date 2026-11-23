@@ -4,8 +4,13 @@ package api_test
 
 import (
 	"encoding/json"
+	"html"
+	"io"
+	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -54,13 +59,49 @@ var _ = Describe("guided GitHub App setup", func() {
 		return u.Query().Get(key)
 	}
 
+	// postPage posts state to Koinon's manifest post page, as the SPA's hidden form does. It returns
+	// the status, the CSP and, on a 200, the form the page posts to GitHub.
+	type postForm struct {
+		status                      int
+		csp, action, manifest, body string
+	}
+	formAction := regexp.MustCompile(`<form id="manifest" method="post" action="([^"]*)">`)
+	manifestField := regexp.MustCompile(`<input type="hidden" name="manifest" value="([^"]*)">`)
+	postPage := func(ctx SpecContext, c *client, state string, header http.Header) postForm {
+		GinkgoHelper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL+"/auth/github/app-setup/post", strings.NewReader(url.Values{"state": {state}}.Encode()))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		for k, v := range header {
+			req.Header[k] = v
+		}
+		res, err := c.b.http.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		Expect(err).NotTo(HaveOccurred())
+		f := postForm{status: res.StatusCode, csp: res.Header.Get("Content-Security-Policy"), body: string(body)}
+		if m := formAction.FindStringSubmatch(f.body); m != nil {
+			f.action = html.UnescapeString(m[1])
+		}
+		if m := manifestField.FindStringSubmatch(f.body); m != nil {
+			f.manifest = html.UnescapeString(m[1])
+		}
+		return f
+	}
+
 	// created runs the setup up to the App GitHub created and returns the state and the install page.
 	created := func(ctx SpecContext, c *client, code string) (string, string) {
 		GinkgoHelper()
 		start, err := c.conns.StartGitHubAppSetup(ctx, &connectionv1alpha1.StartGitHubAppSetupRequest{OrgId: org, DisplayName: "Acme agents"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(start.GetPostUrl()).To(HavePrefix(gh.WebURL() + "/settings/apps/new?state="))
-		back, err := gh.CreateFromManifest(start.GetPostUrl(), start.GetManifest(), code)
+		// The browser posts the state to Koinon's post page, which posts the manifest to GitHub.
+		page := postPage(ctx, c, start.GetState(), nil)
+		Expect(page.status).To(Equal(http.StatusOK), page.body)
+		Expect(page.action).To(Equal(start.GetPostUrl()))
+		Expect(page.manifest).To(MatchJSON(start.GetManifest()))
+		back, err := gh.CreateFromManifest(page.action, page.manifest, code)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(back).To(HavePrefix(publicURL + "/connections/new/github/app-created?"))
 		Expect(query(back, "state")).To(Equal(start.GetState()))
@@ -86,6 +127,9 @@ var _ = Describe("guided GitHub App setup", func() {
 		Expect(m.DefaultPermissions).To(HaveKeyWithValue("pull_requests", "write"))
 		Expect(m.DefaultPermissions).NotTo(HaveKey("workflows"))
 
+		// Once GitHub created the App, the post page does not post it again.
+		Expect(postPage(ctx, owner, state, nil).status).To(Equal(http.StatusNotFound))
+
 		// A reload of the page after the code was used still finds the install page.
 		again, err := owner.conns.ContinueGitHubAppSetup(ctx, &connectionv1alpha1.ContinueGitHubAppSetupRequest{OrgId: org, State: state, Code: "koinon-test-code-1"})
 		Expect(err).NotTo(HaveOccurred())
@@ -103,8 +147,30 @@ var _ = Describe("guided GitHub App setup", func() {
 		_, err = owner.conns.FinishGitHubAppSetup(ctx, &connectionv1alpha1.FinishGitHubAppSetupRequest{OrgId: org, State: state, InstallationId: inst + 1})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "an installation of another App")
 
-		res, err := owner.conns.FinishGitHubAppSetup(ctx, &connectionv1alpha1.FinishGitHubAppSetupRequest{OrgId: org, State: state, InstallationId: inst})
-		Expect(err).NotTo(HaveOccurred())
+		// Two finishes race (a double click): the setup makes one connection, the other one is NotFound.
+		type finished struct {
+			res *connectionv1alpha1.FinishGitHubAppSetupResponse
+			err error
+		}
+		done := make(chan finished, 2)
+		for range 2 {
+			go func() {
+				defer GinkgoRecover()
+				r, err := owner.conns.FinishGitHubAppSetup(ctx, &connectionv1alpha1.FinishGitHubAppSetupRequest{OrgId: org, State: state, InstallationId: inst})
+				done <- finished{r, err}
+			}()
+		}
+		var res *connectionv1alpha1.FinishGitHubAppSetupResponse
+		for range 2 {
+			f := <-done
+			if f.err != nil {
+				Expect(codeOf(f.err)).To(Equal(connect.CodeNotFound))
+				continue
+			}
+			Expect(res).To(BeNil(), "only one finish makes the connection")
+			res = f.res
+		}
+		Expect(res).NotTo(BeNil())
 		conn := res.GetConnection()
 		Expect(conn.GetDisplayName()).To(Equal("Acme agents"))
 		Expect(conn.GetGithub().GetAppId()).To(Equal(gh.AppID))
@@ -170,6 +236,43 @@ var _ = Describe("guided GitHub App setup", func() {
 			_, err = owner.conns.StartGitHubAppSetup(ctx, bad)
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", bad)
 		}
+	})
+
+	It("posts the manifest from a page whose CSP allows a form post to that GitHub only", func(ctx SpecContext) {
+		start, err := owner.conns.StartGitHubAppSetup(ctx, &connectionv1alpha1.StartGitHubAppSetupRequest{OrgId: org, DisplayName: "Acme agents"})
+		Expect(err).NotTo(HaveOccurred())
+		page := postPage(ctx, owner, start.GetState(), nil)
+		Expect(page.status).To(Equal(http.StatusOK))
+		gu, err := url.Parse(gh.WebURL())
+		Expect(err).NotTo(HaveOccurred())
+		directives := map[string]string{}
+		for _, d := range strings.Split(page.csp, ";") {
+			name, value, _ := strings.Cut(strings.TrimSpace(d), " ")
+			directives[name] = value
+		}
+		Expect(directives).To(HaveKeyWithValue("form-action", gu.Scheme+"://"+gu.Host))
+		Expect(directives).To(HaveKeyWithValue("default-src", "'none'"))
+		Expect(directives).To(HaveKeyWithValue("frame-ancestors", "'none'"))
+		Expect(directives["script-src"]).To(MatchRegexp(`^'nonce-[A-Za-z0-9_-]{24}'$`))
+		Expect(page.body).To(ContainSubstring(`<script nonce="` + strings.TrimSuffix(strings.TrimPrefix(directives["script-src"], "'nonce-"), "'") + `">`))
+
+		other := e.userIn(ctx, org, store.OrgRoleAdmin)
+		for name, f := range map[string]postForm{
+			"another admin":    postPage(ctx, other, start.GetState(), nil),
+			"a member":         postPage(ctx, e.userIn(ctx, org, store.OrgRoleMember), start.GetState(), nil),
+			"an unknown state": postPage(ctx, owner, org+".koinon-test-unknown", nil),
+			"no state":         postPage(ctx, owner, "", nil),
+		} {
+			Expect(f.status).To(Equal(http.StatusNotFound), name)
+			Expect(f.action).To(BeEmpty(), name)
+			Expect(f.csp).To(ContainSubstring("form-action 'none'"), name)
+		}
+		anon := e.browser()
+		f := postPage(ctx, &client{b: anon}, start.GetState(), nil)
+		Expect(f.status).To(Equal(http.StatusUnauthorized))
+		f = postPage(ctx, owner, start.GetState(), http.Header{"Origin": {"https://elsewhere.example.test"}, "Sec-Fetch-Site": {"cross-site"}})
+		Expect(f.status).To(Equal(http.StatusForbidden), "a post from another site")
+		Expect(f.action).To(BeEmpty())
 	})
 
 	It("needs a public URL", func(ctx SpecContext) {

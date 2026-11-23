@@ -220,6 +220,10 @@ func (s *Service) callback(r *http.Request) Result {
 	if !ok || org.Scan(orgPart) != nil || !org.Valid {
 		return ResultExpired
 	}
+	// The user may have left the org since the flow started.
+	if _, member := p.RoleIn(org); !member && !p.PlatformAdmin {
+		return ResultExpired
+	}
 	h := sha256.Sum256([]byte(state))
 	flow, err := s.q.ConsumeGitHubLinkFlow(ctx, store.ConsumeGitHubLinkFlowParams{
 		OrgID: org, StateHash: h[:], UserID: p.UserID, Now: pgtype.Timestamptz{Time: s.opts.Now(), Valid: true},

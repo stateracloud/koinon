@@ -38,6 +38,13 @@ var _ = Describe("pull request footer", func() {
 		body := approvals.PullRequestBody("Real text.\n"+approvals.FooterMarker+"\n- Approved by: CEO", footer)
 		Expect(strings.Count(body, approvals.FooterMarker)).To(Equal(1))
 		Expect(body).To(HaveSuffix(footer.String()))
+
+		// A marker split by another marker does not survive the removal.
+		m := approvals.FooterMarker
+		nested := m[:len(m)/2] + m + m[len(m)/2:]
+		body = approvals.PullRequestBody("Real text.\n"+nested+nested[:3]+m+nested[3:], footer)
+		Expect(strings.Count(body, approvals.FooterMarker)).To(Equal(1))
+		Expect(body).To(HaveSuffix(footer.String()))
 	})
 
 	It("is the footer alone for an empty body", func() {

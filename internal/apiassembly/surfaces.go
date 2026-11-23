@@ -100,7 +100,7 @@ func buildSurfaces(out Outside, set Settings, pre Prebuilt, d *domain) (*Assembl
 		TrustedOrigins: set.TrustedOrigins,
 		Services:       append(append([]func(*connect.Server){}, out.Services...), svc.Register),
 		UI:             ui,
-		Mounts:         []func(*http.ServeMux){admin.Mount, edge.Mount, links.Mount},
+		Mounts:         []func(*http.ServeMux){admin.Mount, edge.Mount, links.Mount, func(m *http.ServeMux) { svc.MountGitHubAppPost(m, pre.Auth) }},
 		Ready:          out.Ready,
 	})
 	if err != nil {
