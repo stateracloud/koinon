@@ -433,6 +433,22 @@ _Avoid_: Instance, cluster, tenant, environment
 Koinon's own services, which hold the orgs and their work and drive the sandboxes; no agent code runs in them.
 _Avoid_: Backend, server, operator, manager
 
+**Entry**:
+The one place where each API request starts, on the Connect and the REST path. It checks the minimum Role and the restore hold from the request's row in the entry table, and makes the request ID (ADR 0116).
+_Avoid_: Middleware, interceptor (those are how it is built, not what it is)
+
+**Entry table**:
+The table with one row of facts for each RPC: the minimum Role, `held: refuse|allow` (no default) and an optional `raises` mark. A registry spec checks every row (ADR 0116).
+_Avoid_: RPC registry, facts table, route table
+
+**Refusal reason**:
+The fixed string that says why the API refused a call, from one proto enum. Connect carries it in `google.rpc.ErrorInfo` and REST in `error.reason` (ADR 0116).
+_Avoid_: Error code, error type
+
+**Request ID**:
+The ID the entry makes for each API request and returns in `X-Request-Id`; audit events record it. An ID the client sends is only logged (ADR 0116).
+_Avoid_: Trace ID, correlation ID
+
 ### Contributing
 
 **Claim**:

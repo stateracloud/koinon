@@ -14,6 +14,7 @@ relates: ["0004", "0023", "0085", "0100", "0106"]
 - Area: install-operations
 - Tags: backup-restore, identity, auth, openshell, mcp
 - Amends: [0107](0107-restore-hold-mode.md) (what a held install writes; how a release works)
+- Amended by: [0116](0116-api-entry-table.md) (decision 5: `SetOutwardTargetDisabled` is split into `DisableOutwardTarget` and `EnableOutwardTarget`)
 - Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark),
   [0085](0085-upgrade-compatibility-and-recovery-policy.md) (Context 6, decision 15), [0100](0100-install-audit-chain.md)
   (recorded settings, install audit chain), [0023](0023-observability-and-audit.md) (fixed metric labels),
@@ -275,6 +276,9 @@ the guard off); runtime only (no way to choose read-only before the first start)
   connections; the Secret wins, and the UI cannot enable an item its Secret disables).
 - **Disable is allowed while held** (it reaches nothing). **Enable is refused while held** with `restorehold.ErrHeld`,
   because an enabled target may be dialled (preflight, probe).
+  _(Amended by [0116](0116-api-entry-table.md), decided but not built yet (#771): `SetOutwardTargetDisabled` is split
+  into `DisableOutwardTarget` (`held: allow`) and `EnableOutwardTarget` (`held: refuse`), and the old method is
+  deprecated. The rule does not change.)_
 - `restore status` lists every outward target with its enabled or disabled state (decision 7).
 
 Alternatives: a flag on MCP servers only (#516 as filed; the other kinds keep the same leak); reusing

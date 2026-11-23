@@ -11,7 +11,8 @@ relates: ["0023", "0085", "0100"]
 - Date: 2026-11-10
 - Area: install-operations
 - Tags: backup-restore, helm-chart, upgrade
-- Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works)
+- Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works),
+  [0116](0116-api-entry-table.md) (decided, not built yet; #771: the API entry refuses requests, the service guard holds only callers that are not requests)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (the patch-line rule; recovery policy),
   [0100](0100-install-audit-chain.md) (`restore-hold` is a recorded setting), [0023](0023-observability-and-audit.md) (fixed metric label sets)
 - Issues: closes #462; refs #275 (the restore drill)
@@ -59,7 +60,10 @@ not yet trusted.
      [0110](0110-held-copy-isolation.md), decided but not built yet (#516): the importer logs `held: would <action> <kind> <name>`
      once per change and records one Event per Secret, reason `HeldNotApplied`. The code still does what this paragraph says.)_ The
      connection and binding handlers call the code host themselves, with no service in between, so they keep a
-     check of their own (`Server.refuseWhileHeld`).
+     check of their own (`Server.refuseWhileHeld`). _(Amended by [0116](0116-api-entry-table.md), decided but not
+     built yet (#771): the API entry refuses each request whose entry table row says `held: refuse`, and the service
+     guard stays only for callers that are not requests. The list of what is refused does not change. The code still
+     does what this paragraph says.)_
    - `koinon-agentd` claims and takes over no run and touches no sandbox. It still serves `checkpoints resync`, which
      the runbook runs before the release.
    - `koinon-reconciler` converges no sandbox, applies no provider key and runs no spend settler or cost

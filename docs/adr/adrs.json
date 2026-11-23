@@ -2851,7 +2851,8 @@
     ],
     "related_by": [
       "0107",
-      "0110"
+      "0110",
+      "0116"
     ]
   },
   {
@@ -3044,7 +3045,8 @@
     ],
     "amends": [],
     "amended_by": [
-      "0110"
+      "0110",
+      "0116"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -3125,7 +3127,9 @@
     "amends": [
       "0107"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0116"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3305,6 +3309,32 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0116",
+    "file": "0116-api-entry-table.md",
+    "title": "The API entry table: one row of facts for each RPC",
+    "status": "accepted",
+    "date": "2026-11-23",
+    "area": "security-audit",
+    "tags": [
+      "api",
+      "auth",
+      "audit",
+      "backup-restore",
+      "testing"
+    ],
+    "amends": [
+      "0107",
+      "0110"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0100"
+    ],
     "related_by": []
   },
   {

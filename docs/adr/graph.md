@@ -101,6 +101,7 @@ flowchart LR
   n0113["0113: Agent package access: straight to allow-listed registries, in four levels"]
   n0114["0114: Model traffic always through the gateway; credentials handled by type"]
   n0115["0115: Document metadata: one area and controlled tags on every doc"]
+  n0116["0116: The API entry table: one row of facts for each RPC"]
   n0119["0119: Agent Substrate is Koinon's execution layer"]
   n0120["0120: Execution hardening defaults"]
   n0013 --> n0040
@@ -228,6 +229,8 @@ flowchart LR
   n0015 --> n0114
   n0044 --> n0114
   n0046 --> n0115
+  n0107 --> n0116
+  n0110 --> n0116
   n0002 --> n0119
   n0006 --> n0119
   n0009 --> n0119
