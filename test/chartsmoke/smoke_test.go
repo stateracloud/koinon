@@ -151,11 +151,15 @@ func describeMode(name, valuesFile string) {
 			for _, o := range r.Objects {
 				add(o)
 			}
+			seeded := map[string]bool{}
 			for _, o := range r.Foreign {
 				if _, _, hook := hookOf(mustMeta(o)); hook {
 					// The CA hook Job (issue #1191) acts on the Substrate namespace. Make what the installer leaves
-					// there before helm runs: the namespace and the atelet DaemonSet with the installer patch.
-					seedSubstrateNamespace(ctx, cl, mustMeta(o).GetNamespace())
+					// there before helm runs: the namespace and the atelet DaemonSet with the installer patch, once.
+					if ns := mustMeta(o).GetNamespace(); !seeded[ns] {
+						seeded[ns] = true
+						seedSubstrateNamespace(ctx, cl, ns)
+					}
 				}
 				add(o)
 			}
@@ -189,6 +193,16 @@ func describeMode(name, valuesFile string) {
 				}
 			}
 			AddReportEntry("hook Jobs, in order", fmt.Sprint(ran))
+			for ns := range seeded {
+				// The CA hook Job ran for real: it published the public CA and stamped atelet.
+				cm, err := cl.Admin.CoreV1().ConfigMaps(ns).Get(ctx, imagecacheca.ConfigMapName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cm.Data).To(HaveKey(imagecacheca.CAKey))
+				Expect(cm.Data).NotTo(HaveKey("tls.key"))
+				ds, err := cl.Admin.AppsV1().DaemonSets(ns).Get(ctx, imagecacheca.DaemonSetName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ds.Spec.Template.Annotations).To(HaveKey(imagecacheca.AteletAnnotation))
+			}
 			Expect(ran).To(ContainElement("koinon-migrate"), "the migrate Job is a pre-install hook")
 			if slices.Contains(ran, "koinon-ensure-secrets") {
 				// What the chart expects from it: each token Secret it generates (a Secret the operator
