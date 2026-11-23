@@ -22,7 +22,7 @@ var licenceNotices = []string{
 }
 
 // These specs read the OpenCode Dockerfile and the checked-in notices. They need no Docker, and
-// hack/go-test.sh runs them in the pull request gate (test/harnesses does not run there). They
+// hack/go-test.sh runs them (test/harnesses does not run there). The `go` job runs them only when the change also touches a path it watches; see the README. They
 // fail when a licence notice, the Rust crate notices or the GPL source offer stops being wired
 // into the image (#63). What they cannot show is the built image: the build and the
 // sandbox-user read in licences_test.go do that.
@@ -93,9 +93,9 @@ var _ = Describe("opencode image licence notices (static)", func() {
 		}
 	})
 
-	It("checks that the three Rust tools are in the notices at build time", func() {
-		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*for t in ripgrep fd ast-grep; do \\$`))
-		Expect(dockerfile).To(MatchRegexp(`grep -q "\^## \$t " /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES\.md`))
+	It("checks that the three Rust tools are in the notices, at the pinned version, at build time", func() {
+		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*for t in "ripgrep [0-9.]+" "fd [0-9.]+" "ast-grep [0-9.]+"; do \\$`))
+		Expect(dockerfile).To(MatchRegexp(`grep -qxF "## \$t" /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES\.md`))
 	})
 
 	It("checks the OpenCode MIT notice at build time", func() {

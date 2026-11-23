@@ -479,8 +479,10 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   `--all-features`, so the list also covers optional crates (such as `pcre2` for ripgrep) that a
   release build may enable. It needs network access to github.com (the cargo-about release) and
   crates.io. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
-  together, run the script and commit the result. `test/noticescheck` (it runs in the pull request
-  gate) fails when the notices name another version than the Dockerfile pin.
+  together, run the script and commit the result. `test/noticescheck` (run by `hack/go-test.sh`) and the
+  Dockerfile build check fail when the notices name another version than the Dockerfile pin. The
+  `go` job does not watch the notices file or this script, so a change of only those two does not
+  run `test/noticescheck`; the image build in the merge queue catches it.
   Limits: cargo-about reads each crate's own licence. It does not read C libraries that a crate
   builds in (jemalloc, PCRE2): their notices are not in the file, and nobody has checked yet
   with the release binary which of them it links. `option-ext` (MPL-2.0, a file-level copyleft

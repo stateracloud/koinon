@@ -19,8 +19,8 @@
 #      and its build-time check needs all three tools in it; test/harnesses compares the
 #      versions with the Dockerfile pins (see harnesses/opencode/README.md).
 #
-# Needs network access to github.com (the cargo-about release) and to crates.io (the crates)'s registry and download
-# endpoints (cargo-about resolves and reads each dependency's licence from there); it downloads and
+# Needs network access to github.com (the cargo-about release) and to crates.io (the crates and the
+# registry endpoints cargo-about reads each dependency's licence from); it downloads and
 # executes the cargo-about binary. Run it on a machine that allows both, commit the result; the
 # Dockerfile already copies it. See harnesses/opencode/README.md, "Rust tool dependency notices".
 #

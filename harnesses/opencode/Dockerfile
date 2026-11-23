@@ -278,8 +278,8 @@ RUN set -eux; \
     grep -qi 'LGPL' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
     grep -qi 'relink' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
     grep -q 'oven-sh/webkit' /usr/share/doc/koinon-tools/bun/LICENSE.md; \
-    for t in ripgrep fd ast-grep; do \
-      grep -q "^## $t " /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES.md || { echo "THIRD_PARTY_NOTICES.md: missing $t" >&2; exit 1; }; \
+    for t in "ripgrep 15.2.0" "fd 10.5.0" "ast-grep 0.51.0"; do \
+      grep -qxF "## $t" /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES.md || { echo "THIRD_PARTY_NOTICES.md: missing or stale: $t" >&2; exit 1; }; \
     done; \
     for p in bash coreutils git poppler-utils; do \
       grep -q " $p " /usr/share/doc/koinon-tools/GPL-SOURCE-OFFER.txt || { echo "GPL-SOURCE-OFFER.txt: missing $p" >&2; exit 1; }; \
