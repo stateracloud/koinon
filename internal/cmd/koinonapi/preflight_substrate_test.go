@@ -6,6 +6,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/pflag"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/stateracloud/koinon/internal/preflight"
 )
 
 var _ = Describe("preflight --driver substrate", func() {
@@ -41,6 +44,36 @@ var _ = Describe("preflight --driver substrate", func() {
 		Expect(err).To(MatchError(ContainSubstring("<tier>=<name>")))
 		_, err = parse("--driver=substrate", "--netpol-probe=false")
 		Expect(err).To(MatchError(ContainSubstring("--substrate-probes needs --probe-image")))
+	})
+
+	// Issue #1176: the probe pods run outside Substrate's namespaces, whose admission policies refuse a bare pod.
+	It("runs the probe pods in a namespace of their own, and refuses a Substrate namespace for them", func() {
+		c, err := parse("--driver=substrate", "--probe-image=img", "--netpol-probe=false")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.check.Substrate.ProbeNamespace).To(Equal(preflight.DefaultSubstrateProbeNamespace))
+		c, err = parse("--driver=substrate", "--probe-image=img", "--netpol-probe=false", "--substrate-probe-namespace=probes")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.check.Substrate.ProbeNamespace).To(Equal("probes"))
+		for _, args := range [][]string{
+			{"--substrate-probe-namespace=ate-system"},
+			{"--substrate-probe-namespace=ate-workers"},
+			{"--substrate-namespace=sub", "--substrate-probe-namespace=sub"},
+			{"--substrate-worker-namespace=wk", "--substrate-probe-namespace=wk"},
+		} {
+			_, err := parse(append([]string{"--driver=substrate", "--probe-image=img", "--netpol-probe=false"}, args...)...)
+			Expect(err).To(MatchError(ContainSubstring("is a Substrate namespace")), "%v", args)
+		}
+	})
+
+	It("gives the Substrate prober the probe namespace, not a Substrate namespace", func() {
+		for _, args := range [][]string{nil, {"--substrate-probe-namespace=probes"}} {
+			c, err := parse(append([]string{"--driver=substrate", "--probe-image=img", "--netpol-probe=false"}, args...)...)
+			Expect(err).NotTo(HaveOccurred())
+			p := substrateProber(*c, fake.NewClientset(), *c.check.Substrate)
+			Expect(p.Namespace).To(Equal(c.check.Substrate.ProbeNamespace))
+			Expect(p.Namespace).NotTo(BeElementOf("ate-system", "ate-workers"))
+			Expect(p.Image).To(Equal("img"))
+		}
 	})
 
 	Describe("substrate install", func() {

@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 
+	"github.com/stateracloud/koinon/internal/preflight"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -56,6 +57,8 @@ var (
 const (
 	otherDigest  = "registry.invalid/koinon-escape/other@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	workerDigest = "registry.invalid/koinon-escape/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	// A worker image of the micro-VM class (workerShapes.microvm.images); workerDigest is of the gVisor class.
+	microvmDigest = "registry.invalid/koinon-escape/worker-microvm@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 )
 
 // The ValidatingAdmissionPolicies of the Substrate driver's two namespaces (ADR 0120 section 6),
@@ -331,9 +334,17 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		}
 		// Both classes of Substrate v1.0.0.
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-gvisor"))).To(Succeed())
-		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-microvm", sc(func(c *corev1.SecurityContext) {
+		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-microvm", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Image = microvmDigest
+			p.Spec.Containers[0].SecurityContext.Capabilities.Add = microvmCaps
+		}))).To(Succeed())
+		// The capability set is the set of the class of the image (#1176): not the set of the other class.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("gvisor-image-microvm-caps", sc(func(c *corev1.SecurityContext) {
 			c.Capabilities.Add = microvmCaps
-		})))).To(Succeed())
+		}))))
+		denied(create(ctx, replicaSetController, workerNamespace, worker("microvm-image-gvisor-caps", func(p *corev1.Pod) {
+			p.Spec.Containers[0].Image = microvmDigest
+		})))
 		// One capability more or less than the class, and the old ceiling alone.
 		denied(create(ctx, replicaSetController, workerNamespace, worker("caps-more", sc(func(c *corev1.SecurityContext) {
 			c.Capabilities.Add = append(append([]corev1.Capability{}, gvisorCaps...), "SYS_PTRACE")
@@ -378,6 +389,12 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			p.Spec.InitContainers = []corev1.Container{{Name: "init", Image: workerDigest, SecurityContext: &corev1.SecurityContext{
 				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_MODULE"}},
 			}}}
+		})))
+		// An init container named worker is never the worker container (#1176). Kubernetes refuses a main container with
+		// the same name, so the pod has no worker container, and the shape of the init container is refused.
+		denied(create(ctx, replicaSetController, workerNamespace, worker("init-named-worker", func(p *corev1.Pod) {
+			p.Spec.Containers[0] = corev1.Container{Name: "main", Image: otherDigest}
+			p.Spec.InitContainers = []corev1.Container{{Name: "worker", Image: workerDigest, SecurityContext: shape(gvisorCaps)}}
 		})))
 		// Another container with no capability is fine.
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("sidecar-plain", func(p *corev1.Pod) {
@@ -499,6 +516,21 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			denied(create(ctx, replicaSetController, controlNamespace, plain("host-network", func(p *corev1.Pod) { p.Spec.HostNetwork = true })))
 			denied(create(ctx, replicaSetController, controlNamespace, plain("tag", func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/x:v1" })))
 		})
+	})
+
+	// Issue #1176: Koinon's preflight probe pods run in a namespace of their own, not in Substrate's namespaces. The
+	// policy has no exception for them. The real probe pods, with a pinned image, are still refused in both Substrate
+	// namespaces, from the installer's identity: a bare pod there has no controller owner.
+	It("still denies Koinon's probe pods in the control-plane and the worker namespace (issue 1176)", func(ctx SpecContext) {
+		for _, ns := range []string{controlNamespace, workerNamespace} {
+			prober := preflight.KubeSubstrateProber{
+				Namespace: ns, NamePrefix: "koinon-preflight", Image: otherDigest,
+				Labels: map[string]string{"app.kubernetes.io/part-of": "koinon"},
+			}
+			for _, pod := range []*corev1.Pod{prober.IssuerPod("https://kubernetes.default.svc"), prober.DevicesPod(), prober.UserNamespacesPod("node-a")} {
+				denied(create(ctx, "admin", ns, pod))
+			}
+		}
 	})
 
 	// The CA hook Job of issue #1191 rolls atelet by one annotation on its pod template. The rule is narrow: one
@@ -835,7 +867,8 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 		// The default exempts the platform controllers from the digest rule (worker images are tags in
 		// Substrate v1.0.0, #1140). The specs test the rule itself, so they exempt nobody.
 		"--set", "execution.substrate.workerPolicy.digestExemptIdentities={}",
-		"--set", "execution.substrate.workerPolicy.workerImages={"+workerDigest+"}",
+		"--set", "execution.substrate.workerPolicy.workerShapes.gvisor.images={"+workerDigest+"}",
+		"--set", "execution.substrate.workerPolicy.workerShapes.microvm.images={"+microvmDigest+"}",
 		"--set", "sandboxObserver.enabled=false", "--set", "sandboxNetworkPolicy.enabled=false", "--set", "sandboxLimitRange.enabled=false",
 		"--show-only", workerPolicyTemplate)
 	cmd.Stdout, cmd.Stderr = &out, &stderr

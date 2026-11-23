@@ -527,6 +527,44 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- end }}
 
 {{/*
+koinon.narrowCIDR fails the render when a CIDR of workerNetworkPolicy.imageSource.cidrs is wider than one image source
+needs (issue #1176). The rule reads the prefix length, so every spelling of a range is caught (0.0.0.0/0, 0.0.0.0/1,
+1.0.0.0/8, ::/0, 0::/0, 2000::/3):
+- IPv4: /16 or longer. /8 to /15 only inside private space (10.0.0.0/8, 172.16.0.0/12). Shorter than /8 never.
+- IPv6: /48 or longer. /7 to /47 only inside unique local space (fc00::/7). Shorter than /7 never.
+- No IPv6 range inside ::/8: it holds loopback, IPv4-mapped (::ffff:0:0/96) and NAT64 (64:ff9b::/96,
+  64:ff9b:1::/48) space, which is IPv4 space in another spelling.
+Argument: the CIDR string.
+*/}}
+{{- define "koinon.narrowCIDR" -}}
+{{- $c := toString . -}}
+{{- $what := "execution.substrate.workerNetworkPolicy.imageSource.cidrs" -}}
+{{- if regexMatch "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$" $c -}}
+{{- $parts := splitList "/" $c -}}
+{{- $o := splitList "." (first $parts) -}}
+{{- $bits := atoi (last $parts) -}}
+{{- $a := atoi (index $o 0) -}}
+{{- $b := atoi (index $o 1) -}}
+{{- range $o }}{{- if gt (atoi .) 255 }}{{- fail (printf "%s: %s is not an IPv4 CIDR" $what $c) }}{{- end }}{{- end -}}
+{{- if gt $bits 32 }}{{- fail (printf "%s: %s is not an IPv4 CIDR" $what $c) }}{{- end -}}
+{{- $private := or (and (eq $a 10) (ge $bits 8)) (and (eq $a 172) (ge $b 16) (le $b 31) (ge $bits 12)) -}}
+{{- if and (lt $bits 16) (not $private) }}{{- fail (printf "%s: %s is wider than one image source needs: use /16 or longer (/8 to /15 only inside 10.0.0.0/8 or 172.16.0.0/12)" $what $c) }}{{- end -}}
+{{- else if regexMatch "^[0-9a-fA-F:]+/[0-9]{1,3}$" $c -}}
+{{- $parts := splitList "/" $c -}}
+{{- $addr := lower (first $parts) -}}
+{{- $bits := atoi (last $parts) -}}
+{{- if gt $bits 128 }}{{- fail (printf "%s: %s is not an IPv6 CIDR" $what $c) }}{{- end -}}
+{{- if contains "ffff:" $addr }}{{- if regexMatch "^(0{0,4}:){0,5}:?ffff:" $addr }}{{- fail (printf "%s: %s is an IPv4-mapped range: name the IPv4 CIDR" $what $c) }}{{- end }}{{- end -}}
+{{- $first := first (splitList ":" $addr) -}}
+{{- if regexMatch "^0{0,2}[0-9a-f]{0,2}$" $first }}{{- fail (printf "%s: %s is inside ::/8 (loopback, IPv4-mapped or NAT64 64:ff9b::/96 space): name the IPv4 CIDR or a global IPv6 range" $what $c) }}{{- end -}}
+{{- $ula := and (ge $bits 7) (regexMatch "^f[cd][0-9a-f]{2}$" $first) -}}
+{{- if and (lt $bits 48) (not $ula) }}{{- fail (printf "%s: %s is wider than one image source needs: use /48 or longer (/7 to /47 only inside fc00::/7)" $what $c) }}{{- end -}}
+{{- else -}}
+{{- fail (printf "%s: %s is not a CIDR (address/prefix)" $what $c) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The in-cluster image cache of the Substrate driver (issue #1170): "true" when the driver is substrate and
 execution.substrate.imageCache.enabled. The cache is a Zot pull-through registry in the release namespace; it is the one
 image source of the node agent, and the driver rewrites the registry host of every actor image to it.

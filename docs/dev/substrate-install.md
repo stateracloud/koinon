@@ -137,37 +137,49 @@ Order of the step:
 1. Build and check `ate-setup` (above).
 2. Run the prerequisite checks that need no namespace: the Kubernetes version and whether the service-account
    issuer can be read. When one fails, nothing was created.
-3. Create the Substrate namespace (Pod Security `enforce`, `warn` and `audit` all `privileged`) when it is missing. The probe pods run there.
-4. Run the probe checks (node devices, issuer reachability). Before each probe pod starts, the prober
-   deletes stale probe pods that an earlier run left (same `component` and `part-of=koinon` labels). When a
-   check fails and the installer created the namespace, the installer deletes the namespace again. A
-   namespace that existed before is left as it is.
-5. Run `ate-setup deploy ate-system` with pre-built release images of the pinned tag.
-6. Wait for the CRDs to be Established (applying a `SandboxConfig` right after the CRDs raced in the lab).
-7. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
+3. Create the probe namespace (`--substrate-probe-namespace`, default `koinon-substrate-probe`) when it is
+   missing, with Pod Security `enforce`, `warn` and `audit` all `privileged` (the device probe mounts hostPath
+   devices). The probe pods run there, never in a Substrate namespace: Substrate's admission policies refuse a
+   bare pod in `ate-system` and in the worker namespace, and they have no exception for the probes (issue #1176).
+   The installer refuses a probe namespace that is a Substrate namespace.
+4. Run the probe checks (node devices, user namespaces, issuer reachability). Before each probe pod starts, the
+   prober deletes stale probe pods that an earlier run left (same `component` and `part-of=koinon` labels). When
+   a check fails, the installer stops and nothing of Substrate is created. When the installer created the probe
+   namespace, it deletes it when it stops, after a failure or after step 10. A namespace that existed before is
+   left as it is.
+5. Create the Substrate namespace (Pod Security `enforce`, `warn` and `audit` all `privileged`) when it is
+   missing. On the `generic` platform the object store credentials go there.
+6. Run `ate-setup deploy ate-system` with pre-built release images of the pinned tag.
+7. Wait for the CRDs to be Established (applying a `SandboxConfig` right after the CRDs raced in the lab).
+8. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
    installer finds the router container by name (`atenet-router`), reads the flag in its command and
    arguments, and retries when the Deployment changed during the update.
-8. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
+9. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
    object store" below.
-9. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
-   namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
+10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
+    namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
 
-The probe pods in the Substrate namespace use no image pull secrets: `--probe-image-pull-secrets` names
-Secrets of the release namespace, which do not exist there. How the Substrate namespace pulls the probe
-image is part of S2 (chart work).
+`koinon-api substrate install` and `koinon-api preflight --driver substrate` give the probe pods the Secrets that
+`--probe-image-pull-secrets` names. These Secrets must exist in the probe namespace, not only in the release
+namespace: a namespace that the run creates has no Secrets. Make the probe namespace and copy them before the run,
+or use a probe image that needs no pull secret. A probe namespace that you make must have Pod Security `enforce`
+`privileged`: the device probe mounts hostPath devices, and the run does not change the labels of a namespace that
+it did not create. How the probe namespace pulls the probe image is part of S2 (chart work).
 
-`koinon-api preflight --driver substrate` runs only the checks.
+`koinon-api preflight --driver substrate` runs only the checks. It creates and removes the probe namespace in
+the same way, so it also runs after `helm install`.
 
 ### Permissions of the installer
 
 The kubeconfig of the installer needs these rules:
 
-- `namespaces`: get, create, delete
+- `namespaces`: get, create, delete (the probe namespace and the Substrate namespace)
 - `nodes`: list (platform detection, the kind check and the gVisor user-namespace probe)
 - `storageclasses` (group `storage.k8s.io`): list (the `generic` storage preflight)
 - `secrets` in the Substrate namespace: get, create (the `generic` object-store credentials)
-- `pods`: create, get, delete, list in the Substrate namespace; `pods/log`: get
-- `events`: list (the probe reads the kubelet event of a pod that did not start)
+- `serviceaccounts` and `configmaps` in the probe namespace: get (the wait for `default` and `kube-root-ca.crt`)
+- `pods`: create, get, delete, list in the probe namespace; `pods/log`: get
+- `events`: list in the probe namespace (the probe reads the kubelet event of a pod that did not start)
 - `customresourcedefinitions`: get
 - `deployments`: get, update in the Substrate namespace
 - `workerpools` (group `ate.dev`): get in the worker namespace (`--substrate-worker-namespace`)
@@ -187,7 +199,7 @@ The kubeconfig of the installer needs these rules:
   the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
   plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
   See "Talos: user namespaces for gVisor".
-- Substrate's api server can validate service-account tokens from a pod in its namespace. See below.
+- Substrate's api server can validate service-account tokens. The probe pod runs in the probe namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
   WorkerPool with all its workers ready (`status.readyReplicas`) and every sandbox class resolved.
@@ -195,7 +207,9 @@ The kubeconfig of the installer needs these rules:
 ## Service-account issuer
 
 The probe repeats what Substrate v1.0.0's api server does to validate a token, from a pod with the default
-ServiceAccount of the Substrate namespace (source at commit `b34fbee7`):
+ServiceAccount of the probe namespace (source at commit `b34fbee7`). The issuer and the `iss` of a token are the
+same in every namespace. The probe pod does not pass the NetworkPolicies of `ate-system`: before the install there
+are none, and after the install they allow the api server's own egress, not the probe's.
 
 - `internal/oidcjwt/oidcjwt.go` `discoverKeysForIssuer` (line 606): `GET <issuer>/.well-known/openid-configuration`,
   the document's `issuer` must equal the configured issuer, then `GET` its `jwks_uri`.
@@ -484,9 +498,13 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - The worker container may have extra privileges in one exact shape, and only in the worker namespace. Substrate
   sets it in `workerpool_apply.go` (lines 377-468 at the pinned commit): user and group 0, not privileged, no
   privilege escalation, drop `ALL`, add the capabilities of the sandbox class, and seccomp and AppArmor
-  `Unconfined`. The policy accepts this shape only on the container named `worker` whose image is in
-  `workerPolicy.workerImages` (the pool `workerImage` is added when the pool is enabled). Every other container
-  adds no capability and uses no `Unconfined` profile. There is no capability ceiling: the class sets
+  `Unconfined`. The policy accepts this shape only on the main container named `worker` whose image is in
+  `workerPolicy.workerShapes.gvisor.images` or `workerPolicy.workerShapes.microvm.images`. The list of the image
+  sets the class: a gVisor image gets only the gVisor capabilities, a micro-VM image only the micro-VM ones. One
+  image is in one list only, or the render fails. The pool `workerImage` is added to the list of
+  `workerPool.sandboxClass` when the pool is enabled. An init container named `worker` is never the worker
+  container: Kubernetes names are unique across main and init containers, so the pod then has no worker container.
+  Every other container adds no capability and uses no `Unconfined` profile. There is no capability ceiling: the class sets
   (`workerPolicy.workerShapes`) are exact. A Ginkgo spec in `internal/preflight` compares them with a vendored copy
   of the Substrate source and fails when a Substrate bump changes the shape. Update the vendored copy and the sets
   together in that bump. With an empty image list the policy denies every worker container (fail closed).
@@ -531,9 +549,10 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   the policies apply, restart every DaemonSet in `ate-system`, so that its pods pass the new rules.
 - The installer writes the SandboxConfig `koinon-gvisor`. It must run as an identity in
   `workerPolicy.installerIdentities`, or the objects policy refuses the write.
-- Known limit (open, needs a decision from main): the preflight and install probe pods are bare pods with tag images
-  and, for the device probe, hostPath devices. The control-plane policy refuses them once the chart is installed.
-  Run `koinon-api substrate install` and the probes before `helm install`, or add a probe-identity rule.
+- The preflight and install probe pods are bare pods, and the device probe has hostPath devices. The policies refuse
+  them in `ate-system` and in the worker namespace, and they have no exception for them. So the probes run in the
+  probe namespace (`--substrate-probe-namespace`, issue #1176). An escape spec proves that the probe pods are still
+  refused in both Substrate namespaces.
 - The node agent rule accepts the per-controller `daemon-set-controller` ServiceAccount only. A cluster that runs
   `kube-controller-manager` without `--use-service-account-credentials` must set `workerPolicy.podCreators` and
   adjust the node agent rule to match.
