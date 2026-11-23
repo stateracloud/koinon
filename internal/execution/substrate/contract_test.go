@@ -11,7 +11,7 @@ import (
 var _ = executiontest.ComputeContract("Substrate", func() executiontest.Harness {
 	d, cl := newDriver()
 	return executiontest.Harness{
-		Compute: d, Workspace: ws, Image: "img", Exec: []string{"cat"},
+		Compute: d, Workspace: ws, Image: img, Exec: []string{"cat"},
 		Uploaded: func(sandbox, destDir, name string) ([]byte, bool) {
 			return cl.File(ws, sandbox, destDir+"/"+name)
 		},

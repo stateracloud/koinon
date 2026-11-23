@@ -71,6 +71,10 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if spec.Image == "" {
 		return nil, errors.New("sandbox image is empty")
 	}
+	// A tag can move; a digest cannot (issue #1192). The rewrite below keeps the digest.
+	if err := RequireDigest(spec.Image); err != nil {
+		return nil, err
+	}
 	cpu, mem, err := ResourceLimits(spec)
 	if err != nil {
 		return nil, err

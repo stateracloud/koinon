@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/restorehold"
@@ -212,6 +214,20 @@ func (c *config) finish(v *viper.Viper) error {
 		return err
 	}
 	c.harnessImages = images
+	if c.execution.IsSubstrate() {
+		// Substrate runs a harness image only when it is pinned by digest (issue #1192). Refuse at
+		// start, where the image is defined, not at the first sandbox.
+		names := make([]string, 0, len(images))
+		for name := range images {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			if err := substrate.RequireDigest(images[name]); err != nil {
+				return fmt.Errorf("config harnesses.%s.image (set harnesses.%s.image.digest in the chart values): %w", name, name, err)
+			}
+		}
+	}
 	return nil
 }
 

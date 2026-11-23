@@ -425,10 +425,10 @@ var _ = Describe("the Substrate driver", func() {
 		It("shares a template between equal specs and carries no environment variable", func(ctx SpecContext) {
 			dd, c := newDriver()
 			for _, n := range []string{"a", "b"} {
-				_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: n, Image: "img", CPULimit: "500m", MemoryLimit: "1Gi"})
+				_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: n, Image: img, CPULimit: "500m", MemoryLimit: "1Gi"})
 				Expect(err).NotTo(HaveOccurred())
 			}
-			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2"})
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2" + digest})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.Templates(ws)).To(HaveLen(2))
 			Expect(c.TemplateOf(ws, "a")).To(Equal(c.TemplateOf(ws, "b")))
@@ -443,9 +443,9 @@ var _ = Describe("the Substrate driver", func() {
 		})
 
 		It("refuses egress it cannot enforce", func(ctx SpecContext) {
-			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: "img", Providers: []string{"p"}})
+			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: img, Providers: []string{"p"}})
 			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
-			_, err = d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: "img", Policy: execution.Policy{Network: map[string]execution.NetworkRule{"r": {}}}})
+			_, err = d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: img, Policy: execution.Policy{Network: map[string]execution.NetworkRule{"r": {}}}})
 			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
 		})
 
@@ -474,7 +474,7 @@ var _ = Describe("the Substrate driver", func() {
 		})
 
 		It("rejects a quantity that is not one", func(ctx SpecContext) {
-			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: "img", MemoryLimit: "lots"})
+			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: img, MemoryLimit: "lots"})
 			Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
 		})
 

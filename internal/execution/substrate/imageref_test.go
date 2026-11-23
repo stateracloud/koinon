@@ -3,6 +3,9 @@
 package substrate_test
 
 import (
+	"context"
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -39,7 +42,55 @@ var _ = Describe("RewriteImage", func() {
 	)
 })
 
+var _ = Describe("RequireDigest", func() {
+	DescribeTable("accepts a reference pinned by digest",
+		func(ref string) { Expect(substrate.RequireDigest(ref)).To(Succeed()) },
+		Entry("digest only", "ghcr.io/org/app"+digest),
+		Entry("tag and digest", "ghcr.io/org/app:1"+digest),
+		Entry("a host with a port, a tag and a digest", "localhost:5000/app:1"+digest),
+		Entry("a bare name with a digest", "busybox"+digest),
+	)
+
+	DescribeTable("refuses a reference that is not pinned by digest",
+		func(ref string) {
+			err := substrate.RequireDigest(ref)
+			Expect(err).To(MatchError(ContainSubstring("pinned by digest")))
+		},
+		Entry("tag only", "ghcr.io/org/app:1"),
+		Entry("a bare name", "busybox"),
+		Entry("a host with a port and a tag", "localhost:5000/app:1"),
+		Entry("empty", ""),
+		Entry("a digest with no name", digest),
+		Entry("a short digest", "ghcr.io/org/app:1@sha256:0123"),
+		Entry("upper-case hex", "ghcr.io/org/app:1@sha256:"+strings.Repeat("A", 64)),
+		Entry("another algorithm", "ghcr.io/org/app:1@sha512:"+strings.Repeat("a", 128)),
+		Entry("text after the digest", "ghcr.io/org/app:1"+digest+"x"),
+		Entry("two digests", "ghcr.io/org/app"+digest+digest),
+	)
+})
+
 var _ = Describe("the actor template image", func() {
+	DescribeTable("a template needs an image pinned by digest",
+		func(image string, ok bool) {
+			_, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: image}, substrate.Config{})
+			if ok {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(MatchError(ContainSubstring("not pinned by digest")))
+		},
+		Entry("tag only is refused", "ghcr.io/org/app:1", false),
+		Entry("digest only is accepted", "ghcr.io/org/app"+digest, true),
+		Entry("tag and digest is accepted", "ghcr.io/org/app:1"+digest, true),
+	)
+
+	It("is refused as invalid at create", func() {
+		d, _ := newDriver()
+		_, err := d.CreateSandbox(context.Background(), ws, execution.SandboxSpec{Name: "tagged", Image: "ghcr.io/org/app:1"})
+		Expect(err).To(MatchError(execution.ErrInvalid))
+		Expect(err).To(MatchError(ContainSubstring("not pinned by digest")))
+	})
+
 	spec := execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest}
 
 	It("goes through the image source, with the digest kept", func() {

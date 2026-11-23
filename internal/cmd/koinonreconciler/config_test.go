@@ -413,3 +413,47 @@ var _ = Describe("koinon-reconciler's settings", func() {
 		Expect(err).To(MatchError(ContainSubstring("KOINON_NO_SUCH")))
 	})
 })
+
+var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
+	const pinned = "ghcr.io/stateracloud/koinon/sandbox:0.1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// substrateConfig is chartConfig without the OpenShell-only features, with the harness image given.
+	substrateConfig := func(image string) string {
+		out := strings.ReplaceAll(stripObserver(chartConfig), "  enabled: true\n  name:", "  enabled: false\n  name:")
+		return strings.Replace(out, "image: ghcr.io/stateracloud/koinon/sandbox:0.1.0\n", "image: "+image+"\n", 1)
+	}
+	parse := func(file, driver string) (config, error) {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+		}
+		return parseConfig([]string{
+			"--execution-driver=" + driver,
+			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
+			"--substrate-allow-unhardened", "--substrate-default-tier=dev",
+		}, env)
+	}
+
+	DescribeTable("needs every harness image pinned by digest",
+		func(image string, ok bool) {
+			c, err := parse(substrateConfig(image), cli.DriverSubstrate)
+			if ok {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(c.harnesses()[harness.OpenCode].Image).To(Equal(image))
+				return
+			}
+			Expect(err).To(MatchError(And(
+				ContainSubstring("harnesses.opencode.image"),
+				ContainSubstring("not pinned by digest"),
+			)))
+		},
+		Entry("tag only is refused", "ghcr.io/stateracloud/koinon/sandbox:0.1.0", false),
+		Entry("digest only is accepted", "ghcr.io/stateracloud/koinon/sandbox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true),
+		Entry("tag and digest is accepted", pinned, true),
+	)
+
+	It("does not apply to the OpenShell driver", func() {
+		_, err := parse(chartConfig, cli.DriverOpenShell)
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
