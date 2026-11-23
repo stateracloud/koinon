@@ -121,7 +121,9 @@ func mcpPathSpec(env Env) {
 			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "alpha_read_item"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsError).To(BeFalse())
-			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("alpha saw koinon_test_not-a-real-token-alpha"))
+			// The target echoes the credential it got; the gateway never gives an opened credential to an
+			// agent (#1174), so the agent sees it redacted. The header log below proves the target got it.
+			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("alpha saw [redacted:secret]"))
 			Expect(strings.Join(alphaLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
 			Expect(strings.Join(alphaLog.values("X-Api-Key"), ",")).To(ContainSubstring("koinon_test_not-a-real-token-alpha"))
 		})

@@ -53,8 +53,13 @@ type Options struct {
 	// ListTimeout bounds one target's part of a tools/list. Zero means 10 seconds.
 	ListTimeout time.Duration
 	// Builtins are the kinds of built-in target this process can run, by [gateway.MCPTarget.Builtin].
-	// A built-in target of another kind is not served. Nil serves none.
+	// A built-in target of another kind is not served. Nil serves none. A built-in that opens a
+	// credential takes its source from Scrub.Source, so the value is scrubbed too.
 	Builtins map[string]Builtin
+	// Scrub removes the credential values the gateway opened from its logs, spans and the results it
+	// gives to agents (#1174). New wraps Logger, Tracer and Credentials with it. Nil makes one of its
+	// own; a process passes its own to scrub its other log lines with the same set.
+	Scrub *CredentialScrub
 }
 
 // Gateway is the MCP path. It implements [gateway.MCPGateway]: ApplyMCP swaps its configuration,
@@ -95,6 +100,14 @@ func New(o Options) *Gateway {
 	if o.HTTPClient == nil {
 		o.HTTPClient = newHTTPClient()
 	}
+	// Every opened credential is recorded before it is used, and every log line, span and agent result
+	// is scrubbed of the recorded values (#1174).
+	if o.Scrub == nil {
+		o.Scrub = NewCredentialScrub()
+	}
+	o.Credentials = o.Scrub.Source(o.Credentials)
+	o.Logger = slog.New(o.Scrub.Handler(o.Logger.Handler()))
+	o.Tracer = o.Scrub.Tracer(o.Tracer)
 	g := &Gateway{o: o, g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
 	g.snap.Store(&snapshot{})
 	return g

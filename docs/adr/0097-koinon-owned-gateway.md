@@ -807,9 +807,12 @@ move, once.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.
-   - The trace router no longer scrubs MCP credential values: it cannot read v2 and the reconciler holds no key.
-     koinon-gateway holds the plaintext, so it must scrub the values it opened from the spans it writes.
-     This is issue #1174, not done here. The router path logs and stores no opened v2 value (a spec checks it).
+   - The trace router no longer scrubs v2 MCP credential values: it cannot read v2 and the reconciler holds no key.
+     koinon-gateway holds the plaintext, so it scrubs the values it opened (#1174). `mcpgateway.CredentialScrub`
+     records each value when the gateway opens it, and removes it by exact value (and its encoded forms, and the
+     token after the auth scheme) from every log line, span and audit row the gateway writes and from every tool
+     result it gives to an agent. The router path logs and stores no opened v2 value (a spec checks it). The
+     router still scrubs v1 MCP values, which it can open.
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.
 2. **Move (slice 4, built in #1151).** `koinon-api keys seal-mcp` opens each v1 value with the KEK and seals it

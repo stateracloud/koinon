@@ -189,7 +189,10 @@ func readSecretFile(file, what string) (string, error) {
 }
 
 func run(ctx context.Context, cfg config) error {
-	log := slog.Default()
+	// Every log line of the process goes through the scrub of the MCP credentials the gateway opens
+	// (#1174): the audit line, the guard, the key loader and the State stream client too.
+	credScrub := mcpgateway.NewCredentialScrub()
+	log := slog.New(credScrub.Handler(slog.Default().Handler()))
 	if _, err := readToken(cfg.stateTokenFile); err != nil {
 		return err // fail at start, not on the first request
 	}
@@ -199,6 +202,7 @@ func run(ctx context.Context, cfg config) error {
 		Tracer:  otel.Tracer("koinon-gateway"),
 		Audit:   logAudit{log: log},
 		Logger:  log,
+		Scrub:   credScrub,
 	}
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
 	var keys *gatewaykeys.Loader

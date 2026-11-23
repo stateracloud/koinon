@@ -117,7 +117,7 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 				if !ok {
 					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad tools/call"}
 				}
-				return g.callTool(ctx, agent, r.Params), nil
+				return g.o.Scrub.Result(g.callTool(ctx, agent, r.Params)), nil
 			}
 			return next(ctx, method, req)
 		}
@@ -234,6 +234,9 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 	}
 	finish := func(o Outcome) {
 		row.Outcome, row.Duration = o, time.Since(start)
+		// A guard reason may quote the text it refused; the audit row and its log line never carry an
+		// opened credential (#1174).
+		row.Verdict = g.o.Scrub.Text(row.Verdict)
 		if span != nil {
 			span.SetAttributes(attribute.String("mcp.target", row.Target), attribute.String("mcp.tool", row.Tool),
 				attribute.String("mcp.outcome", string(o)), attribute.String("mcp.credential", row.CredKind))

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -294,4 +295,41 @@ func (s *Secrets) openStart(in string) int {
 		}
 	}
 	return len(in) - s.nodes[cur].depth
+}
+
+// Redact replaces every verbatim match of the set (and of the encoded forms NewSecrets adds) with
+// [redacted:secret]. It applies no other rule: a caller that knows the exact values it must remove,
+// such as koinon-gateway with the credentials it opened (#1174), uses it where the shape rules of a
+// level would change ordinary text. A nil or empty set returns in unchanged.
+func (s *Secrets) Redact(in string) string {
+	if in == "" || s == nil || s.count == 0 {
+		return in
+	}
+	spans := s.find(in, nil)
+	if len(spans) == 0 {
+		return in
+	}
+	return (&Scrubber{}).apply(in, spans)
+}
+
+// authScheme matches the value of an Authorization-style header: the scheme, then the token.
+var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|digest)\s+(\S.*)$`)
+
+// AuthParts returns v and, when v starts with a known auth scheme, the token after it (and, for
+// Basic, the decoded user and password), because a text may carry the token alone, without the
+// scheme word. Pass the result to NewSecrets.
+func AuthParts(v string) []string {
+	out := []string{v}
+	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return out
+	}
+	out = append(out, m[2])
+	if strings.EqualFold(m[1], "basic") {
+		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
+			out = append(out, string(dec))
+			out = append(out, strings.Split(string(dec), ":")...)
+		}
+	}
+	return out
 }
