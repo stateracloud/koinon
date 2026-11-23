@@ -512,7 +512,8 @@ run_gate() { # <gate>
 	case $g in
 	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; }
 		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
-	generate) web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
+	generate) command -v node >/dev/null || { echo "generate skip (node not installed)"; return; }
+		web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
 	proto) command -v go >/dev/null || { echo "proto skip (go not installed; buf runs as a go tool)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;

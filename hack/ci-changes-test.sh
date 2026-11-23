@@ -121,10 +121,12 @@ expect "go generate" third_party/agentgateway/proto/ext_mcp.proto # buf.gen.agen
 expect "go generate" internal/db/queries/agents.sql # sqlc.yaml queries (not a Go package; store regen turns chartsmoke on)
 expect "go generate chartsmoke harnesses" internal/db/migrations/00001_init.sql # sqlc.yaml schema (store is also built by test/harnesses)
 expect "go generate" sqlc.yaml
-expect "generate web" web/package.json     # buf.gen.yaml runs web/node_modules/.bin/protoc-gen-es
+expect "generate web" web/package.json     # buf.gen.yaml runs node on @bufbuild/protoc-gen-es
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "generate" hack/generate.sh         # make generate delegates here (#349)
+expect "generate go" hack/tools/buf/go.mod    # the pinned buf (#1169)
+expect "generate go" hack/cmd/generatecheck/main.go # the tool check of make generate (#1169)
 expect "generate go" cmd/protoc-gen-koinon-doc/doc.go
 expect "generate" docs/reference/proto/proto-api.md   # buf.gen.docs.yaml output
 # Negative: a hand-written file in the same trees is not a generator input.

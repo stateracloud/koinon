@@ -19,12 +19,11 @@ cd "$root" || exit 2
 GO=${GO:-go}
 
 # buf is a pinned `go tool` with its own modfile, so the root go.mod and the generated headers stay
-# as they are (#1169). The version matches BUF_VERSION in hack/versions.env (hack/versions-check.sh).
+# as they are (#1169). The version matches BUF_VERSION in hack/versions.env; a spec in hack/cmd/generatecheck checks it.
 # Test hook: BUF names a stand-in binary.
 buf() { if [[ -n ${BUF:-} ]]; then "$BUF" "$@"; else "$GO" tool -modfile=hack/tools/buf/go.mod buf "$@"; fi; }
 
 # One clear line, and the command that installs it, for each tool `go tool` cannot supply.
-"$GO" run ./hack/cmd/generatecheck . || exit 1
 
 # Paths buf (clean:true), sqlc and oapi-codegen may create, delete or rewrite.
 outs=(
@@ -38,6 +37,9 @@ outs=(
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/koinon-generate.XXXXXX") || exit 2
 trap 'rm -rf "$tmp"' EXIT
+
+# Built, not `go run`, so a missing tool prints its one line and no "exit status 1" line.
+"$GO" build -o "$tmp/generatecheck" ./hack/cmd/generatecheck && "$tmp/generatecheck" . || exit 1
 
 mkdir -p "$tmp/snap"
 for p in "${outs[@]}"; do

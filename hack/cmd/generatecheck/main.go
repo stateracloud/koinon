@@ -22,10 +22,10 @@ const esPlugin = "web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es"
 func missing(root string, lookPath func(string) (string, error)) []string {
 	var lines []string
 	if _, err := lookPath("node"); err != nil {
-		lines = append(lines, "generate: node is missing; install Node 22 or newer (https://nodejs.org), then run: corepack enable")
+		lines = append(lines, "generate: node is missing; install Node (https://nodejs.org), then run: corepack enable")
 	}
 	if _, err := os.Stat(filepath.Join(root, esPlugin)); err != nil { //nolint:gosec // root is the repository root the caller names; the tool reads no untrusted input
-		lines = append(lines, "generate: protoc-gen-es is missing; run: pnpm --dir web install --frozen-lockfile")
+		lines = append(lines, "generate: protoc-gen-es is missing; run: corepack enable && pnpm --dir web install --frozen-lockfile")
 	}
 	return lines
 }

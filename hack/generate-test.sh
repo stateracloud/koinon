@@ -71,6 +71,8 @@ esac
 S
 cat >"$tmp/bin/go" <<'S'
 #!/usr/bin/env bash
+# `go build -o X ...` (the tool check) makes a no-op program X.
+if [[ ${1:-} == build && ${2:-} == -o ]]; then printf '#!/bin/sh\nexit 0\n' >"$3"; chmod +x "$3"; fi
 exit 0
 S
 chmod +x "$tmp/bin/buf" "$tmp/bin/go"
