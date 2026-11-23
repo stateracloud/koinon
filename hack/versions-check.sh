@@ -8,6 +8,8 @@
 #     (GOLANGCI_LINT_VERSION) and bufbuild/buf-action (BUF_VERSION; every use must have one) in .github/workflows
 #   - the tool table in CONTRIBUTING.md
 #   - mise.toml and mise.lock (ADR 0124): the five lint tools, their versions and linux-x64 checksums
+#   - .ko.yaml (#1224): the default base image of ko is cgr.dev/chainguard/static pinned by digest, and every
+#     baseImageOverrides entry is pinned by digest too (a tag makes each image build ask the registry)
 # and on a second literal of any versions.env name where a consumer should read the file instead: a
 # `NAME: value` workflow env entry or a `NAME=value` assignment in hack/*.sh or test/e2e/**/*.sh.
 # Also checks the file's own format. Go itself is not here (go.mod is its source).
@@ -202,6 +204,25 @@ if [[ -f mise.toml && -f mise.lock ]]; then
 				fail "mise.lock: $repo has no sha256 checksum for $plat (run 'mise lock --platform linux-x64,linux-arm64,macos-arm64')"
 		done
 	done
+fi
+
+# 7. .ko.yaml (#1224): ko's default base image is a digest pin, not the tag `latest`, so one registry fault on a tag
+# lookup cannot fail an image build, and the base only changes in a reviewed commit. The re-pin command is in the file.
+ko=.ko.yaml
+if [[ ! -f $ko ]]; then
+	fail "$ko is missing: it pins the default base image of ko by digest (#1224)"
+else
+	ko_body=$(grep -v '^[[:space:]]*#' "$ko" || true)
+	default_ref=$(sed -n 's/^defaultBaseImage:[[:space:]]*//p' <<<"$ko_body" | head -1)
+	if [[ $default_ref =~ ^cgr\.dev/chainguard/static@sha256:[0-9a-f]{64}$ ]]; then
+		grep -qF 'crane digest cgr.dev/chainguard/static' "$ko" || fail "$ko: no re-pin command ('crane digest cgr.dev/chainguard/static:latest') in a comment"
+	else
+		fail "$ko: defaultBaseImage is '${default_ref:-<missing>}', want cgr.dev/chainguard/static@sha256:<64 hex> (re-pin: crane digest cgr.dev/chainguard/static:latest; the digest must be 3 days old, ADR 0079, hack/dep-age-check.sh)"
+	fi
+	# Every base image named under baseImageOverrides is a digest pin as well.
+	while IFS= read -r ref; do
+		[[ $ref =~ @sha256:[0-9a-f]{64}$ ]] || fail "$ko: baseImageOverrides entry '$ref' is not pinned by digest"
+	done < <(sed -n 's/^[[:space:]]\{1,\}[A-Za-z0-9._\/-]\{1,\}:[[:space:]]\{1,\}\(.*\)$/\1/p' <<<"$ko_body")
 fi
 
 if ((fails > 0)); then

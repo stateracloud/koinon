@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
+# The default base of ko (every image without an entry below) is Chainguard's static image, pinned by digest
+# (#1224: a tag made each build ask cgr.dev, and one HTTP 500 on the tag lookup failed the merge queue e2e).
+# hack/versions-check.sh keeps the pin. Re-pin with: crane digest cgr.dev/chainguard/static:latest
+# The digest must be at least 3 days old, or carry the security exception (ADR 0079, hack/dep-age-check.sh).
+# needs main: digest and age of cgr.dev/chainguard/static (the lane VM cannot reach cgr.dev); add the line
+#   defaultBaseImage: cgr.dev/chainguard/static@sha256:<digest>
+# here, above baseImageOverrides.
+#
 # ko's default static base has no git. koinon-fakegitea runs git and git-http-backend, so it
 # builds on Chainguard's git image (git-core with http-backend; the entrypoint is overridden by
 # ko). Its bare repositories live under TMPDIR, so the pod must mount a writable emptyDir there

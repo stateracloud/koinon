@@ -103,5 +103,42 @@ rm -f "$tmp/dk-n"
 check "a local permission denied is not retried" "$(DK_FAIL_N=9 DK_MSG="permission denied while trying to connect to the docker socket" run ghcr.io/o/r v0.1.0-rc.2 "$tmp/refs9")" 1
 check "...one attempt only" "$(cat "$tmp/dk-n")" 1
 
+# A short registry fault is retried too (#1224: cgr.dev answered HTTP 500 while ko pulled its base image). A fake failing
+# command proves it: it fails N times with a message on stderr and then succeeds; the try count is bounded.
+cat >"$tmp/bin/flaky" <<'STUB'
+#!/usr/bin/env bash
+n=$(($(cat "$TMP/fl-n" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$TMP/fl-n"
+if ((n <= ${FL_FAIL_N:-0})); then echo "${FL_MSG:-}" >&2; exit "${FL_RC:-1}"; fi
+echo "flaky ok"
+STUB
+chmod +x "$tmp/bin/flaky"
+flaky() { # FAIL_N MESSAGE [RC]: runs push_retry on the fake; prints its status; stdout and stderr of the run go to $tmp/fl-out and $tmp/fl-err
+	local rc=0
+	rm -f "$tmp/fl-n"
+	(
+		. "$here/push-retry-lib.sh"
+		export TMP=$tmp FL_FAIL_N=$1 FL_MSG=$2 FL_RC=${3:-1} PUSH_RETRY_DELAY=0
+		push_retry "$tmp/bin/flaky"
+	) >"$tmp/fl-out" 2>"$tmp/fl-err" || rc=$?
+	echo "$rc"
+}
+cgr500='fetching base image: pulling cgr.dev/chainguard/static:latest: GET https://cgr.dev/v2/chainguard/static/manifests/latest: INTERNAL_SERVER_ERROR: tag lookup unavailable'
+cgr1040='GET https://cgr.dev/v2/chainguard/static/blobs/sha256:abc: INTERNAL_SERVER_ERROR: Error 1040: Too many connections'
+check "a base image fault (HTTP 500) twice, then success, passes" "$(flaky 2 "$cgr500")" 0
+check "...three runs" "$(cat "$tmp/fl-n")" 3
+check "...the command's stdout came through" "$(cat "$tmp/fl-out")" "flaky ok"
+check "...and said why it retried" "$(grep -c 'push retry: a registry fault' "$tmp/fl-err")" 2
+check "Error 1040 is retried too" "$(flaky 1 "$cgr1040")" 0
+check "...two runs" "$(cat "$tmp/fl-n")" 2
+check "a fault on every attempt fails with the command's status" "$(flaky 99 "$cgr500" 7)" 7
+check "...after exactly five attempts" "$(cat "$tmp/fl-n")" 5
+check "...with a final error that names the fault and the count" "$(grep -c 'still a registry fault after 5 attempts' "$tmp/fl-err")" 1
+check "a compile error is not retried" "$(flaky 99 'main.go:3:1: syntax error')" 1
+check "...one run" "$(cat "$tmp/fl-n")" 1
+check "UNAUTHORIZED is not retried" "$(flaky 99 'GET: UNAUTHORIZED: authentication required')" 1
+check "...one run" "$(cat "$tmp/fl-n")" 1
+check "...and no retry message" "$(grep -c 'push retry' "$tmp/fl-err")" 0
+
 ((fails == 0)) || { echo "$fails failed" >&2; exit 1; }
 echo "all passed"
