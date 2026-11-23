@@ -72,6 +72,10 @@ except go ^hack/chart-check\.d/
 # (internal/compat) and harness-tag.sh (test/harnesses).
 keep go ^hack/(go-test|go-test-host|golangci-lint|agentgateway-pin|record-compat-fixtures|harness-tag)\.sh$
 keep go \.go$
+# The flavor licence notices: test/harnesses compares the notice file with the Dockerfile pins, and
+# the generator script is its documented source (#63).
+keep go ^harnesses/opencode/doc/THIRD_PARTY_NOTICES\.md$
+keep go ^hack/flavor-rust-notices\.sh$
 
 # --- tidy: go-tidy and go-lint (#572) ----------------------------------------------------------------
 # `go mod tidy` and golangci-lint read Go sources and the module files, nothing else (the lint
