@@ -10,7 +10,9 @@
 
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+# The script's own directory, taken before the cd below: $0 may be relative to the caller's directory.
+script_dir=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$script_dir/.." && pwd)
 if [[ -n ${GENERATE_ROOT:-} ]]; then
 	echo "generate: warning: test hook GENERATE_ROOT is set; this run is not a real generate" >&2
 	root=$GENERATE_ROOT
@@ -18,11 +20,12 @@ fi
 cd "$root" || exit 2
 GO=${GO:-go}
 
-# buf is a pinned `go tool` with its own modfile, so the root go.mod and the generated headers stay
-# as they are (#1169). The version matches BUF_VERSION in hack/versions.env; a spec in hack/cmd/generatecheck checks it.
-# Test hook: KOINON_TEST_BUF names a stand-in binary (generate-test.sh).
-# Bump procedure (the root tidy gate does not cover this modfile): go get -tool -modfile=hack/tools/buf/go.mod github.com/bufbuild/buf/cmd/buf@vX.Y.Z, and BUF_VERSION in hack/versions.env.
-buf() { if [[ -n ${KOINON_TEST_BUF:-} ]]; then "$KOINON_TEST_BUF" "$@"; else "$GO" tool -modfile=hack/tools/buf/go.mod buf "$@"; fi; }
+# buf is the pinned `go tool` of hack/buf.sh (#1169, #1198): its own modfile, so the root go.mod and the
+# generated headers stay as they are. The version matches BUF_VERSION in hack/versions.env; a spec in
+# hack/cmd/generatecheck checks it. Test hook KOINON_TEST_BUF is read by hack/buf.sh. The path is the script's
+# own, not $root: GENERATE_ROOT fixtures have no hack/buf.sh.
+buf_sh=$script_dir/buf.sh
+buf() { GO=$GO "$buf_sh" "$@"; }
 
 # Paths buf (clean:true), sqlc and oapi-codegen may create, delete or rewrite.
 outs=(

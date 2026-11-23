@@ -68,11 +68,11 @@ lint-web: ## Lint and typecheck the web UI
 
 .PHONY: lint-proto
 lint-proto: ## Lint protobuf definitions
-	buf lint
+	hack/buf.sh lint
 
 .PHONY: breaking
 breaking: ## Check protobuf changes against main
-	buf breaking --against '.git#branch=main'
+	hack/buf.sh breaking --against '.git#branch=main'
 
 .PHONY: audit-batch-lint
 audit-batch-lint: ## Check that only internal/audit writes the audit tables (the audit batch, #371)

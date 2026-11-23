@@ -14,14 +14,19 @@ trap 'rm -rf "$tmp"' EXIT
 fail() { echo "govulncheck-test: $*" >&2; exit 1; }
 
 mkdir -p "$tmp/bin"
-# `go install pkg@version` (GOBIN set) writes a govulncheck that exits FAKE_VULN_RC; FAKE_INSTALL_RC fails the install.
+# `go install pkg@version` (GOBIN set) writes a govulncheck that exits FAKE_VULN_RC (FAKE_VULN_BIN_RC for a -mode=binary scan); FAKE_INSTALL_RC fails the install.
 cat >"$tmp/bin/go" <<'EOF'
 #!/usr/bin/env bash
 echo "go $*" >>"$FAKE_LOG"
 if [[ $1 == version ]]; then echo "go version $GOTOOLCHAIN [toolchain probe]" >>"$FAKE_LOG"; exit "${FAKE_TOOLCHAIN_RC:-0}"; fi
+if [[ $1 == build ]]; then # go build -modfile=M -o OUT PKG: writes a stand-in binary; FAKE_BUILD_RC fails it
+	[[ ${FAKE_BUILD_RC:-0} -eq 0 ]] || { echo "go: fake build failure" >&2; exit "$FAKE_BUILD_RC"; }
+	while [[ $# -gt 0 ]]; do [[ $1 == -o ]] && { : >"$2"; break; }; shift; done
+	exit 0
+fi
 [[ $1 == install ]] || exit 64
 [[ ${FAKE_INSTALL_RC:-0} -eq 0 ]] || { echo "go: fake proxy unreachable" >&2; exit "$FAKE_INSTALL_RC"; }
-printf '#!/usr/bin/env bash\necho "govulncheck $* [GOTOOLCHAIN=${GOTOOLCHAIN:-}]" >>"$FAKE_LOG"\nexit "${FAKE_VULN_RC:-0}"\n' >"$GOBIN/govulncheck"
+printf '#!/usr/bin/env bash\necho "govulncheck $* [GOTOOLCHAIN=${GOTOOLCHAIN:-}]" >>"$FAKE_LOG"\nrc=${FAKE_VULN_RC:-0}\n[[ ${1:-} != -mode=binary ]] || rc=${FAKE_VULN_BIN_RC:-0}\nexit $rc\n' >"$GOBIN/govulncheck"
 chmod +x "$GOBIN/govulncheck"
 EOF
 chmod +x "$tmp/bin/go"
@@ -80,4 +85,19 @@ run "could not decide is annotated in Actions" 2 "::error title=govulncheck::COU
 run "a failed install is annotated in Actions" 2 "::error title=govulncheck::COULD NOT DECIDE" FAKE_INSTALL_RC=1 GITHUB_ACTIONS=true
 run "no annotation outside Actions" 1 "" FAKE_VULN_RC=3
 ! grep -q '^::error' "$tmp/out" "$tmp/err" || fail "an annotation outside Actions"
+# The pinned tool modules (#1198): scanned as a binary built from their modfile, after a clean main scan.
+mkdir -p hack/tools/buf
+printf 'module example.invalid/buf\n\ngo 1.27.3\n' >hack/tools/buf/go.mod
+run "the buf tool binary is scanned" 0 "no reachable known vulnerability" FAKE_VULN_RC=0
+grep -qF 'go build -modfile=hack/tools/buf/go.mod' "$FAKE_LOG" || fail "the buf tool was not built from its modfile: $(cat "$FAKE_LOG")"
+grep -q '^govulncheck -mode=binary ' "$FAKE_LOG" || fail "the buf binary was not scanned"
+# The main scan is clean here, so only the binary scan returns 3: the finding must come from the buf binary.
+run "a finding in the buf tool fails with 1" 1 "FAIL, a known vulnerability is reachable" FAKE_VULN_RC=0 FAKE_VULN_BIN_RC=3
+grep -q '^govulncheck -mode=binary ' "$FAKE_LOG" || fail "the buf binary scan did not run in the finding case: $(cat "$FAKE_LOG")"
+run "a failed build of the buf tool fails with 2" 2 "FAILED to build github.com/bufbuild/buf/cmd/buf" FAKE_BUILD_RC=1
+: >"$FAKE_LOG"
+FAKE_VULN_RC=0 "$root/hack/govulncheck.sh" ./cmd/... >/dev/null 2>&1
+! grep -q 'go build' "$FAKE_LOG" || fail "a named pattern also built the tool"
+echo "ok: a pattern skips the tool modules"
+rm -rf hack
 echo "govulncheck-test ok"

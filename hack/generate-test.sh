@@ -139,6 +139,19 @@ else
 	bad "successful generate did not keep new output"
 fi
 
+# A relative call from another directory (../hack/generate.sh from api/) still finds hack/buf.sh: the script
+# directory is taken before the cd to the root, not after it.
+# shellcheck disable=SC2016 # the stub's $* and $BUF_LOG expand when the stub runs
+printf '#!/usr/bin/env bash\necho "buf $*" >>"$BUF_LOG"\n' >"$tmp/bin/buf"
+: >"$tmp/buf.log"
+rc=0
+(cd "$PWD/api" && BUF_LOG=$tmp/buf.log KOINON_TEST_BUF="$tmp/bin/buf" PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash ../hack/generate.sh >"$tmp/rel.out" 2>&1) || rc=$?
+if [[ $rc -eq 0 ]] && grep -q '^buf generate' "$tmp/buf.log"; then
+	ok "a relative call from a subdirectory runs buf"
+else
+	bad "relative call from api/: exit $rc, $(tail -2 "$tmp/rel.out" | tr '\n' ' ')"
+fi
+
 # The tool check (#1169): when it exits 1, generate exits 1 at once, prints the check's line only,
 # and touches no output.
 cat >"$tmp/bin/go" <<'S'

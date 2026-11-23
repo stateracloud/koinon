@@ -125,6 +125,7 @@ expect "generate web" web/package.json     # buf.gen.yaml runs node on @bufbuild
 expect "generate web" web/pnpm-lock.yaml   # the version `make web-deps` installs
 expect "generate web" web/src/gen/koinon/x_pb.ts # buf.gen.yaml output
 expect "generate" hack/generate.sh         # make generate delegates here (#349)
+expect "generate" hack/buf.sh           # the pinned buf wrapper (#1198)
 expect "generate go" hack/tools/buf/go.mod    # the pinned buf (#1169)
 expect "generate go" hack/cmd/generatecheck/main.go # the tool check of make generate (#1169)
 expect "generate go" cmd/protoc-gen-koinon-doc/doc.go

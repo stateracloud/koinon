@@ -15,7 +15,7 @@
 #      (rule T1 of docs/dev/ci-rules.md): re-run the job by hand once the network is back.
 #
 # `go run` is not used: it turns the tool's exit code 3 into 1, and a finding could not be told from a
-# failed fetch. Needs bash 5, go and network access to proxy.golang.org, sum.golang.org and vuln.go.dev.
+# failed fetch. Also scans the pinned tool modules (hack/tools/buf) when run without patterns. Needs bash 5, go and network access to proxy.golang.org, sum.golang.org and vuln.go.dev.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -60,6 +60,24 @@ fi
 
 rc=0
 "$bindir/govulncheck" "${patterns[@]}" || rc=$?
+
+# The tool modules with their own modfile (hack/tools/*, #1198) hold no package of the root module, so ./... never
+# reaches them. Each pinned tool is built from its modfile and its binary is scanned. Only the default pattern
+# does this (a caller who names packages asks for those); a clean main scan runs first so its report stays first.
+if [[ $rc -eq 0 && $# -eq 0 ]]; then
+	# One tool module so far (buf); a second one turns this block into a loop again.
+	pkg=github.com/bufbuild/buf/cmd/buf
+	dir=hack/tools/buf
+	if [[ -f $dir/go.mod ]]; then
+		if ! go build -modfile="$dir/go.mod" -o "$bindir/tool-${dir##*/}" "$pkg"; then
+			msg="COULD NOT DECIDE: FAILED to build $pkg from $dir/go.mod. This is not a pass; no retry (rule T1). Re-run by hand."
+			annotate "$msg"
+			echo "govulncheck: $msg" >&2
+			exit 2
+		fi
+		"$bindir/govulncheck" -mode=binary "$bindir/tool-${dir##*/}" || rc=$?
+	fi
+fi
 case $rc in
 0) echo "govulncheck ${GOVULNCHECK_VERSION}: no reachable known vulnerability" ;;
 3)
