@@ -478,16 +478,20 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   on crates.io carries (`ripgrep`, `fd-find`, `ast-grep` at the pinned version) and uses
   `--all-features`, so the list also covers optional crates (such as `pcre2` for ripgrep) that a
   release build may enable. It needs network access to github.com (the cargo-about release) and
-  crates.io. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
+  crates.io, and runs on Linux (x86_64, aarch64) and macOS (arm64); another host stops with a message. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
   together, run the script and commit the result. `test/noticescheck` (run by `hack/go-test.sh`) and the
   Dockerfile build check fail when the notices name another version than the Dockerfile pin. The
   `go` job does not watch the notices file or this script, so a change of only those two does not
   run `test/noticescheck`; the image build in the merge queue catches it.
-  Limits: cargo-about reads each crate's own licence. It does not read C libraries that a crate
-  builds in (jemalloc, PCRE2): their notices are not in the file, and nobody has checked yet
-  with the release binary which of them it links. `option-ext` (MPL-2.0, a file-level copyleft
-  licence) ships unmodified inside ast-grep; its source is the crate `option-ext` 0.2.0 on
-  crates.io, and the notices file names its repository. A maintainer must confirm this route.
+  Limits: cargo-about reads each crate's own licence, not C libraries that a crate builds in. The
+  script adds the licence texts of the C libraries in the lock files from the vendored sources
+  (PCRE2 and sljit through `pcre2-sys`, jemalloc through `tikv-jemalloc-sys`). It takes them from
+  the licence block at the top of the vendored source file (PCRE2, sljit) or from `jemalloc/COPYING`.
+  Nobody has checked with the release binary which of them it links, so the notices err on the
+  side of naming them. `option-ext` (MPL-2.0, a file-level copyleft licence) ships unmodified inside
+  ast-grep; its source is the published crate `option-ext` 0.2.0, at
+  `https://crates.io/crates/option-ext/0.2.0`; the notices file names this location for every crate
+  and gives its repository. A maintainer must confirm this route.
 - **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
