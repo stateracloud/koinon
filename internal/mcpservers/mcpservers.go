@@ -521,7 +521,7 @@ func ValidateCredentialValue(value string) error {
 	}
 	if short {
 		return &InvalidError{
-			Msg: fmt.Sprintf("credential value must be at least %d bytes long, with no spaces at the ends "+
+			Msg: fmt.Sprintf("credential value must be at least %d bytes long, not counting white space at the ends "+
 				"(and the token after an auth scheme word such as Bearer too): "+
 				"the gateway cannot remove a shorter value from its logs and results", MinCredentialBytes),
 			Reason: ReasonCredentialTooShort,

@@ -826,9 +826,9 @@ move, once.
      - **Limits.** A value stays 24 hours after its last open. One org holds at most 256 values and the process
        8192; over a cap the oldest go first. A value that is already known costs no lock. A value shorter than 8
        bytes is not matched (it would remove ordinary words). So koinon-api refuses to save a credential value, or
-       the token after an auth scheme word in it, shorter than 8 bytes (`CREDENTIAL_TOO_SHORT`, #1221). A value
-       saved before that check can still be opened: the gateway counts it
-       (`koinon_gateway_credential_too_short_total`) and logs the target once. `koinon_gateway_credential_redactions_total`
+       the token after an auth scheme word in it, shorter than 8 bytes (#1221): Connect gives the ErrorInfo reason
+       `CREDENTIAL_TOO_SHORT`, REST gives 400 `invalid_request`. A value saved before that check can still be
+       opened: the gateway counts it (`koinon_gateway_credential_too_short_total`) and logs the target once. `koinon_gateway_credential_redactions_total`
        counts the texts it changed, by path (`agent` or `telemetry`). The open that goes over a cap never loses its
        own values to that cap; an open at the same time can (see Batching).
        A value that a cap removes before 24 hours is no longer scrubbed: `koinon_gateway_credential_evictions_total`

@@ -51,7 +51,7 @@ var _ = Describe("a credential too short to scrub, in the UI API (#1221)", func(
 		id := srv.GetServer().GetId()
 		_, err = owner.mcps.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{OrgId: org, ServerId: id, CredentialValue: new(short)})
 		tooShort(err)
-		_, err = owner.mcps.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{OrgId: org, ServerId: id, CredentialValue: new("fake-00008")})
+		_, err = owner.mcps.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{OrgId: org, ServerId: id, CredentialValue: new("fake-x08")})
 		Expect(err).NotTo(HaveOccurred())
 	})
 })

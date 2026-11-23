@@ -837,8 +837,8 @@ var _ = Describe("the gateway scrubs what a built-in target opened (#1174, #1221
 
 	// A built-in that opens its credential through a source of its own, not the one that [Builtin.Call] gives
 	// it, must fail the check above. Go cannot stop a built-in from building such a source, so this check is
-	// the guard: each built-in kind runs it (the A2A target in internal/a2atools). This spec proves that the
-	// check fails for such a built-in.
+	// the guard. This spec proves that this check fails for such a built-in. The A2A target has its own spec
+	// of the same kind, through the real target (internal/a2atools/gateway_test.go); a new built-in kind adds one.
 	It("fails the check for a built-in that opens its credential through a source of its own", func(ctx SpecContext) {
 		got, sc, guard := callEcho(ctx, keyEchoBuiltin{own: mapCredentials{"remote": fakeToken}})
 		failures := InterceptGomegaFailures(func() { expectScrubbed(got, sc, guard) })

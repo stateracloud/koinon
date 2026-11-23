@@ -166,7 +166,7 @@ var _ = Describe("remote agents", func() {
 		v := short
 		_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{Credential: &remoteagents.CredentialPatch{Header: "Authorization", Value: &v}})
 		tooShort(err)
-		v = "fake-00008"
+		v = "fake-x08"
 		_, err = svc.Update(ctx, org, actor, r.ID, remoteagents.Patch{Credential: &remoteagents.CredentialPatch{Header: "Authorization", Value: &v}})
 		Expect(err).NotTo(HaveOccurred())
 	})

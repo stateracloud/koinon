@@ -64,7 +64,7 @@ var _ = Describe("remote MCP servers", func() {
 		code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+s.ID, map[string]any{"credentialValue": "fake-07"})
 		Expect(code).To(Equal(http.StatusBadRequest), string(raw))
 		Expect(string(raw)).To(ContainSubstring("at least 8 bytes"))
-		code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+s.ID, map[string]any{"credentialValue": "fake-00008"})
+		code, raw = e.call(ctx, e.token, http.MethodPatch, "/mcp-servers/"+s.ID, map[string]any{"credentialValue": "fake-x08"})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
 	})
 
