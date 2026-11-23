@@ -84,6 +84,26 @@ subst "$w/CONTRIBUTING.md" "| Helm | v4.3.1 |" "| Helm | v4.3.0 |"
 expect_fail "CONTRIBUTING table drift" "$w" "'Helm' row"
 
 w=$(fresh)
+subst "$w/.github/workflows/ci.yml" 'version: ${{ env.BUF_VERSION }}' 'version: 1.73.0'
+expect_fail "buf-action version drift" "$w" "bufbuild/buf-action"
+
+w=$(fresh)
+subst "$w/.github/workflows/ci.yml" '          version: ${{ env.BUF_VERSION }}
+' ''
+expect_fail "a buf-action without a version" "$w" "without a version: input"
+
+w=$(fresh)
+subst "$w/.github/workflows/ci.yml" '          checksum: ${{ env.BUF_SHA256_AMD64 }}
+' ''
+expect_fail "a buf-action without a checksum" "$w" "without a checksum: input"
+
+w=$(fresh)
+subst "$w/.github/workflows/ci.yml" '      - name: load tool versions
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: bufbuild/buf-action' '      - uses: bufbuild/buf-action'
+expect_fail "a buf-action with no versions-env load in its job" "$w" "no earlier step in the job running hack/versions-env.sh"
+
+w=$(fresh)
 subst "$w/hack/govulncheck.sh" '"golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"' 'golang.org/x/vuln/cmd/govulncheck@v1.9.0'
 expect_fail "a govulncheck version literal in the wrapper script" "$w" "literal govulncheck/gofumpt"
 

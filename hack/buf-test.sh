@@ -61,8 +61,9 @@ grep -qE '^buf\(\) \{ GO=\$GO "\$buf_sh" "\$@"; \}$' hack/generate.sh || fail "t
 grep -q '^buf_sh=.*/buf.sh$' hack/generate.sh || fail "hack/generate.sh does not name hack/buf.sh"
 echo "ok: preflight and generate use hack/buf.sh"
 
-# 4. No script, Makefile or workflow runs a global buf or installs one with buf-action.
-for f in Makefile hack/*.sh .github/workflows/*.y*ml .github/actions/*/action.yml; do
+# 4. No script or Makefile runs a global buf or installs one with buf-action. (The workflows join this loop in
+# #1198 part B, when ci.yml stops using buf-action.)
+for f in Makefile hack/*.sh; do
 	[[ -f $f && $f != hack/buf-test.sh && $f != hack/buf.sh && $f != hack/generate.sh && $f != hack/versions-check.sh && $f != hack/versions-check-test.sh ]] || continue
 	! grep -nE "^[^#]*$bare" "$f" | grep -vE 'echo|printf' || fail "$f calls a global buf"
 	! grep -nE 'uses:[[:space:]]*bufbuild/buf-(setup-)?action' "$f" || fail "$f installs buf with bufbuild/buf-action"
