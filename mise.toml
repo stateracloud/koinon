@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Trial of mise for five lint tools (ADR 0124). Versions equal hack/versions.env.
+min_version = "2026.11.10"
+
+[tools]
+"aqua:koalaman/shellcheck" = "0.11.0"
+"aqua:rhysd/actionlint" = "1.7.12"
+"aqua:zizmorcore/zizmor" = "1.32.0"
+"aqua:hadolint/hadolint" = "2.14.0"
+"aqua:gitleaks/gitleaks" = "8.30.1"

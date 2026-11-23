@@ -146,3 +146,4 @@ are in [0046](0046-adr-conventions.md).
 | [0120](0120-execution-hardening-defaults.md) | Execution hardening defaults | Accepted (decisions D1, D2, D5 and D7 settled by the maintainer on 2026-11-18) |
 | [0121](0121-run-evidence-export-job.md) | Run-evidence export as a chart Job | Proposed |
 | [0123](0123-a2a-external-edge.md) | External A2A edge | Proposed |
+| [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |

@@ -153,6 +153,112 @@ out=$("$w/hack/versions-env.sh")
 check "versions-env.sh keeps FOO_VERSION" 0 "$(grep -c '^FOO_VERSION=1.0$' <<<"$out" | sed 's/^1$/0/')"
 check "versions-env.sh drops BASH_ENV and PATH" 0 "$(grep -cE '^(BASH_ENV|PATH)=' <<<"$out" || true)"
 
+# The mise trial (ADR 0124): fixtures built from the tree's own versions.env. No mise binary is needed.
+mise_fixture() { # mise_fixture <dir>: a mise.toml and a mise.lock that agree with <dir>/hack/versions.env
+	local d=$1 t repo v sha pair
+	{
+		echo 'min_version = "2026.11.10"'
+		echo
+		echo '[tools]'
+		for pair in SHELLCHECK:koalaman/shellcheck ACTIONLINT:rhysd/actionlint ZIZMOR:zizmorcore/zizmor HADOLINT:hadolint/hadolint GITLEAKS:gitleaks/gitleaks; do
+			t=${pair%%:*} repo=${pair#*:}
+			v=$(sed -n "s/^${t}_VERSION=//p" "$d/hack/versions.env")
+			echo "\"aqua:$repo\" = \"$v\""
+		done
+	} >"$d/mise.toml"
+	: >"$d/mise.lock"
+	for pair in SHELLCHECK:koalaman/shellcheck ACTIONLINT:rhysd/actionlint ZIZMOR:zizmorcore/zizmor HADOLINT:hadolint/hadolint GITLEAKS:gitleaks/gitleaks; do
+		t=${pair%%:*} repo=${pair#*:}
+		v=$(sed -n "s/^${t}_VERSION=//p" "$d/hack/versions.env")
+		sha=$(sed -n "s/^${t}_SHA256_AMD64=//p" "$d/hack/versions.env")
+		{
+			printf '[[tools."aqua:%s"]]\nversion = "%s"\nbackend = "aqua:%s"\n\n' "$repo" "$v" "$repo"
+			printf '[tools."aqua:%s"."platforms.linux-x64"]\nchecksum = "sha256:%s"\nurl = "https://example.invalid/x64"\n\n' "$repo" "$sha"
+			printf '[tools."aqua:%s"."platforms.linux-arm64"]\nchecksum = "sha256:%064d"\nurl = "https://example.invalid/arm64"\n\n' "$repo" 1
+			printf '[tools."aqua:%s"."platforms.macos-arm64"]\nchecksum = "sha256:%064d"\nurl = "https://example.invalid/mac"\n\n' "$repo" 2
+		} >>"$d/mise.lock"
+	done
+}
+
+w=$(fresh)
+rc=0
+run "$w" || rc=$?
+check "no mise files: nothing to compare" 0 "$rc"
+
+w=$(fresh)
+mise_fixture "$w"
+rc=0
+run "$w" || rc=$?
+check "mise.toml and mise.lock agree with versions.env" 0 "$rc"
+
+w=$(fresh)
+mise_fixture "$w"
+rm "$w/mise.lock"
+expect_fail "mise.toml without mise.lock" "$w" "mise.lock is missing"
+
+w=$(fresh)
+mise_fixture "$w"
+subst "$w/mise.toml" '"aqua:rhysd/actionlint" = "' '"aqua:rhysd/actionlint" = "9.'
+expect_fail "mise.toml version drift" "$w" "mise.toml: rhysd/actionlint"
+
+w=$(fresh)
+mise_fixture "$w"
+subst "$w/mise.lock" 'version = "0.11.0"' 'version = "0.11.1"'
+expect_fail "mise.lock version drift" "$w" "mise.lock: koalaman/shellcheck is '0.11.1'"
+
+w=$(fresh)
+mise_fixture "$w"
+sum=$(sed -n 's/^HADOLINT_SHA256_AMD64=//p' "$w/hack/versions.env")
+subst "$w/mise.lock" "sha256:$sum" "sha256:$(printf '%064d' 9)"
+expect_fail "mise.lock linux-x64 checksum drift" "$w" "hadolint/hadolint linux-x64 checksum"
+
+w=$(fresh)
+mise_fixture "$w"
+subst "$w/mise.lock" '[tools."aqua:gitleaks/gitleaks"."platforms.macos-arm64"]' '[tools."aqua:gitleaks/gitleaks"."platforms.macos-x64"]'
+expect_fail "mise.lock without macos-arm64" "$w" "gitleaks/gitleaks has no sha256 checksum for macos-arm64"
+
+w=$(fresh)
+mise_fixture "$w"
+printf '"aqua:kubernetes-sigs/kind" = "0.33.0"\n' >>"$w/mise.toml"
+expect_fail "mise.toml tool outside the five" "$w" "not one of the five trial tools"
+
+# mise.toml allows tool versions only (ADR 0124 decision 5): every other line fails, indented or not.
+toml_extra() { # toml_extra <label> <message for printf> <expected text in the failure>
+	local w
+	w=$(fresh)
+	mise_fixture "$w"
+	# shellcheck disable=SC2059 # the caller's text is the printf format (it holds \t and \n)
+	printf "$2" >>"$w/mise.toml"
+	expect_fail "mise.toml: $1" "$w" "$3"
+}
+toml_extra "[env] with a column-0 key" '[env]\nFOO = "bar"\n' "is not allowed: '[env]'"
+toml_extra "[env] with an indented key" '[env]\n  FOO = "bar"\n' "is not allowed: '[env]'"
+toml_extra "an indented FOO under [env] (header removed)" '  FOO = "bar"\n' "is not allowed: '  FOO"
+toml_extra "an empty [env]" '[env]\n' "is not allowed: '[env]'"
+toml_extra "[hooks] with a tab-indented enter" '[hooks]\n\tenter = "echo hi"\n' "is not allowed: '[hooks]'"
+toml_extra "a tab-indented hook line" '\tenter = "echo hi"\n' "is not allowed"
+toml_extra "[tasks.lint] with an indented run" '[tasks.lint]\n  run = "make lint"\n' "is not allowed: '[tasks.lint]'"
+toml_extra "an indented task run line" '  run = "make lint"\n' "is not allowed: '  run"
+toml_extra "[settings] with experimental" '[settings]\nexperimental = true\n' "is not allowed: '[settings]'"
+toml_extra "experimental at the top" 'experimental = true\n' "is not allowed: 'experimental = true'"
+toml_extra "a top-level env table" 'env = { FOO = "bar" }\n' "is not allowed: 'env = "
+toml_extra "an indented top-level env table" '  env = { FOO = "bar" }\n' "is not allowed"
+
+# a tool line with indentation and a trailing comment is still a tool line, and the real file shape passes
+w=$(fresh)
+mise_fixture "$w"
+subst "$w/mise.toml" '"aqua:rhysd/actionlint"' '  "aqua:rhysd/actionlint"'
+printf '# a comment\n\n' >>"$w/mise.toml"
+rc=0
+run "$w" || rc=$?
+check "mise.toml: an indented tool line and a comment pass" 0 "$rc"
+
+# mise.lock holds the five tools only
+w=$(fresh)
+mise_fixture "$w"
+printf '[[tools."aqua:kubernetes-sigs/kind"]]\nversion = "0.33.0"\nbackend = "aqua:kubernetes-sigs/kind"\n' >>"$w/mise.lock"
+expect_fail "mise.lock tool outside the five" "$w" "mise.lock: 'aqua:kubernetes-sigs/kind' is not one of the five"
+
 # dep-age-check fails (no network needed) for a *_VERSION with no tool_repo entry
 w=$(mktemp -d "$tmp/dep.XXXXXX") || exit 1
 mkdir -p "$w/hack"
