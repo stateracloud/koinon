@@ -5,8 +5,15 @@ Resource limits of the Substrate worker namespace (execution.substrate.workerNam
   workerLimits.limitRange, so no worker pod is BestEffort.
 - A ResourceQuota caps the pod count, CPU and memory of the whole namespace
   (workerLimits.quota.hard). A pod that goes over it is refused at admission.
+- A native ValidatingAdmissionPolicy (NEVER Kyverno) guards every LimitRange and ResourceQuota write in
+  the worker namespace, when workerPolicy is on. Without it, any identity that can delete the quota
+  there removes the cap. Only the installer (workerPolicy.installerIdentities or installerGroups) writes
+  them. Kubernetes' own controllers may delete them (garbage collection, namespace deletion) and change
+  their metadata, never their spec. The Substrate controller writes none. The quota controller writes
+  only the status subresource, which the rule does not match. Same pattern as the NetworkPolicy guard
+  of issue 1158 (substrate-policy.yaml).
 The chart owns the namespace (substrate-workernamespace.yaml), so the chart owns these objects.
-Cluster-scoped objects: none. Native Kubernetes objects only, no CNI or CRD feature.
+Cluster-scoped objects: the guard policy and its binding. Native Kubernetes objects only, no CNI or CRD feature.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerLimits.enabled }}
 {{- $l := .Values.execution.substrate.workerLimits }}
@@ -67,5 +74,50 @@ spec:
     {{- range $k, $v := $l.quota.hard }}
     {{ $k | quote }}: {{ $v | quote }}
     {{- end }}
+{{- end }}
+{{- if .Values.execution.substrate.workerPolicy.enabled }}
+{{- $w := .Values.execution.substrate.workerPolicy }}
+{{- $guard := printf "%s-%s-worker-limits" .Release.Namespace (include "koinon.fullname" .) }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $guard }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [limitranges, resourcequotas]
+  variables:
+    - name: installer
+      expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson $w.installerIdentities) (toJson $w.installerGroups) | quote }}
+    # Kubernetes' own controllers: the garbage collector and the namespace controller delete the objects with the
+    # namespace. They never write a spec.
+    - name: kube
+      expression: {{ printf "request.userInfo.username in %s" (toJson (list "system:serviceaccount:kube-system:generic-garbage-collector" "system:serviceaccount:kube-system:namespace-controller" "system:kube-controller-manager")) | quote }}
+    - name: specUnchanged
+      expression: "request.operation == 'UPDATE' && object.spec == oldObject.spec"
+  validations:
+    - expression: "variables.installer || (variables.kube && (request.operation == 'DELETE' || variables.specUnchanged))"
+      messageExpression: "'only the installer may ' + (request.operation == 'DELETE' ? 'delete' : 'write') + ' a ' + (request.resource.resource == 'limitranges' ? 'LimitRange' : 'ResourceQuota') + ' in the worker namespace, not ' + request.userInfo.username"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $guard }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $guard }}
+  validationActions: {{ toJson $w.validationActions }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns | quote }}
 {{- end }}
 {{- end }}

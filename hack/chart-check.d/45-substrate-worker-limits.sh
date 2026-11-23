@@ -43,3 +43,18 @@ grep -q 'workerLimits' "$out/wl.err" || fail "the schema error must name workerL
 if render "${wl[@]}" --set-json execution.substrate.workerLimits.limitRange.default=null >/dev/null 2>"$out/wl2.err"; then fail "a limits.* quota without a default limit must fail the render"; fi
 grep -q 'limitRange.default' "$out/wl2.err" || fail "the guard error must name limitRange.default"
 if render "${wl[@]}" --set-string execution.substrate.workerLimits.quota.hard.requests\\.ephemeral-storage=1Gi >/dev/null 2>"$out/wl3.err"; then fail "a requests.* quota without a default request must fail the render"; fi
+# The write guard (native ValidatingAdmissionPolicy): only the installer writes the LimitRange and the ResourceQuota.
+has "the limits have a write guard" 'name: koinon-koinon-worker-limits$' "${wl[@]}" "${lim[@]}"
+wlg=$(render "${wl[@]}" "${lim[@]}" | docof 'kind: ValidatingAdmissionPolicy\n')
+grep -Fq 'resources: [limitranges, resourcequotas]' <<<"$wlg" || fail "the guard must match limitranges and resourcequotas"
+grep -Fq 'operations: [CREATE, UPDATE, DELETE]' <<<"$wlg" || fail "the guard must match create, update and delete"
+grep -Fq 'failurePolicy: Fail' <<<"$wlg" || fail "the guard must fail closed"
+if grep -q 'resourcequotas/status' <<<"$wlg"; then fail "the guard must not match the quota status (the quota controller writes it)"; fi
+grep -Fq 'kubeadm:cluster-admins' <<<"$wlg" || fail "the guard must admit the installer groups"
+if grep -q 'ate-controller' <<<"$wlg"; then fail "the guard must not admit the Substrate controller"; fi
+wlb=$(render "${wl[@]}" "${lim[@]}" | docof 'kind: ValidatingAdmissionPolicyBinding')
+grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$wlb" || fail "the guard binding must select the worker namespace"
+grep -Fq 'validationActions: ["Deny"]' <<<"$wlb" || fail "the guard binding must deny"
+has "the guard follows the installer values" 'g in \[\\"ops:gitops\\"\]' "${wl[@]}" --set 'execution.substrate.workerPolicy.installerGroups={ops:gitops}' "${lim[@]}"
+lacks "workerPolicy.enabled=false renders no limits guard" 'kind: ValidatingAdmissionPolicy' "${wl[@]}" --set execution.substrate.workerPolicy.enabled=false "${lim[@]}"
+lacks "workerLimits.enabled=false renders no limits guard" 'name: koinon-koinon-worker-limits$' "${wl[@]}" --set execution.substrate.workerLimits.enabled=false

@@ -80,12 +80,15 @@ var _ = Describe("substrate worker namespace", func() {
 	})
 })
 
-// The worker namespace limits (issue #1161): the LimitRange and the ResourceQuota reach the manifest.
+// The worker namespace limits (issue #1161): the LimitRange, the ResourceQuota and their write guard (one
+// ValidatingAdmissionPolicy and its binding) reach the manifest.
 var _ = Describe("substrate worker limits", func() {
-	It("renders one LimitRange and one ResourceQuota", func(ctx SpecContext) {
+	It("renders one LimitRange, one ResourceQuota and their write guard", func(ctx SpecContext) {
 		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
 		limits := helmRenderWith(ctx, values, showOnly("templates/substrate-workerlimits.yaml")...)
 		Expect(limits.Ignored).To(HaveKeyWithValue("LimitRange", 1))
 		Expect(limits.Ignored).To(HaveKeyWithValue("ResourceQuota", 1))
+		Expect(limits.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 1))
+		Expect(limits.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 1))
 	})
 })
