@@ -7,6 +7,7 @@
 #   - every `version:` input of azure/setup-helm (HELM_VERSION), golangci-lint-action
 #     (GOLANGCI_LINT_VERSION) and bufbuild/buf-action (BUF_VERSION; every use must have one) in .github/workflows
 #   - the tool table in CONTRIBUTING.md
+#   - mise.toml and mise.lock (ADR 0124): the five lint tools, their versions and linux-x64 checksums
 # and on a second literal of any versions.env name where a consumer should read the file instead: a
 # `NAME: value` workflow env entry or a `NAME=value` assignment in hack/*.sh or test/e2e/**/*.sh.
 # Also checks the file's own format. Go itself is not here (go.mod is its source).
@@ -134,6 +135,55 @@ row_has kind KIND_VERSION
 row_has ko KO_VERSION
 row_has gitleaks GITLEAKS_VERSION
 row_has golangci-lint GOLANGCI_LINT_VERSION
+
+# 6. The mise trial (ADR 0124): mise.toml and mise.lock pin the five lint tools at the versions of
+# hack/versions.env, and the lock's linux-x64 checksum is the *_SHA256_AMD64 of the file. Both files are
+# optional until the trial starts: with neither there is nothing to compare. mise.toml without mise.lock
+# (or the reverse) fails, because a version without a checksum is not a pin.
+mise_tools="SHELLCHECK:koalaman/shellcheck ACTIONLINT:rhysd/actionlint ZIZMOR:zizmorcore/zizmor HADOLINT:hadolint/hadolint GITLEAKS:gitleaks/gitleaks"
+if [[ -f mise.toml || -f mise.lock ]]; then
+	[[ -f mise.toml ]] || fail "mise.lock exists but mise.toml is missing (ADR 0124)"
+	[[ -f mise.lock ]] || fail "mise.toml exists but mise.lock is missing: run 'mise lock --platform linux-x64,linux-arm64,macos-arm64' (ADR 0124)"
+fi
+if [[ -f mise.toml && -f mise.lock ]]; then
+	# mise.toml: `"aqua:<owner>/<repo>" = "<version>"` lines. Another tool is outside the trial's scope.
+	toml_tools=$(sed -nE 's/^"?aqua:([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)"?[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1 \2/p' mise.toml)
+	toml_keys=$(sed -nE 's/^("[^"]+"|[A-Za-z0-9._:\/-]+)[[:space:]]*=.*$/\1/p' mise.toml | grep -vE '^(min_version|experimental)$' || true)
+	while IFS= read -r key; do
+		[[ -z $key ]] && continue
+		k=${key//\"/}
+		ok=0
+		for pair in $mise_tools; do [[ $k == "aqua:${pair#*:}" ]] && ok=1; done
+		((ok)) || fail "mise.toml: '$k' is not one of the five trial tools (a new tool is a new decision, ADR 0124)"
+	done <<<"$toml_keys"
+	# mise.lock: "V<TAB>tool<TAB>version" and "C<TAB>tool<TAB>platform<TAB>checksum" per entry.
+	lock_facts=$(awk '
+		/^\[\[tools\./ { t = $0; sub(/^\[\[tools\./, "", t); sub(/\]\]$/, "", t); gsub(/"/, "", t); tool = t; plat = ""; next }
+		/^\[tools\..*platforms\./ {
+			t = $0; sub(/^\[tools\./, "", t); sub(/\]$/, "", t); gsub(/"/, "", t)
+			i = index(t, ".platforms."); tool = substr(t, 1, i - 1); plat = substr(t, i + 11); next
+		}
+		/^\[/ { plat = ""; tool = ""; next }
+		tool != "" && plat == "" && /^version[[:space:]]*=/ { v = $0; sub(/^[^=]*=[[:space:]]*"/, "", v); sub(/".*/, "", v); print "V\t" tool "\t" v }
+		tool != "" && plat != "" && /^checksum[[:space:]]*=/ { c = $0; sub(/^[^=]*=[[:space:]]*"/, "", c); sub(/".*/, "", c); print "C\t" tool "\t" plat "\t" c }
+	' mise.lock)
+	for pair in $mise_tools; do
+		t=${pair%%:*}
+		repo=${pair#*:}
+		want=$(val "${t}_VERSION")
+		have=$(awk -F'\t' -v r="$repo" '$1 == "V" && index($2, r) { print $3 }' <<<"$lock_facts" | head -1)
+		have_toml=$(awk -v r="$repo" '$1 == r { print $2 }' <<<"$toml_tools" | head -1)
+		[[ -n $have_toml && $have_toml == "$want" ]] || fail "mise.toml: $repo is '$have_toml', $env_file has ${t}_VERSION=$want"
+		[[ -n $have && $have == "$want" ]] || fail "mise.lock: $repo is '$have', $env_file has ${t}_VERSION=$want"
+		sumwant=$(val "${t}_SHA256_AMD64")
+		sum=$(awk -F'\t' -v r="$repo" '$1 == "C" && index($2, r) && $3 == "linux-x64" { print $4 }' <<<"$lock_facts" | head -1)
+		[[ $sum == "sha256:$sumwant" ]] || fail "mise.lock: $repo linux-x64 checksum is '$sum', $env_file has ${t}_SHA256_AMD64=$sumwant"
+		for plat in linux-arm64 macos-arm64; do
+			awk -F'\t' -v r="$repo" -v p="$plat" '$1 == "C" && index($2, r) && $3 == p && $4 ~ /^sha256:[0-9a-f]{64}$/ { f = 1 } END { exit !f }' <<<"$lock_facts" ||
+				fail "mise.lock: $repo has no sha256 checksum for $plat (run 'mise lock --platform linux-x64,linux-arm64,macos-arm64')"
+		done
+	done
+fi
 
 if ((fails > 0)); then
 	echo "versions-check: $fails mismatches. Fix the copy, or bump hack/versions.env with its checksums (CONTRIBUTING.md, 'Tool versions')." >&2

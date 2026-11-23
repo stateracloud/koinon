@@ -2216,7 +2216,8 @@
       "0098",
       "0111",
       "0118",
-      "0119"
+      "0119",
+      "0124"
     ]
   },
   {
@@ -2541,7 +2542,8 @@
     ],
     "related_by": [
       "0111",
-      "0118"
+      "0118",
+      "0124"
     ]
   },
   {
@@ -3344,7 +3346,9 @@
       "0079",
       "0090"
     ],
-    "related_by": []
+    "related_by": [
+      "0124"
+    ]
   },
   {
     "number": "0119",
@@ -3486,6 +3490,29 @@
       "0066",
       "0101",
       "0120"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0124",
+    "file": "0124-mise-lint-tool-versions.md",
+    "title": "Trial of mise for the versions of five lint tools",
+    "status": "accepted",
+    "date": "2026-11-23",
+    "area": "engineering-process",
+    "tags": [
+      "tooling",
+      "ci",
+      "dependencies"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0079",
+      "0090",
+      "0118"
     ],
     "related_by": []
   }
