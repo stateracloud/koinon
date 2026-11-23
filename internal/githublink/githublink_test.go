@@ -48,7 +48,21 @@ func (sessions) AuthenticateRequest(r *http.Request) (*auth.Principal, error) {
 	if err := id.Scan(c.Value); err != nil {
 		return nil, auth.ErrUnauthenticated
 	}
-	return &auth.Principal{UserID: id}, nil
+	// The memberships as the real session loads them, so a user who left the org is not a member.
+	p := &auth.Principal{UserID: id}
+	rows, err := pool.Query(r.Context(), `SELECT org_id, role FROM org_memberships WHERE user_id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m auth.Membership
+		if err := rows.Scan(&m.OrgID, &m.Role); err != nil {
+			return nil, err
+		}
+		p.Memberships = append(p.Memberships, m)
+	}
+	return p, rows.Err()
 }
 
 const publicURL = "https://koinon.example.test"
@@ -226,6 +240,17 @@ var _ = Describe("GitHub link", func() {
 		f := newFixture(ctx)
 		back := f.start(ctx, f.olive, "code-3", oliveGH)
 		Expect(f.callback(ctx, back, pgtype.UUID{})).To(Equal("signin"))
+	})
+
+	It("refuses a user who left the org during the sign-in", func(ctx SpecContext) {
+		f := newFixture(ctx)
+		back := f.start(ctx, f.mia, "code-left", oliveGH)
+		_, err := pool.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, f.org, f.mia)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.callback(ctx, back, f.mia)).To(Equal("expired"))
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM github_user_links WHERE org_id = $1`, f.org).Scan(&n)).To(Succeed())
+		Expect(n).To(BeZero())
 	})
 
 	It("refuses an expired state", func(ctx SpecContext) {

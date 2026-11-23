@@ -77,8 +77,8 @@ var _ = Describe("guided GitHub App setup", func() {
 		}
 		res, err := c.b.http.Do(req)
 		Expect(err).NotTo(HaveOccurred())
-		defer res.Body.Close()
 		body, err := io.ReadAll(res.Body)
+		Expect(res.Body.Close()).To(Succeed())
 		Expect(err).NotTo(HaveOccurred())
 		f := postForm{status: res.StatusCode, csp: res.Header.Get("Content-Security-Policy"), body: string(body)}
 		if m := formAction.FindStringSubmatch(f.body); m != nil {
