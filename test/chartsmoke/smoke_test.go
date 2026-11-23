@@ -139,6 +139,13 @@ func describeMode(name, valuesFile string) {
 				if m.GetAnnotations()["helm.sh/hook"] == "pre-upgrade" {
 					return // an upgrade-only hook: it has its own spec below
 				}
+				if m.GetName() == "koinon-imagecache-ca" {
+					// The CA hook Job (issue #1191) acts on the Substrate namespace: it needs ate-system, the patched
+					// atelet DaemonSet and the Role of that namespace, which this suite does not make (it ignores
+					// the Roles of other namespaces). Its render has its own spec (substrate worker namespace); its
+					// logic runs in internal/imagecacheca tests and the kind e2e.
+					return
+				}
 				if w, pre, hook := hookOf(m); hook {
 					Expect(pre).To(BeTrue(), "%s %s is a hook of a kind this suite does not run: %s", kindOf(o), m.GetName(), m.GetAnnotations()["helm.sh/hook"])
 					if _, ok := hooks[w]; !ok {
