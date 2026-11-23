@@ -38,9 +38,10 @@ esac
 exit 0'
 stub golangci-lint 'exit "${FAKE_LINT_RC:-0}"'
 stub make '[[ -z ${FAKE_GEN_CHANGE:-} ]] || echo gen >>generated.txt'
-# `pnpm --dir web install` makes web/node_modules/.bin/protoc-gen-es unless FAKE_PNPM_INSTALL_FAIL is set.
-stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/.bin; : >web/node_modules/.bin/protoc-gen-es; fi; exit 0'
+# `pnpm --dir web install` makes the protoc-gen-es plugin unless FAKE_PNPM_INSTALL_FAIL is set.
+stub pnpm 'if [[ " $* " == *" install "* ]]; then [[ -z ${FAKE_PNPM_INSTALL_FAIL:-} ]] || exit 1; mkdir -p web/node_modules/@bufbuild/protoc-gen-es/bin; : >web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es; fi; exit 0'
 stub shellcheck 'exit 0'
+stub node 'exit 0'
 stub actionlint '[[ ${FAKE_ACTIONLINT_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ACTIONLINT_RC:-0}"'
 stub zizmor '[[ $1 != --version ]] || { echo "zizmor ${FAKE_ZIZMOR_VERSION:-$(sed -n "s/^ZIZMOR_VERSION=//p" "'"$repo"'/hack/versions.env")}"; exit 0; }; [[ ${FAKE_ZIZMOR_RC:-0} -eq 0 ]] || echo "x.yml:1:1: fake finding"; exit "${FAKE_ZIZMOR_RC:-0}"'
 stub buf 'exit "${FAKE_BUF_RC:-0}"'

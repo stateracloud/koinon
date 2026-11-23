@@ -59,7 +59,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Docker | any recent, with buildx | Postgres tests (testcontainers), harness images, kind |
 | Node | 24 | web UI |
 | pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |
-| buf | current v1 (CI: `bufbuild/buf-action`) | `make lint-proto`, `make generate` |
+| buf | current v1 (CI: `bufbuild/buf-action`); `make generate` runs the pinned `go tool` buf | `make lint-proto` |
 | golangci-lint | v2.15.0 | `make lint-go` |
 | Helm | v4.3.1 | `make chart-check`, admission tests, Tilt |
 | kind | v0.33.0 (Kubernetes 1.37.0) | `make dev-kind-up`, `make test-e2e-kind` |
@@ -91,7 +91,7 @@ make build      # build Go binaries and the web UI
 make test       # Go and web unit tests, the same set CI runs (without test/harnesses)
 make test-harnesses # build the harness images, then run the harness contract suite (Docker)
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
-make generate   # regenerate protobuf and sqlc code; commit the result
+make generate   # regenerate protobuf and sqlc code; commit the result (needs Go and Node with pnpm; buf runs as a pinned `go tool`)
 make breaking   # buf breaking against main
 make dev-kind-up # local kind cluster with Koinon's prerequisites (once)
 make dev        # Tilt on that cluster (docs/dev/loop.md)
