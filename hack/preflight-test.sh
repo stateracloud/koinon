@@ -29,7 +29,6 @@ stub() { # <name> <body>: a stub that logs its call (with KUBECONFIG) and then r
 	chmod +x "$tmp/bin/$1"
 }
 stub go 'case "$1 $2" in
-"tool "*) exit "${FAKE_BUF_RC:-0}" ;; # the pinned buf (#1169)
 "mod tidy") [[ -z ${FAKE_TIDY_CHANGE:-} ]] || echo "// changed" >>go.mod ;;
 "list ./...") echo example.com/m/a; echo example.com/m/test/harnesses ;;
 "list -f") echo "$PWD"; echo "$PWD/internal/foo"; echo "$PWD/test/harnesses" ;; # go list -f {{.Dir}} ./...: absolute directories
@@ -445,8 +444,8 @@ check "proto change selects proto" has '^proto:' "$tmp/d1"
 rc=$(pf "$tmp/d2" --only deps,proto)
 check "deps and proto pass: exit 0" eq "$rc" 0
 check "dep-age-check gets the base" has '^dep-age-check.sh origin/main' "$FAKE_LOG"
-check "buf lint ran" has '^go tool -modfile=hack/tools/buf/go.mod buf lint' "$FAKE_LOG"
-check "buf breaking against the merge base" has '^go tool -modfile=hack/tools/buf/go.mod buf breaking --against .git#ref=' "$FAKE_LOG"
+check "buf lint ran" has '^buf lint' "$FAKE_LOG"
+check "buf breaking against the merge base" has '^buf breaking --against .git#ref=' "$FAKE_LOG"
 export FAKE_DEP_AGE_CHECK_RC=1
 rc=$(pf "$tmp/d3" --only deps)
 check "dep-age failure fails preflight" eq "$rc" 1
@@ -458,8 +457,8 @@ check "buf failure fails preflight" eq "$rc" 1
 unset FAKE_BUF_RC
 rc=0
 PATH="$tmp/limited" "$repo/hack/preflight.sh" --only proto >"$tmp/d5" 2>&1 || rc=$?
-check "no go: proto skipped, exit 0" eq "$rc" 0
-check "no go: skip line" has '^proto skip' "$tmp/d5"
+check "no buf: proto skipped, exit 0" eq "$rc" 0
+check "no buf: skip line" has '^proto skip' "$tmp/d5"
 
 check "mktemp failure: fresh() fails" test "$mktemp_fail_rc" -ne 0
 check "mktemp failure: caller's checkout branch unchanged" eq "$(git -C "$guard" branch --show-current)" keep

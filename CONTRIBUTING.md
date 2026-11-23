@@ -59,7 +59,7 @@ uses; newer patch releases usually work, but if something differs from CI, match
 | Docker | any recent, with buildx | Postgres tests (testcontainers), harness images, kind |
 | Node | 24 | web UI |
 | pnpm | `web/package.json` `packageManager` (12.18.0) | web UI |
-| buf | current v1 (CI: `bufbuild/buf-action`); `make generate` runs the pinned `go tool` buf | `make lint-proto`, `make generate` |
+| buf | current v1 (CI: `bufbuild/buf-action`); `make generate` runs the pinned `go tool` buf | `make lint-proto` |
 | golangci-lint | v2.15.0 | `make lint-go` |
 | Helm | v4.3.1 | `make chart-check`, admission tests, Tilt |
 | kind | v0.33.0 (Kubernetes 1.37.0) | `make dev-kind-up`, `make test-e2e-kind` |

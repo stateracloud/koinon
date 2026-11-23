@@ -270,8 +270,6 @@ g_tidy() {
 g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
-	# buf is a go tool with its own modfile (#1169); CI runs the same version (BUF_VERSION).
-	buf() { go tool -modfile=hack/tools/buf/go.mod buf "$@"; }
 	buf lint
 	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
 	against=$(hack/buf-breaking-against.sh "$base")
@@ -514,7 +512,7 @@ run_gate() { # <gate>
 		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
 	generate) command -v node >/dev/null || { echo "generate skip (node not installed)"; return; }
 		web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
-	proto) command -v go >/dev/null || { echo "proto skip (go not installed; buf runs as a go tool)"; return; } ;;
+	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
 	fuzz) command -v go >/dev/null || { echo "fuzz skip (go not installed; CI runs hack/go-fuzz.sh)"; return; } ;;

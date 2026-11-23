@@ -20,10 +20,9 @@ GO=${GO:-go}
 
 # buf is a pinned `go tool` with its own modfile, so the root go.mod and the generated headers stay
 # as they are (#1169). The version matches BUF_VERSION in hack/versions.env; a spec in hack/cmd/generatecheck checks it.
-# Test hook: BUF names a stand-in binary.
-buf() { if [[ -n ${BUF:-} ]]; then "$BUF" "$@"; else "$GO" tool -modfile=hack/tools/buf/go.mod buf "$@"; fi; }
-
-# One clear line, and the command that installs it, for each tool `go tool` cannot supply.
+# Test hook: KOINON_TEST_BUF names a stand-in binary (generate-test.sh).
+# Bump procedure (the root tidy gate does not cover this modfile): go get -tool -modfile=hack/tools/buf/go.mod github.com/bufbuild/buf/cmd/buf@vX.Y.Z, and BUF_VERSION in hack/versions.env.
+buf() { if [[ -n ${KOINON_TEST_BUF:-} ]]; then "$KOINON_TEST_BUF" "$@"; else "$GO" tool -modfile=hack/tools/buf/go.mod buf "$@"; fi; }
 
 # Paths buf (clean:true), sqlc and oapi-codegen may create, delete or rewrite.
 outs=(
