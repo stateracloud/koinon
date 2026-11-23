@@ -50,6 +50,9 @@ type Fake struct {
 	// truncated, as GitHub does for a very large repository.
 	TruncateTrees bool
 
+	// Collaborators are the logins a review can be requested from; empty accepts every login.
+	Collaborators []string
+
 	// Prefix is the path the REST API is served under (NewGHES); empty for the API root.
 	Prefix string
 
@@ -62,13 +65,15 @@ type Fake struct {
 
 	key *rsa.PrivateKey
 
-	mu        sync.Mutex
-	mints     int
-	listCalls int
-	requests  []Request
-	tokens    map[string]tokenInfo
-	repos     map[string]*Repo
-	polls     map[string]*pollFeed
+	mu         sync.Mutex
+	mints      int
+	listCalls  int
+	requests   []Request
+	tokens     map[string]tokenInfo
+	repos      map[string]*Repo
+	polls      map[string]*pollFeed
+	codes      map[string]authCode
+	userTokens map[string]*userToken
 }
 
 // tokenInfo is what a minted token may do.
@@ -119,6 +124,8 @@ func NewGHES() *Fake {
 	f.Prefix = GHESPrefix
 	mux := http.NewServeMux()
 	mux.Handle(GHESPrefix+"/", http.StripPrefix(GHESPrefix, f.Handler))
+	// The user authorization's token exchange lives on the web host, outside the REST API.
+	mux.Handle("POST /login/oauth/access_token", f.Handler)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})
@@ -160,6 +167,7 @@ func NewUnstarted() *Fake {
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", f.accessToken)
 	f.routeRepos(mux)
 	f.routePolls(mux)
+	f.routeUserAuth(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})

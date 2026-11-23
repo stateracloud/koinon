@@ -30,6 +30,8 @@ type Repo struct {
 	Blobs    map[string][]byte
 	Pulls    []Pull
 	Comments map[int64][]Comment
+	// Reviewers holds the review requests of each pull request, by number.
+	Reviewers map[int64][]string
 	// FailContents makes GET contents of a path answer with the status instead.
 	FailContents map[string]int
 	// Calls counts write calls by endpoint, e.g. "POST pulls".

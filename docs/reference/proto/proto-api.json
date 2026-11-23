@@ -7510,6 +7510,15 @@
               "deprecated": false
             },
             {
+              "name": "DeleteGitHubLink",
+              "description": "DeleteGitHubLink removes a GitHub link. A member removes their own link;\nadmins and owners remove any link of the org. Audited.",
+              "requestType": "koinon.connection.v1alpha1.DeleteGitHubLinkRequest",
+              "responseType": "koinon.connection.v1alpha1.DeleteGitHubLinkResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "GetConnection",
               "description": "GetConnection returns one connection. Viewers and above.",
               "requestType": "koinon.connection.v1alpha1.GetConnectionRequest",
@@ -7537,10 +7546,28 @@
               "deprecated": false
             },
             {
+              "name": "ListGitHubLinks",
+              "description": "ListGitHubLinks returns every GitHub link of the org. Admins and owners.",
+              "requestType": "koinon.connection.v1alpha1.ListGitHubLinksRequest",
+              "responseType": "koinon.connection.v1alpha1.ListGitHubLinksResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListInstallationRepos",
               "description": "ListInstallationRepos lists the repositories a GitHub connection's App\ninstallation can access, for choosing what to bind an agent to. Koinon\nasks GitHub with a metadata-read installation token; nothing is written.\nAdmins and owners.",
               "requestType": "koinon.connection.v1alpha1.ListInstallationReposRequest",
               "responseType": "koinon.connection.v1alpha1.ListInstallationReposResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListMyGitHubLinks",
+              "description": "ListMyGitHubLinks returns the caller's GitHub links in the org. Any member.",
+              "requestType": "koinon.connection.v1alpha1.ListMyGitHubLinksRequest",
+              "responseType": "koinon.connection.v1alpha1.ListMyGitHubLinksResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -7559,6 +7586,15 @@
               "description": "SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private\nkey, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is\nentered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector\nis required; the other settings stay. It clears the lost mark and the last test result. A\ndeclared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION).\nAudited without the secret. Admins and owners.",
               "requestType": "koinon.connection.v1alpha1.SetConnectionSecretRequest",
               "responseType": "koinon.connection.v1alpha1.SetConnectionSecretResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "StartGitHubLink",
+              "description": "StartGitHubLink starts linking the caller's GitHub login through a GitHub\nconnection's App (issue #1175). It returns the GitHub page to open; GitHub\nsends the browser back to Koinon, which reads the login and revokes the\nuser token at once. With the link, Koinon asks the requester to review an\nagent pull request. Any member.",
+              "requestType": "koinon.connection.v1alpha1.StartGitHubLinkRequest",
+              "responseType": "koinon.connection.v1alpha1.StartGitHubLinkResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -8206,6 +8242,50 @@
           "fields": []
         },
         {
+          "name": "DeleteGitHubLinkRequest",
+          "fullName": "koinon.connection.v1alpha1.DeleteGitHubLinkRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "DeleteGitHubLinkRequest names the link. An empty user_id is the caller.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "user_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "DeleteGitHubLinkResponse",
+          "fullName": "koinon.connection.v1alpha1.DeleteGitHubLinkResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": []
+        },
+        {
           "name": "GetConnectionRequest",
           "fullName": "koinon.connection.v1alpha1.GetConnectionRequest",
           "file": "koinon/connection/v1alpha1/connection.proto",
@@ -8310,6 +8390,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Directories, relative to the repository root, that run CI on this host besides the\nconnector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses\nchanges to them."
+            },
+            {
+              "name": "client_id",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The App has an OAuth client ID (the guided setup stores it with its client\nsecret), so users can link their GitHub login through it (issue #1175)."
             }
           ]
         },
@@ -8328,6 +8417,78 @@
               "oneof": "",
               "deprecated": false,
               "description": "Secure input (ADR 0021): the App's PEM private key, a new one or the one GitHub still lists.\nStored only as an envelope in Postgres (ADR 0056), never returned or logged."
+            }
+          ]
+        },
+        {
+          "name": "GitHubLink",
+          "fullName": "koinon.connection.v1alpha1.GitHubLink",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "GitHubLink links one Koinon user to one GitHub login on one host.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "user_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "host",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The host's web URL, for example https://github.com."
+            },
+            {
+              "name": "github_login",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "github_user_id",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "created_at",
+              "number": 5,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user's display name and email; set by ListGitHubLinks only."
+            },
+            {
+              "name": "email",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -8520,6 +8681,42 @@
           ]
         },
         {
+          "name": "ListGitHubLinksRequest",
+          "fullName": "koinon.connection.v1alpha1.ListGitHubLinksRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListGitHubLinksResponse",
+          "fullName": "koinon.connection.v1alpha1.ListGitHubLinksResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "links",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.GitHubLink",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "ListInstallationReposRequest",
           "fullName": "koinon.connection.v1alpha1.ListInstallationReposRequest",
           "file": "koinon/connection/v1alpha1/connection.proto",
@@ -8597,6 +8794,42 @@
               "oneof": "",
               "deprecated": false,
               "description": "How many repositories the installation can access, before the query."
+            }
+          ]
+        },
+        {
+          "name": "ListMyGitHubLinksRequest",
+          "fullName": "koinon.connection.v1alpha1.ListMyGitHubLinksRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ListMyGitHubLinksResponse",
+          "fullName": "koinon.connection.v1alpha1.ListMyGitHubLinksResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "links",
+              "number": 1,
+              "type": "koinon.connection.v1alpha1.GitHubLink",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -8792,6 +9025,51 @@
               "number": 2,
               "type": "koinon.connection.v1alpha1.CheckResult",
               "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StartGitHubLinkRequest",
+          "fullName": "koinon.connection.v1alpha1.StartGitHubLinkRequest",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "StartGitHubLinkRequest names the GitHub connection whose App signs the user in.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "connection_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StartGitHubLinkResponse",
+          "fullName": "koinon.connection.v1alpha1.StartGitHubLinkResponse",
+          "file": "koinon/connection/v1alpha1/connection.proto",
+          "description": "StartGitHubLinkResponse holds the GitHub page to send the browser to. The\nlink expires after ten minutes and works once.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "authorize_url",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
               "oneof": "",
               "deprecated": false,
               "description": ""

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
@@ -285,9 +286,36 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 			return nil, err
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"url": pr.URL, "number": pr.Number, "branch": args.Branch, "base": base, "commit": head,
-	}, nil
+	}
+	if login := s.requestReview(ctx, acc, repo, pr.Number, row, who); login != "" {
+		out["reviewRequested"] = login
+	}
+	return out, nil
+}
+
+// requestReview asks the requester to review the pull request when they linked their login on the
+// code host (issue #1175). It returns the login it asked. A failure, such as a requester who is not
+// a collaborator of the repository, is logged and does not fail the approved call: the pull
+// request exists and the footer names the requester.
+func (s *Service) requestReview(ctx context.Context, acc codehost.Access, repo codehost.Repo, number int64, row store.ApprovalRequest, who people) string {
+	rr, ok := acc.(codehost.ReviewRequester)
+	if !ok || !who.Requester.Valid {
+		return ""
+	}
+	link, err := s.q.GetGitHubUserLink(ctx, store.GetGitHubUserLinkParams{OrgID: row.OrgID, UserID: who.Requester, Host: rr.ReviewHost()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ""
+	}
+	if err == nil {
+		err = rr.RequestReviewers(ctx, repo, number, []string{link.GithubLogin})
+	}
+	if err != nil {
+		s.log.WarnContext(ctx, "approvals: the review request failed", "approval", row.ID.String(), "repo", repo.String(), "number", number, "error", err)
+		return ""
+	}
+	return link.GithubLogin
 }
 
 // existingHead returns the branch's head if the branch exists and was created for this

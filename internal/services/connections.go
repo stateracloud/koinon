@@ -107,7 +107,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 			if d, err := p.Describe(c.Config); err == nil {
 				out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
 					AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
-					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
+					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs, ClientId: githubClientID(c.Config),
 				}}
 			}
 		case providers.Gitea:
@@ -465,6 +465,12 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		case providers.GitHub:
 			key, _ := github.ParsePrivateKey(secrets[connections.GitHubPrivateKeyField]) // validated above
 			fingerprint = key.Fingerprint()
+			// A new private key keeps the App's OAuth client secret, which the guided setup stored
+			// and the user link needs (#1175). A secret that cannot be opened any more is lost; the
+			// guided setup stores a new one.
+			if old, err := connections.OpenFields(s.keys, cur); err == nil && len(old[github.ClientSecretField]) > 0 {
+				secrets[github.ClientSecretField] = old[github.ClientSecretField]
+			}
 		case providers.Gitea:
 			prev, err := gitea.ParseConfig(cur.Config)
 			if err != nil {

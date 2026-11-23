@@ -10,6 +10,7 @@ import { BoardPage } from '@/pages/board-page'
 import { InboxPage } from '@/pages/inbox-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
+import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
 import { BudgetsPage } from '@/pages/budgets-page'
 import { PlatformBudgetsPage } from '@/pages/platform-budgets-page'
 import { PricesPage } from '@/pages/prices-page'
@@ -68,7 +69,16 @@ export const agentsRoute = createRoute({ getParentRoute: () => appRoute, path: '
 export const newAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new', component: NewAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/$agentId', component: AgentPage })
 
-export const connectionsRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections', component: ConnectionsPage })
+export const connectionsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections',
+  // github_link is the result of the GitHub link callback (internal/githublink).
+  validateSearch: (s: Record<string, unknown>): { github_link?: GitHubLinkResult } => {
+    const r = parseGitHubLinkResult(s.github_link)
+    return r ? { github_link: r } : {}
+  },
+  component: ConnectionsPage,
+})
 export const newGitHubConnectionRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/connections/new/github',

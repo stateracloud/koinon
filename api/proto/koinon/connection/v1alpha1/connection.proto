@@ -80,6 +80,27 @@ service ConnectionService {
   rpc ListInstallationRepos(ListInstallationReposRequest) returns (ListInstallationReposResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // StartGitHubLink starts linking the caller's GitHub login through a GitHub
+  // connection's App (issue #1175). It returns the GitHub page to open; GitHub
+  // sends the browser back to Koinon, which reads the login and revokes the
+  // user token at once. With the link, Koinon asks the requester to review an
+  // agent pull request. Any member.
+  rpc StartGitHubLink(StartGitHubLinkRequest) returns (StartGitHubLinkResponse);
+
+  // ListMyGitHubLinks returns the caller's GitHub links in the org. Any member.
+  rpc ListMyGitHubLinks(ListMyGitHubLinksRequest) returns (ListMyGitHubLinksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListGitHubLinks returns every GitHub link of the org. Admins and owners.
+  rpc ListGitHubLinks(ListGitHubLinksRequest) returns (ListGitHubLinksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // DeleteGitHubLink removes a GitHub link. A member removes their own link;
+  // admins and owners remove any link of the org. Audited.
+  rpc DeleteGitHubLink(DeleteGitHubLinkRequest) returns (DeleteGitHubLinkResponse);
 }
 
 // Tier is a scope's risk tier (ADR 0008).
@@ -158,6 +179,9 @@ message GitHubConnection {
   // connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses
   // changes to them.
   repeated string ci_dirs = 6;
+  // The App has an OAuth client ID (the guided setup stores it with its client
+  // secret), so users can link their GitHub login through it (issue #1175).
+  string client_id = 7;
 }
 
 // GiteaConnection is the non-secret part of a Gitea connection (ADR 0063).
@@ -414,3 +438,53 @@ message ListInstallationReposResponse {
   // How many repositories the installation can access, before the query.
   int64 total_count = 3;
 }
+
+// StartGitHubLinkRequest names the GitHub connection whose App signs the user in.
+message StartGitHubLinkRequest {
+  string org_id = 1;
+  string connection_id = 2;
+}
+
+// StartGitHubLinkResponse holds the GitHub page to send the browser to. The
+// link expires after ten minutes and works once.
+message StartGitHubLinkResponse {
+  string authorize_url = 1;
+}
+
+// GitHubLink links one Koinon user to one GitHub login on one host.
+message GitHubLink {
+  string user_id = 1;
+  // The host's web URL, for example https://github.com.
+  string host = 2;
+  string github_login = 3;
+  int64 github_user_id = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // The user's display name and email; set by ListGitHubLinks only.
+  string display_name = 6;
+  string email = 7;
+}
+
+message ListMyGitHubLinksRequest {
+  string org_id = 1;
+}
+
+message ListMyGitHubLinksResponse {
+  repeated GitHubLink links = 1;
+}
+
+message ListGitHubLinksRequest {
+  string org_id = 1;
+}
+
+message ListGitHubLinksResponse {
+  repeated GitHubLink links = 1;
+}
+
+// DeleteGitHubLinkRequest names the link. An empty user_id is the caller.
+message DeleteGitHubLinkRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string host = 3;
+}
+
+message DeleteGitHubLinkResponse {}

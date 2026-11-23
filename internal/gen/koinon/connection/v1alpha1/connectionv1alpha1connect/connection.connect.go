@@ -59,6 +59,18 @@ const (
 	// ConnectionServiceListInstallationReposProcedure is the procedure name of the ConnectionService's
 	// ListInstallationRepos RPC.
 	ConnectionServiceListInstallationReposProcedure = "/koinon.connection.v1alpha1.ConnectionService/ListInstallationRepos"
+	// ConnectionServiceStartGitHubLinkProcedure is the procedure name of the ConnectionService's
+	// StartGitHubLink RPC.
+	ConnectionServiceStartGitHubLinkProcedure = "/koinon.connection.v1alpha1.ConnectionService/StartGitHubLink"
+	// ConnectionServiceListMyGitHubLinksProcedure is the procedure name of the ConnectionService's
+	// ListMyGitHubLinks RPC.
+	ConnectionServiceListMyGitHubLinksProcedure = "/koinon.connection.v1alpha1.ConnectionService/ListMyGitHubLinks"
+	// ConnectionServiceListGitHubLinksProcedure is the procedure name of the ConnectionService's
+	// ListGitHubLinks RPC.
+	ConnectionServiceListGitHubLinksProcedure = "/koinon.connection.v1alpha1.ConnectionService/ListGitHubLinks"
+	// ConnectionServiceDeleteGitHubLinkProcedure is the procedure name of the ConnectionService's
+	// DeleteGitHubLink RPC.
+	ConnectionServiceDeleteGitHubLinkProcedure = "/koinon.connection.v1alpha1.ConnectionService/DeleteGitHubLink"
 )
 
 var (
@@ -143,6 +155,36 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	connectionServiceStartGitHubLinkSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("StartGitHubLink"),
+			Procedure:  ConnectionServiceStartGitHubLinkProcedure,
+		}
+	})
+	connectionServiceListMyGitHubLinksSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("ListMyGitHubLinks"),
+			Procedure:        ConnectionServiceListMyGitHubLinksProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	connectionServiceListGitHubLinksSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("ListGitHubLinks"),
+			Procedure:        ConnectionServiceListGitHubLinksProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	connectionServiceDeleteGitHubLinkSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("DeleteGitHubLink"),
+			Procedure:  ConnectionServiceDeleteGitHubLinkProcedure,
+		}
+	})
 )
 
 // ConnectionServiceClient is a client for the koinon.connection.v1alpha1.ConnectionService service.
@@ -194,6 +236,19 @@ type ConnectionServiceClient interface {
 	// asks GitHub with a metadata-read installation token; nothing is written.
 	// Admins and owners.
 	ListInstallationRepos(context.Context, *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error)
+	// StartGitHubLink starts linking the caller's GitHub login through a GitHub
+	// connection's App (issue #1175). It returns the GitHub page to open; GitHub
+	// sends the browser back to Koinon, which reads the login and revokes the
+	// user token at once. With the link, Koinon asks the requester to review an
+	// agent pull request. Any member.
+	StartGitHubLink(context.Context, *v1alpha1.StartGitHubLinkRequest) (*v1alpha1.StartGitHubLinkResponse, error)
+	// ListMyGitHubLinks returns the caller's GitHub links in the org. Any member.
+	ListMyGitHubLinks(context.Context, *v1alpha1.ListMyGitHubLinksRequest) (*v1alpha1.ListMyGitHubLinksResponse, error)
+	// ListGitHubLinks returns every GitHub link of the org. Admins and owners.
+	ListGitHubLinks(context.Context, *v1alpha1.ListGitHubLinksRequest) (*v1alpha1.ListGitHubLinksResponse, error)
+	// DeleteGitHubLink removes a GitHub link. A member removes their own link;
+	// admins and owners remove any link of the org. Audited.
+	DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error)
 }
 
 // NewConnectionServiceClient constructs a client for the
@@ -253,6 +308,19 @@ type ConnectionServiceHandler interface {
 	// asks GitHub with a metadata-read installation token; nothing is written.
 	// Admins and owners.
 	ListInstallationRepos(context.Context, *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error)
+	// StartGitHubLink starts linking the caller's GitHub login through a GitHub
+	// connection's App (issue #1175). It returns the GitHub page to open; GitHub
+	// sends the browser back to Koinon, which reads the login and revokes the
+	// user token at once. With the link, Koinon asks the requester to review an
+	// agent pull request. Any member.
+	StartGitHubLink(context.Context, *v1alpha1.StartGitHubLinkRequest) (*v1alpha1.StartGitHubLinkResponse, error)
+	// ListMyGitHubLinks returns the caller's GitHub links in the org. Any member.
+	ListMyGitHubLinks(context.Context, *v1alpha1.ListMyGitHubLinksRequest) (*v1alpha1.ListMyGitHubLinksResponse, error)
+	// ListGitHubLinks returns every GitHub link of the org. Admins and owners.
+	ListGitHubLinks(context.Context, *v1alpha1.ListGitHubLinksRequest) (*v1alpha1.ListGitHubLinksResponse, error)
+	// DeleteGitHubLink removes a GitHub link. A member removes their own link;
+	// admins and owners remove any link of the org. Audited.
+	DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error)
 }
 
 // RegisterConnectionServiceHandler registers svc as the
@@ -271,6 +339,10 @@ func RegisterConnectionServiceHandler(server *connect.Server, svc ConnectionServ
 		connect.Method{Spec: connectionServiceAddConnectionMCPHostSpec(), Handler: adapter.addConnectionMCPHost},
 		connect.Method{Spec: connectionServiceRemoveConnectionMCPHostSpec(), Handler: adapter.removeConnectionMCPHost},
 		connect.Method{Spec: connectionServiceListInstallationReposSpec(), Handler: adapter.listInstallationRepos},
+		connect.Method{Spec: connectionServiceStartGitHubLinkSpec(), Handler: adapter.startGitHubLink},
+		connect.Method{Spec: connectionServiceListMyGitHubLinksSpec(), Handler: adapter.listMyGitHubLinks},
+		connect.Method{Spec: connectionServiceListGitHubLinksSpec(), Handler: adapter.listGitHubLinks},
+		connect.Method{Spec: connectionServiceDeleteGitHubLinkSpec(), Handler: adapter.deleteGitHubLink},
 	)
 }
 
@@ -319,6 +391,22 @@ func (UnimplementedConnectionServiceHandler) RemoveConnectionMCPHost(context.Con
 
 func (UnimplementedConnectionServiceHandler) ListInstallationRepos(context.Context, *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) StartGitHubLink(context.Context, *v1alpha1.StartGitHubLinkRequest) (*v1alpha1.StartGitHubLinkResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.StartGitHubLink is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) ListMyGitHubLinks(context.Context, *v1alpha1.ListMyGitHubLinksRequest) (*v1alpha1.ListMyGitHubLinksResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.ListMyGitHubLinks is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) ListGitHubLinks(context.Context, *v1alpha1.ListGitHubLinksRequest) (*v1alpha1.ListGitHubLinksResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.ListGitHubLinks is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) DeleteGitHubLink(context.Context, *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.DeleteGitHubLink is not implemented")
 }
 
 type connectionServiceClient struct {
@@ -408,6 +496,38 @@ func (c *connectionServiceClient) RemoveConnectionMCPHost(ctx context.Context, r
 func (c *connectionServiceClient) ListInstallationRepos(ctx context.Context, req *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error) {
 	var res v1alpha1.ListInstallationReposResponse
 	if err := c.client.CallUnary(ctx, connectionServiceListInstallationReposSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) StartGitHubLink(ctx context.Context, req *v1alpha1.StartGitHubLinkRequest) (*v1alpha1.StartGitHubLinkResponse, error) {
+	var res v1alpha1.StartGitHubLinkResponse
+	if err := c.client.CallUnary(ctx, connectionServiceStartGitHubLinkSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) ListMyGitHubLinks(ctx context.Context, req *v1alpha1.ListMyGitHubLinksRequest) (*v1alpha1.ListMyGitHubLinksResponse, error) {
+	var res v1alpha1.ListMyGitHubLinksResponse
+	if err := c.client.CallUnary(ctx, connectionServiceListMyGitHubLinksSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) ListGitHubLinks(ctx context.Context, req *v1alpha1.ListGitHubLinksRequest) (*v1alpha1.ListGitHubLinksResponse, error) {
+	var res v1alpha1.ListGitHubLinksResponse
+	if err := c.client.CallUnary(ctx, connectionServiceListGitHubLinksSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) DeleteGitHubLink(ctx context.Context, req *v1alpha1.DeleteGitHubLinkRequest) (*v1alpha1.DeleteGitHubLinkResponse, error) {
+	var res v1alpha1.DeleteGitHubLinkResponse
+	if err := c.client.CallUnary(ctx, connectionServiceDeleteGitHubLinkSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -541,6 +661,54 @@ func (h connectionServiceHandler) listInstallationRepos(ctx context.Context, _ c
 		return err
 	}
 	res, err := h.svc.ListInstallationRepos(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) startGitHubLink(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.StartGitHubLinkRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.StartGitHubLink(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) listMyGitHubLinks(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListMyGitHubLinksRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListMyGitHubLinks(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) listGitHubLinks(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListGitHubLinksRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListGitHubLinks(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) deleteGitHubLink(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.DeleteGitHubLinkRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DeleteGitHubLink(ctx, &req)
 	if err != nil {
 		return err
 	}

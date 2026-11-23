@@ -1768,12 +1768,16 @@ secret store (ADR 0021, 0056); no response ever contains them.
 | CreateGitHubConnection | `koinon.connection.v1alpha1.CreateGitHubConnectionRequest` | `koinon.connection.v1alpha1.CreateGitHubConnectionResponse` | - | CreateGitHubConnection creates a GitHub App connection. The private key is stored encrypted and never returned. Admins and owners. |
 | CreateGiteaConnection | `koinon.connection.v1alpha1.CreateGiteaConnectionRequest` | `koinon.connection.v1alpha1.CreateGiteaConnectionResponse` | - | CreateGiteaConnection creates a Gitea connection: a bot account on a Gitea server with a read token and a write token (ADR 0063). Both tokens are stored encrypted and never returned. Admins and owners. |
 | DeleteConnection | `koinon.connection.v1alpha1.DeleteConnectionRequest` | `koinon.connection.v1alpha1.DeleteConnectionResponse` | - | DeleteConnection deletes a connection and its stored secret fields for good. A connection entered here can be deleted; a declared one only after its Secret was deleted (removed). While agents are bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners. |
+| DeleteGitHubLink | `koinon.connection.v1alpha1.DeleteGitHubLinkRequest` | `koinon.connection.v1alpha1.DeleteGitHubLinkResponse` | - | DeleteGitHubLink removes a GitHub link. A member removes their own link; admins and owners remove any link of the org. Audited. |
 | GetConnection | `koinon.connection.v1alpha1.GetConnectionRequest` | `koinon.connection.v1alpha1.GetConnectionResponse` | - | GetConnection returns one connection. Viewers and above. |
 | ListConnections | `koinon.connection.v1alpha1.ListConnectionsRequest` | `koinon.connection.v1alpha1.ListConnectionsResponse` | - | ListConnections returns the org's connections, oldest first. Viewers and above. |
 | ListConnectorTypes | `koinon.connection.v1alpha1.ListConnectorTypesRequest` | `koinon.connection.v1alpha1.ListConnectorTypesResponse` | - | ListConnectorTypes returns the connector types this install ships, with their scopes and setup guides. Any signed-in user. |
+| ListGitHubLinks | `koinon.connection.v1alpha1.ListGitHubLinksRequest` | `koinon.connection.v1alpha1.ListGitHubLinksResponse` | - | ListGitHubLinks returns every GitHub link of the org. Admins and owners. |
 | ListInstallationRepos | `koinon.connection.v1alpha1.ListInstallationReposRequest` | `koinon.connection.v1alpha1.ListInstallationReposResponse` | - | ListInstallationRepos lists the repositories a GitHub connection's App installation can access, for choosing what to bind an agent to. Koinon asks GitHub with a metadata-read installation token; nothing is written. Admins and owners. |
+| ListMyGitHubLinks | `koinon.connection.v1alpha1.ListMyGitHubLinksRequest` | `koinon.connection.v1alpha1.ListMyGitHubLinksResponse` | - | ListMyGitHubLinks returns the caller's GitHub links in the org. Any member. |
 | RemoveConnectionMCPHost | `koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest` | `koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse` | - | RemoveConnectionMCPHost removes one host from the connection's extra MCP hosts. Every MCP server linked to the connection that it no longer serves loses the link (and its code-host tool class), each audited as mcp_server.data_class.reset (reason connection_mcp_host_removed); the response lists them. With dry_run nothing is written: the response lists the servers a removal would unlink. Removing an absent host changes nothing. Audited (connection.mcp_host.remove). A host added again does not restore a link. Admins and owners. |
 | SetConnectionSecret | `koinon.connection.v1alpha1.SetConnectionSecretRequest` | `koinon.connection.v1alpha1.SetConnectionSecretResponse` | - | SetConnectionSecret replaces the secret fields of a connection entered here: a GitHub App's private key, or a Gitea connection's two tokens. It is how a secret lost with its key-encryption key is entered again (ADR 0085 decision 13), and how one is rotated. Every secret field of the connector is required; the other settings stay. It clears the lost mark and the last test result. A declared connection's secret is changed in its Kubernetes Secret instead (FAILED_PRECONDITION). Audited without the secret. Admins and owners. |
+| StartGitHubLink | `koinon.connection.v1alpha1.StartGitHubLinkRequest` | `koinon.connection.v1alpha1.StartGitHubLinkResponse` | - | StartGitHubLink starts linking the caller's GitHub login through a GitHub connection's App (issue #1175). It returns the GitHub page to open; GitHub sends the browser back to Koinon, which reads the login and revokes the user token at once. With the link, Koinon asks the requester to review an agent pull request. Any member. |
 | TestConnection | `koinon.connection.v1alpha1.TestConnectionRequest` | `koinon.connection.v1alpha1.TestConnectionResponse` | - | TestConnection runs the setup guide's checks against the provider and records the result. Nothing is written to the provider. Admins and owners. |
 
 ### Message AddConnectionMCPHostRequest
@@ -1917,6 +1921,20 @@ CreateGiteaConnectionResponse holds the new connection and, when asked for, the 
 
 No fields.
 
+### Message DeleteGitHubLinkRequest
+
+DeleteGitHubLinkRequest names the link. An empty user_id is the caller.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| user_id | 2 | `string` | singular |  |  |
+| host | 3 | `string` | singular |  |  |
+
+### Message DeleteGitHubLinkResponse
+
+No fields.
+
 ### Message GetConnectionRequest
 
 GetConnectionRequest names a connection.
@@ -1946,6 +1964,7 @@ GitHubConnection is the non-secret part of a GitHub App connection.
 | base_url | 4 | `string` | singular |  | The host's web base URL when it is not github.com (GitHub Enterprise Server), https://host[:port]; empty for github.com. |
 | ca_bundle | 5 | `string` | singular |  | PEM certificates trusted for that host besides the system roots. Public; empty when the host's certificate chains to the system roots. |
 | ci_dirs | 6 | `string` | repeated |  | Directories, relative to the repository root, that run CI on this host besides the connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses changes to them. |
+| client_id | 7 | `string` | singular |  | The App has an OAuth client ID (the guided setup stores it with its client secret), so users can link their GitHub login through it (issue #1175). |
 
 ### Message GitHubConnectionSecret
 
@@ -1954,6 +1973,20 @@ GitHubConnectionSecret is the secret field of a GitHub App connection.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | private_key | 1 | `string` | singular |  | Secure input (ADR 0021): the App's PEM private key, a new one or the one GitHub still lists. Stored only as an envelope in Postgres (ADR 0056), never returned or logged. |
+
+### Message GitHubLink
+
+GitHubLink links one Koinon user to one GitHub login on one host.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| user_id | 1 | `string` | singular |  |  |
+| host | 2 | `string` | singular |  | The host's web URL, for example https://github.com. |
+| github_login | 3 | `string` | singular |  |  |
+| github_user_id | 4 | `int64` | singular |  |  |
+| created_at | 5 | `google.protobuf.Timestamp` | singular |  |  |
+| display_name | 6 | `string` | singular |  | The user's display name and email; set by ListGitHubLinks only. |
+| email | 7 | `string` | singular |  |  |
 
 ### Message GiteaConnection
 
@@ -2017,6 +2050,18 @@ ListConnectorTypesResponse lists the connector types.
 | --- | --- | --- | --- | --- | --- |
 | connector_types | 1 | `koinon.connection.v1alpha1.ConnectorType` | repeated |  |  |
 
+### Message ListGitHubLinksRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ListGitHubLinksResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| links | 1 | `koinon.connection.v1alpha1.GitHubLink` | repeated |  |  |
+
 ### Message ListInstallationReposRequest
 
 ListInstallationReposRequest names a GitHub connection and a page.
@@ -2037,6 +2082,18 @@ ListInstallationReposResponse is one page, in GitHub's order.
 | repos | 1 | `koinon.connection.v1alpha1.InstallationRepo` | repeated |  |  |
 | next_page_token | 2 | `string` | singular |  | Empty on the last page. A filtered page can hold fewer repositories than an unfiltered one, or none, and still have a next page. |
 | total_count | 3 | `int64` | singular |  | How many repositories the installation can access, before the query. |
+
+### Message ListMyGitHubLinksRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ListMyGitHubLinksResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| links | 1 | `koinon.connection.v1alpha1.GitHubLink` | repeated |  |  |
 
 ### Message RemoveConnectionMCPHostRequest
 
@@ -2089,6 +2146,24 @@ SetConnectionSecretResponse holds the connection and, when asked for, the test r
 | --- | --- | --- | --- | --- | --- |
 | connection | 1 | `koinon.connection.v1alpha1.Connection` | singular |  |  |
 | results | 2 | `koinon.connection.v1alpha1.CheckResult` | repeated |  |  |
+
+### Message StartGitHubLinkRequest
+
+StartGitHubLinkRequest names the GitHub connection whose App signs the user in.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| connection_id | 2 | `string` | singular |  |  |
+
+### Message StartGitHubLinkResponse
+
+StartGitHubLinkResponse holds the GitHub page to send the browser to. The
+link expires after ten minutes and works once.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| authorize_url | 1 | `string` | singular |  |  |
 
 ### Message TestConnectionRequest
 

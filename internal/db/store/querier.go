@@ -198,6 +198,9 @@ type Querier interface {
 	CompleteHomeRepositorySeed(ctx context.Context, arg CompleteHomeRepositorySeedParams) (int64, error)
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
+	// The flow of this state, started by this user and not expired; it is deleted, so a state works
+	// once. No row: unknown, used, expired or started by another user.
+	ConsumeGitHubLinkFlow(ctx context.Context, arg ConsumeGitHubLinkFlowParams) (GithubLinkFlow, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
@@ -268,6 +271,10 @@ type Querier interface {
 	CreateConnection(ctx context.Context, arg CreateConnectionParams) (Connection, error)
 	// A connection whose secret fields are an envelope (internal/secretstore).
 	CreateConnectionWithEnvelope(ctx context.Context, arg CreateConnectionWithEnvelopeParams) (Connection, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// GitHub sign-in links (issue #1175). Every query takes @org_id (TestQueriesAreOrgScoped).
+	CreateGitHubLinkFlow(ctx context.Context, arg CreateGitHubLinkFlowParams) error
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -353,8 +360,10 @@ type Querier interface {
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
+	DeleteExpiredGitHubLinkFlows(ctx context.Context, arg DeleteExpiredGitHubLinkFlowsParams) error
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	DeleteGitHubUserLink(ctx context.Context, arg DeleteGitHubUserLinkParams) (GithubUserLink, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) (int64, error)
 	DeleteHomeRepositoryProbe(ctx context.Context, arg DeleteHomeRepositoryProbeParams) error
@@ -523,6 +532,7 @@ type Querier interface {
 	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
 	// while it was down keeps being served with the previous file until the new one has arrived.
 	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
+	GetGitHubUserLink(ctx context.Context, arg GetGitHubUserLinkParams) (GithubUserLink, error)
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
 	// The checkpoint a snapshot's tag names, and whether a backup is still recording it: requested
 	// (tried again later), or running within @lease_seconds (its writer is alive).
@@ -940,6 +950,8 @@ type Querier interface {
 	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
 	// max_output, or the price could not be used (price_error).
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
+	ListGitHubUserLinks(ctx context.Context, orgID pgtype.UUID) ([]ListGitHubUserLinksRow, error)
+	ListGitHubUserLinksOfUser(ctx context.Context, arg ListGitHubUserLinksOfUserParams) ([]GithubUserLink, error)
 	// Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
 	// has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's
@@ -1772,6 +1784,9 @@ type Querier interface {
 	// the render keeps its own reason and detail (a blocked URL says so), not the org-wide one. Replaces an
 	// older row, since no Clear runs in this path.
 	UpsertGatewayProviderFailure(ctx context.Context, arg UpsertGatewayProviderFailureParams) error
+	// A new link replaces the user's earlier one on the same host. A GitHub account linked to another
+	// user of the org violates the unique key.
+	UpsertGitHubUserLink(ctx context.Context, arg UpsertGitHubUserLinkParams) (GithubUserLink, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) (int64, error)
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.

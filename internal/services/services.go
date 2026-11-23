@@ -61,6 +61,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
+	"github.com/stateracloud/koinon/internal/githublink"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -136,6 +137,9 @@ type Options struct {
 	// Approvals decides and executes approval requests. Nil means Approve and
 	// Deny are unavailable; listing still works.
 	Approvals *approvals.Service
+	// GitHubLinks links users to their GitHub login (issue #1175). Nil means the GitHub link RPCs
+	// answer UNIMPLEMENTED.
+	GitHubLinks *githublink.Service
 	// Catalog manages model providers and models (ADR 0056). Nil means ProviderService answers
 	// UNIMPLEMENTED.
 	Catalog *catalog.Service
@@ -190,6 +194,7 @@ type Server struct {
 	refresher    *prices.Refresher
 	hosts        *codehost.Registry
 	approvals    *approvals.Service
+	githubLinks  *githublink.Service
 	catalog      *catalog.Service
 	mcp          *mcpservers.Service
 	remoteAgents *remoteagents.Service
@@ -240,7 +245,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, cancelGrace: opts.WatchCancelGrace, log: opts.Logger,
-		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP, remoteAgents: opts.RemoteAgents,
+		keys: opts.Keys, scopeSync: opts.ScopeSync, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, githubLinks: opts.GitHubLinks, catalog: opts.Catalog, mcp: opts.MCP, remoteAgents: opts.RemoteAgents,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), agentResources: agentresources.New(pool, sandboxPolicy(opts)), modelCheck: opts.ModelCheck, runNow: opts.RunNow, traces: opts.Traces, leakGuard: orgsettings.NewService(pool),
 		hold: opts.RestoreHold, outward: outward.New(pool).WithRestoreHold(opts.RestoreHold),
