@@ -341,7 +341,7 @@ function pendingApproval(t: Tool): boolean {
   return t.toolHash !== '' && t.toolHash !== t.approvedHash
 }
 
-type PinnedText = { name?: string; title?: string; description?: string; inputSchema?: unknown }
+type PinnedText = { name?: string; title?: string; description?: string; annotations?: unknown; inputSchema?: unknown; outputSchema?: unknown }
 
 function parsePinned(raw: string): PinnedText | undefined {
   try {
@@ -353,13 +353,12 @@ function parsePinned(raw: string): PinnedText | undefined {
 }
 
 /**
- * PendingText shows the exact text a decision approves: the name, description and input schema the
- * sync observed, and its hash (#1173). A decision sends that hash, and the server refuses it when the
+ * PendingText shows the exact text a decision approves: every field the hash covers (name, title,
+ * description, annotations, input and output schema) as the sync observed it, and the hash (#1173). A decision sends that hash, and the server refuses it when the
  * text changed in the meantime, so an admin never approves text they did not see.
  */
 function PendingText({ tool }: { tool: Tool }) {
   const pinned = parsePinned(tool.toolJson)
-  const schema = pinned?.inputSchema === undefined ? '' : JSON.stringify(pinned.inputSchema, null, 2)
   return (
     <div className="grid gap-1 rounded-md border p-2 text-sm" role="group" aria-label={`Text waiting for approval: ${tool.name}`}>
       <p className="font-medium">Text waiting for approval</p>
@@ -378,10 +377,9 @@ function PendingText({ tool }: { tool: Tool }) {
           )}
           <dt className="text-muted-foreground text-xs">Description</dt>
           <dd className="break-words whitespace-pre-wrap">{pinned.description || '(none)'}</dd>
-          <dt className="text-muted-foreground text-xs">Input schema</dt>
-          <dd>
-            <pre className="bg-muted max-h-64 overflow-auto rounded p-2 text-xs">{schema || '(none)'}</pre>
-          </dd>
+          <PinnedJSON label="Annotations" value={pinned.annotations} />
+          <PinnedJSON label="Input schema" value={pinned.inputSchema} />
+          <PinnedJSON label="Output schema" value={pinned.outputSchema} />
         </dl>
       ) : (
         <p className="text-muted-foreground text-xs">The text could not be read.</p>
@@ -390,6 +388,17 @@ function PendingText({ tool }: { tool: Tool }) {
         Hash: <code className="break-all">{tool.toolHash}</code>
       </p>
     </div>
+  )
+}
+
+function PinnedJSON({ label, value }: { label: string; value: unknown }) {
+  return (
+    <>
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd>
+        <pre className="bg-muted max-h-64 overflow-auto rounded p-2 text-xs">{value === undefined ? '(none)' : JSON.stringify(value, null, 2)}</pre>
+      </dd>
+    </>
   )
 }
 

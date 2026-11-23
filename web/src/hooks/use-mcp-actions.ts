@@ -17,10 +17,14 @@ export function useMcpActions(orgId: string) {
   return useMemo(() => {
     const client = createClient(McpServerService, transport)
     const refresh = () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: McpServerService, cardinality: undefined }) })
+    // Refresh after a refusal too: a decision refused because the tool text changed (#1173) must show
+    // the new text and its hash, or the next try sends the same stale hash.
     const done = async <T>(p: Promise<T>) => {
-      const res = await p
-      await refresh()
-      return res
+      try {
+        return await p
+      } finally {
+        await refresh()
+      }
     }
     return {
       createServer: (i: CreateServerInput) => done(client.createServer({ orgId, ...i })),

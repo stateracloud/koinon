@@ -95,7 +95,21 @@ func (r *Reconciler) probeSoon(probes []gatewayplan.Probe) {
 func (r *Reconciler) wakeProbe(ctx context.Context, payload string) {
 	org, server, ok := mcpservers.ParseProbeWakePayload(payload)
 	if !ok {
-		r.log.Warn("mcp prober: ignoring a wake with a bad payload")
+		// Debug, not Warn: any role that can NOTIFY could fill the log with forged wakes.
+		r.log.Debug("mcp prober: ignoring a wake with a bad payload")
+		return
+	}
+	// Look the server up in the plan first, so a wake for a server the plan does not probe (a forged
+	// payload, or a server deleted since) leaves no state behind.
+	var probe gatewayplan.Probe
+	found := false
+	for _, p := range r.plan.Probes() {
+		if p.Org == org && p.Server == server {
+			probe, found = p, true
+			break
+		}
+	}
+	if !found {
 		return
 	}
 	now := time.Now()
@@ -130,12 +144,7 @@ func (r *Reconciler) wakeProbe(ctx context.Context, payload string) {
 	}
 	r.probeAsked[server] = now
 	r.probeMu.Unlock()
-	for _, p := range r.plan.Probes() {
-		if p.Org == org && p.Server == server {
-			r.probeSoon([]gatewayplan.Probe{p})
-			return
-		}
-	}
+	r.probeSoon([]gatewayplan.Probe{probe})
 }
 
 func (r *Reconciler) takeProbeDue() []gatewayplan.Probe {

@@ -950,11 +950,13 @@ list only when it matches what an admin approved.
   wake inside that time is held to its end, not dropped. The review flag and the new text therefore reach
   the console in seconds, not at the next probe interval. The wake carries no text: the prober reads the
   text through the gateway itself.
-- An admin decision is a compare-and-set (#1173). The console shows the observed text (name, title,
-  description and input schema) and its hash, and the tier or acknowledgement request carries that hash.
-  The service locks the row and refuses the decision with `Aborted` (HTTP 409) when the observed hash
-  changed since the admin read it, and with `InvalidArgument` when a tool waits for an approval and the
-  request carries no hash. So an admin never approves text they did not see.
+- An admin decision is a compare-and-set (#1173). The console shows every field the hash covers (name,
+  title, description, annotations, input and output schema) and the hash, and the tier or
+  acknowledgement request carries that hash. The service locks the row and refuses the decision with
+  `Aborted` (HTTP 409) when the observed hash changed since the admin read it, and with
+  `InvalidArgument` when a tool waits for an approval and the request carries no hash. After a refusal
+  the console reads the tools again and shows the new text. So an admin never approves text they did
+  not see.
 
 This completes decision 4 of ADR 0091 for tool lists. It does not change the tiers: an approved text is
 not an `auto` grant.

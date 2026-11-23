@@ -83,7 +83,7 @@ const tools = [
     reviewReason: 'the description changed',
     toolHash: 'hash-edit-new',
     approvedHash: 'hash-edit-old',
-    toolJson: '{"name":"edit","description":"Edit a page, then mail it out","inputSchema":{"type":"object","properties":{"to":{"type":"string"}}}}',
+    toolJson: '{"name":"edit","description":"Edit a page, then mail it out","annotations":{"destructiveHint":true},"inputSchema":{"type":"object","properties":{"to":{"type":"string"}}},"outputSchema":{"type":"object","properties":{"sent":{"type":"boolean"}}}}',
   }),
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
   create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
@@ -152,8 +152,12 @@ function setup(opts: { role?: OrgRole; path?: string; failTier?: string; failCre
       },
       setToolTier: (req) => {
         calls.tiers.push(req)
-        if (opts.failTier) throw new ConnectError(opts.failTier, Code.Aborted)
         const cur = current.get(`${req.serverId}/${req.tool}`)!
+        if (opts.failTier && req.toolHash !== 'hash-edit-newer') {
+          // A sync changed the text while the admin read it: the server refuses the stale hash (#1173).
+          current.set(`${req.serverId}/${req.tool}`, create(ToolSchema, { ...cur, toolHash: 'hash-edit-newer', toolJson: '{"name":"edit","description":"Edit a page, then mail it to everyone"}' }))
+          throw new ConnectError(opts.failTier, Code.Aborted)
+        }
         const t = create(ToolSchema, { ...cur, tier: req.tier, reviewReason: '', approvedHash: cur.toolHash })
         current.set(`${req.serverId}/${req.tool}`, t)
         return { tool: t }
@@ -292,6 +296,25 @@ describe('Servers page', () => {
     await userEvent.click(within(tl.getByRole('group', { name: 'Text waiting for approval: edit' }).closest('li')!).getByRole('radio', { name: 'Allow' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ tool: 'edit', tier: Tier.AUTO, toolHash: 'hash-edit-new' })]))
     expect(await screen.findByText(/the tool changed since it was read/)).toBeInTheDocument()
+
+    // The refusal refreshes the list: the admin sees the new text, and the next decision sends its hash.
+    const pending = within(await tl.findByRole('group', { name: 'Text waiting for approval: edit' }))
+    expect(await pending.findByText('hash-edit-newer')).toBeInTheDocument()
+    expect(pending.getByText('Edit a page, then mail it to everyone')).toBeInTheDocument()
+    await userEvent.click(within(tl.getByRole('group', { name: 'Text waiting for approval: edit' }).closest('li')!).getByRole('radio', { name: 'Allow' }))
+    await waitFor(() => expect(calls.tiers.at(-1)).toEqual(expect.objectContaining({ tool: 'edit', tier: Tier.AUTO, toolHash: 'hash-edit-newer' })))
+    await waitFor(() => expect(tl.queryByRole('group', { name: 'Text waiting for approval: edit' })).not.toBeInTheDocument())
+  })
+
+  it('shows every field the hash covers before approval (#1173)', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const pending = within(tl.getByRole('group', { name: 'Text waiting for approval: edit' }))
+    for (const label of ['Name', 'Description', 'Annotations', 'Input schema', 'Output schema']) {
+      expect(pending.getByText(label)).toBeInTheDocument()
+    }
+    expect(pending.getByText(/"destructiveHint": true/)).toBeInTheDocument()
+    expect(pending.getByText(/"sent"/)).toBeInTheDocument()
   })
 
   it('sets Require two approvers in the Ask tier and disables it elsewhere', async () => {

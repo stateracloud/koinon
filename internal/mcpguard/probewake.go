@@ -48,6 +48,13 @@ func (w *probeWaker) due(server pgtype.UUID) bool {
 	return true
 }
 
+// forget gives back the slot due took for a wake that was not sent, so the next call can try again.
+func (w *probeWaker) forget(server pgtype.UUID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.last, server)
+}
+
 // wakeProber asks the reconciler's prober to sync the server now. Best effort: the list decision does
 // not depend on it, and the next probe interval syncs the server anyway.
 func (g *Guard) wakeProber(ctx context.Context, org, server pgtype.UUID) {
@@ -58,6 +65,7 @@ func (g *Guard) wakeProber(ctx context.Context, org, server pgtype.UUID) {
 		Channel: mcpservers.ProbeWakeChannel, Payload: mcpservers.ProbeWakePayload(org, server),
 	})
 	if err != nil {
+		g.wake.forget(server)
 		g.log.Warn("mcp guard: waking the prober failed; the next probe syncs the server", "err", err)
 	}
 }

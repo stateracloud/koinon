@@ -190,8 +190,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
 
 	By("an admin confirms read_item as auto and allows the agent")
-	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+srv.ID+"/tools/read_item/tier", `{"tier":"auto"}`)
-	Expect(code).To(Equal(http.StatusOK), string(body))
+	setToolTierE2E(ctx, admin, srv.ID, "read_item", "auto")
 	// read_item is a read-only lookup with no address arguments: declare its sink class as none so
 	// the in-task call of step 6b is not external-high. Its result legs stay unset (the server's,
 	// both), so the exfil case still holds. write_item stays undeclared (external-high). Step 4's
@@ -297,14 +296,12 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 	// fetch_url, the fetch-style tool (its url argument names a destination), goes auto beside write_item.
 	tools := []string{"write_item", "fetch_url", "search_items"}
 	for _, t := range tools {
-		code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+t+"/tier", `{"tier":"auto"}`)
-		Expect(code).To(Equal(http.StatusOK), string(body))
+		setToolTierE2E(ctx, admin, serverID, t, "auto")
 	}
 	DeferCleanup(func(ctx context.Context) {
 		// Step 6c calls write_item through the approval proxy, where only ask-tier tools are.
 		for _, t := range tools {
-			code, body := admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+t+"/tier", `{"tier":"ask"}`)
-			Expect(code).To(Equal(http.StatusOK), string(body))
+			setToolTierE2E(ctx, admin, serverID, t, "ask")
 		}
 		Eventually(func(g Gomega) {
 			res, err := session.ListTools(ctx, nil)
@@ -422,4 +419,28 @@ func portForward(ctx context.Context, kubectl, target, port string) string {
 		return err
 	}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(500 * time.Millisecond).Should(Succeed())
 	return addr
+}
+
+// setToolTierE2E sets a tool's tier as the console does: it reads the tool's text hash first and sends
+// it, so the decision approves the text the admin saw (#1173).
+func setToolTierE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), serverID, tool, tier string) {
+	GinkgoHelper()
+	code, body := admin(ctx, http.MethodGet, "/mcp-servers/"+serverID+"/tools")
+	Expect(code).To(Equal(http.StatusOK), string(body))
+	var list struct {
+		Tools []struct {
+			Name     string `json:"name"`
+			ToolHash string `json:"toolHash"`
+		} `json:"tools"`
+	}
+	Expect(json.Unmarshal(body, &list)).To(Succeed())
+	hash := ""
+	for _, t := range list.Tools {
+		if t.Name == tool {
+			hash = t.ToolHash
+		}
+	}
+	Expect(hash).NotTo(BeEmpty(), "%s must be in the server's tool list: %s", tool, body)
+	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+tool+"/tier", fmt.Sprintf(`{"tier":%q,"toolHash":%q}`, tier, hash))
+	Expect(code).To(Equal(http.StatusOK), string(body))
 }
