@@ -136,9 +136,18 @@ check "...after exactly five attempts" "$(cat "$tmp/fl-n")" 5
 check "...with a final error that names the fault and the count" "$(grep -c 'still a registry fault after 5 attempts' "$tmp/fl-err")" 1
 check "a compile error is not retried" "$(flaky 99 'main.go:3:1: syntax error')" 1
 check "...one run" "$(cat "$tmp/fl-n")" 1
+check "a Go syntax error with unexpected EOF is not retried" "$(flaky 99 'x.go:3:1: syntax error: unexpected EOF, expected }')" 1
+check "...one run" "$(cat "$tmp/fl-n")" 1
+check "HTTP 501 is not retried" "$(flaky 99 'GET https://r.example/v2/: unexpected status code 501')" 1
+check "...one run" "$(cat "$tmp/fl-n")" 1
+check "an EOF on a registry request is retried" "$(flaky 1 'Get "https://cgr.dev/v2/": GET https://cgr.dev/v2/: unexpected EOF')" 0
 check "UNAUTHORIZED is not retried" "$(flaky 99 'GET: UNAUTHORIZED: authentication required')" 1
 check "...one run" "$(cat "$tmp/fl-n")" 1
 check "...and no retry message" "$(grep -c 'push retry' "$tmp/fl-err")" 0
+# test/e2e/kind/images.sh runs both ko builds through push_retry and sources the library.
+check "images.sh: two ko builds under push_retry" "$(grep -c 'push_retry "\${KO:-ko}" build' "$here/../test/e2e/kind/images.sh")" 2
+check "images.sh: no ko build outside push_retry" "$(grep '"\${KO:-ko}" build' "$here/../test/e2e/kind/images.sh" | grep -vc 'push_retry')" 0
+check "images.sh: sources the retry library" "$(grep -c 'push-retry-lib.sh"$' "$here/../test/e2e/kind/images.sh")" 1
 
 ((fails == 0)) || { echo "$fails failed" >&2; exit 1; }
 echo "all passed"

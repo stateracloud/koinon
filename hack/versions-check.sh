@@ -212,17 +212,20 @@ ko=.ko.yaml
 if [[ ! -f $ko ]]; then
 	fail "$ko is missing: it pins the default base image of ko by digest (#1224)"
 else
-	ko_body=$(grep -v '^[[:space:]]*#' "$ko" || true)
+	# One value per line, without comments, quotes and trailing blanks.
+	ko_clean() { sed -e 's/[[:space:]]#.*$//' -e 's/^[[:space:]]*#.*$//' -e "s/[\"']//g" -e 's/[[:space:]]*$//'; }
+	ko_body=$(ko_clean <"$ko")
 	default_ref=$(sed -n 's/^defaultBaseImage:[[:space:]]*//p' <<<"$ko_body" | head -1)
 	if [[ $default_ref =~ ^cgr\.dev/chainguard/static@sha256:[0-9a-f]{64}$ ]]; then
 		grep -qF 'crane digest cgr.dev/chainguard/static' "$ko" || fail "$ko: no re-pin command ('crane digest cgr.dev/chainguard/static:latest') in a comment"
 	else
 		fail "$ko: defaultBaseImage is '${default_ref:-<missing>}', want cgr.dev/chainguard/static@sha256:<64 hex> (re-pin: crane digest cgr.dev/chainguard/static:latest; the digest must be 3 days old, ADR 0079, hack/dep-age-check.sh)"
 	fi
-	# Every base image named under baseImageOverrides is a digest pin as well.
+	# Every base image under baseImageOverrides (the indented lines after it, up to the next top-level key) is a
+	# digest pin as well.
 	while IFS= read -r ref; do
 		[[ $ref =~ @sha256:[0-9a-f]{64}$ ]] || fail "$ko: baseImageOverrides entry '$ref' is not pinned by digest"
-	done < <(sed -n 's/^[[:space:]]\{1,\}[A-Za-z0-9._\/-]\{1,\}:[[:space:]]\{1,\}\(.*\)$/\1/p' <<<"$ko_body")
+	done < <(awk '/^[^[:space:]]/ { in_o = ($0 ~ /^baseImageOverrides:/); next } in_o && /^[[:space:]]+[^[:space:]]+:[[:space:]]*[^[:space:]]/ { sub(/^[^:]*:[[:space:]]*/, ""); print }' <<<"$ko_body")
 fi
 
 if ((fails > 0)); then

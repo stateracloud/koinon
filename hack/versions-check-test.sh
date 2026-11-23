@@ -286,6 +286,14 @@ w=$(fresh)
 subst "$w/.ko.yaml" "cgr.dev/chainguard/git@sha256:" "cgr.dev/chainguard/git:latest #"
 expect_fail ".ko.yaml: an override as a tag" "$w" "baseImageOverrides entry"
 w=$(fresh)
+printf 'builds:\n  - id: api\n    main: ./cmd/koinon-api\n' >>"$w/.ko.yaml"
+run "$w"
+rc=$?
+check ".ko.yaml: a builds section is not an override" 0 "$rc"
+w=$(fresh)
+subst "$w/.ko.yaml" $'\nbaseImageOverrides:\n' $'\nbaseImageOverrides:\n  "github.com/x/y/cmd/z": cgr.dev/chainguard/git:latest\n'
+expect_fail ".ko.yaml: a quoted key with a tag" "$w" "baseImageOverrides entry"
+w=$(fresh)
 rm "$w/.ko.yaml"
 expect_fail ".ko.yaml: missing" "$w" ".ko.yaml is missing"
 

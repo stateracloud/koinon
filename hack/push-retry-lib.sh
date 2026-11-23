@@ -21,8 +21,8 @@
 #   PUSH_RETRY_ATTEMPTS  total attempts, default 5
 #   PUSH_RETRY_DELAY     seconds before the second attempt, default 3; it doubles each time (3+6+12+24 = 45 s)
 #
-# A short registry fault is HTTP 500, 502, 503, 504 (INTERNAL_SERVER_ERROR, "Too many connections"), 429, a reset
-# connection, an unexpected EOF or a timeout. ko pulls its base image (cgr.dev/chainguard/static by default) on
+# A short registry fault is HTTP 500, 502, 503, 504 (not 501; INTERNAL_SERVER_ERROR, "Too many connections"), 429, a reset
+# connection, an EOF on a registry request (a Go syntax error "unexpected EOF" is not one) or a timeout. ko pulls its base image (cgr.dev/chainguard/static by default) on
 # every build, and a fault of cgr.dev (HTTP 500, "Error 1040: Too many connections") failed the merge queue e2e three
 # times before any spec ran (#1224). The compile error, UNAUTHORIZED or a missing image is no short fault: it fails
 # at once, so a real fault is not hidden for a minute. The last attempt's own status is the return status.
@@ -31,7 +31,7 @@
 # stdout of the command passes through; stderr is shown as it comes and also inspected.
 
 _retry_denied='denied: requested access'
-_retry_fault='INTERNAL_SERVER_ERROR|BAD_GATEWAY|SERVICE_UNAVAILABLE|GATEWAY_TIMEOUT|TOOMANYREQUESTS|TOO_MANY_REQUESTS|Too many connections|(status code|HTTP) (429|50[0-4])|unexpected EOF|connection reset|i/o timeout|TLS handshake timeout|Client\.Timeout'
+_retry_fault='INTERNAL_SERVER_ERROR|BAD_GATEWAY|SERVICE_UNAVAILABLE|GATEWAY_TIMEOUT|TOOMANYREQUESTS|TOO_MANY_REQUESTS|Too many connections|(status code|HTTP) (429|50[0234])([^0-9]|$)|(GET|PUT|HEAD|POST|PATCH) https?://[^ ]+: .*EOF|connection reset|i/o timeout|TLS handshake timeout|Client\.Timeout'
 
 push_retry() {
 	local attempts=${PUSH_RETRY_ATTEMPTS:-5} delay=${PUSH_RETRY_DELAY:-3} n=1 rc errf label reason
