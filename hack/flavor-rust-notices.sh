@@ -156,12 +156,12 @@ for entry in "${tools[@]}"; do
 		echo
 		echo "## $name $version"
 		echo
+		"$cargo_about" generate --fail --locked --all-features \
+			-c "$(cd "$harness_dir" && pwd)/about.toml" \
+			-m "$src/$subdir/Cargo.toml" \
+			"$(cd "$harness_dir" && pwd)/about.hbs"
+		c_libraries "$src/Cargo.lock" "$name"
 	} >>"$tmp"
-	"$cargo_about" generate --fail --locked --all-features \
-		-c "$(cd "$harness_dir" && pwd)/about.toml" \
-		-m "$src/$subdir/Cargo.toml" \
-		"$(cd "$harness_dir" && pwd)/about.hbs" >>"$tmp"
-	c_libraries "$src/Cargo.lock" "$name" >>"$tmp"
 done
 
 mkdir -p "$(dirname "$out")"
