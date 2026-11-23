@@ -1127,7 +1127,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
 
 		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
-		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
+		// Read without kc, which trims the output: the restore below must write the original bytes back,
+		// trailing newline included.
+		rawCfg, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}").Output()
+		Expect(err).NotTo(HaveOccurred(), "kubectl get cm koinon-config")
+		cfgYAML := string(rawCfg)
 		broken := regexp.MustCompile(`(?m)^(\s+image: ).*/sandbox[:@].*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
 		Expect(broken).NotTo(Equal(cfgYAML), "the harness image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
@@ -1142,14 +1146,29 @@ var _ = Describe("the quickstart", Ordered, func() {
 			for _, args := range [][]string{
 				{"-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(restore)},
 				{"-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler"},
-				// The chart sets no KOINON_SANDBOX_WAIT_CAP, so removing the variable restores the default.
-				{"-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP-"},
+			} {
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			}
+			// The chart sets no KOINON_SANDBOX_WAIT_CAP, so removing the variable restores the default. The
+			// spec sets it later than the patch, so it may be absent when the spec failed early. That kubectl
+			// documentation does not say that removing an absent variable exits 0, so this one call
+			// tolerates an error (nothing to remove is the goal state).
+			if out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP-").CombinedOutput(); err != nil {
+				GinkgoWriter.Printf("kubectl set env KOINON_SANDBOX_WAIT_CAP- (tolerated): %v: %s\n", err, out)
+			}
+			for _, args := range [][]string{
 				{"-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m"},
 				{"-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m"},
 			} {
 				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
 				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
 			}
+			// Read back: the broken image is gone from the config the story suite will use.
+			now, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}").Output()
+			Expect(err).NotTo(HaveOccurred(), "kubectl get cm koinon-config")
+			Expect(string(now)).NotTo(ContainSubstring("agent:nope"), "the harness image is restored")
+			Expect(string(now)).To(Equal(cfgYAML), "the config is byte-identical to the original")
 		})
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
@@ -1188,6 +1207,12 @@ var _ = Describe("the quickstart", Ordered, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		bad := created.GetAgent()
+		// Archive the agent before the config is restored (cleanups run last in, first out): otherwise the
+		// reconciler recreates its sandbox with the good image while the story suite runs.
+		DeferCleanup(func(ctx context.Context) {
+			_, err := c.Agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: bad.GetId()})
+			Expect(err).NotTo(HaveOccurred(), "archive the Missing image agent")
+		})
 		_, err = c.Agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: org, AgentId: bad.GetId(), Version: bad.GetLatestVersion()})
 		Expect(err).NotTo(HaveOccurred())
 		res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{

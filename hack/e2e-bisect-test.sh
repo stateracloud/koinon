@@ -169,7 +169,11 @@ out=$(STORIES_RED=1 b --green "$green" --head HEAD --open-issue 42)
 check "$out" "advisory story suite is red on main" "stories-red: the comment on an open issue names the advisory suite"
 nocheck "$out" "main is red" "stories-red: the comment never says main is red"
 out=$(STORIES_RED=1 b --green "$green" --head HEAD --prev failure)
-check "$out" "red in the advisory story suite" "stories-red: the already-red line names the advisory suite"
+check "$out" "main was already red at the previous completed run" "stories-red: the already-red line stays plain (a failure conclusion is a quickstart red)"
+nocheck "$out" "advisory" "stories-red: the already-red line does not call it advisory"
+out=$(STORIES_RED=1 b --green "$green" --head HEAD --results "${chart2:0:7}=fail")
+check "$out" "^e2e story suite red on main, advisory: fix(chart): the culprit" "stories-red: the final title names the advisory story suite and the culprit"
+nocheck "$out" "^e2e regression on main: " "stories-red: the final title is not the quickstart one"
 out=$(b --green "$green" --head HEAD --open-issue 42)
 check "$out" "main is red again" "quickstart failure: the comment still says main is red"
 : >"$fx/calls"

@@ -87,15 +87,15 @@ fi
 # What is red. A red story pass is advisory and the quickstart passed (STORIES_RED=1): "main is red" is wrong
 # then, and nothing is blocked (issue 1190).
 if [[ $STORIES_RED == 1 ]]; then
-  red_state="red in the advisory story suite (the quickstart is green)"
   red_subject="The advisory story suite is red on main (the quickstart is green)"
 else
-  red_state="red"
   red_subject="main is red"
 fi
 
 if [[ $prev == failure ]]; then
-  echo "main was already $red_state at the previous completed run: not a new regression, not bisecting."
+  # A `failure` conclusion means the quickstart was red (an advisory story red concludes success), so the
+  # plain text is true in both modes.
+  echo "main was already red at the previous completed run: not a new regression, not bisecting."
   exit 0
 fi
 if [[ -n $open_issue ]]; then
