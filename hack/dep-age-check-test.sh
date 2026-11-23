@@ -17,7 +17,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Only the pure helpers: the script itself needs git and the network for a full check.
 eval "$(sed -n \
-	'/^image_location() {/,/^}/p; /^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^snapshot_pin() {/,/^}/p; /^check_snapshot() {/,/^}/p; /^age_days() {/,/^}/p; /^report() {/,/^}/p; /^dockerfile_specs=/p; /^oci_annotation_created() {/,/^}/p' \
+	'/^image_location() {/,/^}/p; /^expand_vars() {/,/^}/p; /^pm_pin() {/,/^}/p; /^snapshot_pin() {/,/^}/p; /^check_snapshot() {/,/^}/p; /^age_days() {/,/^}/p; /^report() {/,/^}/p; /^dockerfile_specs=/p; /^mise_pin() {/,/^}/p; /^oci_annotation_created() {/,/^}/p' \
 	"$repo/hack/dep-age-check.sh")"
 
 fail=0
@@ -181,6 +181,22 @@ else
 	fail=1
 fi
 
+# mise_pin (ADR 0124): the pins that dep-age-check dates in mise.toml.
+mpin() { # mpin <name> <line> <expected output, lines joined by |>
+	local got
+	got=$(mise_pin "$2" | paste -sd'|' -)
+	if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
+}
+mpin "mise aqua pin" '"aqua:koalaman/shellcheck" = "0.11.0"' "koalaman/shellcheck 0.11.0"
+mpin "mise aqua pin, trailing comment" '"aqua:rhysd/actionlint" = "1.7.12" # lint' "rhysd/actionlint 1.7.12"
+mpin "mise github pin" '"github:zizmorcore/zizmor" = "1.32.0"' "zizmorcore/zizmor 1.32.0"
+mpin "mise version, plain min_version" 'min_version = "2026.11.10"' "jdx/mise 2026.11.10"
+mpin "mise version, hard and soft" 'min_version = { hard = "2026.11.9", soft = "2026.11.10" }' "jdx/mise 2026.11.9|jdx/mise 2026.11.10"
+mpin "a tool by short name cannot be dated" 'shellcheck = "0.11.0"' "UNDATABLE shellcheck"
+mpin "an inline table cannot be dated" '"aqua:koalaman/shellcheck" = { version = "0.11.0" }' "UNDATABLE aqua:koalaman/shellcheck"
+mpin "a table header is no pin" '[tools]' ""
+mpin "a comment is no pin" '# "aqua:koalaman/shellcheck" = "0.11.0"' ""
+
 # image_location: Docker Hub names reach registry-1.docker.io whatever their prefix (docker.io serves a web page).
 loc() { # loc <name> <expected "host repo">
 	local got
@@ -198,6 +214,24 @@ loc docker.io/alpine "registry-1.docker.io library/alpine"
 loc index.docker.io/alpine "registry-1.docker.io library/alpine"
 loc alpine "registry-1.docker.io library/alpine"
 loc docker.io/myorg/app "registry-1.docker.io myorg/app"
+
+# A mise.toml tool that is not an aqua: or github: pin fails closed (no network needed).
+w=$(mktemp -d "$tmp/mise.XXXXXX") || exit 1
+mkdir -p "$w/hack"
+cp "$repo/hack/dep-age-check.sh" "$w/hack/"
+(
+	cd "$w" || exit 1
+	git init -q -b main . && git config user.name t && git config user.email t@example.invalid
+	echo base >README.txt && git add -A && git commit -q -m base
+	printf '[tools]\nshellcheck = "0.11.0"\n' >mise.toml && git add -A && git commit -q -m add
+)
+rc=0
+(cd "$w" && hack/dep-age-check.sh HEAD~1 >"$w/out" 2>&1) || rc=$?
+if [[ $rc -eq 1 ]] && grep -q 'mise.toml shellcheck' "$w/out"; then
+	echo "ok   dep-age-check: a mise.toml tool without aqua: or github: fails"
+else
+	echo "FAIL dep-age-check mise.toml (rc $rc)"; cat "$w/out"; fail=1
+fi
 
 [[ $fail -eq 0 ]] && echo "dep-age-check tests passed"
 exit "$fail"

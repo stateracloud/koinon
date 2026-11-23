@@ -14,6 +14,7 @@
 #     today minus 3 days by construction; a hand-written bump must not take a younger one)
 #   - Dockerfile `ADD` and `koinon-fetch` URLs of GitHub release assets, raw.githubusercontent.com tags and npm tarballs
 #   - the `<TOOL>_VERSION` pins in hack/versions.env (the release's publish time)
+#   - the tool pins and the `min_version` (the pinned mise version) of mise.toml (ADR 0124; the release's publish time)
 #   - the ADR 0077 platform pins in test/e2e/kind/up.sh, and any line that carries a marker
 #     `# dep-age: github=<owner/repo> [tag-prefix=<prefix>]` (use it where release/versions.yaml
 #     or another file records a pin; the first version-looking token on the line is checked)
@@ -525,6 +526,39 @@ while IFS=$'\t' read -r file line; do
 		fi
 	fi
 done < <(added_lines 'hack/versions.env')
+
+# 4d. mise.toml (ADR 0124): the tool pins (`"aqua:<owner>/<repo>" = "<version>"`) and the pinned mise version
+# (`min_version`, a plain string or a { hard, soft } table). mise's own `minimum_release_age` only filters fuzzy
+# versions, so it is no gate (ADR 0079 stays this script's job). A pin that is not an aqua or github pin of
+# that shape cannot be dated and fails closed.
+# mise_pin <line>: "<owner/repo> <version>" per pin on a mise.toml line; nothing for any other line.
+mise_pin() {
+	local line=$1 v
+	if [[ $line =~ ^\"?(aqua|github):([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)\"?[[:space:]]*=[[:space:]]*\"([^\"[:space:]]+)\" ]]; then
+		echo "${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
+	elif [[ $line =~ ^min_version[[:space:]]*= ]]; then
+		while [[ $line =~ \"([0-9]{4}\.[0-9]+\.[0-9]+)\" ]]; do
+			v=${BASH_REMATCH[1]}
+			echo "jdx/mise $v"
+			line=${line/"\"$v\""/}
+		done
+	elif [[ $line =~ ^\"?([A-Za-z0-9._:/@-]+)\"?[[:space:]]*=[[:space:]]*(\"|\{) ]]; then
+		v=${BASH_REMATCH[1]}
+		[[ $v == experimental ]] || echo "UNDATABLE $v"
+	fi
+}
+while IFS=$'\t' read -r file line; do
+	while read -r repo ver; do
+		[[ -z $repo ]] && continue
+		if [[ $repo == UNDATABLE ]]; then
+			report "mise.toml $ver (not an aqua: or github: pin)" unknown "$file"
+		else
+			tag=v$ver
+			[[ -n $(github_tag_time "$repo" "$tag") ]] || tag=$ver
+			once "pin $repo $tag" && check_github "$repo" "$tag"
+		fi
+	done < <(mise_pin "$line")
+done < <(added_lines 'mise.toml')
 
 # 4c. The Ubuntu snapshot of the harness images (issue 33): the age of the ID itself. hack/ubuntu-snapshot-bump.sh
 # picks today minus 3 days, so its PRs pass by construction; this catches a hand-edited ID.

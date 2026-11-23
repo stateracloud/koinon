@@ -32,6 +32,9 @@ type rendered struct {
 	Deployments []*appsv1.Deployment
 	// Objects are the ServiceAccounts, Secrets, ConfigMaps and RBAC objects, in render order.
 	Objects []runtime.Object
+	// Foreign are the Roles and RoleBindings of another namespace (the Substrate namespace). The suite applies them only
+	// for a hook Job that acts there (the CA hook Job of issue #1191), after it makes the namespace. They count in Ignored too.
+	Foreign []runtime.Object
 	// Ignored lists the kinds the smoke test does not apply (policies, Services, ...).
 	Ignored map[string]int
 }
@@ -109,6 +112,7 @@ func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *re
 			// namespace to land in on this cluster: the smoke suite does not apply it.
 			if ns := mustMeta(obj).GetNamespace(); ns != "" && ns != namespace {
 				r.Ignored[gvk.Kind]++
+				r.Foreign = append(r.Foreign, obj)
 				continue
 			}
 			r.Objects = append(r.Objects, obj)
