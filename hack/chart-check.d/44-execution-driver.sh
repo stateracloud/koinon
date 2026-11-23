@@ -63,3 +63,7 @@ for gm in standalone kubernetes; do
 	lacks "substrate has no openshell.ai/managed-by peer ($gm)" 'openshell.ai/managed-by' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 done
 has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: substrate-x' "${sub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x --show-only templates/networkpolicy.yaml
+# Substrate needs every harness image pinned by digest (#1192): the reconciler refuses to start
+# without one, so the substrate CI values carry a digest and the config renders it.
+has "the substrate CI values pin the harness image by digest" 'image: .*/sandbox:[^@ ]+@sha256:[0-9a-f]{64}' -f "$CHART/ci/substrate-values.yaml" --show-only templates/config.yaml
+lacks "the default harness image has no digest (OpenShell does not need one)" 'image: .*/sandbox:[^@ ]+@sha256:' --show-only templates/config.yaml

@@ -55,8 +55,11 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	return d, cl
 }
 
+// img is the actor image of the specs: the driver refuses one that is not pinned by digest.
+const img = "img" + digest
+
 func spec(name string) execution.SandboxSpec {
-	return execution.SandboxSpec{Name: name, Image: "img"}
+	return execution.SandboxSpec{Name: name, Image: img}
 }
 
 // ready creates a sandbox and waits until it is ready.

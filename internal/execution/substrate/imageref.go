@@ -4,8 +4,34 @@ package substrate
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// pinnedDigest is the end of a reference pinned by digest. It is the same rule as the digest rule of
+// the Substrate admission policy (charts/koinon/templates/substrate-policy.yaml).
+var pinnedDigest = regexp.MustCompile(`@sha256:[a-f0-9]{64}$`)
+
+// RequireDigest refuses an actor image reference that is not pinned by digest (issue #1192). A
+// reference with a tag only can serve other bytes when a registry or a cache moves the tag, and
+// nothing would see it. With a digest, the node agent checks the manifest and every layer against
+// it, so neither the registry nor a pull-through cache needs trust (ADR 0120 section 6). The tag is
+// optional: "name@sha256:<hex>" and "name:tag@sha256:<hex>" both pass, and the digest wins.
+//
+// The driver refuses and does not resolve a tag to a digest: a resolve trusts the registry at that
+// moment, and it needs registry access and pull credentials in the control plane. The digest is set
+// where the image is defined (the chart's harnesses.<name>.image.digest), as for every other image
+// in the chart.
+func RequireDigest(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("actor image is empty: it must be pinned by digest (name@sha256:<64 hex digits>)")
+	}
+	loc := pinnedDigest.FindStringIndex(ref)
+	if loc == nil || loc[0] == 0 || strings.Count(ref, "@") != 1 {
+		return fmt.Errorf("actor image %q is not pinned by digest: use name@sha256:<64 hex digits> or name:tag@sha256:<64 hex digits>", ref)
+	}
+	return nil
+}
 
 // RewriteImage rewrites the registry of an actor image reference to the image source of the node
 // agent (ADR 0061, ADR 0120 section 6, issue #1170). It is the Go twin of the chart helper

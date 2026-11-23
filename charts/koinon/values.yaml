@@ -733,6 +733,8 @@ github:
 # Harness images (ADR 0035, ADR 0112): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
 # .Chart.AppVersion. Every entry becomes a harness the reconciler can run; an agent whose harness
 # has no entry is reported as a reconcile error. Remove an entry to turn that harness off.
+# With execution.driver=substrate, every entry needs image.digest (sha256:<64 hex digits>): the
+# reconciler refuses to start with a harness image that is not pinned by digest (issue #1192).
 harnesses:
   opencode:
     image:
