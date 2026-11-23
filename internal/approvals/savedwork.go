@@ -105,7 +105,7 @@ func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row
 		return nil, err
 	}
 	if head == "" {
-		requested, approved, err := s.people(ctx, row)
+		who, err := s.people(ctx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +113,7 @@ func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row
 		if err != nil {
 			return nil, err
 		}
-		msg := savedWorkMessage(task.Title, row.ID.String(), requested, approved)
+		msg := savedWorkMessage(task.Title, row.ID.String(), who.Requested, who.Approved)
 		if head, err = s.commitSaved(ctx, p, acc, repo, work, msg); err != nil {
 			return nil, err
 		}

@@ -315,7 +315,7 @@ func (s *Server) approvalError(err error) error {
 	switch {
 	case errors.Is(err, approvals.ErrHashMismatch):
 		return connect.NewError(connect.CodeAborted, err.Error())
-	case errors.Is(err, approvals.ErrSameApprover), errors.Is(err, approvals.ErrRequesterApproves):
+	case errors.Is(err, approvals.ErrSameApprover), errors.Is(err, approvals.ErrRequesterApproves), errors.Is(err, approvals.ErrApproverIsRequester):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, approvals.ErrScopeInvalid):
 		return connect.NewError(connect.CodeInvalidArgument, err.Error())

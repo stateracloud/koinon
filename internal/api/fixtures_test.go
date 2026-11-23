@@ -286,6 +286,11 @@ type orgFixture struct {
 	traceDest string
 	// trustedHost is on the org's fetch-trusted list; the org's match threshold is 30.
 	trustedHost string
+	// githubLogin is the owner's linked GitHub login on github.com.
+	githubLogin string
+	// appSetupState is the state of the owner's guided GitHub App setup, after GitHub created the
+	// App.
+	appSetupState string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

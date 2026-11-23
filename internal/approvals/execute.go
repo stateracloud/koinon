@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
@@ -63,7 +64,7 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 	}
 	switch args := call.(type) {
 	case *githubtools.PullRequestArgs:
-		requested, approved, err := s.people(ctx, row)
+		who, err := s.people(ctx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +77,7 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 		if err := githubtools.ValidatePullRequest(*args, guard); err != nil {
 			return nil, permanentError{err}
 		}
-		return s.createPullRequest(ctx, p, acc, repo, *args, guard, row.ID.String(), requested, approved)
+		return s.createPullRequest(ctx, p, acc, repo, *args, guard, row, who)
 	case *githubtools.CommentArgs:
 		return s.comment(ctx, acc, repo, *args, row.ID.String())
 	default:
@@ -139,54 +140,61 @@ func (s *Service) connectionFor(ctx context.Context, p codehost.Provider, row st
 	return conn, nil
 }
 
-// people names the task's creator and the approver for the commit trailers.
-func (s *Service) people(ctx context.Context, row store.ApprovalRequest) (requested, approved string, err error) {
+// people are who the commit trailers and the pull request footer name.
+type people struct {
+	// Requested and Approved are the trailer forms: "Name <email>".
+	Requested, Approved string
+	// RequestedName and ApprovedName are the forms without an email, for the pull request footer,
+	// which a public repository shows to everyone.
+	RequestedName, ApprovedName string
+	// Requester is the person who created the task; not Valid when no person did.
+	Requester pgtype.UUID
+}
+
+// people names the task's creator and the approver for the commit trailers and the footer.
+func (s *Service) people(ctx context.Context, row store.ApprovalRequest) (people, error) {
 	t, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: row.OrgID, ID: row.TaskID})
 	if err != nil {
-		return "", "", err
+		return people{}, err
 	}
-	requested = "Koinon"
+	out := people{Requested: "Koinon", RequestedName: "Koinon", Requester: t.CreatedByUserID}
 	if t.CreatedByUserID.Valid {
-		if requested, err = s.person(ctx, t.CreatedByUserID); err != nil {
-			return "", "", err
-		}
+		out.Requested, out.RequestedName = s.person(ctx, t.CreatedByUserID)
 	}
-	approved = trustedApprover
+	out.Approved, out.ApprovedName = trustedApprover, trustedApprover
 	if row.ScopeID.Valid {
 		// A scoped approval: the trailer names the admin who granted the scope.
 		sc, err := s.q.GetApprovalScope(ctx, store.GetApprovalScopeParams{OrgID: row.OrgID, ID: row.ScopeID})
 		if err != nil {
-			return "", "", err
+			return people{}, err
 		}
-		who, err := s.person(ctx, sc.CreatedBy)
-		if err != nil {
-			return "", "", err
-		}
-		approved = who + " (scoped approval)"
+		who, name := s.person(ctx, sc.CreatedBy)
+		out.Approved, out.ApprovedName = who+" (scoped approval)", name+" (scoped approval)"
 	} else if row.DecidedBy.Valid {
-		if approved, err = s.person(ctx, row.DecidedBy); err != nil {
-			return "", "", err
-		}
+		out.Approved, out.ApprovedName = s.person(ctx, row.DecidedBy)
 	}
-	return requested, approved, nil
+	return out, nil
 }
 
-func (s *Service) person(ctx context.Context, id pgtype.UUID) (string, error) {
+// person names a user for a trailer ("Name <email>") and for the footer (the name alone). A user
+// with no name is named by email in the trailer and by ID in the footer.
+func (s *Service) person(ctx context.Context, id pgtype.UUID) (trailer, name string) {
+	fallback := "Koinon user " + id.String()
 	u, err := s.q.GetActiveUser(ctx, id)
 	if err != nil {
-		return "Koinon user " + id.String(), nil //nolint:nilerr // a deleted user still gets a trailer
+		return fallback, fallback // a deleted user still gets a trailer
 	}
-	name := oneLine(u.DisplayName)
+	name = oneLine(u.DisplayName)
 	email := oneLine(u.Email.String)
 	switch {
 	case name != "" && email != "":
-		return name + " <" + email + ">", nil
+		return name + " <" + email + ">", name
 	case email != "":
-		return "<" + email + ">", nil
+		return "<" + email + ">", fallback
 	case name != "":
-		return name, nil
+		return name, name
 	}
-	return "Koinon user " + id.String(), nil
+	return fallback, fallback
 }
 
 func oneLine(s string) string {
@@ -226,8 +234,9 @@ func hasTrailer(message, approvalID string) bool {
 // of the base, and the pull request. What an earlier attempt of the same approval created
 // is found first and reused.
 func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, guard codehost.Guard,
-	approvalID, requestedBy, approvedBy string,
+	row store.ApprovalRequest, who people,
 ) (map[string]any, error) {
+	approvalID := row.ID.String()
 	base := args.Base
 	if base == "" {
 		r, err := acc.Repository(ctx, repo)
@@ -241,7 +250,7 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 		return nil, err
 	}
 	if head == "" {
-		if head, err = s.commit(ctx, acc, repo, args, guard, base, CommitMessage(args, approvalID, requestedBy, approvedBy)); err != nil {
+		if head, err = s.commit(ctx, acc, repo, args, guard, base, CommitMessage(args, approvalID, who.Requested, who.Approved)); err != nil {
 			return nil, err
 		}
 		err = acc.CreateBranch(ctx, repo, args.Branch, head)
@@ -260,7 +269,11 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 		return nil, err
 	}
 	if !found {
-		pr, err = acc.CreatePullRequest(ctx, repo, codehost.PullRequestInput{Title: args.Title, Body: args.Body, Head: args.Branch, Base: base})
+		body := PullRequestBody(args.Body, Footer{
+			RequestedBy: who.RequestedName, ApprovedBy: who.ApprovedName, ApprovalID: approvalID,
+			RunID: row.RunID.String(), RunURL: RunURL(s.publicURL, row.TaskID.String()),
+		})
+		pr, err = acc.CreatePullRequest(ctx, repo, codehost.PullRequestInput{Title: args.Title, Body: body, Head: args.Branch, Base: base})
 		if codehost.IsStatus(err, 422, 409) {
 			// "A pull request already exists" (GitHub: 422, Gitea: 409): a concurrent attempt
 			// created it.
@@ -273,9 +286,36 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 			return nil, err
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"url": pr.URL, "number": pr.Number, "branch": args.Branch, "base": base, "commit": head,
-	}, nil
+	}
+	if login := s.requestReview(ctx, acc, repo, pr.Number, row, who); login != "" {
+		out["reviewRequested"] = login
+	}
+	return out, nil
+}
+
+// requestReview asks the requester to review the pull request when they linked their login on the
+// code host (issue #1175). It returns the login it asked. A failure, such as a requester who is not
+// a collaborator of the repository, is logged and does not fail the approved call: the pull
+// request exists and the footer names the requester.
+func (s *Service) requestReview(ctx context.Context, acc codehost.Access, repo codehost.Repo, number int64, row store.ApprovalRequest, who people) string {
+	rr, ok := acc.(codehost.ReviewRequester)
+	if !ok || !who.Requester.Valid {
+		return ""
+	}
+	link, err := s.q.GetGitHubUserLink(ctx, store.GetGitHubUserLinkParams{OrgID: row.OrgID, UserID: who.Requester, Host: rr.ReviewHost()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ""
+	}
+	if err == nil {
+		err = rr.RequestReviewers(ctx, repo, number, []string{link.GithubLogin})
+	}
+	if err != nil {
+		s.log.WarnContext(ctx, "approvals: the review request failed", "approval", row.ID.String(), "repo", repo.String(), "number", number, "error", err)
+		return ""
+	}
+	return link.GithubLogin
 }
 
 // existingHead returns the branch's head if the branch exists and was created for this

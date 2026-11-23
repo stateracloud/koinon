@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"github.com/stateracloud/koinon/internal/apiassembly"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -358,6 +359,44 @@ var isolationCases = map[string]isolationCase{
 	connectionv1alpha1connect.ConnectionServiceTestConnectionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceStartGitHubLinkProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.StartGitHubLink(ctx, &connectionv1alpha1.StartGitHubLinkRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceListMyGitHubLinksProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.ListMyGitHubLinks(ctx, &connectionv1alpha1.ListMyGitHubLinksRequest{OrgId: org})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceListGitHubLinksProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.ListGitHubLinks(ctx, &connectionv1alpha1.ListGitHubLinksRequest{OrgId: org})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceDeleteGitHubLinkProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.DeleteGitHubLink(ctx, &connectionv1alpha1.DeleteGitHubLinkRequest{OrgId: org, UserId: f.owner.userID, Host: "https://github.com"})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceStartGitHubAppSetupProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.StartGitHubAppSetup(ctx, &connectionv1alpha1.StartGitHubAppSetupRequest{OrgId: org, DisplayName: "isolated"})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceContinueGitHubAppSetupProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.ContinueGitHubAppSetup(ctx, &connectionv1alpha1.ContinueGitHubAppSetupRequest{OrgId: org, State: f.appSetupState, Code: "isolated"})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceFinishGitHubAppSetupProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.FinishGitHubAppSetup(ctx, &connectionv1alpha1.FinishGitHubAppSetupRequest{OrgId: org, State: f.appSetupState, InstallationId: 2})
 		},
 	},
 	connectionv1alpha1connect.ConnectionServiceListInstallationReposProcedure: {
@@ -743,6 +782,18 @@ var isolationCases = map[string]isolationCase{
 			return c.orgsettings.SetHomeBackupRetention(ctx, &orgsettingsv1alpha1.SetHomeBackupRetentionRequest{OrgId: org, Days: 14})
 		},
 	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceGetApproverNotRequesterProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.GetApproverNotRequester(ctx, &orgsettingsv1alpha1.GetApproverNotRequesterRequest{OrgId: org})
+		},
+	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceSetApproverNotRequesterProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.SetApproverNotRequester(ctx, &orgsettingsv1alpha1.SetApproverNotRequesterRequest{OrgId: org, On: true})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceDeleteServerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.DeleteServer(ctx, &mcpserverv1alpha1.DeleteServerRequest{OrgId: org, ServerId: f.mcpServer})
@@ -972,6 +1023,8 @@ var _ = Describe("org isolation", func() {
 			ghFake: gh,
 			// The create case sends a test trace to a server on 127.0.0.1.
 			allowedHosts: []string{"127.0.0.1"},
+			// The guided GitHub App setup needs a public URL.
+			settings: func(s *apiassembly.Settings) { s.PublicURL = "https://koinon.example.test" },
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
@@ -1015,7 +1068,8 @@ func foreignIDs(f orgFixture) []string {
 	return []string{
 		f.org, f.agent.GetId(), f.draft.GetId(), f.ticket.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
-		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost,
+		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost, f.githubLogin,
+		f.appSetupState,
 	}
 }
 
@@ -1077,6 +1131,19 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(e.pool.QueryRow(ctx,
 		`INSERT INTO trace_destinations (org_id, name, backend, endpoint_url) VALUES ($1, 'isolated', 'generic', 'https://otlp.example.com/v1/traces') RETURNING id`,
 		f.org).Scan(&f.traceDest)).To(Succeed())
+	// The owner's GitHub link, inserted directly: the isolation cases only name it.
+	f.githubLogin = fmt.Sprintf("isolated-login-%d", dbSeq.Add(1))
+	_, err = e.pool.Exec(ctx,
+		`INSERT INTO github_user_links (org_id, user_id, host, github_user_id, github_login) VALUES ($1, $2, 'https://github.com', $3, $4)`,
+		f.org, f.owner.userID, dbSeq.Add(1)+1000, f.githubLogin)
+	Expect(err).NotTo(HaveOccurred())
+	// The owner's guided App setup, with the App GitHub created set directly.
+	setup, err := f.owner.conns.StartGitHubAppSetup(ctx, &connectionv1alpha1.StartGitHubAppSetupRequest{OrgId: f.org, DisplayName: "isolated"})
+	Expect(err).NotTo(HaveOccurred())
+	f.appSetupState = setup.GetState()
+	_, err = e.pool.Exec(ctx,
+		`UPDATE github_app_setups SET app_id = 1, app_slug = 'isolated', client_id = 'Iv1.isolated', secret_envelope = '{}' WHERE org_id = $1`, f.org)
+	Expect(err).NotTo(HaveOccurred())
 	return f
 }
 
@@ -1115,6 +1182,9 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND kind = 'other' AND exposes_private_data`, org),
 		count(ctx, e, `SELECT count(*) FROM org_fetch_trusted_hosts WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM org_settings WHERE org_id = $1 AND leak_match_threshold = 30`, org),
+		count(ctx, e, `SELECT count(*) FROM github_user_links WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM github_link_flows WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM github_app_setups WHERE org_id = $1 AND app_id IS NOT NULL`, org),
 	}
 }
 

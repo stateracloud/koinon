@@ -210,6 +210,15 @@ type Access interface {
 	CreateComment(ctx context.Context, r Repo, number int64, body string) (Comment, error)
 }
 
+// ReviewRequester is an Access that can ask users to review a pull request (issue #1175). GitHub
+// has it; a caller checks for it with a type assertion.
+type ReviewRequester interface {
+	// ReviewHost is the web URL of the host whose logins RequestReviewers takes, for example
+	// https://github.com. A user's linked login is used only on its own host.
+	ReviewHost() string
+	RequestReviewers(ctx context.Context, r Repo, number int64, logins []string) error
+}
+
 // CheckResult is one setup-guide check's outcome. Message never contains secrets.
 type CheckResult struct {
 	Check   string `json:"check"`

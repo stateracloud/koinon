@@ -74,7 +74,7 @@ func (q *Queries) EnsureOrgSettings(ctx context.Context, orgID pgtype.UUID) erro
 
 const getOrgSettings = `-- name: GetOrgSettings :one
 
-SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute FROM org_settings
+SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute, approver_not_requester FROM org_settings
 WHERE org_id = $1
 `
 
@@ -100,6 +100,7 @@ func (q *Queries) GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSet
 		&i.HomeBackupRetentionDays,
 		&i.ContinuationTaskSpendUsd,
 		&i.SandboxCreationsPerMinute,
+		&i.ApproverNotRequester,
 	)
 	return i, err
 }
@@ -212,6 +213,23 @@ func (q *Queries) SandboxCreationSlotFreesIn(ctx context.Context, orgID pgtype.U
 	var column_1 float64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const setOrgApproverNotRequester = `-- name: SetOrgApproverNotRequester :exec
+INSERT INTO org_settings (org_id, approver_not_requester)
+VALUES ($1, $2)
+ON CONFLICT (org_id) DO UPDATE SET approver_not_requester = EXCLUDED.approver_not_requester
+`
+
+type SetOrgApproverNotRequesterParams struct {
+	OrgID                pgtype.UUID
+	ApproverNotRequester bool
+}
+
+// The org setting "the approver must not be the requester" (#1175). It touches only this column.
+func (q *Queries) SetOrgApproverNotRequester(ctx context.Context, arg SetOrgApproverNotRequesterParams) error {
+	_, err := q.db.Exec(ctx, setOrgApproverNotRequester, arg.OrgID, arg.ApproverNotRequester)
+	return err
 }
 
 const setOrgContinuationTaskSpend = `-- name: SetOrgContinuationTaskSpend :exec
@@ -336,7 +354,7 @@ SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute,
     sandbox_wait_cap_seconds = EXCLUDED.sandbox_wait_cap_seconds,
     sandbox_creations_per_minute = EXCLUDED.sandbox_creations_per_minute
-RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute
+RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute, sandbox_wait_cap_seconds, leak_match_threshold, run_content_retention_days, home_backup_retention_days, continuation_task_spend_usd, sandbox_creations_per_minute, approver_not_requester
 `
 
 type UpsertOrgSettingsParams struct {
@@ -380,6 +398,7 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		&i.HomeBackupRetentionDays,
 		&i.ContinuationTaskSpendUsd,
 		&i.SandboxCreationsPerMinute,
+		&i.ApproverNotRequester,
 	)
 	return i, err
 }

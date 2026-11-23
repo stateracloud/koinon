@@ -27,6 +27,9 @@ const PrivateKeyField = "privateKey"
 type Config struct {
 	AppID          int64 `json:"appId"`
 	InstallationID int64 `json:"installationId"`
+	// ClientID is the App's OAuth client ID, for the user link (issue #1175). The manifest flow
+	// sets it; its client secret is the stored secret field ClientSecretField.
+	ClientID string `json:"clientId,omitempty"`
 	// Site is the connection's host when it is not github.com (GitHub Enterprise Server): its
 	// base URL and CA bundle. Both are empty for github.com.
 	codehost.Site
@@ -398,6 +401,14 @@ func (a *access) CreatePullRequest(ctx context.Context, r codehost.Repo, in code
 	return pullRequest(p), err
 }
 
+// ReviewHost implements codehost.ReviewRequester.
+func (a *access) ReviewHost() string { return a.c.webURL }
+
+// RequestReviewers implements codehost.ReviewRequester.
+func (a *access) RequestReviewers(ctx context.Context, r codehost.Repo, number int64, logins []string) error {
+	return a.c.RequestReviewers(ctx, a.tok, repo(r), number, logins)
+}
+
 func (a *access) Comments(ctx context.Context, r codehost.Repo, number int64) ([]codehost.Comment, error) {
 	cs, err := a.c.ListIssueComments(ctx, a.tok, repo(r), number)
 	if err != nil {
@@ -423,4 +434,62 @@ func (*Host) CheckNames() []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// ErrNoUserAuth means the connection's App has no OAuth client ID or client secret stored, so its
+// users cannot link their GitHub login. A connection made by the manifest flow has both.
+var ErrNoUserAuth = errors.New("github: the connection's App has no client ID and secret for user sign-in; create the App with the guided setup")
+
+// userAuth is the App's OAuth client of a connection, and the client for its host.
+func (h *Host) userAuth(conn codehost.Connection) (*Client, string, string, error) {
+	cfg, err := ParseConfig(conn.Config)
+	if err != nil {
+		return nil, "", "", err
+	}
+	secret := string(conn.Fields[ClientSecretField])
+	if cfg.ClientID == "" || secret == "" {
+		return nil, "", "", ErrNoUserAuth
+	}
+	c, err := h.clientFor(conn)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return c, cfg.ClientID, secret, nil
+}
+
+// WebURL is the web URL of the connection's host (https://github.com, or a GitHub Enterprise
+// Server's root). A user link belongs to it.
+func (h *Host) WebURL(conn codehost.Connection) (string, error) {
+	c, err := h.clientFor(conn)
+	if err != nil {
+		return "", err
+	}
+	return c.webURL, nil
+}
+
+// AuthorizeURL is the page where a user authorizes the connection's App (issue #1175).
+func (h *Host) AuthorizeURL(conn codehost.Connection, redirectURI, state, challenge string) (string, error) {
+	c, id, _, err := h.userAuth(conn)
+	if err != nil {
+		return "", err
+	}
+	return c.AuthorizeURL(id, redirectURI, state, challenge), nil
+}
+
+// LinkUser completes the user authorization: it trades the code for a user token, reads the
+// user, and revokes the token whatever the read gave. The token is never kept.
+func (h *Host) LinkUser(ctx context.Context, conn codehost.Connection, code, redirectURI, verifier string) (User, error) {
+	c, id, secret, err := h.userAuth(conn)
+	if err != nil {
+		return User{}, err
+	}
+	tok, err := c.ExchangeUserCode(ctx, UserCode{ClientID: id, ClientSecret: secret, Code: code, RedirectURI: redirectURI, Verifier: verifier})
+	if err != nil {
+		return User{}, err
+	}
+	u, err := c.AuthenticatedUser(ctx, tok)
+	if rerr := c.RevokeUserToken(context.WithoutCancel(ctx), id, secret, tok); rerr != nil && err == nil {
+		err = fmt.Errorf("github: revoke the user token: %w", rerr)
+	}
+	return u, err
 }

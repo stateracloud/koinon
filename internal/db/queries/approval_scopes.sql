@@ -16,13 +16,19 @@ RETURNING *;
 -- The scope that allows this call now: exact on agent, connector, tool and target; a task scope
 -- only for its task. A task scope wins over an agent scope (the narrower one is named). When
 -- call_binding is given the scope's binding must equal it (a code-host scope covers only the
--- connection and base URL it was granted on).
-SELECT * FROM approval_scopes
-WHERE org_id = @org_id AND agent_id = @agent_id AND connector = @connector AND tool = @tool
-  AND target = @target AND revoked_at IS NULL AND expires_at > @now::timestamptz
-  AND (kind = 'agent' OR task_id = @task_id)
-  AND (sqlc.narg(call_binding)::jsonb IS NULL OR call_binding = sqlc.narg(call_binding)::jsonb)
-ORDER BY (kind = 'task') DESC, created_at, id
+-- connection and base URL it was granted on). When the org has the setting "the approver must not
+-- be the requester" on (#1175), a scope does not cover a task its own creator requested.
+SELECT s.* FROM approval_scopes s
+WHERE s.org_id = @org_id AND s.agent_id = @agent_id AND s.connector = @connector AND s.tool = @tool
+  AND s.target = @target AND s.revoked_at IS NULL AND s.expires_at > @now::timestamptz
+  AND (s.kind = 'agent' OR s.task_id = @task_id)
+  AND (sqlc.narg(call_binding)::jsonb IS NULL OR s.call_binding = sqlc.narg(call_binding)::jsonb)
+  AND NOT EXISTS (
+    SELECT 1 FROM org_settings os
+    JOIN tasks t ON t.org_id = os.org_id AND t.id = @task_id
+    WHERE os.org_id = s.org_id AND os.approver_not_requester
+      AND t.created_by_user_id = s.created_by)
+ORDER BY (s.kind = 'task') DESC, s.created_at, s.id
 LIMIT 1;
 
 -- name: GetApprovalScope :one

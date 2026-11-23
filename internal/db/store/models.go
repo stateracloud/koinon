@@ -2105,6 +2105,42 @@ type GatewayStateRevision struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type GithubAppSetup struct {
+	OrgID          pgtype.UUID
+	StateHash      []byte
+	UserID         pgtype.UUID
+	ConnectionID   pgtype.UUID
+	DisplayName    string
+	BaseUrl        string
+	CaBundle       string
+	GithubOwner    string
+	AppID          pgtype.Int8
+	AppSlug        pgtype.Text
+	ClientID       pgtype.Text
+	SecretEnvelope []byte
+	CreatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
+}
+
+type GithubLinkFlow struct {
+	OrgID        pgtype.UUID
+	StateHash    []byte
+	UserID       pgtype.UUID
+	ConnectionID pgtype.UUID
+	CodeVerifier string
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
+type GithubUserLink struct {
+	OrgID        pgtype.UUID
+	UserID       pgtype.UUID
+	Host         string
+	GithubUserID int64
+	GithubLogin  string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type HomeCheckpoint struct {
 	OrgID             pgtype.UUID
 	ID                pgtype.UUID
@@ -2582,6 +2618,7 @@ type OrgSetting struct {
 	HomeBackupRetentionDays   pgtype.Int4
 	ContinuationTaskSpendUsd  pgtype.Numeric
 	SandboxCreationsPerMinute pgtype.Int4
+	ApproverNotRequester      bool
 }
 
 type OrgTraceSetting struct {

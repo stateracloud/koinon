@@ -10,6 +10,7 @@ import { BoardPage } from '@/pages/board-page'
 import { InboxPage } from '@/pages/inbox-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
+import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
 import { BudgetsPage } from '@/pages/budgets-page'
 import { PlatformBudgetsPage } from '@/pages/platform-budgets-page'
 import { PricesPage } from '@/pages/prices-page'
@@ -18,6 +19,7 @@ import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
 import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
+import { GitHubAppCreatedPage, GitHubAppInstalledPage } from '@/pages/github-app-setup-pages'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
 import { LoginPage } from '@/pages/login-page'
 import { TaskPage } from '@/pages/task-page'
@@ -68,11 +70,39 @@ export const agentsRoute = createRoute({ getParentRoute: () => appRoute, path: '
 export const newAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new', component: NewAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/$agentId', component: AgentPage })
 
-export const connectionsRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections', component: ConnectionsPage })
+export const connectionsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections',
+  // github_link is the result of the GitHub link callback (internal/githublink).
+  validateSearch: (s: Record<string, unknown>): { github_link?: GitHubLinkResult } => {
+    const r = parseGitHubLinkResult(s.github_link)
+    return r ? { github_link: r } : {}
+  },
+  component: ConnectionsPage,
+})
 export const newGitHubConnectionRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/connections/new/github',
   component: NewGitHubConnectionPage,
+})
+const searchString = (v: unknown) => (typeof v === 'string' && v.length <= 512 ? v : undefined)
+// GitHub sends the browser here during the guided App setup (issue #1175).
+export const githubAppCreatedRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/github/app-created',
+  validateSearch: (s: Record<string, unknown>): { code?: string; state?: string } => ({ code: searchString(s.code), state: searchString(s.state) }),
+  component: GitHubAppCreatedPage,
+})
+export const githubAppInstalledRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/github/app-installed',
+  validateSearch: (s: Record<string, unknown>): { installation_id?: string; setup_action?: string; state?: string } => ({
+    // A router may parse a numeric parameter as a number.
+    installation_id: typeof s.installation_id === 'number' ? String(s.installation_id) : searchString(s.installation_id),
+    setup_action: searchString(s.setup_action),
+    state: searchString(s.state),
+  }),
+  component: GitHubAppInstalledPage,
 })
 export const newGiteaConnectionRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -104,6 +134,8 @@ const routeTree = rootRoute.addChildren([
     agentRoute,
     connectionsRoute,
     newGitHubConnectionRoute,
+    githubAppCreatedRoute,
+    githubAppInstalledRoute,
     newGiteaConnectionRoute,
     connectionRoute,
     providersRoute,

@@ -184,7 +184,7 @@ func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes 
 	log := slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.svc = approvals.New(pool, approvals.Options{
 		Keys: ring, SavedWorkKeys: ring, GitHub: client, Logger: log,
-		ExecutionLease: 2 * time.Second,
+		ExecutionLease: 2 * time.Second, PublicURL: "https://koinon.example.test/",
 	})
 	tools, err := githubtools.New(pool, githubtools.Options{
 		Logger: log, Keys: ring, Hosts: providers.New(newClient()), // its own token cache, as in koinon-api's separate tool server

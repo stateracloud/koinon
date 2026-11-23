@@ -38,6 +38,12 @@ const (
 	// OrgSettingsServiceSetHomeBackupRetentionProcedure is the procedure name of the
 	// OrgSettingsService's SetHomeBackupRetention RPC.
 	OrgSettingsServiceSetHomeBackupRetentionProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetHomeBackupRetention"
+	// OrgSettingsServiceGetApproverNotRequesterProcedure is the procedure name of the
+	// OrgSettingsService's GetApproverNotRequester RPC.
+	OrgSettingsServiceGetApproverNotRequesterProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/GetApproverNotRequester"
+	// OrgSettingsServiceSetApproverNotRequesterProcedure is the procedure name of the
+	// OrgSettingsService's SetApproverNotRequester RPC.
+	OrgSettingsServiceSetApproverNotRequesterProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetApproverNotRequester"
 )
 
 var (
@@ -71,6 +77,21 @@ var (
 			Procedure:  OrgSettingsServiceSetHomeBackupRetentionProcedure,
 		}
 	})
+	orgSettingsServiceGetApproverNotRequesterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("GetApproverNotRequester"),
+			Procedure:        OrgSettingsServiceGetApproverNotRequesterProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	orgSettingsServiceSetApproverNotRequesterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("SetApproverNotRequester"),
+			Procedure:  OrgSettingsServiceSetApproverNotRequesterProcedure,
+		}
+	})
 )
 
 // OrgSettingsServiceClient is a client for the koinon.orgsettings.v1alpha1.OrgSettingsService
@@ -84,6 +105,10 @@ type OrgSettingsServiceClient interface {
 	// SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
 	// returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
 	SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error)
+	GetApproverNotRequester(context.Context, *v1alpha1.GetApproverNotRequesterRequest) (*v1alpha1.GetApproverNotRequesterResponse, error)
+	// SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
+	// off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
+	SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error)
 }
 
 // NewOrgSettingsServiceClient constructs a client for the
@@ -104,6 +129,10 @@ type OrgSettingsServiceHandler interface {
 	// SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
 	// returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
 	SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error)
+	GetApproverNotRequester(context.Context, *v1alpha1.GetApproverNotRequesterRequest) (*v1alpha1.GetApproverNotRequesterResponse, error)
+	// SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
+	// off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
+	SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error)
 }
 
 // RegisterOrgSettingsServiceHandler registers svc as the
@@ -115,6 +144,8 @@ func RegisterOrgSettingsServiceHandler(server *connect.Server, svc OrgSettingsSe
 		connect.Method{Spec: orgSettingsServiceSetRunContentRetentionSpec(), Handler: adapter.setRunContentRetention},
 		connect.Method{Spec: orgSettingsServiceGetHomeBackupRetentionSpec(), Handler: adapter.getHomeBackupRetention},
 		connect.Method{Spec: orgSettingsServiceSetHomeBackupRetentionSpec(), Handler: adapter.setHomeBackupRetention},
+		connect.Method{Spec: orgSettingsServiceGetApproverNotRequesterSpec(), Handler: adapter.getApproverNotRequester},
+		connect.Method{Spec: orgSettingsServiceSetApproverNotRequesterSpec(), Handler: adapter.setApproverNotRequester},
 	)
 }
 
@@ -135,6 +166,14 @@ func (UnimplementedOrgSettingsServiceHandler) GetHomeBackupRetention(context.Con
 
 func (UnimplementedOrgSettingsServiceHandler) SetHomeBackupRetention(context.Context, *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) GetApproverNotRequester(context.Context, *v1alpha1.GetApproverNotRequesterRequest) (*v1alpha1.GetApproverNotRequesterResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester is not implemented")
 }
 
 type orgSettingsServiceClient struct {
@@ -168,6 +207,22 @@ func (c *orgSettingsServiceClient) GetHomeBackupRetention(ctx context.Context, r
 func (c *orgSettingsServiceClient) SetHomeBackupRetention(ctx context.Context, req *v1alpha1.SetHomeBackupRetentionRequest) (*v1alpha1.SetHomeBackupRetentionResponse, error) {
 	var res v1alpha1.SetHomeBackupRetentionResponse
 	if err := c.client.CallUnary(ctx, orgSettingsServiceSetHomeBackupRetentionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) GetApproverNotRequester(ctx context.Context, req *v1alpha1.GetApproverNotRequesterRequest) (*v1alpha1.GetApproverNotRequesterResponse, error) {
+	var res v1alpha1.GetApproverNotRequesterResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceGetApproverNotRequesterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) SetApproverNotRequester(ctx context.Context, req *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error) {
+	var res v1alpha1.SetApproverNotRequesterResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceSetApproverNotRequesterSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -217,6 +272,30 @@ func (h orgSettingsServiceHandler) setHomeBackupRetention(ctx context.Context, _
 		return err
 	}
 	res, err := h.svc.SetHomeBackupRetention(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) getApproverNotRequester(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetApproverNotRequesterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetApproverNotRequester(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) setApproverNotRequester(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetApproverNotRequesterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetApproverNotRequester(ctx, &req)
 	if err != nil {
 		return err
 	}

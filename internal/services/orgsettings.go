@@ -106,3 +106,34 @@ func (s *Server) SetHomeBackupRetention(ctx context.Context, req *orgsettingsv1a
 	}
 	return &orgsettingsv1alpha1.SetHomeBackupRetentionResponse{Retention: r}, nil
 }
+
+// The rule "the approver must not be the requester" (#1175, ADR 0005 amendment 2026-11-23).
+
+// GetApproverNotRequester implements OrgSettingsService. Admins and owners.
+func (s *Server) GetApproverNotRequester(ctx context.Context, req *orgsettingsv1alpha1.GetApproverNotRequesterRequest) (*orgsettingsv1alpha1.GetApproverNotRequesterResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	on, err := s.leakGuard.ApproverNotRequester(ctx, c.org)
+	if err != nil {
+		return nil, s.catalogError(err)
+	}
+	return &orgsettingsv1alpha1.GetApproverNotRequesterResponse{On: on}, nil
+}
+
+// SetApproverNotRequester implements OrgSettingsService. Admins and owners.
+func (s *Server) SetApproverNotRequester(ctx context.Context, req *orgsettingsv1alpha1.SetApproverNotRequesterRequest) (*orgsettingsv1alpha1.SetApproverNotRequesterResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.leakGuard.SetApproverNotRequester(requestCtx(ctx), c.org, c.auditActor(), req.GetOn()); err != nil {
+		return nil, s.catalogError(err)
+	}
+	on, err := s.leakGuard.ApproverNotRequester(ctx, c.org)
+	if err != nil {
+		return nil, s.catalogError(err)
+	}
+	return &orgsettingsv1alpha1.SetApproverNotRequesterResponse{On: on}, nil
+}

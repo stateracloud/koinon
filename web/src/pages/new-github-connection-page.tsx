@@ -5,6 +5,7 @@ import { createConnectQueryKey, useQuery, useTransport } from '@connectrpc/conne
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
+import { GitHubAppSetup } from '@/components/github-app-setup'
 import { GitHubConnectionForm, type GitHubConnectionInput } from '@/components/github-connection-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
@@ -67,7 +68,16 @@ export function NewGitHubConnectionPage() {
           <AlertDescription>This install has no GitHub connector type.</AlertDescription>
         </Alert>
       )}
-      {github && <GitHubConnectionForm guide={guide} pending={pending} error={error} onSubmit={create} />}
+      {github && (
+        <>
+          <GitHubAppSetup orgId={orgId} />
+          <h2 className="font-medium">Or connect an App you created yourself</h2>
+          <p className="text-muted-foreground text-sm">
+            An App made by hand cannot sign users in, so Koinon cannot ask the requester to review the pull requests of agents.
+          </p>
+          <GitHubConnectionForm guide={guide} pending={pending} error={error} onSubmit={create} />
+        </>
+      )}
     </div>
   )
 }

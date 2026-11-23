@@ -472,7 +472,10 @@ type GitHubConnection struct {
 	// Directories, relative to the repository root, that run CI on this host besides the
 	// connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses
 	// changes to them.
-	CiDirs        []string `protobuf:"bytes,6,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
+	CiDirs []string `protobuf:"bytes,6,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
+	// The App has an OAuth client ID (the guided setup stores it with its client
+	// secret), so users can link their GitHub login through it (issue #1175).
+	ClientId      string `protobuf:"bytes,7,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -547,6 +550,13 @@ func (x *GitHubConnection) GetCiDirs() []string {
 		return x.CiDirs
 	}
 	return nil
+}
+
+func (x *GitHubConnection) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
 }
 
 // GiteaConnection is the non-secret part of a Gitea connection (ADR 0063).
@@ -2414,6 +2424,851 @@ func (x *ListInstallationReposResponse) GetTotalCount() int64 {
 	return 0
 }
 
+// StartGitHubLinkRequest names the GitHub connection whose App signs the user in.
+type StartGitHubLinkRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ConnectionId  string                 `protobuf:"bytes,2,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartGitHubLinkRequest) Reset() {
+	*x = StartGitHubLinkRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartGitHubLinkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartGitHubLinkRequest) ProtoMessage() {}
+
+func (x *StartGitHubLinkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartGitHubLinkRequest.ProtoReflect.Descriptor instead.
+func (*StartGitHubLinkRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *StartGitHubLinkRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *StartGitHubLinkRequest) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
+}
+
+// StartGitHubLinkResponse holds the GitHub page to send the browser to. The
+// link expires after ten minutes and works once.
+type StartGitHubLinkResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthorizeUrl  string                 `protobuf:"bytes,1,opt,name=authorize_url,json=authorizeUrl,proto3" json:"authorize_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartGitHubLinkResponse) Reset() {
+	*x = StartGitHubLinkResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartGitHubLinkResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartGitHubLinkResponse) ProtoMessage() {}
+
+func (x *StartGitHubLinkResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartGitHubLinkResponse.ProtoReflect.Descriptor instead.
+func (*StartGitHubLinkResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *StartGitHubLinkResponse) GetAuthorizeUrl() string {
+	if x != nil {
+		return x.AuthorizeUrl
+	}
+	return ""
+}
+
+// GitHubLink links one Koinon user to one GitHub login on one host.
+type GitHubLink struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// The host's web URL, for example https://github.com.
+	Host         string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
+	GithubLogin  string                 `protobuf:"bytes,3,opt,name=github_login,json=githubLogin,proto3" json:"github_login,omitempty"`
+	GithubUserId int64                  `protobuf:"varint,4,opt,name=github_user_id,json=githubUserId,proto3" json:"github_user_id,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// The user's display name and email; set by ListGitHubLinks only.
+	DisplayName   string `protobuf:"bytes,6,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Email         string `protobuf:"bytes,7,opt,name=email,proto3" json:"email,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GitHubLink) Reset() {
+	*x = GitHubLink{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GitHubLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GitHubLink) ProtoMessage() {}
+
+func (x *GitHubLink) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GitHubLink.ProtoReflect.Descriptor instead.
+func (*GitHubLink) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *GitHubLink) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *GitHubLink) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *GitHubLink) GetGithubLogin() string {
+	if x != nil {
+		return x.GithubLogin
+	}
+	return ""
+}
+
+func (x *GitHubLink) GetGithubUserId() int64 {
+	if x != nil {
+		return x.GithubUserId
+	}
+	return 0
+}
+
+func (x *GitHubLink) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *GitHubLink) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *GitHubLink) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+type ListMyGitHubLinksRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyGitHubLinksRequest) Reset() {
+	*x = ListMyGitHubLinksRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyGitHubLinksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyGitHubLinksRequest) ProtoMessage() {}
+
+func (x *ListMyGitHubLinksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyGitHubLinksRequest.ProtoReflect.Descriptor instead.
+func (*ListMyGitHubLinksRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ListMyGitHubLinksRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type ListMyGitHubLinksResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Links         []*GitHubLink          `protobuf:"bytes,1,rep,name=links,proto3" json:"links,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyGitHubLinksResponse) Reset() {
+	*x = ListMyGitHubLinksResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyGitHubLinksResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyGitHubLinksResponse) ProtoMessage() {}
+
+func (x *ListMyGitHubLinksResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyGitHubLinksResponse.ProtoReflect.Descriptor instead.
+func (*ListMyGitHubLinksResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ListMyGitHubLinksResponse) GetLinks() []*GitHubLink {
+	if x != nil {
+		return x.Links
+	}
+	return nil
+}
+
+type ListGitHubLinksRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListGitHubLinksRequest) Reset() {
+	*x = ListGitHubLinksRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListGitHubLinksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListGitHubLinksRequest) ProtoMessage() {}
+
+func (x *ListGitHubLinksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListGitHubLinksRequest.ProtoReflect.Descriptor instead.
+func (*ListGitHubLinksRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *ListGitHubLinksRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type ListGitHubLinksResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Links         []*GitHubLink          `protobuf:"bytes,1,rep,name=links,proto3" json:"links,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListGitHubLinksResponse) Reset() {
+	*x = ListGitHubLinksResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListGitHubLinksResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListGitHubLinksResponse) ProtoMessage() {}
+
+func (x *ListGitHubLinksResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListGitHubLinksResponse.ProtoReflect.Descriptor instead.
+func (*ListGitHubLinksResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *ListGitHubLinksResponse) GetLinks() []*GitHubLink {
+	if x != nil {
+		return x.Links
+	}
+	return nil
+}
+
+// DeleteGitHubLinkRequest names the link. An empty user_id is the caller.
+type DeleteGitHubLinkRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Host          string                 `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteGitHubLinkRequest) Reset() {
+	*x = DeleteGitHubLinkRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteGitHubLinkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteGitHubLinkRequest) ProtoMessage() {}
+
+func (x *DeleteGitHubLinkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteGitHubLinkRequest.ProtoReflect.Descriptor instead.
+func (*DeleteGitHubLinkRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *DeleteGitHubLinkRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *DeleteGitHubLinkRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *DeleteGitHubLinkRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+type DeleteGitHubLinkResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteGitHubLinkResponse) Reset() {
+	*x = DeleteGitHubLinkResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteGitHubLinkResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteGitHubLinkResponse) ProtoMessage() {}
+
+func (x *DeleteGitHubLinkResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteGitHubLinkResponse.ProtoReflect.Descriptor instead.
+func (*DeleteGitHubLinkResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{42}
+}
+
+// StartGitHubAppSetupRequest names the connection and where the App lives.
+type StartGitHubAppSetupRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// The connection's display name; it is also the App's name on GitHub,
+	// which must be unique there.
+	DisplayName string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// The GitHub organization that owns the App; empty for the admin's own
+	// account.
+	GithubOwner string `protobuf:"bytes,3,opt,name=github_owner,json=githubOwner,proto3" json:"github_owner,omitempty"`
+	// A GitHub Enterprise Server base URL; empty for github.com.
+	BaseUrl string `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// PEM certificates that trust base_url, when no system root does.
+	CaBundle      string `protobuf:"bytes,5,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartGitHubAppSetupRequest) Reset() {
+	*x = StartGitHubAppSetupRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartGitHubAppSetupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartGitHubAppSetupRequest) ProtoMessage() {}
+
+func (x *StartGitHubAppSetupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartGitHubAppSetupRequest.ProtoReflect.Descriptor instead.
+func (*StartGitHubAppSetupRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *StartGitHubAppSetupRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupRequest) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupRequest) GetGithubOwner() string {
+	if x != nil {
+		return x.GithubOwner
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupRequest) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupRequest) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
+}
+
+// StartGitHubAppSetupResponse is the form the browser posts to GitHub: to
+// post_url, with the field "manifest". The setup works once and expires after
+// one hour.
+type StartGitHubAppSetupResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	PostUrl string                 `protobuf:"bytes,1,opt,name=post_url,json=postUrl,proto3" json:"post_url,omitempty"`
+	// The App manifest, as JSON text.
+	Manifest string `protobuf:"bytes,2,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	// The setup's state. GitHub sends it back with each step.
+	State         string `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartGitHubAppSetupResponse) Reset() {
+	*x = StartGitHubAppSetupResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartGitHubAppSetupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartGitHubAppSetupResponse) ProtoMessage() {}
+
+func (x *StartGitHubAppSetupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartGitHubAppSetupResponse.ProtoReflect.Descriptor instead.
+func (*StartGitHubAppSetupResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *StartGitHubAppSetupResponse) GetPostUrl() string {
+	if x != nil {
+		return x.PostUrl
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupResponse) GetManifest() string {
+	if x != nil {
+		return x.Manifest
+	}
+	return ""
+}
+
+func (x *StartGitHubAppSetupResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+// ContinueGitHubAppSetupRequest carries what GitHub sent back after it
+// created the App.
+type ContinueGitHubAppSetupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	State         string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContinueGitHubAppSetupRequest) Reset() {
+	*x = ContinueGitHubAppSetupRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContinueGitHubAppSetupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContinueGitHubAppSetupRequest) ProtoMessage() {}
+
+func (x *ContinueGitHubAppSetupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContinueGitHubAppSetupRequest.ProtoReflect.Descriptor instead.
+func (*ContinueGitHubAppSetupRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *ContinueGitHubAppSetupRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ContinueGitHubAppSetupRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ContinueGitHubAppSetupRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+// ContinueGitHubAppSetupResponse holds the GitHub page that installs the App.
+type ContinueGitHubAppSetupResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	InstallUrl    string                 `protobuf:"bytes,1,opt,name=install_url,json=installUrl,proto3" json:"install_url,omitempty"`
+	AppSlug       string                 `protobuf:"bytes,2,opt,name=app_slug,json=appSlug,proto3" json:"app_slug,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContinueGitHubAppSetupResponse) Reset() {
+	*x = ContinueGitHubAppSetupResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContinueGitHubAppSetupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContinueGitHubAppSetupResponse) ProtoMessage() {}
+
+func (x *ContinueGitHubAppSetupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContinueGitHubAppSetupResponse.ProtoReflect.Descriptor instead.
+func (*ContinueGitHubAppSetupResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ContinueGitHubAppSetupResponse) GetInstallUrl() string {
+	if x != nil {
+		return x.InstallUrl
+	}
+	return ""
+}
+
+func (x *ContinueGitHubAppSetupResponse) GetAppSlug() string {
+	if x != nil {
+		return x.AppSlug
+	}
+	return ""
+}
+
+// FinishGitHubAppSetupRequest carries what GitHub sent back after the
+// install.
+type FinishGitHubAppSetupRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OrgId          string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	State          string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	InstallationId int64                  `protobuf:"varint,3,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *FinishGitHubAppSetupRequest) Reset() {
+	*x = FinishGitHubAppSetupRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinishGitHubAppSetupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinishGitHubAppSetupRequest) ProtoMessage() {}
+
+func (x *FinishGitHubAppSetupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinishGitHubAppSetupRequest.ProtoReflect.Descriptor instead.
+func (*FinishGitHubAppSetupRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *FinishGitHubAppSetupRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *FinishGitHubAppSetupRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *FinishGitHubAppSetupRequest) GetInstallationId() int64 {
+	if x != nil {
+		return x.InstallationId
+	}
+	return 0
+}
+
+// FinishGitHubAppSetupResponse is the new connection and its first test.
+type FinishGitHubAppSetupResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Connection    *Connection            `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	Results       []*CheckResult         `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinishGitHubAppSetupResponse) Reset() {
+	*x = FinishGitHubAppSetupResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinishGitHubAppSetupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinishGitHubAppSetupResponse) ProtoMessage() {}
+
+func (x *FinishGitHubAppSetupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinishGitHubAppSetupResponse.ProtoReflect.Descriptor instead.
+func (*FinishGitHubAppSetupResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *FinishGitHubAppSetupResponse) GetConnection() *Connection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *FinishGitHubAppSetupResponse) GetResults() []*CheckResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
 var File_koinon_connection_v1alpha1_connection_proto protoreflect.FileDescriptor
 
 const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
@@ -2439,14 +3294,15 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x05check\x18\x01 \x01(\tR\x05check\x12\x12\n" +
 	"\x04step\x18\x02 \x01(\tR\x04step\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\xcc\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\xe9\x01\n" +
 	"\x10GitHubConnection\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\x03R\x05appId\x12'\n" +
 	"\x0finstallation_id\x18\x02 \x01(\x03R\x0einstallationId\x12'\n" +
 	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\x12\x19\n" +
 	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
 	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\x12\x17\n" +
-	"\aci_dirs\x18\x06 \x03(\tR\x06ciDirs\"\xab\x02\n" +
+	"\aci_dirs\x18\x06 \x03(\tR\x06ciDirs\x12\x1b\n" +
+	"\tclient_id\x18\a \x01(\tR\bclientId\"\xab\x02\n" +
 	"\x0fGiteaConnection\x12\x19\n" +
 	"\bbase_url\x18\x01 \x01(\tR\abaseUrl\x12\x1b\n" +
 	"\tca_bundle\x18\x02 \x01(\tR\bcaBundle\x12\x17\n" +
@@ -2593,7 +3449,62 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x05repos\x18\x01 \x03(\v2,.koinon.connection.v1alpha1.InstallationRepoR\x05repos\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12\x1f\n" +
 	"\vtotal_count\x18\x03 \x01(\x03R\n" +
-	"totalCount*}\n" +
+	"totalCount\"T\n" +
+	"\x16StartGitHubLinkRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12#\n" +
+	"\rconnection_id\x18\x02 \x01(\tR\fconnectionId\">\n" +
+	"\x17StartGitHubLinkResponse\x12#\n" +
+	"\rauthorize_url\x18\x01 \x01(\tR\fauthorizeUrl\"\xf6\x01\n" +
+	"\n" +
+	"GitHubLink\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04host\x18\x02 \x01(\tR\x04host\x12!\n" +
+	"\fgithub_login\x18\x03 \x01(\tR\vgithubLogin\x12$\n" +
+	"\x0egithub_user_id\x18\x04 \x01(\x03R\fgithubUserId\x129\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12!\n" +
+	"\fdisplay_name\x18\x06 \x01(\tR\vdisplayName\x12\x14\n" +
+	"\x05email\x18\a \x01(\tR\x05email\"1\n" +
+	"\x18ListMyGitHubLinksRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"Y\n" +
+	"\x19ListMyGitHubLinksResponse\x12<\n" +
+	"\x05links\x18\x01 \x03(\v2&.koinon.connection.v1alpha1.GitHubLinkR\x05links\"/\n" +
+	"\x16ListGitHubLinksRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"W\n" +
+	"\x17ListGitHubLinksResponse\x12<\n" +
+	"\x05links\x18\x01 \x03(\v2&.koinon.connection.v1alpha1.GitHubLinkR\x05links\"]\n" +
+	"\x17DeleteGitHubLinkRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04host\x18\x03 \x01(\tR\x04host\"\x1a\n" +
+	"\x18DeleteGitHubLinkResponse\"\xb1\x01\n" +
+	"\x1aStartGitHubAppSetupRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12!\n" +
+	"\fgithub_owner\x18\x03 \x01(\tR\vgithubOwner\x12\x19\n" +
+	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
+	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\"o\n" +
+	"\x1bStartGitHubAppSetupResponse\x12\x19\n" +
+	"\bpost_url\x18\x01 \x01(\tR\apostUrl\x12\x1a\n" +
+	"\bmanifest\x18\x02 \x01(\tR\bmanifest\x12\x19\n" +
+	"\x05state\x18\x03 \x01(\tB\x03\x80\x01\x01R\x05state\"j\n" +
+	"\x1dContinueGitHubAppSetupRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\x05state\x18\x02 \x01(\tB\x03\x80\x01\x01R\x05state\x12\x17\n" +
+	"\x04code\x18\x03 \x01(\tB\x03\x80\x01\x01R\x04code\"\\\n" +
+	"\x1eContinueGitHubAppSetupResponse\x12\x1f\n" +
+	"\vinstall_url\x18\x01 \x01(\tR\n" +
+	"installUrl\x12\x19\n" +
+	"\bapp_slug\x18\x02 \x01(\tR\aappSlug\"x\n" +
+	"\x1bFinishGitHubAppSetupRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\x05state\x18\x02 \x01(\tB\x03\x80\x01\x01R\x05state\x12'\n" +
+	"\x0finstallation_id\x18\x03 \x01(\x03R\x0einstallationId\"\xa9\x01\n" +
+	"\x1cFinishGitHubAppSetupResponse\x12F\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +
+	"connection\x12A\n" +
+	"\aresults\x18\x02 \x03(\v2'.koinon.connection.v1alpha1.CheckResultR\aresults*}\n" +
 	"\x04Tier\x12\x14\n" +
 	"\x10TIER_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tTIER_READ\x10\x01\x12\x19\n" +
@@ -2604,7 +3515,7 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x1dCONNECTION_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCONNECTION_STATUS_UNTESTED\x10\x01\x12\x18\n" +
 	"\x14CONNECTION_STATUS_OK\x10\x02\x12\x1d\n" +
-	"\x19CONNECTION_STATUS_FAILING\x10\x032\xf1\v\n" +
+	"\x19CONNECTION_STATUS_FAILING\x10\x032\x9c\x13\n" +
 	"\x11ConnectionService\x12\x88\x01\n" +
 	"\x12ListConnectorTypes\x125.koinon.connection.v1alpha1.ListConnectorTypesRequest\x1a6.koinon.connection.v1alpha1.ListConnectorTypesResponse\"\x03\x90\x02\x01\x12\x8f\x01\n" +
 	"\x16CreateGitHubConnection\x129.koinon.connection.v1alpha1.CreateGitHubConnectionRequest\x1a:.koinon.connection.v1alpha1.CreateGitHubConnectionResponse\x12\x8c\x01\n" +
@@ -2616,7 +3527,14 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x10DeleteConnection\x123.koinon.connection.v1alpha1.DeleteConnectionRequest\x1a4.koinon.connection.v1alpha1.DeleteConnectionResponse\x12\x89\x01\n" +
 	"\x14AddConnectionMCPHost\x127.koinon.connection.v1alpha1.AddConnectionMCPHostRequest\x1a8.koinon.connection.v1alpha1.AddConnectionMCPHostResponse\x12\x92\x01\n" +
 	"\x17RemoveConnectionMCPHost\x12:.koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest\x1a;.koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse\x12\x91\x01\n" +
-	"\x15ListInstallationRepos\x128.koinon.connection.v1alpha1.ListInstallationReposRequest\x1a9.koinon.connection.v1alpha1.ListInstallationReposResponse\"\x03\x90\x02\x01B[ZYgithub.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
+	"\x15ListInstallationRepos\x128.koinon.connection.v1alpha1.ListInstallationReposRequest\x1a9.koinon.connection.v1alpha1.ListInstallationReposResponse\"\x03\x90\x02\x01\x12z\n" +
+	"\x0fStartGitHubLink\x122.koinon.connection.v1alpha1.StartGitHubLinkRequest\x1a3.koinon.connection.v1alpha1.StartGitHubLinkResponse\x12\x85\x01\n" +
+	"\x11ListMyGitHubLinks\x124.koinon.connection.v1alpha1.ListMyGitHubLinksRequest\x1a5.koinon.connection.v1alpha1.ListMyGitHubLinksResponse\"\x03\x90\x02\x01\x12\x7f\n" +
+	"\x0fListGitHubLinks\x122.koinon.connection.v1alpha1.ListGitHubLinksRequest\x1a3.koinon.connection.v1alpha1.ListGitHubLinksResponse\"\x03\x90\x02\x01\x12}\n" +
+	"\x10DeleteGitHubLink\x123.koinon.connection.v1alpha1.DeleteGitHubLinkRequest\x1a4.koinon.connection.v1alpha1.DeleteGitHubLinkResponse\x12\x86\x01\n" +
+	"\x13StartGitHubAppSetup\x126.koinon.connection.v1alpha1.StartGitHubAppSetupRequest\x1a7.koinon.connection.v1alpha1.StartGitHubAppSetupResponse\x12\x8f\x01\n" +
+	"\x16ContinueGitHubAppSetup\x129.koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest\x1a:.koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse\x12\x89\x01\n" +
+	"\x14FinishGitHubAppSetup\x127.koinon.connection.v1alpha1.FinishGitHubAppSetupRequest\x1a8.koinon.connection.v1alpha1.FinishGitHubAppSetupResponseB[ZYgithub.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
 
 var (
 	file_koinon_connection_v1alpha1_connection_proto_rawDescOnce sync.Once
@@ -2631,7 +3549,7 @@ func file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_connection_v1alpha1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(Tier)(0),                               // 0: koinon.connection.v1alpha1.Tier
 	(ConnectionStatus)(0),                   // 1: koinon.connection.v1alpha1.ConnectionStatus
@@ -2669,23 +3587,38 @@ var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(*ListInstallationReposRequest)(nil),    // 33: koinon.connection.v1alpha1.ListInstallationReposRequest
 	(*InstallationRepo)(nil),                // 34: koinon.connection.v1alpha1.InstallationRepo
 	(*ListInstallationReposResponse)(nil),   // 35: koinon.connection.v1alpha1.ListInstallationReposResponse
-	(*structpb.Struct)(nil),                 // 36: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),           // 37: google.protobuf.Timestamp
-	(*v1alpha1.AdminDisabled)(nil),          // 38: koinon.outward.v1alpha1.AdminDisabled
+	(*StartGitHubLinkRequest)(nil),          // 36: koinon.connection.v1alpha1.StartGitHubLinkRequest
+	(*StartGitHubLinkResponse)(nil),         // 37: koinon.connection.v1alpha1.StartGitHubLinkResponse
+	(*GitHubLink)(nil),                      // 38: koinon.connection.v1alpha1.GitHubLink
+	(*ListMyGitHubLinksRequest)(nil),        // 39: koinon.connection.v1alpha1.ListMyGitHubLinksRequest
+	(*ListMyGitHubLinksResponse)(nil),       // 40: koinon.connection.v1alpha1.ListMyGitHubLinksResponse
+	(*ListGitHubLinksRequest)(nil),          // 41: koinon.connection.v1alpha1.ListGitHubLinksRequest
+	(*ListGitHubLinksResponse)(nil),         // 42: koinon.connection.v1alpha1.ListGitHubLinksResponse
+	(*DeleteGitHubLinkRequest)(nil),         // 43: koinon.connection.v1alpha1.DeleteGitHubLinkRequest
+	(*DeleteGitHubLinkResponse)(nil),        // 44: koinon.connection.v1alpha1.DeleteGitHubLinkResponse
+	(*StartGitHubAppSetupRequest)(nil),      // 45: koinon.connection.v1alpha1.StartGitHubAppSetupRequest
+	(*StartGitHubAppSetupResponse)(nil),     // 46: koinon.connection.v1alpha1.StartGitHubAppSetupResponse
+	(*ContinueGitHubAppSetupRequest)(nil),   // 47: koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest
+	(*ContinueGitHubAppSetupResponse)(nil),  // 48: koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse
+	(*FinishGitHubAppSetupRequest)(nil),     // 49: koinon.connection.v1alpha1.FinishGitHubAppSetupRequest
+	(*FinishGitHubAppSetupResponse)(nil),    // 50: koinon.connection.v1alpha1.FinishGitHubAppSetupResponse
+	(*structpb.Struct)(nil),                 // 51: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),           // 52: google.protobuf.Timestamp
+	(*v1alpha1.AdminDisabled)(nil),          // 53: koinon.outward.v1alpha1.AdminDisabled
 }
 var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	0,  // 0: koinon.connection.v1alpha1.Scope.tier:type_name -> koinon.connection.v1alpha1.Tier
 	2,  // 1: koinon.connection.v1alpha1.ConnectorType.scopes:type_name -> koinon.connection.v1alpha1.Scope
-	36, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
+	51, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
 	3,  // 3: koinon.connection.v1alpha1.ListConnectorTypesResponse.connector_types:type_name -> koinon.connection.v1alpha1.ConnectorType
-	37, // 4: koinon.connection.v1alpha1.GiteaConnection.read_token_set_at:type_name -> google.protobuf.Timestamp
-	37, // 5: koinon.connection.v1alpha1.GiteaConnection.write_token_set_at:type_name -> google.protobuf.Timestamp
+	52, // 4: koinon.connection.v1alpha1.GiteaConnection.read_token_set_at:type_name -> google.protobuf.Timestamp
+	52, // 5: koinon.connection.v1alpha1.GiteaConnection.write_token_set_at:type_name -> google.protobuf.Timestamp
 	1,  // 6: koinon.connection.v1alpha1.Connection.status:type_name -> koinon.connection.v1alpha1.ConnectionStatus
-	37, // 7: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
+	52, // 7: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
 	6,  // 8: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
-	37, // 9: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
-	37, // 10: koinon.connection.v1alpha1.Connection.credential_lost_at:type_name -> google.protobuf.Timestamp
-	38, // 11: koinon.connection.v1alpha1.Connection.admin_disabled:type_name -> koinon.outward.v1alpha1.AdminDisabled
+	52, // 9: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
+	52, // 10: koinon.connection.v1alpha1.Connection.credential_lost_at:type_name -> google.protobuf.Timestamp
+	53, // 11: koinon.connection.v1alpha1.Connection.admin_disabled:type_name -> koinon.outward.v1alpha1.AdminDisabled
 	7,  // 12: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
 	8,  // 13: koinon.connection.v1alpha1.Connection.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnection
 	9,  // 14: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
@@ -2705,33 +3638,52 @@ var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	9,  // 28: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
 	6,  // 29: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
 	34, // 30: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
-	4,  // 31: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
-	10, // 32: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	12, // 33: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:input_type -> koinon.connection.v1alpha1.CreateGiteaConnectionRequest
-	14, // 34: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:input_type -> koinon.connection.v1alpha1.SetConnectionSecretRequest
-	18, // 35: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
-	29, // 36: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
-	31, // 37: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
-	20, // 38: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
-	22, // 39: koinon.connection.v1alpha1.ConnectionService.AddConnectionMCPHost:input_type -> koinon.connection.v1alpha1.AddConnectionMCPHostRequest
-	24, // 40: koinon.connection.v1alpha1.ConnectionService.RemoveConnectionMCPHost:input_type -> koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest
-	33, // 41: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
-	5,  // 42: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
-	11, // 43: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	13, // 44: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:output_type -> koinon.connection.v1alpha1.CreateGiteaConnectionResponse
-	17, // 45: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:output_type -> koinon.connection.v1alpha1.SetConnectionSecretResponse
-	19, // 46: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
-	30, // 47: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
-	32, // 48: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
-	21, // 49: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
-	23, // 50: koinon.connection.v1alpha1.ConnectionService.AddConnectionMCPHost:output_type -> koinon.connection.v1alpha1.AddConnectionMCPHostResponse
-	26, // 51: koinon.connection.v1alpha1.ConnectionService.RemoveConnectionMCPHost:output_type -> koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse
-	35, // 52: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
-	42, // [42:53] is the sub-list for method output_type
-	31, // [31:42] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	52, // 31: koinon.connection.v1alpha1.GitHubLink.created_at:type_name -> google.protobuf.Timestamp
+	38, // 32: koinon.connection.v1alpha1.ListMyGitHubLinksResponse.links:type_name -> koinon.connection.v1alpha1.GitHubLink
+	38, // 33: koinon.connection.v1alpha1.ListGitHubLinksResponse.links:type_name -> koinon.connection.v1alpha1.GitHubLink
+	9,  // 34: koinon.connection.v1alpha1.FinishGitHubAppSetupResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 35: koinon.connection.v1alpha1.FinishGitHubAppSetupResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	4,  // 36: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
+	10, // 37: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	12, // 38: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:input_type -> koinon.connection.v1alpha1.CreateGiteaConnectionRequest
+	14, // 39: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:input_type -> koinon.connection.v1alpha1.SetConnectionSecretRequest
+	18, // 40: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
+	29, // 41: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
+	31, // 42: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
+	20, // 43: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
+	22, // 44: koinon.connection.v1alpha1.ConnectionService.AddConnectionMCPHost:input_type -> koinon.connection.v1alpha1.AddConnectionMCPHostRequest
+	24, // 45: koinon.connection.v1alpha1.ConnectionService.RemoveConnectionMCPHost:input_type -> koinon.connection.v1alpha1.RemoveConnectionMCPHostRequest
+	33, // 46: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
+	36, // 47: koinon.connection.v1alpha1.ConnectionService.StartGitHubLink:input_type -> koinon.connection.v1alpha1.StartGitHubLinkRequest
+	39, // 48: koinon.connection.v1alpha1.ConnectionService.ListMyGitHubLinks:input_type -> koinon.connection.v1alpha1.ListMyGitHubLinksRequest
+	41, // 49: koinon.connection.v1alpha1.ConnectionService.ListGitHubLinks:input_type -> koinon.connection.v1alpha1.ListGitHubLinksRequest
+	43, // 50: koinon.connection.v1alpha1.ConnectionService.DeleteGitHubLink:input_type -> koinon.connection.v1alpha1.DeleteGitHubLinkRequest
+	45, // 51: koinon.connection.v1alpha1.ConnectionService.StartGitHubAppSetup:input_type -> koinon.connection.v1alpha1.StartGitHubAppSetupRequest
+	47, // 52: koinon.connection.v1alpha1.ConnectionService.ContinueGitHubAppSetup:input_type -> koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest
+	49, // 53: koinon.connection.v1alpha1.ConnectionService.FinishGitHubAppSetup:input_type -> koinon.connection.v1alpha1.FinishGitHubAppSetupRequest
+	5,  // 54: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
+	11, // 55: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	13, // 56: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:output_type -> koinon.connection.v1alpha1.CreateGiteaConnectionResponse
+	17, // 57: koinon.connection.v1alpha1.ConnectionService.SetConnectionSecret:output_type -> koinon.connection.v1alpha1.SetConnectionSecretResponse
+	19, // 58: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
+	30, // 59: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
+	32, // 60: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
+	21, // 61: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
+	23, // 62: koinon.connection.v1alpha1.ConnectionService.AddConnectionMCPHost:output_type -> koinon.connection.v1alpha1.AddConnectionMCPHostResponse
+	26, // 63: koinon.connection.v1alpha1.ConnectionService.RemoveConnectionMCPHost:output_type -> koinon.connection.v1alpha1.RemoveConnectionMCPHostResponse
+	35, // 64: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
+	37, // 65: koinon.connection.v1alpha1.ConnectionService.StartGitHubLink:output_type -> koinon.connection.v1alpha1.StartGitHubLinkResponse
+	40, // 66: koinon.connection.v1alpha1.ConnectionService.ListMyGitHubLinks:output_type -> koinon.connection.v1alpha1.ListMyGitHubLinksResponse
+	42, // 67: koinon.connection.v1alpha1.ConnectionService.ListGitHubLinks:output_type -> koinon.connection.v1alpha1.ListGitHubLinksResponse
+	44, // 68: koinon.connection.v1alpha1.ConnectionService.DeleteGitHubLink:output_type -> koinon.connection.v1alpha1.DeleteGitHubLinkResponse
+	46, // 69: koinon.connection.v1alpha1.ConnectionService.StartGitHubAppSetup:output_type -> koinon.connection.v1alpha1.StartGitHubAppSetupResponse
+	48, // 70: koinon.connection.v1alpha1.ConnectionService.ContinueGitHubAppSetup:output_type -> koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse
+	50, // 71: koinon.connection.v1alpha1.ConnectionService.FinishGitHubAppSetup:output_type -> koinon.connection.v1alpha1.FinishGitHubAppSetupResponse
+	54, // [54:72] is the sub-list for method output_type
+	36, // [36:54] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_koinon_connection_v1alpha1_connection_proto_init() }
@@ -2753,7 +3705,7 @@ func file_koinon_connection_v1alpha1_connection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_connection_v1alpha1_connection_proto_rawDesc), len(file_koinon_connection_v1alpha1_connection_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   34,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

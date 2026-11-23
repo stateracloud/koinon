@@ -60,6 +60,17 @@ import (
 // DefaultBaseURL is GitHub's REST API.
 const DefaultBaseURL = "https://api.github.com"
 
+// DefaultWebURL is GitHub's web host, where users authorize an App.
+const DefaultWebURL = "https://github.com"
+
+// webURLFor is the web base URL of the host whose REST API is at apiBase.
+func webURLFor(apiBase string) string {
+	if apiBase == DefaultBaseURL {
+		return DefaultWebURL
+	}
+	return strings.TrimSuffix(apiBase, "/api/v3")
+}
+
 // APIVersion is the REST API version Koinon sends (X-GitHub-Api-Version).
 const APIVersion = "2026-03-10"
 
@@ -164,6 +175,9 @@ func (a App) validate() error {
 // The zero value is not usable; use NewClient.
 type Client struct {
 	baseURL string
+	// webURL is the host's web base URL (https://github.com, or a GHES host), where the user
+	// authorization pages and the token exchange live.
+	webURL  string
 	http    *http.Client
 	dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	ownHTTP bool // http is the default client, so For can give a derived host the checked transport
@@ -182,6 +196,10 @@ type Options struct {
 	// BaseURL defaults to DefaultBaseURL; GitHub Enterprise Server uses
 	// https://<host>/api/v3.
 	BaseURL string
+	// WebURL is the web base URL of the same host, for the user authorization flow (issue #1175).
+	// It defaults to DefaultWebURL for DefaultBaseURL and to BaseURL without a trailing /api/v3
+	// otherwise (GitHub Enterprise Server, or a test fake that serves both at its root).
+	WebURL string
 	// HTTPClient defaults to a client with a 30-second timeout that dials through DialContext and
 	// returns a 3xx response instead of following it. A caller-set client turns the dial check
 	// off for every base URL, derived clients included; no production caller sets it.
@@ -241,7 +259,7 @@ func (c *Client) For(apiBase, caBundle string) (*Client, error) {
 		tr.TLSClientConfig.RootCAs = pool
 		hc.Transport = tr
 	}
-	d := &Client{baseURL: apiBase, http: &hc, dial: c.dial, ownHTTP: c.ownHTTP, now: c.now, margin: c.margin, mu: c.mu, cache: c.cache, derived: c.derived}
+	d := &Client{baseURL: apiBase, webURL: webURLFor(apiBase), http: &hc, dial: c.dial, ownHTTP: c.ownHTTP, now: c.now, margin: c.margin, mu: c.mu, cache: c.cache, derived: c.derived}
 	got, _ := c.derived.LoadOrStore(key, d)
 	return got.(*Client), nil
 }
@@ -284,8 +302,12 @@ func NewClient(o Options) *Client {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	o.BaseURL = strings.TrimRight(o.BaseURL, "/")
+	if o.WebURL == "" {
+		o.WebURL = webURLFor(o.BaseURL)
+	}
 	return &Client{
-		baseURL: strings.TrimRight(o.BaseURL, "/"), http: o.HTTPClient, dial: o.DialContext, ownHTTP: own, now: o.Now,
+		baseURL: o.BaseURL, webURL: strings.TrimRight(o.WebURL, "/"), http: o.HTTPClient, dial: o.DialContext, ownHTTP: own, now: o.Now,
 		margin: o.RefreshMargin, mu: new(sync.Mutex), cache: map[string]*cacheEntry{}, derived: new(sync.Map),
 	}
 }

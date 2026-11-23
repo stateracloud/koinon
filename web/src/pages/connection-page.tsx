@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ConnectionMcpHosts } from '@/components/connection-mcp-hosts'
 import { ConnectionSecretForm } from '@/components/connection-secret-form'
+import { LinkGitHubLoginButton } from '@/components/github-links'
 import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
 import { OutwardSwitch } from '@/components/outward-switch'
@@ -179,6 +180,7 @@ export function ConnectionPage() {
           )}
         </dl>
       )}
+      {gh?.clientId && !c.removed && <LinkGitHubLoginButton orgId={orgId} connectionId={connectionId} />}
       {host?.weakerCredential && (
         <Alert role="note">
           <AlertDescription>

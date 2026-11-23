@@ -107,7 +107,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 			if d, err := p.Describe(c.Config); err == nil {
 				out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
 					AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
-					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
+					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs, ClientId: githubClientID(c.Config),
 				}}
 			}
 		case providers.Gitea:
@@ -147,23 +147,52 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	// One request ID for the whole call, so the reading it starts audits under the same ID as the
 	// call's own events (a UI request carries none).
 	ctx = requestCtx(ctx)
-	name := strings.TrimSpace(req.GetDisplayName())
+	// Take the key out of the request, so nothing that prints the request
+	// later (protobuf-go ignores debug_redact) can show it.
+	pemKey := []byte(req.GetPrivateKey())
+	req.PrivateKey = ""
+	return s.createGitHub(ctx, c, githubCreate{
+		name: req.GetDisplayName(), appID: req.GetAppId(), installationID: req.GetInstallationId(), pemKey: pemKey,
+		baseURL: req.GetBaseUrl(), caBundle: req.GetCaBundle(), ciDirs: req.GetCiDirs(), test: req.GetTest(),
+	})
+}
+
+// githubCreate is what a new GitHub connection is made of: from CreateGitHubConnection, or from
+// the guided App setup (FinishGitHubAppSetup), which also brings the App's OAuth client and an ID
+// and envelope it sealed when GitHub created the App.
+type githubCreate struct {
+	name                  string
+	appID, installationID int64
+	pemKey                []byte
+	baseURL, caBundle     string
+	ciDirs                []string
+	test                  bool
+	// Set by the guided setup only.
+	connID   pgtype.UUID
+	envelope []byte
+	clientID string
+	appSlug  string
+	// setupState is the hash of the setup's state. The setup row goes in the transaction that makes
+	// the connection, so a setup makes one connection only, also when two finishes race.
+	setupState []byte
+}
+
+// createGitHub validates and stores a GitHub connection, audits it and, on request, tests it.
+func (s *Server) createGitHub(ctx context.Context, c caller, in githubCreate) (*connectionv1alpha1.CreateGitHubConnectionResponse, error) {
+	name := strings.TrimSpace(in.name)
 	if name == "" {
 		name = "GitHub"
 	}
 	switch {
 	case len(name) > 200:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "display_name is longer than 200 characters")
-	case req.GetAppId() <= 0:
+	case in.appID <= 0:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "app_id must be the App's numeric ID")
-	case req.GetInstallationId() <= 0:
+	case in.installationID <= 0:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "installation_id must be the installation's numeric ID")
 	}
-	baseURL, caBundle := strings.TrimSpace(req.GetBaseUrl()), strings.TrimSpace(req.GetCaBundle())
-	// Take the key out of the request, so nothing that prints the request
-	// later (protobuf-go ignores debug_redact) can show it.
-	pemKey := []byte(req.GetPrivateKey())
-	req.PrivateKey = ""
+	baseURL, caBundle := strings.TrimSpace(in.baseURL), strings.TrimSpace(in.caBundle)
+	pemKey := in.pemKey
 	host, ok := s.hosts.Get(providers.GitHub)
 	if !ok {
 		return nil, s.dbError(errors.New("github provider is not registered"), "connector type")
@@ -200,33 +229,47 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 			return nil, connect.NewError(connect.CodeInvalidArgument, "ca_bundle: "+err.Error())
 		}
 	}
-	ciDirs, err := codehost.CleanCIDirs(req.GetCiDirs())
+	ciDirs, err := codehost.CleanCIDirs(in.ciDirs)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "ci_dirs: "+err.Error())
 	}
 
-	id, err := uuid.NewV7()
-	if err != nil {
-		return nil, s.dbError(err, "connection")
+	connID, envelope := in.connID, in.envelope
+	if !connID.Valid {
+		id, err := uuid.NewV7()
+		if err != nil {
+			return nil, s.dbError(err, "connection")
+		}
+		connID = pgtype.UUID{Bytes: id, Valid: true}
 	}
-	connID := pgtype.UUID{Bytes: id, Valid: true}
 	config, err := json.Marshal(connections.GitHubConfig{
-		AppID: req.GetAppId(), InstallationID: req.GetInstallationId(),
+		AppID: in.appID, InstallationID: in.installationID, ClientID: in.clientID,
 		Site: codehost.Site{BaseURL: baseURL, CABundle: caBundle, CIDirs: ciDirs},
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
-	envelope, err := connections.SealFields(s.keys, c.org, connID, map[string][]byte{connections.GitHubPrivateKeyField: pemKey})
-	if err != nil {
-		s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
-		return nil, connect.NewError(connect.CodeUnavailable, "could not store the private key; try again")
+	if envelope == nil {
+		envelope, err = connections.SealFields(s.keys, c.org, connID, map[string][]byte{connections.GitHubPrivateKeyField: pemKey})
+		if err != nil {
+			s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
+			return nil, connect.NewError(connect.CodeUnavailable, "could not store the private key; try again")
+		}
 	}
 	var row store.Connection
 	err = s.inAuditTx(requestCtx(ctx), func(q *store.Queries, b audit.Batch) error {
 		// The org's MCP host lock first, so an admin adding an extra host cannot race this create (#240).
 		if err := q.LockOrgMCPHosts(ctx, c.org); err != nil {
 			return err
+		}
+		if in.setupState != nil {
+			n, err := q.DeleteGitHubAppSetup(ctx, store.DeleteGitHubAppSetupParams{OrgID: c.org, StateHash: in.setupState})
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return errSetupNotFound()
+			}
 		}
 		why, err := mcpservers.OwnHostClash(ctx, q, c.org, connID, t, loc, nil)
 		if err != nil {
@@ -242,13 +285,18 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		if err != nil {
 			return err
 		}
+		after := map[string]any{
+			"connector": t.Metadata.ID, "displayName": name, "appId": in.appID,
+			"installationId": in.installationID, "keyFingerprint": key.Fingerprint(), "source": "ui",
+			"baseUrl": baseURL, "caBundle": caBundle != "", "ciDirs": ciDirs,
+		}
+		if in.clientID != "" {
+			// The guided setup: GitHub created the App from Koinon's manifest.
+			after["setup"], after["clientId"], after["appSlug"] = "manifest", in.clientID, in.appSlug
+		}
 		b.Org(audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.create", TargetKind: "connection", TargetID: connID.String(),
-			After: map[string]any{
-				"connector": t.Metadata.ID, "displayName": name, "appId": req.GetAppId(),
-				"installationId": req.GetInstallationId(), "keyFingerprint": key.Fingerprint(), "source": "ui",
-				"baseUrl": baseURL, "caBundle": caBundle != "", "ciDirs": ciDirs,
-			},
+			After: after,
 		})
 		return nil
 	})
@@ -256,11 +304,11 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		return nil, s.dbError(err, "connection")
 	}
 	s.log.Info("connection created", "org", c.org.String(), "connection", connID.String(), "connector", t.Metadata.ID,
-		"app_id", req.GetAppId(), "installation_id", req.GetInstallationId(), "key_fingerprint", key.Fingerprint(),
+		"app_id", in.appID, "installation_id", in.installationID, "key_fingerprint", key.Fingerprint(),
 		"by", c.actor().String())
 
 	res := &connectionv1alpha1.CreateGitHubConnectionResponse{}
-	if req.GetTest() {
+	if in.test {
 		row, res.Results, err = s.testConnection(ctx, row, c.auditActor())
 		if err != nil {
 			return nil, err
@@ -465,6 +513,12 @@ func (s *Server) SetConnectionSecret(ctx context.Context, req *connectionv1alpha
 		case providers.GitHub:
 			key, _ := github.ParsePrivateKey(secrets[connections.GitHubPrivateKeyField]) // validated above
 			fingerprint = key.Fingerprint()
+			// A new private key keeps the App's OAuth client secret, which the guided setup stored
+			// and the user link needs (#1175). A secret that cannot be opened any more is lost; the
+			// guided setup stores a new one.
+			if old, err := connections.OpenFields(s.keys, cur); err == nil && len(old[github.ClientSecretField]) > 0 {
+				secrets[github.ClientSecretField] = old[github.ClientSecretField]
+			}
 		case providers.Gitea:
 			prev, err := gitea.ParseConfig(cur.Config)
 			if err != nil {

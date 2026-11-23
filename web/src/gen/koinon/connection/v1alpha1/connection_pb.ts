@@ -17,7 +17,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/connection/v1alpha1/connection.proto.
  */
 export const file_koinon_connection_v1alpha1_connection: GenFile = /*@__PURE__*/
-  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiigEKEEdpdEh1YkNvbm5lY3Rpb24SDgoGYXBwX2lkGAEgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgCIAEoAxIXCg9rZXlfZmluZ2VycHJpbnQYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSEQoJY2FfYnVuZGxlGAUgASgJEg8KB2NpX2RpcnMYBiADKAki2AEKD0dpdGVhQ29ubmVjdGlvbhIQCghiYXNlX3VybBgBIAEoCRIRCgljYV9idW5kbGUYAiABKAkSDwoHY2lfZGlycxgDIAMoCRI1ChFyZWFkX3Rva2VuX3NldF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNgoSd3JpdGVfdG9rZW5fc2V0X2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIgChh0b2tlbl93YXJuX2FmdGVyX3NlY29uZHMYBiABKAMigAUKCkNvbm5lY3Rpb24SCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhEKCWNvbm5lY3RvchgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSPAoGc3RhdHVzGAUgASgOMiwua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvblN0YXR1cxIyCg5sYXN0X3Rlc3RlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOgoJbGFzdF90ZXN0GAcgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc291cmNlGAsgASgJEhkKEW1hbmFnZWRfYnlfc2VjcmV0GAwgASgJEg8KB3JlbW92ZWQYDSABKAgSNgoSY3JlZGVudGlhbF9sb3N0X2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI+Cg5hZG1pbl9kaXNhYmxlZBgQIAEoCzImLmtvaW5vbi5vdXR3YXJkLnYxYWxwaGExLkFkbWluRGlzYWJsZWQSEQoJbWNwX2hvc3RzGBEgAygJEj4KBmdpdGh1YhgKIAEoCzIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdpdEh1YkNvbm5lY3Rpb25IABI8CgVnaXRlYRgOIAEoCzIrLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdpdGVhQ29ubmVjdGlvbkgAQgoKCHNldHRpbmdzIswBCh1DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEg4KBmFwcF9pZBgDIAEoAxIXCg9pbnN0YWxsYXRpb25faWQYBCABKAMSGAoLcHJpdmF0ZV9rZXkYBSABKAlCA4ABARIMCgR0ZXN0GAYgASgIEhAKCGJhc2VfdXJsGAcgASgJEhEKCWNhX2J1bmRsZRgIIAEoCRIPCgdjaV9kaXJzGAkgAygJIpYBCh5DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0IrsBChxDcmVhdGVHaXRlYUNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSEAoIYmFzZV91cmwYAyABKAkSFwoKcmVhZF90b2tlbhgEIAEoCUIDgAEBEhgKC3dyaXRlX3Rva2VuGAUgASgJQgOAAQESEQoJY2FfYnVuZGxlGAYgASgJEg8KB2NpX2RpcnMYByADKAkSDAoEdGVzdBgIIAEoCCKVAQodQ3JlYXRlR2l0ZWFDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0IuUBChpTZXRDb25uZWN0aW9uU2VjcmV0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRJECgZnaXRodWIYAyABKAsyMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uU2VjcmV0SAASQgoFZ2l0ZWEYBCABKAsyMS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRlYUNvbm5lY3Rpb25TZWNyZXRIABIMCgR0ZXN0GAUgASgIQggKBnNlY3JldCIyChZHaXRIdWJDb25uZWN0aW9uU2VjcmV0EhgKC3ByaXZhdGVfa2V5GAEgASgJQgOAAQEiSgoVR2l0ZWFDb25uZWN0aW9uU2VjcmV0EhcKCnJlYWRfdG9rZW4YASABKAlCA4ABARIYCgt3cml0ZV90b2tlbhgCIAEoCUIDgAEBIpMBChtTZXRDb25uZWN0aW9uU2VjcmV0UmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0Ij0KFEdldENvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIlMKFUdldENvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiJAChdEZWxldGVDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCSIaChhEZWxldGVDb25uZWN0aW9uUmVzcG9uc2UiUgobQWRkQ29ubmVjdGlvbk1DUEhvc3RSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEgwKBGhvc3QYAyABKAkiWgocQWRkQ29ubmVjdGlvbk1DUEhvc3RSZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiJmCh5SZW1vdmVDb25uZWN0aW9uTUNQSG9zdFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSDAoEaG9zdBgDIAEoCRIPCgdkcnlfcnVuGAQgASgIIjoKEVVubGlua2VkTUNQU2VydmVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSCwoDdXJsGAMgASgJIqYBCh9SZW1vdmVDb25uZWN0aW9uTUNQSG9zdFJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEkcKEHVubGlua2VkX3NlcnZlcnMYAiADKAsyLS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5VbmxpbmtlZE1DUFNlcnZlciJFCgtCb3VuZEFnZW50cxI2CgZhZ2VudHMYASADKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Cb3VuZEFnZW50Ii4KCkJvdW5kQWdlbnQSCgoCaWQYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIigKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlYKF0xpc3RDb25uZWN0aW9uc1Jlc3BvbnNlEjsKC2Nvbm5lY3Rpb25zGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiI+ChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkijgEKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0ImgKHExpc3RJbnN0YWxsYXRpb25SZXBvc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSEgoKcGFnZV90b2tlbhgDIAEoCRINCgVxdWVyeRgEIAEoCSJOChBJbnN0YWxsYXRpb25SZXBvEhEKCWZ1bGxfbmFtZRgBIAEoCRIPCgdwcml2YXRlGAIgASgIEhYKDmRlZmF1bHRfYnJhbmNoGAMgASgJIooBCh1MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXNwb25zZRI7CgVyZXBvcxgBIAMoCzIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkluc3RhbGxhdGlvblJlcG8SFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhMKC3RvdGFsX2NvdW50GAMgASgDKn0KBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEg0KCVRJRVJfUkVBRBABEhkKFVRJRVJfUkVWRVJTSUJMRV9XUklURRACEiEKHVRJRVJfRVhURVJOQUxfT1JfSVJSRVZFUlNJQkxFEAMSEgoOVElFUl9GT1JCSURERU4QBCqOAQoQQ29ubmVjdGlvblN0YXR1cxIhCh1DT05ORUNUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEh4KGkNPTk5FQ1RJT05fU1RBVFVTX1VOVEVTVEVEEAESGAoUQ09OTkVDVElPTl9TVEFUVVNfT0sQAhIdChlDT05ORUNUSU9OX1NUQVRVU19GQUlMSU5HEAMy8QsKEUNvbm5lY3Rpb25TZXJ2aWNlEogBChJMaXN0Q29ubmVjdG9yVHlwZXMSNS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXF1ZXN0GjYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2UiA5ACARKPAQoWQ3JlYXRlR2l0SHViQ29ubmVjdGlvbhI5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Gjoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEowBChVDcmVhdGVHaXRlYUNvbm5lY3Rpb24SOC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRlYUNvbm5lY3Rpb25SZXF1ZXN0Gjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0ZWFDb25uZWN0aW9uUmVzcG9uc2UShgEKE1NldENvbm5lY3Rpb25TZWNyZXQSNi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5TZXRDb25uZWN0aW9uU2VjcmV0UmVxdWVzdBo3LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlNldENvbm5lY3Rpb25TZWNyZXRSZXNwb25zZRJ5Cg1HZXRDb25uZWN0aW9uEjAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2V0Q29ubmVjdGlvblJlcXVlc3QaMS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVzcG9uc2UiA5ACARJ/Cg9MaXN0Q29ubmVjdGlvbnMSMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXF1ZXN0GjMua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3Rpb25zUmVzcG9uc2UiA5ACARJ3Cg5UZXN0Q29ubmVjdGlvbhIxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVxdWVzdBoyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVzcG9uc2USfQoQRGVsZXRlQ29ubmVjdGlvbhIzLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkRlbGV0ZUNvbm5lY3Rpb25SZXF1ZXN0GjQua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRGVsZXRlQ29ubmVjdGlvblJlc3BvbnNlEokBChRBZGRDb25uZWN0aW9uTUNQSG9zdBI3LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkFkZENvbm5lY3Rpb25NQ1BIb3N0UmVxdWVzdBo4LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkFkZENvbm5lY3Rpb25NQ1BIb3N0UmVzcG9uc2USkgEKF1JlbW92ZUNvbm5lY3Rpb25NQ1BIb3N0Ejoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuUmVtb3ZlQ29ubmVjdGlvbk1DUEhvc3RSZXF1ZXN0Gjsua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuUmVtb3ZlQ29ubmVjdGlvbk1DUEhvc3RSZXNwb25zZRKRAQoVTGlzdEluc3RhbGxhdGlvblJlcG9zEjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVxdWVzdBo5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RJbnN0YWxsYXRpb25SZXBvc1Jlc3BvbnNlIgOQAgFCW1pZZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vY29ubmVjdGlvbi92MWFscGhhMTtjb25uZWN0aW9udjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_outward_v1alpha1_outward]);
+  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkinQEKEEdpdEh1YkNvbm5lY3Rpb24SDgoGYXBwX2lkGAEgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgCIAEoAxIXCg9rZXlfZmluZ2VycHJpbnQYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSEQoJY2FfYnVuZGxlGAUgASgJEg8KB2NpX2RpcnMYBiADKAkSEQoJY2xpZW50X2lkGAcgASgJItgBCg9HaXRlYUNvbm5lY3Rpb24SEAoIYmFzZV91cmwYASABKAkSEQoJY2FfYnVuZGxlGAIgASgJEg8KB2NpX2RpcnMYAyADKAkSNQoRcmVhZF90b2tlbl9zZXRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjYKEndyaXRlX3Rva2VuX3NldF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoYdG9rZW5fd2Fybl9hZnRlcl9zZWNvbmRzGAYgASgDIoAFCgpDb25uZWN0aW9uEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgljb25uZWN0b3IYAyABKAkSFAoMZGlzcGxheV9uYW1lGAQgASgJEjwKBnN0YXR1cxgFIAEoDjIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb25TdGF0dXMSMgoObGFzdF90ZXN0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjoKCWxhc3RfdGVzdBgHIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0Ei4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnNvdXJjZRgLIAEoCRIZChFtYW5hZ2VkX2J5X3NlY3JldBgMIAEoCRIPCgdyZW1vdmVkGA0gASgIEjYKEmNyZWRlbnRpYWxfbG9zdF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASPgoOYWRtaW5fZGlzYWJsZWQYECABKAsyJi5rb2lub24ub3V0d2FyZC52MWFscGhhMS5BZG1pbkRpc2FibGVkEhEKCW1jcF9ob3N0cxgRIAMoCRI+CgZnaXRodWIYCiABKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uSAASPAoFZ2l0ZWEYDiABKAsyKy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRlYUNvbm5lY3Rpb25IAEIKCghzZXR0aW5ncyLMAQodQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIOCgZhcHBfaWQYAyABKAMSFwoPaW5zdGFsbGF0aW9uX2lkGAQgASgDEhgKC3ByaXZhdGVfa2V5GAUgASgJQgOAAQESDAoEdGVzdBgGIAEoCBIQCghiYXNlX3VybBgHIAEoCRIRCgljYV9idW5kbGUYCCABKAkSDwoHY2lfZGlycxgJIAMoCSKWAQoeQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCK7AQocQ3JlYXRlR2l0ZWFDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEhAKCGJhc2VfdXJsGAMgASgJEhcKCnJlYWRfdG9rZW4YBCABKAlCA4ABARIYCgt3cml0ZV90b2tlbhgFIAEoCUIDgAEBEhEKCWNhX2J1bmRsZRgGIAEoCRIPCgdjaV9kaXJzGAcgAygJEgwKBHRlc3QYCCABKAgilQEKHUNyZWF0ZUdpdGVhQ29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCLlAQoaU2V0Q29ubmVjdGlvblNlY3JldFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSRAoGZ2l0aHViGAMgASgLMjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0SHViQ29ubmVjdGlvblNlY3JldEgAEkIKBWdpdGVhGAQgASgLMjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0ZWFDb25uZWN0aW9uU2VjcmV0SAASDAoEdGVzdBgFIAEoCEIICgZzZWNyZXQiMgoWR2l0SHViQ29ubmVjdGlvblNlY3JldBIYCgtwcml2YXRlX2tleRgBIAEoCUIDgAEBIkoKFUdpdGVhQ29ubmVjdGlvblNlY3JldBIXCgpyZWFkX3Rva2VuGAEgASgJQgOAAQESGAoLd3JpdGVfdG9rZW4YAiABKAlCA4ABASKTAQobU2V0Q29ubmVjdGlvblNlY3JldFJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCI9ChRHZXRDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCSJTChVHZXRDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24iQAoXRGVsZXRlQ29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiGgoYRGVsZXRlQ29ubmVjdGlvblJlc3BvbnNlIlIKG0FkZENvbm5lY3Rpb25NQ1BIb3N0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRIMCgRob3N0GAMgASgJIloKHEFkZENvbm5lY3Rpb25NQ1BIb3N0UmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24iZgoeUmVtb3ZlQ29ubmVjdGlvbk1DUEhvc3RSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEgwKBGhvc3QYAyABKAkSDwoHZHJ5X3J1bhgEIAEoCCI6ChFVbmxpbmtlZE1DUFNlcnZlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgsKA3VybBgDIAEoCSKmAQofUmVtb3ZlQ29ubmVjdGlvbk1DUEhvc3RSZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhJHChB1bmxpbmtlZF9zZXJ2ZXJzGAIgAygLMi0ua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVW5saW5rZWRNQ1BTZXJ2ZXIiRQoLQm91bmRBZ2VudHMSNgoGYWdlbnRzGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQm91bmRBZ2VudCIuCgpCb3VuZEFnZW50EgoKAmlkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSIoChZMaXN0Q29ubmVjdGlvbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJWChdMaXN0Q29ubmVjdGlvbnNSZXNwb25zZRI7Cgtjb25uZWN0aW9ucxgBIAMoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24iPgoVVGVzdENvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIo4BChZUZXN0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCJoChxMaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEhIKCnBhZ2VfdG9rZW4YAyABKAkSDQoFcXVlcnkYBCABKAkiTgoQSW5zdGFsbGF0aW9uUmVwbxIRCglmdWxsX25hbWUYASABKAkSDwoHcHJpdmF0ZRgCIAEoCBIWCg5kZWZhdWx0X2JyYW5jaBgDIAEoCSKKAQodTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2USOwoFcmVwb3MYASADKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5JbnN0YWxsYXRpb25SZXBvEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRITCgt0b3RhbF9jb3VudBgDIAEoAyI/ChZTdGFydEdpdEh1YkxpbmtSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIjAKF1N0YXJ0R2l0SHViTGlua1Jlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkirgEKCkdpdEh1YkxpbmsSDwoHdXNlcl9pZBgBIAEoCRIMCgRob3N0GAIgASgJEhQKDGdpdGh1Yl9sb2dpbhgDIAEoCRIWCg5naXRodWJfdXNlcl9pZBgEIAEoAxIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIUCgxkaXNwbGF5X25hbWUYBiABKAkSDQoFZW1haWwYByABKAkiKgoYTGlzdE15R2l0SHViTGlua3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJSChlMaXN0TXlHaXRIdWJMaW5rc1Jlc3BvbnNlEjUKBWxpbmtzGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0SHViTGluayIoChZMaXN0R2l0SHViTGlua3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJQChdMaXN0R2l0SHViTGlua3NSZXNwb25zZRI1CgVsaW5rcxgBIAMoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdpdEh1YkxpbmsiSAoXRGVsZXRlR2l0SHViTGlua1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDAoEaG9zdBgDIAEoCSIaChhEZWxldGVHaXRIdWJMaW5rUmVzcG9uc2UifQoaU3RhcnRHaXRIdWJBcHBTZXR1cFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIUCgxnaXRodWJfb3duZXIYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSEQoJY2FfYnVuZGxlGAUgASgJIlUKG1N0YXJ0R2l0SHViQXBwU2V0dXBSZXNwb25zZRIQCghwb3N0X3VybBgBIAEoCRIQCghtYW5pZmVzdBgCIAEoCRISCgVzdGF0ZRgDIAEoCUIDgAEBIlYKHUNvbnRpbnVlR2l0SHViQXBwU2V0dXBSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRISCgVzdGF0ZRgCIAEoCUIDgAEBEhEKBGNvZGUYAyABKAlCA4ABASJHCh5Db250aW51ZUdpdEh1YkFwcFNldHVwUmVzcG9uc2USEwoLaW5zdGFsbF91cmwYASABKAkSEAoIYXBwX3NsdWcYAiABKAkiWgobRmluaXNoR2l0SHViQXBwU2V0dXBSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRISCgVzdGF0ZRgCIAEoCUIDgAEBEhcKD2luc3RhbGxhdGlvbl9pZBgDIAEoAyKUAQocRmluaXNoR2l0SHViQXBwU2V0dXBSZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQqfQoEVGllchIUChBUSUVSX1VOU1BFQ0lGSUVEEAASDQoJVElFUl9SRUFEEAESGQoVVElFUl9SRVZFUlNJQkxFX1dSSVRFEAISIQodVElFUl9FWFRFUk5BTF9PUl9JUlJFVkVSU0lCTEUQAxISCg5USUVSX0ZPUkJJRERFThAEKo4BChBDb25uZWN0aW9uU3RhdHVzEiEKHUNPTk5FQ1RJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaQ09OTkVDVElPTl9TVEFUVVNfVU5URVNURUQQARIYChRDT05ORUNUSU9OX1NUQVRVU19PSxACEh0KGUNPTk5FQ1RJT05fU1RBVFVTX0ZBSUxJTkcQAzKcEwoRQ29ubmVjdGlvblNlcnZpY2USiAEKEkxpc3RDb25uZWN0b3JUeXBlcxI1LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QaNi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXNwb25zZSIDkAIBEo8BChZDcmVhdGVHaXRIdWJDb25uZWN0aW9uEjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlcXVlc3QaOi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVzcG9uc2USjAEKFUNyZWF0ZUdpdGVhQ29ubmVjdGlvbhI4LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdGVhQ29ubmVjdGlvblJlcXVlc3QaOS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRlYUNvbm5lY3Rpb25SZXNwb25zZRKGAQoTU2V0Q29ubmVjdGlvblNlY3JldBI2LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlNldENvbm5lY3Rpb25TZWNyZXRSZXF1ZXN0Gjcua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2V0Q29ubmVjdGlvblNlY3JldFJlc3BvbnNlEnkKDUdldENvbm5lY3Rpb24SMC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVxdWVzdBoxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdldENvbm5lY3Rpb25SZXNwb25zZSIDkAIBEn8KD0xpc3RDb25uZWN0aW9ucxIyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0aW9uc1JlcXVlc3QaMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXNwb25zZSIDkAIBEncKDlRlc3RDb25uZWN0aW9uEjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXNwb25zZRJ9ChBEZWxldGVDb25uZWN0aW9uEjMua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRGVsZXRlQ29ubmVjdGlvblJlcXVlc3QaNC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5EZWxldGVDb25uZWN0aW9uUmVzcG9uc2USiQEKFEFkZENvbm5lY3Rpb25NQ1BIb3N0Ejcua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQWRkQ29ubmVjdGlvbk1DUEhvc3RSZXF1ZXN0Gjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQWRkQ29ubmVjdGlvbk1DUEhvc3RSZXNwb25zZRKSAQoXUmVtb3ZlQ29ubmVjdGlvbk1DUEhvc3QSOi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5SZW1vdmVDb25uZWN0aW9uTUNQSG9zdFJlcXVlc3QaOy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5SZW1vdmVDb25uZWN0aW9uTUNQSG9zdFJlc3BvbnNlEpEBChVMaXN0SW5zdGFsbGF0aW9uUmVwb3MSOC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Gjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2UiA5ACARJ6Cg9TdGFydEdpdEh1YkxpbmsSMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5TdGFydEdpdEh1YkxpbmtSZXF1ZXN0GjMua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU3RhcnRHaXRIdWJMaW5rUmVzcG9uc2UShQEKEUxpc3RNeUdpdEh1YkxpbmtzEjQua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdE15R2l0SHViTGlua3NSZXF1ZXN0GjUua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdE15R2l0SHViTGlua3NSZXNwb25zZSIDkAIBEn8KD0xpc3RHaXRIdWJMaW5rcxIyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RHaXRIdWJMaW5rc1JlcXVlc3QaMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0R2l0SHViTGlua3NSZXNwb25zZSIDkAIBEn0KEERlbGV0ZUdpdEh1YkxpbmsSMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5EZWxldGVHaXRIdWJMaW5rUmVxdWVzdBo0LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkRlbGV0ZUdpdEh1YkxpbmtSZXNwb25zZRKGAQoTU3RhcnRHaXRIdWJBcHBTZXR1cBI2LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlN0YXJ0R2l0SHViQXBwU2V0dXBSZXF1ZXN0Gjcua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU3RhcnRHaXRIdWJBcHBTZXR1cFJlc3BvbnNlEo8BChZDb250aW51ZUdpdEh1YkFwcFNldHVwEjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29udGludWVHaXRIdWJBcHBTZXR1cFJlcXVlc3QaOi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db250aW51ZUdpdEh1YkFwcFNldHVwUmVzcG9uc2USiQEKFEZpbmlzaEdpdEh1YkFwcFNldHVwEjcua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRmluaXNoR2l0SHViQXBwU2V0dXBSZXF1ZXN0Gjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRmluaXNoR2l0SHViQXBwU2V0dXBSZXNwb25zZUJbWllnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9jb25uZWN0aW9uL3YxYWxwaGExO2Nvbm5lY3Rpb252MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_outward_v1alpha1_outward]);
 
 /**
  * Scope is a grantable capability of a connector type.
@@ -231,6 +231,14 @@ export type GitHubConnection = Message<"koinon.connection.v1alpha1.GitHubConnect
    * @generated from field: repeated string ci_dirs = 6;
    */
   ciDirs: string[];
+
+  /**
+   * The App has an OAuth client ID (the guided setup stores it with its client
+   * secret), so users can link their GitHub login through it (issue #1175).
+   *
+   * @generated from field: string client_id = 7;
+   */
+  clientId: string;
 };
 
 /**
@@ -1172,6 +1180,405 @@ export const ListInstallationReposResponseSchema: GenMessage<ListInstallationRep
   messageDesc(file_koinon_connection_v1alpha1_connection, 33);
 
 /**
+ * StartGitHubLinkRequest names the GitHub connection whose App signs the user in.
+ *
+ * @generated from message koinon.connection.v1alpha1.StartGitHubLinkRequest
+ */
+export type StartGitHubLinkRequest = Message<"koinon.connection.v1alpha1.StartGitHubLinkRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.StartGitHubLinkRequest.
+ * Use `create(StartGitHubLinkRequestSchema)` to create a new message.
+ */
+export const StartGitHubLinkRequestSchema: GenMessage<StartGitHubLinkRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 34);
+
+/**
+ * StartGitHubLinkResponse holds the GitHub page to send the browser to. The
+ * link expires after ten minutes and works once.
+ *
+ * @generated from message koinon.connection.v1alpha1.StartGitHubLinkResponse
+ */
+export type StartGitHubLinkResponse = Message<"koinon.connection.v1alpha1.StartGitHubLinkResponse"> & {
+  /**
+   * @generated from field: string authorize_url = 1;
+   */
+  authorizeUrl: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.StartGitHubLinkResponse.
+ * Use `create(StartGitHubLinkResponseSchema)` to create a new message.
+ */
+export const StartGitHubLinkResponseSchema: GenMessage<StartGitHubLinkResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 35);
+
+/**
+ * GitHubLink links one Koinon user to one GitHub login on one host.
+ *
+ * @generated from message koinon.connection.v1alpha1.GitHubLink
+ */
+export type GitHubLink = Message<"koinon.connection.v1alpha1.GitHubLink"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * The host's web URL, for example https://github.com.
+   *
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * @generated from field: string github_login = 3;
+   */
+  githubLogin: string;
+
+  /**
+   * @generated from field: int64 github_user_id = 4;
+   */
+  githubUserId: bigint;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 5;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * The user's display name and email; set by ListGitHubLinks only.
+   *
+   * @generated from field: string display_name = 6;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: string email = 7;
+   */
+  email: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.GitHubLink.
+ * Use `create(GitHubLinkSchema)` to create a new message.
+ */
+export const GitHubLinkSchema: GenMessage<GitHubLink> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 36);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.ListMyGitHubLinksRequest
+ */
+export type ListMyGitHubLinksRequest = Message<"koinon.connection.v1alpha1.ListMyGitHubLinksRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListMyGitHubLinksRequest.
+ * Use `create(ListMyGitHubLinksRequestSchema)` to create a new message.
+ */
+export const ListMyGitHubLinksRequestSchema: GenMessage<ListMyGitHubLinksRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 37);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.ListMyGitHubLinksResponse
+ */
+export type ListMyGitHubLinksResponse = Message<"koinon.connection.v1alpha1.ListMyGitHubLinksResponse"> & {
+  /**
+   * @generated from field: repeated koinon.connection.v1alpha1.GitHubLink links = 1;
+   */
+  links: GitHubLink[];
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListMyGitHubLinksResponse.
+ * Use `create(ListMyGitHubLinksResponseSchema)` to create a new message.
+ */
+export const ListMyGitHubLinksResponseSchema: GenMessage<ListMyGitHubLinksResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 38);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.ListGitHubLinksRequest
+ */
+export type ListGitHubLinksRequest = Message<"koinon.connection.v1alpha1.ListGitHubLinksRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListGitHubLinksRequest.
+ * Use `create(ListGitHubLinksRequestSchema)` to create a new message.
+ */
+export const ListGitHubLinksRequestSchema: GenMessage<ListGitHubLinksRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 39);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.ListGitHubLinksResponse
+ */
+export type ListGitHubLinksResponse = Message<"koinon.connection.v1alpha1.ListGitHubLinksResponse"> & {
+  /**
+   * @generated from field: repeated koinon.connection.v1alpha1.GitHubLink links = 1;
+   */
+  links: GitHubLink[];
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListGitHubLinksResponse.
+ * Use `create(ListGitHubLinksResponseSchema)` to create a new message.
+ */
+export const ListGitHubLinksResponseSchema: GenMessage<ListGitHubLinksResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 40);
+
+/**
+ * DeleteGitHubLinkRequest names the link. An empty user_id is the caller.
+ *
+ * @generated from message koinon.connection.v1alpha1.DeleteGitHubLinkRequest
+ */
+export type DeleteGitHubLinkRequest = Message<"koinon.connection.v1alpha1.DeleteGitHubLinkRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string host = 3;
+   */
+  host: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.DeleteGitHubLinkRequest.
+ * Use `create(DeleteGitHubLinkRequestSchema)` to create a new message.
+ */
+export const DeleteGitHubLinkRequestSchema: GenMessage<DeleteGitHubLinkRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 41);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.DeleteGitHubLinkResponse
+ */
+export type DeleteGitHubLinkResponse = Message<"koinon.connection.v1alpha1.DeleteGitHubLinkResponse"> & {
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.DeleteGitHubLinkResponse.
+ * Use `create(DeleteGitHubLinkResponseSchema)` to create a new message.
+ */
+export const DeleteGitHubLinkResponseSchema: GenMessage<DeleteGitHubLinkResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 42);
+
+/**
+ * StartGitHubAppSetupRequest names the connection and where the App lives.
+ *
+ * @generated from message koinon.connection.v1alpha1.StartGitHubAppSetupRequest
+ */
+export type StartGitHubAppSetupRequest = Message<"koinon.connection.v1alpha1.StartGitHubAppSetupRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * The connection's display name; it is also the App's name on GitHub,
+   * which must be unique there.
+   *
+   * @generated from field: string display_name = 2;
+   */
+  displayName: string;
+
+  /**
+   * The GitHub organization that owns the App; empty for the admin's own
+   * account.
+   *
+   * @generated from field: string github_owner = 3;
+   */
+  githubOwner: string;
+
+  /**
+   * A GitHub Enterprise Server base URL; empty for github.com.
+   *
+   * @generated from field: string base_url = 4;
+   */
+  baseUrl: string;
+
+  /**
+   * PEM certificates that trust base_url, when no system root does.
+   *
+   * @generated from field: string ca_bundle = 5;
+   */
+  caBundle: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.StartGitHubAppSetupRequest.
+ * Use `create(StartGitHubAppSetupRequestSchema)` to create a new message.
+ */
+export const StartGitHubAppSetupRequestSchema: GenMessage<StartGitHubAppSetupRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 43);
+
+/**
+ * StartGitHubAppSetupResponse is the form the browser posts to GitHub: to
+ * post_url, with the field "manifest". The setup works once and expires after
+ * one hour.
+ *
+ * @generated from message koinon.connection.v1alpha1.StartGitHubAppSetupResponse
+ */
+export type StartGitHubAppSetupResponse = Message<"koinon.connection.v1alpha1.StartGitHubAppSetupResponse"> & {
+  /**
+   * @generated from field: string post_url = 1;
+   */
+  postUrl: string;
+
+  /**
+   * The App manifest, as JSON text.
+   *
+   * @generated from field: string manifest = 2;
+   */
+  manifest: string;
+
+  /**
+   * The setup's state. GitHub sends it back with each step.
+   *
+   * @generated from field: string state = 3;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.StartGitHubAppSetupResponse.
+ * Use `create(StartGitHubAppSetupResponseSchema)` to create a new message.
+ */
+export const StartGitHubAppSetupResponseSchema: GenMessage<StartGitHubAppSetupResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 44);
+
+/**
+ * ContinueGitHubAppSetupRequest carries what GitHub sent back after it
+ * created the App.
+ *
+ * @generated from message koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest
+ */
+export type ContinueGitHubAppSetupRequest = Message<"koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string state = 2;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string code = 3;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ContinueGitHubAppSetupRequest.
+ * Use `create(ContinueGitHubAppSetupRequestSchema)` to create a new message.
+ */
+export const ContinueGitHubAppSetupRequestSchema: GenMessage<ContinueGitHubAppSetupRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 45);
+
+/**
+ * ContinueGitHubAppSetupResponse holds the GitHub page that installs the App.
+ *
+ * @generated from message koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse
+ */
+export type ContinueGitHubAppSetupResponse = Message<"koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse"> & {
+  /**
+   * @generated from field: string install_url = 1;
+   */
+  installUrl: string;
+
+  /**
+   * @generated from field: string app_slug = 2;
+   */
+  appSlug: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ContinueGitHubAppSetupResponse.
+ * Use `create(ContinueGitHubAppSetupResponseSchema)` to create a new message.
+ */
+export const ContinueGitHubAppSetupResponseSchema: GenMessage<ContinueGitHubAppSetupResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 46);
+
+/**
+ * FinishGitHubAppSetupRequest carries what GitHub sent back after the
+ * install.
+ *
+ * @generated from message koinon.connection.v1alpha1.FinishGitHubAppSetupRequest
+ */
+export type FinishGitHubAppSetupRequest = Message<"koinon.connection.v1alpha1.FinishGitHubAppSetupRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string state = 2;
+   */
+  state: string;
+
+  /**
+   * @generated from field: int64 installation_id = 3;
+   */
+  installationId: bigint;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.FinishGitHubAppSetupRequest.
+ * Use `create(FinishGitHubAppSetupRequestSchema)` to create a new message.
+ */
+export const FinishGitHubAppSetupRequestSchema: GenMessage<FinishGitHubAppSetupRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 47);
+
+/**
+ * FinishGitHubAppSetupResponse is the new connection and its first test.
+ *
+ * @generated from message koinon.connection.v1alpha1.FinishGitHubAppSetupResponse
+ */
+export type FinishGitHubAppSetupResponse = Message<"koinon.connection.v1alpha1.FinishGitHubAppSetupResponse"> & {
+  /**
+   * @generated from field: koinon.connection.v1alpha1.Connection connection = 1;
+   */
+  connection?: Connection | undefined;
+
+  /**
+   * @generated from field: repeated koinon.connection.v1alpha1.CheckResult results = 2;
+   */
+  results: CheckResult[];
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.FinishGitHubAppSetupResponse.
+ * Use `create(FinishGitHubAppSetupResponseSchema)` to create a new message.
+ */
+export const FinishGitHubAppSetupResponseSchema: GenMessage<FinishGitHubAppSetupResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 48);
+
+/**
  * Tier is a scope's risk tier (ADR 0008).
  *
  * @generated from enum koinon.connection.v1alpha1.Tier
@@ -1385,6 +1792,88 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof ListInstallationReposRequestSchema;
     output: typeof ListInstallationReposResponseSchema;
+  },
+  /**
+   * StartGitHubLink starts linking the caller's GitHub login through a GitHub
+   * connection's App (issue #1175). It returns the GitHub page to open; GitHub
+   * sends the browser back to Koinon, which reads the login and revokes the
+   * user token at once. With the link, Koinon asks the requester to review an
+   * agent pull request. Any member.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.StartGitHubLink
+   */
+  startGitHubLink: {
+    methodKind: "unary";
+    input: typeof StartGitHubLinkRequestSchema;
+    output: typeof StartGitHubLinkResponseSchema;
+  },
+  /**
+   * ListMyGitHubLinks returns the caller's GitHub links in the org. Any member.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.ListMyGitHubLinks
+   */
+  listMyGitHubLinks: {
+    methodKind: "unary";
+    input: typeof ListMyGitHubLinksRequestSchema;
+    output: typeof ListMyGitHubLinksResponseSchema;
+  },
+  /**
+   * ListGitHubLinks returns every GitHub link of the org. Admins and owners.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.ListGitHubLinks
+   */
+  listGitHubLinks: {
+    methodKind: "unary";
+    input: typeof ListGitHubLinksRequestSchema;
+    output: typeof ListGitHubLinksResponseSchema;
+  },
+  /**
+   * DeleteGitHubLink removes a GitHub link. A member removes their own link;
+   * admins and owners remove any link of the org. Audited.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.DeleteGitHubLink
+   */
+  deleteGitHubLink: {
+    methodKind: "unary";
+    input: typeof DeleteGitHubLinkRequestSchema;
+    output: typeof DeleteGitHubLinkResponseSchema;
+  },
+  /**
+   * StartGitHubAppSetup starts the guided setup of the org's own GitHub App
+   * (issue #1175): Koinon builds the App's manifest, and the browser posts it
+   * to GitHub, which creates the App. Admin or owner.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.StartGitHubAppSetup
+   */
+  startGitHubAppSetup: {
+    methodKind: "unary";
+    input: typeof StartGitHubAppSetupRequestSchema;
+    output: typeof StartGitHubAppSetupResponseSchema;
+  },
+  /**
+   * ContinueGitHubAppSetup takes the code GitHub sends back after it created
+   * the App. Koinon trades it for the App's private key and OAuth client and
+   * stores them in the secret store. The browser then installs the App. Admin
+   * or owner, the same user who started the setup.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.ContinueGitHubAppSetup
+   */
+  continueGitHubAppSetup: {
+    methodKind: "unary";
+    input: typeof ContinueGitHubAppSetupRequestSchema;
+    output: typeof ContinueGitHubAppSetupResponseSchema;
+  },
+  /**
+   * FinishGitHubAppSetup takes the installation GitHub sends back after the
+   * install and makes the connection. Admin or owner, the same user who
+   * started the setup.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.FinishGitHubAppSetup
+   */
+  finishGitHubAppSetup: {
+    methodKind: "unary";
+    input: typeof FinishGitHubAppSetupRequestSchema;
+    output: typeof FinishGitHubAppSetupResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_connection_v1alpha1_connection, 0);
