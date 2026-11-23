@@ -483,7 +483,7 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
   keeps each package's `/usr/share/doc/<pkg>/copyright` and the GPL source offer covers the base packages.
-- **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
+- **Snapshot freshness.** The snapshot is `20261120T000000Z` (`UBUNTU_SNAPSHOT` in the
   Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
   when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).
   The bump is automated (issue 33): the `ubuntu-snapshot` workflow runs weekly (Monday, and by hand

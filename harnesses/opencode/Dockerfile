@@ -149,7 +149,7 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::E
  && rm -rf /var/lib/apt/lists/*
 
 FROM ${BASE}
-ARG UBUNTU_SNAPSHOT=20261027T000000Z
+ARG UBUNTU_SNAPSHOT=20261120T000000Z
 # Our own labels (#1182). These replace any label of the base image. The release
 # script sets the version, revision and source labels on top (hack/release-harness.sh). The licenses
 # label points to the notices: the image holds Apache-2.0 and MIT code, Ubuntu packages under many
@@ -173,10 +173,10 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       || { echo "package index update from snapshot.ubuntu.com (snapshot ${UBUNTU_SNAPSHOT}) failed after retries: most likely the snapshot mirror is unreachable; otherwise check UBUNTU_SNAPSHOT and the archive keyring" >&2; exit 1; }; } \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 upgrade -y \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
-      ca-certificates=20260816ubuntu0.24.04.1 \
+      ca-certificates=20260816ubuntu0.24.04.2 \
       git=1:2.43.0-1ubuntu7.4 \
       jq=1.7.1-3ubuntu0.24.04.2 \
-      sqlite3=3.45.1-1ubuntu2.8 \
+      sqlite3=3.45.1-1ubuntu2.9 \
       poppler-utils=24.02.0-1ubuntu9.11 \
       file=1:5.45-3build1 \
       tree=2.1.1-2ubuntu3.24.04.2 \
