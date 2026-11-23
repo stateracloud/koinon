@@ -504,7 +504,17 @@ type Tool struct {
 	DescriptionCleaned        bool  `protobuf:"varint,17,opt,name=description_cleaned,json=descriptionCleaned,proto3" json:"description_cleaned,omitempty"`
 	// sink is the tool's declaration for the leak guard (ADR 0091). A tool nobody declared is
 	// external-high with the server's legs.
-	Sink          *ToolSink `protobuf:"bytes,18,opt,name=sink,proto3" json:"sink,omitempty"`
+	Sink *ToolSink `protobuf:"bytes,18,opt,name=sink,proto3" json:"sink,omitempty"`
+	// tool_hash is the hash of the tool text the server published last, as the gateway pins it: every
+	// member the model sees (name, title, description, annotations, input and output schema), sanitised.
+	// An approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty
+	// before the first sync that recorded it.
+	ToolHash string `protobuf:"bytes,19,opt,name=tool_hash,json=toolHash,proto3" json:"tool_hash,omitempty"`
+	// tool_json is that text, as JSON. The console shows it before an admin approves it.
+	ToolJson string `protobuf:"bytes,20,opt,name=tool_json,json=toolJson,proto3" json:"tool_json,omitempty"`
+	// approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When
+	// tool_hash differs, the text is pending: the gateway does not serve it until an admin approves it.
+	ApprovedHash  string `protobuf:"bytes,21,opt,name=approved_hash,json=approvedHash,proto3" json:"approved_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -663,6 +673,27 @@ func (x *Tool) GetSink() *ToolSink {
 		return x.Sink
 	}
 	return nil
+}
+
+func (x *Tool) GetToolHash() string {
+	if x != nil {
+		return x.ToolHash
+	}
+	return ""
+}
+
+func (x *Tool) GetToolJson() string {
+	if x != nil {
+		return x.ToolJson
+	}
+	return ""
+}
+
+func (x *Tool) GetApprovedHash() string {
+	if x != nil {
+		return x.ApprovedHash
+	}
+	return ""
 }
 
 // ToolSink is what a tool declares about its calls (ADR 0091 decision 2).
@@ -1518,11 +1549,15 @@ func (x *ListToolsResponse) GetTools() []*Tool {
 }
 
 type SetToolTierRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	Tool          string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
-	Tier          Tier                   `protobuf:"varint,4,opt,name=tier,proto3,enum=koinon.mcpserver.v1alpha1.Tier" json:"tier,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	OrgId    string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ServerId string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Tool     string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
+	Tier     Tier                   `protobuf:"varint,4,opt,name=tier,proto3,enum=koinon.mcpserver.v1alpha1.Tier" json:"tier,omitempty"`
+	// tool_hash is the Tool.tool_hash the admin reviewed. Setting a tier approves that text. Required
+	// while the tool's text is pending; a hash that is not the stored one is refused (Aborted) and
+	// nothing changes.
+	ToolHash      string `protobuf:"bytes,5,opt,name=tool_hash,json=toolHash,proto3" json:"tool_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1583,6 +1618,13 @@ func (x *SetToolTierRequest) GetTier() Tier {
 		return x.Tier
 	}
 	return Tier_TIER_UNSPECIFIED
+}
+
+func (x *SetToolTierRequest) GetToolHash() string {
+	if x != nil {
+		return x.ToolHash
+	}
+	return ""
 }
 
 type SetToolSinkRequest struct {
@@ -1751,10 +1793,12 @@ func (x *SetToolTierResponse) GetTool() *Tool {
 }
 
 type AcknowledgeToolReviewRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	Tool          string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	OrgId    string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ServerId string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Tool     string                 `protobuf:"bytes,3,opt,name=tool,proto3" json:"tool,omitempty"`
+	// tool_hash is as for SetToolTierRequest.tool_hash.
+	ToolHash      string `protobuf:"bytes,4,opt,name=tool_hash,json=toolHash,proto3" json:"tool_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1806,6 +1850,13 @@ func (x *AcknowledgeToolReviewRequest) GetServerId() string {
 func (x *AcknowledgeToolReviewRequest) GetTool() string {
 	if x != nil {
 		return x.Tool
+	}
+	return ""
+}
+
+func (x *AcknowledgeToolReviewRequest) GetToolHash() string {
+	if x != nil {
+		return x.ToolHash
 	}
 	return ""
 }
@@ -2206,7 +2257,7 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1d\n" +
 	"\n" +
 	"data_class\x18\x02 \x03(\tR\tdataClass\x125\n" +
-	"\x17code_host_connection_id\x18\x03 \x01(\tR\x14codeHostConnectionId\"\xa1\x06\n" +
+	"\x17code_host_connection_id\x18\x03 \x01(\tR\x14codeHostConnectionId\"\x80\a\n" +
 	"\x04Tool\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -2227,7 +2278,10 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x1bdescription_original_length\x18\x0f \x01(\x03R\x19descriptionOriginalLength\x12-\n" +
 	"\x12description_capped\x18\x10 \x01(\bR\x11descriptionCapped\x12/\n" +
 	"\x13description_cleaned\x18\x11 \x01(\bR\x12descriptionCleaned\x127\n" +
-	"\x04sink\x18\x12 \x01(\v2#.koinon.mcpserver.v1alpha1.ToolSinkR\x04sink\"\x8f\x02\n" +
+	"\x04sink\x18\x12 \x01(\v2#.koinon.mcpserver.v1alpha1.ToolSinkR\x04sink\x12\x1b\n" +
+	"\ttool_hash\x18\x13 \x01(\tR\btoolHash\x12\x1b\n" +
+	"\ttool_json\x18\x14 \x01(\tR\btoolJson\x12#\n" +
+	"\rapproved_hash\x18\x15 \x01(\tR\fapprovedHash\"\x8f\x02\n" +
 	"\bToolSink\x12\x1d\n" +
 	"\n" +
 	"sink_class\x18\x01 \x01(\tR\tsinkClass\x12\x1e\n" +
@@ -2297,12 +2351,13 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\"J\n" +
 	"\x11ListToolsResponse\x125\n" +
-	"\x05tools\x18\x01 \x03(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x05tools\"\x91\x01\n" +
+	"\x05tools\x18\x01 \x03(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x05tools\"\xae\x01\n" +
 	"\x12SetToolTierRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04tool\x18\x03 \x01(\tR\x04tool\x123\n" +
-	"\x04tier\x18\x04 \x01(\x0e2\x1f.koinon.mcpserver.v1alpha1.TierR\x04tier\"\xb8\x01\n" +
+	"\x04tier\x18\x04 \x01(\x0e2\x1f.koinon.mcpserver.v1alpha1.TierR\x04tier\x12\x1b\n" +
+	"\ttool_hash\x18\x05 \x01(\tR\btoolHash\"\xb8\x01\n" +
 	"\x12SetToolSinkRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
@@ -2312,11 +2367,12 @@ const file_koinon_mcpserver_v1alpha1_mcpserver_proto_rawDesc = "" +
 	"\x13SetToolSinkResponse\x123\n" +
 	"\x04tool\x18\x01 \x01(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x04tool\"J\n" +
 	"\x13SetToolTierResponse\x123\n" +
-	"\x04tool\x18\x01 \x01(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x04tool\"f\n" +
+	"\x04tool\x18\x01 \x01(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x04tool\"\x83\x01\n" +
 	"\x1cAcknowledgeToolReviewRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x12\n" +
-	"\x04tool\x18\x03 \x01(\tR\x04tool\"T\n" +
+	"\x04tool\x18\x03 \x01(\tR\x04tool\x12\x1b\n" +
+	"\ttool_hash\x18\x04 \x01(\tR\btoolHash\"T\n" +
 	"\x1dAcknowledgeToolReviewResponse\x123\n" +
 	"\x04tool\x18\x01 \x01(\v2\x1f.koinon.mcpserver.v1alpha1.ToolR\x04tool\"J\n" +
 	"\x16GetAgentServersRequest\x12\x15\n" +

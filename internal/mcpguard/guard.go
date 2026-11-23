@@ -107,6 +107,8 @@ type Guard struct {
 	feedPolled func()
 	// unseenAfter: see Options.UnseenAfter.
 	unseenAfter time.Duration
+	// wake rate-limits the prober wakes of CheckToolList (#1173).
+	wake probeWaker
 }
 
 // New returns a Guard on pool.
@@ -133,6 +135,7 @@ func New(pool *pgxpool.Pool, o Options) *Guard {
 		pool: pool, q: store.New(pool), state: NewState(pool, o.MaxFingerprints, o.Metrics), log: o.Logger, metrics: o.Metrics,
 		now: o.Now, cap: o.ByteCap, limits: o.Limits, decider: o.Decider, person: PersonDecider{Approve: o.Approve}, own: slices.Clone(o.OwnTargets),
 		url: leakguard.DefaultURLPolicy(), feedWait: o.FeedWait, unseenAfter: o.UnseenAfter,
+		wake: probeWaker{now: o.Now},
 	}
 }
 

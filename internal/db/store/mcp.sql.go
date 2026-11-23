@@ -1293,6 +1293,22 @@ func (q *Queries) MarkMCPToolsAbsent(ctx context.Context, arg MarkMCPToolsAbsent
 	return err
 }
 
+const notifyMCPProbe = `-- name: NotifyMCPProbe :exec
+SELECT pg_notify($1::text, $2::text)
+`
+
+type NotifyMCPProbeParams struct {
+	Channel string
+	Payload string
+}
+
+// The gateway asks the prober to sync one server now (#1173). The channel is
+// mcpservers.ProbeWakeChannel and the payload mcpservers.ProbeWakePayload: IDs only, no tool text.
+func (q *Queries) NotifyMCPProbe(ctx context.Context, arg NotifyMCPProbeParams) error {
+	_, err := q.db.Exec(ctx, notifyMCPProbe, arg.Channel, arg.Payload)
+	return err
+}
+
 const recordMCPServerProbe = `-- name: RecordMCPServerProbe :one
 UPDATE mcp_servers
 SET consecutive_failures = CASE WHEN $1::boolean THEN 0 ELSE consecutive_failures + 1 END,

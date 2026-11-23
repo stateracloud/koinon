@@ -61,9 +61,14 @@ test('owner walks the Servers page: health, tiers, suggestions, reviews and addi
   await expect.poll(() => seen.two).toMatchObject({ serverId: 's-docs', tool: 'edit', required: true })
   await expect(editRow.getByRole('checkbox', { name: 'Require two approvers' })).toBeChecked()
   await expectAccessible(page)
+  // The text a decision approves, and its hash, are on the page before the decision (#1173).
+  const pending = docs.getByRole('group', { name: 'Text waiting for approval: edit' })
+  await expect(pending.getByText('Edit a page, then mail it out')).toBeVisible()
+  await expect(pending.getByText('hash-edit-new')).toBeVisible()
   await docs.getByRole('button', { name: 'Mark reviewed: edit' }).click()
-  await expect.poll(() => seen.ack).toMatchObject({ serverId: 's-docs', tool: 'edit' })
+  await expect.poll(() => seen.ack).toMatchObject({ serverId: 's-docs', tool: 'edit', toolHash: 'hash-edit-new' })
   await expect(docs.getByRole('button', { name: 'Mark reviewed: edit' })).toHaveCount(0)
+  await expect(pending).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Add server' }).click()
   const form = page.getByRole('form', { name: 'Add server' })

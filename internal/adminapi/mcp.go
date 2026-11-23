@@ -4,6 +4,7 @@ package adminapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -76,6 +77,18 @@ func toMcpTool(t mcpservers.Tool) McpTool {
 	}
 	if t.TierSetBy != "" {
 		out.TierSetBy = &t.TierSetBy
+	}
+	if t.ToolHash != "" {
+		out.ToolHash = &t.ToolHash
+	}
+	if t.ApprovedHash != "" {
+		out.ApprovedHash = &t.ApprovedHash
+	}
+	if len(t.ToolJSON) > 0 {
+		var m map[string]any
+		if json.Unmarshal(t.ToolJSON, &m) == nil {
+			out.ToolJson = &m
+		}
 	}
 	return out
 }
@@ -218,7 +231,7 @@ func (s *Server) SetMcpToolTier(ctx context.Context, req SetMcpToolTierRequestOb
 		return SetMcpToolTierdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	p, actor := s.actor(ctx)
-	got, err := s.mcp.SetTier(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, string(req.Body.Tier))
+	got, err := s.mcp.SetTier(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, string(req.Body.Tier), deref(req.Body.ToolHash))
 	if err != nil {
 		st, e := s.problem(err)
 		return SetMcpToolTierdefaultJSONResponse{Body: e, StatusCode: st}, nil
@@ -267,7 +280,11 @@ func (s *Server) AcknowledgeMcpToolReview(ctx context.Context, req AcknowledgeMc
 		return AcknowledgeMcpToolReviewdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	p, actor := s.actor(ctx)
-	got, err := s.mcp.AcknowledgeReview(ctx, p.Org, actor, uid(req.ServerId), req.ToolName)
+	var hash string
+	if req.Body != nil {
+		hash = deref(req.Body.ToolHash)
+	}
+	got, err := s.mcp.AcknowledgeReview(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, hash)
 	if err != nil {
 		st, e := s.problem(err)
 		return AcknowledgeMcpToolReviewdefaultJSONResponse{Body: e, StatusCode: st}, nil

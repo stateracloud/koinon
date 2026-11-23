@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
@@ -138,9 +139,9 @@ var _ = Describe("the ask-tier proxy", func() {
 			{Name: "drop_table", Description: "Drop"},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "search", "auto")
+		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "search", "auto", mcpserverstest.PinOf(ctx, svc, org, server.ID, "search"))
 		Expect(err).NotTo(HaveOccurred())
-		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "drop_table", "never")
+		_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "drop_table", "never", mcpserverstest.PinOf(ctx, svc, org, server.ID, "drop_table"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(q.InsertAgentMCPServer(ctx, store.InsertAgentMCPServerParams{OrgID: org, AgentID: agent.ID, ServerID: sid})).To(Succeed())
 
@@ -300,7 +301,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		sid := uuidOf(server.ID)
 		change := map[string]func(ctx SpecContext){
 			"never tier": func(ctx SpecContext) {
-				_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "never")
+				_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "never", mcpserverstest.PinOf(ctx, svc, org, server.ID, "create_issue"))
 				Expect(err).NotTo(HaveOccurred())
 			},
 			"changed description": func(ctx SpecContext) {
@@ -328,12 +329,12 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.Status).To(Equal(store.ApprovalStatusFailed), name)
 			// Put the world back for the next case.
-			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask")
+			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask", mcpserverstest.PinOf(ctx, svc, org, server.ID, "create_issue"))
 			_ = q.InsertAgentMCPServer(ctx, store.InsertAgentMCPServerParams{OrgID: org, AgentID: agent.ID, ServerID: sid})
 			u := "https://mcp.example.com/mcp"
 			_, _ = svc.Update(ctx, org, audit.System("koinon-test:spec"), server.ID, mcpservers.Patch{URL: &u})
 			_, _ = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{{Name: "create_issue", Description: "Create an issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)}})
-			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask")
+			_, _ = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask", mcpserverstest.PinOf(ctx, svc, org, server.ID, "create_issue"))
 		}
 		Expect(gw.count()).To(BeZero())
 	})
@@ -342,7 +343,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		// The gateway opens the executor's key to the auto tier too, for the leak guard's cards (ADR
 		// 0091), so the call reaches the server; only the never tier stops an approved call.
 		row := request(ctx, map[string]any{"title": "b"})
-		_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "auto")
+		_, err := svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "auto", mcpserverstest.PinOf(ctx, svc, org, server.ID, "create_issue"))
 		Expect(err).NotTo(HaveOccurred())
 		got, err := exec().Approve(ctx, org, row.ID, user, row.ArgsSha256, "")
 		Expect(err).NotTo(HaveOccurred())
@@ -437,7 +438,7 @@ var _ = Describe("the ask-tier proxy", func() {
 
 			_, err := svc.SyncTools(ctx, org, sid(), []mcpservers.ListedTool{{Name: "create_issue", Description: "Create an issue. Now also deletes things.", InputSchema: json.RawMessage(`{"type":"object"}`)}})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask") // an admin put it back to ask without reviewing
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), server.ID, "create_issue", "ask", mcpserverstest.PinOf(ctx, svc, org, server.ID, "create_issue")) // an admin put it back to ask without reviewing
 			Expect(err).NotTo(HaveOccurred())
 			Expect(request(ctx, map[string]any{"title": "after change"}).Status).To(Equal(store.ApprovalStatusPending))
 

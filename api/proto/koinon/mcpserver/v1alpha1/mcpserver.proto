@@ -178,6 +178,16 @@ message Tool {
   // sink is the tool's declaration for the leak guard (ADR 0091). A tool nobody declared is
   // external-high with the server's legs.
   ToolSink sink = 18;
+  // tool_hash is the hash of the tool text the server published last, as the gateway pins it: every
+  // member the model sees (name, title, description, annotations, input and output schema), sanitised.
+  // An approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty
+  // before the first sync that recorded it.
+  string tool_hash = 19;
+  // tool_json is that text, as JSON. The console shows it before an admin approves it.
+  string tool_json = 20;
+  // approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When
+  // tool_hash differs, the text is pending: the gateway does not serve it until an admin approves it.
+  string approved_hash = 21;
 }
 
 // ToolSink is what a tool declares about its calls (ADR 0091 decision 2).
@@ -294,6 +304,10 @@ message SetToolTierRequest {
   string server_id = 2;
   string tool = 3;
   Tier tier = 4;
+  // tool_hash is the Tool.tool_hash the admin reviewed. Setting a tier approves that text. Required
+  // while the tool's text is pending; a hash that is not the stored one is refused (Aborted) and
+  // nothing changes.
+  string tool_hash = 5;
 }
 
 message SetToolSinkRequest {
@@ -317,6 +331,8 @@ message AcknowledgeToolReviewRequest {
   string org_id = 1;
   string server_id = 2;
   string tool = 3;
+  // tool_hash is as for SetToolTierRequest.tool_hash.
+  string tool_hash = 4;
 }
 
 message AcknowledgeToolReviewResponse {

@@ -10485,6 +10485,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "tool_hash",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_hash is as for SetToolTierRequest.tool_hash."
             }
           ]
         },
@@ -11312,6 +11321,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "tool_hash",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_hash is the Tool.tool_hash the admin reviewed. Setting a tier approves that text. Required\nwhile the tool's text is pending; a hash that is not the stored one is refused (Aborted) and\nnothing changes."
             }
           ]
         },
@@ -11564,6 +11582,33 @@
               "oneof": "",
               "deprecated": false,
               "description": "sink is the tool's declaration for the leak guard (ADR 0091). A tool nobody declared is\nexternal-high with the server's legs."
+            },
+            {
+              "name": "tool_hash",
+              "number": 19,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_hash is the hash of the tool text the server published last, as the gateway pins it: every\nmember the model sees (name, title, description, annotations, input and output schema), sanitised.\nAn approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty\nbefore the first sync that recorded it."
+            },
+            {
+              "name": "tool_json",
+              "number": 20,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_json is that text, as JSON. The console shows it before an admin approves it."
+            },
+            {
+              "name": "approved_hash",
+              "number": 21,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When\ntool_hash differs, the text is pending: the gateway does not serve it until an admin approves it."
             }
           ]
         },
