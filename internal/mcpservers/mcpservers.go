@@ -500,7 +500,7 @@ const MinCredentialBytes = scrub.MinSecretLen
 
 // ReasonCredentialTooShort is the [InvalidError] reason of a credential value shorter than
 // [MinCredentialBytes].
-const ReasonCredentialTooShort = "CREDENTIAL_TOO_SHORT"
+const ReasonCredentialTooShort = "CREDENTIAL_TOO_SHORT" //nolint:gosec // G101: an error reason name, not a credential
 
 // ValidateCredentialValue refuses a credential value shorter than [MinCredentialBytes]. An empty value is
 // not checked: it means no credential, and the caller decides if that is allowed. The value is never part
