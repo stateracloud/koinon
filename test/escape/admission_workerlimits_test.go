@@ -268,6 +268,9 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 			denied(err, user+" relabels the ResourceQuota")
 			denied(as[user].CoreV1().LimitRanges(ns).Delete(ctx, lr.Name, metav1.DeleteOptions{DryRun: dry}), user+" deletes the LimitRange")
 			denied(as[user].CoreV1().ResourceQuotas(ns).Delete(ctx, rq.Name, metav1.DeleteOptions{DryRun: dry}), user+" deletes the ResourceQuota")
+			// A collection delete is admitted item by item, as a DELETE of each object.
+			denied(as[user].CoreV1().ResourceQuotas(ns).DeleteCollection(ctx, metav1.DeleteOptions{DryRun: dry}, metav1.ListOptions{}), user+" deletes all ResourceQuotas")
+			denied(as[user].CoreV1().LimitRanges(ns).DeleteCollection(ctx, metav1.DeleteOptions{DryRun: dry}, metav1.ListOptions{}), user+" deletes all LimitRanges")
 		}
 
 		// Kubernetes' own controllers delete the objects with the namespace and may change metadata, never the spec.
@@ -286,7 +289,12 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 			denied(err, user+" raises the ResourceQuota")
 			_, err = as[user].CoreV1().ResourceQuotas(ns).Create(ctx, newRQ(), metav1.CreateOptions{DryRun: dry})
 			denied(err, user+" creates a ResourceQuota")
+			_, err = as[user].CoreV1().LimitRanges(ns).Create(ctx, newLR(), metav1.CreateOptions{DryRun: dry})
+			denied(err, user+" creates a LimitRange")
 		}
+		// The namespace controller empties a namespace with a collection delete.
+		Expect(as[nsController].CoreV1().ResourceQuotas(ns).DeleteCollection(ctx, metav1.DeleteOptions{DryRun: dry}, metav1.ListOptions{})).To(Succeed())
+		Expect(as[nsController].CoreV1().LimitRanges(ns).DeleteCollection(ctx, metav1.DeleteOptions{DryRun: dry}, metav1.ListOptions{})).To(Succeed())
 
 		// The quota status is a subresource: the quota controller still counts pods.
 		q := rq.DeepCopy()

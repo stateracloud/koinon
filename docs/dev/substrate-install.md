@@ -461,7 +461,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   counts the old pod during a rollout, so keep room for the replicas plus the surge. To remove a key, set it to
   `null`: an empty map keeps the defaults.
 - A native ValidatingAdmissionPolicy (`<namespace>-<fullname>-worker-limits`) guards every LimitRange and
-  ResourceQuota write in the worker namespace when `workerPolicy` is on. Only the installer identities
+  ResourceQuota write in the worker namespace when `workerPolicy` and `workerLimits` are on. Only the installer identities
   (`workerPolicy.installerIdentities` or `installerGroups`) create, change or delete them. The Substrate controller
   writes none. Kubernetes' own controllers may delete them and change their metadata, not their spec. The quota
   controller writes only the quota status, which the rule does not match. If a GitOps tool applies the chart, add its

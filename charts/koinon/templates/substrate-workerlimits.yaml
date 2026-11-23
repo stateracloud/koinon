@@ -5,7 +5,6 @@ Resource limits of the Substrate worker namespace (execution.substrate.workerNam
   workerLimits.limitRange, so no worker pod is BestEffort.
 - A ResourceQuota caps the pod count, CPU and memory of the whole namespace
   (workerLimits.quota.hard). A pod that goes over it is refused at admission.
-The chart owns the namespace (substrate-workernamespace.yaml), so the chart owns these objects.
 - A native ValidatingAdmissionPolicy (NEVER Kyverno) guards every LimitRange and ResourceQuota write in
   the worker namespace, when workerPolicy is on. Without it, any identity that can delete the quota
   there removes the cap. Only the installer (workerPolicy.installerIdentities or installerGroups) writes
@@ -13,6 +12,7 @@ The chart owns the namespace (substrate-workernamespace.yaml), so the chart owns
   their metadata, never their spec. The Substrate controller writes none. The quota controller writes
   only the status subresource, which the rule does not match. Same pattern as the NetworkPolicy guard
   of issue 1158 (substrate-policy.yaml).
+The chart owns the namespace (substrate-workernamespace.yaml), so the chart owns these objects.
 Cluster-scoped objects: the guard policy and its binding. Native Kubernetes objects only, no CNI or CRD feature.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerLimits.enabled }}
