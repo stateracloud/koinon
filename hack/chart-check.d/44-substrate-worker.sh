@@ -256,7 +256,9 @@ for c in 198.51.100.0/24 203.0.113.7/32 8.8.0.0/16 10.0.0.0/8 172.16.0.0/12 fd00
 done
 # The matchExpressions selector must reach the image-source policy itself, not only some document of the render.
 mxdoc=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-image-source\n' <<<"$(render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].key=app' --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].operator=Exists' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000 "${np[@]}")")
-grep -Eq '^ *podSelector:$' <<<"$mxdoc" && grep -Fq 'matchExpressions:' <<<"$mxdoc" && grep -Fq 'key: app' <<<"$mxdoc" && grep -Fq 'operator: Exists' <<<"$mxdoc" || fail "a matchExpressions pod selector must be the image source of the image-source policy"
+# The policy's own spec.podSelector also has matchExpressions, so read only the peer under "- podSelector:".
+mxpeer=$(grep -A4 -E '^ *- podSelector:$' <<<"$mxdoc")
+grep -Fq 'matchExpressions:' <<<"$mxpeer" && grep -Fq 'key: app' <<<"$mxpeer" && grep -Fq 'operator: Exists' <<<"$mxpeer" || fail "a matchExpressions pod selector must be the image source of the image-source policy"
 grep -Fq '{port: 5000, protocol: TCP}' <<<"$mxdoc" || fail "the matchExpressions image source must use the configured port"
 if grep -Fq 'ipBlock' <<<"$mxdoc"; then fail "a matchExpressions image source must not open a CIDR"; fi
 grep -Fq 'one image source' "$out/img.err" || fail "the two-sources error must say that there is one image source"

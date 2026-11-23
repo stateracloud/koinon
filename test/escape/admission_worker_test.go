@@ -523,8 +523,10 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 	// namespaces, from the installer's identity: a bare pod there has no controller owner.
 	It("still denies Koinon's probe pods in the control-plane and the worker namespace (issue 1176)", func(ctx SpecContext) {
 		for _, ns := range []string{controlNamespace, workerNamespace} {
-			prober := preflight.KubeSubstrateProber{Namespace: ns, NamePrefix: "koinon-preflight", Image: otherDigest,
-				Labels: map[string]string{"app.kubernetes.io/part-of": "koinon"}}
+			prober := preflight.KubeSubstrateProber{
+				Namespace: ns, NamePrefix: "koinon-preflight", Image: otherDigest,
+				Labels: map[string]string{"app.kubernetes.io/part-of": "koinon"},
+			}
 			for _, pod := range []*corev1.Pod{prober.IssuerPod("https://kubernetes.default.svc"), prober.DevicesPod(), prober.UserNamespacesPod("node-a")} {
 				denied(create(ctx, "admin", ns, pod))
 			}
