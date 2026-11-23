@@ -20,6 +20,9 @@ accepted = [
     "0BSD",
     "Zlib",
     "CC0-1.0",
+    "Unicode-3.0",
+    "MIT-0",
+    "MPL-2.0",
 ]
 
 # ignore-build-dependencies/ignore-dev-dependencies default to false in cargo-about; left at the

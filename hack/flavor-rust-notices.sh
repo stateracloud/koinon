@@ -9,8 +9,8 @@
 #
 # Usage: hack/flavor-rust-notices.sh
 #
-# What it does, for each (repo, tag) pair below:
-#   1. Fetches the tagged source tree (github.com/<repo>/archive/refs/tags/<tag>.tar.gz).
+# What it does, for each (crate, version) pair below:
+#   1. Fetches the published crate (static.crates.io/crates/<crate>/<crate>-<version>.crate).
 #   2. Runs `cargo about generate --fail -c about.toml -m <crate>/Cargo.toml about.hbs`
 #      against the tool's own Cargo.lock (never regenerated: --locked), so the notice matches the
 #      exact dependency versions the release binary was built from.
@@ -24,7 +24,7 @@
 # executes the cargo-about binary. Run it on a machine that allows both, commit the result; the
 # Dockerfile already copies it. See harnesses/opencode/README.md, "Rust tool dependency notices".
 #
-# Re-pinning a tool: update its (repo, tag, version) below and in the Dockerfile together, rerun
+# Re-pinning a tool: update its (crate, version) below and in the Dockerfile together, rerun
 # this script, and commit the new THIRD_PARTY_NOTICES.md alongside the Dockerfile change.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -39,13 +39,14 @@ cd "$(dirname "$0")/.."
 harness_dir=harnesses/opencode
 out=$harness_dir/doc/THIRD_PARTY_NOTICES.md
 
-# repo, tag, the version string the Dockerfile's build-time check expects to find, and the path
-# to the crate's Cargo.toml inside the extracted archive (the archive's top directory is
-# "<repo-basename>-<tag-without-leading-v>", GitHub's own naming for a tag archive).
+# crates.io crate, its version, the tool name and version string for the notice header, and the
+# path to the crate's Cargo.toml inside the extracted .crate. The published crate of a release
+# carries the Cargo.lock the release was built from, and crates.io serves it without GitHub's
+# archive endpoint (which some networks block). The .crate top directory is "<crate>-<version>".
 tools=(
-	"BurntSushi/ripgrep 15.2.0 ripgrep 15.2.0 ."
-	"sharkdp/fd v10.5.0 fd 10.5.0 ."
-	"ast-grep/ast-grep 0.51.0 ast-grep 0.51.0 crates/cli"
+	"ripgrep 15.2.0 ripgrep 15.2.0 ."
+	"fd-find 10.5.0 fd 10.5.0 ."
+	"ast-grep 0.51.0 ast-grep 0.51.0 ."
 )
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/flavor-rust-notices.XXXXXX")
@@ -81,15 +82,13 @@ tmp=$work/THIRD_PARTY_NOTICES.md
 } >>"$tmp"
 
 for entry in "${tools[@]}"; do
-	read -r repo tag name version subdir <<<"$entry"
+	read -r crate crate_version name version subdir <<<"$entry"
 	src=$work/$name
 	archive=$work/$name.tar.gz
-	# GitHub's tag archive, not a shallow clone: no git needed, and the tarball is content-addressed
-	# by the tag, so this stays reproducible for a given (repo, tag).
-	curl -fsSL --retry 5 --retry-all-errors -o "$archive" "https://github.com/$repo/archive/refs/tags/$tag.tar.gz"
+	curl -fsSL --retry 5 --retry-all-errors -o "$archive" "https://static.crates.io/crates/$crate/$crate-$crate_version.crate"
 	mkdir -p "$src"
 	tar -xzf "$archive" -C "$src" --strip-components=1
-	echo "flavor-rust-notices: generating notices for $name $version ($repo@$tag)"
+	echo "flavor-rust-notices: generating notices for $name $version (crates.io $crate $crate_version)"
 	{
 		echo
 		echo "## $name $version"
