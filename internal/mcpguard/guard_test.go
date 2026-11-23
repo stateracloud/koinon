@@ -1088,7 +1088,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				Expect(woke).To(BeFalse(), "the console already shows the text; a probe adds nothing")
 			})
 
-			It("wakes the prober for a tool the sync never recorded, and serves it only as unreviewed text", func(ctx SpecContext) {
+			It("wakes the prober for a tool the sync never recorded, and serves it with only the untrusted-input leg", func(ctx SpecContext) {
 				next := listen(ctx)
 				v := check(ctx, "web", mcptoolpin.Published{Name: "brand_new", Description: "new"})
 				Expect(names(v.Serve)).To(ConsistOf("brand_new"))
@@ -1110,6 +1110,18 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 				Expect(names(v.Serve)).To(ConsistOf("brand_new"))
 				_, woke := next(racescale.D(500 * time.Millisecond))
 				Expect(woke).To(BeFalse(), "the console already shows the text")
+			})
+
+			It("wakes the prober for an unreviewed tool whose text moved since the sync recorded it", func(ctx SpecContext) {
+				_, err := svc.SyncTools(ctx, org, uuidOf(web.ID), []mcpservers.ListedTool{
+					{Name: "search_web", Description: "search_web"}, {Name: "brand_new", Description: "new"},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				next := listen(ctx)
+				v := check(ctx, "web", mcptoolpin.Published{Name: "brand_new", Description: "new, version 2"})
+				Expect(names(v.Serve)).To(ConsistOf("brand_new"))
+				_, woke := next(racescale.D(5 * time.Second))
+				Expect(woke).To(BeTrue(), "the console shows old text; the new text must reach review")
 			})
 		})
 
