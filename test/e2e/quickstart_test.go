@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1128,11 +1127,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
-		broken := regexp.MustCompile(`(?m)^(\s+image: ).*/sandbox[:@].*$`).ReplaceAllString(cfgYAML, "${1}localhost:5001/koinon-escape/agent:nope")
+		broken := breakHarnessImage(cfgYAML)
 		Expect(broken).NotTo(Equal(cfgYAML), "the harness image line")
-		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
+		patch, err := configMapPatch(broken)
 		Expect(err).NotTo(HaveOccurred())
-		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
+		// The config is cluster-wide and the stories pass runs on this install afterwards (issue 1190: S3
+		// pulled the broken image). Put the config and the wait cap back when the spec ends, pass or fail.
+		DeferCleanup(restoreHarnessConfig(kc, cfgYAML))
+		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", patch)
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
 		// 2 minutes, the value with evidence. The cap counts from the run's first claim
 		// (internal/agentd/sandbox.go) and the cause is named from the last pod reason the observer read.

@@ -164,5 +164,17 @@ out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $head" "quickstart failure: the baseline is the newest green run"
 nocheck "$(cat "$fx/calls")" "stories=true" "quickstart failure: no stories input"
 
+# The text says which part is red (issue 1190): an advisory story red must not say "main is red".
+out=$(STORIES_RED=1 b --green "$green" --head HEAD --results "${chart2:0:7}=fail")
+check "$out" "The story suite is red (advisory), quickstart green on main at" "stories-red: the issue body names the advisory suite"
+nocheck "$out" "The kind e2e failed" "stories-red: the issue body does not say the kind e2e failed"
+out=$(STORIES_RED=1 b --green "$green" --head HEAD --open-issue 7)
+check "$out" "Story suite red (advisory), quickstart green, again at" "stories-red: the comment on an open issue names the advisory suite"
+nocheck "$out" "main is red" "stories-red: the comment does not say main is red"
+out=$(b --green "$green" --head HEAD --results "${chart2:0:7}=fail")
+check "$out" "The kind e2e failed on main at" "quickstart red: the issue body keeps the old text"
+out=$(b --green "$green" --head HEAD --open-issue 7)
+check "$out" "main is red again at" "quickstart red: the comment keeps the old text"
+
 [[ $fail -eq 0 ]] && echo "e2e-bisect tests passed"
 exit "$fail"

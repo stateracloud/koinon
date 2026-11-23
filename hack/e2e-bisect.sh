@@ -38,6 +38,15 @@ CANDIDATE_TIMEOUT=${CANDIDATE_TIMEOUT:-5100} # 85 min
 # STORIES_RED=1 (the bisect job sets it when the story suite was red and the quickstart passed): the baseline is
 # the newest nightly whose stories passed, and the candidates run with stories=true.
 STORIES_RED=${STORIES_RED:-0}
+# What is red. With STORIES_RED=1 only the advisory story suite failed and the quickstart passed: say so, because
+# "main is red" would be false (issue 1190).
+if [[ $STORIES_RED == 1 ]]; then
+  red_again="Story suite red (advisory), quickstart green, again"
+  red_head="The story suite is red (advisory), quickstart green"
+else
+  red_again="main is red again"
+  red_head="The kind e2e failed"
+fi
 dry=0 green="" head=HEAD results="" prev="" open_issue=""
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -89,7 +98,7 @@ if [[ $prev == failure ]]; then
   exit 0
 fi
 if [[ -n $open_issue ]]; then
-  msg="main is red again at ${head:0:12}${GITHUB_RUN_URL:+ ([run]($GITHUB_RUN_URL))}. Not bisecting again while this issue is open."
+  msg="$red_again at ${head:0:12}${GITHUB_RUN_URL:+ ([run]($GITHUB_RUN_URL))}. Not bisecting again while this issue is open."
   if [[ $dry == 1 ]]; then echo "would comment on #$open_issue: $msg"; else "$GH" issue comment "$open_issue" --body "$msg"; fi
   exit 0
 fi
@@ -142,7 +151,7 @@ run_link=""
 
 # render <status paragraph>: the issue body.
 render() {
-  local b="The kind e2e failed on main at ${head:0:12}${run_link}."$'\n\n'"$1"$'\n\n'
+  local b="$red_head on main at ${head:0:12}${run_link}."$'\n\n'"$1"$'\n\n'
   if ((${#candidates[@]} > 0)); then
     b+="Candidates tested (oldest first):"$'\n'"$(list "${candidates[@]}")"$'\n\n'
   fi
