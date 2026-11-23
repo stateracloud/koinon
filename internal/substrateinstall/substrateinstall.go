@@ -208,7 +208,7 @@ type Installer struct {
 	Context    string
 	Profile    Profile
 	Out        io.Writer
-	// PollInterval and WaitTimeout bound the wait for the CRDs (defaults 2s and 2m).
+	// PollInterval and WaitTimeout bound the wait for the CRDs and for the probe namespace (defaults 2s and 2m).
 	PollInterval time.Duration
 	WaitTimeout  time.Duration
 	// GVisorStore and GVisorFetcher are for the tests. Nil means the cluster object store reached through a
@@ -431,6 +431,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	sub := i.Checker.Config.SubstrateOrDefault()
 	sub.ExpectedIssuer = i.Profile.ExpectedJWTIssuer
 	i.Checker.Config.Substrate = &sub
+	if err := sub.CheckProbeNamespace(); err != nil {
+		return err
+	}
 	if i.Kubeconfig == "" || i.Context == "" {
 		return errors.New("the installer needs a kubeconfig and a context: it does not act on the ambient current context")
 	}
@@ -503,21 +506,30 @@ func (i *Installer) Install(ctx context.Context) error {
 		sub.ExpectedIssuer = issuer
 		i.Checker.Config.Substrate = &sub
 	}
-	created, err := i.EnsureNamespace(ctx)
+	// The probe pods run in a namespace of their own, never in Substrate's (issue #1176): Substrate's admission
+	// policies refuse a bare pod there, also on a second run after an install. The final check below probes too, so
+	// a probe namespace that this run created stays until Install returns.
+	probeNS := i.probeNamespace()
+	probeCreated, err := probeNS.Ensure(ctx)
 	if err != nil {
 		return err
 	}
-	if err := i.WaitNamespaceReady(ctx); err != nil {
-		if created {
-			i.removeNamespace(ctx)
-		}
+	if probeCreated {
+		defer func() {
+			if err := probeNS.Remove(ctx); err != nil {
+				_, _ = fmt.Fprintln(i.Out, err)
+			}
+		}()
+	}
+	if err := probeNS.WaitReady(ctx); err != nil {
 		return err
 	}
 	if failed := preflight.Write(i.Out, i.Checker.SubstrateProbePrerequisites(ctx)); failed > 0 {
-		if created {
-			i.removeNamespace(ctx)
-		}
 		return fmt.Errorf("%w: %d checks; nothing was installed", ErrPrerequisites, failed)
+	}
+	created, err := i.EnsureNamespace(ctx)
+	if err != nil {
+		return err
 	}
 	if platform == PlatformGeneric {
 		if err := i.EnsureRustFSCredentials(ctx); err != nil {
@@ -587,7 +599,7 @@ func (i *Installer) resolvePlatform(ctx context.Context) (Platform, error) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// removeNamespace deletes the namespace the installer created for the probes, after a prerequisite failed.
+// removeNamespace deletes Substrate's namespace that the installer created, after a step before ate-setup failed.
 func (i *Installer) removeNamespace(ctx context.Context) {
 	ns := i.Checker.Config.SubstrateOrDefault().Namespace
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -598,9 +610,9 @@ func (i *Installer) removeNamespace(ctx context.Context) {
 }
 
 // EnsureNamespace creates Substrate's namespace when it is missing, with Pod Security enforce=privileged
-// (the device probe mounts hostPath devices and Substrate's workers are privileged, plan section 4.4),
-// and reports whether it created it. The prerequisite probes run pods there before ate-setup, which
-// creates the namespace on a fresh cluster. An existing namespace is left as it is.
+// (Substrate's workers are privileged, plan section 4.4), and reports whether it created it. The generic platform
+// writes the object store credentials there before ate-setup, which creates the namespace on a fresh cluster. An
+// existing namespace is left as it is. No probe pod runs there (issue #1176).
 func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 	ns := i.Checker.Config.SubstrateOrDefault().Namespace
 	_, err := i.Kube.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
@@ -612,8 +624,7 @@ func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 	}
 	_, err = i.Kube.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: ns,
-		// warn and audit too: the device probe mounts hostPath devices, and without them the API server
-		// warns about the restricted profile on every probe pod.
+		// warn and audit too: without them the API server warns about the restricted profile on every Substrate pod.
 		Labels: map[string]string{
 			"pod-security.kubernetes.io/enforce": "privileged",
 			"pod-security.kubernetes.io/warn":    "privileged",
@@ -629,34 +640,11 @@ func (i *Installer) EnsureNamespace(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// WaitNamespaceReady waits until the controllers have filled the Substrate namespace: the probe pods use
-// the default ServiceAccount and the issuer probe mounts the default ServiceAccount token, whose ca.crt is the kube-root-ca.crt ConfigMap, and both appear
-// some time after a namespace is created. Without the wait a probe pod on a fresh cluster is refused or
-// stays in FailedMount.
-func (i *Installer) WaitNamespaceReady(ctx context.Context) error {
-	ns := i.Checker.Config.SubstrateOrDefault().Namespace
-	ctx, cancel := context.WithTimeout(ctx, orDuration(i.WaitTimeout, 2*time.Minute))
-	defer cancel()
-	for {
-		var missing []string
-		if _, err := i.Kube.CoreV1().ServiceAccounts(ns).Get(ctx, "default", metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			missing = append(missing, "ServiceAccount default")
-		} else if err != nil {
-			return fmt.Errorf("read ServiceAccount %s/default: %w", ns, err)
-		}
-		if _, err := i.Kube.CoreV1().ConfigMaps(ns).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			missing = append(missing, "ConfigMap kube-root-ca.crt")
-		} else if err != nil {
-			return fmt.Errorf("read ConfigMap %s/kube-root-ca.crt: %w", ns, err)
-		}
-		if len(missing) == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("namespace %s not ready in time, missing: %s", ns, strings.Join(missing, ", "))
-		case <-time.After(orDuration(i.PollInterval, 2*time.Second)):
-		}
+// probeNamespace is the namespace of the probe pods, with the installer's wait bounds.
+func (i *Installer) probeNamespace() preflight.ProbeNamespace {
+	return preflight.ProbeNamespace{
+		Client: i.Kube, Name: i.Checker.Config.SubstrateOrDefault().ProbeNamespace,
+		PollInterval: i.PollInterval, Timeout: i.WaitTimeout,
 	}
 }
 

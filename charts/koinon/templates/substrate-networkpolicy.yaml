@@ -185,6 +185,8 @@ spec:
         - {port: 6443, protocol: TCP}
 {{- end }}
 {{- with $np.bucketInitJobs }}
+{{- $osApp := required "execution.substrate.workerNetworkPolicy.objectStoreApp is required with bucketInitJobs: the app label of the object store pod" $np.objectStoreApp }}
+{{- $osPort := required "execution.substrate.workerNetworkPolicy.objectStorePort is required with bucketInitJobs: the S3 port of the object store" $np.objectStorePort }}
 ---
 # The bucket-init Job pod of the object store has no `app` label, so the Job name selects it. It needs DNS and the
 # object store S3 port, and nothing else (kind/rustfs.yaml:93-133 creates a bucket; the object store admits it at
@@ -215,9 +217,9 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app: {{ $np.objectStoreApp | quote }}
+              app: {{ $osApp | quote }}
       ports:
-        - {port: {{ $np.objectStorePort }}, protocol: TCP}
+        - {port: {{ $osPort }}, protocol: TCP}
 {{- end }}
 {{- $img := $np.imageSource | default dict }}
 {{- $imgPods := dict }}
@@ -229,7 +231,7 @@ spec:
 {{- $imgPods = dict "matchLabels" (include "koinon.selectorLabels" (list . "imagecache") | fromYaml) }}
 {{- $img = dict "apps" $img.apps "port" $s.imageCache.port "podSelector" $imgPods "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" .Release.Namespace)) }}
 {{- end }}
-{{- range $imgCIDRs }}{{- if has . (list "0.0.0.0/0" "::/0") }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource.cidrs must name the image source, not the whole internet" }}{{- end }}{{- end }}
+{{- range $imgCIDRs }}{{- include "koinon.narrowCIDR" . }}{{- end }}
 {{- if and $imgPods $imgCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.imageSource names one image source: set podSelector (an in-cluster cache) or cidrs, not both" }}{{- end }}
 {{- if or $imgPods $imgCIDRs }}
 ---

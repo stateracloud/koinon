@@ -867,22 +867,27 @@ execution:
         - /dev/vhost-net
         # The worker's base directory (volume ate-base), mounted in every tier, gVisor too.
         - /var/lib/ate
-      # The worker images (name@sha256:...): the container named `worker` with one of these images is the
-      # worker container, the only container of the worker namespace that may add capabilities or have an
-      # Unconfined profile. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the
-      # registry mirrors) is added by the template. Empty and no pool: no container is a worker container and a
-      # worker pod does not start (fail closed). Use a digest. The digest rule has an interim exemption for the ReplicaSet controller (digestExemptIdentities, #1140), so a tag image also gets the shape until #1140 closes.
-      workerImages: []
       # The exact shape that Substrate sets on the worker container, per sandbox class: runAsUser 0, runAsGroup 0,
       # privileged false, allowPrivilegeEscalation false, drop ALL, and these added capabilities; seccomp and
       # AppArmor Unconfined (cmd/atecontroller/internal/controllers/workerpool_apply.go:377-468 at the pinned
       # commit, preflight.SubstratePinnedCommit). The namespace has no wider ceiling. A Go spec compares these lists with the
       # vendored source of that commit and fails when the pin moves and the source changes
       # (internal/preflight/substrate_workershape_test.go). Do not widen them.
+      #
+      # images: the worker images of the class (name@sha256:...). The main container named `worker` with one of these images
+      # is the worker container, the only container of the worker namespace that may add capabilities or have an
+      # Unconfined profile, and it gets the capability set of this class only (issue #1176). An init container is never the
+      # worker container. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the registry
+      # mirrors) is added to the list of workerPool.sandboxClass by the template. One image is in one list only. No image and
+      # no pool: no container is a worker container and a worker pod does not start (fail closed). Use a digest. The digest
+      # rule has an interim exemption for the ReplicaSet controller (digestExemptIdentities, #1140), so a tag image also gets
+      # the shape until #1140 closes.
       workerShapes:
         gvisor:
+          images: []
           capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, NET_RAW, SETFCAP]
         microvm:
+          images: []
           capabilities: [NET_ADMIN, SYS_ADMIN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, CHOWN, MKNOD, SETFCAP, FSETID, SETPCAP]
       # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
       # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this

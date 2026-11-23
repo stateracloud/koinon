@@ -161,7 +161,7 @@ func (c *Checker) checkUserNamespaces(ctx context.Context) Result {
 	if err != nil {
 		return Result{
 			Check: check, Status: Fail,
-			Message: fmt.Sprintf("the user-namespace probe could not run in namespace %s: %v", sub.Namespace, err),
+			Message: fmt.Sprintf("the user-namespace probe could not run in namespace %s: %v", sub.ProbeNamespace, err),
 			Fix:     "fix the cause above (the namespace, Pod Security, image pull, the node selector or scheduling), then run the check again",
 		}
 	}

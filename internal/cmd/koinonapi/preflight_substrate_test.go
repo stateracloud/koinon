@@ -6,6 +6,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/pflag"
+
+	"github.com/stateracloud/koinon/internal/preflight"
 )
 
 var _ = Describe("preflight --driver substrate", func() {
@@ -41,6 +43,25 @@ var _ = Describe("preflight --driver substrate", func() {
 		Expect(err).To(MatchError(ContainSubstring("<tier>=<name>")))
 		_, err = parse("--driver=substrate", "--netpol-probe=false")
 		Expect(err).To(MatchError(ContainSubstring("--substrate-probes needs --probe-image")))
+	})
+
+	// Issue #1176: the probe pods run outside Substrate's namespaces, whose admission policies refuse a bare pod.
+	It("runs the probe pods in a namespace of their own, and refuses a Substrate namespace for them", func() {
+		c, err := parse("--driver=substrate", "--probe-image=img", "--netpol-probe=false")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.check.Substrate.ProbeNamespace).To(Equal(preflight.DefaultSubstrateProbeNamespace))
+		c, err = parse("--driver=substrate", "--probe-image=img", "--netpol-probe=false", "--substrate-probe-namespace=probes")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.check.Substrate.ProbeNamespace).To(Equal("probes"))
+		for _, args := range [][]string{
+			{"--substrate-probe-namespace=ate-system"},
+			{"--substrate-probe-namespace=ate-workers"},
+			{"--substrate-namespace=sub", "--substrate-probe-namespace=sub"},
+			{"--substrate-worker-namespace=wk", "--substrate-probe-namespace=wk"},
+		} {
+			_, err := parse(append([]string{"--driver=substrate", "--probe-image=img", "--netpol-probe=false"}, args...)...)
+			Expect(err).To(MatchError(ContainSubstring("is a Substrate namespace")), "%v", args)
+		}
 	})
 
 	Describe("substrate install", func() {

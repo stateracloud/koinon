@@ -47,6 +47,7 @@ type preflightConfig struct {
 	substrateProbes          bool
 	substrateNamespace       string
 	substrateWorkerNamespace string
+	substrateProbeNamespace  string
 	substrateIssuer          string
 
 	netpolProbe      bool
@@ -83,12 +84,14 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.driver, "driver", "openshell", "execution.driver: openshell or substrate (substrate replaces the OpenShell and Agent Sandbox checks)")
 	fs.StringVar(&c.substrateNamespace, "substrate-namespace", "ate-system", "namespace of Agent Substrate")
 	fs.StringVar(&c.substrateWorkerNamespace, "substrate-worker-namespace", "ate-workers", "namespace of the WorkerPools (execution.substrate.workerNamespace)")
+	fs.StringVar(&c.substrateProbeNamespace, "substrate-probe-namespace", preflight.DefaultSubstrateProbeNamespace,
+		"namespace of the Substrate probe pods, never a Substrate namespace (their admission policies refuse a bare pod); created with Pod Security privileged when missing, and then removed")
 	fs.StringArrayVar(&c.substratePools, "substrate-worker-pool", nil, "<tier>=<WorkerPool name> that must be ready (repeatable)")
 	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
 	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
 	fs.BoolVar(&c.substrateGVisor, "substrate-gvisor", true, "the gVisor sandbox class is in use: probe each worker node for user.max_user_namespaces above 0 (gVisor starts its sentry in a user namespace)")
 	fs.StringVar(&c.substrateIssuer, "substrate-expected-issuer", "", "the service-account issuer Substrate trusts (ate-setup --ateapi-expected-jwt-issuer); empty is the issuer in the API server's discovery document")
-	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod and the user-namespace probe pods in the Substrate namespace")
+	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod and the user-namespace probe pods in --substrate-probe-namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -107,7 +110,13 @@ func (c *preflightConfig) validate() error {
 	switch c.driver {
 	case "openshell":
 	case "substrate":
-		sub := preflight.SubstrateConfig{Namespace: c.substrateNamespace, WorkerNamespace: c.substrateWorkerNamespace, ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{}}
+		sub := preflight.SubstrateConfig{
+			Namespace: c.substrateNamespace, WorkerNamespace: c.substrateWorkerNamespace, ProbeNamespace: c.substrateProbeNamespace,
+			ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{},
+		}
+		if err := sub.CheckProbeNamespace(); err != nil {
+			return fmt.Errorf("--substrate-probe-namespace: %w", err)
+		}
 		for _, kv := range c.substratePools {
 			tier, name, ok := strings.Cut(kv, "=")
 			if !ok || tier == "" || name == "" {
@@ -242,6 +251,24 @@ func runPreflight(ctx context.Context, cfg preflightConfig, out io.Writer) error
 		return err
 	}
 	defer closeGateway()
+	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
+		// The probe pods run in a namespace of their own (issue #1176). One that this run creates, it removes.
+		ns := preflight.ProbeNamespace{Client: checker.Kube, Name: sub.WithDefaults().ProbeNamespace}
+		created, err := ns.Ensure(ctx)
+		if err != nil {
+			return err
+		}
+		if created {
+			defer func() {
+				if err := ns.Remove(ctx); err != nil {
+					_, _ = fmt.Fprintln(out, err)
+				}
+			}()
+		}
+		if err := ns.WaitReady(ctx); err != nil {
+			return err
+		}
+	}
 	if failed := preflight.Write(out, checker.Run(ctx)); failed > 0 {
 		return fmt.Errorf("%w: %d checks", preflight.ErrFailed, failed)
 	}
@@ -268,7 +295,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
 		prober := preflight.KubeSubstrateProber{
 			Client:           kube,
-			Namespace:        sub.Namespace,
+			Namespace:        sub.WithDefaults().ProbeNamespace,
 			NamePrefix:       cfg.probeNamePrefix,
 			Image:            cfg.probeImage,
 			ImagePullSecrets: splitList(cfg.probePullSecrets),

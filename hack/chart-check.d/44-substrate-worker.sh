@@ -16,6 +16,9 @@ pol=(--show-only templates/substrate-policy.yaml)
 np=(--show-only templates/substrate-networkpolicy.yaml)
 pool=(--show-only templates/substrate-workerpool.yaml)
 wns=(--show-only templates/substrate-workernamespace.yaml)
+# nocomment: stdin without YAML comment lines. A line is a comment only when '#' is its first non-blank character: a CEL
+# string that holds '#' stays (issue #1176 m1; a filter on any '#' would hide such a line from the checks).
+nocomment() { grep -v '^[[:space:]]*#' || true; }
 # docof <awk regex>: the YAML documents of stdin that match the regex (documents split on ---).
 docof() { awk -v pat="$1" '/^---$/{ if (buf ~ pat) printf "%s\n---\n", buf; buf=""; next } { buf = buf $0 "\n" } END { if (buf ~ pat) printf "%s", buf }'; }
 
@@ -69,7 +72,11 @@ if grep -Eq 'persistentVolumeClaim|has\(v.csi\)|has\(v.nfs\)|has\(v.secret\)' <<
 grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected serviceAccountToken must be denied for worker pods"
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 if grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods"; then fail "the namespace must have no capability ceiling: only the pinned worker shape adds capabilities"; fi
-grep -Fq "(c.name == 'worker' && c.image in [])" <<<"$wpods" || fail "with no worker image no container is a worker container (fail closed)"
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods" || fail "with no worker image no container is a worker container (fail closed)"
+grep -Fq 'object.spec.initContainers.map(c, c.name)' <<<"$wpods" || fail "an init container named worker must never be the worker container"
+[[ $(grep -c "c.name == 'worker' && !('worker' in variables.initNames)" <<<"$wpods") -eq 3 ]] || fail "all three worker-container rules must exclude an init container named worker"
+# m1: the comment filter keeps a code line that holds '#' and drops only comment lines.
+[[ $(printf '%s\n' '    # request.namespace' '    - expression: "a # b"' | nocomment) == '    - expression: "a # b"' ]] || fail "nocomment must drop only comment lines"
 grep -Fq 'size(c.securityContext.capabilities.add) == 0' <<<"$wpods" || fail "a container that is not the worker container must add no capability"
 grep -Fq "c.securityContext.capabilities.drop == ['ALL']" <<<"$wpods" || fail "the worker container must drop ALL"
 grep -Fq 'c.securityContext.runAsUser == 0' <<<"$wpods" || fail "the worker container must run as user 0 (the shape of Substrate)"
@@ -98,10 +105,23 @@ if grep -Fq 'ate-workers' <<<"$cpods"; then fail "the control-plane pod policy m
 grep -Fq "hostNetwork is not allowed" <<<"$cpods" || fail "hostNetwork must be denied in the control-plane namespace"
 has "the node agent ServiceAccount is configurable" 'object.spec.serviceAccountName in \[\\"agent-x\\"\]' "${wsub[@]}" --set execution.substrate.workerPolicy.nodeAgent.serviceAccount=agent-x "${pol[@]}"
 has "the node agent hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.nodeAgent.allowedHostPaths={/dev/kvm}' "${pol[@]}"
-wimg=(--set 'execution.substrate.workerPolicy.workerImages={registry.example/w@sha256:aaaa}')
-has "the worker images are configurable" '\\"registry.example/w@sha256:aaaa\\"' "${wsub[@]}" "${wimg[@]}" "${pol[@]}"
+# The capability set follows the class of the worker image (issue #1176): a gVisor image gets the gVisor set only.
+wimg=(--set 'execution.substrate.workerPolicy.workerShapes.gvisor.images={registry.example/g@sha256:aaaa}' --set 'execution.substrate.workerPolicy.workerShapes.microvm.images={registry.example/m@sha256:bbbb}')
+cls=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${wimg[@]}" "${pol[@]}" | tr -d '\134')")
+grep -Fq 'c.image in ["registry.example/g@sha256:aaaa"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"])' <<<"$cls" || fail "a gVisor image must get the gVisor capability set only"
+grep -Fq 'c.image in ["registry.example/m@sha256:bbbb"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"])' <<<"$cls" || fail "a micro-VM image must get the micro-VM capability set only"
+grep -Fq 'c.image in ["registry.example/g@sha256:aaaa","registry.example/m@sha256:bbbb"])' <<<"$cls" || fail "the worker images of both classes are worker images"
+if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.workerShapes.gvisor.images={registry.example/x@sha256:cccc}' --set 'execution.substrate.workerPolicy.workerShapes.microvm.images={registry.example/x@sha256:cccc}' "${pol[@]}" >/dev/null 2>"$out/cls.err"; then fail "one image in both class lists must not render"; fi
+grep -Fq 'a worker image has one sandbox class' "$out/cls.err" || fail "the two-class error must say that a worker image has one class"
+if render "${wsub[@]}" --set 'execution.substrate.workerPolicy.workerImages={registry.example/w@sha256:aaaa}' "${pol[@]}" >/dev/null 2>&1; then fail "the class-free workerImages list is gone (an image without a class)"; fi
 wpool=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)
 has "the WorkerPool image is a worker image" '\\"registry.example/ateworker-gvisor:v1.0.0\\"' "${wsub[@]}" "${wpool[@]}" "${pol[@]}"
+gpool=$(render "${wsub[@]}" "${wpool[@]}" "${pol[@]}" | tr -d '\134')
+grep -Fq 'c.image in ["registry.example/ateworker-gvisor:v1.0.0"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"])' <<<"$gpool" || fail "a gvisor pool image must get the gVisor set"
+grep -Fq 'c.image in [] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD"' <<<"$gpool" || fail "a gvisor pool image must not get the micro-VM set"
+mpool=$(render "${wsub[@]}" --set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.sandboxClass=microvm --set execution.substrate.workerPool.workerImage=registry.example/ateworker-microvm:v1.0.0 "${pol[@]}" | tr -d '\134')
+grep -Fq 'c.image in ["registry.example/ateworker-microvm:v1.0.0"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD"' <<<"$mpool" || fail "a microvm pool image must get the micro-VM set"
+grep -Fq 'c.image in [] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW"' <<<"$mpool" || fail "a microvm pool image must not get the gVisor set"
 wmir=(--set 'global.registryMirrors.registry\.example=mirror.example/cache')
 has "the mirrored worker image is the policy worker image" '\\"mirror.example/cache/ateworker-gvisor:v1.0.0\\"' "${wsub[@]}" "${wmir[@]}" "${wpool[@]}" "${pol[@]}"
 has "the mirrored worker image is the pool worker image" 'workerImage: mirror.example/cache/ateworker-gvisor:v1.0.0' "${wsub[@]}" "${wmir[@]}" "${wpool[@]}" "${pool[@]}"
@@ -146,7 +166,7 @@ grep -Fq '!object.spec.template.spec.automountServiceAccountToken' <<<"$objs" ||
 grep -Fq 'object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in' <<<"$objs" || fail "the Deployment template hostPath must follow allowedHostPaths"
 grep -Fq "variables.reqNamespace in [\"ate-system\",\"ate-workers\",\"\"] && request.operation == 'UPDATE' && request.resource.group == 'ate.dev'" <<<"$objs" || fail "the controller may change metadata of Substrate objects in both namespaces and of cluster-scoped ones"
 grep -Fq "has(request.namespace) ? request.namespace : ''" <<<"$objs" || fail "a cluster-scoped object has no request.namespace key: the objects policy must guard the read"
-rest=$(tr -d '\134' <<<"$objs" | grep -Fv '#' | sed "s/has(request.namespace) ? request.namespace : ''//")
+rest=$(tr -d '\134' <<<"$objs" | nocomment | sed "s/has(request.namespace) ? request.namespace : ''//")
 if grep -Fq 'request.namespace' <<<"$rest"; then fail "the objects policy reads request.namespace outside the guard"; fi
 grep -Fq 'c.securityContext.privileged' <<<"$wpods" || fail "the worker pod rules must deny privileged containers"
 grep -Fq 'object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged)' <<<"$objs" || fail "the Deployment template must not be privileged"
@@ -175,7 +195,7 @@ grep -Fq "q.port == 53" <<<"$nppol" || fail "the DNS peer must be limited to por
 grep -Fq 'has(r.ports) && size(r.ports) > 0' <<<"$nppol" || fail "the DNS peer needs explicit ports (no ports means every port)"
 grep -Fq 'has(r.from) && size(r.from) > 0' <<<"$nppol" || fail "an ingress rule of the controller needs a from list (no from means every source)"
 grep -Fq "request.operation == 'DELETE' ||" <<<"$nppol" || fail "a delete has no object: the rules that read the object must skip it"
-if grep -Fq 'request.namespace' <<<"$(grep -Fv '#' <<<"$nppol")"; then fail "the NetworkPolicy guard must not read request.namespace (the binding selects the namespace)"; fi
+if grep -Fq 'request.namespace' <<<"$(nocomment <<<"$nppol")"; then fail "the NetworkPolicy guard must not read request.namespace (the binding selects the namespace)"; fi
 grep -Fq 'kubernetes.io/metadata.name: "pools-x"' <<<"$(docof 'ValidatingAdmissionPolicyBinding\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$(render "${wsub[@]}" --set execution.substrate.workerNamespace=pools-x "${pol[@]}")")" || fail "the NetworkPolicy guard follows the worker namespace"
 has "the NetworkPolicy guard follows the control-plane namespace" 'metadata.name.\] == "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${pol[@]}"
 grep -Fq 'ops-x' <<<"$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-netpol\n' <<<"$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.installerIdentities={ops-x}' "${pol[@]}")")" || fail "the NetworkPolicy guard follows the installer identities"
@@ -206,6 +226,14 @@ grep -Fq 'app: "rustfs"' <<<"$bucket" || fail "the bucket-init policy must reach
 grep -Fq '{port: 9000, protocol: TCP}' <<<"$bucket" || fail "the bucket-init policy must reach the S3 port"
 grep -Fq 'policyTypes: [Egress]' <<<"$bucket" || fail "the bucket-init policy must leave ingress to Substrate's own policies"
 lacks "no bucket-init policy with an empty list" 'substrate-bucket-init' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.bucketInitJobs=null' "${np[@]}"
+# m3 (issue #1176): with bucket-init Jobs the object store values are required (an empty app selects nothing useful and
+# an empty port is invalid YAML).
+for v in objectStoreApp objectStorePort; do
+	if render "${wsub[@]}" --set "execution.substrate.workerNetworkPolicy.$v=null" "${np[@]}" >/dev/null 2>"$out/os.err"; then fail "$v=null must not render with bucket-init Jobs"; fi
+	grep -Fq "workerNetworkPolicy.$v is required" "$out/os.err" || fail "the error must name $v"
+done
+lacks "the object store values are not needed without bucket-init Jobs" 'substrate-bucket-init' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.bucketInitJobs=null' --set execution.substrate.workerNetworkPolicy.objectStoreApp=null "${np[@]}"
+has "the object store app is configurable" 'app: "minio"' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.objectStoreApp=minio "${np[@]}"
 lacks "no image-source policy until an image source is set" 'substrate-image-source' "${wsub[@]}" "${np[@]}"
 imgpod=(--set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchLabels.app=zot' --set 'execution.substrate.workerNetworkPolicy.imageSource.namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=registry' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000)
 imgdoc=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-image-source\n' <<<"$(render "${wsub[@]}" "${imgpod[@]}" "${np[@]}")")
@@ -218,10 +246,21 @@ if grep -Fq 'ipBlock' <<<"$imgdoc"; then fail "an in-cluster image source must n
 imgcidr=(--set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={198.51.100.0/24}')
 has "an operator CIDR can be the image source" 'cidr: "198.51.100.0/24"' "${wsub[@]}" "${imgcidr[@]}" "${np[@]}"
 if render "${wsub[@]}" "${imgpod[@]}" "${imgcidr[@]}" "${np[@]}" >/dev/null 2>"$out/img.err"; then fail "two image sources must not render"; fi
-if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.cidrs={0.0.0.0/0}' "${np[@]}" >/dev/null 2>&1; then fail "the whole internet must not be an image source"; fi
-has "a matchExpressions pod selector can be the image source" 'matchExpressions' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].key=app' --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].operator=Exists' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000 "${np[@]}"
+# m2 (issue #1176): the prefix length decides, so every spelling of a wide range is refused, not only 0.0.0.0/0 and ::/0.
+for c in 0.0.0.0/0 0.0.0.0/1 1.0.0.0/8 100.64.0.0/10 172.32.0.0/12 10.0.0.0/7 ::/0 0::/0 0:0:0:0:0:0:0:0/0 2000::/3 2001:db8::/32 ::ffff:0:0/96 bogus 300.0.0.0/24; do
+	if render "${wsub[@]}" --set "execution.substrate.workerNetworkPolicy.imageSource.cidrs={$c}" "${np[@]}" >/dev/null 2>"$out/cidr.err"; then fail "the image source $c is too wide and must not render"; fi
+	grep -Fq "imageSource.cidrs: $c" "$out/cidr.err" || fail "the error for $c must name imageSource.cidrs and the CIDR"
+done
+for c in 198.51.100.0/24 203.0.113.7/32 8.8.0.0/16 10.0.0.0/8 172.16.0.0/12 fd00::/8 2001:db8:1::/48; do
+	has "the image source $c renders" "cidr: \"$c\"" "${wsub[@]}" --set "execution.substrate.workerNetworkPolicy.imageSource.cidrs={$c}" "${np[@]}"
+done
+# The matchExpressions selector must reach the image-source policy itself, not only some document of the render.
+mxdoc=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-image-source\n' <<<"$(render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].key=app' --set 'execution.substrate.workerNetworkPolicy.imageSource.podSelector.matchExpressions[0].operator=Exists' --set execution.substrate.workerNetworkPolicy.imageSource.port=5000 "${np[@]}")")
+grep -Eq '^ *podSelector:$' <<<"$mxdoc" && grep -Fq 'matchExpressions:' <<<"$mxdoc" && grep -Fq 'key: app' <<<"$mxdoc" && grep -Fq 'operator: Exists' <<<"$mxdoc" || fail "a matchExpressions pod selector must be the image source of the image-source policy"
+grep -Fq '{port: 5000, protocol: TCP}' <<<"$mxdoc" || fail "the matchExpressions image source must use the configured port"
+if grep -Fq 'ipBlock' <<<"$mxdoc"; then fail "a matchExpressions image source must not open a CIDR"; fi
 grep -Fq 'one image source' "$out/img.err" || fail "the two-sources error must say that there is one image source"
-closedcode=$(grep -v '^[[:space:]]*#' <<<"$closed")
+closedcode=$(nocomment <<<"$closed")
 if grep -Eq 'ate-idp-server|postgres|rustfs' <<<"$closedcode"; then fail "the default-deny egress policy names no app: it covers them all"; fi
 workers=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-workers\n' <<<"$npdocs")
 control=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' <<<"$npdocs")

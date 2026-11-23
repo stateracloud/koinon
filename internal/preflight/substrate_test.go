@@ -250,7 +250,7 @@ var _ = Describe("Substrate checks", func() {
 			r := find(c.run(ctx), "Service-account issuer")
 			Expect(r.Status).To(Equal(preflight.Fail))
 			Expect(r.Message).To(And(
-				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("from a pod in namespace ate-system"),
+				ContainSubstring("https://[fdae:1::1]:10001"), ContainSubstring("from a pod in namespace koinon-substrate-probe"),
 				ContainSubstring("invalid bearer token"), ContainSubstring("IPv6 unique-local address"),
 			))
 			Expect(r.Fix).To(And(

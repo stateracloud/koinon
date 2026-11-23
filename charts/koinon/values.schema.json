@@ -782,13 +782,12 @@
                 "platformControllers": {"type": "array", "items": {"type": "string"}},
                 "digestExemptIdentities": {"type": "array", "items": {"type": "string"}},
                 "allowedHostPaths": {"type": "array", "items": {"type": "string", "pattern": "^/"}},
-                "workerImages": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "workerShapes": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "gvisor": {"type": "object", "additionalProperties": false, "properties": {"capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}},
-                    "microvm": {"type": "object", "additionalProperties": false, "properties": {"capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}}
+                    "gvisor": {"type": "object", "additionalProperties": false, "properties": {"images": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}}, "capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}},
+                    "microvm": {"type": "object", "additionalProperties": false, "properties": {"images": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}}, "capabilities": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z_]+$"}}}}
                   }
                 },
                 "nodeAgent": {

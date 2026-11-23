@@ -91,6 +91,9 @@ type SubstrateConfig struct {
 	Namespace string
 	// WorkerNamespace holds the WorkerPools (execution.substrate.workerNamespace, ate-workers).
 	WorkerNamespace string
+	// ProbeNamespace is where the probe pods run (default koinon-substrate-probe). It is never one of
+	// Substrate's namespaces: their admission policies refuse a bare pod (CheckProbeNamespace).
+	ProbeNamespace string
 	// APIServerDeployment carries the release version in its image tag.
 	APIServerDeployment string
 	// RouterDeployment runs the router whose SPIFFE allow-list is checked.
@@ -116,6 +119,9 @@ func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	}
 	if s.WorkerNamespace == "" {
 		s.WorkerNamespace = "ate-workers"
+	}
+	if s.ProbeNamespace == "" {
+		s.ProbeNamespace = DefaultSubstrateProbeNamespace
 	}
 	if s.APIServerDeployment == "" {
 		s.APIServerDeployment = "ate-api-server"
@@ -267,7 +273,7 @@ func (c *Checker) SubstrateStaticPrerequisites(ctx context.Context) []Result {
 	return results
 }
 
-// SubstrateProbePrerequisites runs the prerequisite checks that start pods in Substrate's namespace: the
+// SubstrateProbePrerequisites runs the prerequisite checks that start pods in the probe namespace: the
 // node devices of the vm tier, the user namespaces of the gVisor nodes and the service-account issuer probe.
 func (c *Checker) SubstrateProbePrerequisites(ctx context.Context) []Result {
 	c.defaultSubstrate()
@@ -498,7 +504,7 @@ func (c *Checker) checkSubstrateDevices(ctx context.Context) Result {
 		if !errors.Is(err, ErrDevicesMissing) {
 			return Result{
 				Check: check, Status: Fail,
-				Message: fmt.Sprintf("the device probe pod could not run in namespace %s: %v", c.Config.Substrate.Namespace, err),
+				Message: fmt.Sprintf("the device probe pod could not run in namespace %s: %v", c.Config.Substrate.ProbeNamespace, err),
 				Fix:     "this is not a device problem: fix the cause above (the namespace, Pod Security, image pull or scheduling), then run the check again",
 			}
 		}
@@ -555,7 +561,9 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 			Fix:     "grant the preflight ServiceAccount the system:service-account-issuer-discovery ClusterRole",
 		}
 	}
-	ns := c.Config.Substrate.Namespace
+	// The probe pod runs in the probe namespace (issue #1176), not in Substrate's namespace: the issuer and the iss
+	// of a token are the same in every namespace. ns is Substrate's namespace, which the fixes name.
+	ns, probeNS := c.Config.Substrate.Namespace, c.Config.Substrate.ProbeNamespace
 	res, err := c.IssuerProbe.ProbeIssuer(ctx, issuer)
 	if err != nil {
 		return Result{Check: check, Status: Fail, Message: fmt.Sprintf("issuer probe pod: %v", err)}
@@ -572,14 +580,14 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		}
 		return Result{
 			Check: check, Status: Fail,
-			Message: fmt.Sprintf("a pod in %s reaches %s, but only without verifying its TLS certificate (%s); Substrate's api server verifies it and would fail with \"invalid bearer token\"", ns, issuer, res.Detail),
+			Message: fmt.Sprintf("a pod in %s reaches %s, but only without verifying its TLS certificate (%s); Substrate's api server verifies it and would fail with \"invalid bearer token\"", probeNS, issuer, res.Detail),
 			Fix:     fix,
 		}
 	}
 	if !res.Reachable {
 		msg := fmt.Sprintf("Substrate's api server could not validate service-account tokens of issuer %s from a pod in namespace %s (%s). "+
 			"It fetches <issuer>/.well-known/openid-configuration and the document's jwks_uri, so every call would fail with \"invalid bearer token\"",
-			issuer, ns, res.Detail)
+			issuer, probeNS, res.Detail)
 		if why := UnroutableIssuerHost(issuer); why != "" {
 			msg += ". The issuer host is " + why
 		}
@@ -598,14 +606,14 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s, but the probe could not read the iss claim of its service-account token, "+
-				"so it cannot tell whether Substrate would accept the tokens (Substrate rejects a token whose iss differs from the issuer)", ns, issuer, info),
+				"so it cannot tell whether Substrate would accept the tokens (Substrate rejects a token whose iss differs from the issuer)", probeNS, issuer, info),
 			Fix: "run the probe with a koinon-api image of this release (an older image does not report the token issuer), and check that pods in " + ns + " get a projected service-account token",
 		}
 	}
 	if res.TokenIssuer != issuer {
 		return Result{
 			Check: check, Status: Fail,
-			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, ns, res.TokenIssuer),
+			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, probeNS, res.TokenIssuer),
 			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.0 fetches discovery from the issuer itself. " +
 				"Drop --expected-jwt-issuer (or set it to " + res.TokenIssuer + ") and run the check again: it then probes that URL. " +
 				"If pods cannot reach it, set the API server's first --service-account-issuer to https://kubernetes.default.svc or another URL pods reach " +
@@ -613,7 +621,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 				SafeIssuerPatch(res.TokenIssuer, res.TokenIssuer),
 		}
 	}
-	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s%s", ns, issuer, info, tokenInfo)}
+	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("a pod in %s fetches the discovery document and JWKS of %s%s%s", probeNS, issuer, info, tokenInfo)}
 }
 
 // SafeIssuerPatch is the cluster change that makes the in-cluster issuer usable without invalidating a
@@ -929,8 +937,9 @@ func ParseIssuerProbeOutput(log string) (IssuerResult, error) {
 	return IssuerResult{}, fmt.Errorf("no %q line in the probe pod's log: %q", SubstrateIssuerProbeMarker, truncate(log, 200))
 }
 
-// KubeSubstrateProber runs the issuer probe and the device probe as pods in Substrate's namespace
-// (a privileged Pod Security namespace; the issuer pod is unprivileged and carries the default ServiceAccount token to probe with it).
+// KubeSubstrateProber runs the issuer probe and the device probe as pods in the probe namespace
+// (a privileged Pod Security namespace; the issuer pod is unprivileged and carries the default ServiceAccount token
+// to probe with it). Namespace is never one of Substrate's namespaces: their admission policies refuse a bare pod.
 type KubeSubstrateProber struct {
 	Client           kubernetes.Interface
 	Namespace        string

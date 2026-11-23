@@ -235,7 +235,7 @@ func TestStopsBeforeInstallingWhenAPrerequisiteFails(t *testing.T) {
 		err := i.Install(t.Context())
 		g.Expect(err).To(MatchError(substrateinstall.ErrPrerequisites), name)
 		g.Expect(r.setupCalls()).To(BeEmpty(), name)
-		// Whatever the installer created for its probes is gone again: no namespace remains.
+		// Whatever the installer created for its probes is gone again, and ate-system was not created: no namespace remains.
 		nss, err := client.CoreV1().Namespaces().List(t.Context(), metav1.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nss.Items).To(BeEmpty(), name)
@@ -244,11 +244,27 @@ func TestStopsBeforeInstallingWhenAPrerequisiteFails(t *testing.T) {
 
 func TestLeavesAnExistingNamespaceAloneWhenAPrerequisiteFails(t *testing.T) {
 	g := NewWithT(t)
-	i, _, client := setup("37", false, []runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ate-system"}}})
-	fillNamespace(client, "ate-system")
-	g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrPrerequisites))
-	_, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
-	g.Expect(err).NotTo(HaveOccurred())
+	for _, name := range []string{"ate-system", preflight.DefaultSubstrateProbeNamespace} {
+		i, _, client := setup("37", false, []runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}})
+		fillNamespace(client, name)
+		g.Expect(i.Install(t.Context())).To(MatchError(substrateinstall.ErrPrerequisites), name)
+		_, err := client.CoreV1().Namespaces().Get(t.Context(), name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), name)
+	}
+}
+
+// A probe namespace that is a Substrate namespace is refused before the installer creates anything (issue #1176).
+func TestRefusesAProbeNamespaceThatIsASubstrateNamespace(t *testing.T) {
+	g := NewWithT(t)
+	for _, ns := range []string{"ate-system", "ate-workers"} {
+		i, r, client := setup("37", true, nil)
+		i.Checker.Config.Substrate.ProbeNamespace = ns
+		g.Expect(i.Install(t.Context())).To(MatchError(ContainSubstring("is a Substrate namespace")), ns)
+		g.Expect(r.setupCalls()).To(BeEmpty(), ns)
+		nss, err := client.CoreV1().Namespaces().List(t.Context(), metav1.ListOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(nss.Items).To(BeEmpty(), ns)
+	}
 }
 
 func TestRunsSetupThenWaitsForCRDs(t *testing.T) {
@@ -526,26 +542,36 @@ func TestProfileNamesWhatIsMissing(t *testing.T) {
 	g.Expect(substrateinstall.Profile{}.Validate()).To(MatchError(ContainSubstring("storage bucket")))
 }
 
-// A fresh cluster has no ate-system: ate-setup creates it. The prerequisite probes run pods there
-// first, so the installer must create the namespace before them. The fake clientset does not enforce
-// namespaces, so this test adds the API server's rule.
-func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
+// The probe pods run in a namespace of their own, never in Substrate's namespaces (issue #1176): Substrate's
+// admission policies refuse a bare pod there. The installer creates the probe namespace before the probes, with Pod
+// Security privileged (the device probe mounts hostPath devices), and removes it when it is done. It still creates
+// ate-system for ate-setup, with Pod Security privileged. The fake clientset enforces neither namespaces nor the
+// policies, so this test adds both rules of the API server.
+func TestRunsTheProbePodsOutsideTheSubstrateNamespaces(t *testing.T) {
 	g := NewWithT(t)
 	i, r, client := setup("37", true, nil)
+	var probeNamespaces []string
+	var probeLabels map[string]string
 	client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
 		ca := a.(k8stesting.CreateAction)
+		probeNamespaces = append(probeNamespaces, ca.GetNamespace())
+		if ca.GetNamespace() == "ate-system" || ca.GetNamespace() == "ate-workers" {
+			return true, nil, apierrors.NewForbidden(corev1.Resource("pods"), "probe", errors.New("denied by ValidatingAdmissionPolicy"))
+		}
 		// The tracker, not the clientset: a reactor that calls the clientset deadlocks on its lock.
 		nsGVR := corev1.SchemeGroupVersion.WithResource("namespaces")
-		if _, err := client.Tracker().Get(nsGVR, "", ca.GetNamespace()); apierrors.IsNotFound(err) {
+		ns, err := client.Tracker().Get(nsGVR, "", ca.GetNamespace())
+		if apierrors.IsNotFound(err) {
 			return true, nil, apierrors.NewNotFound(corev1.Resource("namespaces"), ca.GetNamespace())
 		}
+		probeLabels = ns.(*corev1.Namespace).Labels
 		pod := ca.GetObject().(*corev1.Pod)
 		pod.Name = "probe"
 		pod.Status.Phase = corev1.PodSucceeded
 		return false, nil, nil
 	})
 	i.Checker.IssuerProbe = preflight.KubeSubstrateProber{
-		Client: client, Namespace: "ate-system", NamePrefix: "t", Image: "img", PollInterval: time.Millisecond, Timeout: time.Second,
+		Client: client, Namespace: preflight.DefaultSubstrateProbeNamespace, NamePrefix: "t", Image: "img", PollInterval: time.Millisecond, Timeout: time.Second,
 		Logs: func(context.Context, string, string) (string, error) {
 			return preflight.IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "ok"}.String() + "\n" + preflight.SubstrateDevicesProbeMarker + "\n", nil
 		},
@@ -554,6 +580,14 @@ func TestCreatesTheNamespaceBeforeTheProbePodsRun(t *testing.T) {
 	i.Checker.Config.Substrate.VMTier = true
 	_ = i.Install(t.Context()) // later checks fail: Substrate itself is not installed in the fake
 	g.Expect(r.setupCalls()).To(HaveLen(1), "the prerequisites passed, so ate-setup ran")
+	g.Expect(probeNamespaces).NotTo(BeEmpty())
+	g.Expect(probeNamespaces).To(HaveEach(preflight.DefaultSubstrateProbeNamespace), "no probe pod in a Substrate namespace")
+	for _, mode := range []string{"enforce", "warn", "audit"} {
+		g.Expect(probeLabels).To(HaveKeyWithValue("pod-security.kubernetes.io/"+mode, "privileged"))
+	}
+	g.Expect(probeLabels).To(HaveKeyWithValue("app.kubernetes.io/part-of", "koinon"))
+	_, err := client.CoreV1().Namespaces().Get(t.Context(), preflight.DefaultSubstrateProbeNamespace, metav1.GetOptions{})
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the probe namespace the installer created is removed: %v", err)
 	ns, err := client.CoreV1().Namespaces().Get(t.Context(), "ate-system", metav1.GetOptions{})
 	g.Expect(err).NotTo(HaveOccurred())
 	for _, mode := range []string{"enforce", "warn", "audit"} {

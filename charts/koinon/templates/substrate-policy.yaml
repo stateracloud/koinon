@@ -10,7 +10,7 @@ Worker namespace:
   hostIPC; hostPath only from workerPolicy.allowedHostPaths; volumes of the kinds hostPath, emptyDir,
   configMap, downwardAPI and projected only; no projected serviceAccountToken source and
   automountServiceAccountToken not true (the worker has no Kubernetes client, ADR 0120 section 2.4);
-  added capabilities and an Unconfined profile only on the worker container (name worker, a worker image), and only with the
+  added capabilities and an Unconfined profile only on the worker container (a main container named worker with a worker image), and only with the
   shape that Substrate sets for the gVisor or the micro-VM class (workerPolicy.workerShapes; a spec compares it with
   Substrate's source at the pinned commit); digests pinned (the platform
   controllers' pods are exempt until Substrate publishes by digest: workerPolicy.digestExemptIdentities);
@@ -59,11 +59,21 @@ change its metadata (garbage collection, namespace deletion), never its spec.
 {{- $trusted := concat $w.podCreators $controllers }}
 {{- $platformTrusted := concat $controllers $w.platformControllers }}
 {{- $tagOK := $w.digestExemptIdentities }}
-{{- /* The worker images: the ones that the values name, and the image of the WorkerPool that the chart makes (rewritten by the
-registry mirrors like every image). With no worker image no container is a worker container, so a worker pod has no extra
-capability and no Unconfined profile and does not start: the policy fails closed. */}}
-{{- $workerImages := $w.workerImages | default list }}
-{{- if and $s.workerPool.enabled $s.workerPool.workerImage }}{{- $workerImages = append $workerImages (include "koinon.imageRef" (list . $s.workerPool.workerImage)) }}{{- end }}
+{{- /* The worker images per sandbox class (workerShapes.<class>.images), and the image of the WorkerPool that the chart makes
+(rewritten by the registry mirrors like every image) in the list of its class. The class of a worker container is the class
+of its image: a gVisor image gets only the gVisor capability set, a micro-VM image only the micro-VM set (issue #1176). With
+no worker image no container is a worker container, so a worker pod has no extra capability and no Unconfined profile and
+does not start: the policy fails closed. */}}
+{{- $gvisorImages := $w.workerShapes.gvisor.images | default list }}
+{{- $microImages := $w.workerShapes.microvm.images | default list }}
+{{- if and $s.workerPool.enabled $s.workerPool.workerImage }}
+{{- $poolImage := include "koinon.imageRef" (list . $s.workerPool.workerImage) }}
+{{- if eq $s.workerPool.sandboxClass "microvm" }}{{- $microImages = append $microImages $poolImage }}{{- else }}{{- $gvisorImages = append $gvisorImages $poolImage }}{{- end }}
+{{- end }}
+{{- range $gvisorImages }}{{- if has . $microImages }}{{- fail (printf "execution.substrate.workerPolicy.workerShapes: the image %s is in the gvisor and the microvm list; a worker image has one sandbox class" .) }}{{- end }}{{- end }}
+{{- /* append onto list, not concat: concat of two empty lists is null, and `c.image in null` is a CEL error. */}}
+{{- $workerImages := list }}
+{{- range (concat $gvisorImages $microImages) }}{{- $workerImages = append $workerImages . }}{{- end }}
 {{- $gvisorCaps := $w.workerShapes.gvisor.capabilities }}
 {{- $microCaps := $w.workerShapes.microvm.capabilities }}
 {{- $dsc := "system:serviceaccount:kube-system:daemon-set-controller" }}
@@ -84,6 +94,10 @@ spec:
   variables:
     - name: allContainers
       expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])"
+    # Only an init container can share no name with a main container, so an init container named worker is never the
+    # worker container: it gets no capability and no Unconfined profile (issue #1176).
+    - name: initNames
+      expression: "has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.name) : []"
     - name: creator
       expression: {{ printf "request.userInfo.username in %s" (toJson $w.podCreators) | quote }}
     - name: trusted
@@ -130,14 +144,15 @@ spec:
     - expression: "variables.allContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))"
       message: hostPort is not allowed in the worker namespace
     # The worker container is the one that Substrate's controller shapes (cmd/atecontroller workerpool_apply.go:377-468):
-    # its name is `worker` and its image is one of the worker images. Only it may have an Unconfined profile and added
-    # capabilities, and only the shape that Substrate sets. Every other container has neither.
-    - expression: {{ printf "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined') && variables.allContainers.all(c, (c.name == 'worker' && c.image in %s) || !has(c.securityContext) || ((!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined') && (!has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined')))" (toJson $workerImages) | quote }}
-      message: an Unconfined seccomp or AppArmor profile is allowed only on the worker container (name worker, a worker image), never on the pod and never on another container
-    - expression: {{ printf "variables.allContainers.all(c, (c.name == 'worker' && c.image in %s) || !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)" (toJson $workerImages) | quote }}
-      message: added capabilities are allowed only on the worker container (name worker, a worker image) in the worker namespace
-    - expression: {{ printf "variables.allContainers.all(c, !(c.name == 'worker' && c.image in %s) || (has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0 && has(c.securityContext.runAsGroup) && c.securityContext.runAsGroup == 0 && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop == ['ALL'] && has(c.securityContext.capabilities.add) && ((c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)) || (c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)))))" (toJson $workerImages) (toJson $gvisorCaps) (toJson $gvisorCaps) (toJson $microCaps) (toJson $microCaps) | quote }}
-      message: the worker container must have the exact shape that Substrate sets (runAsUser 0, runAsGroup 0, no privilege escalation, drop ALL, and the added capabilities of the gVisor or the micro-VM class)
+    # a main container (not an init container) named `worker` whose image is one of the worker images. Only it may have an
+    # Unconfined profile and added capabilities, and only the shape that Substrate sets for the class of its image. Every
+    # other container has neither.
+    - expression: {{ printf "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type != 'Unconfined') && (!has(object.spec.securityContext) || !has(object.spec.securityContext.appArmorProfile) || object.spec.securityContext.appArmorProfile.type != 'Unconfined') && variables.allContainers.all(c, (c.name == 'worker' && !('worker' in variables.initNames) && c.image in %s) || !has(c.securityContext) || ((!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type != 'Unconfined') && (!has(c.securityContext.appArmorProfile) || c.securityContext.appArmorProfile.type != 'Unconfined')))" (toJson $workerImages) | quote }}
+      message: an Unconfined seccomp or AppArmor profile is allowed only on the worker container (a main container named worker with a worker image), never on the pod and never on another container
+    - expression: {{ printf "variables.allContainers.all(c, (c.name == 'worker' && !('worker' in variables.initNames) && c.image in %s) || !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)" (toJson $workerImages) | quote }}
+      message: added capabilities are allowed only on the worker container (a main container named worker with a worker image) in the worker namespace
+    - expression: {{ printf "variables.allContainers.all(c, !(c.name == 'worker' && !('worker' in variables.initNames) && c.image in %s) || (has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0 && has(c.securityContext.runAsGroup) && c.securityContext.runAsGroup == 0 && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop == ['ALL'] && has(c.securityContext.capabilities.add) && ((c.image in %s && c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)) || (c.image in %s && c.securityContext.capabilities.add.all(x, x in %s) && %s.all(x, x in c.securityContext.capabilities.add)))))" (toJson $workerImages) (toJson $gvisorImages) (toJson $gvisorCaps) (toJson $gvisorCaps) (toJson $microImages) (toJson $microCaps) (toJson $microCaps) | quote }}
+      message: the worker container must have the exact shape that Substrate sets (runAsUser 0, runAsGroup 0, no privilege escalation, drop ALL, and the added capabilities of the sandbox class of its image, gVisor or micro-VM)
     - expression: "variables.unchanged || variables.tagAllowed || variables.allContainers.all(c, c.image.matches('@sha256:[a-f0-9]{64}$'))"
       message: images in the worker namespace must be pinned by digest (name@sha256:<64 hex digits>)
 ---
