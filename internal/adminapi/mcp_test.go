@@ -31,6 +31,10 @@ type mcpToolJSON struct {
 	Tier         string `json:"tier"`
 	ReviewReason string `json:"reviewReason"`
 	ReadOnlyHint bool   `json:"readOnlyHint"`
+	// The pin (#1173): the text the sync observed, its hash and the approved hash.
+	ToolHash     string         `json:"toolHash"`
+	ToolJSON     map[string]any `json:"toolJson"`
+	ApprovedHash string         `json:"approvedHash"`
 }
 
 func pgOf(id string) pgtype.UUID {
@@ -96,9 +100,15 @@ var _ = Describe("remote MCP servers", func() {
 		Expect(tools).To(HaveLen(1))
 		Expect(tools[0].Tier).To(Equal("ask"))
 		Expect(tools[0].ReadOnlyHint).To(BeTrue())
+		Expect(tools[0].ToolHash).NotTo(BeEmpty())
+		Expect(tools[0].ApprovedHash).To(BeEmpty())
+		Expect(tools[0].ToolJSON).To(HaveKeyWithValue("description", "Search"), "the console shows the text before an approval")
 
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/tier", map[string]any{"tier": "auto"})
+		Expect(code).To(Equal(http.StatusBadRequest), "a pending tool needs the hash the admin read: %s", raw)
+		code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/tier", map[string]any{"tier": "auto", "toolHash": tools[0].ToolHash})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
+		Expect(decode[mcpToolJSON](raw).ApprovedHash).To(Equal(tools[0].ToolHash))
 		Expect(decode[mcpToolJSON](raw).Tier).To(Equal("auto"))
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/two-approvers", map[string]any{"required": true})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
@@ -110,8 +120,11 @@ var _ = Describe("remote MCP servers", func() {
 		_, err = e.mcp.SyncTools(ctx, e.org, pgOf(s.ID), []mcpservers.ListedTool{tool})
 		Expect(err).NotTo(HaveOccurred())
 		_, raw = e.call(ctx, e.token, http.MethodGet, "/mcp-servers/"+s.ID+"/tools", nil)
-		Expect(decode[struct{ Tools []mcpToolJSON }](raw).Tools[0].ReviewReason).NotTo(BeEmpty())
-		code, raw = e.call(ctx, e.token, http.MethodPost, "/mcp-servers/"+s.ID+"/tools/search/review", nil)
+		changed := decode[struct{ Tools []mcpToolJSON }](raw).Tools[0]
+		Expect(changed.ReviewReason).NotTo(BeEmpty())
+		code, raw = e.call(ctx, e.token, http.MethodPost, "/mcp-servers/"+s.ID+"/tools/search/review", map[string]any{"toolHash": tools[0].ToolHash})
+		Expect(code).To(Equal(http.StatusConflict), "the text changed since the admin read it: %s", raw)
+		code, raw = e.call(ctx, e.token, http.MethodPost, "/mcp-servers/"+s.ID+"/tools/search/review", map[string]any{"toolHash": changed.ToolHash})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
 		Expect(decode[mcpToolJSON](raw).ReviewReason).To(BeEmpty())
 

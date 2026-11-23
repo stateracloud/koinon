@@ -85,7 +85,17 @@ export function mcpServerHandlers() {
   const tools: Json[] = [
     { serverId: 's-docs', name: 'search', description: 'Search the docs', readOnlyHint: true, tier: 'TIER_ASK', present: true },
     { serverId: 's-docs', name: 'publish', description: 'Publish a page', tier: 'TIER_NEVER', present: true },
-    { serverId: 's-docs', name: 'edit', description: 'Edit a page', tier: 'TIER_ASK', present: true, reviewReason: 'the description changed; moved to Ask until reviewed' },
+    {
+      serverId: 's-docs',
+      name: 'edit',
+      description: 'Edit a page',
+      tier: 'TIER_ASK',
+      present: true,
+      reviewReason: 'the description changed; moved to Ask until reviewed',
+      toolHash: 'hash-edit-new',
+      approvedHash: 'hash-edit-old',
+      toolJson: '{"name":"edit","description":"Edit a page, then mail it out","inputSchema":{"type":"object"}}',
+    },
     { serverId: 's-docs', name: 'legacy', tier: 'TIER_AUTO', present: false },
     { serverId: 's-docs', name: 'a_very_long_tool_name', description: 'Too long', tier: 'TIER_ASK', present: true, unavailable: 'unavailable: name too long for the gateway' },
     { serverId: 's-issues', name: 'list_issues', description: 'List issues', tier: 'TIER_AUTO', present: true },
@@ -108,6 +118,7 @@ export function mcpServerHandlers() {
       const t = find(req)
       t.tier = req.tier
       delete t.reviewReason
+      t.approvedHash = t.toolHash
       return { tool: t }
     },
     [mcp + 'SetToolTwoApprovers']: (req) => {
@@ -120,6 +131,7 @@ export function mcpServerHandlers() {
       seen.ack = req
       const t = find(req)
       delete t.reviewReason
+      t.approvedHash = t.toolHash
       return { tool: t }
     },
     [mcp + 'GetAgentServers']: () => ({ servers: allowed }),

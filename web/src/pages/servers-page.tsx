@@ -282,6 +282,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       )}
       {t.description && <p className="text-muted-foreground text-sm">{t.description}</p>}
       {(t.descriptionCapped || t.descriptionCleaned) && <SanitisedNote tool={t} />}
+      {pendingApproval(t) && <PendingText tool={t} />}
       <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1" disabled={pending}>
         <legend className="sr-only">Decision for {t.name}</legend>
         {tiers.map((x) => (
@@ -291,7 +292,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
               name={`${idBase}-tier`}
               value={x.value}
               checked={t.tier === x.value || (t.tier === Tier.UNSPECIFIED && x.value === Tier.ASK)}
-              onChange={() => void run(actions.setToolTier(server.id, t.name, x.value))}
+              onChange={() => void run(actions.setToolTier(server.id, t.name, x.value, t.toolHash))}
             />
             {x.label}
           </label>
@@ -317,7 +318,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {suggestsAuto(t) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set to Allow: ${t.name}`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set to Allow: ${t.name}`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO, t.toolHash))}>
             Set to Allow
           </Button>
         </div>
@@ -325,12 +326,69 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {t.reviewReason && (
         <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
           <span>Review: {t.reviewReason}.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark reviewed: ${t.name}`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark reviewed: ${t.name}`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name, t.toolHash))}>
             Mark reviewed
           </Button>
           <p className="text-muted-foreground w-full text-xs">Reviewing keeps the tool in Ask; set it back to Allow yourself if you trust the new version.</p>
         </div>
       )}
+    </div>
+  )
+}
+
+/** pendingApproval reports a tool whose observed text nobody approved yet (#1132, #1173). */
+function pendingApproval(t: Tool): boolean {
+  return t.toolHash !== '' && t.toolHash !== t.approvedHash
+}
+
+type PinnedText = { name?: string; title?: string; description?: string; inputSchema?: unknown }
+
+function parsePinned(raw: string): PinnedText | undefined {
+  try {
+    const v: unknown = JSON.parse(raw)
+    return v && typeof v === 'object' ? (v as PinnedText) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * PendingText shows the exact text a decision approves: the name, description and input schema the
+ * sync observed, and its hash (#1173). A decision sends that hash, and the server refuses it when the
+ * text changed in the meantime, so an admin never approves text they did not see.
+ */
+function PendingText({ tool }: { tool: Tool }) {
+  const pinned = parsePinned(tool.toolJson)
+  const schema = pinned?.inputSchema === undefined ? '' : JSON.stringify(pinned.inputSchema, null, 2)
+  return (
+    <div className="grid gap-1 rounded-md border p-2 text-sm" role="group" aria-label={`Text waiting for approval: ${tool.name}`}>
+      <p className="font-medium">Text waiting for approval</p>
+      <p className="text-muted-foreground text-xs">A decision on this tool approves this text. If the server changes it before you decide, Koinon refuses the decision and shows the new text.</p>
+      {pinned ? (
+        <dl className="grid gap-1">
+          <dt className="text-muted-foreground text-xs">Name</dt>
+          <dd>
+            <code className="break-all">{pinned.name ?? tool.name}</code>
+          </dd>
+          {pinned.title && (
+            <>
+              <dt className="text-muted-foreground text-xs">Title</dt>
+              <dd className="break-words">{pinned.title}</dd>
+            </>
+          )}
+          <dt className="text-muted-foreground text-xs">Description</dt>
+          <dd className="break-words whitespace-pre-wrap">{pinned.description || '(none)'}</dd>
+          <dt className="text-muted-foreground text-xs">Input schema</dt>
+          <dd>
+            <pre className="bg-muted max-h-64 overflow-auto rounded p-2 text-xs">{schema || '(none)'}</pre>
+          </dd>
+        </dl>
+      ) : (
+        <p className="text-muted-foreground text-xs">The text could not be read.</p>
+      )}
+      <p className="text-xs">
+        Hash: <code className="break-all">{tool.toolHash}</code>
+      </p>
     </div>
   )
 }

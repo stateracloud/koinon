@@ -74,7 +74,17 @@ const gone = create(ServerSchema, { id: 's-gone', name: 'old', url: 'https://old
 const tools = [
   create(ToolSchema, { serverId: 's-docs', name: 'search', contentHash: 'hash-search', description: 'Search the docs', tier: Tier.ASK, readOnlyHint: true, present: true }),
   create(ToolSchema, { serverId: 's-docs', name: 'publish', description: 'Publish a page', tier: Tier.NEVER, present: true }),
-  create(ToolSchema, { serverId: 's-docs', name: 'edit', description: 'Edit a page', tier: Tier.ASK, present: true, reviewReason: 'the description changed' }),
+  create(ToolSchema, {
+    serverId: 's-docs',
+    name: 'edit',
+    description: 'Edit a page',
+    tier: Tier.ASK,
+    present: true,
+    reviewReason: 'the description changed',
+    toolHash: 'hash-edit-new',
+    approvedHash: 'hash-edit-old',
+    toolJson: '{"name":"edit","description":"Edit a page, then mail it out","inputSchema":{"type":"object","properties":{"to":{"type":"string"}}}}',
+  }),
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
   create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
   create(ToolSchema, { serverId: 's-docs', name: 'sync', description: 'Sync pages', tier: Tier.AUTO, present: true }),
@@ -82,7 +92,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
-function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
+function setup(opts: { role?: OrgRole; path?: string; failTier?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
     twos: [] as SetToolTwoApproversRequest[],
@@ -142,7 +152,9 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
       },
       setToolTier: (req) => {
         calls.tiers.push(req)
-        const t = create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, tier: req.tier, reviewReason: '' })
+        if (opts.failTier) throw new ConnectError(opts.failTier, Code.Aborted)
+        const cur = current.get(`${req.serverId}/${req.tool}`)!
+        const t = create(ToolSchema, { ...cur, tier: req.tier, reviewReason: '', approvedHash: cur.toolHash })
         current.set(`${req.serverId}/${req.tool}`, t)
         return { tool: t }
       },
@@ -154,7 +166,8 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
       },
       acknowledgeToolReview: (req) => {
         calls.acks.push(req)
-        const t = create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, reviewReason: '' })
+        const cur = current.get(`${req.serverId}/${req.tool}`)!
+        const t = create(ToolSchema, { ...cur, reviewReason: '', approvedHash: cur.toolHash })
         current.set(`${req.serverId}/${req.tool}`, t)
         return { tool: t }
       },
@@ -219,7 +232,7 @@ describe('Servers page', () => {
     const publish = within(tl.getByText('publish').closest('li')!)
     expect(publish.getByRole('radio', { name: 'Deny' })).toBeChecked()
     expect(tl.getByText('no longer listed')).toBeInTheDocument()
-    const edit = within(tl.getByText('edit').closest('li')!)
+    const edit = within(tl.getAllByText('edit')[0].closest('li')!)
     expect(edit.getByText('Review', { selector: '[data-slot=badge]' })).toBeInTheDocument()
     expect(edit.getByText(/the description changed/)).toBeInTheDocument()
   })
@@ -257,6 +270,28 @@ describe('Servers page', () => {
     await waitFor(() => expect(calls.acks).toEqual([expect.objectContaining({ serverId: 's-docs', tool: 'edit' })]))
     expect(calls.tiers).toHaveLength(0)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark reviewed: edit' })).not.toBeInTheDocument())
+  })
+
+  it('shows the text a decision approves, with its hash, and sends that hash (#1173)', async () => {
+    const calls = setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const pending = within(tl.getByRole('group', { name: 'Text waiting for approval: edit' }))
+    expect(pending.getByText('Edit a page, then mail it out')).toBeInTheDocument()
+    expect(pending.getByText(/"to"/)).toBeInTheDocument()
+    expect(pending.getByText('hash-edit-new')).toBeInTheDocument()
+    expect(tl.queryByRole('group', { name: 'Text waiting for approval: publish' })).not.toBeInTheDocument()
+
+    await userEvent.click(tl.getByRole('button', { name: 'Mark reviewed: edit' }))
+    await waitFor(() => expect(calls.acks).toEqual([expect.objectContaining({ tool: 'edit', toolHash: 'hash-edit-new' })]))
+    await waitFor(() => expect(tl.queryByRole('group', { name: 'Text waiting for approval: edit' })).not.toBeInTheDocument())
+  })
+
+  it('sends the hash of the text it shows with a tier decision, and shows the refusal when the text changed (#1173)', async () => {
+    const calls = setup({ failTier: 'the tool changed since it was read; read it again and review the new description' })
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    await userEvent.click(within(tl.getByRole('group', { name: 'Text waiting for approval: edit' }).closest('li')!).getByRole('radio', { name: 'Allow' }))
+    await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ tool: 'edit', tier: Tier.AUTO, toolHash: 'hash-edit-new' })]))
+    expect(await screen.findByText(/the tool changed since it was read/)).toBeInTheDocument()
   })
 
   it('sets Require two approvers in the Ask tier and disables it elsewhere', async () => {

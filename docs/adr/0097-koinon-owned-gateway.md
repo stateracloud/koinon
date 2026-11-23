@@ -943,6 +943,18 @@ list only when it matches what an admin approved.
 - The left-out set is kept in memory in each gateway replica. The database review flag that the sync
   sets backs the call refusal. The metric `koinon_gateway_mcp_tools_left_out_total` has the label
   `reason` only (ADR 0023).
+- When a list carries text for a tool that is neither the approved text nor the text the sync recorded
+  last, the gateway wakes the prober (#1173). It sends a Postgres `NOTIFY` on `koinon_mcp_probe` with
+  the org and server IDs only, at most once per server in 10 seconds per replica. The leading reconciler
+  listens on that channel and syncs that one server at once, at most once per server in 5 seconds. A
+  wake inside that time is held to its end, not dropped. The review flag and the new text therefore reach
+  the console in seconds, not at the next probe interval. The wake carries no text: the prober reads the
+  text through the gateway itself.
+- An admin decision is a compare-and-set (#1173). The console shows the observed text (name, title,
+  description and input schema) and its hash, and the tier or acknowledgement request carries that hash.
+  The service locks the row and refuses the decision with `Aborted` (HTTP 409) when the observed hash
+  changed since the admin read it, and with `InvalidArgument` when a tool waits for an approval and the
+  request carries no hash. So an admin never approves text they did not see.
 
 This completes decision 4 of ADR 0091 for tool lists. It does not change the tiers: an approved text is
 not an `auto` grant.

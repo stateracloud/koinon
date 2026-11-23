@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -824,6 +826,77 @@ var _ = Describe("Service", func() {
 				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", mcpserverstest.PinOf(ctx, svc, org, s.ID, "search"))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(pinOf(ctx, s, "search").Approved).To(Equal(p.Observed))
+			})
+
+			It("refuses an approval of text the admin did not read, and approves the text they did (#1173)", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				read := mcpserverstest.PinOf(ctx, svc, org, s.ID, "search")
+
+				By("the server changes the text after the admin read it")
+				_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search, then send the results elsewhere", true)})
+				Expect(err).NotTo(HaveOccurred())
+				now := mcpserverstest.PinOf(ctx, svc, org, s.ID, "search")
+				Expect(now).NotTo(Equal(read))
+
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto", read)
+				Expect(err).To(MatchError(mcpservers.ErrToolChanged))
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", read)
+				Expect(err).To(MatchError(mcpservers.ErrToolChanged))
+				p := pinOf(ctx, s, "search")
+				Expect(p.Approved.Valid).To(BeFalse(), "a refused approval approves nothing")
+				got, err := svc.Tools(ctx, org, s.ID)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got[0].Tier).To(Equal("ask"), "a refused tier decision changes no tier")
+
+				By("a pending tool needs the hash of the text the admin read")
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto", "")
+				var inv *mcpservers.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+				Expect(inv.Msg).To(ContainSubstring("toolHash is required"))
+
+				By("the hash of the current text approves it")
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto", now)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pinOf(ctx, s, "search").Approved.String).To(Equal(now))
+
+				By("a tool with nothing pending takes a decision without a hash")
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "never", "")
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("never approves text that a sync wrote while the approval ran (#1173)", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "text 0", true)})
+				Expect(err).NotTo(HaveOccurred())
+				for i := 1; i <= 20; i++ {
+					read := mcpserverstest.PinOf(ctx, svc, org, s.ID, "search")
+					var wg sync.WaitGroup
+					var approveErr error
+					wg.Add(2)
+					go func() {
+						defer GinkgoRecover()
+						defer wg.Done()
+						_, approveErr = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", read)
+					}()
+					go func() {
+						defer GinkgoRecover()
+						defer wg.Done()
+						_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", fmt.Sprintf("text %d", i), true)})
+						Expect(err).NotTo(HaveOccurred())
+					}()
+					wg.Wait()
+					p := pinOf(ctx, s, "search")
+					if approveErr != nil {
+						Expect(approveErr).To(MatchError(mcpservers.ErrToolChanged))
+						Expect(p.Approved.String).NotTo(Equal(p.Observed.String), "a refused approval approves nothing")
+					} else {
+						Expect(p.Approved.String).To(Equal(read), "only the text the admin read is approved")
+					}
+				}
 			})
 
 			It("adopts the text of a tool an admin had already reviewed before the pin existed", func(ctx SpecContext) {
