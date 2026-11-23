@@ -73,7 +73,8 @@ func tlsSecret(ca, leaf, key []byte) *corev1.Secret {
 func ateletDS() *appsv1.DaemonSet {
 	ds := ateletDSUnpatched()
 	ds.Spec.Template.Spec.Volumes = []corev1.Volume{{Name: imagecacheca.VolumeName, VolumeSource: corev1.VolumeSource{
-		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}}}}}
+		ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}},
+	}}}
 	ds.Spec.Template.Spec.Containers = []corev1.Container{{Name: imagecacheca.AteletContainer, Env: []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}}}}
 	return ds
 }
