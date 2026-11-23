@@ -4,8 +4,8 @@
 # Fails on drift between hack/versions.env (the one place tool versions live, old issue 544) and the copies
 # that cannot read it:
 #   - hack/e2e-toolchain/Dockerfile: ARG <TOOL>_VERSION and <TOOL>_SHA256_<arch> for kind, ko, helm, kubectl
-#   - every `version:` input of azure/setup-helm (HELM_VERSION), golangci-lint-action
-#     (GOLANGCI_LINT_VERSION) and bufbuild/buf-action (BUF_VERSION; every use must have one) in .github/workflows
+#   - every `version:` input of azure/setup-helm (HELM_VERSION) and golangci-lint-action
+#     (GOLANGCI_LINT_VERSION) in .github/workflows
 #   - the tool table in CONTRIBUTING.md
 #   - mise.toml and mise.lock (ADR 0124): the five lint tools, their versions and linux-x64 checksums
 # and on a second literal of any versions.env name where a consumer should read the file instead: a
@@ -64,7 +64,7 @@ pinned_inputs() {
 }
 for wf in .github/workflows/*.yml; do
 	[[ -f $wf ]] || continue
-	for pair in "azure/setup-helm HELM_VERSION" "golangci/golangci-lint-action GOLANGCI_LINT_VERSION" "bufbuild/buf-action BUF_VERSION"; do
+	for pair in "azure/setup-helm HELM_VERSION" "golangci/golangci-lint-action GOLANGCI_LINT_VERSION"; do
 		read -r act key <<<"$pair"
 		want=$(val "$key")
 		while IFS=: read -r n v; do
@@ -83,38 +83,10 @@ for n in $names; do
 	[[ -z $hits ]] || fail "$n is set outside $env_file (read the file instead): $(head -1 <<<"$hits")"
 done
 
-# 4a. Go tools run by version (`go run <module>@vX`) and buf-action without a `version:`: a literal
-# version of govulncheck, gofumpt or crane anywhere in workflows or scripts, or a buf-action with no pinned
-# version (it would pull "latest", ADR 0079's cooldown cannot apply), is a second copy.
+# 4a. Go tools run by version (`go run <module>@vX`): a literal version of govulncheck, gofumpt or crane
+# anywhere in workflows or scripts is a second copy.
 hits=$(grep -nE '(govulncheck|gofumpt|crane)@v?[0-9]' .github/workflows/*.yml hack/*.sh test/e2e/*.sh test/e2e/*/*.sh 2>/dev/null | grep -v '^hack/versions-check' | grep -v '^hack/preflight-test.sh:' || true)
 [[ -z $hits ]] || fail "a literal govulncheck/gofumpt/crane version (read GOVULNCHECK_VERSION/GOFUMPT_VERSION/CRANE_VERSION from $env_file): $(head -1 <<<"$hits")"
-# Every buf-action step needs `version:` and `checksum:`, and (when they read the env) a step earlier
-# in the same job that runs hack/versions-env.sh; without the load both expand to "" and buf-action
-# installs the latest buf and skips the checksum.
-for wf in .github/workflows/*.yml; do
-	[[ -f $wf ]] || continue
-	while IFS= read -r msg; do
-		[[ -z $msg ]] && continue
-		fail "$wf:$msg"
-	done < <(awk '
-		function finish() {
-			if (!in_buf) return
-			if (!hv) print ln ": bufbuild/buf-action step without a version: input (an unpinned buf pulls latest)"
-			if (!hc) print ln ": bufbuild/buf-action step without a checksum: input"
-			in_buf = 0
-		}
-		/^  [A-Za-z0-9_-]+:[[:space:]]*$/ { finish(); loaded = 0 }
-		in_buf && /^[[:space:]]*- / { finish() }
-		/versions-env\.sh/ { loaded = 1 }
-		/uses:[[:space:]]*bufbuild\/buf-action@/ {
-			finish(); in_buf = 1; ln = NR; hv = 0; hc = 0
-			if (!loaded) print ln ": bufbuild/buf-action step with no earlier step in the job running hack/versions-env.sh (BUF_VERSION would be empty)"
-		}
-		in_buf && /^[[:space:]]*version:/ { hv = 1 }
-		in_buf && /^[[:space:]]*checksum:/ { hc = 1; c = $0; sub(/^[[:space:]]*checksum:[[:space:]]*/, "", c); sub(/[[:space:]]*#.*/, "", c); if (c != "${{ env.BUF_SHA256_AMD64 }}") print NR ": buf-action checksum '"'"'" c "'"'"' is not ${{ env.BUF_SHA256_AMD64 }}" }
-		END { finish() }
-	' "$wf")
-done
 
 # 4b. `sha256sum -c` input needs two spaces between hash and file ("HASH  FILE"); GNU sha256sum rejects
 # one space or none as a malformed line, and only the CI run would show it.

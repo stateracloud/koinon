@@ -321,6 +321,7 @@ script-skip - hack/wt-install-test.sh
 script-skip - hack/e2e-bisect-test.sh
 # Covered by another preflight gate (versions, dockerfile, mktemp, pinned, bash5, audit, adr).
 script-skip - hack/versions-check.sh
+script-skip - hack/buf.sh # runs the pinned buf (the proto lint step of ci.yml); the preflight gate `proto` runs it
 script-skip - hack/dockerfile-lint-test.sh
 script-skip - hack/dockerfile-lint.sh
 script-skip - hack/mktemp-lint-test.sh

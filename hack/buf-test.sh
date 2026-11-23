@@ -19,7 +19,8 @@ fail() { echo "buf-test: $*" >&2; exit 1; }
 mkdir -p "$tmp/bin"
 printf '#!/usr/bin/env bash\necho "go $*" >>"$FAKE_LOG"\n' >"$tmp/bin/go"
 printf '#!/usr/bin/env bash\necho "a global buf ran: $*" >>"$FAKE_LOG"\nexit 97\n' >"$tmp/bin/buf"
-chmod +x "$tmp/bin/go" "$tmp/bin/buf"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/bin/true-tool"
+chmod +x "$tmp/bin/go" "$tmp/bin/buf" "$tmp/bin/true-tool"
 export FAKE_LOG="$tmp/log"
 
 want_tool() { # <name> <buf args...>: the log has exactly the pinned-tool call and no global buf
@@ -35,7 +36,7 @@ want_tool() { # <name> <buf args...>: the log has exactly the pinned-tool call a
 (cd "$tmp" && PATH="$tmp/bin:$PATH" "$root/hack/buf.sh" lint --path x)
 want_tool "hack/buf.sh" lint --path x
 : >"$FAKE_LOG"
-PATH="$tmp/bin:$PATH" GO=$tmp/bin/go KOINON_TEST_BUF=/bin/true "$root/hack/buf.sh" lint
+PATH="$tmp/bin:$PATH" GO=$tmp/bin/go KOINON_TEST_BUF=$tmp/bin/true-tool "$root/hack/buf.sh" lint
 [[ ! -s $FAKE_LOG ]] || fail "KOINON_TEST_BUF did not replace the tool"
 echo "ok: the test hook replaces the tool"
 
