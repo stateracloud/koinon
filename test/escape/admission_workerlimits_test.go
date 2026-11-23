@@ -264,6 +264,8 @@ var _ = Describe("Worker namespace limits", Label("escape", "admission", "substr
 			_, err = as[user].CoreV1().ResourceQuotas(ns).Update(ctx, q, metav1.UpdateOptions{DryRun: dry})
 			denied(err, user+" raises the ResourceQuota")
 			l, q = relabelled()
+			_, err = as[user].CoreV1().LimitRanges(ns).Update(ctx, l, metav1.UpdateOptions{DryRun: dry})
+			denied(err, user+" relabels the LimitRange")
 			_, err = as[user].CoreV1().ResourceQuotas(ns).Update(ctx, q, metav1.UpdateOptions{DryRun: dry})
 			denied(err, user+" relabels the ResourceQuota")
 			denied(as[user].CoreV1().LimitRanges(ns).Delete(ctx, lr.Name, metav1.DeleteOptions{DryRun: dry}), user+" deletes the LimitRange")
