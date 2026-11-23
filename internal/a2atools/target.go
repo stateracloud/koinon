@@ -57,7 +57,7 @@ type Options struct {
 // Target is the built-in target of kind [gateway.BuiltinA2A]. It is safe for concurrent use.
 type Target struct{ o Options }
 
-var _ mcpgateway.Builtin = (*Target)(nil)
+var _ mcpgateway.CredentialBuiltin = (*Target)(nil)
 
 // New returns the target.
 func New(o Options) *Target {
@@ -67,6 +67,14 @@ func New(o Options) *Target {
 	if o.Credentials == nil {
 		o.Credentials = mcpgateway.StaticCredentials{}
 	}
+	return &Target{o: o}
+}
+
+// WrapCredentials returns a copy of t whose credential source is wrap(source). The gateway uses it to record
+// every credential the target opens in its credential scrub (#1174).
+func (t *Target) WrapCredentials(wrap func(mcpgateway.CredentialSource) mcpgateway.CredentialSource) mcpgateway.Builtin {
+	o := t.o
+	o.Credentials = wrap(o.Credentials)
 	return &Target{o: o}
 }
 

@@ -811,10 +811,26 @@ move, once.
      koinon-gateway holds the plaintext, so it scrubs the values it opened (#1174). `mcpgateway.CredentialScrub`
      records each value when the gateway opens it, and removes it by exact value (and its encoded forms, and the
      token after the auth scheme) from every log line, span and audit row the gateway writes and from every tool
-     list and tool result it gives to an agent. Logs, spans and audit rows use the values of all orgs. A tool list or
-     tool result uses only the values of the agent's own org, so one org's credential cannot change what an agent of
-     another org gets. The router path logs and stores no opened v2 value (a spec checks it). The router still scrubs
-     v1 MCP values, which it can open.
+     list and tool result it gives to an agent. Built-in targets open their credentials through the same scrub.
+     - **Scope.** An org chooses its own credential bytes. So each text that belongs to one org uses only that org's
+       values: the tool lists and tool results an agent gets, and the log lines, spans and audit rows of an agent's
+       request (the org travels in the request context). One org's credential cannot change or hide the text of
+       another org. A log line or span with no org is process telemetry: it uses the values of all orgs, in its
+       values and free text only, never in its keys or group names, which are code constants.
+     - **Where.** A tool list and a tool result are scrubbed as they enter the gateway, so the tool-list check, the
+       pin hash and the agent see one text, and again as they leave. The guard's inspection of the wire still sees
+       the raw message: it must, to judge it.
+     - **Limits.** A value stays 24 hours after its last open. One org holds at most 256 values and the process
+       8192; over a cap the oldest go first. A value that is already known costs no lock. A value shorter than 8
+       bytes is not matched (it would remove ordinary words): the gateway counts it
+       (`koinon_gateway_credential_too_short_total`) and logs the target once. `koinon_gateway_credential_redactions_total`
+       counts the texts it changed, by path (`agent` or `telemetry`).
+     - **Threat scope.** The scrub is a backstop for a target that echoes its credential by accident. It does not
+       stop a target that hides the value on purpose (hex, a hash, a split over two fields): that target already
+       holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
+       own issue.
+     The router path logs and stores no opened v2 value (a spec checks it). The router still scrubs v1 MCP values,
+     which it can open.
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.
 2. **Move (slice 4, built in #1151).** `koinon-api keys seal-mcp` opens each v1 value with the KEK and seals it

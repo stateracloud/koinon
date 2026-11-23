@@ -58,3 +58,22 @@ func TestAuthParts(t *testing.T) {
 		t.Errorf("no scheme: %q", got)
 	}
 }
+
+// Encoders other than Go's write lower-case hex digits in a percent escape, and some JSON encoders write / as
+// \/. The value keeps its case in both forms, so the whole-lower form does not match them (#1174).
+func TestSecretsRedactOtherEncoderForms(t *testing.T) {
+	const v = "KOINON/test+not real=token"
+	set := scrub.NewSecrets(v)
+	sec := scrub.Replacement(scrub.KindSecret)
+	for _, in := range []string{
+		"KOINON%2ftest%2bnot+real%3dtoken", // query escape, lower-case hex
+		"KOINON%2Ftest%2Bnot+real%3Dtoken", // query escape, Go's upper-case hex
+		"KOINON%2ftest+not%20real=token",   // path escape, lower-case hex
+		`KOINON\/test+not real=token`,      // JSON with an escaped slash
+		"koinon%2ftest%2bnot+real%3dtoken", // a server that folds the URL to lower case
+	} {
+		if got := set.Redact("q=" + in); got != "q="+sec {
+			t.Errorf("Redact(%q) = %q, want the value removed", in, got)
+		}
+	}
+}

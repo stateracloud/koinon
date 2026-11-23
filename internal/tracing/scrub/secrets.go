@@ -243,12 +243,33 @@ func secretForms(v string) []string {
 	forms = append(forms, ascii, asciiEscape(plain, true))
 	double := string(appendString(nil, plain))
 	forms = append(forms, double[1:len(double)-1])
-	q := url.QueryEscape(v)
-	forms = append(forms, q, url.PathEscape(v), strings.ToLower(q))
+	if strings.Contains(plain, "/") { // some JSON encoders (PHP, older Java) write / as \/
+		forms = append(forms, strings.ReplaceAll(plain, "/", `\/`))
+	}
+	q, path := url.QueryEscape(v), url.PathEscape(v)
+	// Go writes upper-case hex digits; other encoders write lower case. Only the digits change case: the
+	// value itself keeps its case. The whole-lower form stays for a URL that a server folds to lower case.
+	forms = append(forms, q, path, strings.ToLower(q), lowerHex(q), lowerHex(path))
 	b := []byte(v)
 	forms = append(forms, base64.StdEncoding.EncodeToString(b), base64.URLEncoding.EncodeToString(b),
 		base64.RawStdEncoding.EncodeToString(b), base64.RawURLEncoding.EncodeToString(b))
 	return forms
+}
+
+// lowerHex returns s with the hex digits of every %XX escape in lower case.
+func lowerHex(s string) string {
+	b := []byte(s)
+	for i := 0; i+2 < len(b); i++ {
+		if b[i] == '%' {
+			for j := i + 1; j <= i+2; j++ {
+				if b[j] >= 'A' && b[j] <= 'F' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			i += 2
+		}
+	}
+	return string(b)
 }
 
 // asciiEscape writes every non-ASCII rune of s as a \uXXXX escape (a surrogate pair above the

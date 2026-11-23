@@ -235,7 +235,19 @@ type Metrics struct {
 	Dropped *prometheus.CounterVec
 	// ToolsLeftOut counts tools a tools/list left out of what an agent sees, by reason (#1132).
 	ToolsLeftOut *prometheus.CounterVec
+	// CredentialRedactions counts texts in which the gateway replaced an opened credential value, by path:
+	// "agent" (a tool list or a tool result an agent gets) or "telemetry" (a log record, a span, an audit row)
+	// (#1174).
+	CredentialRedactions *prometheus.CounterVec
+	// CredentialsTooShort counts opened credentials whose token is shorter than the scrub can match.
+	CredentialsTooShort prometheus.Counter
 }
+
+// The paths of CredentialRedactions.
+const (
+	redactAgent     = "agent"
+	redactTelemetry = "telemetry"
+)
 
 // NewMetrics creates the counters and registers them with reg (nil: not registered).
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -256,6 +268,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_gateway_mcp_tools_left_out_total",
 			Help: "Tools the MCP path left out of a tools/list because they changed since approval, were over the limit or unusable, by reason.",
 		}, []string{"reason"}),
+		CredentialRedactions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_redactions_total",
+			Help: "Texts in which koinon-gateway replaced an opened credential value, by path (agent or telemetry).",
+		}, []string{"path"}),
+		CredentialsTooShort: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_too_short_total",
+			Help: "Opened credentials whose token is too short for koinon-gateway to scrub from logs and results.",
+		}),
+	}
+	for _, p := range []string{redactAgent, redactTelemetry} {
+		m.CredentialRedactions.WithLabelValues(p)
 	}
 	for _, r := range []string{leftChanged, leftOverLimit, leftUnusable, leftUnreadable} {
 		m.ToolsLeftOut.WithLabelValues(r)
@@ -267,7 +290,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Dropped.WithLabelValues(r)
 	}
 	if reg != nil {
-		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut)
+		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut, m.CredentialRedactions,
+			m.CredentialsTooShort)
 	}
 	return m
 }
@@ -287,6 +311,18 @@ func (m *Metrics) toolLeft(reason string) {
 func (m *Metrics) noteDropped() {
 	if m != nil {
 		m.NotesDropped.Inc()
+	}
+}
+
+func (m *Metrics) redacted(path string) {
+	if m != nil {
+		m.CredentialRedactions.WithLabelValues(path).Inc()
+	}
+}
+
+func (m *Metrics) shortCredential() {
+	if m != nil {
+		m.CredentialsTooShort.Inc()
 	}
 }
 
