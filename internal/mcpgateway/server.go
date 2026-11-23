@@ -111,13 +111,13 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 			}
 			switch method {
 			case "tools/list":
-				return g.o.Scrub.ToolList(g.listTools(ctx, agent)), nil
+				return g.o.Scrub.ToolList(agent.Org, g.listTools(ctx, agent)), nil
 			case "tools/call":
 				r, ok := req.(*mcp.CallToolRequest)
 				if !ok {
 					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad tools/call"}
 				}
-				return g.o.Scrub.Result(g.callTool(ctx, agent, r.Params)), nil
+				return g.o.Scrub.Result(agent.Org, g.callTool(ctx, agent, r.Params)), nil
 			}
 			return next(ctx, method, req)
 		}

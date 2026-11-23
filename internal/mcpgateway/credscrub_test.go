@@ -198,7 +198,7 @@ var _ = Describe("CredentialScrub", func() {
 
 	It("scrubs every field of a tool result: text, resources, links, blobs, metadata and structured content", func() {
 		sc.Add("Bearer " + fakeToken)
-		res := sc.Result(&mcp.CallToolResult{
+		res := sc.Result("", &mcp.CallToolResult{
 			Meta: mcp.Meta{"echo": fakeToken},
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: "got " + fakeToken, Meta: mcp.Meta{"t": fakeToken}},
@@ -220,7 +220,7 @@ var _ = Describe("CredentialScrub", func() {
 	It("scrubs a tool list: each tool's text, schema and metadata, and leaves a clean tool as it is", func() {
 		sc.Add(fakeToken)
 		clean := &mcp.Tool{Name: "clean", Description: "fine"}
-		res := sc.ToolList(&mcp.ListToolsResult{
+		res := sc.ToolList("", &mcp.ListToolsResult{
 			Meta: mcp.Meta{"m": fakeToken},
 			Tools: []*mcp.Tool{clean, {
 				Name: "t", Title: fakeToken, Description: "uses " + fakeToken,
@@ -238,10 +238,26 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(res.Tools[1].Description).To(Equal("uses [redacted:secret]"))
 	})
 
+	It("scrubs an agent's tool list and result only with its own org's values, and logs with every org's values", func() {
+		sc.AddFor("org-a", fakeToken)
+		text := "the docs say " + fakeToken
+		other := sc.ToolList("org-b", &mcp.ListToolsResult{Tools: []*mcp.Tool{{Name: "t", Description: text}}})
+		Expect(other.Tools[0].Description).To(Equal(text))
+		in := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+		Expect(sc.Result("org-b", in)).To(BeIdenticalTo(in))
+		own := sc.ToolList("org-a", &mcp.ListToolsResult{Tools: []*mcp.Tool{{Name: "t", Description: text}}})
+		Expect(own.Tools[0].Description).To(Equal("the docs say [redacted:secret]"))
+		res := sc.Result("org-a", &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}})
+		Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("the docs say [redacted:secret]"))
+		Expect(sc.Text(text)).To(Equal("the docs say [redacted:secret]"))
+		log.Info("x", "v", text)
+		expectNoLeak("the log", buf.String())
+	})
+
 	It("returns a tool result with no credential unchanged", func() {
 		sc.Add(fakeToken)
 		in := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fine"}}}
-		Expect(sc.Result(in)).To(BeIdenticalTo(in))
+		Expect(sc.Result("", in)).To(BeIdenticalTo(in))
 	})
 
 	It("scrubs a []byte log value, which a text handler writes as a string", func() {

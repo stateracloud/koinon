@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -33,27 +34,51 @@ import (
 // dummy), and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A value shorter than
 // [scrub.MinSecretLen] is not matched: it would redact ordinary words.
 //
+// Each value is recorded for the org of the agent whose call opened it. Logs, spans and errors are operator
+// telemetry: they are scrubbed with the values of every org, because a value must not leak there whichever call
+// it came from. Tool lists and tool results go to one agent: they are scrubbed only with the values of that
+// agent's org. An org chooses its own credential bytes, so a set shared by all orgs would let one org change or
+// hide the text of another org's tools.
+//
 // A value stays in the set for Retain after the gateway last opened it, so a late error about a rotated
-// credential is still scrubbed. The set holds at most MaxValues values; the oldest go first, in one batch. It is safe for
-// concurrent use. The zero value is not usable: call [NewCredentialScrub].
+// credential is still scrubbed. The set holds at most MaxValues values; the oldest go first, in one batch. It is
+// safe for concurrent use. The zero value is not usable: call [NewCredentialScrub].
 type CredentialScrub struct {
 	// Retain is how long a value stays in the set after its last open. Zero means 24 hours.
 	Retain time.Duration
-	// MaxValues caps the set. One credential adds up to four values. Zero means 65536.
+	// MaxValues caps the set (values of all orgs). One credential adds up to five values. Zero means 65536.
 	MaxValues int
 
 	now func() time.Time
 
 	mu        sync.Mutex
-	seen      map[string]time.Time // value -> last open
+	seen      map[scopedValue]time.Time // (org, value) -> last open
 	lastPrune time.Time
-	set       atomic.Pointer[scrub.Secrets]
+	sets      atomic.Pointer[scrubSets]
+}
+
+// scopedValue is a recorded value and the org of the call that opened it.
+type scopedValue struct{ org, value string }
+
+// scrubSets is an immutable snapshot of the matchers: all values, and the values of each org.
+type scrubSets struct {
+	all   *scrub.Secrets
+	byOrg map[string]*scrub.Secrets
+}
+
+var emptySecrets = scrub.NewSecrets()
+
+func (ss *scrubSets) org(org string) *scrub.Secrets {
+	if s, ok := ss.byOrg[org]; ok {
+		return s
+	}
+	return emptySecrets
 }
 
 // NewCredentialScrub returns an empty CredentialScrub.
 func NewCredentialScrub() *CredentialScrub {
-	s := &CredentialScrub{now: time.Now, seen: map[string]time.Time{}}
-	s.set.Store(scrub.NewSecrets())
+	s := &CredentialScrub{now: time.Now, seen: map[scopedValue]time.Time{}}
+	s.sets.Store(&scrubSets{all: emptySecrets, byOrg: map[string]*scrub.Secrets{}})
 	return s
 }
 
@@ -77,65 +102,85 @@ func (s *CredentialScrub) maxValues() int {
 	return 65536
 }
 
-// Add records opened credential values. Each value also adds the token after a known auth scheme
-// ([scrub.AuthParts]). Empty values are ignored.
-func (s *CredentialScrub) Add(values ...string) {
+// Add records opened credential values for no org: they are scrubbed from logs, spans and errors, and from the
+// tool lists and results of [CredentialScrub.Result] and [CredentialScrub.ToolList] called with the org "".
+func (s *CredentialScrub) Add(values ...string) { s.AddFor("", values...) }
+
+// AddFor records credential values that a call of an agent of org opened. Each value also adds the token after a
+// known auth scheme ([scrub.AuthParts]). Values shorter than [scrub.MinSecretLen] are ignored.
+func (s *CredentialScrub) AddFor(org string, values ...string) {
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := false
+	changed := map[string]bool{}
 	for _, v := range values {
 		for _, p := range scrub.AuthParts(v) {
 			p = strings.TrimSpace(p)
 			if len(p) < scrub.MinSecretLen {
 				continue
 			}
-			if _, ok := s.seen[p]; !ok {
-				changed = true
+			k := scopedValue{org: org, value: p}
+			if _, ok := s.seen[k]; !ok {
+				changed[org] = true
 			}
-			s.seen[p] = now
+			s.seen[k] = now
 		}
 	}
 	if now.Sub(s.lastPrune) >= time.Minute || len(s.seen) > s.maxValues() {
 		s.lastPrune = now
-		changed = s.pruneLocked(now) || changed
+		s.pruneLocked(now, changed)
 	}
-	if changed {
-		vals := make([]string, 0, len(s.seen))
-		for v := range s.seen {
-			vals = append(vals, v)
-		}
-		s.set.Store(scrub.NewSecrets(vals...))
+	if len(changed) > 0 {
+		s.rebuildLocked(changed)
 	}
 }
 
+// rebuildLocked builds new matchers for the changed orgs and for all values, and stores a new snapshot.
+func (s *CredentialScrub) rebuildLocked(changed map[string]bool) {
+	old := s.sets.Load()
+	all := map[string]bool{}
+	vals := map[string][]string{}
+	for k := range s.seen {
+		all[k.value] = true
+		if changed[k.org] {
+			vals[k.org] = append(vals[k.org], k.value)
+		}
+	}
+	next := &scrubSets{all: scrub.NewSecrets(slices.Collect(maps.Keys(all))...), byOrg: maps.Clone(old.byOrg)}
+	for org := range changed {
+		if len(vals[org]) == 0 {
+			delete(next.byOrg, org)
+			continue
+		}
+		next.byOrg[org] = scrub.NewSecrets(vals[org]...)
+	}
+	s.sets.Store(next)
+}
+
 // pruneLocked drops values not opened within Retain. Over MaxValues, it drops the oldest values in one batch
-// down to nine tenths of MaxValues, so a full set is not sorted and rebuilt at each open.
-func (s *CredentialScrub) pruneLocked(now time.Time) bool {
-	changed := false
-	for v, t := range s.seen {
+// down to nine tenths of MaxValues, so a full set is not sorted and rebuilt at each open. It marks the orgs it
+// changed.
+func (s *CredentialScrub) pruneLocked(now time.Time, changed map[string]bool) {
+	for k, t := range s.seen {
 		if now.Sub(t) > s.retain() {
-			delete(s.seen, v)
-			changed = true
+			delete(s.seen, k)
+			changed[k.org] = true
 		}
 	}
 	if limit := s.maxValues(); len(s.seen) > limit {
 		keep := limit - limit/10
-		vals := make([]string, 0, len(s.seen))
-		for v := range s.seen {
-			vals = append(vals, v)
+		keys := slices.Collect(maps.Keys(s.seen))
+		slices.SortFunc(keys, func(a, b scopedValue) int { return s.seen[a].Compare(s.seen[b]) })
+		for _, k := range keys[:len(keys)-keep] {
+			delete(s.seen, k)
+			changed[k.org] = true
 		}
-		slices.SortFunc(vals, func(a, b string) int { return s.seen[a].Compare(s.seen[b]) })
-		for _, v := range vals[:len(vals)-keep] {
-			delete(s.seen, v)
-		}
-		changed = true
 	}
-	return changed
 }
 
-// Text returns in with every recorded value replaced by [redacted:secret].
-func (s *CredentialScrub) Text(in string) string { return s.set.Load().Redact(in) }
+// Text returns in with every recorded value of every org replaced by [redacted:secret]. It is for operator
+// telemetry: log lines, spans, errors and audit rows.
+func (s *CredentialScrub) Text(in string) string { return s.sets.Load().all.Redact(in) }
 
 // Error returns err unchanged when its text holds no recorded value, else an error with the scrubbed text.
 // The new error does not wrap err: an Unwrap would give the value back.
@@ -167,44 +212,46 @@ type recordingSource struct {
 func (r recordingSource) Credential(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) (Credential, error) {
 	c, err := r.src.Credential(ctx, t, agent)
 	if c.Value != "" {
-		r.s.Add(c.Value, strings.TrimPrefix(c.Value, t.CredentialPrefix))
+		r.s.AddFor(agent.Org, c.Value, strings.TrimPrefix(c.Value, t.CredentialPrefix))
 	}
 	return c, r.s.Error(err)
 }
 
-// Result scrubs everything an agent gets from a tool call. It scrubs the bytes of each blob (an embedded
-// resource, an image, an audio clip) as text, then the JSON form of the whole result, so every field is covered,
-// including fields a later SDK adds. A result with no match is returned unchanged. If the scrubbed JSON does not
-// decode, the agent gets an error result rather than the value.
-func (s *CredentialScrub) Result(res *mcp.CallToolResult) *mcp.CallToolResult {
-	if res == nil || s.set.Load().Len() == 0 {
+// Result scrubs everything an agent of org gets from a tool call, with the values recorded for org. It scrubs the
+// bytes of each blob (an embedded resource, an image, an audio clip) as text, then the JSON form of the whole
+// result, so every field is covered, including fields a later SDK adds. A result with no match is returned
+// unchanged. If the scrubbed JSON does not decode, the agent gets an error result rather than the value.
+func (s *CredentialScrub) Result(org string, res *mcp.CallToolResult) *mcp.CallToolResult {
+	set := s.sets.Load().org(org)
+	if res == nil || set.Len() == 0 {
 		return res
 	}
 	for _, c := range res.Content {
 		switch c := c.(type) {
 		case *mcp.EmbeddedResource:
 			if c.Resource != nil {
-				c.Resource.Blob = s.bytes(c.Resource.Blob)
+				c.Resource.Blob = redactBytes(set, c.Resource.Blob)
 			}
 		case *mcp.ImageContent:
-			c.Data = s.bytes(c.Data)
+			c.Data = redactBytes(set, c.Data)
 		case *mcp.AudioContent:
-			c.Data = s.bytes(c.Data)
+			c.Data = redactBytes(set, c.Data)
 		}
 	}
-	clean, ok := scrubJSON(s, res)
+	clean, ok := scrubJSON(set, res)
 	if !ok {
 		return scrubbedResult()
 	}
 	return clean
 }
 
-// ToolList scrubs the tool list an agent gets: each tool's name, title, description, schemas, annotations and
-// metadata, through its JSON form. A target can quote the credential it was sent in any of them. A tool whose
-// scrubbed JSON does not decode is left out, so the agent never gets the value. It changes res in place and
-// returns it.
-func (s *CredentialScrub) ToolList(res *mcp.ListToolsResult) *mcp.ListToolsResult {
-	if res == nil || s.set.Load().Len() == 0 {
+// ToolList scrubs the tool list an agent of org gets, with the values recorded for org: each tool's name, title,
+// description, schemas, annotations and metadata, through its JSON form. A target can quote the credential it was
+// sent in any of them. A tool whose scrubbed JSON does not decode is left out, so the agent never gets the value.
+// It changes res in place and returns it.
+func (s *CredentialScrub) ToolList(org string, res *mcp.ListToolsResult) *mcp.ListToolsResult {
+	set := s.sets.Load().org(org)
+	if res == nil || set.Len() == 0 {
 		return res
 	}
 	tools := res.Tools[:0]
@@ -212,13 +259,13 @@ func (s *CredentialScrub) ToolList(res *mcp.ListToolsResult) *mcp.ListToolsResul
 		if t == nil {
 			continue
 		}
-		if clean, ok := scrubJSON(s, t); ok {
+		if clean, ok := scrubJSON(set, t); ok {
 			tools = append(tools, clean)
 		}
 	}
 	res.Tools = tools
 	if res.Meta != nil {
-		if m, ok := scrubJSON(s, &res.Meta); ok {
+		if m, ok := scrubJSON(set, &res.Meta); ok {
 			res.Meta = *m
 		} else {
 			res.Meta = nil
@@ -227,14 +274,14 @@ func (s *CredentialScrub) ToolList(res *mcp.ListToolsResult) *mcp.ListToolsResul
 	return res
 }
 
-// scrubJSON returns v unchanged when its JSON form holds no recorded value, else a new value decoded from the
+// scrubJSON returns v unchanged when its JSON form holds no value of set, else a new value decoded from the
 // scrubbed JSON. ok is false when v does not encode or the scrubbed JSON does not decode.
-func scrubJSON[T any](s *CredentialScrub, v *T) (_ *T, ok bool) {
+func scrubJSON[T any](set *scrub.Secrets, v *T) (_ *T, ok bool) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, false
 	}
-	out := s.Text(string(raw))
+	out := set.Redact(string(raw))
 	if out == string(raw) {
 		return v, true
 	}
@@ -245,12 +292,12 @@ func scrubJSON[T any](s *CredentialScrub, v *T) (_ *T, ok bool) {
 	return clean, true
 }
 
-// bytes returns b with every recorded value in its text replaced, or b itself when it holds none.
-func (s *CredentialScrub) bytes(b []byte) []byte {
+// redactBytes returns b with every value of set in its text replaced, or b itself when it holds none.
+func redactBytes(set *scrub.Secrets, b []byte) []byte {
 	if len(b) == 0 {
 		return b
 	}
-	if out := s.Text(string(b)); out != string(b) {
+	if out := set.Redact(string(b)); out != string(b) {
 		return []byte(out)
 	}
 	return b
@@ -295,7 +342,7 @@ func (h *scrubHandler) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 func (h *scrubHandler) Handle(ctx context.Context, r slog.Record) error {
-	set := h.s.set.Load()
+	set := h.s.sets.Load().all
 	inner := h.inner
 	if len(h.ops) > 0 {
 		if b := h.cache.Load(); b != nil && b.set == set {
@@ -405,7 +452,7 @@ type scrubTracer struct {
 }
 
 func (t scrubTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	set := t.s.set.Load()
+	set := t.s.sets.Load().all
 	cfg := trace.NewSpanStartConfig(opts...)
 	clean := []trace.SpanStartOption{trace.WithSpanKind(cfg.SpanKind())}
 	if attrs := cfg.Attributes(); len(attrs) > 0 {
@@ -433,7 +480,7 @@ type scrubSpan struct {
 func (sp scrubSpan) SetName(name string) { sp.Span.SetName(sp.s.Text(name)) }
 
 func (sp scrubSpan) SetAttributes(kv ...attribute.KeyValue) {
-	sp.Span.SetAttributes(scrubKVs(sp.s.set.Load(), kv)...)
+	sp.Span.SetAttributes(scrubKVs(sp.s.sets.Load().all, kv)...)
 }
 
 func (sp scrubSpan) SetStatus(code codes.Code, description string) {
@@ -441,12 +488,12 @@ func (sp scrubSpan) SetStatus(code codes.Code, description string) {
 }
 
 func (sp scrubSpan) AddEvent(name string, opts ...trace.EventOption) {
-	set := sp.s.set.Load()
+	set := sp.s.sets.Load().all
 	sp.Span.AddEvent(set.Redact(name), scrubEventOptions(set, opts)...)
 }
 
 func (sp scrubSpan) RecordError(err error, opts ...trace.EventOption) {
-	set := sp.s.set.Load()
+	set := sp.s.sets.Load().all
 	if err != nil {
 		if msg := err.Error(); set.Redact(msg) != msg {
 			err = errors.New(set.Redact(msg))
@@ -456,7 +503,7 @@ func (sp scrubSpan) RecordError(err error, opts ...trace.EventOption) {
 }
 
 func (sp scrubSpan) AddLink(l trace.Link) {
-	l.Attributes = scrubKVs(sp.s.set.Load(), l.Attributes)
+	l.Attributes = scrubKVs(sp.s.sets.Load().all, l.Attributes)
 	sp.Span.AddLink(l)
 }
 

@@ -811,8 +811,10 @@ move, once.
      koinon-gateway holds the plaintext, so it scrubs the values it opened (#1174). `mcpgateway.CredentialScrub`
      records each value when the gateway opens it, and removes it by exact value (and its encoded forms, and the
      token after the auth scheme) from every log line, span and audit row the gateway writes and from every tool
-     list and tool result it gives to an agent. The router path logs and stores no opened v2 value (a spec checks it). The
-     router still scrubs v1 MCP values, which it can open.
+     list and tool result it gives to an agent. Logs, spans and audit rows use the values of all orgs. A tool list or
+     tool result uses only the values of the agent's own org, so one org's credential cannot change what an agent of
+     another org gets. The router path logs and stores no opened v2 value (a spec checks it). The router still scrubs
+     v1 MCP values, which it can open.
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.
 2. **Move (slice 4, built in #1151).** `koinon-api keys seal-mcp` opens each v1 value with the KEK and seals it
