@@ -96,8 +96,21 @@ Options that the research compared:
 - Follow-ups: the measurements below.
 
 Done when part 2 merges, the pull request reports two measurements: the CI install time of the two jobs
-before and after, and the first-run time and the network hosts that a fresh cloud VM needs. (The hosts
-for GitHub release assets, the aqua registry and any CDN are not known yet.)
+before and after, and the first-run time and the network hosts that a fresh cloud VM needs.
+
+What the first real run showed (mise 2026.11.12, `mise lock --platform linux-x64,linux-arm64,macos-arm64`,
+"15 targets checked"). The lock is `lockfile_version = 4`. Each tool has a `[[tools."aqua:o/r"]]` table with
+`version`, `backend` and `specifiers`, and one `[tools."aqua:o/r"."platforms.<platform>"]` table per
+platform with `checksum = "sha256:..."`, `url` and `url_api`. All 15 tool-platform entries have a sha256
+checksum. For shellcheck, hadolint and gitleaks, the entry has `checksum_source = "mise-versions"` (the
+checksum comes from the mise versions host). For actionlint and zizmor, the entry has `provenance =
+"github-attestations"` and mise downloaded the artifacts to verify them at lock time. The `linux-x64`
+checksums equal `hack/versions.env`.
+
+Hosts seen so far (partly observed): `mise-versions.jdx.dev` (version lists and checksums),
+`api.github.com` (release lists and the `url_api` asset URLs) and `github.com` (the `url` of every
+asset). The hosts of the aqua registry and the redirect target of the asset downloads were not recorded.
+A fresh VM still needs a measured list.
 
 ## Open questions
 
@@ -123,6 +136,11 @@ Read on 2026-11-23:
 - The aqua registry has the packages `koalaman/shellcheck`, `rhysd/actionlint`, `zizmorcore/zizmor`,
   `hadolint/hadolint` and `gitleaks/gitleaks`: <https://github.com/aquaproj/aqua-registry>
 
-Not verified: the exact host list that a fresh VM needs; that Dependabot has no mise ecosystem (the
+Found while making the lock: `MISE_GLOBAL_CONFIG_FILE=/dev/null` fails ("unknown config file type"). To
+isolate mise from a user's setup, point it at an empty `.toml` file in an isolated directory. Inside the
+sandbox of the agent shell, mise could not finish a TLS handshake to `mise-versions.jdx.dev` (OSStatus
+-26276), so `mise lock` ran outside it with the isolated directories.
+
+Not verified: the full host list that a fresh VM needs; that Dependabot has no mise ecosystem (the
 page was cut off); whether `jdx/mise-action` checks the checksum of a freshly downloaded mise binary.
 Part 2 must settle the last point before CI relies on it.
