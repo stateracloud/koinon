@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package harnesses_test
+package noticescheck_test
 
 import (
 	"os"
@@ -11,7 +11,18 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// These specs read the OpenCode Dockerfile and the checked-in notices. They need no Docker. They
+// licenceNotices are the files under /usr/share/doc/koinon-tools/ the image carries. The same list
+// is in test/harnesses/licences_test.go, which reads them in a built image.
+var licenceNotices = []string{
+	"fd/LICENSE-MIT", "fd/LICENSE-APACHE",
+	"ripgrep/UNLICENSE", "ripgrep/LICENSE-MIT", "ripgrep/COPYING",
+	"yq/LICENSE", "ast-grep/LICENSE", "duckdb/LICENSE", "opencode/LICENSE", "bun/LICENSE.md",
+	"THIRD_PARTY_NOTICES.md",
+	"GPL-SOURCE-OFFER.txt",
+}
+
+// These specs read the OpenCode Dockerfile and the checked-in notices. They need no Docker, and
+// hack/go-test.sh runs them in the pull request gate (test/harnesses does not run there). They
 // fail when a licence notice, the Rust crate notices or the GPL source offer stops being wired
 // into the image (#63). What they cannot show is the built image: the build and the
 // sandbox-user read in licences_test.go do that.
@@ -80,6 +91,15 @@ var _ = Describe("opencode image licence notices (static)", func() {
 		for _, p := range []string{"bash", "coreutils", "git", "poppler-utils"} {
 			Expect(dockerfile).To(MatchRegexp(`for p in [^;]*\b`+p+`\b[^;]*; do`), p)
 		}
+	})
+
+	It("checks that the three Rust tools are in the notices at build time", func() {
+		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*for t in ripgrep fd ast-grep; do \\$`))
+		Expect(dockerfile).To(MatchRegexp(`grep -q "\^## \$t " /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES\.md`))
+	})
+
+	It("checks the OpenCode MIT notice at build time", func() {
+		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*grep -q 'MIT License' /usr/share/doc/koinon-tools/opencode/LICENSE; \\$`))
 	})
 
 	It("checks the Bun LGPL notice for the relinking pointers at build time", func() {

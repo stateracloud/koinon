@@ -11,12 +11,12 @@ its own Cargo.lock (see hack/flavor-rust-notices.sh). It does not cover the tool
 which ships separately in this image.
 
 Overview:
-  - MIT License: 47 crate(s)
-  - BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License: 2 crate(s)
+  - MIT License: 54 crate(s)
+  - BSD 3-Clause "New" or "Revised" License: 2 crate(s)
   - Unicode License v3: 1 crate(s)
 
 ================================================================================
-BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License
+BSD 3-Clause "New" or "Revised" License
 ================================================================================
 
 Used by:
@@ -79,7 +79,7 @@ pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] = [
 
 
 ================================================================================
-BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License
+BSD 3-Clause "New" or "Revised" License
 ================================================================================
 
 Used by:
@@ -121,6 +121,8 @@ Used by:
   - cc 1.2.67 (https://github.com/rust-lang/cc-rs)
   - cfg-if 1.0.4 (https://github.com/rust-lang/cfg-if)
   - find-msvc-tools 0.1.9 (https://github.com/rust-lang/cc-rs)
+  - jobserver 0.1.35 (https://github.com/rust-lang/jobserver-rs)
+  - pkg-config 0.3.33 (https://github.com/rust-lang/pkg-config-rs)
   - tikv-jemalloc-sys 0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8 (https://github.com/tikv/jemallocator)
   - tikv-jemallocator 0.7.0 (https://github.com/tikv/jemallocator)
 
@@ -160,6 +162,41 @@ Used by:
   - regex-automata 0.4.15 (https://github.com/rust-lang/regex)
   - regex-syntax 0.8.11 (https://github.com/rust-lang/regex)
 
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+================================================================================
+MIT License
+================================================================================
+
+Used by:
+  - getrandom 0.4.3 (https://github.com/rust-random/getrandom)
+
+Copyright (c) 2018-2026 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -353,6 +390,7 @@ MIT License
 ================================================================================
 
 Used by:
+  - r-efi 6.0.0 (https://github.com/r-efi/r-efi)
   - windows-link 0.2.1 (https://github.com/microsoft/windows-rs)
   - windows-sys 0.61.2 (https://github.com/microsoft/windows-rs)
 
@@ -429,6 +467,7 @@ Used by:
   - globset 0.4.19 (https://github.com/BurntSushi/ripgrep/tree/master/crates/globset)
   - grep-cli 0.1.12 (https://github.com/BurntSushi/ripgrep/tree/master/crates/cli)
   - grep-matcher 0.1.9 (https://github.com/BurntSushi/ripgrep/tree/master/crates/matcher)
+  - grep-pcre2 0.1.10 (https://github.com/BurntSushi/ripgrep/tree/master/crates/pcre2)
   - grep-printer 0.3.1 (https://github.com/BurntSushi/ripgrep/tree/master/crates/printer)
   - grep-regex 0.1.14 (https://github.com/BurntSushi/ripgrep/tree/master/crates/regex)
   - grep-searcher 0.1.17 (https://github.com/BurntSushi/ripgrep/tree/master/crates/searcher)
@@ -496,6 +535,8 @@ MIT License
 ================================================================================
 
 Used by:
+  - pcre2-sys 0.2.10 (https://github.com/BurntSushi/rust-pcre2)
+  - pcre2 0.2.11 (https://github.com/BurntSushi/rust-pcre2)
   - same-file 1.0.6 (https://github.com/BurntSushi/same-file)
   - winapi-util 0.1.11 (https://github.com/BurntSushi/winapi-util)
 
@@ -647,7 +688,7 @@ its own Cargo.lock (see hack/flavor-rust-notices.sh). It does not cover the tool
 which ships separately in this image.
 
 Overview:
-  - MIT License: 94 crate(s)
+  - MIT License: 99 crate(s)
   - Unicode License v3: 1 crate(s)
 
 ================================================================================
@@ -690,8 +731,12 @@ MIT License
 ================================================================================
 
 Used by:
+  - cc 1.2.56 (https://github.com/rust-lang/cc-rs)
   - cfg-if 1.0.4 (https://github.com/rust-lang/cfg-if)
   - filetime 0.2.29 (https://github.com/alexcrichton/filetime)
+  - find-msvc-tools 0.1.9 (https://github.com/rust-lang/cc-rs)
+  - tikv-jemalloc-sys 0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8 (https://github.com/tikv/jemallocator)
+  - tikv-jemallocator 0.7.0 (https://github.com/tikv/jemallocator)
 
 Copyright (c) 2014 Alex Crichton
 
@@ -1451,6 +1496,36 @@ MIT License
 ================================================================================
 
 Used by:
+  - shlex 1.3.0 (https://github.com/comex/rust-shlex)
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Nicholas Allegra (comex).
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+================================================================================
+MIT License
+================================================================================
+
+Used by:
   - same-file 1.0.6 (https://github.com/BurntSushi/same-file)
   - winapi-util 0.1.11 (https://github.com/BurntSushi/winapi-util)
 
@@ -1636,8 +1711,8 @@ which ships separately in this image.
 Overview:
   - MIT License: 262 crate(s)
   - Apache License 2.0: 6 crate(s)
-  - BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License: 2 crate(s)
-  - BSD 2-Clause &quot;Simplified&quot; License: 1 crate(s)
+  - BSD 3-Clause "New" or "Revised" License: 2 crate(s)
+  - BSD 2-Clause "Simplified" License: 1 crate(s)
   - ISC License: 1 crate(s)
   - MIT No Attribution: 1 crate(s)
   - Mozilla Public License 2.0: 1 crate(s)
@@ -2358,7 +2433,7 @@ limitations under the License.
 
 
 ================================================================================
-BSD 2-Clause &quot;Simplified&quot; License
+BSD 2-Clause "Simplified" License
 ================================================================================
 
 Used by:
@@ -2376,7 +2451,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 
 ================================================================================
-BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License
+BSD 3-Clause "New" or "Revised" License
 ================================================================================
 
 Used by:
@@ -2439,7 +2514,7 @@ pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] = [
 
 
 ================================================================================
-BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License
+BSD 3-Clause "New" or "Revised" License
 ================================================================================
 
 Used by:

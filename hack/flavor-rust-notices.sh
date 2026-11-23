@@ -11,7 +11,7 @@
 #
 # What it does, for each (crate, version) pair below:
 #   1. Fetches the published crate (static.crates.io/crates/<crate>/<crate>-<version>.crate).
-#   2. Runs `cargo about generate --fail -c about.toml -m <crate>/Cargo.toml about.hbs`
+#   2. Runs `cargo about generate --fail --all-features -c about.toml -m <crate>/Cargo.toml about.hbs`
 #      against the tool's own Cargo.lock (never regenerated: --locked), so the notice matches the
 #      exact dependency versions the release binary was built from.
 #   3. Concatenates the three outputs into harnesses/opencode/doc/THIRD_PARTY_NOTICES.md with a
@@ -19,7 +19,7 @@
 #      and its build-time check needs all three tools in it; test/harnesses compares the
 #      versions with the Dockerfile pins (see harnesses/opencode/README.md).
 #
-# Needs network access to github.com (source tarballs) and to crates.io's registry and download
+# Needs network access to github.com (the cargo-about release) and to crates.io (the crates)'s registry and download
 # endpoints (cargo-about resolves and reads each dependency's licence from there); it downloads and
 # executes the cargo-about binary. Run it on a machine that allows both, commit the result; the
 # Dockerfile already copies it. See harnesses/opencode/README.md, "Rust tool dependency notices".
@@ -82,7 +82,8 @@ tmp=$work/THIRD_PARTY_NOTICES.md
 } >>"$tmp"
 
 for entry in "${tools[@]}"; do
-	read -r crate crate_version name version subdir <<<"$entry"
+	read -r crate crate_version name _ subdir <<<"$entry"
+	version=$crate_version
 	src=$work/$name
 	archive=$work/$name.tar.gz
 	curl -fsSL --retry 5 --retry-all-errors -o "$archive" "https://static.crates.io/crates/$crate/$crate-$crate_version.crate"
@@ -94,7 +95,7 @@ for entry in "${tools[@]}"; do
 		echo "## $name $version"
 		echo
 	} >>"$tmp"
-	"$cargo_about" generate --fail --locked \
+	"$cargo_about" generate --fail --locked --all-features \
 		-c "$(cd "$harness_dir" && pwd)/about.toml" \
 		-m "$src/$subdir/Cargo.toml" \
 		"$(cd "$harness_dir" && pwd)/about.hbs" >>"$tmp"

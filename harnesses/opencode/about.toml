@@ -22,9 +22,16 @@ accepted = [
     "CC0-1.0",
     "Unicode-3.0",
     "MIT-0",
-    "MPL-2.0",
 ]
 
 # ignore-build-dependencies/ignore-dev-dependencies default to false in cargo-about; left at the
 # default on purpose, so a dependency that is build- or dev-only but still unapproved still fails
 # the generation instead of being silently dropped from the notice.
+
+# Reviewed exceptions, one crate each, so a new crate under the same licence still stops the build.
+# MPL-2.0 is a file-level copyleft licence: option-ext 0.2.0 (through dirs-sys, a dependency of
+# ast-grep) ships unmodified, its licence text is in THIRD_PARTY_NOTICES.md, and its source is the
+# crate on crates.io. MPL-2.0 section 3.2 asks that recipients know how to get the source: see the
+# README, "Rust tool dependency notices". A maintainer must confirm this exception (#63).
+[option-ext]
+accepted = ["MPL-2.0"]

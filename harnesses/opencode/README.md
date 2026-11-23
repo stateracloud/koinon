@@ -474,11 +474,18 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   `/usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES.md`. The Dockerfile copies the checked-in
   `doc/THIRD_PARTY_NOTICES.md`, and the build fails if it lacks one of the three tools.
   `hack/flavor-rust-notices.sh` (with `about.toml` and `about.hbs` here) generates the file with
-  `cargo-about` (pinned in `hack/versions.env`) from the `Cargo.lock` of each pinned tag. It needs
-  network access to github.com and crates.io. To re-pin one of the tools, edit the `tools` array of
-  the script and the Dockerfile together, run the script and commit the result. The static specs
-  of `test/harnesses` fail when the notices name another version than the Dockerfile pin. Note:
-  `make test` skips `test/harnesses`; run `make test-harnesses` (and CI's harnesses job) for them.
+  `cargo-about` (pinned in `hack/versions.env`). It reads the `Cargo.lock` that each published crate
+  on crates.io carries (`ripgrep`, `fd-find`, `ast-grep` at the pinned version) and uses
+  `--all-features`, so the list also covers optional crates (such as `pcre2` for ripgrep) that a
+  release build may enable. It needs network access to github.com (the cargo-about release) and
+  crates.io. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
+  together, run the script and commit the result. `test/noticescheck` (it runs in the pull request
+  gate) fails when the notices name another version than the Dockerfile pin.
+  Limits: cargo-about reads each crate's own licence. It does not read C libraries that a crate
+  builds in (jemalloc, PCRE2): their notices are not in the file, and nobody has checked yet
+  with the release binary which of them it links. `option-ext` (MPL-2.0, a file-level copyleft
+  licence) ships unmodified inside ast-grep; its source is the crate `option-ext` 0.2.0 on
+  crates.io, and the notices file names its repository. A maintainer must confirm this route.
 - **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
