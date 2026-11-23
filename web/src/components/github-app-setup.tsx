@@ -41,7 +41,9 @@ export function GitHubAppSetup({ orgId }: { orgId: string }) {
 
   const nameError = name.trim().length > appNameMax ? `The App's name is at most ${appNameMax} characters on GitHub.` : undefined
   const ownerError = owner.trim() && !ownerPattern.test(owner.trim()) ? 'Enter the login of a GitHub organization.' : undefined
-  const caError = caBundleError(caBundle)
+  // The CA bundle is for a GitHub Enterprise Server only; with no base URL it is not sent.
+  const usesCA = !!baseUrl.trim()
+  const caError = usesCA ? caBundleError(caBundle) : undefined
 
   async function start(e: FormEvent) {
     e.preventDefault()
@@ -54,7 +56,7 @@ export function GitHubAppSetup({ orgId }: { orgId: string }) {
         displayName: name.trim(),
         githubOwner: owner.trim(),
         baseUrl: baseUrl.trim(),
-        caBundle: caBundle.trim(),
+        caBundle: usesCA ? caBundle.trim() : '',
       })
       setState(res.state)
     } catch (err) {
@@ -90,7 +92,7 @@ export function GitHubAppSetup({ orgId }: { orgId: string }) {
           <Label htmlFor="app-base-url">GitHub Enterprise Server URL (optional)</Label>
           <Input id="app-base-url" value={baseUrl} placeholder="https://github.example.com" onChange={(e) => setBaseUrl(e.target.value)} />
         </div>
-        {baseUrl.trim() && (
+        {usesCA && (
           <div className="grid gap-1">
             <Label htmlFor="app-ca-bundle">CA bundle (optional)</Label>
             <textarea
