@@ -9,8 +9,9 @@
 # env=GITHUB_TOKEN; CI passes its token, #145). Without it they are anonymous. It is never an ARG
 # or ENV and no layer keeps it.
 
-# OpenShell's default sandbox base (ADR 0035), multi-arch index digest, checked 2026-10-22.
-ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3bdb76c7038bd4c90a090c21eb7c9f40686
+# Plain Ubuntu 24.04 (ADR 0035, amendment 2026-11-20, #1182): the official Docker Hub image, multi-arch
+# index digest of the tag noble-20260917 (published 2026-09-17), read from the registry on 2026-11-20.
+ARG BASE=docker.io/library/ubuntu:noble-20260917@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
 
 # OpenCode 2.2.6 (ADR 0052) is the compiled glibc build that npm's @opencode/cli package installs
 # as an optional dependency (@opencode/cli-linux-<arch>). The sha256 values below were computed
@@ -135,11 +136,11 @@ RUN set -eux; \
     /out/libexec/duckdb -c 'SELECT version()' | grep -q 'v2\.0\.0'
 
 # Every apt package comes from one Ubuntu snapshot (snapshot.ubuntu.com), so a build on any day
-# gets the same versions; the base is pinned by digest. Bump UBUNTU_SNAPSHOT on purpose to take
+# gets the same versions; the base is pinned by digest, and `apt-get upgrade` brings its packages to the snapshot. Bump UBUNTU_SNAPSHOT on purpose to take
 # security updates, and the versions below with it (apt-cache policy shows the candidate).
 # apt's own --snapshot flag is not used: it leaves the arm64 mirror (ports.ubuntu.com), which has
 # no snapshots, unchanged. The snapshot service serves both architectures under /ubuntu/.
-# The base has no CA bundle, which the snapshot's HTTPS needs: this stage borrows one from the
+# Plain Ubuntu has no CA bundle, which the snapshot's HTTPS needs: this stage borrows one from the
 # archive over HTTP (apt checks it against the archive keyring) and the final image takes only
 # the bundle file, which the pinned ca-certificates below then regenerates.
 FROM ${BASE} AS ca-bootstrap
@@ -149,6 +150,15 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::E
 
 FROM ${BASE}
 ARG UBUNTU_SNAPSHOT=20261027T000000Z
+# Our own labels (#1182). These replace any label of the base image. The release
+# script sets the version, revision and source labels on top (hack/release-harness.sh). The licenses
+# label points to the notices: the image holds Apache-2.0 and MIT code, Ubuntu packages under many
+# licences (GPL and LGPL among them) and the tools of /usr/share/doc/koinon-tools.
+LABEL org.opencontainers.image.title="Koinon OpenCode harness" \
+      org.opencontainers.image.vendor="Koinon" \
+      org.opencontainers.image.description="OpenCode driven over ACP by koinon-agentd, on Ubuntu 24.04 (Koinon sandbox harness image)." \
+      org.opencontainers.image.version="dev" \
+      org.opencontainers.image.licenses="LicenseRef-koinon-image-notices"
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # git for the repository the agent works on, ca-certificates for TLS through the OpenShell proxy. The
 # data tools: jq, sqlite3, poppler-utils (pdftotext, pdfinfo; GPL, shipped unmodified from Ubuntu
@@ -161,6 +171,7 @@ RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
       > /etc/apt/sources.list.d/koinon-snapshot.sources \
  && { apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update \
       || { echo "package index update from snapshot.ubuntu.com (snapshot ${UBUNTU_SNAPSHOT}) failed after retries: most likely the snapshot mirror is unreachable; otherwise check UBUNTU_SNAPSHOT and the archive keyring" >&2; exit 1; }; } \
+ && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 upgrade -y \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
       ca-certificates=20260816ubuntu0.24.04.1 \
       git=1:2.43.0-1ubuntu7.4 \

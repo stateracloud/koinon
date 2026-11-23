@@ -115,6 +115,17 @@ Checked 2026-10-21:
 not by a table entry and an image. The flavor contract of this ADR becomes the contract of ADR 0112,
 decisions 5 to 9. The rename is groundwork before the core release; the rest is built after it.
 
+## Amendment (2026-11-20)
+
+The harness images are built on plain `docker.io/library/ubuntu` (24.04), pinned by digest, not on
+`nvcr.io/nvidia/base/ubuntu` (#1182). The NVIDIA image holds only Ubuntu 24.04 content, but NVIDIA names
+no licence for it and its NGC terms may not allow public redistribution. We chose it only because it was
+OpenShell's default, and OpenShell leaves in v0.1 ([#1094](https://github.com/stateracloud/koinon/issues/1094)).
+The image adds an `apt-get upgrade` from the pinned Ubuntu snapshot and keeps the `ca-bootstrap` stage (plain
+Ubuntu has no CA bundle). The image sets its own title, vendor, description and licenses labels; the
+licenses label points to the notices in `/usr/share/doc/koinon-tools`. See
+[0015](0015-agent-environment-and-browser.md).
+
 ## Links
 
 - [0016 Execution backend and agentd](0016-harness-and-deployment.md), [0029 Run-level resume](0029-run-level-resume.md)

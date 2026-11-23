@@ -103,7 +103,7 @@ docker buildx build "${output[@]}" \
 	--label org.opencontainers.image.source="https://github.com/$source_repo" \
 	--label org.opencontainers.image.version="$version" \
 	--label org.opencontainers.image.revision="$commit" \
-	--label org.opencontainers.image.licenses=Apache-2.0 \
+	--label org.opencontainers.image.licenses=LicenseRef-koinon-image-notices \
 	--sbom=true --provenance=mode=min \
 	--metadata-file "$meta" harnesses/opencode >&2
 

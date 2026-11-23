@@ -172,6 +172,12 @@ type Tool struct {
 	// the storage prefix of a new repository epoch (default DefaultProbeTimeout); ProbePoll how often
 	// they look for the answer (default one second).
 	ProbeTimeout, ProbePoll time.Duration
+	// SealGate is the write gate of seal-mcp (ADR 0097 12.5 step 1): it returns an error while any expected
+	// pod cannot read envelope v2. Nil means no gate (tests).
+	SealGate func(ctx context.Context) error
+	// GatewayKeyring loads the gateway private keys for seal-mcp --to-v1. Nil, or an error, means this
+	// identity cannot open v2 and the command refuses.
+	GatewayKeyring func(ctx context.Context) (*secretstore.RecipientKeyring, error)
 }
 
 // auditor is the Auditor the commands write with, or nil.
@@ -486,6 +492,7 @@ func (t *Tool) Status(ctx context.Context) error {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", id, state, usage[id], wrapped, fp)
 	}
 	_ = w.Flush()
+	t.mcpUsage(ctx)
 	period := t.ActivePeriod
 	if period <= 0 {
 		period = DefaultActivePeriod

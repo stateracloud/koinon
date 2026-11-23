@@ -63,6 +63,15 @@ func (t *Tool) Verify(ctx context.Context) error {
 		}
 	}
 	_, _ = fmt.Fprintf(t.Out, "%d value(s) opened, %d failed.\n", opened, failed)
+	// The v1 MCP credentials count (ADR 0097 12.5 step 3): zero means the move is done. v2 values need the
+	// gateway key, which this command does not hold, so they are counted, not opened.
+	if v2, v1, err := t.V2Usage(ctx); err == nil {
+		n := 0
+		for _, c := range v2 {
+			n += c
+		}
+		_, _ = fmt.Fprintf(t.Out, "MCP credentials: %d in v1, %d in v2 (counted, not opened here).\n", v1, n)
+	}
 	if failed > 0 {
 		for _, k := range []string{"unknown_kek", "open", "envelope", "database"} {
 			if kinds[k] > 0 {
