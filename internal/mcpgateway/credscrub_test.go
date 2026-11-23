@@ -66,7 +66,7 @@ func spanTexts(rec *tracetest.SpanRecorder) []string {
 	var out []string
 	kvs := func(attrs []attribute.KeyValue) {
 		for _, kv := range attrs {
-			out = append(out, string(kv.Key), kv.Value.Emit())
+			out = append(out, string(kv.Key), kv.Value.String())
 		}
 	}
 	for _, s := range rec.Ended() {
