@@ -15,16 +15,14 @@
 #      against the tool's own Cargo.lock (never regenerated: --locked), so the notice matches the
 #      exact dependency versions the release binary was built from.
 #   3. Concatenates the three outputs into harnesses/opencode/doc/THIRD_PARTY_NOTICES.md with a
-#      per-tool header naming the tool and the pinned version. Wiring this file into the
-#      Dockerfile's build-time check (so a re-pin that forgets to rerun this script fails the
-#      image build) is still to do; see harnesses/opencode/README.md.
+#      per-tool header naming the tool and the pinned version. The Dockerfile copies this file
+#      and its build-time check needs all three tools in it; test/harnesses compares the
+#      versions with the Dockerfile pins (see harnesses/opencode/README.md).
 #
 # Needs network access to github.com (source tarballs) and to crates.io's registry and download
 # endpoints (cargo-about resolves and reads each dependency's licence from there); it downloads and
-# executes the cargo-about binary. Run it on a machine that allows both, commit the result, and
-# wire the generated file into the Dockerfile (COPY the checked-in file, as the GPL offer and the
-# OpenCode/Bun notices already are) the next time this runs successfully; see harnesses/opencode/README.md,
-# "Rust tool dependency notices".
+# executes the cargo-about binary. Run it on a machine that allows both, commit the result; the
+# Dockerfile already copies it. See harnesses/opencode/README.md, "Rust tool dependency notices".
 #
 # Re-pinning a tool: update its (repo, tag, version) below and in the Dockerfile together, rerun
 # this script, and commit the new THIRD_PARTY_NOTICES.md alongside the Dockerfile change.

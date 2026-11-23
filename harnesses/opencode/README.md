@@ -442,8 +442,8 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   `--version`. The licence texts of yq, ast-grep and DuckDB are fetched the same way into
   `/usr/share/doc/koinon-tools/`; fd's and ripgrep's ship in their tarballs. The DuckDB and ast-grep
   archives carry no bundled third-party notices; those live upstream (DuckDB: `third_party/` and
-  `LICENSE` in github.com/duckdb/duckdb at v2.0.0; ast-grep: the dependency licences of its
-  `Cargo.lock` in github.com/ast-grep/ast-grep at 0.51.0). Every apt package comes from one
+  `LICENSE` in github.com/duckdb/duckdb at v2.0.0; ast-grep's crate licences ship in
+  `THIRD_PARTY_NOTICES.md`). Every apt package comes from one
   `snapshot.ubuntu.com` snapshot (`UBUNTU_SNAPSHOT` in the Dockerfile) at an exact version, so a
   rebuild gives the same packages; bump both on purpose to take security updates. The base has no
   CA bundle, so a throwaway stage borrows one over HTTP for the snapshot's HTTPS (apt checks the
@@ -475,8 +475,10 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   `doc/THIRD_PARTY_NOTICES.md`, and the build fails if it lacks one of the three tools.
   `hack/flavor-rust-notices.sh` (with `about.toml` and `about.hbs` here) generates the file with
   `cargo-about` (pinned in `hack/versions.env`) from the `Cargo.lock` of each pinned tag. It needs
-  network access to github.com and crates.io. After a re-pin of one of the tools, run it and commit
-  the result; `test/harnesses` fails when the notices name another version than the Dockerfile pin.
+  network access to github.com and crates.io. To re-pin one of the tools, edit the `tools` array of
+  the script and the Dockerfile together, run the script and commit the result. The static specs
+  of `test/harnesses` fail when the notices name another version than the Dockerfile pin. Note:
+  `make test` skips `test/harnesses`; run `make test-harnesses` (and CI's harnesses job) for them.
 - **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image

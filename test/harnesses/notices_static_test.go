@@ -33,7 +33,7 @@ var _ = Describe("opencode image licence notices (static)", func() {
 			dir, file, _ := strings.Cut(name, "/")
 			if file == "" {
 				// a file directly in the directory, copied under its own name
-				Expect(dockerfile).To(ContainSubstring("/usr/share/doc/koinon-tools/"+name), name)
+				Expect(dockerfile).To(MatchRegexp(`(?m)^COPY .* /usr/share/doc/koinon-tools/`+regexp.QuoteMeta(name)+`$`), name)
 				continue
 			}
 			// a tool's file: its directory is copied whole or the file is copied by name
@@ -60,28 +60,31 @@ var _ = Describe("opencode image licence notices (static)", func() {
 	})
 
 	It("names the pinned version of each Rust tool in the notices as the Dockerfile pins it", func() {
+		pinned := map[string]string{}
+		for tool, pin := range map[string]string{"ripgrep": "ripgrep/releases/download/", "fd": "sharkdp/fd/releases/download/v", "ast-grep": "ast-grep/releases/download/"} {
+			pins := regexp.MustCompile(regexp.QuoteMeta(pin)+`([0-9]+\.[0-9]+\.[0-9]+)`).FindAllStringSubmatch(dockerfile, -1)
+			Expect(pins).To(HaveLen(2), "%s: one pin per architecture", tool)
+			Expect(pins[0][1]).To(Equal(pins[1][1]), "%s: the two architectures pin different versions", tool)
+			pinned[tool] = pins[0][1]
+		}
 		b, err := os.ReadFile("../../harnesses/opencode/doc/THIRD_PARTY_NOTICES.md")
 		Expect(err).NotTo(HaveOccurred())
-		for tool, pin := range map[string]string{"ripgrep": "ripgrep/releases/download/", "fd": "sharkdp/fd/releases/download/v", "ast-grep": "ast-grep/releases/download/"} {
-			i := strings.Index(dockerfile, pin)
-			Expect(i).To(BeNumerically(">=", 0), tool)
-			v := regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+`).FindString(dockerfile[i+len(pin):])
-			Expect(v).NotTo(BeEmpty(), tool)
+		for tool, v := range pinned {
 			Expect(string(b)).To(ContainSubstring("## "+tool+" "+v), "notices are for another %s version than the Dockerfile pin", tool)
 		}
 	})
 
-	It("writes a source offer that names the packages Koinon knows are GPL or LGPL", func() {
-		Expect(dockerfile).To(ContainSubstring("GPL-SOURCE-OFFER.txt"))
-		Expect(dockerfile).To(ContainSubstring("dpkg-query -W"))
+	It("writes a source offer built from dpkg-query and checks the four GPL packages in it", func() {
+		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*pkgs=\$\(dpkg-query -W -f=`))
+		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*\} > /usr/share/doc/koinon-tools/GPL-SOURCE-OFFER\.txt$`))
 		for _, p := range []string{"bash", "coreutils", "git", "poppler-utils"} {
 			Expect(dockerfile).To(MatchRegexp(`for p in [^;]*\b`+p+`\b[^;]*; do`), p)
 		}
 	})
 
-	It("ships the Bun LGPL notice with the relinking pointers the build greps for", func() {
-		for _, s := range []string{"bun/LICENSE.md", "JavaScriptCore", "LGPL", "relink", "oven-sh/webkit"} {
-			Expect(dockerfile).To(ContainSubstring(s), s)
+	It("checks the Bun LGPL notice for the relinking pointers at build time", func() {
+		for _, s := range []string{"JavaScriptCore", "LGPL", "relink", "oven-sh/webkit"} {
+			Expect(dockerfile).To(MatchRegexp(`(?m)^\s*grep -q(i)? '`+regexp.QuoteMeta(s)+`' /usr/share/doc/koinon-tools/bun/LICENSE\.md; \\$`), s)
 		}
 	})
 })
