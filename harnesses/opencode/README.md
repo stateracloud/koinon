@@ -442,8 +442,8 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   `--version`. The licence texts of yq, ast-grep and DuckDB are fetched the same way into
   `/usr/share/doc/koinon-tools/`; fd's and ripgrep's ship in their tarballs. The DuckDB and ast-grep
   archives carry no bundled third-party notices; those live upstream (DuckDB: `third_party/` and
-  `LICENSE` in github.com/duckdb/duckdb at v2.0.0; ast-grep: the dependency licences of its
-  `Cargo.lock` in github.com/ast-grep/ast-grep at 0.51.0). Every apt package comes from one
+  `LICENSE` in github.com/duckdb/duckdb at v2.0.0; ast-grep's crate licences ship in
+  `THIRD_PARTY_NOTICES.md`). Every apt package comes from one
   `snapshot.ubuntu.com` snapshot (`UBUNTU_SNAPSHOT` in the Dockerfile) at an exact version, so a
   rebuild gives the same packages; bump both on purpose to take security updates. The base has no
   CA bundle, so a throwaway stage borrows one over HTTP for the snapshot's HTTPS (apt checks the
@@ -469,16 +469,29 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   snapshot ID below as the exact source (`apt source` against that snapshot) and offers to provide
   it another way if that snapshot is unreachable. The build fails if any of the four packages above is
   missing from the offer.
-- **Rust tool dependency notices (#63, open).** ripgrep, fd and ast-grep are Rust binaries; their
-  own top-level licences ship already (the table above), but the notices their dependency crates
-  carry do not yet. `hack/flavor-rust-notices.sh` and `about.toml`/`about.hbs` in this directory
-  are the generator (`cargo-about generate`, pinned in `hack/versions.env`) for a combined
-  `doc/THIRD_PARTY_NOTICES.md`, run against each tool's pinned tag's `Cargo.lock`; neither the
-  generated file nor the Dockerfile `COPY` for it exist yet, because generating it needs to run
-  `cargo-about` (a freshly downloaded binary) against live crates.io state, which this lane's
-  sandbox does not allow. Run the script on a machine without that restriction, commit the
-  result, and wire the `COPY` and the build-time check into the Dockerfile the way the GPL offer
-  and the OpenCode/Bun notices are wired in.
+- **Rust tool dependency notices (#63).** ripgrep, fd and ast-grep are Rust binaries. Their own
+  licences ship (the table above). The notices of their dependency crates ship in
+  `/usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES.md`. The Dockerfile copies the checked-in
+  `doc/THIRD_PARTY_NOTICES.md`, and the build fails if it lacks one of the three tools.
+  `hack/flavor-rust-notices.sh` (with `about.toml` and `about.hbs` here) generates the file with
+  `cargo-about` (pinned in `hack/versions.env`). It reads the `Cargo.lock` that each published crate
+  on crates.io carries (`ripgrep`, `fd-find`, `ast-grep` at the pinned version) and uses
+  `--all-features`, so the list also covers optional crates (such as `pcre2` for ripgrep) that a
+  release build may enable. It needs network access to github.com (the cargo-about release) and
+  crates.io, and needs cargo on PATH (cargo-about runs `cargo metadata`), and runs on Linux (x86_64, aarch64) and macOS (arm64); another host, or no cargo, stops with a message. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
+  together, run the script and commit the result. `test/noticescheck` (run by `hack/go-test.sh`, and by the `go` job, which
+  watches the notices file and the script) fails when the notices name another version than the
+  Dockerfile pin, or when the build check loop in the Dockerfile names another version than the
+  pin. The build check in the image then fails when the notices do not name the loop's version.
+  Limits: cargo-about reads each crate's own licence, not C libraries that a crate builds in. The
+  script adds the licence texts of the C libraries in the lock files from the vendored sources
+  (PCRE2 and sljit through `pcre2-sys`, jemalloc through `tikv-jemalloc-sys`). It takes them from
+  the licence block at the top of the vendored source file (PCRE2, sljit) or from `jemalloc/COPYING`.
+  Nobody has checked with the release binary which of them it links, so the notices err on the
+  side of naming them. `option-ext` (MPL-2.0, a file-level copyleft licence) ships unmodified inside
+  ast-grep; its source is the published crate `option-ext` 0.2.0, at
+  `https://crates.io/crates/option-ext/0.2.0`; the notices file names this location for every crate
+  and gives its repository. A maintainer must confirm this route.
 - **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
