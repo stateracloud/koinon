@@ -241,6 +241,9 @@ type Metrics struct {
 	CredentialRedactions *prometheus.CounterVec
 	// CredentialsTooShort counts opened credentials whose token is shorter than the scrub can match.
 	CredentialsTooShort prometheus.Counter
+	// CredentialEvictions counts opened values that a cap removed before Retain. A value removed so is no longer
+	// scrubbed: a rising count means that a cap is too low for the credentials in use.
+	CredentialEvictions prometheus.Counter
 }
 
 // The paths of CredentialRedactions.
@@ -276,6 +279,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_gateway_credential_too_short_total",
 			Help: "Opened credentials whose token is too short for koinon-gateway to scrub from logs and results.",
 		}),
+		CredentialEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_gateway_credential_evictions_total",
+			Help: "Opened credential values that koinon-gateway stopped scrubbing early because a cap was full.",
+		}),
 	}
 	for _, p := range []string{redactAgent, redactTelemetry} {
 		m.CredentialRedactions.WithLabelValues(p)
@@ -291,7 +298,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.NotesDropped, m.GuardFailures, m.Dropped, m.ToolsLeftOut, m.CredentialRedactions,
-			m.CredentialsTooShort)
+			m.CredentialsTooShort, m.CredentialEvictions)
 	}
 	return m
 }
@@ -323,6 +330,12 @@ func (m *Metrics) redacted(path string) {
 func (m *Metrics) shortCredential() {
 	if m != nil {
 		m.CredentialsTooShort.Inc()
+	}
+}
+
+func (m *Metrics) evicted(n int) {
+	if m != nil {
+		m.CredentialEvictions.Add(float64(n))
 	}
 }
 

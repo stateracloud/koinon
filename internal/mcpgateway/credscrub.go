@@ -251,6 +251,9 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Read the clock again under the lock: a call that waited for it must not give its new values a time older
+	// than the values other calls opened meanwhile, or a cap would remove them first.
+	now = s.now()
 	ss := s.sets.Load()
 	next := &scrubSets{byOrg: maps.Clone(ss.byOrg), all: ss.all, pending: slices.Clone(ss.pending), allBuilt: ss.allBuilt, allDirty: ss.allDirty}
 	changed := map[string]bool{}
@@ -262,7 +265,7 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 		}
 		for _, p := range parts {
 			if t, ok := last[p]; ok {
-				t.Store(now.UnixNano())
+				touch(t, now.UnixNano())
 				continue
 			}
 			t := &atomic.Int64{}
@@ -271,8 +274,11 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 			changed[org] = true
 		}
 		if len(last) > s.maxOrgValues() {
-			dropOldest(last, s.maxOrgValues())
-			removed = true
+			if n := dropOldest(last, s.maxOrgValues(), parts); n > 0 {
+				s.metrics.Load().evicted(n)
+				changed[org] = true
+				removed = true
+			}
 		}
 		if changed[org] {
 			next.byOrg[org] = &orgSet{last: last}
@@ -283,10 +289,13 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 		removed = s.pruneLocked(next, now, changed) || removed
 	}
 	if total := countValues(next); total > s.maxValues() {
-		s.capLocked(next, changed)
-		removed = true
+		if n := s.capLocked(next, changed, org, parts); n > 0 {
+			s.metrics.Load().evicted(n)
+			removed = true
+		}
 	}
-	if len(changed) == 0 && (!next.allDirty || now.Sub(next.allBuilt) < allRebuildEvery) {
+	due := now.Sub(next.allBuilt) >= allRebuildEvery && (next.allDirty || len(next.pending) > 0)
+	if len(changed) == 0 && !due {
 		return
 	}
 	for o := range changed {
@@ -327,8 +336,9 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 }
 
 // dropOldest removes the values opened longest ago from last until keep minus a tenth remain, so a full set is not
-// sorted and rebuilt at each open.
-func dropOldest(last map[string]*atomic.Int64, keep int) {
+// sorted and rebuilt at each open. It never removes a value of protect: the values the calling open just recorded.
+// It returns how many values it removed.
+func dropOldest(last map[string]*atomic.Int64, keep int, protect []string) int {
 	keep -= keep / 10
 	type entry struct {
 		value string
@@ -337,28 +347,34 @@ func dropOldest(last map[string]*atomic.Int64, keep int) {
 	// The fast path can change a time during the sort: sort a copy of the times.
 	all := make([]entry, 0, len(last))
 	for v, t := range last {
-		all = append(all, entry{v, t.Load()})
-	}
-	slices.SortFunc(all, func(a, b entry) int { return cmp.Compare(a.at, b.at) })
-	for _, e := range all[:max(0, len(all)-keep)] {
-		if evict(last[e.value], e.at) {
-			delete(last, e.value)
+		if !slices.Contains(protect, v) {
+			all = append(all, entry{v, t.Load()})
 		}
 	}
+	slices.SortFunc(all, func(a, b entry) int { return cmp.Compare(a.at, b.at) })
+	n := 0
+	for _, e := range all[:min(len(all), max(0, len(last)-keep))] {
+		if evict(last[e.value], e.at) {
+			delete(last, e.value)
+			n++
+		}
+	}
+	return n
 }
 
 // evicted marks a time whose value a locked path removed. The fast path does not touch it: it takes the slow path,
 // which adds the value again.
 const evicted = math.MinInt64
 
-// touch sets the last open of a known value to now. It reports false when a locked path evicted the value first.
+// touch moves the last open of a known value forward to now; it never moves it back, so a late caller does not make
+// a value look older than it is. It reports false when a locked path evicted the value first.
 func touch(t *atomic.Int64, now int64) bool {
 	for {
 		old := t.Load()
 		if old == evicted {
 			return false
 		}
-		if t.CompareAndSwap(old, now) {
+		if old >= now || t.CompareAndSwap(old, now) {
 			return true
 		}
 	}
@@ -403,22 +419,28 @@ func (s *CredentialScrub) pruneLocked(next *scrubSets, now time.Time, changed ma
 }
 
 // capLocked drops the oldest values of all orgs until MaxValues minus a tenth remain, and marks the orgs it
-// changed.
-func (s *CredentialScrub) capLocked(next *scrubSets, changed map[string]bool) {
+// changed. It never removes a value of protect in org: the values the calling open just recorded. It returns how
+// many values it removed.
+func (s *CredentialScrub) capLocked(next *scrubSets, changed map[string]bool, org string, protect []string) int {
 	type entry struct {
 		org, value string
 		at         int64
 	}
 	var all []entry
-	for org, o := range next.byOrg {
-		for v, t := range o.last {
-			all = append(all, entry{org, v, t.Load()})
+	total := 0
+	for o, set := range next.byOrg {
+		total += len(set.last)
+		for v, t := range set.last {
+			if o != org || !slices.Contains(protect, v) {
+				all = append(all, entry{o, v, t.Load()})
+			}
 		}
 	}
 	keep := s.maxValues() - s.maxValues()/10
 	slices.SortFunc(all, func(a, b entry) int { return cmp.Compare(a.at, b.at) })
 	cloned := map[string]bool{}
-	for _, e := range all[:max(0, len(all)-keep)] {
+	n := 0
+	for _, e := range all[:min(len(all), max(0, total-keep))] {
 		o := next.byOrg[e.org]
 		if !evict(o.last[e.value], e.at) {
 			continue
@@ -430,7 +452,9 @@ func (s *CredentialScrub) capLocked(next *scrubSets, changed map[string]bool) {
 		}
 		delete(o.last, e.value)
 		changed[e.org] = true
+		n++
 	}
+	return n
 }
 
 // Text returns in with every recorded value of every org replaced by [redacted:secret]. It is for process

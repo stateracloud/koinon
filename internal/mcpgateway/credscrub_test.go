@@ -248,15 +248,17 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(sc.Text(fakeToken)).To(Equal(fakeToken), "not opened within Retain")
 		Expect(sc.Text("koinon_test_third_value")).To(Equal("[redacted:secret]"))
 		capped := mcpgateway.NewCredentialScrub()
+		mcpgateway.SetScrubClock(capped, func() time.Time { return now })
 		capped.MaxValues = 2
-		capped.Add("koinon_test_value_one", "koinon_test_value_two", "koinon_test_value_three")
-		n := 0
 		for _, v := range []string{"koinon_test_value_one", "koinon_test_value_two", "koinon_test_value_three"} {
-			if capped.Text(v) != v {
-				n++
-			}
+			now = now.Add(time.Second)
+			capped.Add(v)
 		}
-		Expect(n).To(Equal(2))
+		Expect(capped.TextFor("", "koinon_test_value_one")).To(Equal("koinon_test_value_one"), "the oldest value goes")
+		Expect(capped.TextFor("", "koinon_test_value_two koinon_test_value_three")).To(Equal("[redacted:secret] [redacted:secret]"))
+		capped.Add("koinon_test_value_four", "koinon_test_value_five", "koinon_test_value_six")
+		Expect(capped.TextFor("", "koinon_test_value_four koinon_test_value_five koinon_test_value_six")).
+			To(Equal("[redacted:secret] [redacted:secret] [redacted:secret]"), "an open never loses its own values to a cap")
 	})
 
 	It("caps the values of one org without removing the values of another org", func() {
@@ -288,6 +290,31 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(mcpgateway.ScrubRebuilds(sc)).To(Equal(before + 1))
 		Expect(sc.Text("koinon_test_flood_000")).To(Equal("koinon_test_flood_000"), "the rebuild drops an evicted value")
 		Expect(sc.Text("koinon_test_flood_new " + fakeToken)).To(Equal("[redacted:secret] [redacted:secret]"))
+	})
+
+	It("keeps the values an open just recorded, even when its clock reads older than the values at the cap", func() {
+		now := time.Unix(1_700_000_000, 0)
+		mcpgateway.SetScrubClock(sc, func() time.Time { return now })
+		m := mcpgateway.NewMetrics(nil)
+		mcpgateway.UseScrubMetrics(sc, m, nil)
+		sc.MaxOrgValues = 10
+		for i := range 10 {
+			sc.AddFor("org-a", fmt.Sprintf("koinon_test_newer_%02d", i))
+		}
+		now = now.Add(-time.Minute)
+		sc.AddFor("org-a", "koinon_test_late-open")
+		Expect(sc.TextFor("org-a", "koinon_test_late-open")).To(Equal("[redacted:secret]"), "the per-org cap keeps it")
+		Expect(testutil.ToFloat64(m.CredentialEvictions)).To(BeNumerically(">", 0))
+
+		total := mcpgateway.NewCredentialScrub()
+		mcpgateway.SetScrubClock(total, func() time.Time { return now })
+		total.MaxValues = 10
+		for i := range 10 {
+			total.AddFor("org-b", fmt.Sprintf("koinon_test_newer_%02d", i))
+		}
+		now = now.Add(-time.Minute)
+		total.AddFor("org-a", "koinon_test_late-open")
+		Expect(total.TextFor("org-a", "koinon_test_late-open")).To(Equal("[redacted:secret]"), "the total cap keeps it")
 	})
 
 	It("never evicts a value that the fast path opened after the eviction read its time", func() {
@@ -408,7 +435,8 @@ var _ = Describe("CredentialScrub", func() {
 	})
 
 	It("is safe for concurrent opens and scrubs, and never misses a value it recorded", func() {
-		sc.MaxOrgValues = 20
+		// Each org's working set (75 values) fits its cap: a value that another call evicts is not a miss.
+		sc.MaxOrgValues = 100
 		var wg sync.WaitGroup
 		for w := range 8 {
 			wg.Go(func() {
