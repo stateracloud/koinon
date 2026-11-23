@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	"github.com/stateracloud/koinon/internal/imagecacheca"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -139,13 +140,6 @@ func describeMode(name, valuesFile string) {
 				if m.GetAnnotations()["helm.sh/hook"] == "pre-upgrade" {
 					return // an upgrade-only hook: it has its own spec below
 				}
-				if m.GetName() == "koinon-imagecache-ca" {
-					// The CA hook Job (issue #1191) acts on the Substrate namespace: it needs ate-system, the patched
-					// atelet DaemonSet and the Role of that namespace, which this suite does not make (it ignores
-					// the Roles of other namespaces). Its render has its own spec (substrate worker namespace); its
-					// logic runs in internal/imagecacheca tests and the kind e2e.
-					return
-				}
 				if w, pre, hook := hookOf(m); hook {
 					Expect(pre).To(BeTrue(), "%s %s is a hook of a kind this suite does not run: %s", kindOf(o), m.GetName(), m.GetAnnotations()["helm.sh/hook"])
 					if _, ok := hooks[w]; !ok {
@@ -155,6 +149,14 @@ func describeMode(name, valuesFile string) {
 				}
 			}
 			for _, o := range r.Objects {
+				add(o)
+			}
+			for _, o := range r.Foreign {
+				if _, _, hook := hookOf(mustMeta(o)); hook {
+					// The CA hook Job (issue #1191) acts on the Substrate namespace. Make what the installer leaves
+					// there before helm runs: the namespace and the atelet DaemonSet with the installer patch.
+					seedSubstrateNamespace(ctx, cl, mustMeta(o).GetNamespace())
+				}
 				add(o)
 			}
 			for _, j := range r.Jobs {
@@ -922,9 +924,9 @@ func applyObject(ctx context.Context, cl *cluster, o runtime.Object) error {
 	case *appsv1.Deployment:
 		_, err = c.AppsV1().Deployments(namespace).Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.Role:
-		_, err = c.RbacV1().Roles(namespace).Create(ctx, o, metav1.CreateOptions{})
+		_, err = c.RbacV1().Roles(objectNamespace(o)).Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.RoleBinding:
-		_, err = c.RbacV1().RoleBindings(namespace).Create(ctx, o, metav1.CreateOptions{})
+		_, err = c.RbacV1().RoleBindings(objectNamespace(o)).Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.ClusterRole:
 		_, err = c.RbacV1().ClusterRoles().Create(ctx, o, metav1.CreateOptions{})
 	case *rbacv1.ClusterRoleBinding:
@@ -995,4 +997,43 @@ func createComponentRoles(ctx context.Context, dbURL string) {
 		_, err := conn.Exec(ctx, stmt)
 		Expect(err).NotTo(HaveOccurred(), c.role)
 	}
+}
+
+// objectNamespace is the namespace of a rendered Role or RoleBinding: the release namespace unless the chart names another.
+func objectNamespace(o metav1.Object) string {
+	if ns := o.GetNamespace(); ns != "" {
+		return ns
+	}
+	return namespace
+}
+
+// seedSubstrateNamespace makes the Substrate namespace and the atelet DaemonSet as "koinon-api substrate install" leaves
+// them (issue #1191): the DaemonSet has the optional ConfigMap volume and SSL_CERT_DIR of the installer patch. No pod runs.
+func seedSubstrateNamespace(ctx context.Context, cl *cluster, ns string) {
+	GinkgoHelper()
+	_, err := cl.Admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	optional := true
+	labels := map[string]string{"app": imagecacheca.DaemonSetName}
+	_, err = cl.Admin.AppsV1().DaemonSets(ns).Create(ctx, &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: imagecacheca.DaemonSetName},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:         imagecacheca.AteletContainer,
+						Image:        "registry.invalid/koinon-smoke/atelet:stub",
+						Env:          []corev1.EnvVar{{Name: imagecacheca.EnvName, Value: imagecacheca.CertDirs}},
+						VolumeMounts: []corev1.VolumeMount{{Name: imagecacheca.VolumeName, MountPath: imagecacheca.MountPath, ReadOnly: true}},
+					}},
+					Volumes: []corev1.Volume{{Name: imagecacheca.VolumeName, VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: imagecacheca.ConfigMapName}, Optional: &optional},
+					}}},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
 }
