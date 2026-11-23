@@ -19,6 +19,7 @@ var licenceNotices = []string{
 	"fd/LICENSE-MIT", "fd/LICENSE-APACHE",
 	"ripgrep/UNLICENSE", "ripgrep/LICENSE-MIT", "ripgrep/COPYING",
 	"yq/LICENSE", "ast-grep/LICENSE", "duckdb/LICENSE", "opencode/LICENSE", "bun/LICENSE.md",
+	"THIRD_PARTY_NOTICES.md",
 	"GPL-SOURCE-OFFER.txt",
 }
 

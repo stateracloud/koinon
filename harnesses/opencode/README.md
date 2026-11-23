@@ -469,16 +469,14 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   snapshot ID below as the exact source (`apt source` against that snapshot) and offers to provide
   it another way if that snapshot is unreachable. The build fails if any of the four packages above is
   missing from the offer.
-- **Rust tool dependency notices (#63, open).** ripgrep, fd and ast-grep are Rust binaries; their
-  own top-level licences ship already (the table above), but the notices their dependency crates
-  carry do not yet. `hack/flavor-rust-notices.sh` and `about.toml`/`about.hbs` in this directory
-  are the generator (`cargo-about generate`, pinned in `hack/versions.env`) for a combined
-  `doc/THIRD_PARTY_NOTICES.md`, run against each tool's pinned tag's `Cargo.lock`; neither the
-  generated file nor the Dockerfile `COPY` for it exist yet, because generating it needs to run
-  `cargo-about` (a freshly downloaded binary) against live crates.io state, which this lane's
-  sandbox does not allow. Run the script on a machine without that restriction, commit the
-  result, and wire the `COPY` and the build-time check into the Dockerfile the way the GPL offer
-  and the OpenCode/Bun notices are wired in.
+- **Rust tool dependency notices (#63).** ripgrep, fd and ast-grep are Rust binaries. Their own
+  licences ship (the table above). The notices of their dependency crates ship in
+  `/usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES.md`. The Dockerfile copies the checked-in
+  `doc/THIRD_PARTY_NOTICES.md`, and the build fails if it lacks one of the three tools.
+  `hack/flavor-rust-notices.sh` (with `about.toml` and `about.hbs` here) generates the file with
+  `cargo-about` (pinned in `hack/versions.env`) from the `Cargo.lock` of each pinned tag. It needs
+  network access to github.com and crates.io. After a re-pin of one of the tools, run it and commit
+  the result; `test/harnesses` fails when the notices name another version than the Dockerfile pin.
 - **Base image.** The base is plain `docker.io/library/ubuntu` (24.04), pinned by digest (#1182,
   ADR 0035 amendment 2026-11-20). It replaced the NVIDIA NGC base, whose terms for redistribution
   were unclear. The notices list the base packages as Ubuntu 24.04, various licences; the image
