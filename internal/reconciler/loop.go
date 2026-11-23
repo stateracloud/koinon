@@ -185,10 +185,13 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 func (r *Reconciler) waitOrPing(ctx context.Context, c *pgx.Conn, alive *atomic.Int64) error {
 	for {
 		wctx, wcancel := context.WithTimeout(ctx, r.cfg.LeaderHeartbeat)
-		_, err := c.WaitForNotification(wctx)
+		n, err := c.WaitForNotification(wctx)
 		wcancel()
 		switch {
 		case err == nil:
+			// The source of a wake-up is otherwise invisible: a pass that follows it looks like any
+			// other (issue 1188). The payload is an org ID or empty, never a secret.
+			r.log.Debug("reconcile wake-up", "channel", n.Channel, "payload", n.Payload)
 			alive.Store(time.Now().UnixNano())
 			return nil
 		case ctx.Err() != nil:
