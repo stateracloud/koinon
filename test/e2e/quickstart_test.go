@@ -1101,8 +1101,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. agentd pod killed mid-run: takeover under a new epoch, no duplicate events")
 	})
 
-	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
-	// the run (the cluster is deleted afterwards).
+	// Not part of the quickstart, and after its time check: the harness image is broken while the spec
+	// runs, and the spec puts the config back at its end (the story suite runs next in the same cluster).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
@@ -1132,6 +1132,25 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(broken).NotTo(Equal(cfgYAML), "the harness image line")
 		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
 		Expect(err).NotTo(HaveOccurred())
+		// Put the config and the wait cap back when the spec ends (issue 1190). The story suite runs in
+		// the same cluster after this pass; with the broken image left in place, its first run never got a
+		// sandbox (ImagePullBackOff on the broken image). The spec's own context is canceled when the spec
+		// ends, so the cleanup runs kubectl with its own.
+		restore, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": cfgYAML}})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx context.Context) {
+			for _, args := range [][]string{
+				{"-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(restore)},
+				{"-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler"},
+				// The chart sets no KOINON_SANDBOX_WAIT_CAP, so removing the variable restores the default.
+				{"-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP-"},
+				{"-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m"},
+				{"-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m"},
+			} {
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			}
+		})
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
 		// 2 minutes, the value with evidence. The cap counts from the run's first claim

@@ -84,12 +84,22 @@ if [[ $dry == 0 ]]; then
   [[ -n $open_issue ]] || open_issue=$("$GH" issue list --label e2e-regression --state open --limit 1 --json number --jq '.[0].number // empty')
 fi
 
+# What is red. A red story pass is advisory and the quickstart passed (STORIES_RED=1): "main is red" is wrong
+# then, and nothing is blocked (issue 1190).
+if [[ $STORIES_RED == 1 ]]; then
+  red_state="red in the advisory story suite (the quickstart is green)"
+  red_subject="The advisory story suite is red on main (the quickstart is green)"
+else
+  red_state="red"
+  red_subject="main is red"
+fi
+
 if [[ $prev == failure ]]; then
-  echo "main was already red at the previous completed run: not a new regression, not bisecting."
+  echo "main was already $red_state at the previous completed run: not a new regression, not bisecting."
   exit 0
 fi
 if [[ -n $open_issue ]]; then
-  msg="main is red again at ${head:0:12}${GITHUB_RUN_URL:+ ([run]($GITHUB_RUN_URL))}. Not bisecting again while this issue is open."
+  msg="$red_subject again at ${head:0:12}${GITHUB_RUN_URL:+ ([run]($GITHUB_RUN_URL))}. Not bisecting again while this issue is open."
   if [[ $dry == 1 ]]; then echo "would comment on #$open_issue: $msg"; else "$GH" issue comment "$open_issue" --body "$msg"; fi
   exit 0
 fi
@@ -137,12 +147,17 @@ list() { # a bullet per commit
 }
 
 policy='**Policy: fix forward within 2 hours of this issue opening, otherwise revert the merge.** Release candidate tags are only cut from a commit with a green kind e2e run.'
+lead="The kind e2e failed on main"
+if [[ $STORIES_RED == 1 ]]; then
+  lead="$red_subject"
+  policy='**Policy: the story suite is advisory and the quickstart is green, so this issue does not block a release candidate tag. Fix forward.**'
+fi
 run_link=""
 [[ -z ${GITHUB_RUN_URL:-} ]] || run_link=" ([failed run](${GITHUB_RUN_URL}))"
 
 # render <status paragraph>: the issue body.
 render() {
-  local b="The kind e2e failed on main at ${head:0:12}${run_link}."$'\n\n'"$1"$'\n\n'
+  local b="$lead at ${head:0:12}${run_link}."$'\n\n'"$1"$'\n\n'
   if ((${#candidates[@]} > 0)); then
     b+="Candidates tested (oldest first):"$'\n'"$(list "${candidates[@]}")"$'\n\n'
   fi
@@ -155,6 +170,7 @@ render() {
 
 issue=""
 title="e2e regression on main (${head:0:9})"
+[[ $STORIES_RED != 1 ]] || title="e2e story suite red on main, advisory (${head:0:9})"
 body=$(render "Bisecting: the e2e is being re-run on each candidate. This issue is updated with the result.")
 if [[ $dry == 1 ]]; then
   echo "--- issue opened (label e2e-regression) ---"
@@ -226,6 +242,7 @@ else
   rm -rf "$wd"
   if [[ -n $culprit ]]; then
     final_title="e2e regression on main: $(commit_title "$culprit")"
+    [[ $STORIES_RED != 1 ]] || final_title="e2e story suite red on main, advisory: $(commit_title "$culprit")"
     status="Culprit: $(git log -1 --format='%h' "$culprit") $(commit_title "$culprit") ($(git log -1 --format=%an "$culprit")). The e2e fails on that commit by itself."
     ((${#untested[@]} == 0)) || status+=" Older untested merges are listed below, so it may be an earlier one."
   elif ((${#candidates[@]} == 1)); then

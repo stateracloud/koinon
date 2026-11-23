@@ -159,6 +159,19 @@ out=$(RUNS=runs2.json STORIES_RED=1 GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2
 check "$out" "baseline $green" "stories-red: the baseline is the newest nightly with the stories-green artifact"
 check "$out" "cannot list the artifacts of run 60" "stories-red: an artifacts API error warns and the search moves to an older run"
 check "$(cat "$fx/calls")" "-f stories=true" "stories-red: the candidates are dispatched with stories=true"
+# The issue text (issue 1190): an advisory story red is not "main is red".
+check "$(cat "$fx/calls")" "advisory story suite is red on main (the quickstart is green)" "stories-red: the issue names the advisory story suite"
+check "$(cat "$fx/calls")" "does not block a release candidate tag" "stories-red: the issue says it blocks no release candidate"
+nocheck "$(cat "$fx/calls")" "main is red" "stories-red: the issue never says main is red"
+nocheck "$(cat "$fx/calls")" "The kind e2e failed on main" "stories-red: the issue never says the kind e2e failed"
+nocheck "$(cat "$fx/calls")" "fix forward within 2 hours" "stories-red: no 2 hour revert policy"
+out=$(STORIES_RED=1 b --green "$green" --head HEAD --open-issue 42)
+check "$out" "advisory story suite is red on main" "stories-red: the comment on an open issue names the advisory suite"
+nocheck "$out" "main is red" "stories-red: the comment never says main is red"
+out=$(STORIES_RED=1 b --green "$green" --head HEAD --prev failure)
+check "$out" "red in the advisory story suite" "stories-red: the already-red line names the advisory suite"
+out=$(b --green "$green" --head HEAD --open-issue 42)
+check "$out" "main is red again" "quickstart failure: the comment still says main is red"
 : >"$fx/calls"
 out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $head" "quickstart failure: the baseline is the newest green run"
