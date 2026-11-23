@@ -317,8 +317,9 @@ var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|dig
 
 // AuthParts returns v and, when v starts with a known auth scheme, the token after it (and, for
 // Basic, the decoded "user:password" and the password), because a text may carry the token alone,
-// without the scheme word. The Basic user name is not a secret and is not returned: it would redact
-// an ordinary name in every text. Pass the result to NewSecrets.
+// without the scheme word. The Basic user name is returned only when the password is shorter than
+// MinSecretLen: then the user name is the secret (an API key as the user, an empty or dummy password).
+// Otherwise it is an ordinary name and would be redacted in every text. Pass the result to NewSecrets.
 func AuthParts(v string) []string {
 	out := []string{v}
 	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
@@ -329,8 +330,13 @@ func AuthParts(v string) []string {
 	if strings.EqualFold(m[1], "basic") {
 		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
 			out = append(out, string(dec))
-			if _, pass, ok := strings.Cut(string(dec), ":"); ok {
+			if user, pass, ok := strings.Cut(string(dec), ":"); ok {
 				out = append(out, pass)
+				if len(pass) < MinSecretLen {
+					// An empty or dummy password ("x") means the user name carries the secret, as an
+					// API key sent as the Basic user does.
+					out = append(out, user)
+				}
 			}
 		}
 	}

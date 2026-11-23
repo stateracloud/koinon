@@ -25,12 +25,13 @@ import (
 
 // CredentialScrub removes the credential values that the gateway opened from everything the gateway emits: log
 // lines, span names, span attributes, span events, recorded errors, and the tool lists and tool results it gives
-// to an agent (#1174, ADR 0097 decision 12). Only the gateway holds an opened v2 credential, so only the gateway can remove it: the
-// trace router cannot read the value.
+// to an agent (#1174, ADR 0097 decision 12). Only the gateway holds an opened v2 credential, so only the gateway
+// can remove it: the trace router cannot read the value.
 //
 // It matches by exact value with [scrub.Secrets]: the value as sent (prefix and token), the token alone, the
-// decoded "user:password" and password of a Basic value (not the user name), and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A
-// value shorter than [scrub.MinSecretLen] is not matched: it would redact ordinary words.
+// decoded "user:password" and password of a Basic value (and the user name when the password is empty or a
+// dummy), and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A value shorter than
+// [scrub.MinSecretLen] is not matched: it would redact ordinary words.
 //
 // A value stays in the set for Retain after the gateway last opened it, so a late error about a rotated
 // credential is still scrubbed. The set holds at most MaxValues values; the oldest go first, in one batch. It is safe for
