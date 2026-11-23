@@ -281,7 +281,7 @@ script-check - inputs=hack/agent-state-test.sh,hack/agent-state.sh hack/agent-st
 script-check - inputs=hack/dep-age-check-test.sh,hack/dep-age-check.sh,hack/e2e-toolchain/Dockerfile,hack/e2e-toolchain/web.Dockerfile hack/dep-age-check-test.sh
 script-check - inputs=hack/testdata/ubuntu-snapshot/,hack/ubuntu-snapshot-bump_test.sh,hack/ubuntu-snapshot-bump.sh hack/ubuntu-snapshot-bump_test.sh
 script-check - inputs=hack/buf-breaking-against-test.sh,hack/buf-breaking-against.sh hack/buf-breaking-against-test.sh
-script-check - inputs=Makefile,hack/buf-test.sh,hack/buf.sh,hack/generate.sh,hack/preflight.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/versions-check-test.sh,hack/versions-check.sh,hack/versions.env hack/buf-test.sh
+script-check - inputs=Makefile,hack/buf-test.sh,hack/buf.sh,hack/generate.sh,hack/preflight.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/versions-check-test.sh,hack/versions-check.sh,hack/versions.env,.github/workflows/ci.yml hack/buf-test.sh
 script-check - inputs=hack/ci-changes.sh,hack/gate-reuse-lib.sh,hack/lane-gates-test.sh,hack/lane-gates.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight.sh hack/lane-gates-test.sh
 script-check - inputs=hack/board-test.sh,hack/board.sh hack/board-test.sh
 script-check - inputs=api/,docs/reference/proto/,docs/reference/proto/proto-api.md,hack/buf.sh,hack/generate-test.sh,hack/generate.sh,internal/gen/,Makefile,web/src/gen/,web/src/gen/google/rpc/,web/src/gen/google/rpc/error_details_pb.ts hack/generate-test.sh
@@ -326,6 +326,7 @@ script-skip - hack/wt-install-test.sh
 script-skip - hack/e2e-bisect-test.sh
 # Covered by another preflight gate (versions, dockerfile, mktemp, pinned, bash5, audit, adr).
 script-skip - hack/versions-check.sh
+script-skip - hack/buf.sh # runs the pinned buf (the proto lint step of ci.yml); the preflight gate `proto` runs it
 script-skip - hack/dockerfile-lint-test.sh
 script-skip - hack/dockerfile-lint.sh
 script-skip - hack/mktemp-lint-test.sh
