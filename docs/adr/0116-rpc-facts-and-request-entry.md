@@ -136,7 +136,7 @@ Taken from the options of the 2026-11-19 comment on #771.
 
 - **Hold: the entry only (delete all service guards).** A future workflow or sweeper that calls a service that was
   guarded is not held, and nothing finds that.
-- **Hold: the service layer only (today).** The table only records the answer for a spec. The 12 handler checks and the
+- **Hold: the service layer only (today).** The table only records the answer for a spec. The 9 handler checks and the
   per-file mappers stay, and #775 is dropped.
 - **Split vs predicate for `SetOutwardTargetDisabled`: a request predicate on the row** (`HeldWhen func(req) bool`).
   The table then holds code, and the spec must call every predicate with each value of the field. A service check kept
