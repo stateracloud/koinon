@@ -293,3 +293,12 @@ has "the worker ServiceAccount mounts no API token with pull secrets" 'automount
 has "a named ServiceAccount is used as is" 'serviceAccountName: "?my-sa"?' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.serviceAccountName=my-sa "${pool[@]}"
 has "the WorkerPool spec override merges" 'foo: bar' "${wsub[@]}" "${wp[@]}" --set execution.substrate.workerPool.spec.foo=bar "${pool[@]}"
 lacks "the render has no lookup or random value" 'randAlphaNum|lookup' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
+
+# The CA hook Job of issue #1191 may stamp the atelet pod template and change nothing else. Every spec field that the rule
+# does not name is compared here, so a weaker rule fails (the cases that deny each change are in test/escape).
+cadocs=$(render "${wsub[@]/imageCache.enabled=false/imageCache.enabled=true}" "${pol[@]}" | tr -d '\134')
+for f in spec.minReadySeconds spec.revisionHistoryLimit spec.template.metadata.finalizers metadata.ownerReferences metadata.finalizers spec.selector spec.updateStrategy; do
+	grep -Fq "object.$f == oldObject.$f" <<<"$cadocs" || fail "the CA stamp rule must keep $f unchanged"
+done
+grep -Fq "matches('^[0-9a-f]{64}\$')" <<<"$cadocs" || fail "the CA stamp rule must check the format of the stamp"
+grep -Fq "variables.caMetaNew.all(k, k == 'deprecated.daemonset.template.generation'" <<<"$cadocs" || fail "the CA stamp rule must compare the annotations of the DaemonSet, except the generation mirror of the API server"

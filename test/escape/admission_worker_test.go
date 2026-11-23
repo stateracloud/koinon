@@ -514,7 +514,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			return err
 		}
 		annotate := func(ds *appsv1.DaemonSet) {
-			ds.Spec.Template.Annotations[stamp] = "0123456789abcdef"
+			ds.Spec.Template.Annotations[stamp] = strings.Repeat("ab", 32)
 		}
 		It("lets the hook Job change only the CA stamp of the atelet pod template", func(ctx SpecContext) {
 			Expect(update(ctx, caHook, "atelet", annotate)).To(Succeed())
@@ -535,6 +535,15 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { delete(ds.Spec.Template.Annotations, "keep") }))
 			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Labels["extra"] = "x" }))
 			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Labels = map[string]string{"x": "y"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Annotations = map[string]string{"x": "y"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) {
+				ds.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "gone", UID: "22222222-2222-2222-2222-222222222222"}}
+			}))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Finalizers = []string{"example.com/hold"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Finalizers = []string{"example.com/hold"} }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.MinReadySeconds = 3600 }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { limit := int32(1); ds.Spec.RevisionHistoryLimit = &limit }))
+			denied(update(ctx, caHook, "atelet", func(ds *appsv1.DaemonSet) { ds.Spec.Template.Annotations[stamp] = "not-a-hash" }))
 		})
 		It("denies the stamp on another DaemonSet, and a create or a delete by the hook Job", func(ctx SpecContext) {
 			denied(update(ctx, caHook, "other-ds", annotate))
@@ -569,7 +578,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 			Expect(err).NotTo(HaveOccurred())
 			ds, err := admin.AppsV1().DaemonSets(workerNamespace).Get(ctx, "atelet", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			ds.Spec.Template.Annotations = map[string]string{stamp: "0123456789abcdef"}
+			ds.Spec.Template.Annotations = map[string]string{stamp: strings.Repeat("ab", 32)}
 			_, err = as[caHook].AppsV1().DaemonSets(workerNamespace).Update(ctx, ds, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
 			denied(err)
 		})
