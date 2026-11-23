@@ -24,16 +24,17 @@ a0ddef1, 2026-11-23.
 
 1. **Role.** `authorize` checks one minimum Role for each call (`internal/services/services.go:308`). Some rules
    are finer than one Role. A trace content level of `full` needs an owner (`internal/tracedest/settings.go:119`).
-   `AuditService.List` without an org ID is a platform admin call (`internal/services/audit.go:69` and `:93`).
+   `AuditService.List` without an org ID is a platform admin call (`internal/services/audit.go:93`).
 2. **Restore hold.** ADR 0107 decision 2 puts the hold check in the service layer: each service that calls out has
    a `restorehold.Guard` and returns `restorehold.ErrHeld`. The handlers map that error in `dbError`
    (`internal/services/services.go:339`) and in `problem()` (`internal/adminapi/adminapi.go:310`). The connection,
-   binding, task, direct message and A2A edge handlers also call `refuseWhileHeld` (`internal/services/hold.go`).
+   binding, task and direct message handlers, and the A2A edge, also call `refuseWhileHeld`
+   (`internal/services/hold.go`).
    Not every caller of a guarded service is a request: approvals `Execute` also runs from
    `internal/apiassembly/domain.go:91`.
 3. **One RPC, two hold answers.** `SetOutwardTargetDisabled` has one `disabled` field
    (`api/proto/koinon/outward/v1alpha1/outward.proto:36`). ADR 0110 decision 5 allows disable while held and refuses
-   enable while held (`internal/outward/outward.go:196`). A check at the entry sees the RPC, not the field.
+   enable while held (`internal/outward/outward.go:203`). A check at the entry sees the RPC, not the field.
 4. **Errors.** TraceDestinationService attaches `google.rpc.ErrorInfo` (domain `koinon.dev`) with a reason
    (`internal/services/tracedestinations.go:106`), and the web reads it (`web/src/lib/trace-errors.ts`). The REST
    `Error` has only `code` and `message` (`api/admin/v1/openapi.yaml:1219`). In other places the web shows raw
@@ -58,7 +59,7 @@ The registry spec (#672) checks every row.
 
 - Each row of the entry table must say `held: refuse` or `held: allow`. The field has no default value. A new RPC
   fails the registry spec until a person decides its value.
-- The entry refuses a `held: refuse` RPC while the install is held, with the same error as today
+- The entry refuses a `held: refuse` RPC while the install is held. The error is the one of ADR 0107 decision 2
   (`FailedPrecondition` on Connect, `409` on REST).
 - The service-level hold check (`restorehold.Guard` in the service) stays only for callers that are not requests:
   - approvals `Execute` (`internal/apiassembly/domain.go:91`);
@@ -81,8 +82,8 @@ the table thus stays static, and the table stays the one source.
 - A row can also have an optional `raises: owner` or `raises: platform_admin` mark. The mark says that some
   requests of this RPC need more than the minimum Role.
 - The domain checks the field rule and returns a typed `ROLE_TOO_LOW` refusal.
-- The registry spec (#672) tests each `raises` row: it calls the RPC with the minimum Role and expects
-  `ROLE_TOO_LOW`. Examples: the trace content level `full`, and an audit list with no org ID.
+- The registry spec (#672) tests each `raises` row (for example the trace content level `full`, and an audit list
+  with no org ID).
 
 ### 4. Refusal reasons on the wire
 
@@ -101,8 +102,8 @@ the table thus stays static, and the table stays the one source.
 ### 6. Order of the work
 
 - #783, #784 and #785 keep their waits for #770, #759, #746 and #731.
-- #787 is split. Each part of the old path is deleted when its last user moves to the entry.
-- `authorize`, `requestCtx`, `hold.go` and the comparison hook are deleted last. That pull request changes
+- #787 is split. The #787 work deletes each part of the old path when its last user moves to the entry.
+- The #787 work deletes `authorize`, `requestCtx`, `hold.go` and the comparison hook last. That pull request changes
   CODEOWNERS, so it needs `--admin`.
 
 ## Amendment to ADR 0107 decision 2
@@ -110,11 +111,12 @@ the table thus stays static, and the table stays the one source.
 ADR 0107 decision 2 puts the hold check at the service layer, "so the hold holds for every caller and both API
 surfaces". From this ADR, two layers share the work, each with a fixed role:
 
-- **The entry** holds every request. The `held` fact of the RPC's row decides.
+- **The entry** decides the hold for every request. The `held` fact of the RPC's row decides.
 - **The service guard** holds only the callers that are not requests. Decision 1 lists them, and a spec lists
   them too.
 
-The list of what is refused while held in ADR 0107 does not change. Only the place of the check changes. The
+The list of what is refused while held in ADR 0107 does not change; only the place of the check changes
+_(inferred)_. The
 `refuseWhileHeld` checks in the handlers go away when their RPCs move to the entry (#775), except the A2A edge.
 
 ## Amendment to ADR 0110 decision 5
@@ -142,8 +144,8 @@ the old method is deprecated. The rule does not change: disable is allowed while
   (forged or duplicate IDs, ADR 0100).
 - **Use the OpenTelemetry trace ID as the request ID.** Rejected: with no tracer the ID is empty or random, and one
   trace can contain many requests.
-- **Migrate the waiting handler files now** (#783 to #785). Rejected: merge conflicts with four refactors that
-  change the same files, and work done twice.
+- **Migrate the waiting handler files now** (#783 to #785). Rejected: merge conflicts with the refactors of #770,
+  #759, #746 and #731, which change the same files, and work done twice.
 
 ## Consequences
 
@@ -161,8 +163,7 @@ the old method is deprecated. The rule does not change: disable is allowed while
 
 ## Open questions
 
-These are not decided by the maintainer's answers. The child ticket that does the work decides them, in the open,
-and records the answer here.
+The maintainer's answers do not decide these. They stay open until the maintainer decides them.
 
 - The name of the reason enum and of its proto package.
 - The one format of the request ID.

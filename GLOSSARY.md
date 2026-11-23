@@ -439,7 +439,7 @@ _Avoid_: Middleware, interceptor (those are how it is built, not what it is)
 
 **Entry table**:
 The table with one row of facts for each RPC: the minimum Role, `held: refuse|allow` (no default) and an optional `raises` mark. A registry spec checks every row (ADR 0116).
-_Avoid_: RPC registry, facts table, route table
+_Avoid_: Facts table, route table
 
 **Refusal reason**:
 The fixed string that says why the API refused a call, from one proto enum. Connect carries it in `google.rpc.ErrorInfo` and REST in `error.reason` (ADR 0116).
