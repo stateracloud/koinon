@@ -331,13 +331,13 @@ func scrubAny(set *scrub.Secrets, v slog.Value) slog.Value {
 	switch x := v.Any().(type) {
 	case error:
 		text = x.Error()
-	case fmt.Stringer:
-		text = x.String()
-	case json.RawMessage:
-		text = string(x)
 	case []byte:
 		// A text handler writes a []byte as a string; %+v would print numbers and hide the match.
 		text = string(x)
+	case json.RawMessage:
+		text = string(x)
+	case fmt.Stringer:
+		text = x.String()
 	default:
 		text = fmt.Sprintf("%+v", x)
 	}
