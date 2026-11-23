@@ -22,7 +22,7 @@ var licenceNotices = []string{
 }
 
 // These specs read the OpenCode Dockerfile and the checked-in notices. They need no Docker, and
-// hack/go-test.sh runs them (test/harnesses does not run there). The `go` job runs them only when the change also touches a path it watches; see the README. They
+// hack/go-test.sh runs them (test/harnesses does not run there), and the `go` job watches the notices file and its generator (hack/paths.rules). They
 // fail when a licence notice, the Rust crate notices or the GPL source offer stops being wired
 // into the image (#63). What they cannot show is the built image: the build and the
 // sandbox-user read in licences_test.go do that.
@@ -102,6 +102,10 @@ var _ = Describe("opencode image licence notices (static)", func() {
 		Expect(notices).To(ContainSubstring("University of Cambridge"))
 		Expect(notices).To(ContainSubstring("Zoltan Herczeg"))
 		Expect(notices).To(ContainSubstring("Jason Evans"))
+		// One section for each tool whose lock file has the -sys crate.
+		for _, h := range []string{"### C library in ripgrep: PCRE2 and sljit", "### C library in ripgrep: jemalloc", "### C library in fd: jemalloc"} {
+			Expect(notices).To(ContainSubstring(h), h)
+		}
 		// option-ext (MPL-2.0) is in the notices, and the notices name where to get crate sources.
 		Expect(notices).To(ContainSubstring("option-ext 0.2.0"))
 		Expect(notices).To(ContainSubstring("https://crates.io/crates/<name>/<version>"))
@@ -110,6 +114,14 @@ var _ = Describe("opencode image licence notices (static)", func() {
 	It("checks that the three Rust tools are in the notices, at the pinned version, at build time", func() {
 		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*for t in "ripgrep [0-9.]+" "fd [0-9.]+" "ast-grep [0-9.]+"; do \\$`))
 		Expect(dockerfile).To(MatchRegexp(`grep -qxF "## \$t" /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES\.md`))
+		// The versions in that loop are the pins of the release downloads.
+		loop := regexp.MustCompile(`for t in "ripgrep ([0-9.]+)" "fd ([0-9.]+)" "ast-grep ([0-9.]+)"; do`).FindStringSubmatch(dockerfile)
+		Expect(loop).To(HaveLen(4))
+		for i, c := range []struct{ tool, pin string }{{"ripgrep", "ripgrep/releases/download/"}, {"fd", "sharkdp/fd/releases/download/v"}, {"ast-grep", "ast-grep/releases/download/"}} {
+			pins := regexp.MustCompile(regexp.QuoteMeta(c.pin)+`([0-9]+\.[0-9]+\.[0-9]+)`).FindAllStringSubmatch(dockerfile, -1)
+			Expect(pins).NotTo(BeEmpty(), c.tool)
+			Expect(loop[i+1]).To(Equal(pins[0][1]), "%s: the build check loop and the download pin differ", c.tool)
+		}
 	})
 
 	It("checks the OpenCode MIT notice at build time", func() {

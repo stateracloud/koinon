@@ -16,7 +16,7 @@
 #      exact dependency versions the release binary was built from.
 #   3. Concatenates the three outputs into harnesses/opencode/doc/THIRD_PARTY_NOTICES.md with a
 #      per-tool header naming the tool and the pinned version. The Dockerfile copies this file
-#      and its build-time check needs all three tools in it; test/harnesses compares the
+#      and its build-time check needs all three tools in it; test/noticescheck compares the
 #      versions with the Dockerfile pins (see harnesses/opencode/README.md).
 #
 # Needs cargo (Rust) on PATH, because cargo-about runs `cargo metadata`.
@@ -90,7 +90,7 @@ lock_version() {
 # licence texts come from the vendored sources, never by hand.
 crate_file() {
 	local crate=$1 version=$2 path=$3 dir
-	dir=$work/cfile-$crate
+	dir=$work/cfile-$crate-${version//+/_}
 	if [ ! -d "$dir" ]; then
 		mkdir -p "$dir"
 		curl -fsSL --retry 5 --retry-all-errors "https://static.crates.io/crates/$crate/$crate-${version//+/%2B}.crate" | tar -xzf - -C "$dir" --strip-components=1
