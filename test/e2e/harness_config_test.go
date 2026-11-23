@@ -3,7 +3,9 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -52,27 +54,51 @@ func TestQuickstartRestoresTheBrokenHarnessImage(t *testing.T) {
 	}
 	text := string(src)
 	apply := strings.Index(text, `"patch", "cm", "koinon-config"`)
-	restore := strings.Index(text, "restoreHarnessConfig(")
+	restore := strings.Index(text, "restoreHarnessConfig(cctx")
 	if apply < 0 {
 		t.Fatal("spec 8 no longer patches koinon-config")
 	}
 	if restore < 0 || restore > apply {
-		t.Fatal("spec 8 changes the cluster-wide harness image and must DeferCleanup its restore (restoreHarnessConfig) before the change (issue 1190)")
+		t.Fatal("spec 8 changes the cluster-wide harness image and must DeferCleanup its restore (restoreHarnessConfig with its own SpecContext) before the change (issue 1190)")
 	}
 }
 
-// restoreHarnessConfig returns the cleanup that puts the original config.yaml back, removes the wait cap
-// and waits for the reconciler and agentd to roll out again. Call DeferCleanup with it BEFORE the patch.
-func restoreHarnessConfig(kc func(args ...string) string, orig string) func() {
-	return func() {
-		p, err := configMapPatch(orig)
-		if err != nil {
-			panic(err)
+// restoreHarnessConfig puts the original config.yaml back, removes the wait cap and waits for the
+// reconciler and agentd to roll out again. run executes one kubectl command. Every step runs, and the
+// errors are joined. The caller passes the context of its own cleanup node: the context of the spec is
+// cancelled when the spec returns, before DeferCleanup runs.
+func restoreHarnessConfig(ctx context.Context, run func(ctx context.Context, args ...string) error, orig string) error {
+	p, err := configMapPatch(orig)
+	if err != nil {
+		return err
+	}
+	return errors.Join(
+		run(ctx, "-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", p),
+		run(ctx, "-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP-"),
+		run(ctx, "-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler"),
+		run(ctx, "-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m"),
+		run(ctx, "-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m"),
+	)
+}
+
+func TestRestoreHarnessConfigRunsEveryStep(t *testing.T) {
+	var calls []string
+	run := func(_ context.Context, args ...string) error {
+		calls = append(calls, strings.Join(args, " "))
+		if len(calls) == 2 {
+			return errors.New("set env failed")
 		}
-		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", p)
-		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP-")
-		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
-		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
-		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
+		return nil
+	}
+	err := restoreHarnessConfig(context.Background(), run, "image: orig\n")
+	if err == nil || !strings.Contains(err.Error(), "set env failed") {
+		t.Fatalf("the error is lost: %v", err)
+	}
+	if len(calls) != 5 {
+		t.Fatalf("a failed step skipped the rest: %v", calls)
+	}
+	if !strings.Contains(calls[0], "patch cm koinon-config") || !strings.Contains(calls[0], "image: orig") ||
+		!strings.Contains(calls[1], "KOINON_SANDBOX_WAIT_CAP-") || !strings.Contains(calls[2], "rollout restart deploy/koinon-reconciler") {
+		t.Fatalf("unexpected steps: %v", calls)
 	}
 }

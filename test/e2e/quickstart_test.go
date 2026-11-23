@@ -1100,8 +1100,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("8. agentd pod killed mid-run: takeover under a new epoch, no duplicate events")
 	})
 
-	// Not part of the quickstart, and after its time check: the harness image is broken for the rest of
-	// the run (the cluster is deleted afterwards).
+	// Not part of the quickstart, and after its time check: the harness image is broken until the spec's
+	// cleanup restores it (the stories pass runs on the same install afterwards: issue 1190).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
@@ -1133,7 +1133,17 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		// The config is cluster-wide and the stories pass runs on this install afterwards (issue 1190: S3
 		// pulled the broken image). Put the config and the wait cap back when the spec ends, pass or fail.
-		DeferCleanup(restoreHarnessConfig(kc, cfgYAML))
+		// The cleanup takes its own context: the spec's is cancelled when the spec returns.
+		DeferCleanup(func(cctx SpecContext) {
+			err := restoreHarnessConfig(cctx, func(c context.Context, args ...string) error {
+				out, err := exec.CommandContext(c, kubectl, args...).CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("kubectl %s: %w: %s", strings.Join(args, " "), err, out)
+				}
+				return nil
+			}, cfgYAML)
+			Expect(err).NotTo(HaveOccurred(), "restoring the harness config")
+		}, NodeTimeout(8*time.Minute))
 		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", patch)
 		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
 		// 2 minutes, the value with evidence. The cap counts from the run's first claim
