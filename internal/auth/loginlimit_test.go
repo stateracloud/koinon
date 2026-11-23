@@ -210,7 +210,16 @@ var _ = Describe("password login limiter (issue 658)", func() {
 	It("gives no exemption to a forged, expired or other-user cookie", func(ctx SpecContext) {
 		cookie := deviceCookieOf(loginWithCookie(ctx, "192.0.2.51", "admin", fakeLimitPassword, nil))
 		forged := *cookie
-		forged.Value = cookie.Value[:len(cookie.Value)-2] + "AA"
+		// Change one character of the MAC. A fixed replacement text leaves the cookie as it was
+		// when the MAC already ends in it (about 1 run of 1024, #1203). The second to last
+		// character is a full 6 bits of the MAC, so the MAC stays well formed and wrong.
+		i := len(cookie.Value) - 2
+		swap := byte('A')
+		if cookie.Value[i] == swap {
+			swap = 'B'
+		}
+		forged.Value = cookie.Value[:i] + string(swap) + cookie.Value[i+1:]
+		Expect(forged.Value).NotTo(Equal(cookie.Value), "the forgery must differ from the real cookie")
 		advance(31 * 24 * time.Hour)
 		blockAccount(ctx, "admin")
 		Expect(loginWithCookie(ctx, "198.51.100.203", "admin", fakeLimitPassword, cookie).Code).To(Equal(http.StatusTooManyRequests), "expired")
