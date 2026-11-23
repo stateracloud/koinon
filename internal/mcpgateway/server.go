@@ -111,7 +111,7 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 			}
 			switch method {
 			case "tools/list":
-				return g.listTools(ctx, agent), nil
+				return g.o.Scrub.ToolList(g.listTools(ctx, agent)), nil
 			case "tools/call":
 				r, ok := req.(*mcp.CallToolRequest)
 				if !ok {

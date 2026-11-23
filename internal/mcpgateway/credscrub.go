@@ -24,8 +24,8 @@ import (
 )
 
 // CredentialScrub removes the credential values that the gateway opened from everything the gateway emits: log
-// lines, span names, span attributes, span events, recorded errors and the results it gives to an agent (#1174,
-// ADR 0097 decision 12). Only the gateway holds an opened v2 credential, so only the gateway can remove it: the
+// lines, span names, span attributes, span events, recorded errors, and the tool lists and tool results it gives
+// to an agent (#1174, ADR 0097 decision 12). Only the gateway holds an opened v2 credential, so only the gateway can remove it: the
 // trace router cannot read the value.
 //
 // It matches by exact value with [scrub.Secrets]: the value as sent (prefix and token), the token alone, the
@@ -191,19 +191,57 @@ func (s *CredentialScrub) Result(res *mcp.CallToolResult) *mcp.CallToolResult {
 			c.Data = s.bytes(c.Data)
 		}
 	}
-	raw, err := json.Marshal(res)
-	if err != nil {
+	clean, ok := scrubJSON(s, res)
+	if !ok {
 		return scrubbedResult()
+	}
+	return clean
+}
+
+// ToolList scrubs the tool list an agent gets: each tool's name, title, description, schemas, annotations and
+// metadata, through its JSON form. A target can quote the credential it was sent in any of them. A tool whose
+// scrubbed JSON does not decode is left out, so the agent never gets the value. It changes res in place and
+// returns it.
+func (s *CredentialScrub) ToolList(res *mcp.ListToolsResult) *mcp.ListToolsResult {
+	if res == nil || s.set.Load().Len() == 0 {
+		return res
+	}
+	tools := res.Tools[:0]
+	for _, t := range res.Tools {
+		if t == nil {
+			continue
+		}
+		if clean, ok := scrubJSON(s, t); ok {
+			tools = append(tools, clean)
+		}
+	}
+	res.Tools = tools
+	if res.Meta != nil {
+		if m, ok := scrubJSON(s, &res.Meta); ok {
+			res.Meta = *m
+		} else {
+			res.Meta = nil
+		}
+	}
+	return res
+}
+
+// scrubJSON returns v unchanged when its JSON form holds no recorded value, else a new value decoded from the
+// scrubbed JSON. ok is false when v does not encode or the scrubbed JSON does not decode.
+func scrubJSON[T any](s *CredentialScrub, v *T) (_ *T, ok bool) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
 	}
 	out := s.Text(string(raw))
 	if out == string(raw) {
-		return res
+		return v, true
 	}
-	var clean mcp.CallToolResult
-	if json.Unmarshal([]byte(out), &clean) != nil {
-		return scrubbedResult()
+	clean := new(T)
+	if json.Unmarshal([]byte(out), clean) != nil {
+		return nil, false
 	}
-	return &clean
+	return clean, true
 }
 
 // bytes returns b with every recorded value in its text replaced, or b itself when it holds none.

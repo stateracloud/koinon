@@ -811,7 +811,7 @@ move, once.
      koinon-gateway holds the plaintext, so it scrubs the values it opened (#1174). `mcpgateway.CredentialScrub`
      records each value when the gateway opens it, and removes it by exact value (and its encoded forms, and the
      token after the auth scheme) from every log line, span and audit row the gateway writes and from every tool
-     result it gives to an agent. The router path logs and stores no opened v2 value (a spec checks it). The
+     list and tool result it gives to an agent. The router path logs and stores no opened v2 value (a spec checks it). The
      router still scrubs v1 MCP values, which it can open.
    - `koinon_gateway_credential_open_failures_total` counts failed opens. One refused call can open a
      credential more than once, so the counter is not a count of refused calls.

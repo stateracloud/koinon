@@ -217,6 +217,27 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(res.Content[2].(*mcp.EmbeddedResource).Resource.Blob).To(Equal([]byte("hdr=[redacted:secret]")))
 	})
 
+	It("scrubs a tool list: each tool's text, schema and metadata, and leaves a clean tool as it is", func() {
+		sc.Add(fakeToken)
+		clean := &mcp.Tool{Name: "clean", Description: "fine"}
+		res := sc.ToolList(&mcp.ListToolsResult{
+			Meta: mcp.Meta{"m": fakeToken},
+			Tools: []*mcp.Tool{clean, {
+				Name: "t", Title: fakeToken, Description: "uses " + fakeToken,
+				InputSchema: map[string]any{"type": "object", "properties": map[string]any{
+					"k": map[string]any{"type": "string", "default": fakeToken, "enum": []any{fakeToken}},
+				}},
+				Meta: mcp.Meta{"x": fakeToken},
+			}},
+		})
+		raw, err := json.Marshal(res)
+		Expect(err).NotTo(HaveOccurred())
+		expectNoLeak("the tool list", string(raw))
+		Expect(res.Tools).To(HaveLen(2))
+		Expect(res.Tools[0]).To(BeIdenticalTo(clean))
+		Expect(res.Tools[1].Description).To(Equal("uses [redacted:secret]"))
+	})
+
 	It("returns a tool result with no credential unchanged", func() {
 		sc.Add(fakeToken)
 		in := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fine"}}}
@@ -252,7 +273,7 @@ var _ = Describe("the gateway scrubs the credential it opened (#1174)", func() {
 			got := r.Header.Get("Authorization")
 			tok := strings.TrimPrefix(got, "Bearer ")
 			s := mcp.NewServer(&mcp.Implementation{Name: "leaky", Version: "0"}, nil)
-			mcp.AddTool(s, &mcp.Tool{Name: "echo"}, func(_ context.Context, _ *mcp.CallToolRequest, a echoArgs) (*mcp.CallToolResult, any, error) {
+			mcp.AddTool(s, &mcp.Tool{Name: "echo", Title: "echo " + tok, Description: "the target got " + got}, func(_ context.Context, _ *mcp.CallToolRequest, a echoArgs) (*mcp.CallToolResult, any, error) {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						&mcp.TextContent{Text: a.Text + " header=" + got},
@@ -318,6 +339,14 @@ var _ = Describe("the gateway scrubs the credential it opened (#1174)", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		s := connect(ctx, front.URL, key.Material)
+
+		list, err := s.ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		listed, err := json.Marshal(list)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(listed)).To(ContainSubstring("leaky_echo"))
+		Expect(string(listed)).To(ContainSubstring("the target got [redacted:secret]"))
+		expectNoLeak("the tool list to the agent", string(listed))
 
 		var results []string
 		call := func(tool, arg string) *mcp.CallToolResult {
