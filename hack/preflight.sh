@@ -253,8 +253,11 @@ g_go() {
 	return "$rc"
 }
 
+# Tool modules with their own modfile (hack/tools/*): `go mod tidy` must leave them as they are too (#1198).
+tool_mods=(hack/tools/buf)
+
 g_tidy() {
-	local tmp rc=0
+	local tmp rc=0 d
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/preflight-tidy.XXXXXX") || return 1
 	cp go.mod "$tmp/go.mod"
 	[[ -f go.sum ]] && cp go.sum "$tmp/go.sum"
@@ -263,6 +266,15 @@ g_tidy() {
 	if [[ -f $tmp/go.sum ]]; then cmp -s go.sum "$tmp/go.sum" || { echo "go mod tidy changed go.sum"; rc=1; }; fi
 	cp "$tmp/go.mod" go.mod
 	[[ -f $tmp/go.sum ]] && cp "$tmp/go.sum" go.sum
+	for d in "${tool_mods[@]}"; do
+		[[ -f $d/go.mod && -f $d/go.sum ]] || continue
+		mkdir -p "$tmp/$d"
+		cp "$d/go.mod" "$d/go.sum" "$tmp/$d/"
+		(cd "$d" && go mod tidy) || rc=1
+		cmp -s "$d/go.mod" "$tmp/$d/go.mod" || { echo "go mod tidy changed $d/go.mod"; rc=1; }
+		cmp -s "$d/go.sum" "$tmp/$d/go.sum" || { echo "go mod tidy changed $d/go.sum"; rc=1; }
+		cp "$tmp/$d/go.mod" "$tmp/$d/go.sum" "$d/"
+	done
 	rm -rf "$tmp"
 	return $rc
 }
@@ -270,10 +282,10 @@ g_tidy() {
 g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
-	buf lint
+	hack/buf.sh lint
 	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
 	against=$(hack/buf-breaking-against.sh "$base")
-	buf breaking --against ".git#ref=$against"
+	hack/buf.sh breaking --against ".git#ref=$against"
 }
 
 tree_state() { git status --porcelain; git diff | cksum; }
@@ -512,7 +524,7 @@ run_gate() { # <gate>
 		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
 	generate) command -v node >/dev/null || { echo "generate skip (node not installed)"; return; }
 		web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
-	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
+	proto) command -v go >/dev/null || { echo "proto skip (go not installed; buf is the pinned tool of hack/tools/buf)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
 	fuzz) command -v go >/dev/null || { echo "fuzz skip (go not installed; CI runs hack/go-fuzz.sh)"; return; } ;;

@@ -67,6 +67,8 @@ printf '#!/usr/bin/env bash\necho "go-test.sh $* [KUBECONFIG=${KUBECONFIG:-}]" >
 printf '#!/usr/bin/env bash\necho "needs-e2e.sh $*" >>"$FAKE_LOG"\nrc=${FAKE_NEEDS_RC:-1}\n[[ $rc -ne 0 ]] || echo "kind e2e needed"\nexit "$rc"\n' >"$seed/hack/needs-e2e.sh"
 cp "$repo/hack/golangci-lint.sh" "$seed/hack/golangci-lint.sh" # the real wrapper; it execs the golangci-lint stub
 cp "$repo/hack/buf-breaking-against.sh" "$seed/hack/buf-breaking-against.sh" # real helper (#542); needs only git
+# The gate `proto` runs hack/buf.sh (#1198); in the fixture it forwards to the logging `buf` stub, as the real one forwards to the pinned tool.
+printf '#!/usr/bin/env bash\nexec buf "$@"\n' >"$seed/hack/buf.sh"
 chmod +x "$seed/hack/"*.sh
 printf 'module example.com/m\n\ngo 1.25\n' >"$seed/go.mod"
 echo "package foo" >"$seed/internal/foo/a.go"

@@ -82,6 +82,7 @@ keep go \.go$
 job tidy \.go$
 job tidy ^go\.(mod|sum)$
 job tidy ^\.golangci\.ya?ml$
+job tidy ^hack/tools/buf/go\.(mod|sum)$
 
 # --- vuln: go-vuln, govulncheck on a change of the Go dependencies (#579 part 2) --------------------------
 # A change of the module's requirements (go.mod, go.sum) can bring in a reachable known vulnerability, so
@@ -95,6 +96,7 @@ job tidy ^\.golangci\.ya?ml$
 # minute. A change to ci.yml, the Makefile, the setup-go-cache action or these rules runs it through
 # `everything`. The preflight gate `vuln` uses the same rules.
 job vuln ^go\.(mod|sum)$
+job vuln ^hack/tools/buf/go\.(mod|sum)$
 job vuln ^hack/govulncheck\.sh$
 job vuln ^\.github/workflows/govulncheck\.yml$
 job vuln ^hack/versions\.env$
@@ -146,7 +148,7 @@ job web ^(web/|api/proto/)
 # spec and its config, the sqlc inputs, the buf and sqlc configs, protoc-gen-es (web/package.json,
 # its lockfile) and the outputs.
 # hack/generate.sh is the body of `make generate` (#349): a wrapper-only edit must still run the job.
-job generate ^(api/proto/|third_party/openshell/proto/|third_party/substrate/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$|hack/tools/buf/|hack/cmd/generatecheck/)
+job generate ^(api/proto/|third_party/openshell/proto/|third_party/substrate/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$|hack/buf\.sh$|hack/tools/buf/|hack/cmd/generatecheck/)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
 job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
@@ -244,7 +246,7 @@ script-check - inputs=hack/ci-fail-test.sh,hack/ci-fail.sh,hack/testdata/ci-fail
 script-check - inputs=hack/ci-timing-test.sh,hack/ci-timing.sh,hack/testdata/ci-timing/gh/,hack/testdata/ci-timing/records.json hack/ci-timing-test.sh
 script-check - inputs=.github/,hack/ci-go-gate-test.sh,hack/ci-required.txt,hack/govulncheck.sh hack/ci-go-gate-test.sh
 script-check - inputs=.github/,hack/ci-required.txt,hack/ci-web-gate-test.sh hack/ci-web-gate-test.sh
-script-check - inputs=cmd/,hack/ci-fail.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/versions.env hack/govulncheck-test.sh
+script-check - inputs=cmd/,hack/ci-fail.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/versions.env hack/govulncheck-test.sh
 script-check - inputs=.github/,.github/workflows/,hack/ci-go-gate-test.sh,hack/ci-required-test.sh,hack/ci-required.txt,hack/ci-web-gate-test.sh hack/ci-required-test.sh
 script-check - inputs=guard hack/repo-contract-test.sh
 script-check - inputs=guard hack/tmp-safety-test.sh
@@ -273,6 +275,7 @@ script-check - inputs=hack/agent-state-test.sh,hack/agent-state.sh hack/agent-st
 script-check - inputs=hack/dep-age-check-test.sh,hack/dep-age-check.sh,hack/e2e-toolchain/Dockerfile,hack/e2e-toolchain/web.Dockerfile hack/dep-age-check-test.sh
 script-check - inputs=hack/testdata/ubuntu-snapshot/,hack/ubuntu-snapshot-bump_test.sh,hack/ubuntu-snapshot-bump.sh hack/ubuntu-snapshot-bump_test.sh
 script-check - inputs=hack/buf-breaking-against-test.sh,hack/buf-breaking-against.sh hack/buf-breaking-against-test.sh
+script-check - inputs=Makefile,hack/buf-test.sh,hack/buf.sh,hack/generate.sh,hack/preflight.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/versions-check-test.sh,hack/versions-check.sh,hack/versions.env,.github/workflows/ci.yml hack/buf-test.sh
 script-check - inputs=hack/ci-changes.sh,hack/gate-reuse-lib.sh,hack/lane-gates-test.sh,hack/lane-gates.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight.sh hack/lane-gates-test.sh
 script-check - inputs=hack/board-test.sh,hack/board.sh hack/board-test.sh
 script-check - inputs=api/,docs/reference/proto/,docs/reference/proto/proto-api.md,hack/generate-test.sh,hack/generate.sh,internal/gen/,Makefile,web/src/gen/,web/src/gen/google/rpc/,web/src/gen/google/rpc/error_details_pb.ts hack/generate-test.sh
@@ -287,7 +290,7 @@ script-check - inputs=.github/,docs/,hack/ci-required.txt,hack/ci-rules-check-te
 script-check - inputs=guard hack/ci-rules-check.sh
 script-check - inputs=guard hack/e2e-commands-check.sh
 script-check - inputs=hack/chart-check-test.sh,hack/chart-check.d/,hack/chart-check.sh,hack/chart-check.d/ hack/chart-check-test.sh
-script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh
