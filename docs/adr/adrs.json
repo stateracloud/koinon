@@ -90,7 +90,8 @@
     "superseded_by": [],
     "relates": [],
     "related_by": [
-      "0110"
+      "0110",
+      "0116"
     ]
   },
   {
@@ -539,7 +540,9 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0116"
+    ]
   },
   {
     "number": "0023",
@@ -578,6 +581,7 @@
       "0098",
       "0107",
       "0110",
+      "0116",
       "0121"
     ]
   },
@@ -2851,7 +2855,8 @@
     ],
     "related_by": [
       "0107",
-      "0110"
+      "0110",
+      "0116"
     ]
   },
   {
@@ -3044,7 +3049,8 @@
     ],
     "amends": [],
     "amended_by": [
-      "0110"
+      "0110",
+      "0116"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -3125,7 +3131,9 @@
     "amends": [
       "0107"
     ],
-    "amended_by": [],
+    "amended_by": [
+      "0116"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3305,6 +3313,34 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
+    "related_by": []
+  },
+  {
+    "number": "0116",
+    "file": "0116-rpc-facts-and-request-entry.md",
+    "title": "RPC facts and the request entry",
+    "status": "accepted",
+    "date": "2026-11-23",
+    "area": "tenancy-identity",
+    "tags": [
+      "api",
+      "auth",
+      "audit",
+      "backup-restore"
+    ],
+    "amends": [
+      "0107",
+      "0110"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0004",
+      "0022",
+      "0023",
+      "0100"
+    ],
     "related_by": []
   },
   {
