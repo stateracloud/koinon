@@ -146,27 +146,46 @@ if [[ -f mise.toml || -f mise.lock ]]; then
 	[[ -f mise.lock ]] || fail "mise.toml exists but mise.lock is missing: run 'mise lock --platform linux-x64,linux-arm64,macos-arm64' (ADR 0124)"
 fi
 if [[ -f mise.toml && -f mise.lock ]]; then
-	# mise.toml: `"aqua:<owner>/<repo>" = "<version>"` lines. Another tool is outside the trial's scope.
-	toml_tools=$(sed -nE 's/^"?aqua:([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)"?[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1 \2/p' mise.toml)
-	toml_keys=$(sed -nE 's/^("[^"]+"|[A-Za-z0-9._:\/-]+)[[:space:]]*=.*$/\1/p' mise.toml | grep -vE '^(min_version|experimental)$' || true)
-	while IFS= read -r key; do
-		[[ -z $key ]] && continue
-		k=${key//\"/}
-		ok=0
-		for pair in $mise_tools; do [[ $k == "aqua:${pair#*:}" ]] && ok=1; done
-		((ok)) || fail "mise.toml: '$k' is not one of the five trial tools (a new tool is a new decision, ADR 0124)"
-	done <<<"$toml_keys"
-	# mise.lock: "V<TAB>tool<TAB>version" and "C<TAB>tool<TAB>platform<TAB>checksum" per entry.
+	# mise.toml is an allow-list (ADR 0124 decision 5: tool versions only, no [env], [settings], [hooks] or
+	# tasks). Every line that is not blank and not a comment is `min_version = "..."`, the `[tools]` header or
+	# `"aqua:<owner>/<repo>" = "<version>"`, with whitespace around it and an optional trailing comment.
+	# Another tool is outside the trial's scope.
+	re_skip='^[[:space:]]*(#.*)?$'
+	re_min='^[[:space:]]*min_version[[:space:]]*=[[:space:]]*"[^"]+"[[:space:]]*(#.*)?$'
+	re_hdr='^[[:space:]]*\[tools\][[:space:]]*(#.*)?$'
+	re_tool='^[[:space:]]*"aqua:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)"[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*(#.*)?$'
+	toml_tools=""
+	lineno=0
+	while IFS= read -r line || [[ -n $line ]]; do
+		lineno=$((lineno + 1))
+		if [[ $line =~ $re_skip || $line =~ $re_min || $line =~ $re_hdr ]]; then
+			continue
+		elif [[ $line =~ $re_tool ]]; then
+			ok=0
+			for pair in $mise_tools; do [[ ${BASH_REMATCH[1]} == "${pair#*:}" ]] && ok=1; done
+			((ok)) || fail "mise.toml: line $lineno '${BASH_REMATCH[1]}' is not one of the five trial tools (a new tool is a new decision, ADR 0124)"
+			toml_tools+="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"$'\n'
+		else
+			fail "mise.toml: line $lineno is not allowed: '$line' (only min_version, [tools] and \"aqua:owner/repo\" = \"version\" lines; ADR 0124 decision 5)"
+		fi
+	done <mise.toml
+	# mise.lock: "T<TAB>tool" per tool table, "V<TAB>tool<TAB>version" and "C<TAB>tool<TAB>platform<TAB>checksum" per entry.
 	lock_facts=$(awk '
-		/^\[\[tools\./ { t = $0; sub(/^\[\[tools\./, "", t); sub(/\]\]$/, "", t); gsub(/"/, "", t); tool = t; plat = ""; next }
+		/^\[\[tools\./ { t = $0; sub(/^\[\[tools\./, "", t); sub(/\]\]$/, "", t); gsub(/"/, "", t); tool = t; plat = ""; print "T\t" tool; next }
 		/^\[tools\..*platforms\./ {
 			t = $0; sub(/^\[tools\./, "", t); sub(/\]$/, "", t); gsub(/"/, "", t)
-			i = index(t, ".platforms."); tool = substr(t, 1, i - 1); plat = substr(t, i + 11); next
+			i = index(t, ".platforms."); tool = substr(t, 1, i - 1); plat = substr(t, i + 11); print "T\t" tool; next
 		}
 		/^\[/ { plat = ""; tool = ""; next }
 		tool != "" && plat == "" && /^version[[:space:]]*=/ { v = $0; sub(/^[^=]*=[[:space:]]*"/, "", v); sub(/".*/, "", v); print "V\t" tool "\t" v }
 		tool != "" && plat != "" && /^checksum[[:space:]]*=/ { c = $0; sub(/^[^=]*=[[:space:]]*"/, "", c); sub(/".*/, "", c); print "C\t" tool "\t" plat "\t" c }
 	' mise.lock)
+	while IFS=$'\t' read -r kind lock_tool _; do
+		[[ $kind == T ]] || continue
+		ok=0
+		for pair in $mise_tools; do [[ $lock_tool == "aqua:${pair#*:}" ]] && ok=1; done
+		((ok)) || fail "mise.lock: '$lock_tool' is not one of the five trial tools (a new tool is a new decision, ADR 0124)"
+	done <<<"$lock_facts"
 	for pair in $mise_tools; do
 		t=${pair%%:*}
 		repo=${pair#*:}

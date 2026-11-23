@@ -37,16 +37,18 @@ documentation and the GitHub API.
    `hack/versions.env` and `mise.toml` with `mise.lock`. The one place for versions is still
    `hack/versions.env`. `hack/versions-check.sh` fails when the two disagree on a version or on a
    `linux-x64` checksum. The trial ends with one place for these five tools (see Open questions).
-3. **mise is optional.** Without mise, every script works as before. `hack/preflight.sh` runs the five
-   gates through `mise exec --` only when mise is on `PATH`.
-4. **The mise version is pinned.** `mise.toml` has `min_version` set to the exact release that CI
-   installs. The release must be at least 3 days old.
+3. **mise is optional.** Without mise, every script works as before. In part 2, `hack/preflight.sh` will
+   run the five gates through `mise exec --` only when mise is on `PATH`. Part 1 does not change
+   preflight.
+4. **The minimum mise version.** `mise.toml` has `min_version`. It is the minimum mise version, not a
+   pin: a contributor can run a newer mise. In part 2, CI will install one exact mise release, at least
+   3 days old.
 5. **Only tool versions.** No mise `[env]`, no `[settings]`, no `[hooks]` and no mise tasks. Make stays
    the front door ([ADR 0118](0118-hack-logic-in-go.md)). Go, the `go tool` pins (buf included) and pnpm
    (`packageManager`) do not move to mise.
 6. **Backends that record checksums.** Tools use the `aqua:` backend. mise checks the checksum and the
-   signatures or attestations that the aqua registry declares, with no `cosign` or `gpg` binary. CI runs
-   with `MISE_LOCKED=1`, so an install fails when the lock has no entry for the platform.
+   signatures or attestations that the aqua registry declares, with no `cosign` or `gpg` binary. In part
+   2, CI will run with `MISE_LOCKED=1`, so an install fails when the lock has no entry for the platform.
 7. **The 3-day rule holds.** `hack/dep-age-check.sh` dates every tool pin and the pinned mise version in
    `mise.toml` ([ADR 0079](0079-dependency-cooldown.md)). The mise setting `minimum_release_age` only
    filters fuzzy versions. It is not the gate.
@@ -90,7 +92,7 @@ Options that the research compared:
   linux-x64,linux-arm64,macos-arm64`). Dependabot has no mise ecosystem in the part of its documentation
   that was read, so no bot bumps `mise.toml`.
 - Risks: mise has one main maintainer (95 of the last 100 commits were by one person) and it releases
-  about every two days. ADR 0118 rejected mage for the same one-maintainer profile. The exit is cheap
+  about every two days. ADR 0118 rejected mage for a similar maintainer profile, among other reasons. The exit is cheap
   because the config is plain TOML and the lock has URLs and checksums. The backend set also changes
   (the `ubi` backend is deprecated and leaves in 2027.1.0), so only `aqua:` pins are allowed here.
 - Follow-ups: the measurements below.
@@ -111,6 +113,12 @@ Hosts seen so far (partly observed): `mise-versions.jdx.dev` (version lists and 
 `api.github.com` (release lists and the `url_api` asset URLs) and `github.com` (the `url` of every
 asset). The hosts of the aqua registry and the redirect target of the asset downloads were not recorded.
 A fresh VM still needs a measured list.
+
+Facts about the lock and the 3-day rule. `mise.lock` was made with mise 2026.11.12. That release was
+published on 2026-11-21, so on 2026-11-23 it is younger than the 3 days of
+[ADR 0079](0079-dependency-cooldown.md). The mise binary is not in the tree. Only the five tool pins are in
+it. `hack/versions-check.sh` compares the five `linux-x64` checksums with `hack/versions.env`. The
+`linux-arm64` and `macos-arm64` checksums have no second source in the tree.
 
 ## Open questions
 
@@ -137,7 +145,8 @@ Read on 2026-11-23:
   `hadolint/hadolint` and `gitleaks/gitleaks`: <https://github.com/aquaproj/aqua-registry>
 
 Found while making the lock: `MISE_GLOBAL_CONFIG_FILE=/dev/null` fails ("unknown config file type"). To
-isolate mise from a user's setup, point it at an empty `.toml` file in an isolated directory. Inside the
+isolate mise from a user's setup, point it at an empty `.toml` file in an isolated directory. The
+maintainer installed mise. The main agent session ran `mise lock` on the maintainer's word. Inside the
 sandbox of the agent shell, mise could not finish a TLS handshake to `mise-versions.jdx.dev` (OSStatus
 -26276), so `mise lock` ran outside it with the isolated directories.
 

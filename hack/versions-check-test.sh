@@ -222,6 +222,43 @@ mise_fixture "$w"
 printf '"aqua:kubernetes-sigs/kind" = "0.33.0"\n' >>"$w/mise.toml"
 expect_fail "mise.toml tool outside the five" "$w" "not one of the five trial tools"
 
+# mise.toml allows tool versions only (ADR 0124 decision 5): every other line fails, indented or not.
+toml_extra() { # toml_extra <label> <message for printf> <expected text in the failure>
+	local w
+	w=$(fresh)
+	mise_fixture "$w"
+	# shellcheck disable=SC2059 # the caller's text is the printf format (it holds \t and \n)
+	printf "$2" >>"$w/mise.toml"
+	expect_fail "mise.toml: $1" "$w" "$3"
+}
+toml_extra "[env] with a column-0 key" '[env]\nFOO = "bar"\n' "is not allowed: '[env]'"
+toml_extra "[env] with an indented key" '[env]\n  FOO = "bar"\n' "is not allowed: '[env]'"
+toml_extra "an indented FOO under [env] (header removed)" '  FOO = "bar"\n' "is not allowed: '  FOO"
+toml_extra "an empty [env]" '[env]\n' "is not allowed: '[env]'"
+toml_extra "[hooks] with a tab-indented enter" '[hooks]\n\tenter = "echo hi"\n' "is not allowed: '[hooks]'"
+toml_extra "a tab-indented hook line" '\tenter = "echo hi"\n' "is not allowed"
+toml_extra "[tasks.lint] with an indented run" '[tasks.lint]\n  run = "make lint"\n' "is not allowed: '[tasks.lint]'"
+toml_extra "an indented task run line" '  run = "make lint"\n' "is not allowed: '  run"
+toml_extra "[settings] with experimental" '[settings]\nexperimental = true\n' "is not allowed: '[settings]'"
+toml_extra "experimental at the top" 'experimental = true\n' "is not allowed: 'experimental = true'"
+toml_extra "a top-level env table" 'env = { FOO = "bar" }\n' "is not allowed: 'env = "
+toml_extra "an indented top-level env table" '  env = { FOO = "bar" }\n' "is not allowed"
+
+# a tool line with indentation and a trailing comment is still a tool line, and the real file shape passes
+w=$(fresh)
+mise_fixture "$w"
+subst "$w/mise.toml" '"aqua:rhysd/actionlint"' '  "aqua:rhysd/actionlint"'
+printf '# a comment\n\n' >>"$w/mise.toml"
+rc=0
+run "$w" || rc=$?
+check "mise.toml: an indented tool line and a comment pass" 0 "$rc"
+
+# mise.lock holds the five tools only
+w=$(fresh)
+mise_fixture "$w"
+printf '[[tools."aqua:kubernetes-sigs/kind"]]\nversion = "0.33.0"\nbackend = "aqua:kubernetes-sigs/kind"\n' >>"$w/mise.lock"
+expect_fail "mise.lock tool outside the five" "$w" "mise.lock: 'aqua:kubernetes-sigs/kind' is not one of the five"
+
 # dep-age-check fails (no network needed) for a *_VERSION with no tool_repo entry
 w=$(mktemp -d "$tmp/dep.XXXXXX") || exit 1
 mkdir -p "$w/hack"
