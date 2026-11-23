@@ -415,7 +415,8 @@ var _ = Describe("koinon-reconciler's settings", func() {
 })
 
 var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
-	const pinned = "ghcr.io/stateracloud/koinon/sandbox:0.1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// The fake references use a reserved test domain: the dependency age check skips it (ADR 0079).
+	const pinned = "registry.example.com/koinon/sandbox:0.1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	// substrateConfig is chartConfig without the OpenShell-only features, with the harness image given.
 	substrateConfig := func(image string) string {
 		out := strings.ReplaceAll(stripObserver(chartConfig), "  enabled: true\n  name:", "  enabled: false\n  name:")
@@ -447,8 +448,8 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 				ContainSubstring("not pinned by digest"),
 			)))
 		},
-		Entry("tag only is refused", "ghcr.io/stateracloud/koinon/sandbox:0.1.0", false),
-		Entry("digest only is accepted", "ghcr.io/stateracloud/koinon/sandbox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true),
+		Entry("tag only is refused", "registry.example.com/koinon/sandbox:0.1.0", false),
+		Entry("digest only is accepted", "registry.example.com/koinon/sandbox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true),
 		Entry("tag and digest is accepted", pinned, true),
 	)
 
