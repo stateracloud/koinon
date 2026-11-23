@@ -478,7 +478,7 @@ v0.5 self-installed tools). Koinon's instructions tell the agent how to use them
   on crates.io carries (`ripgrep`, `fd-find`, `ast-grep` at the pinned version) and uses
   `--all-features`, so the list also covers optional crates (such as `pcre2` for ripgrep) that a
   release build may enable. It needs network access to github.com (the cargo-about release) and
-  crates.io, and runs on Linux (x86_64, aarch64) and macOS (arm64); another host stops with a message. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
+  crates.io, and needs cargo on PATH (cargo-about runs `cargo metadata`), and runs on Linux (x86_64, aarch64) and macOS (arm64); another host, or no cargo, stops with a message. To re-pin one of the tools, edit the `tools` array of the script and the Dockerfile
   together, run the script and commit the result. `test/noticescheck` (run by `hack/go-test.sh`) and the
   Dockerfile build check fail when the notices name another version than the Dockerfile pin. The
   `go` job does not watch the notices file or this script, so a change of only those two does not
