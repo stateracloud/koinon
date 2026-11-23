@@ -3,7 +3,6 @@
 package substrate_test
 
 import (
-	"context"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -84,9 +83,9 @@ var _ = Describe("the actor template image", func() {
 		Entry("tag and digest is accepted", "ghcr.io/org/app:1"+digest, true),
 	)
 
-	It("is refused as invalid at create", func() {
+	It("is refused as invalid at create", func(ctx SpecContext) {
 		d, _ := newDriver()
-		_, err := d.CreateSandbox(context.Background(), ws, execution.SandboxSpec{Name: "tagged", Image: "ghcr.io/org/app:1"})
+		_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "tagged", Image: "ghcr.io/org/app:1"})
 		Expect(err).To(MatchError(execution.ErrInvalid))
 		Expect(err).To(MatchError(ContainSubstring("not pinned by digest")))
 	})
