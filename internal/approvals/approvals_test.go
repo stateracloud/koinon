@@ -70,7 +70,13 @@ var _ = Describe("Service", func() {
 		Expect(pr.Head).To(Equal(f.branch("fix-typo")))
 		Expect(pr.Base).To(Equal("main"))
 		Expect(pr.Title).To(Equal("Fix the typo"))
-		Expect(pr.Body).To(Equal("Fixes the typo in the docs."))
+		By("the body is the agent's text, then Koinon's footer: requester, approver and the run")
+		Expect(pr.Body).To(Equal("Fixes the typo in the docs.\n\n" + approvals.FooterMarker + "\n---\n" +
+			"A Koinon agent opened this pull request.\n\n" +
+			"- Requested by: Olive\n- Approved by: Adam\n" +
+			"- Run: [`" + f.run.ID.String() + "`](https://koinon.example.test/tasks/" + f.task.ID.String() + ")\n" +
+			"- Approval: `" + req.ID + "`\n"))
+		Expect(pr.Body).NotTo(ContainSubstring("@example.test"), "the footer names people without their email")
 		head := repo.Commits[repo.Refs[f.branch("fix-typo")]]
 		Expect(head.Parents).To(Equal([]string{repo.Refs["main"]}))
 		Expect(pr.HeadSHA).To(Equal(head.SHA))
