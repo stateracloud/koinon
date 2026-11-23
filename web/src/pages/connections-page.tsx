@@ -3,6 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
+import { ApproverNotRequesterSettings } from '@/components/approver-not-requester-settings'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,6 +67,7 @@ export function ConnectionsPage() {
           No connections yet. {admin ? 'Connect GitHub or Gitea to let agents work on your repositories.' : 'An org admin or owner can connect GitHub or Gitea.'}
         </p>
       )}
+      {admin && <ApproverNotRequesterSettings orgId={org.orgId} />}
     </div>
   )
 }

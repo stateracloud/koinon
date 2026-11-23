@@ -426,7 +426,8 @@ type Querier interface {
 	// The scope that allows this call now: exact on agent, connector, tool and target; a task scope
 	// only for its task. A task scope wins over an agent scope (the narrower one is named). When
 	// call_binding is given the scope's binding must equal it (a code-host scope covers only the
-	// connection and base URL it was granted on).
+	// connection and base URL it was granted on). When the org has the setting "the approver must not
+	// be the requester" on (#1175), a scope does not cover a task its own creator requested.
 	FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error)
 	FindLiveOpenRouterLimitProposal(ctx context.Context, arg FindLiveOpenRouterLimitProposalParams) (OpenrouterLimitProposal, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1593,6 +1594,8 @@ type Querier interface {
 	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOpenRouterModelEndpoints(ctx context.Context, arg SetOpenRouterModelEndpointsParams) (int64, error)
+	// The org setting "the approver must not be the requester" (#1175). It touches only this column.
+	SetOrgApproverNotRequester(ctx context.Context, arg SetOrgApproverNotRequesterParams) error
 	// The org's default per-task USD cap for continuation runs (issue #99); NULL is the platform
 	// default. It touches only this column, so the other settings stay.
 	SetOrgContinuationTaskSpend(ctx context.Context, arg SetOrgContinuationTaskSpendParams) error

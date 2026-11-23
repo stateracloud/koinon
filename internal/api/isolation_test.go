@@ -743,6 +743,18 @@ var isolationCases = map[string]isolationCase{
 			return c.orgsettings.SetHomeBackupRetention(ctx, &orgsettingsv1alpha1.SetHomeBackupRetentionRequest{OrgId: org, Days: 14})
 		},
 	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceGetApproverNotRequesterProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.GetApproverNotRequester(ctx, &orgsettingsv1alpha1.GetApproverNotRequesterRequest{OrgId: org})
+		},
+	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceSetApproverNotRequesterProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.SetApproverNotRequester(ctx, &orgsettingsv1alpha1.SetApproverNotRequesterRequest{OrgId: org, On: true})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceDeleteServerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.DeleteServer(ctx, &mcpserverv1alpha1.DeleteServerRequest{OrgId: org, ServerId: f.mcpServer})

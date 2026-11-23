@@ -537,6 +537,194 @@ func (x *SetHomeBackupRetentionResponse) GetRetention() *HomeBackupRetention {
 	return nil
 }
 
+// The optional org rule "the approver must not be the requester". It is off by default. When it is
+// on, the person who created a task cannot approve the calls of that task, and an approval scope does
+// not cover the calls of tasks that the scope's creator requested. A second-person rule on the code
+// host, such as two approvals on a protected branch, stays the org's own code-host setting.
+type GetApproverNotRequesterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApproverNotRequesterRequest) Reset() {
+	*x = GetApproverNotRequesterRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApproverNotRequesterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApproverNotRequesterRequest) ProtoMessage() {}
+
+func (x *GetApproverNotRequesterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApproverNotRequesterRequest.ProtoReflect.Descriptor instead.
+func (*GetApproverNotRequesterRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetApproverNotRequesterRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type GetApproverNotRequesterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	On            bool                   `protobuf:"varint,1,opt,name=on,proto3" json:"on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApproverNotRequesterResponse) Reset() {
+	*x = GetApproverNotRequesterResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApproverNotRequesterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApproverNotRequesterResponse) ProtoMessage() {}
+
+func (x *GetApproverNotRequesterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApproverNotRequesterResponse.ProtoReflect.Descriptor instead.
+func (*GetApproverNotRequesterResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetApproverNotRequesterResponse) GetOn() bool {
+	if x != nil {
+		return x.On
+	}
+	return false
+}
+
+type SetApproverNotRequesterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	On            bool                   `protobuf:"varint,2,opt,name=on,proto3" json:"on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetApproverNotRequesterRequest) Reset() {
+	*x = SetApproverNotRequesterRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetApproverNotRequesterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetApproverNotRequesterRequest) ProtoMessage() {}
+
+func (x *SetApproverNotRequesterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetApproverNotRequesterRequest.ProtoReflect.Descriptor instead.
+func (*SetApproverNotRequesterRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SetApproverNotRequesterRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetApproverNotRequesterRequest) GetOn() bool {
+	if x != nil {
+		return x.On
+	}
+	return false
+}
+
+type SetApproverNotRequesterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	On            bool                   `protobuf:"varint,1,opt,name=on,proto3" json:"on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetApproverNotRequesterResponse) Reset() {
+	*x = SetApproverNotRequesterResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetApproverNotRequesterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetApproverNotRequesterResponse) ProtoMessage() {}
+
+func (x *SetApproverNotRequesterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetApproverNotRequesterResponse.ProtoReflect.Descriptor instead.
+func (*SetApproverNotRequesterResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SetApproverNotRequesterResponse) GetOn() bool {
+	if x != nil {
+		return x.On
+	}
+	return false
+}
+
 var File_koinon_orgsettings_v1alpha1_orgsettings_proto protoreflect.FileDescriptor
 
 const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
@@ -569,12 +757,23 @@ const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04days\x18\x02 \x01(\x05R\x04days\"p\n" +
 	"\x1eSetHomeBackupRetentionResponse\x12N\n" +
-	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.HomeBackupRetentionR\tretention2\xee\x04\n" +
+	"\tretention\x18\x01 \x01(\v20.koinon.orgsettings.v1alpha1.HomeBackupRetentionR\tretention\"7\n" +
+	"\x1eGetApproverNotRequesterRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"1\n" +
+	"\x1fGetApproverNotRequesterResponse\x12\x0e\n" +
+	"\x02on\x18\x01 \x01(\bR\x02on\"G\n" +
+	"\x1eSetApproverNotRequesterRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x0e\n" +
+	"\x02on\x18\x02 \x01(\bR\x02on\"1\n" +
+	"\x1fSetApproverNotRequesterResponse\x12\x0e\n" +
+	"\x02on\x18\x01 \x01(\bR\x02on2\xa1\a\n" +
 	"\x12OrgSettingsService\x12\x96\x01\n" +
 	"\x16GetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
 	"\x16SetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse\x12\x96\x01\n" +
 	"\x16GetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
-	"\x16SetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
+	"\x16SetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse\x12\x99\x01\n" +
+	"\x17GetApproverNotRequester\x12;.koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest\x1a<.koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse\"\x03\x90\x02\x01\x12\x94\x01\n" +
+	"\x17SetApproverNotRequester\x12;.koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest\x1a<.koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
 
 var (
 	file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescOnce sync.Once
@@ -588,37 +787,45 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP() []byte {
 	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescData
 }
 
-var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_goTypes = []any{
-	(*RunContentRetention)(nil),            // 0: koinon.orgsettings.v1alpha1.RunContentRetention
-	(*GetRunContentRetentionRequest)(nil),  // 1: koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
-	(*GetRunContentRetentionResponse)(nil), // 2: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
-	(*SetRunContentRetentionRequest)(nil),  // 3: koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
-	(*SetRunContentRetentionResponse)(nil), // 4: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
-	(*HomeBackupRetention)(nil),            // 5: koinon.orgsettings.v1alpha1.HomeBackupRetention
-	(*GetHomeBackupRetentionRequest)(nil),  // 6: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
-	(*GetHomeBackupRetentionResponse)(nil), // 7: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
-	(*SetHomeBackupRetentionRequest)(nil),  // 8: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
-	(*SetHomeBackupRetentionResponse)(nil), // 9: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+	(*RunContentRetention)(nil),             // 0: koinon.orgsettings.v1alpha1.RunContentRetention
+	(*GetRunContentRetentionRequest)(nil),   // 1: koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
+	(*GetRunContentRetentionResponse)(nil),  // 2: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
+	(*SetRunContentRetentionRequest)(nil),   // 3: koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
+	(*SetRunContentRetentionResponse)(nil),  // 4: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
+	(*HomeBackupRetention)(nil),             // 5: koinon.orgsettings.v1alpha1.HomeBackupRetention
+	(*GetHomeBackupRetentionRequest)(nil),   // 6: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+	(*GetHomeBackupRetentionResponse)(nil),  // 7: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+	(*SetHomeBackupRetentionRequest)(nil),   // 8: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+	(*SetHomeBackupRetentionResponse)(nil),  // 9: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+	(*GetApproverNotRequesterRequest)(nil),  // 10: koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest
+	(*GetApproverNotRequesterResponse)(nil), // 11: koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse
+	(*SetApproverNotRequesterRequest)(nil),  // 12: koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest
+	(*SetApproverNotRequesterResponse)(nil), // 13: koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse
 }
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_depIdxs = []int32{
-	0, // 0: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
-	0, // 1: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
-	5, // 2: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
-	5, // 3: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
-	1, // 4: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
-	3, // 5: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
-	6, // 6: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
-	8, // 7: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
-	2, // 8: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
-	4, // 9: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
-	7, // 10: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
-	9, // 11: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0,  // 0: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
+	0,  // 1: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
+	5,  // 2: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
+	5,  // 3: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
+	1,  // 4: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
+	3,  // 5: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
+	6,  // 6: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+	8,  // 7: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+	10, // 8: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest
+	12, // 9: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest
+	2,  // 10: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
+	4,  // 11: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
+	7,  // 12: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+	9,  // 13: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+	11, // 14: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse
+	13, // 15: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() }
@@ -632,7 +839,7 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc), len(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

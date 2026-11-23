@@ -22,7 +22,7 @@ var _ = Describe("org settings: retention", func() {
 		org, owner = e.newTeamOrg(ctx)
 	})
 
-	It("lets only admins and owners read or change the run content and home backup retention", func(ctx SpecContext) {
+	It("lets only admins and owners read or change the retentions and the approver rule", func(ctx SpecContext) {
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		calls := map[string]func(c *client) error{
@@ -42,6 +42,14 @@ var _ = Describe("org settings: retention", func() {
 				_, err := c.orgsettings.SetHomeBackupRetention(ctx, &orgsettingsv1alpha1.SetHomeBackupRetentionRequest{OrgId: org, Days: 14})
 				return err
 			},
+			"GetApproverNotRequester": func(c *client) error {
+				_, err := c.orgsettings.GetApproverNotRequester(ctx, &orgsettingsv1alpha1.GetApproverNotRequesterRequest{OrgId: org})
+				return err
+			},
+			"SetApproverNotRequester": func(c *client) error {
+				_, err := c.orgsettings.SetApproverNotRequester(ctx, &orgsettingsv1alpha1.SetApproverNotRequesterRequest{OrgId: org, On: true})
+				return err
+			},
 		}
 		for name, call := range calls {
 			Expect(codeOf(call(member))).To(Equal(connect.CodePermissionDenied), name+" refuses a member")
@@ -52,10 +60,16 @@ var _ = Describe("org settings: retention", func() {
 		rc, err := owner.orgsettings.GetRunContentRetention(ctx, &orgsettingsv1alpha1.GetRunContentRetentionRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rc.GetRetention().GetDays()).To(Equal(int32(30)), "a member's Set changed nothing")
+		an, err := owner.orgsettings.GetApproverNotRequester(ctx, &orgsettingsv1alpha1.GetApproverNotRequesterRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(an.GetOn()).To(BeFalse(), "a member's Set changed nothing")
 
 		for name, call := range calls {
 			Expect(call(admin)).To(Succeed(), name+" serves an admin")
 			Expect(call(owner)).To(Succeed(), name+" serves an owner")
 		}
+		an, err = owner.orgsettings.GetApproverNotRequester(ctx, &orgsettingsv1alpha1.GetApproverNotRequesterRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(an.GetOn()).To(BeTrue(), "an admin's Set turned the rule on")
 	})
 })

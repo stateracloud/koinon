@@ -75,6 +75,12 @@ INSERT INTO org_settings (org_id, home_backup_retention_days)
 VALUES (@org_id, sqlc.narg(home_backup_retention_days))
 ON CONFLICT (org_id) DO UPDATE SET home_backup_retention_days = EXCLUDED.home_backup_retention_days;
 
+-- name: SetOrgApproverNotRequester :exec
+-- The org setting "the approver must not be the requester" (#1175). It touches only this column.
+INSERT INTO org_settings (org_id, approver_not_requester)
+VALUES (@org_id, @approver_not_requester)
+ON CONFLICT (org_id) DO UPDATE SET approver_not_requester = EXCLUDED.approver_not_requester;
+
 -- name: EnsureOrgSettings :exec
 -- Makes sure the org has an org_settings row, so LockOrgSettings has a row to lock.
 INSERT INTO org_settings (org_id) VALUES (@org_id) ON CONFLICT (org_id) DO NOTHING;

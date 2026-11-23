@@ -22,6 +22,12 @@ service OrgSettingsService {
   // SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or
   // returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set.
   rpc SetHomeBackupRetention(SetHomeBackupRetentionRequest) returns (SetHomeBackupRetentionResponse);
+  rpc GetApproverNotRequester(GetApproverNotRequesterRequest) returns (GetApproverNotRequesterResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
+  // off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
+  rpc SetApproverNotRequester(SetApproverNotRequesterRequest) returns (SetApproverNotRequesterResponse);
 }
 
 // RunContentRetention is the org's effective retention of stored run content. Once a finished run is
@@ -80,4 +86,25 @@ message SetHomeBackupRetentionRequest {
 
 message SetHomeBackupRetentionResponse {
   HomeBackupRetention retention = 1;
+}
+
+// The optional org rule "the approver must not be the requester". It is off by default. When it is
+// on, the person who created a task cannot approve the calls of that task, and an approval scope does
+// not cover the calls of tasks that the scope's creator requested. A second-person rule on the code
+// host, such as two approvals on a protected branch, stays the org's own code-host setting.
+message GetApproverNotRequesterRequest {
+  string org_id = 1;
+}
+
+message GetApproverNotRequesterResponse {
+  bool on = 1;
+}
+
+message SetApproverNotRequesterRequest {
+  string org_id = 1;
+  bool on = 2;
+}
+
+message SetApproverNotRequesterResponse {
+  bool on = 1;
 }

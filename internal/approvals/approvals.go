@@ -56,6 +56,7 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/runpark"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -114,6 +115,9 @@ var (
 	ErrSameApprover = errors.New("this request needs two approvers; the second must be a different person than the first")
 	// ErrRequesterApproves: the person who created the task may not approve a two-approver request.
 	ErrRequesterApproves = errors.New("this request needs two approvers, and the person who created the task cannot be one of them")
+	// ErrApproverIsRequester: the org has the setting "the approver must not be the requester" on
+	// (orgsettings.ApproverNotRequester), and the approver created the task.
+	ErrApproverIsRequester = errors.New("this org requires another person to approve: the person who created the task cannot approve its calls")
 )
 
 // KindFirstApproved is the task event of the first of two approvals.
@@ -325,6 +329,19 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 						return err
 					}
 				}
+			}
+		}
+		notRequester, err := orgsettings.ApproverNotRequester(ctx, q, org)
+		if err != nil {
+			return err
+		}
+		if notRequester {
+			t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: org, ID: cur.TaskID})
+			if err != nil {
+				return err
+			}
+			if t.CreatedByUserID.Valid && t.CreatedByUserID == approver {
+				return ErrApproverIsRequester
 			}
 		}
 		if scope.Kind != ScopeOnce && (cur.ApprovalsRequired >= 2 || cur.System) {

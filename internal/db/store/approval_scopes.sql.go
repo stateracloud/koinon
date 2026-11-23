@@ -76,12 +76,17 @@ func (q *Queries) CreateApprovalScope(ctx context.Context, arg CreateApprovalSco
 }
 
 const findActiveApprovalScope = `-- name: FindActiveApprovalScope :one
-SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at FROM approval_scopes
-WHERE org_id = $1 AND agent_id = $2 AND connector = $3 AND tool = $4
-  AND target = $5 AND revoked_at IS NULL AND expires_at > $6::timestamptz
-  AND (kind = 'agent' OR task_id = $7)
-  AND ($8::jsonb IS NULL OR call_binding = $8::jsonb)
-ORDER BY (kind = 'task') DESC, created_at, id
+SELECT s.org_id, s.id, s.agent_id, s.connector, s.tool, s.target, s.kind, s.task_id, s.expires_at, s.created_by, s.source_approval_id, s.call_binding, s.revoked_at, s.revoked_by, s.created_at FROM approval_scopes s
+WHERE s.org_id = $1 AND s.agent_id = $2 AND s.connector = $3 AND s.tool = $4
+  AND s.target = $5 AND s.revoked_at IS NULL AND s.expires_at > $6::timestamptz
+  AND (s.kind = 'agent' OR s.task_id = $7)
+  AND ($8::jsonb IS NULL OR s.call_binding = $8::jsonb)
+  AND NOT EXISTS (
+    SELECT 1 FROM org_settings os
+    JOIN tasks t ON t.org_id = os.org_id AND t.id = $7
+    WHERE os.org_id = s.org_id AND os.approver_not_requester
+      AND t.created_by_user_id = s.created_by)
+ORDER BY (s.kind = 'task') DESC, s.created_at, s.id
 LIMIT 1
 `
 
@@ -99,7 +104,8 @@ type FindActiveApprovalScopeParams struct {
 // The scope that allows this call now: exact on agent, connector, tool and target; a task scope
 // only for its task. A task scope wins over an agent scope (the narrower one is named). When
 // call_binding is given the scope's binding must equal it (a code-host scope covers only the
-// connection and base URL it was granted on).
+// connection and base URL it was granted on). When the org has the setting "the approver must not
+// be the requester" on (#1175), a scope does not cover a task its own creator requested.
 func (q *Queries) FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error) {
 	row := q.db.QueryRow(ctx, findActiveApprovalScope,
 		arg.OrgID,

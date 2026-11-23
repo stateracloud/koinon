@@ -2798,10 +2798,29 @@ layer the admin API uses. Admins and owners only. Every change is audited.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
+| GetApproverNotRequester | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse` | - |  |
 | GetHomeBackupRetention | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse` | - |  |
 | GetRunContentRetention | `koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse` | - |  |
+| SetApproverNotRequester | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse` | - | SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set. |
 | SetHomeBackupRetention | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse` | - | SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set. |
 | SetRunContentRetention | `koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse` | - | SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the default (30 days) when days is 0. Audited as org.run_content_retention.set. |
+
+### Message GetApproverNotRequesterRequest
+
+The optional org rule "the approver must not be the requester". It is off by default. When it is
+on, the person who created a task cannot approve the calls of that task, and an approval scope does
+not cover the calls of tasks that the scope's creator requested. A second-person rule on the code
+host, such as two approvals on a protected branch, stays the org's own code-host setting.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message GetApproverNotRequesterResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| on | 1 | `bool` | singular |  |  |
 
 ### Message GetHomeBackupRetentionRequest
 
@@ -2854,6 +2873,19 @@ events, the run's status, traces and the spend ledger stay.
 | default_days | 2 | `int32` | singular |  |  |
 | min_days | 3 | `int32` | singular |  |  |
 | max_days | 4 | `int32` | singular |  |  |
+
+### Message SetApproverNotRequesterRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| on | 2 | `bool` | singular |  |  |
+
+### Message SetApproverNotRequesterResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| on | 1 | `bool` | singular |  |  |
 
 ### Message SetHomeBackupRetentionRequest
 

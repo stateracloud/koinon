@@ -2582,6 +2582,7 @@ type OrgSetting struct {
 	HomeBackupRetentionDays   pgtype.Int4
 	ContinuationTaskSpendUsd  pgtype.Numeric
 	SandboxCreationsPerMinute pgtype.Int4
+	ApproverNotRequester      bool
 }
 
 type OrgTraceSetting struct {

@@ -11822,6 +11822,15 @@
           "deprecated": false,
           "methods": [
             {
+              "name": "GetApproverNotRequester",
+              "description": "",
+              "requestType": "koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "GetHomeBackupRetention",
               "description": "",
               "requestType": "koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest",
@@ -11835,6 +11844,15 @@
               "description": "",
               "requestType": "koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest",
               "responseType": "koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetApproverNotRequester",
+              "description": "SetApproverNotRequester turns the optional rule \"the approver must not be the requester\" on or\noff (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.",
+              "requestType": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -11861,6 +11879,42 @@
         }
       ],
       "messages": [
+        {
+          "name": "GetApproverNotRequesterRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "The optional org rule \"the approver must not be the requester\". It is off by default. When it is\non, the person who created a task cannot approve the calls of that task, and an approval scope does\nnot cover the calls of tasks that the scope's creator requested. A second-person rule on the code\nhost, such as two approvals on a protected branch, stays the org's own code-host setting.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetApproverNotRequesterResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "on",
+              "number": 1,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "GetHomeBackupRetentionRequest",
           "fullName": "koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest",
@@ -12016,6 +12070,51 @@
               "name": "max_days",
               "number": 4,
               "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetApproverNotRequesterRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "on",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetApproverNotRequesterResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "on",
+              "number": 1,
+              "type": "bool",
               "label": "singular",
               "oneof": "",
               "deprecated": false,

@@ -72,6 +72,8 @@ type Settings struct {
 	// ContinuationTaskSpend is the most a task may have spent for a continuation run to start after
 	// a run hit its time limit (issue #99). An agent's own cap overrides it.
 	ContinuationTaskSpend money.USD
+	// ApproverNotRequester is the setting "the approver must not be the requester" (approver.go).
+	ApproverNotRequester bool
 }
 
 // Defaults are the platform defaults a Settings falls back to.
@@ -137,6 +139,7 @@ func apply(def Settings, row store.OrgSetting) Settings {
 			}
 		}
 	}
+	def.ApproverNotRequester = row.ApproverNotRequester
 	return def
 }
 
