@@ -14,6 +14,7 @@ relates: ["0004", "0023", "0085", "0100", "0106"]
 - Area: install-operations
 - Tags: backup-restore, identity, auth, openshell, mcp
 - Amends: [0107](0107-restore-hold-mode.md) (what a held install writes; how a release works)
+- Amended by: [0116](0116-rpc-facts-and-request-entry.md) (decision 5: the switch is two RPCs; decided, not built yet)
 - Relates to: [0106](0106-install-mark-owns-openshell-objects.md) (the install mark),
   [0085](0085-upgrade-compatibility-and-recovery-policy.md) (Context 6, decision 15), [0100](0100-install-audit-chain.md)
   (recorded settings, install audit chain), [0023](0023-observability-and-audit.md) (fixed metric labels),
@@ -270,10 +271,10 @@ the guard off); runtime only (no way to choose read-only before the first start)
   note)` service, one audit action pair `outward.disable` and `outward.enable` with `targetKind`, and one check
   `outward.Enabled` that every caller of a target uses before it dials. A disabled target is not called, not probed,
   and not offered to runs (its tools, its models); it keeps its bindings and its credential.
-- Surfaces: one admin REST and Connect method (`SetOutwardTargetDisabled`), a switch on each target's UI page, and
+- Surfaces: one admin REST and Connect method (`SetOutwardTargetDisabled`; _amended by [0116](0116-rpc-facts-and-request-entry.md), decided but not built yet: two methods, `DisableOutwardTarget` with `held: allow` and `EnableOutwardTarget` with `held: refuse`, and the old method is deprecated_), a switch on each target's UI page, and
   the declarative field `disabled: true` for the kinds that have declarative Secrets (providers, MCP servers,
   connections; the Secret wins, and the UI cannot enable an item its Secret disables).
-- **Disable is allowed while held** (it reaches nothing). **Enable is refused while held** with `restorehold.ErrHeld`,
+- **Disable is allowed while held** (it reaches nothing). **Enable is refused while held** with `restorehold.ErrHeld` _(amended by [0116](0116-rpc-facts-and-request-entry.md), decided but not built yet: the entry refuses `EnableOutwardTarget` through its `held: refuse` row)_,
   because an enabled target may be dialled (preflight, probe).
 - `restore status` lists every outward target with its enabled or disabled state (decision 7).
 

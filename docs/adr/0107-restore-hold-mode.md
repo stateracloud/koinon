@@ -11,7 +11,8 @@ relates: ["0023", "0085", "0100"]
 - Date: 2026-11-10
 - Area: install-operations
 - Tags: backup-restore, helm-chart, upgrade
-- Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works)
+- Amended by: [0110](0110-held-copy-isolation.md) (decided, not built yet; #516: what a held install writes and how a release works),
+  [0116](0116-rpc-facts-and-request-entry.md) (which layer holds a request; decided, not built yet)
 - Relates to: [0085](0085-upgrade-compatibility-and-recovery-policy.md) (the patch-line rule; recovery policy),
   [0100](0100-install-audit-chain.md) (`restore-hold` is a recorded setting), [0023](0023-observability-and-audit.md) (fixed metric label sets)
 - Issues: closes #462; refs #275 (the restore drill)
@@ -44,7 +45,7 @@ not yet trusted.
      sits in each service that calls out (the provider echo check, the MCP server preflight, run-trace
      destinations, approvals, the code-host scope read), which returns `restorehold.ErrHeld`, so the hold holds
      for every caller and both API surfaces, and a new caller of a guarded service is held without any check of its
-     own. What is refused: the provider echo check; adding an MCP server or changing its address (the add-time
+     own. _(Amended by [0116](0116-rpc-facts-and-request-entry.md), decided but not built yet: a request is held by the request entry, through the `held: refuse|allow` field of its RPC facts row. This service guard stays for the callers that are not requests: approvals Execute, the importer, the sweepers, the A2A edge and remote agents. The A2A edge now uses `refuseWhileHeld` of `hold.go`; its check moves to the service guard before `hold.go` is deleted.)_ What is refused: the provider echo check; adding an MCP server or changing its address (the add-time
      preflight); saving or testing a run-trace destination; approving a request (**Approve**; the approved call
      would run at once, and Deny stays open), an approved call's execution (including trusted-preset calls) and an
      approval's diff; creating, re-keying, testing and listing a code-host connection and the scope read they

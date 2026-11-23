@@ -139,6 +139,7 @@ are in [0046](0046-adr-conventions.md).
 | [0113](0113-agent-package-access.md) | Agent package access: straight to allow-listed registries, in four levels | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release |
 | [0114](0114-model-credentials-by-type.md) | Model traffic always through the gateway; credentials handled by type | Accepted (direction by procoduck, 2026-11-11). Not built: delivery comes after the core release. Decision 5 names no qualifying auth type yet (Verification) |
 | [0115](0115-document-metadata.md) | Document metadata: one area and controlled tags on every doc | Accepted |
+| [0116](0116-rpc-facts-and-request-entry.md) | RPC facts and the request entry | Accepted (decided by the maintainer, 2026-11-23, in the decision comment on #771) |
 | [0117](0117-simplified-technical-english.md) | Simplified Technical English for public project text | Accepted |
 | [0118](0118-hack-logic-in-go.md) | Logic in hack/ moves to Go programs that run with go tool | Accepted |
 | [0119](0119-agent-substrate-execution-layer.md) | Agent Substrate is Koinon's execution layer | Accepted (decisions D1-D11 settled by the maintainer on 2026-11-18; accepted 2026-11-18 after the phase 0 proofs reported, see Verification) |

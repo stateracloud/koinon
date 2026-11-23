@@ -433,6 +433,14 @@ _Avoid_: Instance, cluster, tenant, environment
 Koinon's own services, which hold the orgs and their work and drive the sandboxes; no agent code runs in them.
 _Avoid_: Backend, server, operator, manager
 
+**RPC facts**:
+The one table with a row for each Connect RPC and admin REST route: its minimum Role, an optional `raises` mark and whether the call is refused while the install is held (ADR 0116).
+_Avoid_: Permission table, route table, policy file
+
+**Request entry**:
+The one place that runs before every handler on both transports, enforces the RPC facts row and gives the request an ID (ADR 0116).
+_Avoid_: Middleware, interceptor chain, gateway
+
 ### Contributing
 
 **Claim**:
