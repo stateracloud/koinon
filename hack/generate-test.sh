@@ -153,9 +153,17 @@ echo 'before-check' >"$repo/internal/gen/keep.go"
 rc=0
 KOINON_TEST_BUF="$tmp/bin/buf" PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/chk.out" 2>&1 || rc=$?
 if [[ $rc -eq 1 ]]; then ok "a missing tool stops generate with exit 1"; else bad "missing tool: exit $rc, want 1"; fi
-grep -v 'test hook GENERATE_ROOT' "$tmp/chk.out" | grep -qx 'generate: node is missing; install it' && [[ $(grep -vc 'test hook GENERATE_ROOT' "$tmp/chk.out") -eq 1 ]] \
-	&& ok "a missing tool prints one line" || bad "missing tool: output was not the one line"
-grep -qx before-check "$repo/internal/gen/keep.go" && ok "a missing tool leaves the outputs alone" || bad "missing tool changed an output"
+chk_lines=$(grep -v 'test hook GENERATE_ROOT' "$tmp/chk.out" || true)
+if [[ $chk_lines == 'generate: node is missing; install it' ]]; then
+	ok "a missing tool prints one line"
+else
+	bad "missing tool: output was not the one line"
+fi
+if grep -qx before-check "$repo/internal/gen/keep.go"; then
+	ok "a missing tool leaves the outputs alone"
+else
+	bad "missing tool changed an output"
+fi
 
 [[ $fail -eq 0 ]] && echo "generate-test: ok"
 exit "$fail"
