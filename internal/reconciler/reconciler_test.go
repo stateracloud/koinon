@@ -1754,8 +1754,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("cancels a running pass when the leader's connection is lost, before the follower leads", func(ctx SpecContext) {
 			cfg.ResyncInterval = time.Hour
-			// A failure of this spec was seen once in CI and not reproduced (issue 1188): keep the log, which
-			// names the source of every wake-up, so the next failure shows what started the extra pass.
+			// CI showed one failure of this spec (issue 1188). We could not reproduce it. On a failure,
+			// this cleanup prints the log. The log has the NOTIFY wake-ups, so it can show what started
+			// the extra pass.
 			DeferCleanup(func() {
 				if CurrentSpecReport().Failed() {
 					GinkgoWriter.Println("reconciler log of the failed spec:\n" + logs.String())

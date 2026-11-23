@@ -189,8 +189,8 @@ func (r *Reconciler) waitOrPing(ctx context.Context, c *pgx.Conn, alive *atomic.
 		wcancel()
 		switch {
 		case err == nil:
-			// The source of a wake-up is otherwise invisible: a pass that follows it looks like any
-			// other (issue 1188). The payload is an org ID or empty, never a secret.
+			// Shows which NOTIFY starts the next pass. The payload is an org ID or empty, so it is
+			// safe to log. Keep it so for every NOTIFY on NotifyChannel.
 			r.log.Debug("reconcile wake-up", "channel", n.Channel, "payload", n.Payload)
 			alive.Store(time.Now().UnixNano())
 			return nil
