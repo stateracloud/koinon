@@ -316,8 +316,9 @@ func (s *Secrets) Redact(in string) string {
 var authScheme = regexp.MustCompile(`(?i)^(bearer|basic|token|apikey|api-key|digest)\s+(\S.*)$`)
 
 // AuthParts returns v and, when v starts with a known auth scheme, the token after it (and, for
-// Basic, the decoded user and password), because a text may carry the token alone, without the
-// scheme word. Pass the result to NewSecrets.
+// Basic, the decoded "user:password" and the password), because a text may carry the token alone,
+// without the scheme word. The Basic user name is not a secret and is not returned: it would redact
+// an ordinary name in every text. Pass the result to NewSecrets.
 func AuthParts(v string) []string {
 	out := []string{v}
 	m := authScheme.FindStringSubmatch(strings.TrimSpace(v))
@@ -328,7 +329,9 @@ func AuthParts(v string) []string {
 	if strings.EqualFold(m[1], "basic") {
 		if dec, err := base64.StdEncoding.DecodeString(m[2]); err == nil {
 			out = append(out, string(dec))
-			out = append(out, strings.Split(string(dec), ":")...)
+			if _, pass, ok := strings.Cut(string(dec), ":"); ok {
+				out = append(out, pass)
+			}
 		}
 	}
 	return out

@@ -301,7 +301,11 @@ func run(ctx context.Context, cfg config) error {
 	if err != nil {
 		return fmt.Errorf("MCP listener: %w", err)
 	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	// net/http writes handler panics and connection errors to ErrorLog; route them through the scrub.
+	srv := &http.Server{
+		Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
+	}
 	served := make(chan error, 1)
 	safego.Go(ctx, log, "mcp-listener", func(context.Context) { served <- srv.Serve(ln) })
 	safego.Go(ctx, log, "mcp-sweep", func(ctx context.Context) {

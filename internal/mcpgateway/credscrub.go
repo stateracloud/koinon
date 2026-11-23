@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,16 +29,16 @@ import (
 // trace router cannot read the value.
 //
 // It matches by exact value with [scrub.Secrets]: the value as sent (prefix and token), the token alone, the
-// decoded parts of a Basic value, and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A
+// decoded "user:password" and password of a Basic value (not the user name), and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A
 // value shorter than [scrub.MinSecretLen] is not matched: it would redact ordinary words.
 //
 // A value stays in the set for Retain after the gateway last opened it, so a late error about a rotated
-// credential is still scrubbed. The set holds at most MaxValues values; the oldest go first. It is safe for
+// credential is still scrubbed. The set holds at most MaxValues values; the oldest go first, in one batch. It is safe for
 // concurrent use. The zero value is not usable: call [NewCredentialScrub].
 type CredentialScrub struct {
 	// Retain is how long a value stays in the set after its last open. Zero means 24 hours.
 	Retain time.Duration
-	// MaxValues caps the set. Zero means 4096.
+	// MaxValues caps the set. One credential adds up to four values. Zero means 65536.
 	MaxValues int
 
 	now func() time.Time
@@ -72,7 +73,7 @@ func (s *CredentialScrub) maxValues() int {
 	if s.MaxValues > 0 {
 		return s.MaxValues
 	}
-	return 4096
+	return 65536
 }
 
 // Add records opened credential values. Each value also adds the token after a known auth scheme
@@ -107,7 +108,8 @@ func (s *CredentialScrub) Add(values ...string) {
 	}
 }
 
-// pruneLocked drops values not opened within Retain, then the oldest values over MaxValues.
+// pruneLocked drops values not opened within Retain. Over MaxValues, it drops the oldest values in one batch
+// down to nine tenths of MaxValues, so a full set is not sorted and rebuilt at each open.
 func (s *CredentialScrub) pruneLocked(now time.Time) bool {
 	changed := false
 	for v, t := range s.seen {
@@ -116,15 +118,16 @@ func (s *CredentialScrub) pruneLocked(now time.Time) bool {
 			changed = true
 		}
 	}
-	for len(s.seen) > s.maxValues() {
-		var oldest string
-		var at time.Time
-		for v, t := range s.seen {
-			if oldest == "" || t.Before(at) {
-				oldest, at = v, t
-			}
+	if limit := s.maxValues(); len(s.seen) > limit {
+		keep := limit - limit/10
+		vals := make([]string, 0, len(s.seen))
+		for v := range s.seen {
+			vals = append(vals, v)
 		}
-		delete(s.seen, oldest)
+		slices.SortFunc(vals, func(a, b string) int { return s.seen[a].Compare(s.seen[b]) })
+		for _, v := range vals[:len(vals)-keep] {
+			delete(s.seen, v)
+		}
 		changed = true
 	}
 	return changed
@@ -168,36 +171,56 @@ func (r recordingSource) Credential(ctx context.Context, t gateway.MCPTarget, ag
 	return c, r.s.Error(err)
 }
 
-// Result scrubs the text an agent gets from a tool call: text content, the text of an embedded resource and
-// the structured content. It changes res in place and returns it.
+// Result scrubs everything an agent gets from a tool call. It scrubs the bytes of each blob (an embedded
+// resource, an image, an audio clip) as text, then the JSON form of the whole result, so every field is covered,
+// including fields a later SDK adds. A result with no match is returned unchanged. If the scrubbed JSON does not
+// decode, the agent gets an error result rather than the value.
 func (s *CredentialScrub) Result(res *mcp.CallToolResult) *mcp.CallToolResult {
 	if res == nil || s.set.Load().Len() == 0 {
 		return res
 	}
 	for _, c := range res.Content {
 		switch c := c.(type) {
-		case *mcp.TextContent:
-			c.Text = s.Text(c.Text)
 		case *mcp.EmbeddedResource:
 			if c.Resource != nil {
-				c.Resource.Text = s.Text(c.Resource.Text)
+				c.Resource.Blob = s.bytes(c.Resource.Blob)
 			}
+		case *mcp.ImageContent:
+			c.Data = s.bytes(c.Data)
+		case *mcp.AudioContent:
+			c.Data = s.bytes(c.Data)
 		}
 	}
-	if res.StructuredContent != nil {
-		if raw, err := json.Marshal(res.StructuredContent); err == nil {
-			if out := s.Text(string(raw)); out != string(raw) {
-				var v any
-				if json.Unmarshal([]byte(out), &v) == nil {
-					res.StructuredContent = v
-				} else {
-					// The match broke the JSON; give no structured content rather than the value.
-					res.StructuredContent = nil
-				}
-			}
-		}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		return scrubbedResult()
 	}
-	return res
+	out := s.Text(string(raw))
+	if out == string(raw) {
+		return res
+	}
+	var clean mcp.CallToolResult
+	if json.Unmarshal([]byte(out), &clean) != nil {
+		return scrubbedResult()
+	}
+	return &clean
+}
+
+// bytes returns b with every recorded value in its text replaced, or b itself when it holds none.
+func (s *CredentialScrub) bytes(b []byte) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	if out := s.Text(string(b)); out != string(b) {
+		return []byte(out)
+	}
+	return b
+}
+
+func scrubbedResult() *mcp.CallToolResult {
+	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+		Text: "koinon-gateway removed a credential from this tool result and could not rebuild it",
+	}}}
 }
 
 // Handler returns h with every log record scrubbed before h sees it: the message, every attribute value and key,
@@ -310,6 +333,11 @@ func scrubAny(set *scrub.Secrets, v slog.Value) slog.Value {
 		text = x.Error()
 	case fmt.Stringer:
 		text = x.String()
+	case json.RawMessage:
+		text = string(x)
+	case []byte:
+		// A text handler writes a []byte as a string; %+v would print numbers and hide the match.
+		text = string(x)
 	default:
 		text = fmt.Sprintf("%+v", x)
 	}

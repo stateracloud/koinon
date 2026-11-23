@@ -40,10 +40,13 @@ func TestAuthParts(t *testing.T) {
 	}
 	basic := base64.StdEncoding.EncodeToString([]byte("koinon_test_user:" + fakeMCPToken))
 	got := scrub.AuthParts("Basic " + basic)
-	for _, want := range []string{basic, "koinon_test_user:" + fakeMCPToken, "koinon_test_user", fakeMCPToken} {
+	for _, want := range []string{basic, "koinon_test_user:" + fakeMCPToken, fakeMCPToken} {
 		if !slices.Contains(got, want) {
 			t.Errorf("Basic: %q lacks %q", got, want)
 		}
+	}
+	if slices.Contains(got, "koinon_test_user") {
+		t.Errorf("Basic: %q holds the user name, which is not a secret", got)
 	}
 	if got := scrub.AuthParts(fakeMCPToken); !slices.Equal(got, []string{fakeMCPToken}) {
 		t.Errorf("no scheme: %q", got)

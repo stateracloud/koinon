@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -162,6 +163,7 @@ var _ = Describe("CredentialScrub", func() {
 		sc.Add("Basic " + basic)
 		Expect(sc.Text("p=" + fakeToken)).To(Equal("p=[redacted:secret]"))
 		Expect(sc.Text(basic)).To(Equal("[redacted:secret]"))
+		Expect(sc.Text("user=koinon_test_user")).To(Equal("user=koinon_test_user"), "a Basic user name is not a secret")
 	})
 
 	It("ignores a value too short to match without redacting ordinary words", func() {
@@ -170,9 +172,18 @@ var _ = Describe("CredentialScrub", func() {
 	})
 
 	It("drops a value not opened within Retain and caps the set", func() {
-		sc.Retain = 1 // nanosecond: every value is old at the next prune
+		now := time.Unix(1_700_000_000, 0)
+		mcpgateway.SetScrubClock(sc, func() time.Time { return now })
+		sc.Retain = time.Hour
 		sc.Add(fakeToken)
 		Expect(sc.Text(fakeToken)).To(Equal("[redacted:secret]"))
+		now = now.Add(30 * time.Minute)
+		sc.Add("koinon_test_other_value")
+		Expect(sc.Text(fakeToken)).To(Equal("[redacted:secret]"), "opened within Retain")
+		now = now.Add(2 * time.Hour)
+		sc.Add("koinon_test_third_value")
+		Expect(sc.Text(fakeToken)).To(Equal(fakeToken), "not opened within Retain")
+		Expect(sc.Text("koinon_test_third_value")).To(Equal("[redacted:secret]"))
 		capped := mcpgateway.NewCredentialScrub()
 		capped.MaxValues = 2
 		capped.Add("koinon_test_value_one", "koinon_test_value_two", "koinon_test_value_three")
@@ -185,19 +196,40 @@ var _ = Describe("CredentialScrub", func() {
 		Expect(n).To(Equal(2))
 	})
 
-	It("scrubs a tool result: text, embedded resource text and structured content", func() {
-		sc.Add(fakeToken)
+	It("scrubs every field of a tool result: text, resources, links, blobs, metadata and structured content", func() {
+		sc.Add("Bearer " + fakeToken)
 		res := sc.Result(&mcp.CallToolResult{
+			Meta: mcp.Meta{"echo": fakeToken},
 			Content: []mcp.Content{
-				&mcp.TextContent{Text: "got " + fakeToken},
-				&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "x:y", Text: fakeToken}},
+				&mcp.TextContent{Text: "got " + fakeToken, Meta: mcp.Meta{"t": fakeToken}},
+				&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "x:" + fakeToken, Text: fakeToken}},
+				&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "x:y", Blob: []byte("hdr=Bearer " + fakeToken)}},
+				&mcp.ResourceLink{URI: "https://example.invalid/?t=" + fakeToken, Name: fakeToken},
+				&mcp.ImageContent{MIMEType: "image/png", Data: []byte("png " + fakeToken)},
 			},
 			StructuredContent: map[string]any{"token": fakeToken, "n": 1},
 		})
 		raw, err := json.Marshal(res)
 		Expect(err).NotTo(HaveOccurred())
 		expectNoLeak("the result", string(raw))
+		Expect(res.Content).To(HaveLen(5))
 		Expect(res.StructuredContent).To(HaveKeyWithValue("n", BeNumerically("==", 1)))
+		Expect(res.Content[2].(*mcp.EmbeddedResource).Resource.Blob).To(Equal([]byte("hdr=[redacted:secret]")))
+	})
+
+	It("returns a tool result with no credential unchanged", func() {
+		sc.Add(fakeToken)
+		in := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "fine"}}}
+		Expect(sc.Result(in)).To(BeIdenticalTo(in))
+	})
+
+	It("scrubs a []byte log value, which a text handler writes as a string", func() {
+		text := &syncBuffer{}
+		tlog := slog.New(sc.Handler(slog.NewTextHandler(text, nil)))
+		sc.Add(fakeToken)
+		tlog.Info("x", "b", []byte("hdr="+fakeToken), "raw", json.RawMessage(`{"t":"`+fakeToken+`"}`))
+		expectNoLeak("the text log", text.String())
+		Expect(text.String()).To(ContainSubstring("[redacted:secret]"))
 	})
 
 	It("does not print its values", func() {
