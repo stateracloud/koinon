@@ -11,6 +11,6 @@ inputs:
     paths:
       - google/rpc/error_details.proto
 plugins:
-  - local: web/node_modules/.bin/protoc-gen-es
+  - local: ["node", "web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es"]
     out: web/src/gen
     opt: [target=ts, ts_nocheck=true]

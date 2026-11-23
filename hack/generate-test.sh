@@ -76,7 +76,7 @@ S
 chmod +x "$tmp/bin/buf" "$tmp/bin/go"
 
 rc=0
-BUF_LOG=$tmp/buf.log PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/out" 2>&1 || rc=$?
+BUF_LOG=$tmp/buf.log BUF="$tmp/bin/buf" PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/out" 2>&1 || rc=$?
 if [[ $rc -ne 0 ]]; then ok "generate exits non-zero on buf failure (rc=$rc)"; else bad "generate exited 0 on buf failure"; fi
 if [[ -f $repo/web/src/gen/google/rpc/error_details_pb.ts ]] && grep -qx tracked "$repo/web/src/gen/google/rpc/error_details_pb.ts"; then
 	ok "tracked error_details_pb.ts restored"
@@ -114,7 +114,7 @@ S
 chmod +x "$tmp/bin/buf"
 : >"$tmp/buf.log"
 rc=0
-BUF_LOG=$tmp/buf.log PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/docs.out" 2>&1 || rc=$?
+BUF_LOG=$tmp/buf.log BUF="$tmp/bin/buf" PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/docs.out" 2>&1 || rc=$?
 if [[ $rc -ne 0 ]]; then ok "generate exits non-zero when the docs reference step fails"; else bad "generate hid a docs step failure"; fi
 if grep -q -- '--template buf.gen.docs.yaml' "$tmp/buf.log"; then ok "generate runs the docs reference template"; else bad "docs reference template not run"; fi
 if grep -qx tracked-docs "$repo/docs/reference/proto/proto-api.md"; then ok "docs/reference/proto restored"; else bad "docs/reference/proto not restored"; fi
@@ -129,7 +129,7 @@ exit 0
 S
 chmod +x "$tmp/bin/buf"
 rc=0
-PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/ok.out" 2>&1 || rc=$?
+BUF="$tmp/bin/buf" PATH="$tmp/bin:$PATH" GENERATE_ROOT="$repo" bash "$script" >"$tmp/ok.out" 2>&1 || rc=$?
 if [[ $rc -eq 0 ]]; then ok "generate succeeds when buf works"; else bad "generate failed unexpectedly"; sed 's/^/    /' "$tmp/ok.out"; fi
 if grep -qx new "$repo/web/src/gen/google/rpc/error_details_pb.ts"; then
 	ok "successful generate keeps new output"

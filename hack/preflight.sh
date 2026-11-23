@@ -270,6 +270,8 @@ g_tidy() {
 g_deps() { hack/dep-age-check.sh "$base"; }
 
 g_proto() {
+	# buf is a go tool with its own modfile (#1169); CI runs the same version (BUF_VERSION).
+	buf() { go tool -modfile=hack/tools/buf/go.mod buf "$@"; }
 	buf lint
 	# Same against-ref as CI (#542): the merge base of HEAD and the base, not the base tip.
 	against=$(hack/buf-breaking-against.sh "$base")
@@ -494,15 +496,15 @@ reuse_fp() { # <gate>: prints the inputs fingerprint when the gate may reuse a v
 	esac
 }
 
-# web_deps: web/node_modules, which `make generate` (buf runs web/node_modules/.bin/protoc-gen-es) and
+# web_deps: web/node_modules, which `make generate` (buf runs web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es) and
 # the web gate both need. A worktree made before hack/wt.sh installed them, or one whose install failed,
 # gets one offline attempt from the pnpm store (no network). Still missing: the caller reports a skip,
 # which lane-gates turns into notrun, never fail (#541).
 web_deps() {
-	[[ -e web/node_modules/.bin/protoc-gen-es ]] && return 0
+	[[ -e web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es ]] && return 0
 	command -v pnpm >/dev/null 2>&1 || return 1
 	[[ -f web/pnpm-lock.yaml ]] && pnpm --dir web install --offline --frozen-lockfile >/dev/null 2>&1
-	[[ -e web/node_modules/.bin/protoc-gen-es ]]
+	[[ -e web/node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es ]]
 }
 
 run_gate() { # <gate>
@@ -511,7 +513,7 @@ run_gate() { # <gate>
 	web) command -v pnpm >/dev/null || { echo "web skip (pnpm not installed)"; return; }
 		web_deps || { echo "web skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
 	generate) web_deps || { echo "generate skip (web dependencies missing; offline pnpm install failed)"; return; } ;;
-	proto) command -v buf >/dev/null || { echo "proto skip (buf not installed)"; return; } ;;
+	proto) command -v go >/dev/null || { echo "proto skip (go not installed; buf runs as a go tool)"; return; } ;;
 	shell) command -v shellcheck >/dev/null || { echo "shell skip (shellcheck not installed)"; return; } ;;
 	actionlint) command -v actionlint >/dev/null || { echo "actionlint skip (actionlint not installed)"; return; } ;;
 	fuzz) command -v go >/dev/null || { echo "fuzz skip (go not installed; CI runs hack/go-fuzz.sh)"; return; } ;;

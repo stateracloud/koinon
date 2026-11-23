@@ -18,6 +18,14 @@ fi
 cd "$root" || exit 2
 GO=${GO:-go}
 
+# buf is a pinned `go tool` with its own modfile, so the root go.mod and the generated headers stay
+# as they are (#1169). The version matches BUF_VERSION in hack/versions.env (hack/versions-check.sh).
+# Test hook: BUF names a stand-in binary.
+buf() { if [[ -n ${BUF:-} ]]; then "$BUF" "$@"; else "$GO" tool -modfile=hack/tools/buf/go.mod buf "$@"; fi; }
+
+# One clear line, and the command that installs it, for each tool `go tool` cannot supply.
+"$GO" run ./hack/cmd/generatecheck . || exit 1
+
 # Paths buf (clean:true), sqlc and oapi-codegen may create, delete or rewrite.
 outs=(
 	internal/gen

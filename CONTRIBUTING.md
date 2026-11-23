@@ -91,7 +91,7 @@ make build      # build Go binaries and the web UI
 make test       # Go and web unit tests, the same set CI runs (without test/harnesses)
 make test-harnesses # build the harness images, then run the harness contract suite (Docker)
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
-make generate   # regenerate protobuf and sqlc code; commit the result
+make generate   # regenerate protobuf and sqlc code; commit the result (needs Go and Node with pnpm; buf runs as a pinned `go tool`)
 make breaking   # buf breaking against main
 make dev-kind-up # local kind cluster with Koinon's prerequisites (once)
 make dev        # Tilt on that cluster (docs/dev/loop.md)
