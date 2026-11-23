@@ -309,8 +309,11 @@ does today, no more (model path at parity, below).
   guard runs inside the gateway process (placement, below).
 - The step 1 drift rule ("a non-`tools/call` reply sets both legs") is not carried over as is. Once
   Koinon's gateway sees every message, it taints only what it cannot read, and it scans the kinds it
-  reads (`tools/list` descriptions, `initialize` instructions, `resources/read`) by content and declared
-  legs. An unknown kind still sets both legs.
+  reads (`initialize` instructions, `resources/read`) by content and declared legs. An unknown kind
+  still sets both legs. A `tools/list` is not session data: it is reviewed configuration, pinned to the
+  hash an admin approved (decision 13, amendment 2026-11-23, #1132). Tool text is never
+  fingerprinted. Approved text sets no leg. Unreviewed text sets only the untrusted-input leg, and only on a server that
+  declares it. A list the guard cannot read keeps both legs.
 - Only methods on an allowlist are forwarded; any other method is refused.
 - **Placement** (maintainer decision 2026-11-06). The gateway is a separate `koinon-gateway`
   Deployment from the same image, with its own ServiceAccount, 2+ replicas, a PodDisruptionBudget and
