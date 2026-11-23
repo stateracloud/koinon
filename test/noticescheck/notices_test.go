@@ -93,6 +93,20 @@ var _ = Describe("opencode image licence notices (static)", func() {
 		}
 	})
 
+	It("carries the licence texts of the C libraries and the crate source of the MPL-2.0 dependency", func() {
+		b, err := os.ReadFile("../../harnesses/opencode/doc/THIRD_PARTY_NOTICES.md")
+		Expect(err).NotTo(HaveOccurred())
+		notices := string(b)
+		// PCRE2 (and sljit) through pcre2-sys, jemalloc through tikv-jemalloc-sys: the generator adds
+		// their texts from the vendored sources (hack/flavor-rust-notices.sh).
+		Expect(notices).To(ContainSubstring("University of Cambridge"))
+		Expect(notices).To(ContainSubstring("Zoltan Herczeg"))
+		Expect(notices).To(ContainSubstring("Jason Evans"))
+		// option-ext (MPL-2.0) is in the notices, and the notices name where to get crate sources.
+		Expect(notices).To(ContainSubstring("option-ext 0.2.0"))
+		Expect(notices).To(ContainSubstring("https://crates.io/crates/<name>/<version>"))
+	})
+
 	It("checks that the three Rust tools are in the notices, at the pinned version, at build time", func() {
 		Expect(dockerfile).To(MatchRegexp(`(?m)^\s*for t in "ripgrep [0-9.]+" "fd [0-9.]+" "ast-grep [0-9.]+"; do \\$`))
 		Expect(dockerfile).To(MatchRegexp(`grep -qxF "## \$t" /usr/share/doc/koinon-tools/THIRD_PARTY_NOTICES\.md`))
