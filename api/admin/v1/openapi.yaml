@@ -356,7 +356,13 @@ paths:
     post:
       tags: [mcp]
       operationId: acknowledgeMcpToolReview
-      summary: Mark a changed tool as reviewed without changing its tier.
+      summary: Mark a changed tool as reviewed without changing its tier. Approves the tool text `toolHash` names.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpToolReview"
       responses:
         "200":
           description: The tool.
@@ -1806,6 +1812,21 @@ components:
         tierSetBy: {type: string}
         tierSetAt: {type: string, format: date-time}
         sink: {$ref: "#/components/schemas/McpToolSink"}
+        toolHash:
+          type: string
+          description: >-
+            Hash of the tool text the server published last, as the gateway pins it (every member the model
+            sees, sanitised). An approval approves this text and takes this hash. Empty before the first sync
+            that recorded it.
+        toolJson:
+          type: object
+          additionalProperties: true
+          description: That text. Shown to an admin before an approval.
+        approvedHash:
+          type: string
+          description: >-
+            Hash of the text an admin approved; empty while none did. When `toolHash` differs, the text is
+            pending: the gateway does not serve it until an admin approves it.
     McpToolList:
       type: object
       required: [tools]
@@ -1823,6 +1844,18 @@ components:
       required: [tier]
       properties:
         tier: {type: string, enum: [ask, auto, never]}
+        toolHash:
+          type: string
+          description: >-
+            The `toolHash` of the tool as the caller read it. Setting a tier approves that text. Required
+            while the tool's text is pending; a hash that is not the stored one is refused (409) and
+            nothing changes.
+    McpToolReview:
+      type: object
+      properties:
+        toolHash:
+          type: string
+          description: As for `McpToolTierUpdate.toolHash`.
     AgentMcpServers:
       type: object
       required: [servers]

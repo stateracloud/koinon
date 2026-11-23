@@ -292,6 +292,10 @@ type Reconciler struct {
 	probeMu   sync.Mutex
 	probeDue  []gatewayplan.Probe
 	probeWake chan struct{}
+	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
+	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
+	probeAsked map[pgtype.UUID]time.Time
+	probeHeld  map[pgtype.UUID]bool
 }
 
 // New returns a Reconciler.

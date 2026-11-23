@@ -33,6 +33,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -98,7 +99,7 @@ var _ = Describe("Org MCP servers", func() {
 		_, err = svc.SyncTools(ctx, org, id, listed)
 		Expect(err).NotTo(HaveOccurred())
 		for tool, tier := range tiers {
-			_, err := svc.SetTier(ctx, org, actor, s.ID, tool, tier)
+			_, err := svc.SetTier(ctx, org, actor, s.ID, tool, tier, mcpserverstest.PinOf(ctx, svc, org, s.ID, tool))
 			Expect(err).NotTo(HaveOccurred())
 		}
 		return s

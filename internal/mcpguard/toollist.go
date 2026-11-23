@@ -23,7 +23,8 @@ const reasonToolListUnreadable = "withheld by the leak guard: it could not read 
 //
 //   - A tool with an approved hash and the same hash is served with the approved text, which sets no leg.
 //   - A tool with an approved hash and another hash changed: it is left out, and a call to it is refused.
-//     The sync records the change for review (mcpservers.SyncTools); the guard writes nothing.
+//     The sync records the change for review (mcpservers.SyncTools); the guard writes nothing. When the
+//     sync has not recorded that text yet, the guard wakes the prober to sync the server now (#1173).
 //   - A tool no admin approved (new, or in the ask tier of a first sync) is served as sanitised text. It
 //     sets the untrusted-input leg, and only when the server declares that leg: the leg alone never
 //     causes an approval.
@@ -51,7 +52,9 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 	}
 	approved := make(map[string]string, len(rows))
 	stored := make(map[string]json.RawMessage, len(rows))
+	recorded := make(map[string]string, len(rows))
 	for _, r := range rows {
+		recorded[r.Name] = r.ToolHash.String
 		if r.ApprovedHash.Valid {
 			approved[r.Name] = r.ApprovedHash.String
 			stored[r.Name] = r.ApprovedJson
@@ -60,6 +63,7 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 	var (
 		v          mcpgateway.ToolListVerdict
 		unreviewed bool
+		unsynced   bool
 	)
 	for _, p := range l.Tools {
 		t, _, err := mcptoolpin.Normalise(p)
@@ -82,7 +86,14 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 			v.Serve = append(v.Serve, pt)
 		default:
 			v.Left = append(v.Left, p.Name)
+			// The sync has not recorded this text yet, so no admin can see it to approve it.
+			unsynced = unsynced || recorded[p.Name] != t.Hash()
 		}
+	}
+	if unsynced {
+		// Ask the prober to sync the server now instead of at its next interval (#1173). The tool stays
+		// left out until an admin approves the new text; the wake changes only when the admin can see it.
+		a.g.wakeProber(ctx, c.org.ID, c.server.ID)
 	}
 	if unreviewed && c.server.ExposesUntrustedInput {
 		legs := Legs{UntrustedInput: true}

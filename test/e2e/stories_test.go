@@ -274,9 +274,28 @@ var _ = Describe("the run-1 stories", Ordered, Label("stories"), func() {
 		_, err = c.McpServers.SetToolTier(ctx, &mcpserverv1alpha1.SetToolTierRequest{OrgId: org, ServerId: srv.GetId(), Tool: "read_item"})
 		expectRefused(err, connect.CodeInvalidArgument, "tier must be ask, auto or never")
 
+		readHash := ""
+		for _, t := range tools {
+			if t.GetName() == "read_item" {
+				readHash = t.GetToolHash()
+			}
+		}
+		Expect(readHash).NotTo(BeEmpty(), "the console shows the pending tool text's hash (#1173)")
+
+		By("rule: an approval names the tool text the admin read, and a stale hash approves nothing (#1173)")
+		_, err = c.McpServers.SetToolTier(ctx, &mcpserverv1alpha1.SetToolTierRequest{
+			OrgId: org, ServerId: srv.GetId(), Tool: "read_item", Tier: mcpserverv1alpha1.Tier_TIER_AUTO,
+		})
+		expectRefused(err, connect.CodeInvalidArgument, "toolHash is required")
+		_, err = c.McpServers.SetToolTier(ctx, &mcpserverv1alpha1.SetToolTierRequest{
+			OrgId: org, ServerId: srv.GetId(), Tool: "read_item", Tier: mcpserverv1alpha1.Tier_TIER_AUTO,
+			ToolHash: strings.Repeat("0", 64),
+		})
+		expectRefused(err, connect.CodeAborted, "the tool changed since it was read")
+
 		By("an admin confirms the read tool as auto, and the others stay in ask")
 		set, err := c.McpServers.SetToolTier(ctx, &mcpserverv1alpha1.SetToolTierRequest{
-			OrgId: org, ServerId: srv.GetId(), Tool: "read_item", Tier: mcpserverv1alpha1.Tier_TIER_AUTO,
+			OrgId: org, ServerId: srv.GetId(), Tool: "read_item", Tier: mcpserverv1alpha1.Tier_TIER_AUTO, ToolHash: readHash,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(set.GetTool().GetTier()).To(Equal(mcpserverv1alpha1.Tier_TIER_AUTO))

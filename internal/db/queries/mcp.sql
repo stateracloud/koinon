@@ -185,6 +185,11 @@ SELECT * FROM mcp_tools
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 FOR UPDATE;
 
+-- name: NotifyMCPProbe :exec
+-- The gateway asks the prober to sync one server now (#1173). The channel is
+-- mcpservers.ProbeWakeChannel and the payload mcpservers.ProbeWakePayload: IDs only, no tool text.
+SELECT pg_notify(@channel::text, @payload::text);
+
 -- name: InsertMCPTool :one
 INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint,
                        description_original_length, description_capped, description_cleaned, tool_json, tool_hash)

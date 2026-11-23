@@ -969,6 +969,9 @@ type McpServerUpdateTransport string
 
 // McpTool defines model for McpTool.
 type McpTool struct {
+	// ApprovedHash Hash of the text an admin approved; empty while none did. When `toolHash` differs, the text is pending: the gateway does not serve it until an admin approves it.
+	ApprovedHash *string `json:"approvedHash,omitempty"`
+
 	// ContentHash SHA-256 of the sanitised description and input schema as last published.
 	ContentHash string `json:"contentHash"`
 	Description string `json:"description"`
@@ -1002,6 +1005,12 @@ type McpTool struct {
 	TierSetAt    *time.Time         `json:"tierSetAt,omitempty"`
 	TierSetBy    *string            `json:"tierSetBy,omitempty"`
 
+	// ToolHash Hash of the tool text the server published last, as the gateway pins it (every member the model sees, sanitised). An approval approves this text and takes this hash. Empty before the first sync that recorded it.
+	ToolHash *string `json:"toolHash,omitempty"`
+
+	// ToolJson That text. Shown to an admin before an approval.
+	ToolJson *map[string]interface{} `json:"toolJson,omitempty"`
+
 	// Unavailable Why agents are not offered the tool, for example a name too long.
 	Unavailable *string `json:"unavailable,omitempty"`
 }
@@ -1012,6 +1021,12 @@ type McpToolTier string
 // McpToolList defines model for McpToolList.
 type McpToolList struct {
 	Tools []McpTool `json:"tools"`
+}
+
+// McpToolReview defines model for McpToolReview.
+type McpToolReview struct {
+	// ToolHash As for `McpToolTierUpdate.toolHash`.
+	ToolHash *string `json:"toolHash,omitempty"`
 }
 
 // McpToolSink defines model for McpToolSink.
@@ -1043,6 +1058,9 @@ type McpToolSinkUpdate struct {
 // McpToolTierUpdate defines model for McpToolTierUpdate.
 type McpToolTierUpdate struct {
 	Tier McpToolTierUpdateTier `json:"tier"`
+
+	// ToolHash The `toolHash` of the tool as the caller read it. Setting a tier approves that text. Required while the tool's text is pending; a hash that is not the stored one is refused (409) and nothing changes.
+	ToolHash *string `json:"toolHash,omitempty"`
 }
 
 // McpToolTierUpdateTier defines model for McpToolTierUpdate.Tier.
@@ -1744,6 +1762,9 @@ type UpdateMcpServerJSONRequestBody = McpServerUpdate
 // SetMcpServerDataClassJSONRequestBody defines body for SetMcpServerDataClass for application/json ContentType.
 type SetMcpServerDataClassJSONRequestBody = McpServerDataClass
 
+// AcknowledgeMcpToolReviewJSONRequestBody defines body for AcknowledgeMcpToolReview for application/json ContentType.
+type AcknowledgeMcpToolReviewJSONRequestBody = McpToolReview
+
 // SetMcpToolSinkJSONRequestBody defines body for SetMcpToolSink for application/json ContentType.
 type SetMcpToolSinkJSONRequestBody = McpToolSinkUpdate
 
@@ -1866,7 +1887,7 @@ type ServerInterface interface {
 	// ListMcpTools The server's tools with their tiers and review flags.
 	// (GET /mcp-servers/{serverId}/tools)
 	ListMcpTools(w http.ResponseWriter, r *http.Request, serverId ServerId)
-	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier.
+	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier. Approves the tool text `toolHash` names.
 	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
 	AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
 	// SetMcpToolSink Declare a tool's sink class, its address arguments and what its results carry. Audited.
@@ -4628,6 +4649,7 @@ func (response ListMcpToolsdefaultJSONResponse) VisitListMcpToolsResponse(w http
 type AcknowledgeMcpToolReviewRequestObject struct {
 	ServerId ServerId `json:"serverId"`
 	ToolName ToolName `json:"toolName"`
+	Body     *AcknowledgeMcpToolReviewJSONRequestBody
 }
 
 type AcknowledgeMcpToolReviewResponseObject interface {
@@ -5823,7 +5845,7 @@ type StrictServerInterface interface {
 	// ListMcpTools The server's tools with their tiers and review flags.
 	// (GET /mcp-servers/{serverId}/tools)
 	ListMcpTools(ctx context.Context, request ListMcpToolsRequestObject) (ListMcpToolsResponseObject, error)
-	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier.
+	// AcknowledgeMcpToolReview Mark a changed tool as reviewed without changing its tier. Approves the tool text `toolHash` names.
 	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
 	AcknowledgeMcpToolReview(ctx context.Context, request AcknowledgeMcpToolReviewRequestObject) (AcknowledgeMcpToolReviewResponseObject, error)
 	// SetMcpToolSink Declare a tool's sink class, its address arguments and what its results carry. Audited.
@@ -6724,6 +6746,16 @@ func (sh *strictHandler) AcknowledgeMcpToolReview(w http.ResponseWriter, r *http
 
 	request.ServerId = serverId
 	request.ToolName = toolName
+
+	var body AcknowledgeMcpToolReviewJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.AcknowledgeMcpToolReview(ctx, request.(AcknowledgeMcpToolReviewRequestObject))

@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
@@ -73,7 +74,7 @@ func (g *RealGuard) Server(ctx context.Context, name string, legs []string, tool
 	_, err = g.svc.SyncTools(ctx, g.Org, uuidOf(s.ID), listed)
 	Expect(err).NotTo(HaveOccurred())
 	for _, t := range tools {
-		_, err = g.svc.SetTier(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, t, "auto")
+		_, err = g.svc.SetTier(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, t, "auto", mcpserverstest.PinOf(ctx, g.svc, g.Org, s.ID, t))
 		Expect(err).NotTo(HaveOccurred())
 	}
 	_, err = g.svc.SetDataClass(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: append([]string{}, legs...)})

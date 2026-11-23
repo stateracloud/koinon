@@ -65,6 +65,7 @@ func mcpToolProto(t mcpservers.Tool) *mcpserverv1alpha1.Tool {
 		LastSeenAt: timestamppb.New(t.LastSeenAt), TierSetBy: t.TierSetBy, TierSetAt: optTime(t.TierSetAt),
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash, Unavailable: t.Unavailable,
 		DescriptionOriginalLength: int64(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
+		ToolHash: t.ToolHash, ToolJson: string(t.ToolJSON), ApprovedHash: t.ApprovedHash,
 		Sink: &mcpserverv1alpha1.ToolSink{
 			SinkClass: string(t.Sink.Class), Derivation: string(t.Sink.Derivation), AddressArgs: append([]string{}, t.Sink.AddressArgs...),
 			ResultUntrustedInput: t.Sink.ResultUntrustedInput, ResultPrivateData: t.Sink.ResultPrivateData,
@@ -218,7 +219,7 @@ func (s *Server) SetToolTier(ctx context.Context, req *mcpserverv1alpha1.SetTool
 	if !ok {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "tier must be ask, auto or never")
 	}
-	t, err := s.mcp.SetTier(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), tier)
+	t, err := s.mcp.SetTier(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), tier, req.GetToolHash())
 	if err != nil {
 		return nil, s.mcpError(err)
 	}
@@ -264,7 +265,7 @@ func (s *Server) AcknowledgeToolReview(ctx context.Context, req *mcpserverv1alph
 	if err != nil {
 		return nil, err
 	}
-	t, err := s.mcp.AcknowledgeReview(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool())
+	t, err := s.mcp.AcknowledgeReview(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), req.GetToolHash())
 	if err != nil {
 		return nil, s.mcpError(err)
 	}

@@ -1337,6 +1337,9 @@ type Querier interface {
 	// leader may sleep. A time only, no org.
 	NextCodeHostPollAt(ctx context.Context) (pgtype.Timestamptz, error)
 	NotifyGatewayStateRevision(ctx context.Context, payload string) error
+	// The gateway asks the prober to sync one server now (#1173). The channel is
+	// mcpservers.ProbeWakeChannel and the payload mcpservers.ProbeWakePayload: IDs only, no tool text.
+	NotifyMCPProbe(ctx context.Context, arg NotifyMCPProbeParams) error
 	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
 	// starts it (the waiting run is the demand) without waiting for a resync.

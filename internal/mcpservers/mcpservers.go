@@ -248,6 +248,15 @@ type Tool struct {
 	RequiresTwoApprovers bool `json:"requiresTwoApprovers,omitempty"`
 	// ContentHash identifies the description and schema as they were last published.
 	ContentHash string `json:"contentHash"`
+	// ToolHash and ToolJSON are the tool text the server published last, as the gateway pins it: every
+	// member the model sees (name, title, description, annotations, input and output schema), sanitised
+	// (#1132). An approval (SetTier, AcknowledgeReview) approves this text and takes ToolHash as its
+	// expected hash (#1173). Empty before the first sync that recorded it.
+	ToolHash string          `json:"toolHash,omitempty"`
+	ToolJSON json.RawMessage `json:"toolJson,omitempty"`
+	// ApprovedHash is the hash of the text an admin approved; empty while none did. A ToolHash that
+	// differs is pending: the gateway does not serve that text until an admin approves it.
+	ApprovedHash string `json:"approvedHash,omitempty"`
 	// DescriptionOriginalLength is the length in characters of the description as the server published
 	// it. Description is the sanitised text (internal/mcpsanitize); Capped and Cleaned say it was cut
 	// or had characters removed or tags escaped, in the description or in the input schema's strings.
@@ -392,10 +401,27 @@ func toTool(t store.McpTool) Tool {
 		ServerID: t.ServerID.String(), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
 		Tier: string(t.Tier), ReviewReason: t.ReviewReason.String, Present: t.Present,
 		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash,
+		ToolHash: t.ToolHash.String, ToolJSON: json.RawMessage(t.ToolJson), ApprovedHash: t.ApprovedHash.String,
 		DescriptionOriginalLength: int(t.DescriptionOriginalLength), DescriptionCapped: t.DescriptionCapped, DescriptionCleaned: t.DescriptionCleaned,
 		FirstSeenAt: t.FirstSeenAt.Time, LastSeenAt: t.LastSeenAt.Time, TierSetBy: t.TierSetBy.String, TierSetAt: timePtr(t.TierSetAt),
 		Sink: sinkOf(t),
 	}
+}
+
+// checkApproval is the compare-and-set of an approval (#1173). An approval adopts the text the sync
+// recorded last (tool_hash) as the approved text. When that text is pending (no admin approved it),
+// the caller must name its hash: the text the admin saw. A hash that is not the stored one is
+// ErrToolChanged, and nothing is approved. With nothing pending the hash may be empty; a hash that is
+// given must still match. cur is read under the row lock (GetMCPToolForUpdate), so a sync waits.
+func checkApproval(cur store.McpTool, expected string) error {
+	pending := cur.ToolHash.Valid && cur.ToolHash.String != cur.ApprovedHash.String
+	switch {
+	case expected == "" && pending:
+		return invalid("toolHash is required: the hash of the tool text you reviewed")
+	case expected != "" && expected != cur.ToolHash.String:
+		return ErrToolChanged
+	}
+	return nil
 }
 
 func serverSummary(r store.McpServer) map[string]any {
@@ -1033,8 +1059,10 @@ func (s *Service) SetTwoApprovers(ctx context.Context, org pgtype.UUID, actor au
 }
 
 // SetTier moves a tool to a tier. It works on declared servers too: tiers are decisions about
-// risk, not part of what a Secret declares. It clears the tool's review flag.
-func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool, tier string) (Tool, error) {
+// risk, not part of what a Secret declares. It clears the tool's review flag and approves the tool
+// text the sync recorded last. expectedHash is that text's hash as the admin read it (Tool.ToolHash);
+// see checkApproval.
+func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool, tier, expectedHash string) (Tool, error) {
 	if tier != TierAsk && tier != TierAuto && tier != TierNever {
 		return Tool{}, invalid("tier must be %q, %q or %q", TierAsk, TierAuto, TierNever)
 	}
@@ -1048,8 +1076,11 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 		if err != nil {
 			return err
 		}
-		cur, err := q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org, ServerID: sid, Name: tool})
+		cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: tool})
 		if err != nil {
+			return err
+		}
+		if err := checkApproval(cur, expectedHash); err != nil {
 			return err
 		}
 		out, err = q.SetMCPToolTier(ctx, store.SetMCPToolTierParams{
@@ -1061,7 +1092,7 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.tier", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
 			Before: map[string]any{"server": srv.Name, "tool": tool, "tier": string(cur.Tier), "reviewFlag": cur.ReviewReason.Valid},
-			After:  map[string]any{"server": srv.Name, "tool": tool, "tier": tier},
+			After:  map[string]any{"server": srv.Name, "tool": tool, "tier": tier, "approvedHash": out.ApprovedHash.String},
 		})
 		return nil
 	})
@@ -1071,8 +1102,9 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 	return toTool(out), nil
 }
 
-// AcknowledgeReview clears a tool's review flag without changing its tier.
-func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool string) (Tool, error) {
+// AcknowledgeReview clears a tool's review flag without changing its tier, and approves the tool text
+// the sync recorded last. expectedHash is as for SetTier.
+func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool, expectedHash string) (Tool, error) {
 	sid, err := parseID(serverID)
 	if err != nil {
 		return Tool{}, err
@@ -1083,13 +1115,20 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 		if err != nil {
 			return err
 		}
+		cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: tool})
+		if err != nil {
+			return err
+		}
+		if err := checkApproval(cur, expectedHash); err != nil {
+			return err
+		}
 		out, err = q.AcknowledgeMCPToolReview(ctx, store.AcknowledgeMCPToolReviewParams{OrgID: org, ServerID: sid, Name: tool})
 		if err != nil {
 			return err
 		}
 		b.Org(audit.Event{
 			Org: org, Actor: actor, Action: "mcp_tool.review", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
-			After: map[string]any{"server": srv.Name, "tool": tool, "tier": string(out.Tier)},
+			After: map[string]any{"server": srv.Name, "tool": tool, "tier": string(out.Tier), "approvedHash": out.ApprovedHash.String},
 		})
 		return nil
 	})

@@ -51,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpgateway/pgaudit"
 	"github.com/stateracloud/koinon/internal/mcpguard"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/mcptoolpin"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/runevidence"
@@ -233,7 +234,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		_, err = svc.SyncTools(ctx, org, uuidOf(s.ID), listed)
 		Expect(err).NotTo(HaveOccurred())
 		for _, t := range tools {
-			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), s.ID, t, "auto")
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), s.ID, t, "auto", mcpserverstest.PinOf(ctx, svc, org, s.ID, t))
 			Expect(err).NotTo(HaveOccurred())
 		}
 		if legs != nil {
@@ -1032,7 +1033,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			}
 			_, err := svc.SyncTools(ctx, org, uuidOf(wiki.ID), []mcpservers.ListedTool{listed})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), wiki.ID, "titled", "auto")
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), wiki.ID, "titled", "auto", mcpserverstest.PinOf(ctx, svc, org, wiki.ID, "titled"))
 			Expect(err).NotTo(HaveOccurred())
 			v := check(ctx, "wiki", mcptoolpin.Published{
 				Name: "titled", Description: "titled", Title: listed.Title,
@@ -1095,7 +1096,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			_, err := svc.SyncTools(ctx, org, uuidOf(web.ID), []mcpservers.ListedTool{{Name: "search_web", Description: "search_web v2"}})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(check(ctx, "web", mcptoolpin.Published{Name: "search_web", Description: "search_web v2"}).Left).To(ConsistOf("search_web"))
-			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), web.ID, "search_web", "auto")
+			_, err = svc.SetTier(ctx, org, audit.System("koinon-test:spec"), web.ID, "search_web", "auto", mcpserverstest.PinOf(ctx, svc, org, web.ID, "search_web"))
 			Expect(err).NotTo(HaveOccurred())
 			v := check(ctx, "web", mcptoolpin.Published{Name: "search_web", Description: "search_web v2"})
 			Expect(v.Left).To(BeEmpty())

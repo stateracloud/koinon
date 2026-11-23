@@ -2509,6 +2509,7 @@ be set here. Credentials are write-only; they are never returned.
 | org_id | 1 | `string` | singular |  |  |
 | server_id | 2 | `string` | singular |  |  |
 | tool | 3 | `string` | singular |  |  |
+| tool_hash | 4 | `string` | singular |  | tool_hash is as for SetToolTierRequest.tool_hash. |
 
 ### Message AcknowledgeToolReviewResponse
 
@@ -2690,6 +2691,7 @@ ServerClass is what a server declares it exposes (ADR 0084 decision 8).
 | server_id | 2 | `string` | singular |  |  |
 | tool | 3 | `string` | singular |  |  |
 | tier | 4 | `koinon.mcpserver.v1alpha1.Tier` | singular |  |  |
+| tool_hash | 5 | `string` | singular |  | tool_hash is the Tool.tool_hash the admin reviewed. Setting a tier approves that text. Required while the tool's text is pending; a hash that is not the stored one is refused (Aborted) and nothing changes. |
 
 ### Message SetToolTierResponse
 
@@ -2734,6 +2736,9 @@ ServerClass is what a server declares it exposes (ADR 0084 decision 8).
 | description_capped | 16 | `bool` | singular |  |  |
 | description_cleaned | 17 | `bool` | singular |  |  |
 | sink | 18 | `koinon.mcpserver.v1alpha1.ToolSink` | singular |  | sink is the tool's declaration for the leak guard (ADR 0091). A tool nobody declared is external-high with the server's legs. |
+| tool_hash | 19 | `string` | singular |  | tool_hash is the hash of the tool text the server published last, as the gateway pins it: every member the model sees (name, title, description, annotations, input and output schema), sanitised. An approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty before the first sync that recorded it. |
+| tool_json | 20 | `string` | singular |  | tool_json is that text, as JSON. The console shows it before an admin approves it. |
+| approved_hash | 21 | `string` | singular |  | approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When tool_hash differs, the text is pending: the gateway does not serve it until an admin approves it. |
 
 ### Message ToolSink
 

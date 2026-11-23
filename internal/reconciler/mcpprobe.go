@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -39,6 +40,11 @@ const (
 	mcpMaxToolPages    = 20
 	reasonNoTools      = "the gateway got no tools from the server: it is unreachable, rejected the credential or lists none (the gateway does not say which)"
 	reasonGatewayError = "the gateway refused or failed the probe"
+	// mcpProbeWakeEvery is the shortest time between two probes of one server that gateway wakes
+	// (#1173) start. A wake inside it is held back to its end, not dropped: the text the gateway saw
+	// may have changed after the last probe started. Any role may notify the channel, so this bound
+	// also holds when many gateway replicas, or a misbehaving client, send wakes.
+	mcpProbeWakeEvery = 5 * time.Second
 )
 
 // RunProber probes until ctx ends. It is started by Run and only has work on the replica that
@@ -79,6 +85,56 @@ func (r *Reconciler) probeSoon(probes []gatewayplan.Probe) {
 	select {
 	case r.probeWakeChan() <- struct{}{}:
 	default: // a wake is already pending
+	}
+}
+
+// wakeProbe handles a gateway wake (#1173): the gateway served a list whose text for a tool differs
+// from the text the prober recorded, so the server is probed now, not at the next interval. That sync
+// flags the tool for review, and the console shows its new text. At most one probe per server starts
+// per mcpProbeWakeEvery. A payload that names no served server is ignored.
+func (r *Reconciler) wakeProbe(ctx context.Context, payload string) {
+	org, server, ok := mcpservers.ParseProbeWakePayload(payload)
+	if !ok {
+		r.log.Warn("mcp prober: ignoring a wake with a bad payload")
+		return
+	}
+	now := time.Now()
+	r.probeMu.Lock()
+	if r.probeHeld[server] {
+		r.probeMu.Unlock()
+		return // a held wake already covers this one
+	}
+	if last, seen := r.probeAsked[server]; seen && now.Sub(last) < mcpProbeWakeEvery {
+		if r.probeHeld == nil {
+			r.probeHeld = map[pgtype.UUID]bool{}
+		}
+		r.probeHeld[server] = true
+		r.probeMu.Unlock()
+		time.AfterFunc(mcpProbeWakeEvery-now.Sub(last), func() {
+			r.probeMu.Lock()
+			delete(r.probeHeld, server)
+			r.probeMu.Unlock()
+			if ctx.Err() == nil {
+				r.wakeProbe(ctx, payload)
+			}
+		})
+		return
+	}
+	if r.probeAsked == nil {
+		r.probeAsked = map[pgtype.UUID]time.Time{}
+	}
+	for k, t := range r.probeAsked {
+		if now.Sub(t) >= mcpProbeWakeEvery {
+			delete(r.probeAsked, k)
+		}
+	}
+	r.probeAsked[server] = now
+	r.probeMu.Unlock()
+	for _, p := range r.plan.Probes() {
+		if p.Org == org && p.Server == server {
+			r.probeSoon([]gatewayplan.Probe{p})
+			return
+		}
 	}
 }
 
