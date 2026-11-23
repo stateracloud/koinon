@@ -452,7 +452,9 @@ func setToolSinkE2E(ctx context.Context, admin func(context.Context, string, str
 // replica. The counter has fixed labels (ADR 0023), so the e2e compares it before and after a task.
 func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass string) float64 {
 	GinkgoHelper()
-	res, err := http.Get("http://" + portForward(ctx, kubectl, "deploy/koinon-api", "9090") + "/metrics")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, "deploy/koinon-api", "9090")+"/metrics", nil)
+	Expect(err).NotTo(HaveOccurred())
+	res, err := http.DefaultClient.Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(res.Body)
