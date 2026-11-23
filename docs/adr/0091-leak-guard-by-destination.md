@@ -650,7 +650,10 @@ text is a prompt, so a new tool or a changed description is a new instruction to
 - The guard compares the hash of each tool's sanitised text with the hash an admin approved. A tool
   with another hash is left out of the list, and a call to it is refused with the reason
   `tool_changed`, until an admin reviews it again. See ADR 0097 decision 13.
+- A tool whose hash equals the approved hash is served from the approved text. It sets no leg.
 - A tool that no admin approved yet is served as sanitised text. It sets the untrusted-input leg, and
   only when its server declares that leg. The leg alone never causes an approval.
 - A tool list that the guard cannot read is not served, and it sets both legs (fail closed, as for any
   reply the guard never saw).
+- The guard does not fingerprint tool text (2026-11-23). The text is reviewed configuration, not
+  session data. A fingerprint of it gives false refusals and does not stop an injection; the pin does.

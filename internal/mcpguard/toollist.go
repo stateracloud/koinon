@@ -27,7 +27,9 @@ const reasonToolListUnreadable = "withheld by the leak guard: it could not read 
 //     sync has not recorded that text yet, the guard wakes the prober to sync the server now (#1173).
 //   - A tool no admin approved (new, or in the ask tier of a first sync) is served as sanitised text. It
 //     sets the untrusted-input leg, and only when the server declares that leg: the leg alone never
-//     causes an approval.
+//     causes an approval. When the sync has not recorded that text, the guard wakes the prober too, so
+//     the tool reaches review now and not at the next probe interval.
+//   - The guard never fingerprints tool text: it is reviewed configuration, not session data.
 //   - A list the guard cannot record or read keeps both legs and is withheld (fail closed).
 //
 // Koinon's executor, the prober and Koinon's own targets are not an agent's session: their list goes on
@@ -76,6 +78,9 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 		case !pinned:
 			unreviewed = true
 			v.Serve = append(v.Serve, t)
+			// A tool the sync never recorded (new since the last probe), or whose unreviewed text moved
+			// since: the console cannot show it for review until the prober syncs the server.
+			unsynced = unsynced || recorded[p.Name] != t.Hash()
 		case want == t.Hash():
 			pt, err := mcptoolpin.Parse(stored[p.Name])
 			if err != nil || pt.Hash() != want {
@@ -91,8 +96,9 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 		}
 	}
 	if unsynced {
-		// Ask the prober to sync the server now instead of at its next interval (#1173). The tool stays
-		// left out until an admin approves the new text; the wake changes only when the admin can see it.
+		// Ask the prober to sync the server now instead of at its next interval (#1173). A changed tool
+		// stays left out until an admin approves the new text; the wake changes only when the admin can
+		// see it.
 		a.g.wakeProber(ctx, c.org.ID, c.server.ID)
 	}
 	if unreviewed && c.server.ExposesUntrustedInput {
