@@ -504,14 +504,25 @@ const ReasonCredentialTooShort = "CREDENTIAL_TOO_SHORT" //nolint:gosec // G101: 
 
 // ValidateCredentialValue refuses a credential value shorter than [MinCredentialBytes]. An empty value is
 // not checked: it means no credential, and the caller decides if that is allowed. The value is never part
-// of the message. The remote agents (ADR 0123 decision 9) use it too.
+// of the message. A value that starts with a known auth scheme ("Bearer abc1") is checked on the token after
+// the scheme too: the gateway also removes that token alone ([scrub.AuthParts]), and a short one is dropped.
+// The remote agents (ADR 0123 decision 9) use it too.
 func ValidateCredentialValue(value string) error {
 	if value == "" {
 		return nil
 	}
-	if len(strings.TrimSpace(value)) < MinCredentialBytes {
+	parts := scrub.AuthParts(strings.TrimSpace(value))
+	if len(parts) > 2 {
+		parts = parts[:2] // the Basic parts after the token: a short password is allowed (the user is the secret)
+	}
+	short := false
+	for _, p := range parts {
+		short = short || len(strings.TrimSpace(p)) < MinCredentialBytes
+	}
+	if short {
 		return &InvalidError{
-			Msg: fmt.Sprintf("credential value must be at least %d bytes long, with no spaces at the ends: "+
+			Msg: fmt.Sprintf("credential value must be at least %d bytes long, with no spaces at the ends "+
+				"(and the token after an auth scheme word such as Bearer too): "+
 				"the gateway cannot remove a shorter value from its logs and results", MinCredentialBytes),
 			Reason: ReasonCredentialTooShort,
 		}

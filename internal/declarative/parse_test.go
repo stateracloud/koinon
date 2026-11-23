@@ -131,6 +131,20 @@ func TestParseDisabled(t *testing.T) {
 	}
 }
 
+// TestParseMCPServerShortCredential covers the length check of the credential key: a held plan parses only,
+// so the parse must refuse a value that apply refuses (#1221).
+func TestParseMCPServerShortCredential(t *testing.T) {
+	sec := func(cred string) *corev1.Secret {
+		return &corev1.Secret{Data: map[string][]byte{"name": []byte("wiki"), "url": []byte("https://mcp.example.com/mcp"), declarative.KeyCredential: []byte(cred)}}
+	}
+	if _, err := declarative.ParseMCPServer(sec("fake-07"), "v"); err == nil || !strings.Contains(err.Error(), declarative.KeyCredential) {
+		t.Errorf("7 bytes: want an error naming %s, got %v", declarative.KeyCredential, err)
+	}
+	if _, err := declarative.ParseMCPServer(sec("fake-008"), "v"); err != nil {
+		t.Errorf("8 bytes: %v", err)
+	}
+}
+
 // TestParseMCPServerCABundle covers the optional caBundle key of an mcp-server Secret (#278).
 func TestParseMCPServerCABundle(t *testing.T) {
 	set, err := faketls.Make("koinon test CA", []string{"mcp.example.com"})

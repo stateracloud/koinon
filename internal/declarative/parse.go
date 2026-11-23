@@ -224,6 +224,9 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 			errs = append(errs, err)
 		} else if err := mcpservers.ValidateRemote(d.URL, d.Transport, header, d.CredentialPrefix); err != nil {
 			errs = append(errs, err)
+		} else if err := mcpservers.ValidateCredentialValue(d.CredentialValue); err != nil {
+			// Here too, not only at apply: a held plan (held.go) parses only, and must not say "would apply" (#1221).
+			errs = append(errs, fmt.Errorf("%s: %w", KeyCredential, err))
 		} else if err := mcpservers.ValidateTLSTrust(d.URL, d.CABundle, d.InsecureSkipVerify); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle+"/"+KeyInsecureSkipVerify, err))
 		}

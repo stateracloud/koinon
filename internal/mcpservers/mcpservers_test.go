@@ -537,6 +537,9 @@ var _ = Describe("Service", func() {
 			Entry("8 bytes", long, true),
 			Entry("7 bytes in spaces and a newline", "  "+short+"\n", false),
 			Entry("only spaces", "          ", false),
+			Entry("8 bytes in spaces", " "+long+"\n", true),
+			Entry("a scheme word and a 7-byte token", "Bearer "+short, false),
+			Entry("a scheme word and an 8-byte token", "Bearer "+long, true),
 		)
 
 		It("refuses 7 bytes and takes 8 when a server is created", func(ctx SpecContext) {

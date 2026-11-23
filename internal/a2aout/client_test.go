@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
 )
 
 const fakeToken = "koinon_test_not-a-real-token"
@@ -146,7 +147,8 @@ var _ = Describe("Client", func() {
 		bgctx   = context.Background()
 		connect = func(mod ...func(*a2aout.Options)) (*a2aout.Client, error) {
 			o := a2aout.Options{
-				Target: target, Agent: gateway.AgentRef{Org: "acme", Name: "scout"}, Policy: policy,
+				Credentials: mcpgateway.StaticCredentials{},
+				Target:      target, Agent: gateway.AgentRef{Org: "acme", Name: "scout"}, Policy: policy,
 				PollInterval: 5 * time.Millisecond, RequestTimeout: 5 * time.Second,
 			}
 			// The pin: the hash of the card as the agent serves it now. A spec that tests the pin sets its own.
@@ -636,7 +638,7 @@ var _ = Describe("Client", func() {
 		It("stops the next client at once when the card changes", func() {
 			_, err := connect()
 			Expect(err).NotTo(HaveOccurred())
-			pin, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			pin, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).NotTo(HaveOccurred())
 			// The server now serves a card with one more skill: the same agent, another card.
 			srv.Config.Handler = func() http.Handler {
@@ -650,30 +652,30 @@ var _ = Describe("Client", func() {
 				})
 				return mux
 			}()
-			_, err = a2aout.New(bgctx, a2aout.Options{Target: target, Policy: policy, CardHash: pin.Hash})
+			_, err = a2aout.New(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy, CardHash: pin.Hash})
 			Expect(err).To(MatchError(a2aout.ErrCardChanged))
 		})
 
 		It("reads the card with its hash and never needs the pin to do it", func() {
-			c, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			c, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.Hash).To(MatchRegexp(`^[0-9a-f]{64}$`))
 			Expect(c.JSON).To(ContainSubstring("kagent-fake"))
-			again, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			again, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(again.Hash).To(Equal(c.Hash))
 		})
 
 		It("sends the credential when it reads the card, and only over the target's own rules", func() {
 			withCredential()
-			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f.auth).To(ContainElement("Bearer " + fakeToken))
 		})
 
 		It("refuses a card that is over the size limit", func() {
 			start(func(c *a2a.AgentCard) { c.Description = strings.Repeat("x", a2aout.MaxCardBytes+1) })
-			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).To(MatchError(a2aout.ErrCard))
 		})
 
@@ -681,7 +683,7 @@ var _ = Describe("Client", func() {
 			start(func(c *a2a.AgentCard) {
 				c.SupportedInterfaces = []*a2a.AgentInterface{a2a.NewAgentInterface("https://elsewhere.example.com/jsonrpc", a2a.TransportProtocolJSONRPC)}
 			})
-			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Target: target, Policy: policy})
+			_, err := a2aout.FetchCard(bgctx, a2aout.Options{Credentials: mcpgateway.StaticCredentials{}, Target: target, Policy: policy})
 			Expect(err).To(MatchError(a2aout.ErrCardHost))
 		})
 	})

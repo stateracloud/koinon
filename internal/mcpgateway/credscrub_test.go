@@ -821,23 +821,28 @@ var _ = Describe("the gateway scrubs what a built-in target opened (#1174, #1221
 		return text(res), sc, guard
 	}
 
-	It("records the built-in's credential and scrubs its result before the guard sees it", func(ctx SpecContext) {
-		got, sc, guard := callEcho(ctx, keyEchoBuiltin{})
+	// expectScrubbed is the check that each built-in must pass: the gateway recorded the value that the
+	// built-in opened, for the caller's org, and scrubbed the result before the guard and the agent saw it.
+	expectScrubbed := func(got string, sc *mcpgateway.CredentialScrub, guard *recordingGuard) {
+		GinkgoHelper()
 		Expect(got).To(Equal("the remote said [redacted:secret]"))
 		Expect(sc.TextFor("acme", fakeToken)).To(Equal("[redacted:secret]"), "the value was recorded for the caller's org")
 		Expect(guard.sawText("the remote said [redacted:secret]")).To(BeTrue())
 		Expect(guard.sawText(fakeToken)).To(BeFalse(), "the guard got the scrubbed result")
+	}
+
+	It("records the built-in's credential and scrubs its result before the guard sees it", func(ctx SpecContext) {
+		expectScrubbed(callEcho(ctx, keyEchoBuiltin{}))
 	})
 
-	// The check above must fail for a built-in that opens its credential through a source of its own. This
-	// spec runs the same call for such a built-in and shows that the same assertions see it: the value is not
-	// recorded and reaches the agent. A built-in that keeps a source of its own is the fault; the [Builtin]
-	// interface gives it no reason to, because each call gets the recording source.
-	It("sees a built-in that opens its credential through a source of its own", func(ctx SpecContext) {
+	// A built-in that opens its credential through a source of its own, not the one that [Builtin.Call] gives
+	// it, must fail the check above. Go cannot stop a built-in from building such a source, so this check is
+	// the guard: each built-in kind runs it (the A2A target in internal/a2atools). This spec proves that the
+	// check fails for such a built-in.
+	It("fails the check for a built-in that opens its credential through a source of its own", func(ctx SpecContext) {
 		got, sc, guard := callEcho(ctx, keyEchoBuiltin{own: mapCredentials{"remote": fakeToken}})
-		GinkgoWriter.Println("GOT", got, sc.TextFor("acme", fakeToken))
-		Expect(got).NotTo(Equal("the remote said [redacted:secret]"), "the check of the spec above fails for this built-in")
-		Expect(sc.TextFor("acme", fakeToken)).To(Equal(fakeToken), "a value opened outside the gateway's source is not recorded")
-		Expect(guard.sawText(fakeToken)).To(BeTrue())
+		failures := InterceptGomegaFailures(func() { expectScrubbed(got, sc, guard) })
+		Expect(failures).NotTo(BeEmpty(), "the check must see the value that was not recorded")
+		Expect(guard.sawText(fakeToken)).To(BeTrue(), "the value reached the guard unscrubbed")
 	})
 })

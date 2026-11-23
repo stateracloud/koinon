@@ -825,9 +825,12 @@ move, once.
        the raw message: it must, to judge it.
      - **Limits.** A value stays 24 hours after its last open. One org holds at most 256 values and the process
        8192; over a cap the oldest go first. A value that is already known costs no lock. A value shorter than 8
-       bytes is not matched (it would remove ordinary words): the gateway counts it
+       bytes is not matched (it would remove ordinary words). So koinon-api refuses to save a credential value, or
+       the token after an auth scheme word in it, shorter than 8 bytes (`CREDENTIAL_TOO_SHORT`, #1221). A value
+       saved before that check can still be opened: the gateway counts it
        (`koinon_gateway_credential_too_short_total`) and logs the target once. `koinon_gateway_credential_redactions_total`
-       counts the texts it changed, by path (`agent` or `telemetry`). An open never loses its own values to a cap.
+       counts the texts it changed, by path (`agent` or `telemetry`). The open that goes over a cap never loses its
+       own values to that cap; an open at the same time can (see Batching).
        A value that a cap removes before 24 hours is no longer scrubbed: `koinon_gateway_credential_evictions_total`
        counts these, so an operator sees a cap that is too low for the credentials in use.
      - **Threat scope.** The scrub is a backstop for a target that echoes its credential by accident. It does not
@@ -835,8 +838,10 @@ move, once.
        holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
        own issue. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
        its org's audit row of a call changes. Only a reader of that org's audit can see this. Each call of a built-in
-       target gets the gateway's recording source as an argument of `Builtin.Call`, and a built-in has no source of
-       its own. So each value that a built-in opens is recorded (#1221).
+       target gets the gateway's recording source as an argument of `Builtin.Call`, and the outbound clients have no
+       default source (a nil source is an error). Go cannot stop a built-in from building a source of its own, so
+       each built-in kind has a test that the gateway records the value it opens; a built-in that uses another
+       source fails it (#1221).
      - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
        in it until the next rebuild. That rebuild runs at the next change at least one second later, and with traffic
        at most one minute later. Until then the value can only over-scrub a process record. A removal marks a value

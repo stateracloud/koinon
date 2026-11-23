@@ -162,6 +162,10 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 // stays with the target. base nil is http.DefaultTransport. The MCP path and the A2A outbound client
 // (ADR 0123 decision 7) both build their clients here, so one rule covers both.
 func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gateway.AgentRef, src CredentialSource) (*http.Client, error) {
+	if src == nil {
+		// No default source: a caller that has none would open the credential where the scrub cannot record it.
+		return nil, errors.New("mcpgateway: no credential source")
+	}
 	if base == nil {
 		base = http.DefaultTransport
 	}

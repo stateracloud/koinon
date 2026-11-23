@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
 )
@@ -155,6 +156,7 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 		cred := filepath.Join(dir, "token")
 		Expect(os.WriteFile(cred, []byte(token+"\n"), 0o600)).To(Succeed())
 		o := a2aout.Options{
+			Credentials: mcpgateway.StaticCredentials{},
 			Target: gateway.MCPTarget{
 				Name: "koinon-peer", URL: srv.URL + a2aedge.BasePath + "/agents/" + agentID, CAFile: ca,
 				CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: cred,
@@ -200,9 +202,10 @@ var _ = Describe("Outbound client against the inbound edge", func() {
 
 	It("refuses a client that has no token", func() {
 		o := a2aout.Options{
-			Target: gateway.MCPTarget{Name: "koinon-peer", URL: srv.URL + a2aedge.BasePath + "/agents/" + agentID, CAFile: ca},
-			Agent:  gateway.AgentRef{Org: "acme", Name: "caller"},
-			Policy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: []string{"127.0.0.1"}},
+			Credentials: mcpgateway.StaticCredentials{},
+			Target:      gateway.MCPTarget{Name: "koinon-peer", URL: srv.URL + a2aedge.BasePath + "/agents/" + agentID, CAFile: ca},
+			Agent:       gateway.AgentRef{Org: "acme", Name: "caller"},
+			Policy:      catalog.URLPolicy{Namespace: "koinon", AllowedHosts: []string{"127.0.0.1"}},
 		}
 		_, err := a2aout.FetchCard(ctx, o)
 		Expect(err).To(HaveOccurred())
