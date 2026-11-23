@@ -297,6 +297,16 @@ approvals, and the server never sees them, not even after the approver denies th
 It fails when the threshold or the taint path of an external-low call regresses. Locally:
 `test/e2e/run.sh` (kind).
 
+**External-low URL case (#1051).** The same step then declares `fetch_url` with the `fetch` derivation, after the
+escape hook (which expects it undeclared), so a URL to a host the org has not trusted is external-low
+(`leakGuardURLInTask`, turns for `tracker fetch canary`). The agent reads the canary, then fetches three URLs. A
+clean URL reaches the fake server. The canary's first 30 characters as hex in one path component are refused by
+the URL shape rule (ADR 0084): the text match cannot read hex. The test reads the refusal from koinon-api's
+`koinon_api_mcp_guard_decisions_total{decision="refuse",reason="url_rule",sink_class="external-low"}` (one more
+than before the task) and sees no approval for it. The whole canary in the query of a valid URL is held as a
+taint approval of an external-low call. The server sees neither. It fails when the fetch derivation, the URL
+rule or the text match on a URL regresses.
+
 ## Testing layers
 
 Every PR: unit and package tests, the smoke test and the scenarios (`make test` and CI). The kind

