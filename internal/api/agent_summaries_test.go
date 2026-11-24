@@ -226,8 +226,10 @@ var _ = Describe("the agent list pages", func() {
 			_, err = list(2, bad)
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "token %q", bad)
 		}
-		_, err = list(-1, "")
-		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		// A size of 0 or less gives the default size (the shared pageSize rule of the org reads).
+		neg, err := list(-1, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(agentIDs(neg.GetAgents())).To(Equal(want))
 
 		By("a summary token is not a list token")
 		sum, err := owner.agents.ListAgentSummaries(ctx, &agentv1alpha1.ListAgentSummariesRequest{OrgId: org, PageSize: 1})
