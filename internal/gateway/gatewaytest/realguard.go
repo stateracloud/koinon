@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/sinkclass"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -43,6 +44,7 @@ type RealGuard struct {
 	Agent store.Agent
 
 	svc   *mcpservers.Service
+	ids   map[string]string // server name to ID, for Declare
 	port  int
 	srv   *grpc.Server
 	local *mcpguard.GatewayGuard
@@ -78,6 +80,7 @@ func (g *RealGuard) Server(ctx context.Context, name string, srv *httptest.Serve
 	GinkgoHelper()
 	s, err := g.svc.Create(ctx, g.Org, audit.System("koinon-test:realguard"), g.User, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
 	Expect(err).NotTo(HaveOccurred())
+	g.ids[name] = s.ID
 	published := publishedTools(ctx, srv)
 	var listed []mcpservers.ListedTool
 	for _, t := range tools {
@@ -92,6 +95,25 @@ func (g *RealGuard) Server(ctx context.Context, name string, srv *httptest.Serve
 		Expect(err).NotTo(HaveOccurred())
 	}
 	_, err = g.svc.SetDataClass(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: append([]string{}, legs...)})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// Declare sets the declaration of one tool of the org's server, as an admin does after review
+// (ADR 0091 decision 3): its sink class, how the class is derived and its address arguments.
+func (g *RealGuard) Declare(ctx context.Context, server, tool string, d sinkclass.Declaration) {
+	GinkgoHelper()
+	id, ok := g.ids[server]
+	Expect(ok).To(BeTrue(), "no server %q: call Server first", server)
+	tools, err := g.svc.Tools(ctx, g.Org, id)
+	Expect(err).NotTo(HaveOccurred())
+	var hash string
+	for _, t := range tools {
+		if t.Name == tool {
+			hash = t.ContentHash
+		}
+	}
+	Expect(hash).NotTo(BeEmpty(), "the server %q has no tool %q", server, tool)
+	_, err = g.svc.SetToolDeclaration(ctx, g.Org, audit.System("koinon-test:realguard"), id, tool, hash, d)
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -167,7 +189,7 @@ func startRealGuard(ctx context.Context) *RealGuard {
 	Expect(err).NotTo(HaveOccurred())
 
 	g := &RealGuard{
-		Pool: pool, Org: org, User: user, Slug: slug, Agent: agent, srv: grpc.NewServer(),
+		Pool: pool, Org: org, User: user, Slug: slug, Agent: agent, srv: grpc.NewServer(), ids: map[string]string{},
 		svc: mcpservers.New(pool, secretstoretest.Keyring(), nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 	}
 	guard := mcpguard.New(pool, mcpguard.Options{
