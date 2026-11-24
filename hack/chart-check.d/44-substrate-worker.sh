@@ -72,7 +72,11 @@ if grep -Eq 'persistentVolumeClaim|has\(v.csi\)|has\(v.nfs\)|has\(v.secret\)' <<
 grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected serviceAccountToken must be denied for worker pods"
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 if grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods"; then fail "the namespace must have no capability ceiling: only the pinned worker shape adds capabilities"; fi
-grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods" || fail "with no worker image no container is a worker container (fail closed)"
+# The default pool's pinned image is a worker image (issue #1089); with the pool off and no workerShapes image, no container is.
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [\"ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0\"])" <<<"$(tr -d '\134' <<<"$wpods")" || fail "the default pool image is the one worker image"
+nopool=(--set execution.substrate.workerPool.enabled=false)
+wpods0=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${nopool[@]}" "${pol[@]}" | tr -d '\134')")
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods0" || fail "with no worker image no container is a worker container (fail closed)"
 grep -Fq 'object.spec.initContainers.map(c, c.name)' <<<"$wpods" || fail "an init container named worker must never be the worker container"
 [[ $(grep -c "c.name == 'worker' && !('worker' in variables.initNames)" <<<"$wpods") -eq 3 ]] || fail "all three worker-container rules must exclude an init container named worker"
 # m1: the comment filter keeps a code line that holds '#' and drops only comment lines.
@@ -107,7 +111,7 @@ has "the node agent ServiceAccount is configurable" 'object.spec.serviceAccountN
 has "the node agent hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.nodeAgent.allowedHostPaths={/dev/kvm}' "${pol[@]}"
 # The capability set follows the class of the worker image (issue #1176): a gVisor image gets the gVisor set only.
 wimg=(--set 'execution.substrate.workerPolicy.workerShapes.gvisor.images={registry.example/g@sha256:aaaa}' --set 'execution.substrate.workerPolicy.workerShapes.microvm.images={registry.example/m@sha256:bbbb}')
-cls=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${wimg[@]}" "${pol[@]}" | tr -d '\134')")
+cls=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${nopool[@]}" "${wimg[@]}" "${pol[@]}" | tr -d '\134')")
 grep -Fq 'c.image in ["registry.example/g@sha256:aaaa"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"])' <<<"$cls" || fail "a gVisor image must get the gVisor capability set only"
 grep -Fq 'c.image in ["registry.example/m@sha256:bbbb"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"])' <<<"$cls" || fail "a micro-VM image must get the micro-VM capability set only"
 grep -Fq 'c.image in ["registry.example/g@sha256:aaaa","registry.example/m@sha256:bbbb"])' <<<"$cls" || fail "the worker images of both classes are worker images"
@@ -299,15 +303,29 @@ has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
 lacks "the NetworkPolicies are off when disabled" 'name: koinon-substrate-(workers|control)' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 
-# WorkerPool (Substrate v1.0.0 WorkerPoolSpec): off by default; workerImage is required; one sandbox
-# class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
+# WorkerPool (Substrate v1.0.0 WorkerPoolSpec): on by default with the substrate driver (issue #1089), with the pinned
+# worker image of its class and a small size; one sandbox class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
 # The pool and its ServiceAccount are in the worker namespace, and the template names the chart
 # ServiceAccount (automountServiceAccountToken false), because the controller's own ateworker ServiceAccount
 # leaves the field unset.
 wp=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)
-lacks "no WorkerPool by default" 'kind: WorkerPool' "${wsub[@]}"
-if render "${wsub[@]}" --set execution.substrate.workerPool.enabled=true >/dev/null 2>"$out/sub.err"; then fail "a WorkerPool without workerImage must not render"; fi
-grep -q 'workerImage' "$out/sub.err" || fail "the missing-image error must name workerImage"
+has "a WorkerPool by default with the substrate driver" 'kind: WorkerPool' "${wsub[@]}" "${pool[@]}"
+lacks "no WorkerPool when it is off" 'kind: WorkerPool' "${wsub[@]}" "${nopool[@]}"
+lacks "no worker ServiceAccount when it is off" 'koinon-gvisor-worker' "${wsub[@]}" "${nopool[@]}"
+lacks "no WorkerPool with the openshell driver even when it is on" 'kind: WorkerPool' --set execution.substrate.workerPool.enabled=true
+has "the default pool runs the pinned gvisor worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" "${pool[@]}"
+has "the default microvm pool runs the pinned microvm worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-microvm:v1.0.0$' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
+has "the pinned worker image follows the registry mirrors" 'workerImage: mirror.example/gh/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" --set 'global.registryMirrors.ghcr\.io=mirror.example/gh' "${pool[@]}"
+# The size: one replica that requests 500m CPU and 1Gi (limits 2 CPU, 4Gi); every value is settable.
+sized=$(render "${wsub[@]}" "${pool[@]}")
+grep -Eq '^  replicas: 1$' <<<"$sized" || fail "the default pool has one replica"
+grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ' | grep -Fq 'limits:cpu:"2"memory:4Girequests:cpu:500mmemory:1Gi' || fail "the default pool size is 500m/1Gi requests and 2/4Gi limits"
+has "replicas is the size value" '^  replicas: 3$' "${wsub[@]}" --set execution.substrate.workerPool.replicas=3 "${pool[@]}"
+has "the resources are settable" 'memory: 6Gi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=6Gi "${pool[@]}"
+lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
+if render "${wsub[@]}" --set execution.substrate.workerPool.resources.requests=null "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "resources without requests must not render"; fi
+grep -q 'both requests and limits' "$out/sub.err" || fail "the resources error must ask for both requests and limits"
+if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@]}" >/dev/null 2>&1; then fail "zero replicas must not render (switch the pool off instead)"; fi
 has "the default WorkerPool" 'kind: WorkerPool' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
 pooldocs=$(render "${wsub[@]}" "${wp[@]}" "${pool[@]}")
 grep -Eq 'namespace: "ate-workers"' <<<"$pooldocs" || fail "the WorkerPool must be in the worker namespace"

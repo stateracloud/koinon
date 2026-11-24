@@ -466,11 +466,19 @@ Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6)
 WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
 controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
 
+- The chart creates the default WorkerPool (issue #1089). It is on by default with `execution.driver: substrate`.
+  `koinon-api substrate install` and ate-setup create no pool. `helm upgrade` changes the pool, and `helm uninstall`
+  removes it. The default pool is `koinon-gvisor`: one replica of the pinned worker image
+  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory, with
+  limits of 2 CPU and 4Gi. The pool needs one node that runs the gvisor class with this much free. Change the size
+  with `workerPool.replicas` and `workerPool.resources`. Set `workerPool.sandboxClass: microvm` for a microVM pool
+  (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
+  exist before `helm install`, so install Substrate first.
 - The chart sets resource limits in the worker namespace (`execution.substrate.workerLimits`, on by default). A
   LimitRange gives a container with no requests or limits the defaults (500m CPU and 1Gi memory as requests, 8 CPU
   and 16Gi as limits). A ResourceQuota caps the namespace at 20 pods, 64 CPU and 128Gi of requests, and 128 CPU and
   256Gi of limits. A pod over the quota is refused. These defaults suit a small pool. A worker pod hosts many
-  sandboxes, so for a real pool set `workerPool.spec.template.resources` with both requests and limits (a pod with
+  sandboxes, so for a real pool set `workerPool.resources` with both requests and limits (a pod with
   requests above the default limit and no limit is refused), and raise `workerLimits.quota.hard`. The quota also
   counts the old pod during a rollout, so keep room for the replicas plus the surge. To remove a key, set it to
   `null`: an empty map keeps the defaults.

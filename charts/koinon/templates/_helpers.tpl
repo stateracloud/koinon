@@ -527,6 +527,26 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- end }}
 
 {{/*
+koinon.substrate.workerPoolImage: the worker image of the WorkerPool that the chart makes, after the registry mirrors
+(koinon.imageRef), or "" when the chart makes no pool. An empty workerPool.workerImage takes the worker image of the
+pinned Substrate release for the pool's class: <repository>/ateworker-<class>:<version>. The pin is the one of
+internal/preflight/substratepin.go (SubstratePinnedImageRepo, SubstratePinnedVersion); test/chartsmoke fails when the two
+differ. Substrate v1.0.0 publishes tags only (see workerPolicy.digestExemptIdentities); pin a digest in workerImage.
+*/}}
+{{- define "koinon.substrate.pinnedImageRepo" -}}ghcr.io/agent-substrate/substrate{{- end }}
+{{- define "koinon.substrate.pinnedVersion" -}}v1.0.0{{- end }}
+{{- define "koinon.substrate.workerPoolImage" -}}
+{{- $p := .Values.execution.substrate.workerPool -}}
+{{- if and (eq (include "koinon.substrate" .) "true") $p.enabled -}}
+{{- $img := $p.workerImage -}}
+{{- if not $img -}}
+{{- $img = printf "%s/ateworker-%s:%s" (include "koinon.substrate.pinnedImageRepo" .) $p.sandboxClass (include "koinon.substrate.pinnedVersion" .) -}}
+{{- end -}}
+{{- include "koinon.imageRef" (list . $img) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 koinon.narrowCIDR fails the render when a CIDR of workerNetworkPolicy.imageSource.cidrs is wider than one image source
 needs (issue #1176). The rule reads the prefix length, so every spelling of a range is caught (0.0.0.0/0, 0.0.0.0/1,
 1.0.0.0/8, ::/0, 0::/0, 2000::/3):

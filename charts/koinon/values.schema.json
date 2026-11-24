@@ -896,6 +896,7 @@
                 "nodeSelector": {"type": "object"},
                 "tolerations": {"type": "array", "maxItems": 16, "items": {"type": "object"}},
                 "serviceAccountName": {"type": "string"},
+                "resources": {"type": "object", "additionalProperties": false, "properties": {"requests": {"type": "object"}, "limits": {"type": "object"}}},
                 "spec": {"type": "object"}
               }
             }
