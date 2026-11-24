@@ -65,19 +65,6 @@ func parseAgentCursor(tok string, withTeam bool) (agentCursor, pgtype.UUID, erro
 	return c, id, nil
 }
 
-// pageSize applies the default and the maximum.
-func pageSize(req int32, def, maxSize int) (int, error) {
-	switch {
-	case req < 0:
-		return 0, connect.NewError(connect.CodeInvalidArgument, "page_size is negative")
-	case req == 0:
-		return def, nil
-	case int(req) > maxSize:
-		return maxSize, nil
-	}
-	return int(req), nil
-}
-
 func tsArg(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
 // ListAgents implements AgentService: one page of the org's agents, oldest first.
@@ -86,10 +73,7 @@ func (s *Server) ListAgents(ctx context.Context, req *agentv1alpha1.ListAgentsRe
 	if err != nil {
 		return nil, err
 	}
-	size, err := pageSize(req.GetPageSize(), agentsMaxPageSize, agentsMaxPageSize)
-	if err != nil {
-		return nil, err
-	}
+	size := pageSize(req.GetPageSize(), agentsMaxPageSize, agentsMaxPageSize)
 	arg := store.ListAgentsPageParams{OrgID: c.org, PageSize: int32(size + 1)} //nolint:gosec // at most agentsMaxPageSize+1
 	if t := req.GetPageToken(); t != "" {
 		cur, id, err := parseAgentCursor(t, false)
@@ -133,10 +117,7 @@ func (s *Server) ListAgentSummaries(ctx context.Context, req *agentv1alpha1.List
 	if err != nil {
 		return nil, err
 	}
-	size, err := pageSize(req.GetPageSize(), agentSummariesDefaultPageSize, agentSummariesMaxPageSize)
-	if err != nil {
-		return nil, err
-	}
+	size := pageSize(req.GetPageSize(), agentSummariesDefaultPageSize, agentSummariesMaxPageSize)
 	now := time.Now()
 	day := budget.DayStart(now)
 	arg := store.ListAgentSummariesParams{
