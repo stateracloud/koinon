@@ -241,7 +241,7 @@ func run(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	// The egress keys and routes load before any listener starts: a bad key directory or route file
 	// stops the start, not a gateway that is half up.
-	eg, egState, err := newEgress(cfg, reg, log)
+	eg, egState, err := newEgress(cfg, reg, log, credScrub.AddFor)
 	if err != nil {
 		return err
 	}
@@ -275,6 +275,11 @@ func run(ctx context.Context, cfg config) error {
 			}
 			// Sealed MCP credentials (mcpv2- files) open with these keys; a refused one is counted.
 			gopts.Credentials = mcpgateway.StaticCredentials{Keys: keys.Keyring, OnOpenFailure: keys.CountFailure}
+			// The forge credentials of the egress routes (forgev2- files, #1086 part C) open with the same
+			// keys. A pod without them refuses every credentialed route (credential_unavailable).
+			if eg != nil {
+				eg.SetCredentials(egress.SealedCredentials{Keys: keys.Keyring, OnOpenFailure: keys.CountFailure})
+			}
 		}
 	}
 	gw := mcpgateway.New(gopts)
@@ -444,7 +449,7 @@ func run(ctx context.Context, cfg config) error {
 // newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
 // returns nil when it does not. It loads the actor token keys and the platform routes, and returns
 // the applier that merges the org routes of each State revision with them.
-func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress.Gateway, *egress.StateRoutes, error) {
+func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub func(org string, values ...string)) (*egress.Gateway, *egress.StateRoutes, error) {
 	if cfg.egressAddr == "" {
 		return nil, nil, nil
 	}
@@ -464,6 +469,8 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress
 		Dial:     policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
 		Metrics:  egress.NewMetrics(reg),
 		Log:      log,
+		// Each credential the gateway attaches is masked in its log lines too.
+		Scrub: scrub,
 	})
 	if err != nil {
 		return nil, nil, err

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
 
@@ -41,13 +42,19 @@ type StateRoutes struct {
 	Platform *route.Table
 }
 
-// ApplyEgress merges org with the platform routes and installs the result.
-func (s StateRoutes) ApplyEgress(_ context.Context, org []route.Route) error {
-	t, err := Merge(s.Platform, org)
+// ApplyEgress merges the org routes of e with the platform routes and installs the result with the
+// credentials of e. A fault in the routes or the credentials installs the platform routes alone.
+func (s StateRoutes) ApplyEgress(_ context.Context, e gateway.EgressState) error {
+	t, err := Merge(s.Platform, e.EgressRoutes)
 	if err != nil {
 		s.Gateway.Apply(s.Platform)
 		return err
 	}
-	s.Gateway.Apply(t)
+	creds, err := route.CheckCredentials(e.EgressRoutes, e.EgressCredentials)
+	if err != nil {
+		s.Gateway.Apply(s.Platform)
+		return fmt.Errorf("egress: the org credentials: %w", err)
+	}
+	s.Gateway.ApplyWithCredentials(t, creds)
 	return nil
 }
