@@ -42,6 +42,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/forgecredfile"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -88,6 +89,14 @@ var Columns = []Column{
 	// Run-trace destination credentials (ADR 0074): the org's, and the platform's single row.
 	{Table: tracedest.DestinationsTable, Column: tracedest.CredentialsColumn},
 	{Table: tracedest.PlatformTable, Column: tracedest.CredentialsColumn},
+}
+
+// Transient lists bindings whose envelopes no table stores, so they are not in Columns and the key
+// commands have no rows of them to read, rewrap or retire. An agent's forge token (#1086 part C,
+// ADR 0097) is minted from its connection and sealed at once to the gateway's recipient key, never to
+// a KEK; the reconciler seals it again when the recipient key changes, so no rotation strands it.
+var Transient = []Column{
+	{Table: forgecredfile.AgentsTable, Column: forgecredfile.TokenColumn},
 }
 
 // singleton is the platform's one-row table: it has no org_id or id, and its binding names the org
