@@ -31,7 +31,7 @@ import (
 
 // substrateImage is pinned by digest: the Substrate driver refuses any other reference. The digest
 // is a fake, the fakeate never pulls.
-const substrateImage = "ghcr.io/stateracloud/koinon/sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+const substrateImage = "registry.example.com/koinon/sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 // The reconciler against the fake Substrate (issue #1245): the spec it renders must be one that the
 // Substrate driver accepts, as the production wiring (execution.WithoutEgress around the driver) gives it.
