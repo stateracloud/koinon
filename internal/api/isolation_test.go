@@ -133,6 +133,17 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.ListAgents(ctx, &agentv1alpha1.ListAgentsRequest{OrgId: org})
 		},
 	},
+	agentv1alpha1connect.AgentServiceListAgentSummariesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.agents.ListAgentSummaries(ctx, &agentv1alpha1.ListAgentSummariesRequest{OrgId: org})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentPlacementProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentPlacement(ctx, &agentv1alpha1.SetAgentPlacementRequest{OrgId: org, AgentId: f.agent.GetId(), Team: "isolation"})
+		},
+	},
 	agentv1alpha1connect.AgentServiceActivateAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{

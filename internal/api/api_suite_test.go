@@ -22,6 +22,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -152,6 +153,8 @@ type envOptions struct {
 	modelChat modelcheck.Chat
 	// settings changes the Settings that Assemble reads, after the suite has filled them.
 	settings func(*apiassembly.Settings)
+	// queryTracer sees every query of the env's own pool (a copy of base's pool with newEnvOn).
+	queryTracer pgx.QueryTracer
 }
 
 // env is one API server on its own database.
@@ -202,6 +205,14 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		e.pool, e.clock = newPool(ctx), &clock{t: time.Now()}
 		e.pwFile = filepath.Join(GinkgoT().TempDir(), "password")
 		Expect(os.WriteFile(e.pwFile, []byte(bootstrapPassword+"\n"), 0o600)).To(Succeed())
+	}
+	if opts.queryTracer != nil {
+		cfg := e.pool.Config()
+		cfg.ConnConfig.Tracer = opts.queryTracer
+		traced, err := pgxpool.NewWithConfig(ctx, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(traced.Close)
+		e.pool = traced
 	}
 
 	var handler http.Handler
