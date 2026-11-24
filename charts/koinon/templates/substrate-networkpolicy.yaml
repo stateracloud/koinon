@@ -17,8 +17,9 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
 - Control-plane namespace: the policy selects the pods whose `app` label is in
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
   which would fail open for a pod that lost its label). They talk to each other and to the worker
-  namespace, resolve names, reach Koinon's gateway and API pods, and reach the Kubernetes API server on
-  workerNetworkPolicy.apiServerPorts (TCP ports, any address: no CNI-neutral API server peer exists; ADR 0120 amendment 10). A pod with another `app` label is not
+  namespace, resolve names and reach Koinon's gateway and API pods. The API server route is NOT in this policy: it
+  is its own policy for workerNetworkPolicy.apiServerApps only (below), so atenet-router and atenet-egress, which
+  carry actor traffic, never get a TCP route to any address. A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
   The other pods of the namespace have their own list each, so no Substrate pod is unfenced: a default-deny egress policy covers every pod of the namespace (so ate-idp-server, postgres
@@ -117,7 +118,6 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
 {{- end }}
@@ -139,6 +139,30 @@ spec:
   podSelector: {}
   policyTypes: [Egress]
   egress: []
+{{- if not $np.apiServerApps }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerApps is empty: the control plane would lose the Kubernetes API server" }}{{- end }}
+---
+# The pods that call the Kubernetes API server (ADR 0120 amendment 10, issue 1172): TCP on apiServerPorts to any
+# address. A separate policy with its own app list, so the actor data path (atenet-router, atenet-egress) is not
+# selected: those pods have no API server client (research note 2026-11-19 R4 lists the kube API for ate-api-server,
+# the controller, atelet and k8s-credential-provider only). Egress rules add up with the control policy. The policy
+# lists no Ingress type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.fullname" $ }}-substrate-api-server
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "koinon.commonLabels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          {{- toYaml $np.apiServerApps | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
 {{- with $np.apiOnlyApps }}
 ---
 # Pods that call the Kubernetes API server and nothing else: DNS and the API server ports. Their ingress is

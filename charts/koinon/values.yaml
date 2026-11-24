@@ -933,7 +933,9 @@ execution:
       # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
       # bucket-init Job (kind/rustfs.yaml:93-133). They get DNS and the object store S3 port only.
       # The ONE image source of the node agent (ADR 0120 section 6, issue 1089): the pods in `apps` (atelet) get egress
-      # to it and to no other registry. Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
+      # to it and to no other registry at the image source rule; atelet can still open TCP on apiServerPorts (443) to any
+      # address, so a TLS registry on 443 is reachable at L3 and only the image rewrite and the SandboxConfig source limit it
+      # (ADR 0120 amendment 10). Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
       # when it runs in another namespace) OR to operator cidrs, with the port. Both set: the render fails. None set:
       # the node agent has no image egress (fail closed), which a cluster that serves images from the node needs.
       # With imageCache.enabled (the default) the chart sets this itself, and setting podSelector or cidrs fails the
@@ -954,7 +956,11 @@ execution:
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
-      # TCP ports of the Kubernetes API server. The pods that call the API server (the controlPlaneApps, the
+      # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Not
+      # atenet-router and atenet-egress (actor data path: no API server client, and a TCP route to any address there
+      # would bypass the gateway's L7 rules at the network layer). Keep a pod out of this list unless it needs it.
+      apiServerApps: [atelet, ate-controller, ate-api-server]
+      # TCP ports of the Kubernetes API server. The pods that call the API server (the apiServerApps, the
       # apiOnlyApps, the podcert controller, Prometheus of otel-system) may open these ports to ANY address, and no
       # worker pod gets this route (ADR 0120 section 2.4 and amendment 10). The rule names no address because
       # NetworkPolicy has no CNI-neutral peer for the API server: an ipBlock for the `kubernetes` Service address
@@ -1004,7 +1010,8 @@ execution:
         app: podcertificate-controller
 
     # The ONE image source of the node agent (issue #1170, ADR 0120 section 6.9). atelet pulls every actor image itself,
-    # and the Substrate namespaces deny internet egress, so atelet reaches one pull-through cache. By default the chart runs
+    # and the Substrate namespaces deny internet egress except the apiServerPorts rule (TCP 443 and 6443 to any address
+    # for the apiServerApps, ADR 0120 amendment 10), so atelet reaches one pull-through cache. By default the chart runs
     # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has internet egress, and
     # atelet checks the manifest and every layer against the digest of the reference, so the cache needs no trust.
     # Actor image references are rewritten to it in the driver (the digest is kept): <cache host>/<upstream host>/<path>.

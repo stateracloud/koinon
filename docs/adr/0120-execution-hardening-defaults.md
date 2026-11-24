@@ -273,7 +273,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 10. **Amendment (issue #1172): the API server route is a port rule.**
    - **Decision.** The fenced control pods that call the Kubernetes API server may open TCP on the ports in
      `execution.substrate.workerNetworkPolicy.apiServerPorts` (default 443 and 6443) to any address. These pods are the
-     `controlPlaneApps` (atelet and the Substrate controllers), the `apiOnlyApps`, the certificate (podcert) controller
+     `apiServerApps` (default atelet, ate-controller and ate-api-server: their own policy, not the control policy), the `apiOnlyApps`, the certificate (podcert) controller
      and the Prometheus of `otel-system`. The rule names no destination. The value `apiServerCIDRs` is removed: an
      `ipBlock` is not a safe peer (below), so a narrowing value would only fail on some CNIs. An operator who wants a
      narrower rule disables the chart fence for a namespace and writes their own, or adds a rule with `extraEgress`.
@@ -287,7 +287,12 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    - **Cost.** A compromised control pod can open a connection to any server on these ports, in the cluster or on the
      internet, not only to the API server. This is wider than the old address rule on a CNI that matched it. What
      stays: the rule is TCP only and covers only the pods named above. Actor and worker pods get no new egress (section
-     2.4 holds). The other routes of the fence are unchanged. The pods still need a valid ServiceAccount token or a
+     2.4 holds). The actor data path pods `atenet-router` and `atenet-egress` are in `controlPlaneApps` but NOT in
+     `apiServerApps`: they have no API server client, so they get no TCP route to any address and their egress to the
+     gateway and API stays the only route out. Items 7 and 9 now hold with one exception: atelet can open TCP 443 to
+     any address, so "no internet egress for atelet" and "one image source" hold at the network layer for other
+     ports only. A TLS registry on 443 is reachable at L3, and only the image rewrite and the `SandboxConfig` source
+     limit atelet to the cache. The other routes of the fence are unchanged. The pods still need a valid ServiceAccount token or a
      client certificate to use the API server, and the API server's own RBAC and the admission policies of item 6
      bind what they can do.
    - **What would replace it.** A peer for the API server that works on every CNI. The Network Policy API

@@ -406,7 +406,7 @@ reads the same nodes.
 ## The image cache
 
 With `execution.driver: substrate` the chart installs a Zot pull-through registry (`execution.substrate.imageCache`,
-on by default; ADR 0120 section 6, item 9). It is the one image source of atelet. Only the cache has internet egress,
+on by default; ADR 0120 section 6, item 9). It is the one image source of atelet. Only the cache has a route to the internet by design,
 and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.io`, `quay.io`) on port 443.
 
 - **The rewrite.** The driver rewrites the registry of every actor image to
@@ -542,9 +542,14 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   the Kubernetes API server. The rule names the ports and no address, because NetworkPolicy has no peer for the API
   server that works on every CNI (ADR 0120 amendment 10, issue #1172). You do not look up an address. Check the API
   server port of your cluster (`kubectl get endpoints kubernetes -n default`) and add it when it is not 443 or 6443.
-  The cost: a compromised control pod can open these ports to any server. Worker pods get no such rule.
+  Only the pods of `workerNetworkPolicy.apiServerApps` (default `atelet`, `ate-controller`, `ate-api-server`), the
+  `apiOnlyApps`, the podcert controller and the otel Prometheus get the rule. `atenet-router` and `atenet-egress` do
+  not, so the actor data path has no TCP route to any address.
+  The cost: a compromised control pod can open these ports to any server. This includes atelet: a TLS registry on
+  port 443 is reachable at L3, and only the image rewrite and the `SandboxConfig` source limit atelet to the one image
+  source. Worker pods get no such rule.
   `test/e2e/kind/apiserver-egress.sh` proves the rule on kind.
-- atelet needs no internet egress when the gVisor tarball comes from the cluster object store. The installer
+- atelet needs no purpose-made internet egress (it still has the TCP 443 API server rule above) when the gVisor tarball comes from the cluster object store. The installer
   stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
   issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.
   The kind check must prove that atelet reads the `s3://` SandboxConfig `koinon-gvisor` with egress denied. After

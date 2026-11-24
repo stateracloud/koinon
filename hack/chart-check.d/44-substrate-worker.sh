@@ -209,7 +209,7 @@ has "the worker namespace is privileged for Pod Security" 'pod-security.kubernet
 
 # NetworkPolicies: standard API only.
 npdocs=$(render "${wsub[@]}" "${np[@]}")
-[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 5 ]] || fail "expected five NetworkPolicies (workers, control plane, default-deny egress, API-only pods, bucket-init Job)"
+[[ $(grep -c '^kind: NetworkPolicy' <<<"$npdocs") == 6 ]] || fail "expected six NetworkPolicies (workers, control plane, default-deny egress, API server pods, API-only pods, bucket-init Job)"
 closed=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-default-deny-egress\n' <<<"$npdocs")
 apionly=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-only\n' <<<"$npdocs")
 grep -Eq '^  podSelector: \{\}$' <<<"$closed" || fail "the default-deny egress policy must cover every pod of the control-plane namespace"
@@ -290,7 +290,15 @@ if grep -Eq 'DoesNotExist|ate.dev/worker-pool' <<<"$control"; then fail "the con
 for a in atelet ate-controller ate-api-server atenet-router atenet-egress; do
 	grep -Eq -- "- $a\$" <<<"$control" || fail "the control policy must list app $a"
 done
-apiport "the control-plane policy" "$control"
+if grep -Eq -- '- ports:|port: (443|6443), protocol: TCP' <<<"$control"; then fail "the control-plane policy must carry no any-address API server rule (atenet-router and atenet-egress would get it; ADR 0120 amendment 10)"; fi
+apisrv=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-server\n' <<<"$npdocs")
+apiport "the API server policy" "$apisrv"
+for a in atelet ate-controller ate-api-server; do
+	grep -Eq -- "- $a\$" <<<"$apisrv" || fail "the API server policy must list app $a"
+done
+for a in atenet-router atenet-egress; do
+	if grep -Eq -- "- $a\$" <<<"$apisrv"; then fail "the API server policy must not select $a (actor data path; no TCP route to any address)"; fi
+done
 grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$control" || fail "the control-plane policy must reach the worker namespace"
 has "the app list is configurable" '- app-x$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps={app-x}' "${np[@]}"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps=null' >/dev/null 2>"$out/sub.err"; then fail "an empty controlPlaneApps must not render"; fi

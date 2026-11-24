@@ -3,7 +3,8 @@
 The in-cluster image cache of the Substrate driver (issue #1170, ADR 0120 section 6.9): a Zot registry that pulls
 through to the upstream registries on demand. It is the ONE image source of the node agent (atelet): atelet pulls every
 actor image itself, the Substrate namespaces deny internet egress, and a NetworkPolicy cannot allow a registry by name.
-Only this pod has egress to the internet. atelet checks the manifest and every layer against the digest of the
+Only this pod has a purpose-made route to the internet; atelet can still open TCP on apiServerPorts (443) to any
+address (ADR 0120 amendment 10), so the image rewrite and the SandboxConfig source limit atelet, not the network. atelet checks the manifest and every layer against the digest of the
 reference, so the cache needs no trust. The driver rewrites the registry host of every actor image to
 <cache host>/<upstream host> and keeps the path, the tag and the digest.
 Renders only with execution.driver=substrate and execution.substrate.imageCache.enabled.
