@@ -25,7 +25,7 @@
 # skipped. FAIL and NOT RUN fail the run; a requirement listed in KOINON_REQUIRE (CI sets it) turns
 # a skip into a failure.
 #
-# Exit codes: 0 ok, 1 failed, 3 incomplete: an expected requirement (docker, git, helm by default;
+# Exit codes: 0 ok, 1 failed, 3 incomplete: an expected requirement (docker, git, helm, volumecopy by default;
 # KOINON_EXPECT overrides, a comma list) was missing, so some suites or specs skipped and the run
 # proved less than it should. Requirements that are not expected are opt-in (e2e, openshell,
 # envtest, ...) and are only listed.
@@ -310,7 +310,7 @@ if ((${#suites[@]} + ${#events[@]})); then
 	# Built, not `go run`: go run reports any non-zero exit of the program as 1, hiding the 3.
 	go build -o "$report_dir/testverdict.bin" ./hack/testverdict || exit 1
 	vrc=0
-	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm}" ${events[@]+"${events[@]}"} ${pflags[@]+"${pflags[@]}"} ${suites[@]+"${suites[@]}"} || vrc=$?
+	"$report_dir/testverdict.bin" -reports "$report_dir" -name go-test -expect "${KOINON_EXPECT:-docker,git,helm,volumecopy}" ${events[@]+"${events[@]}"} ${pflags[@]+"${pflags[@]}"} ${suites[@]+"${suites[@]}"} || vrc=$?
 	rm -f "$report_dir/testverdict.bin"
 	if [[ $vrc == 3 && $rc == 0 ]]; then
 		rc=3

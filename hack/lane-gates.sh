@@ -156,6 +156,12 @@ has_failure() { # <log>
 # <ignore-failures> as the second argument when the exit code already says "missing requirement".
 env_problem() { # <log> [<ignore-failures>]: prints the reason when the log shows one
 	local log=$1
+	# pnpm cannot open its store lock under a sandbox that blocks the store directory. Its own
+	# "Error:" line would read as a failure, but the machine is the problem (#1242).
+	if grep -qF 'ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK' "$log" && grep -qi 'operation not permitted' "$log"; then
+		echo "sandbox denial (pnpm store lock)"
+		return
+	fi
 	if [[ -z ${2:-} ]] && has_failure "$log"; then
 		return
 	fi

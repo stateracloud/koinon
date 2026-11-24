@@ -283,6 +283,16 @@ EOF2
 chmod +x "$tmp/make-vitest"
 out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-vitest" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "vitest failure beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
+# The pnpm store lock denied by a sandbox is notrun, although pnpm prints "Error:" (#1242).
+cat >"$tmp/make-pnpmlock" <<'EOF2'
+#!/usr/bin/env bash
+echo "Error: ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK"
+echo "  Failed to open the store operation lock: Operation not permitted (os error 1)"
+exit 1
+EOF2
+chmod +x "$tmp/make-pnpmlock"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-pnpmlock" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "pnpm store lock denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="sandbox denial \(pnpm store lock\)"'
 # Hooks print a warning.
 run STUB_GATES="go"
 expect "hook warning" 0 'warning: test hook LANE_GATES_PREFLIGHT is set'
