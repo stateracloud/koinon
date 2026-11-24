@@ -406,24 +406,47 @@ func secretToken(ctx context.Context, kubectl, name string) string {
 	return string(raw)
 }
 
-// mcpPath is the MCP path of this install (ADR 0097 decision 5): koinon-gateway when the chart runs it
-// (gateway.mcp.driver=koinon, the koinon-mcp-gateway Deployment exists), else agentgateway, the fallback.
+// mcpPath is one MCP path of this install (ADR 0097 decision 5): koinon-gateway (gateway.mcp.driver=koinon)
+// or agentgateway, the fallback.
 type mcpPath struct {
 	koinon  bool
 	service string
 	port    string
 }
 
+// installMCPPath is the MCP path a client outside the cluster uses: koinon-gateway when the chart runs it
+// (the koinon-mcp-gateway Deployment exists), else agentgateway. The port is read from the Service.
 func installMCPPath(ctx context.Context, kubectl string) mcpPath {
 	GinkgoHelper()
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
 	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "--ignore-not-found",
 		"koinon-mcp-gateway", "-o", "name").CombinedOutput()
 	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-mcp-gateway: %s", out)
+	p := mcpPath{service: "svc/koinon-gateway"}
 	if strings.TrimSpace(string(out)) != "" {
-		return mcpPath{koinon: true, service: "svc/koinon-mcp-gateway", port: "8080"}
+		p = mcpPath{koinon: true, service: "svc/koinon-mcp-gateway"}
 	}
-	return mcpPath{service: "svc/koinon-gateway", port: "8080"}
+	out, err = exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", p.service,
+		"-o", `jsonpath={.spec.ports[?(@.name=="mcp")].port}{.spec.ports[?(@.name=="llm")].port}`).CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get %s: %s", p.service, out)
+	p.port = strings.TrimSpace(string(out))
+	Expect(p.port).NotTo(BeEmpty(), "the MCP port of %s", p.service)
+	return p
+}
+
+// agentMCPPath is the MCP path an agent in a sandbox uses. koinon-agentd gives the agent its MCP URL from
+// its environment, so the path is koinon-gateway exactly when one of those values names the
+// koinon-mcp-gateway Service. Until #1239 moves the agent's MCP URL, it is agentgateway for every driver.
+func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "koinon-agentd",
+		"-o", "jsonpath={.spec.template.spec.containers[*].env[*].value}").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-agentd: %s", out)
+	if strings.Contains(string(out), "koinon-mcp-gateway.") {
+		return mcpPath{koinon: true}
+	}
+	return mcpPath{}
 }
 
 // orgServerAgentHeader is the agent header a server an org registered sees on this path (#1235). Koinon's

@@ -100,7 +100,8 @@ procoduck decided the open points on 2026-10-28.
      Ingress, without authentication.
    - An operator may also mirror both documents to a public bucket. AWS and Entra federation need
      this when the install is not reachable from the internet.
-   - The subject is `koinon:<org>:<agent>`, as in 0043. The SPIFFE form of
+   - The subject is `koinon:<org>:<agent>`, as in 0043, for Koinon's own tool servers. A server an
+     org registered gets a pairwise subject (decision 13). The SPIFFE form of
      [0006](0006-identity-layers.md) stays an alias for a later SPIRE issuer.
 
 2. **Signing keys and rotation.**
@@ -221,8 +222,9 @@ procoduck decided the open points on 2026-10-28.
       pairwise subject in the sense of OpenID Connect Core section 8.1. Two servers get different IDs
       for one agent, so they cannot correlate it. Decision 1's `koinon:<org>:<agent>` stays the subject
       for Koinon's own tool servers.
-    - The Koinon claims that carry an internal ID (`agent`, `run`, `task`, `requested_by`, `approval`)
-      follow the same rule in such a passport: the design of the token service (step 1 of decision 12)
+    - Every Koinon claim that carries an internal ID (`org`, `agent`, `run`, `task`, `requested_by`,
+      `approval`, `on_behalf_of`) and each subject in the `act` chain follow the same rule in such a
+      passport: the design of the token service (step 1 of decision 12)
       makes each one pairwise or leaves it out. Decision 8 (opt-in for third-party servers) is
       unchanged.
 

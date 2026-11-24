@@ -1433,7 +1433,7 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, kubectl, or
 	Expect(got).To(HaveLen(2), "only the two searches that pass reach the server: %+v", got)
 	Expect(got[0].Args).To(MatchJSON(arg(k.CleanQuery)))
 	Expect(got[1].Args).To(MatchJSON(arg(k.BelowQuery)))
-	wantAgent := installMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)
+	wantAgent := agentMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)
 	for _, r := range got {
 		Expect(r.Agent).To(Equal(wantAgent), "the agent header on an org's server (#1235)")
 	}
@@ -1525,7 +1525,7 @@ func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(con
 	got := fetches()[before:]
 	Expect(got).To(HaveLen(1), "only the clean fetch reaches the server: %+v", got)
 	Expect(got[0].Args).To(MatchJSON(arg(k.CleanURL)))
-	Expect(got[0].Agent).To(Equal(installMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)), "the agent header on an org's server (#1235)")
+	Expect(got[0].Agent).To(Equal(agentMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)), "the agent header on an org's server (#1235)")
 
 	By("the URL rule: the canary as hex in one path component is refused on the external-low class, with no approval")
 	Expect(refusedURLRule()-refusedBefore).To(BeNumerically("==", 1), "the guard refused exactly one call by the URL rule")

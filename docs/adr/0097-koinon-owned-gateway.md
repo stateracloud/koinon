@@ -378,9 +378,10 @@ does today, no more (model path at parity, below).
     Backend runs after the target's credential is injected and strips it
     ([research](../research/agentgateway-k8s-crds.md)), and a Backend per org is the Kubernetes-mode
     shape this ADR freezes (decision 4). agentgateway is the fallback driver only, so the gap is
-    accepted there and the e2e suite pins it: an org's fake server sees the agent on the agentgateway
-    path and sees no agent header on Koinon's MCP path (`test/e2e/mcp_test.go`,
-    `test/e2e/quickstart_test.go`).
+    accepted there. The e2e assertions (`test/e2e/mcp_test.go`, `test/e2e/quickstart_test.go`) follow the
+    path the call uses: an org's fake server sees the agent on the agentgateway path and no agent header
+    on Koinon's MCP path. The e2e install runs the Koinon case when koinon-gateway becomes its default
+    (#1239).
 - The ask tier can park a call in the path, so the second `<org>-<server>-ask` target of ADR 0057 item
   7 may fold into the main target (decided in the step 2 design). _(inferred)_
 - The same code runs in every cluster as a plain Deployment and Service, so the standalone/Kubernetes
