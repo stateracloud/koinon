@@ -16,8 +16,8 @@ func showOnly(template string) []string {
 }
 
 // The Substrate driver's worker namespace (issue #1089): with execution.driver=substrate the chart
-// renders the worker Namespace, the ValidatingAdmissionPolicies and the five NetworkPolicies (workers, control
-// plane, default-deny egress, API-only pods, bucket-init Job) next to the components that the smoke suite starts. They are objects for the API server, not
+// renders the worker Namespace, the ValidatingAdmissionPolicies and the seven NetworkPolicies (workers, control
+// plane, default-deny egress, API server ports, API-only pods, bucket-init Job, image source) next to the components that the smoke suite starts. They are objects for the API server, not
 // containers, so this spec renders the chart and checks that each of them reaches the manifest. It needs
 // helm and no Docker. The policies themselves run against a real API server in test/escape
 // (make test-admission).
@@ -30,7 +30,18 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicy", 5))
 		Expect(policy.Ignored).To(HaveKeyWithValue("ValidatingAdmissionPolicyBinding", 5))
 		netpol := helmRenderWith(ctx, values, showOnly("templates/substrate-networkpolicy.yaml")...)
-		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 6))
+		// Seven policies, asserted by name so that a later extra policy fails with its name in the message.
+		// substrate-api-server is the ports-only rule for the Kubernetes API server (issue #1172).
+		Expect(netpol.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
+		Expect(netpol.IgnoredNames["NetworkPolicy"]).To(ConsistOf(
+			"koinon-substrate-workers",
+			"koinon-substrate-control",
+			"koinon-substrate-default-deny-egress",
+			"koinon-substrate-api-server",
+			"koinon-substrate-api-only",
+			"koinon-substrate-bucket-init",
+			"koinon-substrate-image-source",
+		))
 		// The fence of otel-system and podcertificate-controller-system and the telemetry route (issue #1172): seven policies.
 		fence := helmRenderWith(ctx, values, showOnly("templates/substrate-fence-networkpolicy.yaml")...)
 		Expect(fence.Ignored).To(HaveKeyWithValue("NetworkPolicy", 7))
@@ -43,7 +54,7 @@ var _ = Describe("substrate worker namespace", func() {
 	})
 
 	// The default image cache (issue #1170): atelet's one image source is a Zot pull-through registry in
-	// Koinon's namespace. The sixth worker NetworkPolicy above is the image-source rule that selects it.
+	// Koinon's namespace. The image-source worker NetworkPolicy above is the image-source rule that selects it.
 	It("renders the in-cluster image cache by default", func(ctx SpecContext) {
 		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
 		cache := helmRenderWith(ctx, values, showOnly("templates/substrate-imagecache.yaml")...)
