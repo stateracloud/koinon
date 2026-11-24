@@ -1784,8 +1784,10 @@ var _ = Describe("Reconciler", func() {
 			mg.mu.Unlock()
 			// The follower applies to a gateway of its own, so each count below belongs to one
 			// reconciler. The new leader can run more than one pass: each NOTIFY on the reconcile
-			// channel starts one, and the suite's database keeps the rows of earlier specs, which the
-			// new leader's pass and the prober act on (issue 1188).
+			// channel starts one. A NOTIFY can come from a row write of any spec that shares the
+			// suite's database, from the ledger, or from a reconciler itself at the end of a key
+			// settle (notifySelf, #249). A count of all passes is thus not a check of the cancel
+			// (issue 1188).
 			follower := &fakeModelGateway{}
 			run(newReconcilerWith(follower))
 			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
@@ -1806,12 +1808,12 @@ var _ = Describe("Reconciler", func() {
 			// applyTimes records the start of an Apply and appliedCount its end, so the new leader's
 			// pass can have started and not yet finished (#861): wait for the finish.
 			Eventually(follower.appliedCount).Should(BeNumerically(">=", 1), "the new leader's pass finished")
-			// A wake-up starts one more pass of the new leader, as a NOTIFY from a row of an earlier
-			// spec can. The spec makes this happen in every run, so the extra pass is not left to timing.
+			// A wake-up starts one more pass of the new leader. The spec makes this happen in every
+			// run, so the checks below always see an extra pass and do not depend on timing.
 			before := follower.appliedCount()
 			_, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", reconciler.NotifyChannel)
 			Expect(err).NotTo(HaveOccurred())
-			Eventually(follower.appliedCount).WithTimeout(racescale.D(2*time.Second)).Should(BeNumerically(">", before), "the wake-up started a pass")
+			Eventually(follower.appliedCount).WithTimeout(racescale.D(2*time.Second)).Should(BeNumerically(">", before), "the new leader ran another pass")
 			// The old pass was cancelled and never adds to the count, and the old reconciler starts no
 			// other Apply: it waits for the lock again.
 			Consistently(func(g Gomega) {
