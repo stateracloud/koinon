@@ -9,11 +9,13 @@
 // role in that org (platform admins hold every role); every query is scoped
 // to it, so an ID from another org is simply not found. Roles per RPC:
 //
-//	viewer  Get*, List*, WatchRun
+//	viewer  Get*, List*, WatchRun (OrgService.ListMembers included)
 //	member  CreateAgentFromTemplate, CreateTask, AppendMessage, CancelTask, CancelRun
 //	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent, SetAgentPlacement,
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
+//
+// PlatformService (ListOrgs, GetOrg) is for platform admins only: an org role does not count.
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
 // probed; a member without the required role gets PermissionDenied.
@@ -50,8 +52,10 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1/orgv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1/platformv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
@@ -278,6 +282,8 @@ func (s *Server) Register(server *connect.Server) {
 	orgsettingsv1alpha1connect.RegisterOrgSettingsServiceHandler(server, s)
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
+	platformv1alpha1connect.RegisterPlatformServiceHandler(server, s)
+	orgv1alpha1connect.RegisterOrgServiceHandler(server, s)
 }
 
 var (
@@ -296,6 +302,8 @@ var (
 	_ outwardv1alpha1connect.OutwardServiceHandler         = (*Server)(nil)
 	_ orgsettingsv1alpha1connect.OrgSettingsServiceHandler = (*Server)(nil)
 	_ auditv1alpha1connect.AuditServiceHandler             = (*Server)(nil)
+	_ platformv1alpha1connect.PlatformServiceHandler       = (*Server)(nil)
+	_ orgv1alpha1connect.OrgServiceHandler                 = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

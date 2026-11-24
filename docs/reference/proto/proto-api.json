@@ -12942,6 +12942,162 @@
       ]
     },
     {
+      "name": "koinon.org.v1alpha1",
+      "files": [
+        "koinon/org/v1alpha1/org.proto"
+      ],
+      "services": [
+        {
+          "name": "OrgService",
+          "fullName": "koinon.org.v1alpha1.OrgService",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "OrgService reads the org itself for its members (ADR 0126). Every role may call it. A platform\nadmin may call it for any org (ADR 0126 section 4: the UI shows the \"acting as platform admin\"\nbanner when the admin is not a member). It reads only.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "ListMembers",
+              "description": "ListMembers lists the users with an effective role in the org, by display name. The org's\nidentity mode applies, as for WhoAmI (ADR 0004). It is the data for \"reports to a person\".",
+              "requestType": "koinon.org.v1alpha1.ListMembersRequest",
+              "responseType": "koinon.org.v1alpha1.ListMembersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "ListMembersRequest",
+          "fullName": "koinon.org.v1alpha1.ListMembersRequest",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "page_size",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is 100 by default and at most 500."
+            },
+            {
+              "name": "page_token",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page."
+            }
+          ]
+        },
+        {
+          "name": "ListMembersResponse",
+          "fullName": "koinon.org.v1alpha1.ListMembersResponse",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "members",
+              "number": 1,
+              "type": "koinon.org.v1alpha1.Member",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
+          "name": "Member",
+          "fullName": "koinon.org.v1alpha1.Member",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "Member is one user of the org with the user's effective role.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "user_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "role",
+              "number": 3,
+              "type": "koinon.auth.v1alpha1.OrgRole",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "enums": [
+        {
+          "name": "OrgKind",
+          "fullName": "koinon.org.v1alpha1.OrgKind",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "OrgKind mirrors the org_kind enum in Postgres.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "ORG_KIND_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ORG_KIND_PERSONAL",
+              "number": 1,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ORG_KIND_TEAM",
+              "number": 2,
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "koinon.orgsettings.v1alpha1",
       "files": [
         "koinon/orgsettings/v1alpha1/orgsettings.proto"
@@ -13622,12 +13778,248 @@
           "name": "PlatformService",
           "fullName": "koinon.platform.v1alpha1.PlatformService",
           "file": "koinon/platform/v1alpha1/platform.proto",
-          "description": "PlatformService is the first Koinon API surface. It has no methods yet;\nit exists so code generation and `buf breaking` run from day one.",
+          "description": "PlatformService is the platform console's face of the install (ADR 0126 section 4). Every call is\nfor a platform admin only; any other caller gets PermissionDenied. It reads only: create, update,\narchive and delete of an org need a decision first (ADR 0126 section 7).",
           "deprecated": false,
-          "methods": []
+          "methods": [
+            {
+              "name": "GetOrg",
+              "description": "GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the\n\"acting as platform admin\" banner (ADR 0126 section 4).",
+              "requestType": "koinon.platform.v1alpha1.GetOrgRequest",
+              "responseType": "koinon.platform.v1alpha1.GetOrgResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListOrgs",
+              "description": "ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are\nleft out unless include_personal is set.",
+              "requestType": "koinon.platform.v1alpha1.ListOrgsRequest",
+              "responseType": "koinon.platform.v1alpha1.ListOrgsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
         }
       ],
-      "messages": [],
+      "messages": [
+        {
+          "name": "GetOrgRequest",
+          "fullName": "koinon.platform.v1alpha1.GetOrgRequest",
+          "file": "koinon/platform/v1alpha1/platform.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgResponse",
+          "fullName": "koinon.platform.v1alpha1.GetOrgResponse",
+          "file": "koinon/platform/v1alpha1/platform.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgSummary",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "month_start",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from."
+            }
+          ]
+        },
+        {
+          "name": "ListOrgsRequest",
+          "fullName": "koinon.platform.v1alpha1.ListOrgsRequest",
+          "file": "koinon/platform/v1alpha1/platform.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "include_personal",
+              "number": 1,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the personal orgs."
+            },
+            {
+              "name": "page_size",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is 50 by default and at most 200."
+            },
+            {
+              "name": "page_token",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, with the same include_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListOrgsResponse",
+          "fullName": "koinon.platform.v1alpha1.ListOrgsResponse",
+          "file": "koinon/platform/v1alpha1/platform.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "orgs",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgSummary",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            },
+            {
+              "name": "month_start",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from."
+            }
+          ]
+        },
+        {
+          "name": "OrgSummary",
+          "fullName": "koinon.platform.v1alpha1.OrgSummary",
+          "file": "koinon/platform/v1alpha1/platform.proto",
+          "description": "OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way\nBudgetService writes them.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "kind",
+              "number": 4,
+              "type": "koinon.org.v1alpha1.OrgKind",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "member_count",
+              "number": 5,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "member_count counts the users with an effective role in the org (its identity mode applies, as\nfor WhoAmI)."
+            },
+            {
+              "name": "agent_count",
+              "number": 6,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent_count counts the agents that are not archived."
+            },
+            {
+              "name": "spent_this_month_usd",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "spent_this_month_usd is the recorded spend since month_start of the response: every charge of\nthe org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it."
+            },
+            {
+              "name": "monthly_cap_usd",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "monthly_cap_usd is the org's monthly budget; empty when the org has none."
+            },
+            {
+              "name": "platform_ceiling_usd",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none."
+            },
+            {
+              "name": "created_at",
+              "number": 10,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ],
       "enums": []
     },
     {

@@ -25,8 +25,10 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1/orgv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1/platformv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
@@ -62,6 +64,8 @@ type client struct {
 	leakguard    leakguardv1alpha1connect.LeakGuardServiceClient
 	orgsettings  orgsettingsv1alpha1connect.OrgSettingsServiceClient
 	outward      outwardv1alpha1connect.OutwardServiceClient
+	platform     platformv1alpha1connect.PlatformServiceClient
+	orgs         orgv1alpha1connect.OrgServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -82,6 +86,8 @@ func newClient(b *browser) *client {
 		leakguard:    leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
 		orgsettings:  orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
 		outward:      outwardv1alpha1connect.NewOutwardServiceClient(cc),
+		platform:     platformv1alpha1connect.NewPlatformServiceClient(cc),
+		orgs:         orgv1alpha1connect.NewOrgServiceClient(cc),
 	}
 }
 
@@ -261,8 +267,10 @@ type orgFixture struct {
 	owner *client
 	agent *agentv1alpha1.Agent
 	draft *agentv1alpha1.Agent // set by newIsolationFixture
-	task  *taskv1alpha1.Task
-	run   *runv1alpha1.Run
+	// viewer is a second member of the org; set by newIsolationFixture.
+	viewer *client
+	task   *taskv1alpha1.Task
+	run    *runv1alpha1.Run
 	// connection and appKey are set by newIsolationFixture.
 	connection string
 	appKey     []byte

@@ -4,8 +4,72 @@ syntax = "proto3";
 
 package koinon.platform.v1alpha1;
 
+import "google/protobuf/timestamp.proto";
+import "koinon/org/v1alpha1/org.proto";
+
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1";
 
-// PlatformService is the first Koinon API surface. It has no methods yet;
-// it exists so code generation and `buf breaking` run from day one.
-service PlatformService {}
+// PlatformService is the platform console's face of the install (ADR 0126 section 4). Every call is
+// for a platform admin only; any other caller gets PermissionDenied. It reads only: create, update,
+// archive and delete of an org need a decision first (ADR 0126 section 7).
+service PlatformService {
+  // ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are
+  // left out unless include_personal is set.
+  rpc ListOrgs(ListOrgsRequest) returns (ListOrgsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the
+  // "acting as platform admin" banner (ADR 0126 section 4).
+  rpc GetOrg(GetOrgRequest) returns (GetOrgResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
+// BudgetService writes them.
+message OrgSummary {
+  string org_id = 1;
+  string slug = 2;
+  string display_name = 3;
+  koinon.org.v1alpha1.OrgKind kind = 4;
+  // member_count counts the users with an effective role in the org (its identity mode applies, as
+  // for WhoAmI).
+  int32 member_count = 5;
+  // agent_count counts the agents that are not archived.
+  int32 agent_count = 6;
+  // spent_this_month_usd is the recorded spend since month_start of the response: every charge of
+  // the org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it.
+  string spent_this_month_usd = 7;
+  // monthly_cap_usd is the org's monthly budget; empty when the org has none.
+  string monthly_cap_usd = 8;
+  // platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none.
+  string platform_ceiling_usd = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListOrgsRequest {
+  // include_personal also lists the personal orgs.
+  bool include_personal = 1;
+  // page_size is 50 by default and at most 200.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page, with the same include_personal.
+  string page_token = 3;
+}
+
+message ListOrgsResponse {
+  repeated OrgSummary orgs = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+  // month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from.
+  google.protobuf.Timestamp month_start = 3;
+}
+
+message GetOrgRequest {
+  string org_id = 1;
+}
+
+message GetOrgResponse {
+  OrgSummary org = 1;
+  // month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from.
+  google.protobuf.Timestamp month_start = 2;
+}
