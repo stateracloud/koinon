@@ -1,11 +1,21 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* shadcn/ui theme (new-york, neutral), as written by `shadcn init` for Tailwind v4. */
+/* Koinon theme (ADR 0126 sections 1 and 2): role tokens for the dark theme (the default) and the light L2 draft.
+   Components use these names, never a raw Tailwind palette colour. The theme is the `data-theme` attribute on
+   <html> ("dark" or "light"; the theme switch and /theme-init.js set it, see src/lib/theme.ts). Without the
+   attribute the dark values apply. `web/src/lib/contrast.test.ts` reads this file and checks the text pairs. */
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Geist and Geist Mono are variable fonts that the npm packages ship; Vite bundles the files, so the UI loads no
+   font from a network host (ADR 0126 section 1, point 2). Licence: src/assets/fonts/LICENSE-OFL-1.1.txt. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
-@custom-variant dark (&:is(.dark *));
+/* One dark-mode strategy: `dark:` follows data-theme. The old `.dark` class was never set by any code. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -14,6 +24,8 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
@@ -27,56 +39,115 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-divider: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-link: var(--link);
+  --color-attention: var(--attention);
+  --color-attention-foreground: var(--attention-foreground);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-idion: var(--idion);
+  --color-logo-gold: var(--logo-gold);
+  --color-cat-orange: var(--cat-orange);
+  --color-cat-gold: var(--cat-gold);
+  --color-cat-green: var(--cat-green);
+  --color-cat-teal: var(--cat-teal);
+  --color-cat-sky: var(--cat-sky);
+  --color-cat-blue: var(--cat-blue);
+  --color-cat-lavender: var(--cat-lavender);
+  --color-cat-slate: var(--cat-slate);
 }
 
+/* Dark (default). Token map from ADR 0126 to the shadcn names the components use:
+   `border` (ADR: control border, non-text 3:1) is --input; `divider` (ADR: decorative) is --border, because the base
+   layer gives every element `border-border` and most borders are separators. `overlay` is --popover. */
 :root {
+  color-scheme: dark;
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #1c1b29;
+  --foreground: #eaeefe;
+  --card: #302f41;
+  --card-foreground: #eaeefe;
+  --raised: #414053;
+  --overlay: #555468;
+  --popover: #555468;
+  --popover-foreground: #eaeefe;
+  --primary: #cba6f5;
+  --primary-foreground: #1c1b29;
+  --secondary: #414053;
+  --secondary-foreground: #eaeefe;
+  --muted: #414053;
+  --muted-foreground: #acb1cb;
+  --accent: #414053;
+  --accent-foreground: #eaeefe;
+  --destructive: #f38e8e;
+  --destructive-foreground: #1c1b29;
+  --border: #616174;
+  --input: #9090a4;
+  --ring: #d2b3f7;
+  --link: #d2b3f7;
+  --attention: #f7c68c;
+  --attention-foreground: #1c1b29;
+  --warning: #f7c68c;
+  --success: #a7dca1;
+  --danger: #fa9494;
+  --info: #90b7f8;
+  --idion: #8cd6cb;
+  --logo-gold: #f7c68c;
+  --cat-orange: #f6ae84;
+  --cat-gold: #d6c665;
+  --cat-green: #a7dca1;
+  --cat-teal: #8cd6cb;
+  --cat-sky: #48a5c7;
+  --cat-blue: #90b7f8;
+  --cat-lavender: #c4c4fd;
+  --cat-slate: #788597;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    /* The dark destructive is a light red: white on it is under 4.5:1 (WCAG 1.4.3), so text on it is near black. */
-    --destructive-foreground: oklch(0.145 0 0);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-  }
+/* Light L2 "tinted daylight". A DRAFT (ADR 0126 section 1, point 7): the maintainer wants it refined. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #ddddf3;
+  --foreground: #24233c;
+  --card: #f5f6ff;
+  --card-foreground: #24233c;
+  --raised: #fdfdff;
+  --overlay: #ffffff;
+  --popover: #ffffff;
+  --popover-foreground: #24233c;
+  --primary: #6e3ead;
+  --primary-foreground: #ffffff;
+  --secondary: #fdfdff;
+  --secondary-foreground: #24233c;
+  --muted: #fdfdff;
+  --muted-foreground: #555571;
+  --accent: #fdfdff;
+  --accent-foreground: #24233c;
+  --destructive: #b13530;
+  --destructive-foreground: #ffffff;
+  --border: #bbbbd1;
+  --input: #727286;
+  --ring: #65379f;
+  --link: #65379f;
+  --attention: #e3993e;
+  --attention-foreground: #24233c;
+  --warning: #8a5516;
+  --success: #306f35;
+  --danger: #b13530;
+  --info: #2763a8;
+  --idion: #067067;
+  --logo-gold: #9a6200;
+  --cat-orange: #b1512d;
+  --cat-gold: #8c6801;
+  --cat-green: #357339;
+  --cat-teal: #067067;
+  --cat-sky: #3299b4;
+  --cat-blue: #2964aa;
+  --cat-lavender: #483c95;
+  --cat-slate: #313e4f;
 }
 
 @layer base {
@@ -90,7 +161,8 @@
     overflow-wrap: anywhere;
   }
   body {
-    @apply bg-background text-foreground;
-    font-family: system-ui, sans-serif;
+    @apply bg-background text-foreground font-sans;
+    /* Numbers use tabular figures (ADR 0126 section 1, point 2). */
+    font-variant-numeric: tabular-nums;
   }
 }

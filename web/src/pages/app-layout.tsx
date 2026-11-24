@@ -5,7 +5,9 @@ import { useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { Logo } from '@/components/logo'
 import { NoticeBanner } from '@/components/notice-banner'
+import { ThemeSwitch } from '@/components/theme-switch'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -86,14 +88,14 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="bg-card w-full shrink-0 border-b p-3 md:w-56 md:border-r md:border-b-0">
-        <Link to="/" className="mb-2 block px-3 text-lg font-semibold md:mb-4">
-          Koinon
+        <Link to="/" aria-label="Koinon" className="mb-2 block px-3 md:mb-4">
+          <Logo />
         </Link>
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
           <Link to="/" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
             Inbox
             {waiting > 0 && (
-              <span data-testid="inbox-badge" aria-label={`${waiting} waiting on you`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-xs font-semibold text-white">
+              <span data-testid="inbox-badge" aria-label={`${waiting} waiting on you`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-attention text-attention-foreground px-1.5 text-xs font-semibold">
                 {waiting}
               </span>
             )}
@@ -169,6 +171,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <span>{org.orgDisplayName || org.orgSlug}</span>
           )}
           <span className="text-muted-foreground">{who.user?.displayName || who.user?.email}</span>
+          <ThemeSwitch />
           <Button variant="outline" size="sm" onClick={() => void onLogout()} disabled={loggingOut}>
             Log out
           </Button>
