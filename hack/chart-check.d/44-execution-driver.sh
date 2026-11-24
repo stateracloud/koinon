@@ -44,7 +44,8 @@ env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
 # The tiers reach both components: the driver starts no guest process without one (#1088).
 env_is KOINON_SUBSTRATE_DEFAULT_TIER '"dev"' "${sub[@]}"
 has "the default tier is in the reconciler config" 'defaultTier: "dev"' "${sub[@]}" --show-only templates/config.yaml
-tiers=(--set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.runtimeClassTiers.gvisor=hardened)
+# kata=vm needs a microvm pool: the chart refuses the vm tier on the default gvisor pool (ADR 0075, 44-substrate-worker.sh).
+tiers=(--set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.runtimeClassTiers.gvisor=hardened --set execution.substrate.workerPool.sandboxClass=microvm)
 env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"gvisor=hardened,kata=vm"' "${sub[@]}" "${tiers[@]}"
 has "the class tiers are in the reconciler config" '- "kata=vm"' "${sub[@]}" "${tiers[@]}" --show-only templates/config.yaml
 # The class the reconciler puts on every sandbox (openshell.runtimeClassName) always has a tier (#1245).

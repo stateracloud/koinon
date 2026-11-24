@@ -462,7 +462,7 @@ func (c *Checker) checkWorkerPool(ctx context.Context, check, namespace, name st
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("WorkerPool %s/%s not found", namespace, name),
-			Fix:     "create it with the installer step, or set the pool name of this tier in the chart values",
+			Fix:     "the chart creates the default pool (execution.substrate.workerPool); enable it, or set the pool name of this tier in the chart values",
 		}
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("WorkerPool %s/%s", namespace, name), err)

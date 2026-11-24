@@ -72,7 +72,11 @@ if grep -Eq 'persistentVolumeClaim|has\(v.csi\)|has\(v.nfs\)|has\(v.secret\)' <<
 grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected serviceAccountToken must be denied for worker pods"
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 if grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods"; then fail "the namespace must have no capability ceiling: only the pinned worker shape adds capabilities"; fi
-grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods" || fail "with no worker image no container is a worker container (fail closed)"
+# The default pool's pinned image is a worker image (issue #1089); with the pool off and no workerShapes image, no container is.
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [\"ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0\"])" <<<"$wpods" || fail "the default pool image is the one worker image"
+nopool=(--set execution.substrate.workerPool.enabled=false)
+wpods0=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${nopool[@]}" "${pol[@]}" | tr -d '\134')")
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods0" || fail "with no worker image no container is a worker container (fail closed)"
 grep -Fq 'object.spec.initContainers.map(c, c.name)' <<<"$wpods" || fail "an init container named worker must never be the worker container"
 [[ $(grep -c "c.name == 'worker' && !('worker' in variables.initNames)" <<<"$wpods") -eq 3 ]] || fail "all three worker-container rules must exclude an init container named worker"
 # m1: the comment filter keeps a code line that holds '#' and drops only comment lines.
@@ -107,7 +111,7 @@ has "the node agent ServiceAccount is configurable" 'object.spec.serviceAccountN
 has "the node agent hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\]' "${wsub[@]}" --set 'execution.substrate.workerPolicy.nodeAgent.allowedHostPaths={/dev/kvm}' "${pol[@]}"
 # The capability set follows the class of the worker image (issue #1176): a gVisor image gets the gVisor set only.
 wimg=(--set 'execution.substrate.workerPolicy.workerShapes.gvisor.images={registry.example/g@sha256:aaaa}' --set 'execution.substrate.workerPolicy.workerShapes.microvm.images={registry.example/m@sha256:bbbb}')
-cls=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${wimg[@]}" "${pol[@]}" | tr -d '\134')")
+cls=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${nopool[@]}" "${wimg[@]}" "${pol[@]}" | tr -d '\134')")
 grep -Fq 'c.image in ["registry.example/g@sha256:aaaa"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","NET_RAW","SETFCAP"])' <<<"$cls" || fail "a gVisor image must get the gVisor capability set only"
 grep -Fq 'c.image in ["registry.example/m@sha256:bbbb"] && c.securityContext.capabilities.add.all(x, x in ["NET_ADMIN","SYS_ADMIN","SETUID","SETGID","DAC_OVERRIDE","FOWNER","CHOWN","MKNOD","SETFCAP","FSETID","SETPCAP"])' <<<"$cls" || fail "a micro-VM image must get the micro-VM capability set only"
 grep -Fq 'c.image in ["registry.example/g@sha256:aaaa","registry.example/m@sha256:bbbb"])' <<<"$cls" || fail "the worker images of both classes are worker images"
@@ -130,13 +134,13 @@ has "worker hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$wpods" | tail -1)
 grep -Fq 'replicaset-controller' <<<"$tagline" || fail "the digest exemption must default to the platform controllers"
 if grep -Fq 'ate-controller' <<<"$tagline"; then fail "the Substrate controller must not be exempt from the digest rule by default"; fi
-custom=$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}")
+custom=$(render "${wsub[@]}" "${nopool[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}")
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$custom" | tail -1)
 grep -Fq 'system:serviceaccount:x:y' <<<"$tagline" || fail "digestExemptIdentities must set the exemption"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "digestExemptIdentities must replace the default list"; fi
 mkdir -p "$out/values"
 printf 'execution:\n  substrate:\n    workerPolicy:\n      digestExemptIdentities: []\n' >"$out/values/no-exempt.yaml"
-none=$(render "${wsub[@]}" -f "$out/values/no-exempt.yaml" "${pol[@]}")
+none=$(render "${wsub[@]}" "${nopool[@]}" -f "$out/values/no-exempt.yaml" "${pol[@]}")
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$none" | tail -1)
 grep -Fq 'request.userInfo.username in []' <<<"$tagline" || fail "an empty digestExemptIdentities must exempt nobody"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "an empty digestExemptIdentities must not fall back to the platform controllers"; fi
@@ -312,15 +316,67 @@ lacks "no ipBlock for the API server in any Substrate policy" 'ipBlock' "${wsub[
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
 lacks "the NetworkPolicies are off when disabled" 'name: koinon-substrate-(workers|control)' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 
-# WorkerPool (Substrate v1.0.0 WorkerPoolSpec): off by default; workerImage is required; one sandbox
-# class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
+# WorkerPool (Substrate v1.0.0 WorkerPoolSpec): on by default with the substrate driver (issue #1089), with the pinned
+# worker image of its class and a small size; one sandbox class; placement and the pull ServiceAccount live under spec.template; the spec has no imagePullSecrets.
 # The pool and its ServiceAccount are in the worker namespace, and the template names the chart
 # ServiceAccount (automountServiceAccountToken false), because the controller's own ateworker ServiceAccount
 # leaves the field unset.
 wp=(--set execution.substrate.workerPool.enabled=true --set execution.substrate.workerPool.workerImage=registry.example/ateworker-gvisor:v1.0.0)
-lacks "no WorkerPool by default" 'kind: WorkerPool' "${wsub[@]}"
-if render "${wsub[@]}" --set execution.substrate.workerPool.enabled=true >/dev/null 2>"$out/sub.err"; then fail "a WorkerPool without workerImage must not render"; fi
-grep -q 'workerImage' "$out/sub.err" || fail "the missing-image error must name workerImage"
+has "a WorkerPool by default with the substrate driver" 'kind: WorkerPool' "${wsub[@]}" "${pool[@]}"
+lacks "no WorkerPool when it is off" 'kind: WorkerPool' "${wsub[@]}" "${nopool[@]}"
+lacks "no worker ServiceAccount when it is off" 'koinon-gvisor-worker' "${wsub[@]}" "${nopool[@]}"
+lacks "no WorkerPool with the openshell driver even when it is on" 'kind: WorkerPool' --set execution.substrate.workerPool.enabled=true
+has "the default pool runs the pinned gvisor worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" "${pool[@]}"
+has "the default microvm pool runs the pinned microvm worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-microvm:v1.0.0$' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
+has "the pinned worker image follows the registry mirrors" 'workerImage: mirror.example/gh/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" --set 'global.registryMirrors.ghcr\.io=mirror.example/gh' "${pool[@]}"
+# The size: one replica that requests 500m CPU and 1Gi (limits 4 CPU, 8704Mi: the largest sandbox); every value is settable.
+sized=$(render "${wsub[@]}" "${pool[@]}")
+grep -Eq '^  replicas: 1$' <<<"$sized" || fail "the default pool has one replica"
+sizeline=$(grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ')
+grep -Fq 'limits:cpu:"4"memory:8704Mirequests:cpu:500mmemory:1Gi' <<<"$sizeline" || fail "the default pool size is 500m/1Gi requests and 4/8704Mi limits"
+has "replicas is the size value" '^  replicas: 3$' "${wsub[@]}" --set execution.substrate.workerPool.replicas=3 "${pool[@]}"
+has "the resources are settable" 'memory: 10Gi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=10Gi "${pool[@]}"
+lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
+if render "${wsub[@]}" --set execution.substrate.workerPool.resources.requests=null "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "resources without requests must not render"; fi
+grep -q 'both requests and limits' "$out/sub.err" || fail "the resources error must ask for both requests and limits"
+if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "zero replicas must not render (switch the pool off instead)"; fi
+grep -q 'replicas' "$out/sub.err" || fail "the zero-replicas error must name replicas"
+if render "${wsub[@]}" --set execution.substrate.workerPool.spec.template.resources.requests.cpu=4 "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "spec.template.resources must not render (it would merge with the default resources)"; fi
+grep -q 'set execution.substrate.workerPool.resources' "$out/sub.err" || fail "the spec.template.resources error must point to workerPool.resources"
+# Capacity: the worker limits must fit the largest sandbox (sandbox.resources.bounds.*.limit.max). The
+# memory need is the limit plus the 64Mi reserve, plus 4Mi + 8Mi/GiB for microvm: 8256Mi gvisor, 8324Mi microvm.
+capacity_refused() { # capacity_refused <what> <stderr text> <render args...>: the render must fail and name the text
+  local what=$1 text=$2; shift 2
+  if render "$@" >/dev/null 2>"$out/sub.err"; then fail "$what must not render"; return; fi
+  grep -Fq "$text" "$out/sub.err" || fail "$what: the error must say: $text"
+}
+capacity_refused "a worker cpu limit below the sandbox cpu maximum" 'the worker cpu limit 3 (execution.substrate.workerPool.resources.limits.cpu) is below sandbox.resources.bounds.cpu.limit.max 4' "${wsub[@]}" --set-string execution.substrate.workerPool.resources.limits.cpu=3 "${pool[@]}"
+grep -Fq 'or lower sandbox.resources.bounds.cpu.limit.max' "$out/sub.err" || fail "the cpu capacity error must name both values to change"
+capacity_refused "a gvisor worker memory limit below 8256Mi" 'is below 8256Mi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=8255Mi "${pool[@]}"
+has "a gvisor worker memory limit of 8256Mi renders" 'memory: 8256Mi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=8256Mi "${pool[@]}"
+capacity_refused "a microvm worker memory limit below 8324Mi" 'is below 8324Mi' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm --set execution.substrate.workerPool.resources.limits.memory=8323Mi "${pool[@]}"
+has "a microvm worker memory limit of 8324Mi renders" 'memory: 8324Mi' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm --set execution.substrate.workerPool.resources.limits.memory=8324Mi "${pool[@]}"
+has "a lower sandbox maximum allows a smaller worker" 'memory: 2Gi' "${wsub[@]}" --set-string sandbox.resources.bounds.cpu.limit.max=1 --set sandbox.resources.bounds.memory.limit.max=1Gi --set sandbox.resources.bounds.memory.request.max=1Gi --set-string execution.substrate.workerPool.resources.limits.cpu=1 --set execution.substrate.workerPool.resources.limits.memory=2Gi "${pool[@]}"
+has "resources null checks the LimitRange default limits (8 CPU, 16Gi fit)" 'kind: WorkerPool' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
+capacity_refused "resources null with a LimitRange default below the maximum" '(execution.substrate.workerLimits.limitRange.default.cpu) is below' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set-string execution.substrate.workerLimits.limitRange.default.cpu=2 "${pool[@]}"
+capacity_refused "resources null and no workerLimits" 'the worker pods have no cpu limit' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set execution.substrate.workerLimits.enabled=false "${pool[@]}"
+capacity_refused "a cpu limit from the LimitRange next to a pool memory limit" '(execution.substrate.workerLimits.limitRange.default.cpu) is below' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.cpu=null --set-string execution.substrate.workerLimits.limitRange.default.cpu=2 "${pool[@]}"
+# The runtime class label: Substrate copies the WorkerPool labels to its workers, and the substrate driver selects
+# workers on koinon.dev/runtime-class with the runtime class of the sandbox (openshell.runtimeClassName).
+has "the pool carries the runtime class of the sandboxes" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" "${pool[@]}"
+has "the label follows openshell.runtimeClassName" '^    koinon.dev/runtime-class: "gvisor-x"$' "${wsub[@]}" --set openshell.runtimeClassName=gvisor-x --set 'sandboxPolicy.runtimeClasses={gvisor-x}' "${pool[@]}"
+capacity_refused "the vm tier on a gvisor pool" 'the vm tier needs a microVM per sandbox' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=vm "${pool[@]}"
+has "the vm tier on a microvm pool renders" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
+has "the hardened tier on a gvisor pool renders" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=hardened "${pool[@]}"
+long=$(printf 'k%.0s' {1..64})
+capacity_refused "a runtime class that is not a label value" 'is not a valid label value' "${wsub[@]}" --set "openshell.runtimeClassName=$long" --set "sandboxPolicy.runtimeClasses={$long}" "${pool[@]}"
+# The default image is a tag: without the interim exemption of the ReplicaSet controller (#1140) the render fails.
+if render "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "a tag pool image without the digest exemption must not render"; fi
+grep -q 'has no digest' "$out/sub.err" || fail "the digest error must say that the image has no digest"
+has "a digest pool image renders without the exemption" 'workerImage: registry.example/w@sha256:a{64}$' "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' --set "execution.substrate.workerPool.workerImage=registry.example/w@sha256:$(printf 'a%.0s' {1..64})" "${pool[@]}"
+# kubeconform checks the pool against the CRD of the pinned Substrate release (schemas/ate.dev/workerpool_v1.json).
+[[ -s hack/chart-check.d/schemas/ate.dev/workerpool_v1.json ]] || fail "the WorkerPool schema for kubeconform is missing"
+grep -Fq '"sandboxClasses"' hack/chart-check.d/schemas/ate.dev/workerpool_v1.json || fail "the WorkerPool schema must be the WorkerPool CRD"
 has "the default WorkerPool" 'kind: WorkerPool' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
 pooldocs=$(render "${wsub[@]}" "${wp[@]}" "${pool[@]}")
 grep -Eq 'namespace: "ate-workers"' <<<"$pooldocs" || fail "the WorkerPool must be in the worker namespace"

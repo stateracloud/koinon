@@ -3,11 +3,38 @@
 package chartsmoke_test
 
 import (
+	"bytes"
+	"context"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/yaml"
+
+	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/preflight"
 )
+
+// workerPools renders the chart with the values file and extra helm arguments and returns the WorkerPool
+// objects (a CRD kind that helmRenderWith only counts) as plain maps.
+func workerPools(ctx context.Context, valuesFile string, extra ...string) []map[string]any {
+	args := append([]string{"template", release, chartDir, "--namespace", namespace, "-f", valuesFile}, extra...)
+	var out, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, envOr("HELM", "helm"), args...)
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	Expect(cmd.Run()).To(Succeed(), stderr.String())
+	var pools []map[string]any
+	for _, doc := range strings.Split(out.String(), "\n---") {
+		var obj map[string]any
+		Expect(yaml.Unmarshal([]byte(doc), &obj)).To(Succeed())
+		if obj["kind"] == "WorkerPool" {
+			pools = append(pools, obj)
+		}
+	}
+	return pools
+}
 
 // showOnly returns the helm arguments that render one template with the external database values,
 // in a new slice (the shared externalDatabase slice is not changed).
@@ -102,6 +129,37 @@ var _ = Describe("substrate worker namespace", func() {
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {
 		r := helmRender(ctx, filepath.Join(chartDir, "ci", "external-standalone-values.yaml"))
 		Expect(r.Ignored).NotTo(HaveKey("WorkerPool"))
+	})
+
+	// The default WorkerPool (issue #1089): the chart makes it with the Substrate driver, on by default. Its worker
+	// image is the one of the Substrate release that this Koinon release pins (internal/preflight/substratepin.go),
+	// so the chart and the preflight cannot name two releases. Its ServiceAccount is in the worker namespace and
+	// is not applied here.
+	It("renders the default WorkerPool with the pinned worker image and its size", func(ctx SpecContext) {
+		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
+		r := helmRender(ctx, values)
+		Expect(r.Ignored).To(HaveKeyWithValue("WorkerPool", 1))
+		Expect(r.Ignored).To(HaveKeyWithValue("ServiceAccount", 1))
+		pools := workerPools(ctx, values, externalDatabase...)
+		Expect(pools).To(HaveLen(1))
+		// The label that the substrate driver selects workers on, with the runtime class of the sandboxes
+		// (openshell.runtimeClassName, default kata). Substrate copies the WorkerPool labels to its workers.
+		Expect(pools[0]["metadata"]).To(HaveKeyWithValue("labels", HaveKeyWithValue(substrate.RuntimeClassSelector, "kata")))
+		spec := pools[0]["spec"].(map[string]any)
+		Expect(spec["workerImage"]).To(Equal(preflight.SubstratePinnedImageRepo + "/ateworker-gvisor:" + preflight.SubstratePinnedVersion))
+		Expect(spec["replicas"]).To(BeEquivalentTo(1))
+		Expect(spec["template"]).To(HaveKeyWithValue("resources", map[string]any{
+			"requests": map[string]any{"cpu": "500m", "memory": "1Gi"},
+			"limits":   map[string]any{"cpu": "4", "memory": "8704Mi"},
+		}))
+
+		sized := workerPools(ctx, values, append(showOnly("templates/substrate-workerpool.yaml"),
+			"--set", "execution.substrate.workerPool.replicas=3")...)
+		Expect(sized[0]["spec"]).To(HaveKeyWithValue("replicas", BeEquivalentTo(3)))
+
+		off := helmRenderWith(ctx, values, append(append([]string{}, externalDatabase...),
+			"--set", "execution.substrate.workerPool.enabled=false")...)
+		Expect(off.Ignored).NotTo(HaveKey("WorkerPool"))
 	})
 })
 
