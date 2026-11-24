@@ -39,16 +39,18 @@ every worker pod is refused at admission, so refuse the render instead of a pool
 {{- /* Capacity: a worker offers its pod limits (less a memory reserve) to all its actors, and an actor books
 its own limits. A pool whose worker limits are below the largest sandbox the sizing bounds permit never
 places that sandbox. The limits come from workerPool.resources, else from the workerLimits LimitRange
-default; a worker with no limit reports no capacity and places nothing. */}}
+default, per resource. A worker with no limit reports the allocatable of its node, which is shared with
+other pods, so its actors could overbook the node: the chart refuses it. */}}
 {{- $lim := dict }}
 {{- if $s.workerLimits.enabled }}{{- $lim = deepCopy ($s.workerLimits.limitRange.default | default dict) }}{{- end }}
 {{- with $p.resources }}{{- $lim = mergeOverwrite $lim (deepCopy (.limits | default dict)) }}{{- end }}
-{{- $src := ternary "execution.substrate.workerPool.resources.limits" "execution.substrate.workerLimits.limitRange.default" (not (empty $p.resources)) }}
 {{- $bounds := .Values.sandbox.resources.bounds }}
 {{- range $r := list (dict "name" "cpu" "max" (toString $bounds.cpu.limit.max)) (dict "name" "memory" "max" (toString $bounds.memory.limit.max)) }}
 {{- $have := toString (index $lim $r.name | default "") }}
+{{- $src := "execution.substrate.workerLimits.limitRange.default" }}
+{{- if hasKey (dig "limits" dict ($p.resources | default dict)) $r.name }}{{- $src = "execution.substrate.workerPool.resources.limits" }}{{- end }}
 {{- if not $have }}
-{{- fail (printf "execution.substrate.workerPool: the worker pods have no %s limit, so each worker reports no %s capacity and places no sandbox; set execution.substrate.workerPool.resources.limits.%s (at least sandbox.resources.bounds.%s.limit.max)" $r.name $r.name $r.name $r.name) }}
+{{- fail (printf "execution.substrate.workerPool: the worker pods have no %s limit, so each worker reports the %s allocatable of its node, which other pods share, and its sandboxes could overbook the node; set execution.substrate.workerPool.resources.limits.%s (at least sandbox.resources.bounds.%s.limit.max)" $r.name $r.name $r.name $r.name) }}
 {{- end }}
 {{- if $r.max }}
 {{- $hv := include "koinon.quantity" (dict "q" $have "what" (printf "%s.%s" $src $r.name)) | float64 }}
@@ -74,6 +76,12 @@ metadata:
   namespace: {{ $s.workerNamespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
+    {{- /* Substrate v1.0.0 copies the WorkerPool labels to every Worker record (workersync/syncer.go:368), and
+    the substrate driver selects workers on this label with the runtime class of the sandbox
+    (internal/execution/substrate/template.go RuntimeClassSelector). */}}
+    {{- with ($p.runtimeClassName | default .Values.openshell.runtimeClassName) }}
+    koinon.dev/runtime-class: {{ . | quote }}
+    {{- end }}
 spec:
   {{- toYaml (mergeOverwrite $spec ($p.spec | default dict)) | nindent 2 }}
 {{- if and (not $p.serviceAccountName) (not $userSA) }}

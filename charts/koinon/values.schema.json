@@ -893,6 +893,7 @@
                 "replicas": {"type": "integer", "minimum": 1},
                 "workerImage": {"type": "string"},
                 "sandboxClass": {"enum": ["gvisor", "microvm"]},
+                "runtimeClassName": {"type": "string"},
                 "nodeSelector": {"type": "object"},
                 "tolerations": {"type": "array", "maxItems": 16, "items": {"type": "object"}},
                 "serviceAccountName": {"type": "string"},

@@ -472,7 +472,10 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory (the
   idle cost), with limits of 4 CPU and 8704Mi (8.5Gi). The pool needs one node that runs the gvisor class: the node
   scheduler reserves the requests, and the largest sandbox needs 4 CPU and 8.5Gi free on that node. Change the size
-  with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). Set `workerPool.sandboxClass: microvm` for a microVM pool
+  with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). The pool carries the label
+  `koinon.dev/runtime-class` with `workerPool.runtimeClassName` (empty: `openshell.runtimeClassName`, default `kata`).
+  Substrate copies it to the workers, and the substrate driver puts each sandbox only on a worker with the runtime
+  class of the sandbox. Map that class to a tier in `execution.substrate.runtimeClassTiers`. Set `workerPool.sandboxClass: microvm` for a microVM pool
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
   exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
   identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps
@@ -495,9 +498,12 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
     `sandbox.resources.bounds.cpu.limit.max`, memory limit at least `sandbox.resources.bounds.memory.limit.max` plus
     64Mi (plus the microVM overhead for a microVM pool). The chart refuses the render when it does not. The check
     uses `workerPool.resources.limits`, or the `workerLimits` LimitRange default limits when `workerPool.resources`
-    is null. A worker with no limit reports no capacity, so the chart also refuses a pool with no limit.
+    is null (per resource). A worker with no limit reports the allocatable of its node, which other pods share, so
+    its sandboxes could overbook the node: the chart also refuses a pool with no limit. A microVM pool needs a memory
+    limit of at least 8324Mi with the default bounds (8Gi + 64Mi + 4Mi + 8 × 8Mi).
   - To size for N agents that run at the same time, add up their limits. With the default agent (2 CPU, 2Gi), N
-    agents need 2N CPU and 2N Gi in total over all replicas, and each replica also needs 64Mi for the worker. For
+    agents need 2N CPU and 2N Gi in total over all replicas, and each replica also needs 64Mi for the worker. In a
+    microVM pool, each default agent also books 20Mi (4Mi + 2 × 8Mi). For
     example, 8 default agents fit on 2 replicas with limits of 8 CPU and 8256Mi each (4 agents on each), or on 4
     replicas with the default limits of 4 CPU and 8704Mi (2 agents on each). With the default bounds, a replica
     cannot be smaller than 4 CPU and 8256Mi. Every replica adds its requests to the node cost and to the

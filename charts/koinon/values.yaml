@@ -1113,6 +1113,12 @@ execution:
       # The one sandbox class of the pool: gvisor or microvm. It must be a class the Substrate install
       # has (ate-setup --sandbox-classes; the generic platform and kind install gvisor only).
       sandboxClass: gvisor
+      # The runtime class that the pool serves: the chart puts it on the WorkerPool as the label
+      # koinon.dev/runtime-class, and Substrate copies the pool labels to its workers. The substrate driver
+      # gives each sandbox a worker selector on that label with the runtime class of the sandbox
+      # (openshell.runtimeClassName), so a sandbox lands only on a pool with the same value. Empty uses
+      # openshell.runtimeClassName. Map the value to a tier in execution.substrate.runtimeClassTiers.
+      runtimeClassName: ""
       # spec.template.nodeSelector and spec.template.tolerations (at most 16).
       nodeSelector: {}
       tolerations: []

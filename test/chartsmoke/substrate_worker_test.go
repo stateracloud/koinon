@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/yaml"
 
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/preflight"
 )
 
@@ -116,6 +117,9 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(r.Ignored).To(HaveKeyWithValue("ServiceAccount", 1))
 		pools := workerPools(ctx, values, externalDatabase...)
 		Expect(pools).To(HaveLen(1))
+		// The label that the substrate driver selects workers on, with the runtime class of the sandboxes
+		// (openshell.runtimeClassName, default kata). Substrate copies the WorkerPool labels to its workers.
+		Expect(pools[0]["metadata"]).To(HaveKeyWithValue("labels", HaveKeyWithValue(substrate.RuntimeClassSelector, "kata")))
 		spec := pools[0]["spec"].(map[string]any)
 		Expect(spec["workerImage"]).To(Equal(preflight.SubstratePinnedImageRepo + "/ateworker-gvisor:" + preflight.SubstratePinnedVersion))
 		Expect(spec["replicas"]).To(BeEquivalentTo(1))

@@ -346,6 +346,12 @@ has "a lower sandbox maximum allows a smaller worker" 'memory: 2Gi' "${wsub[@]}"
 has "resources null checks the LimitRange default limits (8 CPU, 16Gi fit)" 'kind: WorkerPool' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
 capacity_refused "resources null with a LimitRange default below the maximum" '(execution.substrate.workerLimits.limitRange.default.cpu) is below' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set-string execution.substrate.workerLimits.limitRange.default.cpu=2 "${pool[@]}"
 capacity_refused "resources null and no workerLimits" 'the worker pods have no cpu limit' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set execution.substrate.workerLimits.enabled=false "${pool[@]}"
+capacity_refused "a cpu limit from the LimitRange next to a pool memory limit" '(execution.substrate.workerLimits.limitRange.default.cpu) is below' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.cpu=null --set-string execution.substrate.workerLimits.limitRange.default.cpu=2 "${pool[@]}"
+# The runtime class label: Substrate copies the WorkerPool labels to its workers, and the substrate driver selects
+# workers on koinon.dev/runtime-class with the runtime class of the sandbox (openshell.runtimeClassName).
+has "the pool carries the runtime class of the sandboxes" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" "${pool[@]}"
+has "the label follows openshell.runtimeClassName" '^    koinon.dev/runtime-class: "gvisor-x"$' "${wsub[@]}" --set openshell.runtimeClassName=gvisor-x --set 'sandboxPolicy.runtimeClasses={gvisor-x}' "${pool[@]}"
+has "workerPool.runtimeClassName sets the label" '^    koinon.dev/runtime-class: "other"$' "${wsub[@]}" --set execution.substrate.workerPool.runtimeClassName=other "${pool[@]}"
 # The default image is a tag: without the interim exemption of the ReplicaSet controller (#1140) the render fails.
 if render "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "a tag pool image without the digest exemption must not render"; fi
 grep -q 'has no digest' "$out/sub.err" || fail "the digest error must say that the image has no digest"
