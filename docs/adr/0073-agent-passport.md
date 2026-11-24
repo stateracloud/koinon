@@ -213,8 +213,9 @@ procoduck decided the open points on 2026-10-28.
 13. **A server an org registered gets no agent header, and a pairwise subject** (amendment 2026-11-24,
     [#1235](https://github.com/stateracloud/koinon/issues/1235); [0097](0097-koinon-owned-gateway.md)
     decision 5).
-    - The unsigned agent header goes only to Koinon's own tool servers. A server an org registered
-      (org-run or third-party) never gets it, and no setting turns it on.
+    - On Koinon's MCP path, the unsigned agent header goes only to Koinon's own tool servers. A server an
+      org registered (org-run or third-party) never gets it there, and no setting turns it on. The
+      agentgateway fallback still sends it (0097 decision 5, the fallback gateway).
     - Such a server learns the caller only from a credential signed for that one server: this passport
       (decision 4, one audience) or the server's own sign-in token
       ([0096](0096-mcp-oauth-sign-in.md)).

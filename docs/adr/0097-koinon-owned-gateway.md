@@ -378,9 +378,10 @@ does today, no more (model path at parity, below).
     deletes that path. The render does not change. The driver selects which calls go through
     agentgateway. With driver `agentgateway` (the default until #1239, and the fallback after it), all MCP
     calls go through it. With driver `koinon`, every call through koinon-gateway gets no agent header on an
-    org's server. Until #1239, an agent's own MCP calls, koinon-api's live check of an agent's tools and
-    the reconciler's probe go through agentgateway with both drivers. Thus before #1239, driver `koinon`
-    removes the header only from the calls that a human approved.
+    org's server. Until #1239, an agent's own MCP calls and koinon-api's live check of an agent's tools go
+    through agentgateway with both drivers. Thus before #1239, driver `koinon` removes the header only
+    from the calls that a human approved. The reconciler's probe goes through agentgateway with both
+    drivers; #1239 does not move it. Its header names a probe agent, not a real agent.
   - The reason that the render does not change: in Kubernetes mode, a `transformation` on the one MCP
     route sets the header before agentgateway selects the target, so it cannot leave out one target. A
     `transformation` on the Backend runs after agentgateway injects the target's credential; the one that
