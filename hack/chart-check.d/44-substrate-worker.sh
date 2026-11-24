@@ -8,7 +8,7 @@
 
 wsub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
-	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
+	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
 	# The operator image source paths below; the default in-cluster cache has its own file (45-substrate-imagecache.sh).
 	--set execution.substrate.imageCache.enabled=false)
@@ -217,7 +217,13 @@ grep -Fq 'namespace: "ate-system"' <<<"$closed" || fail "the default-deny egress
 grep -Fq 'egress: []' <<<"$closed" || fail "the default-deny egress policy must deny all egress"
 grep -Fq 'policyTypes: [Egress]' <<<"$closed" || fail "the default-deny egress policy must leave ingress to Substrate's own policies"
 grep -Fq -- '- k8s-credential-provider' <<<"$apionly" || fail "the API-only policy must select k8s-credential-provider"
-grep -Fq 'cidr: "192.0.2.10/32"' <<<"$apionly" || fail "the API-only policy must reach the API server CIDRs"
+apiport() { # apiport <name> <policy doc>: the API server rule is a ports-only rule (no address) on 443 and 6443
+	grep -Fq -- '- ports:' <<<"$2" || fail "$1 must carry the ports-only API server rule"
+	grep -Fq 'port: 443, protocol: TCP' <<<"$2" || fail "$1 must open the API server port 443"
+	grep -Fq 'port: 6443, protocol: TCP' <<<"$2" || fail "$1 must open the API server port 6443"
+	if grep -Fq 'ipBlock' <<<"$2"; then fail "$1 must not name an API server address (no CNI-neutral peer; ADR 0120 amendment 10)"; fi
+}
+apiport "the API-only policy" "$apionly"
 grep -Fq 'policyTypes: [Egress]' <<<"$apionly" || fail "the API-only policy must leave ingress to Substrate's own policies"
 bucket=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-bucket-init\n' <<<"$npdocs")
 grep -Fq 'key: batch.kubernetes.io/job-name' <<<"$bucket" || fail "the bucket-init policy must select the Job pod by Job name"
@@ -284,18 +290,19 @@ if grep -Eq 'DoesNotExist|ate.dev/worker-pool' <<<"$control"; then fail "the con
 for a in atelet ate-controller ate-api-server atenet-router atenet-egress; do
 	grep -Eq -- "- $a\$" <<<"$control" || fail "the control policy must list app $a"
 done
-grep -Fq 'cidr: "192.0.2.10/32"' <<<"$control" || fail "the control-plane policy must carry the API server route"
+apiport "the control-plane policy" "$control"
 grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$control" || fail "the control-plane policy must reach the worker namespace"
 has "the app list is configurable" '- app-x$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps={app-x}' "${np[@]}"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps=null' >/dev/null 2>"$out/sub.err"; then fail "an empty controlPlaneApps must not render"; fi
 grep -q 'controlPlaneApps' "$out/sub.err" || fail "the empty-list error must name controlPlaneApps"
 has "worker NetworkPolicy admits Koinon's namespace" 'kubernetes.io/metadata.name: "koinon"' "${wsub[@]}" "${np[@]}"
-if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs=null' >/dev/null 2>"$out/sub.err"; then fail "an empty apiServerCIDRs must not render"; fi
-grep -q 'apiServerCIDRs' "$out/sub.err" || fail "the empty-CIDR error must name apiServerCIDRs"
+if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerPorts=null' >/dev/null 2>"$out/sub.err"; then fail "an empty apiServerPorts must not render"; fi
+grep -q 'apiServerPorts' "$out/sub.err" || fail "the empty-ports error must name apiServerPorts"
 if render "${wsub[@]}" --set execution.substrate.namespace=substrate-x >/dev/null 2>"$out/sub.err"; then fail "a namespace that differs from gatewayClientNamespaceSelector must not render"; fi
 grep -q 'gatewayClientNamespaceSelector' "$out/sub.err" || fail "the namespace-mismatch error must name gatewayClientNamespaceSelector"
 has "a matching namespace and selector render" 'namespace: "substrate-x"' "${wsub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x "${np[@]}"
-has "the API server rule follows apiServerCIDRs" 'cidr: "10.0.0.1/32"' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={10.0.0.1/32}' "${np[@]}"
+has "the API server rule follows apiServerPorts" 'port: 8443, protocol: TCP' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerPorts={8443}' "${np[@]}"
+lacks "no ipBlock for the API server in any Substrate policy" 'ipBlock' "${wsub[@]}" "${np[@]}"
 lacks "no CNI-specific resource" 'cilium|calico|CiliumNetworkPolicy' "${wsub[@]}" "${np[@]}"
 lacks "the NetworkPolicies are off when disabled" 'name: koinon-substrate-(workers|control)' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 

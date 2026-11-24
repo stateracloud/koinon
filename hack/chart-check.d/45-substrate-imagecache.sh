@@ -8,7 +8,7 @@
 
 isub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
-	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev --set 'execution.substrate.workerNetworkPolicy.apiServerCIDRs={192.0.2.10/32}'
+	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 icache=(--show-only templates/substrate-imagecache.yaml)
 inp=(--show-only templates/substrate-networkpolicy.yaml)

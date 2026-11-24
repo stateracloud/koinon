@@ -521,7 +521,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   in-cluster pull-through cache on this setting.
 - The two other namespaces of the Substrate setup have a NetworkPolicy fence, from the same switch
   (`workerNetworkPolicy.enabled`). `podcertificate-controller-system` has default deny for ingress and egress, and the
-  controller reaches the Kubernetes API server (`apiServerCIDRs`) and nothing else
+  controller reaches the Kubernetes API server (`apiServerPorts`) and nothing else
   (`workerNetworkPolicy.podcertSystem`). `otel-system` has default deny and one policy per app: the collector takes
   OTLP (4317, 4318) from `ate-system` and its read ports (8889, 8888) from Prometheus, and sends traces to Jaeger;
   Jaeger takes OTLP from the collector only; Prometheus reaches DNS, the API server, the collector and the metrics
@@ -538,10 +538,12 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   `workerPolicy.installerIdentities` and `installerGroups` only, and each request gets the audit annotation `connect` (user, resource,
   subresource, pod). The worker namespace stays fully denied, and the proxy subresources stay denied for everyone.
   The audit annotation is written for allowed requests too. The binding also lists `Audit`, which records a refused request.
-- `workerNetworkPolicy.apiServerCIDRs` has no default. A CNI that matches before the Service translation sees the
-  ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`); one that matches after it sees the
-  endpoint (`kubectl get endpoints kubernetes -n default`). The ClusterIP differs per cluster (for example 10.96.0.1
-  and 10.250.0.1). List both when in doubt.
+- `workerNetworkPolicy.apiServerPorts` (default 443 and 6443) lists the TCP ports that the fenced control pods open to
+  the Kubernetes API server. The rule names the ports and no address, because NetworkPolicy has no peer for the API
+  server that works on every CNI (ADR 0120 amendment 10, issue #1172). You do not look up an address. Check the API
+  server port of your cluster (`kubectl get endpoints kubernetes -n default`) and add it when it is not 443 or 6443.
+  The cost: a compromised control pod can open these ports to any server. Worker pods get no such rule.
+  `test/e2e/kind/apiserver-egress.sh` proves the rule on kind.
 - atelet needs no internet egress when the gVisor tarball comes from the cluster object store. The installer
   stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
   issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.

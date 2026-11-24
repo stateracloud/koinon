@@ -927,7 +927,7 @@ execution:
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
       # only ingress rules for them. A pod that a later Substrate version adds has no egress until a list names it.
-      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerCIDRs. The installer
+      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerPorts. The installer
       # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
       apiOnlyApps: [k8s-credential-provider]
       # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
@@ -954,14 +954,16 @@ execution:
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
-      # CIDRs of the Kubernetes API server. Only the control-plane pods get this route; worker pods get none
-      # (ADR 0120 section 2.4). Required while the policy is enabled: the render fails when empty, because the
-      # policy would cut Substrate's control plane off from the Kubernetes API server. Name the address that
-      # the CNI matches, and no default holds for every cluster: a CNI that matches before the Service
-      # translation sees the ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`,
-      # for example 10.96.0.1 on kind by default, 10.250.0.1 in the kind e2e cluster); one that matches after
-      # it sees the endpoint (`kubectl get endpoints kubernetes -n default`). When in doubt, list both.
-      apiServerCIDRs: []
+      # TCP ports of the Kubernetes API server. The pods that call the API server (the controlPlaneApps, the
+      # apiOnlyApps, the podcert controller, Prometheus of otel-system) may open these ports to ANY address, and no
+      # worker pod gets this route (ADR 0120 section 2.4 and amendment 10). The rule names no address because
+      # NetworkPolicy has no CNI-neutral peer for the API server: an ipBlock for the `kubernetes` Service address
+      # or for its endpoint addresses matches on some CNIs and times out on others (Cilium in its default mode never
+      # matches an ipBlock against a node address). The cost: a compromised control pod can reach any server on
+      # these ports. The list must not be empty (the render fails: an empty port list opens every port). Add the
+      # port of a managed control plane when it is not 443 or 6443 (`kubectl get endpoints kubernetes -n default`
+      # shows it).
+      apiServerPorts: [443, 6443]
       # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
       # or database outside the cluster.
       extraEgress: []

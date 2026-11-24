@@ -23,7 +23,8 @@ AS_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AS_
 OS_VERSION=0.1.7
 OS_DIGEST=sha256:3e5998c749390a6be3a4f553e52e488b6f692e19be7b8bf681a26285d1e18901
 
-# kind's kindnet does not enforce NetworkPolicy (spike S1); the chart's policies need an engine.
+# kind v0.33's kindnet already enforces NetworkPolicy (proof: test/e2e/kind/apiserver-egress.sh). This add-on stays as the
+# explicit engine (spike S1 found the older kindnet did not), so the chart's policies never depend on the node image's CNI.
 KNP_VERSION=v1.1.2
 KNP_SHA256=a8345bd40f74e812c7f2e13c40a841d4d6c7b1fc22e245750116072807a0f4ba
 KNP_URL="https://raw.githubusercontent.com/kubernetes-sigs/kube-network-policies/${KNP_VERSION}/install.yaml"

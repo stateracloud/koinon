@@ -522,6 +522,23 @@ chart refuses to render without it (the install would otherwise end in crash-loo
 {{- required "openshell.address is required: set it to the OpenShell gateway's host:port, for example openshell.openshell.svc:8080" .Values.openshell.address -}}
 {{- end }}
 
+{{/*
+koinon.substrate.apiServerEgress is the one egress rule that lets a fenced control pod reach the Kubernetes API
+server (ADR 0120 section 2, amendment 10, issue 1172). It names TCP ports and NO destination, so the peer is any
+address. NetworkPolicy has no CNI-neutral peer for the API server: an ipBlock for the Service address or the
+endpoint address matches on one CNI and times out on another (Cilium with its default policy-cidr-match-mode
+never matches an ipBlock against a node address). An empty port list would open every port, so it fails the
+render. Only the pods that call the API server use this rule; worker pods never do.
+*/}}
+{{- define "koinon.substrate.apiServerEgress" -}}
+{{- $ports := .Values.execution.substrate.workerNetworkPolicy.apiServerPorts -}}
+{{- if not $ports }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerPorts is empty: the policy would cut the Substrate control plane off from the Kubernetes API server, and an empty port list in a NetworkPolicy would open every port. List the TCP ports of the API server (443 and 6443 by default), or set workerNetworkPolicy.enabled=false and fence the namespaces yourself." }}{{- end -}}
+- ports:
+{{- range $ports }}
+    - {port: {{ . }}, protocol: TCP}
+{{- end }}
+{{- end }}
+
 {{- define "koinon.substrate" -}}
 {{- eq (.Values.execution.driver | default "openshell") "substrate" -}}
 {{- end }}

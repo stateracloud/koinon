@@ -18,13 +18,13 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
   which would fail open for a pod that lost its label). They talk to each other and to the worker
   namespace, resolve names, reach Koinon's gateway and API pods, and reach the Kubernetes API server on
-  workerNetworkPolicy.apiServerCIDRs, which the render requires. A pod with another `app` label is not
+  workerNetworkPolicy.apiServerPorts (TCP ports, any address: no CNI-neutral API server peer exists; ADR 0120 amendment 10). A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
   The other pods of the namespace have their own list each, so no Substrate pod is unfenced: a default-deny egress policy covers every pod of the namespace (so ate-idp-server, postgres
   and rustfs have no egress at all), and per-app policies allow bucketInitJobs (the object store Job pod, selected by Job name),
   imageSource (the node agent's one image source) and apiOnlyApps (k8s-credential-provider: DNS and the API
-  server only). Their ingress stays Substrate's own.
+  server ports only). Their ingress stays Substrate's own.
 */ -}}
 {{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.workerNetworkPolicy.enabled }}
 {{- $s := .Values.execution.substrate }}
@@ -32,7 +32,6 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
 {{- $ns := $s.namespace }}
 {{- $wns := $s.workerNamespace }}
 {{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
-{{- if not $np.apiServerCIDRs }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the policy would cut the Substrate control plane off from the Kubernetes API server. Name the API server's CIDRs (kubectl get endpoints kubernetes -n default), or set workerNetworkPolicy.enabled=false and fence the namespaces yourself." }}{{- end }}
 {{- if not $np.controlPlaneApps }}{{- fail "execution.substrate.workerNetworkPolicy.controlPlaneApps is empty: the control-plane policy would select no pod" }}{{- end }}
 {{- if not (or $np.atenetEgressSelector.matchLabels $np.atenetEgressSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let workers reach every pod in the control-plane namespace" }}{{- end }}
 {{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $ns $s.gatewayClientNamespaceSelector }}
@@ -118,14 +117,7 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-    - to:
-        {{- range $np.apiServerCIDRs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - {port: 443, protocol: TCP}
-        - {port: 6443, protocol: TCP}
+{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
 {{- end }}
@@ -149,7 +141,7 @@ spec:
   egress: []
 {{- with $np.apiOnlyApps }}
 ---
-# Pods that call the Kubernetes API server and nothing else: DNS and the API server CIDRs. Their ingress is
+# Pods that call the Kubernetes API server and nothing else: DNS and the API server ports. Their ingress is
 # Substrate's own (k8s-credential-provider admits the egress gateway only; ate-system-networkpolicies.yaml lines 15-35
 # and 236-241), so this policy lists no Ingress type.
 apiVersion: networking.k8s.io/v1
@@ -175,14 +167,7 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-    - to:
-        {{- range $np.apiServerCIDRs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - {port: 443, protocol: TCP}
-        - {port: 6443, protocol: TCP}
+{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
 {{- end }}
 {{- with $np.bucketInitJobs }}
 {{- $osApp := required "execution.substrate.workerNetworkPolicy.objectStoreApp is required with bucketInitJobs: the app label of the object store pod" $np.objectStoreApp }}

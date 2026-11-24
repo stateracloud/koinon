@@ -270,6 +270,31 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    - **Rejected.** Kyverno or a CNI feature to name a registry (a NetworkPolicy cannot name one; rules at the
      cluster edge are the operator's). `global.registryMirrors` for the rewrite (above). A certificate from the Helm
      random functions (not deterministic, and it changes on every render).
+10. **Amendment (issue #1172): the API server route is a port rule.**
+   - **Decision.** The fenced control pods that call the Kubernetes API server may open TCP on the ports in
+     `execution.substrate.workerNetworkPolicy.apiServerPorts` (default 443 and 6443) to any address. These pods are the
+     `controlPlaneApps` (atelet and the Substrate controllers), the `apiOnlyApps`, the certificate (podcert) controller
+     and the Prometheus of `otel-system`. The rule names no destination. The value `apiServerCIDRs` is removed: an
+     `ipBlock` is not a safe peer (below), so a narrowing value would only fail on some CNIs. An operator who wants a
+     narrower rule disables the chart fence for a namespace and writes their own, or adds a rule with `extraEgress`.
+   - **Why.** NetworkPolicy has no CNI-neutral peer for the API server. The `kubernetes` Service address and its
+     endpoint addresses match as an `ipBlock` on some CNIs and not on others. On kindnet only the endpoint address
+     matches. On Cilium in its default `policy-cidr-match-mode`, an `ipBlock` never matches a node address, so no
+     `apiServerCIDRs` value works and the podcert controller lost the API server with `i/o timeout`. Other charts
+     solve the same problem with ports and no destination: cert-manager allows TCP 80, 443 and 6443 with no `to`,
+     and Bitnami charts have `kubeAPIServerPorts` (443, 6443, 8443) to any address
+     (research note 2026-11-24, `apiserver-egress-networkpolicy`).
+   - **Cost.** A compromised control pod can open a connection to any server on these ports, in the cluster or on the
+     internet, not only to the API server. This is wider than the old address rule on a CNI that matched it. What
+     stays: the rule is TCP only and covers only the pods named above. Actor and worker pods get no new egress (section
+     2.4 holds). The other routes of the fence are unchanged. The pods still need a valid ServiceAccount token or a
+     client certificate to use the API server, and the API server's own RBAC and the admission policies of item 6
+     bind what they can do.
+   - **What would replace it.** A peer for the API server that works on every CNI. The Network Policy API
+     (`ClusterNetworkPolicy`, sig-network) has a `nodes` peer, which is alpha, so the chart cannot use it. Track it
+     and replace the port rule when it is generally available and the CNIs we run support it.
+   - **Proof.** `test/e2e/kind/apiserver-egress.sh` makes a kind cluster, applies the chart's fence, and shows that a
+     fenced pod reaches TCP 6443 at an address that the policy does not name and cannot reach another port.
 7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
