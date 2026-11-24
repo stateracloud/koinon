@@ -272,7 +272,10 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	var out *agentv1alpha1.Agent
 	restarting := 0
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
-		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		// The row lock makes the version check and the activation one step: a concurrent
+		// UpdateAgent or SetAgentTriggers either commits first, and the check then fails, or
+		// waits, so the version that an admin reviewed is the version that runs.
+		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}
