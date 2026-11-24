@@ -10,9 +10,9 @@
 # toless_policies: the names of the NetworkPolicies of a rendered chart on stdin that have an egress rule without `to`.
 toless_policies() {
 	awk '
-		# An empty `to` list (`to: []`, or a `to:` key with no list item) matches every destination: it is no `to`.
+		# An empty `to` list (`to: []`, `to: [ ]`, `to: null`, `to: ~`, or a `to:` key with no list item) matches every destination: it is no `to`.
 		function flush() { if (inrule && !hasto && name != "") bad[name] = 1; inrule = 0; hasto = 0; topend = 0 }
-		function seto(line) { if (line ~ /to:[ \t]*(\[\][ \t]*)?(#.*)?$/) { topend = 1; hasto = 0 } else hasto = 1 }
+		function seto(line) { if (line ~ /to:[ \t]*(\[[ \t]*\]|null|~)?[ \t]*(#.*)?$/) { topend = 1; hasto = 0 } else hasto = 1 }
 		function doc_end() { flush(); inegress = 0; name = ""; isnp = 0 }
 		/^---$/ { doc_end(); next }
 		/^kind: NetworkPolicy$/ { isnp = 1 }
@@ -31,6 +31,8 @@ toless_policies() {
 [[ $(printf '%s\n' 'kind: NetworkPolicy' 'metadata:' '  name: a' 'spec:' '  egress:' '    - ports:' '        - {port: 1, protocol: TCP}' '    - to:' '        - podSelector: {}' '---' 'kind: NetworkPolicy' 'metadata:' '  name: b' 'spec:' '  egress:' '    - ports:' '        - {port: 53}' '      to:' '        - podSelector: {}' | toless_policies) == a ]] || fail "toless_policies must report a policy with a rule without to, and only that"
 # An empty `to` list matches every destination, so it counts as no `to` (inline, as a first key, or as a bare key).
 [[ $(printf '%s\n' 'kind: NetworkPolicy' 'metadata:' '  name: c' 'spec:' '  egress:' '    - to: []' '      ports:' '        - {port: 22}' '---' 'kind: NetworkPolicy' 'metadata:' '  name: d' 'spec:' '  egress:' '    - ports:' '        - {port: 22}' '      to: []' '---' 'kind: NetworkPolicy' 'metadata:' '  name: e' 'spec:' '  egress:' '    - to:' '      ports:' '        - {port: 22}' '---' 'kind: NetworkPolicy' 'metadata:' '  name: f' 'spec:' '  egress:' '    - to:' '        - podSelector: {}' '      ports:' '        - {port: 22}' | toless_policies) == $'c\nd\ne' ]] || fail "toless_policies must treat an empty to list as no to"
+# `to: null`, `to: ~` and `to: [ ]` are an empty destination too (Helm renders a nil list as `to: null`).
+[[ $(printf '%s\n' 'kind: NetworkPolicy' 'metadata:' '  name: g' 'spec:' '  egress:' '    - to: null' '      ports:' '        - {port: 22}' '---' 'kind: NetworkPolicy' 'metadata:' '  name: h' 'spec:' '  egress:' '    - ports:' '        - {port: 22}' '      to: ~' '---' 'kind: NetworkPolicy' 'metadata:' '  name: i' 'spec:' '  egress:' '    - ports:' '        - {port: 22}' '      to: [ ]  # none' | toless_policies) == $'g\nh\ni' ]] || fail "toless_policies must treat to: null, to: ~ and to: [ ] as no to"
 
 # These policies of ci/substrate-values.yaml carry a destination-less egress rule, each on purpose:
 #   koinon-gateway            the gateway's DNS rule (also on main)
