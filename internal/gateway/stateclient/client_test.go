@@ -137,15 +137,17 @@ func (m *mcpApplier) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.R
 
 // egressApplier records the org egress routes of each revision.
 type egressApplier struct {
-	mu  sync.Mutex
-	got [][]route.Route
-	err error
+	mu    sync.Mutex
+	got   [][]route.Route
+	creds [][]route.Credential
+	err   error
 }
 
-func (e *egressApplier) ApplyEgress(_ context.Context, routes []route.Route) error {
+func (e *egressApplier) ApplyEgress(_ context.Context, st gateway.EgressState) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.got = append(e.got, routes)
+	e.got = append(e.got, st.EgressRoutes)
+	e.creds = append(e.creds, st.EgressCredentials)
 	return e.err
 }
 
@@ -155,10 +157,11 @@ func (e *egressApplier) calls() [][]route.Route {
 	return append([][]route.Route(nil), e.got...)
 }
 
-func (m *memStore) publishEgress(rev int64, name string, routes []route.Route) {
+func (m *memStore) publishEgress(rev int64, name string, routes []route.Route, creds ...route.Credential) {
 	var s gateway.State
 	s.MCP = []gateway.MCPTarget{{Name: name, URL: "http://" + name + "/mcp"}}
 	s.EgressRoutes = routes
+	s.EgressCredentials = creds
 	u := staterev.Snapshot(s)
 	u.Revision = rev
 	m.mu.Lock()
@@ -237,12 +240,19 @@ var _ = Describe("the gateway State client", func() {
 			start(20 * time.Millisecond)
 			eg := &egressApplier{}
 			egress = eg
-			st.publishEgress(3, "wiki", []route.Route{forgeRoute})
+			cred := route.Credential{
+				Name: "org/acme/agent/a1/codehost", Org: "acme", Agent: "a1", File: "/keys/forgev2-x",
+				Scheme: route.SchemeBasic, User: "x-access-token",
+			}
+			st.publishEgress(3, "wiki", []route.Route{forgeRoute}, cred)
 			m := stateclient.NewMetrics(nil)
 			run(m)
 			Eventually(acked(3, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
 			Eventually(eg.calls).Should(HaveLen(1))
 			Expect(eg.calls()[0]).To(Equal([]route.Route{forgeRoute}))
+			eg.mu.Lock()
+			Expect(eg.creds[0]).To(Equal([]route.Credential{cred}))
+			eg.mu.Unlock()
 			for _, a := range st.ackList() {
 				Expect(a.half).To(BeElementOf(gwv1.Half_HALF_MODEL, gwv1.Half_HALF_MCP))
 			}
