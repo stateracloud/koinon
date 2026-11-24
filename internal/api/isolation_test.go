@@ -1063,7 +1063,7 @@ var _ = Describe("org isolation", func() {
 // none of them. A new object in newIsolationFixture goes here too.
 func foreignIDs(f orgFixture) []string {
 	return []string{
-		f.org, f.owner.userID, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
+		f.org, f.owner.userID, f.viewer.userID, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
 		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost, f.githubLogin,
 		f.appSetupState,
@@ -1075,6 +1075,7 @@ func foreignIDs(f orgFixture) []string {
 func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture {
 	f := e.newOrgFixture(ctx)
 	f.draft = f.owner.draftAgent(ctx, f.org)
+	f.viewer = e.userIn(ctx, f.org, store.OrgRoleViewer)
 	f.appKey = appKey
 	res, err := f.owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 		OrgId: f.org, AppId: 1, InstallationId: 2, PrivateKey: string(appKey),

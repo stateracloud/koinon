@@ -98,7 +98,7 @@ var _ = Describe("the platform console org reads (PlatformService)", func() {
 
 		orgs := listAllOrgs(ctx, admin, false, 2)
 		for _, o := range orgs {
-			Expect(o.GetKind()).To(Equal(platformv1alpha1.OrgKind_ORG_KIND_TEAM), o.GetSlug())
+			Expect(o.GetKind()).To(Equal(orgv1alpha1.OrgKind_ORG_KIND_TEAM), o.GetSlug())
 		}
 		slugs := make([]string, 0, len(orgs))
 		for _, o := range orgs {
@@ -123,7 +123,7 @@ var _ = Describe("the platform console org reads (PlatformService)", func() {
 		withPersonal := listAllOrgs(ctx, admin, true, 200)
 		p := orgByID(withPersonal, personal)
 		Expect(p).NotTo(BeNil())
-		Expect(p.GetKind()).To(Equal(platformv1alpha1.OrgKind_ORG_KIND_PERSONAL))
+		Expect(p.GetKind()).To(Equal(orgv1alpha1.OrgKind_ORG_KIND_PERSONAL))
 	})
 
 	It("reads an org the platform admin is not a member of", func(ctx SpecContext) {
@@ -230,5 +230,13 @@ var _ = Describe("the members read (OrgService.ListMembers)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetMembers()).To(HaveLen(1))
 		Expect(res.GetMembers()[0].GetUserId()).To(Equal(owner.userID))
+
+		// An org that does not exist or is deleted is NotFound, as for GetOrg, not an empty list.
+		_, err = pa.orgs.ListMembers(ctx, &orgv1alpha1.ListMembersRequest{OrgId: "00000000-0000-0000-0000-000000000000"})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		_, err = e.pool.Exec(ctx, `UPDATE orgs SET deleted_at = now() WHERE id = $1`, org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pa.orgs.ListMembers(ctx, &orgv1alpha1.ListMembersRequest{OrgId: org})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
 	})
 })

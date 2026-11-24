@@ -3003,6 +3003,16 @@ Member is one user of the org with the user's effective role.
 | display_name | 2 | `string` | singular |  |  |
 | role | 3 | `koinon.auth.v1alpha1.OrgRole` | singular |  |  |
 
+### Enum OrgKind
+
+OrgKind mirrors the org_kind enum in Postgres.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| ORG_KIND_UNSPECIFIED | 0 |  |
+| ORG_KIND_PERSONAL | 1 |  |
+| ORG_KIND_TEAM | 2 |  |
+
 ## koinon.orgsettings.v1alpha1
 
 Files: `koinon/orgsettings/v1alpha1/orgsettings.proto`
@@ -3252,23 +3262,13 @@ BudgetService writes them.
 | org_id | 1 | `string` | singular |  |  |
 | slug | 2 | `string` | singular |  |  |
 | display_name | 3 | `string` | singular |  |  |
-| kind | 4 | `koinon.platform.v1alpha1.OrgKind` | singular |  |  |
+| kind | 4 | `koinon.org.v1alpha1.OrgKind` | singular |  |  |
 | member_count | 5 | `int32` | singular |  | member_count counts the users with an effective role in the org (its identity mode applies, as for WhoAmI). |
 | agent_count | 6 | `int32` | singular |  | agent_count counts the agents that are not archived. |
-| spent_this_month_usd | 7 | `string` | singular |  | spent_this_month_usd is the recorded spend since month_start of the response. |
+| spent_this_month_usd | 7 | `string` | singular |  | spent_this_month_usd is the recorded spend since month_start of the response: every charge of the org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it. |
 | monthly_cap_usd | 8 | `string` | singular |  | monthly_cap_usd is the org's monthly budget; empty when the org has none. |
 | platform_ceiling_usd | 9 | `string` | singular |  | platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none. |
 | created_at | 10 | `google.protobuf.Timestamp` | singular |  |  |
-
-### Enum OrgKind
-
-OrgKind mirrors the org_kind enum in Postgres.
-
-| Value | Number | Description |
-| --- | --- | --- |
-| ORG_KIND_UNSPECIFIED | 0 |  |
-| ORG_KIND_PERSONAL | 1 |  |
-| ORG_KIND_TEAM | 2 |  |
 
 ## koinon.provider.v1alpha1
 

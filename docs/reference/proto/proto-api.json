@@ -12662,7 +12662,35 @@
           ]
         }
       ],
-      "enums": []
+      "enums": [
+        {
+          "name": "OrgKind",
+          "fullName": "koinon.org.v1alpha1.OrgKind",
+          "file": "koinon/org/v1alpha1/org.proto",
+          "description": "OrgKind mirrors the org_kind enum in Postgres.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "ORG_KIND_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ORG_KIND_PERSONAL",
+              "number": 1,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "ORG_KIND_TEAM",
+              "number": 2,
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "koinon.orgsettings.v1alpha1",
@@ -13524,7 +13552,7 @@
             {
               "name": "kind",
               "number": 4,
-              "type": "koinon.platform.v1alpha1.OrgKind",
+              "type": "koinon.org.v1alpha1.OrgKind",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -13555,7 +13583,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "spent_this_month_usd is the recorded spend since month_start of the response."
+              "description": "spent_this_month_usd is the recorded spend since month_start of the response: every charge of\nthe org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it."
             },
             {
               "name": "monthly_cap_usd",
@@ -13587,35 +13615,7 @@
           ]
         }
       ],
-      "enums": [
-        {
-          "name": "OrgKind",
-          "fullName": "koinon.platform.v1alpha1.OrgKind",
-          "file": "koinon/platform/v1alpha1/platform.proto",
-          "description": "OrgKind mirrors the org_kind enum in Postgres.",
-          "deprecated": false,
-          "values": [
-            {
-              "name": "ORG_KIND_UNSPECIFIED",
-              "number": 0,
-              "deprecated": false,
-              "description": ""
-            },
-            {
-              "name": "ORG_KIND_PERSONAL",
-              "number": 1,
-              "deprecated": false,
-              "description": ""
-            },
-            {
-              "name": "ORG_KIND_TEAM",
-              "number": 2,
-              "deprecated": false,
-              "description": ""
-            }
-          ]
-        }
-      ]
+      "enums": []
     },
     {
       "name": "koinon.provider.v1alpha1",

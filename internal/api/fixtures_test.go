@@ -267,8 +267,10 @@ type orgFixture struct {
 	owner *client
 	agent *agentv1alpha1.Agent
 	draft *agentv1alpha1.Agent // set by newIsolationFixture
-	task  *taskv1alpha1.Task
-	run   *runv1alpha1.Run
+	// viewer is a second member of the org; set by newIsolationFixture.
+	viewer *client
+	task   *taskv1alpha1.Task
+	run    *runv1alpha1.Run
 	// connection and appKey are set by newIsolationFixture.
 	connection string
 	appKey     []byte

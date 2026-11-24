@@ -132,12 +132,12 @@ func orgSummaryToProto(r store.ListOrgSummariesRow) (*platformv1alpha1.OrgSummar
 	if err != nil {
 		return nil, err
 	}
-	kind := platformv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
+	kind := orgv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
 	switch r.Kind {
 	case store.OrgKindPersonal:
-		kind = platformv1alpha1.OrgKind_ORG_KIND_PERSONAL
+		kind = orgv1alpha1.OrgKind_ORG_KIND_PERSONAL
 	case store.OrgKindTeam:
-		kind = platformv1alpha1.OrgKind_ORG_KIND_TEAM
+		kind = orgv1alpha1.OrgKind_ORG_KIND_TEAM
 	}
 	return &platformv1alpha1.OrgSummary{
 		OrgId:              r.OrgID.String(),
@@ -172,6 +172,12 @@ func (s *Server) ListMembers(ctx context.Context, req *orgv1alpha1.ListMembersRe
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
 		return nil, err
+	}
+	if _, member := c.p.RoleIn(c.org); !member {
+		// A platform admin passes authorize for any org ID; the org must still be live, as for GetOrg.
+		if _, err := s.q.GetOrgSlug(ctx, c.org); err != nil {
+			return nil, s.dbError(err, "org")
+		}
 	}
 	size := pageSize(req.GetPageSize(), defaultMemberPageSize, maxMemberPageSize)
 	afterID := pgtype.UUID{Valid: true} // the zero UUID sorts before every user ID

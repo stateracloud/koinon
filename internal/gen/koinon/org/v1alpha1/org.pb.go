@@ -24,6 +24,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// OrgKind mirrors the org_kind enum in Postgres.
+type OrgKind int32
+
+const (
+	OrgKind_ORG_KIND_UNSPECIFIED OrgKind = 0
+	OrgKind_ORG_KIND_PERSONAL    OrgKind = 1
+	OrgKind_ORG_KIND_TEAM        OrgKind = 2
+)
+
+// Enum value maps for OrgKind.
+var (
+	OrgKind_name = map[int32]string{
+		0: "ORG_KIND_UNSPECIFIED",
+		1: "ORG_KIND_PERSONAL",
+		2: "ORG_KIND_TEAM",
+	}
+	OrgKind_value = map[string]int32{
+		"ORG_KIND_UNSPECIFIED": 0,
+		"ORG_KIND_PERSONAL":    1,
+		"ORG_KIND_TEAM":        2,
+	}
+)
+
+func (x OrgKind) Enum() *OrgKind {
+	p := new(OrgKind)
+	*p = x
+	return p
+}
+
+func (x OrgKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OrgKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_org_v1alpha1_org_proto_enumTypes[0].Descriptor()
+}
+
+func (OrgKind) Type() protoreflect.EnumType {
+	return &file_koinon_org_v1alpha1_org_proto_enumTypes[0]
+}
+
+func (x OrgKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OrgKind.Descriptor instead.
+func (OrgKind) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_org_v1alpha1_org_proto_rawDescGZIP(), []int{0}
+}
+
 // Member is one user of the org with the user's effective role.
 type Member struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -216,7 +266,11 @@ const file_koinon_org_v1alpha1_org_proto_rawDesc = "" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\"t\n" +
 	"\x13ListMembersResponse\x125\n" +
 	"\amembers\x18\x01 \x03(\v2\x1b.koinon.org.v1alpha1.MemberR\amembers\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2s\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*M\n" +
+	"\aOrgKind\x12\x18\n" +
+	"\x14ORG_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11ORG_KIND_PERSONAL\x10\x01\x12\x11\n" +
+	"\rORG_KIND_TEAM\x10\x022s\n" +
 	"\n" +
 	"OrgService\x12e\n" +
 	"\vListMembers\x12'.koinon.org.v1alpha1.ListMembersRequest\x1a(.koinon.org.v1alpha1.ListMembersResponse\"\x03\x90\x02\x01BMZKgithub.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1;orgv1alpha1b\x06proto3"
@@ -233,18 +287,20 @@ func file_koinon_org_v1alpha1_org_proto_rawDescGZIP() []byte {
 	return file_koinon_org_v1alpha1_org_proto_rawDescData
 }
 
+var file_koinon_org_v1alpha1_org_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_koinon_org_v1alpha1_org_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_koinon_org_v1alpha1_org_proto_goTypes = []any{
-	(*Member)(nil),              // 0: koinon.org.v1alpha1.Member
-	(*ListMembersRequest)(nil),  // 1: koinon.org.v1alpha1.ListMembersRequest
-	(*ListMembersResponse)(nil), // 2: koinon.org.v1alpha1.ListMembersResponse
-	(v1alpha1.OrgRole)(0),       // 3: koinon.auth.v1alpha1.OrgRole
+	(OrgKind)(0),                // 0: koinon.org.v1alpha1.OrgKind
+	(*Member)(nil),              // 1: koinon.org.v1alpha1.Member
+	(*ListMembersRequest)(nil),  // 2: koinon.org.v1alpha1.ListMembersRequest
+	(*ListMembersResponse)(nil), // 3: koinon.org.v1alpha1.ListMembersResponse
+	(v1alpha1.OrgRole)(0),       // 4: koinon.auth.v1alpha1.OrgRole
 }
 var file_koinon_org_v1alpha1_org_proto_depIdxs = []int32{
-	3, // 0: koinon.org.v1alpha1.Member.role:type_name -> koinon.auth.v1alpha1.OrgRole
-	0, // 1: koinon.org.v1alpha1.ListMembersResponse.members:type_name -> koinon.org.v1alpha1.Member
-	1, // 2: koinon.org.v1alpha1.OrgService.ListMembers:input_type -> koinon.org.v1alpha1.ListMembersRequest
-	2, // 3: koinon.org.v1alpha1.OrgService.ListMembers:output_type -> koinon.org.v1alpha1.ListMembersResponse
+	4, // 0: koinon.org.v1alpha1.Member.role:type_name -> koinon.auth.v1alpha1.OrgRole
+	1, // 1: koinon.org.v1alpha1.ListMembersResponse.members:type_name -> koinon.org.v1alpha1.Member
+	2, // 2: koinon.org.v1alpha1.OrgService.ListMembers:input_type -> koinon.org.v1alpha1.ListMembersRequest
+	3, // 3: koinon.org.v1alpha1.OrgService.ListMembers:output_type -> koinon.org.v1alpha1.ListMembersResponse
 	3, // [3:4] is the sub-list for method output_type
 	2, // [2:3] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -262,13 +318,14 @@ func file_koinon_org_v1alpha1_org_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_org_v1alpha1_org_proto_rawDesc), len(file_koinon_org_v1alpha1_org_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_koinon_org_v1alpha1_org_proto_goTypes,
 		DependencyIndexes: file_koinon_org_v1alpha1_org_proto_depIdxs,
+		EnumInfos:         file_koinon_org_v1alpha1_org_proto_enumTypes,
 		MessageInfos:      file_koinon_org_v1alpha1_org_proto_msgTypes,
 	}.Build()
 	File_koinon_org_v1alpha1_org_proto = out.File

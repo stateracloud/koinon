@@ -5,8 +5,8 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { OrgRole } from "../../auth/v1alpha1/auth_pb";
 import { file_koinon_auth_v1alpha1_auth } from "../../auth/v1alpha1/auth_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/org/v1alpha1/org.proto.
  */
 export const file_koinon_org_v1alpha1_org: GenFile = /*@__PURE__*/
-  fileDesc("Ch1rb2lub24vb3JnL3YxYWxwaGExL29yZy5wcm90bxITa29pbm9uLm9yZy52MWFscGhhMSJcCgZNZW1iZXISDwoHdXNlcl9pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUiSwoSTGlzdE1lbWJlcnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIRCglwYWdlX3NpemUYAiABKAUSEgoKcGFnZV90b2tlbhgDIAEoCSJcChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiwKB21lbWJlcnMYASADKAsyGy5rb2lub24ub3JnLnYxYWxwaGExLk1lbWJlchIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkycwoKT3JnU2VydmljZRJlCgtMaXN0TWVtYmVycxInLmtvaW5vbi5vcmcudjFhbHBoYTEuTGlzdE1lbWJlcnNSZXF1ZXN0Gigua29pbm9uLm9yZy52MWFscGhhMS5MaXN0TWVtYmVyc1Jlc3BvbnNlIgOQAgFCTVpLZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vb3JnL3YxYWxwaGExO29yZ3YxYWxwaGExYgZwcm90bzM", [file_koinon_auth_v1alpha1_auth]);
+  fileDesc("Ch1rb2lub24vb3JnL3YxYWxwaGExL29yZy5wcm90bxITa29pbm9uLm9yZy52MWFscGhhMSJcCgZNZW1iZXISDwoHdXNlcl9pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUiSwoSTGlzdE1lbWJlcnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIRCglwYWdlX3NpemUYAiABKAUSEgoKcGFnZV90b2tlbhgDIAEoCSJcChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiwKB21lbWJlcnMYASADKAsyGy5rb2lub24ub3JnLnYxYWxwaGExLk1lbWJlchIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkqTQoHT3JnS2luZBIYChRPUkdfS0lORF9VTlNQRUNJRklFRBAAEhUKEU9SR19LSU5EX1BFUlNPTkFMEAESEQoNT1JHX0tJTkRfVEVBTRACMnMKCk9yZ1NlcnZpY2USZQoLTGlzdE1lbWJlcnMSJy5rb2lub24ub3JnLnYxYWxwaGExLkxpc3RNZW1iZXJzUmVxdWVzdBooLmtvaW5vbi5vcmcudjFhbHBoYTEuTGlzdE1lbWJlcnNSZXNwb25zZSIDkAIBQk1aS2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL29yZy92MWFscGhhMTtvcmd2MWFscGhhMWIGcHJvdG8z", [file_koinon_auth_v1alpha1_auth]);
 
 /**
  * Member is one user of the org with the user's effective role.
@@ -100,6 +100,34 @@ export type ListMembersResponse = Message<"koinon.org.v1alpha1.ListMembersRespon
  */
 export const ListMembersResponseSchema: GenMessage<ListMembersResponse> = /*@__PURE__*/
   messageDesc(file_koinon_org_v1alpha1_org, 2);
+
+/**
+ * OrgKind mirrors the org_kind enum in Postgres.
+ *
+ * @generated from enum koinon.org.v1alpha1.OrgKind
+ */
+export enum OrgKind {
+  /**
+   * @generated from enum value: ORG_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ORG_KIND_PERSONAL = 1;
+   */
+  PERSONAL = 1,
+
+  /**
+   * @generated from enum value: ORG_KIND_TEAM = 2;
+   */
+  TEAM = 2,
+}
+
+/**
+ * Describes the enum koinon.org.v1alpha1.OrgKind.
+ */
+export const OrgKindSchema: GenEnum<OrgKind> = /*@__PURE__*/
+  enumDesc(file_koinon_org_v1alpha1_org, 0);
 
 /**
  * OrgService reads the org itself for its members (ADR 0126). Every role may call it. A platform

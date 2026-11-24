@@ -9,6 +9,7 @@
 package platformv1alpha1
 
 import (
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -24,56 +25,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// OrgKind mirrors the org_kind enum in Postgres.
-type OrgKind int32
-
-const (
-	OrgKind_ORG_KIND_UNSPECIFIED OrgKind = 0
-	OrgKind_ORG_KIND_PERSONAL    OrgKind = 1
-	OrgKind_ORG_KIND_TEAM        OrgKind = 2
-)
-
-// Enum value maps for OrgKind.
-var (
-	OrgKind_name = map[int32]string{
-		0: "ORG_KIND_UNSPECIFIED",
-		1: "ORG_KIND_PERSONAL",
-		2: "ORG_KIND_TEAM",
-	}
-	OrgKind_value = map[string]int32{
-		"ORG_KIND_UNSPECIFIED": 0,
-		"ORG_KIND_PERSONAL":    1,
-		"ORG_KIND_TEAM":        2,
-	}
-)
-
-func (x OrgKind) Enum() *OrgKind {
-	p := new(OrgKind)
-	*p = x
-	return p
-}
-
-func (x OrgKind) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (OrgKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_koinon_platform_v1alpha1_platform_proto_enumTypes[0].Descriptor()
-}
-
-func (OrgKind) Type() protoreflect.EnumType {
-	return &file_koinon_platform_v1alpha1_platform_proto_enumTypes[0]
-}
-
-func (x OrgKind) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use OrgKind.Descriptor instead.
-func (OrgKind) EnumDescriptor() ([]byte, []int) {
-	return file_koinon_platform_v1alpha1_platform_proto_rawDescGZIP(), []int{0}
-}
-
 // OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
 // BudgetService writes them.
 type OrgSummary struct {
@@ -81,13 +32,14 @@ type OrgSummary struct {
 	OrgId       string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	Slug        string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
 	DisplayName string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Kind        OrgKind                `protobuf:"varint,4,opt,name=kind,proto3,enum=koinon.platform.v1alpha1.OrgKind" json:"kind,omitempty"`
+	Kind        v1alpha1.OrgKind       `protobuf:"varint,4,opt,name=kind,proto3,enum=koinon.org.v1alpha1.OrgKind" json:"kind,omitempty"`
 	// member_count counts the users with an effective role in the org (its identity mode applies, as
 	// for WhoAmI).
 	MemberCount int32 `protobuf:"varint,5,opt,name=member_count,json=memberCount,proto3" json:"member_count,omitempty"`
 	// agent_count counts the agents that are not archived.
 	AgentCount int32 `protobuf:"varint,6,opt,name=agent_count,json=agentCount,proto3" json:"agent_count,omitempty"`
-	// spent_this_month_usd is the recorded spend since month_start of the response.
+	// spent_this_month_usd is the recorded spend since month_start of the response: every charge of
+	// the org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it.
 	SpentThisMonthUsd string `protobuf:"bytes,7,opt,name=spent_this_month_usd,json=spentThisMonthUsd,proto3" json:"spent_this_month_usd,omitempty"`
 	// monthly_cap_usd is the org's monthly budget; empty when the org has none.
 	MonthlyCapUsd string `protobuf:"bytes,8,opt,name=monthly_cap_usd,json=monthlyCapUsd,proto3" json:"monthly_cap_usd,omitempty"`
@@ -149,11 +101,11 @@ func (x *OrgSummary) GetDisplayName() string {
 	return ""
 }
 
-func (x *OrgSummary) GetKind() OrgKind {
+func (x *OrgSummary) GetKind() v1alpha1.OrgKind {
 	if x != nil {
 		return x.Kind
 	}
-	return OrgKind_ORG_KIND_UNSPECIFIED
+	return v1alpha1.OrgKind(0)
 }
 
 func (x *OrgSummary) GetMemberCount() int32 {
@@ -424,13 +376,13 @@ var File_koinon_platform_v1alpha1_platform_proto protoreflect.FileDescriptor
 
 const file_koinon_platform_v1alpha1_platform_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/platform/v1alpha1/platform.proto\x12\x18koinon.platform.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9b\x03\n" +
+	"'koinon/platform/v1alpha1/platform.proto\x12\x18koinon.platform.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/org/v1alpha1/org.proto\"\x96\x03\n" +
 	"\n" +
 	"OrgSummary\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
-	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x125\n" +
-	"\x04kind\x18\x04 \x01(\x0e2!.koinon.platform.v1alpha1.OrgKindR\x04kind\x12!\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x120\n" +
+	"\x04kind\x18\x04 \x01(\x0e2\x1c.koinon.org.v1alpha1.OrgKindR\x04kind\x12!\n" +
 	"\fmember_count\x18\x05 \x01(\x05R\vmemberCount\x12\x1f\n" +
 	"\vagent_count\x18\x06 \x01(\x05R\n" +
 	"agentCount\x12/\n" +
@@ -455,11 +407,7 @@ const file_koinon_platform_v1alpha1_platform_proto_rawDesc = "" +
 	"\x0eGetOrgResponse\x126\n" +
 	"\x03org\x18\x01 \x01(\v2$.koinon.platform.v1alpha1.OrgSummaryR\x03org\x12;\n" +
 	"\vmonth_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"monthStart*M\n" +
-	"\aOrgKind\x12\x18\n" +
-	"\x14ORG_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
-	"\x11ORG_KIND_PERSONAL\x10\x01\x12\x11\n" +
-	"\rORG_KIND_TEAM\x10\x022\xdb\x01\n" +
+	"monthStart2\xdb\x01\n" +
 	"\x0fPlatformService\x12f\n" +
 	"\bListOrgs\x12).koinon.platform.v1alpha1.ListOrgsRequest\x1a*.koinon.platform.v1alpha1.ListOrgsResponse\"\x03\x90\x02\x01\x12`\n" +
 	"\x06GetOrg\x12'.koinon.platform.v1alpha1.GetOrgRequest\x1a(.koinon.platform.v1alpha1.GetOrgResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1b\x06proto3"
@@ -476,28 +424,27 @@ func file_koinon_platform_v1alpha1_platform_proto_rawDescGZIP() []byte {
 	return file_koinon_platform_v1alpha1_platform_proto_rawDescData
 }
 
-var file_koinon_platform_v1alpha1_platform_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_koinon_platform_v1alpha1_platform_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_koinon_platform_v1alpha1_platform_proto_goTypes = []any{
-	(OrgKind)(0),                  // 0: koinon.platform.v1alpha1.OrgKind
-	(*OrgSummary)(nil),            // 1: koinon.platform.v1alpha1.OrgSummary
-	(*ListOrgsRequest)(nil),       // 2: koinon.platform.v1alpha1.ListOrgsRequest
-	(*ListOrgsResponse)(nil),      // 3: koinon.platform.v1alpha1.ListOrgsResponse
-	(*GetOrgRequest)(nil),         // 4: koinon.platform.v1alpha1.GetOrgRequest
-	(*GetOrgResponse)(nil),        // 5: koinon.platform.v1alpha1.GetOrgResponse
+	(*OrgSummary)(nil),            // 0: koinon.platform.v1alpha1.OrgSummary
+	(*ListOrgsRequest)(nil),       // 1: koinon.platform.v1alpha1.ListOrgsRequest
+	(*ListOrgsResponse)(nil),      // 2: koinon.platform.v1alpha1.ListOrgsResponse
+	(*GetOrgRequest)(nil),         // 3: koinon.platform.v1alpha1.GetOrgRequest
+	(*GetOrgResponse)(nil),        // 4: koinon.platform.v1alpha1.GetOrgResponse
+	(v1alpha1.OrgKind)(0),         // 5: koinon.org.v1alpha1.OrgKind
 	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_koinon_platform_v1alpha1_platform_proto_depIdxs = []int32{
-	0, // 0: koinon.platform.v1alpha1.OrgSummary.kind:type_name -> koinon.platform.v1alpha1.OrgKind
+	5, // 0: koinon.platform.v1alpha1.OrgSummary.kind:type_name -> koinon.org.v1alpha1.OrgKind
 	6, // 1: koinon.platform.v1alpha1.OrgSummary.created_at:type_name -> google.protobuf.Timestamp
-	1, // 2: koinon.platform.v1alpha1.ListOrgsResponse.orgs:type_name -> koinon.platform.v1alpha1.OrgSummary
+	0, // 2: koinon.platform.v1alpha1.ListOrgsResponse.orgs:type_name -> koinon.platform.v1alpha1.OrgSummary
 	6, // 3: koinon.platform.v1alpha1.ListOrgsResponse.month_start:type_name -> google.protobuf.Timestamp
-	1, // 4: koinon.platform.v1alpha1.GetOrgResponse.org:type_name -> koinon.platform.v1alpha1.OrgSummary
+	0, // 4: koinon.platform.v1alpha1.GetOrgResponse.org:type_name -> koinon.platform.v1alpha1.OrgSummary
 	6, // 5: koinon.platform.v1alpha1.GetOrgResponse.month_start:type_name -> google.protobuf.Timestamp
-	2, // 6: koinon.platform.v1alpha1.PlatformService.ListOrgs:input_type -> koinon.platform.v1alpha1.ListOrgsRequest
-	4, // 7: koinon.platform.v1alpha1.PlatformService.GetOrg:input_type -> koinon.platform.v1alpha1.GetOrgRequest
-	3, // 8: koinon.platform.v1alpha1.PlatformService.ListOrgs:output_type -> koinon.platform.v1alpha1.ListOrgsResponse
-	5, // 9: koinon.platform.v1alpha1.PlatformService.GetOrg:output_type -> koinon.platform.v1alpha1.GetOrgResponse
+	1, // 6: koinon.platform.v1alpha1.PlatformService.ListOrgs:input_type -> koinon.platform.v1alpha1.ListOrgsRequest
+	3, // 7: koinon.platform.v1alpha1.PlatformService.GetOrg:input_type -> koinon.platform.v1alpha1.GetOrgRequest
+	2, // 8: koinon.platform.v1alpha1.PlatformService.ListOrgs:output_type -> koinon.platform.v1alpha1.ListOrgsResponse
+	4, // 9: koinon.platform.v1alpha1.PlatformService.GetOrg:output_type -> koinon.platform.v1alpha1.GetOrgResponse
 	8, // [8:10] is the sub-list for method output_type
 	6, // [6:8] is the sub-list for method input_type
 	6, // [6:6] is the sub-list for extension type_name
@@ -515,14 +462,13 @@ func file_koinon_platform_v1alpha1_platform_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_platform_v1alpha1_platform_proto_rawDesc), len(file_koinon_platform_v1alpha1_platform_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_koinon_platform_v1alpha1_platform_proto_goTypes,
 		DependencyIndexes: file_koinon_platform_v1alpha1_platform_proto_depIdxs,
-		EnumInfos:         file_koinon_platform_v1alpha1_platform_proto_enumTypes,
 		MessageInfos:      file_koinon_platform_v1alpha1_platform_proto_msgTypes,
 	}.Build()
 	File_koinon_platform_v1alpha1_platform_proto = out.File

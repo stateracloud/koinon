@@ -5,6 +5,7 @@ syntax = "proto3";
 package koinon.platform.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/org/v1alpha1/org.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1";
 
@@ -24,26 +25,20 @@ service PlatformService {
   }
 }
 
-// OrgKind mirrors the org_kind enum in Postgres.
-enum OrgKind {
-  ORG_KIND_UNSPECIFIED = 0;
-  ORG_KIND_PERSONAL = 1;
-  ORG_KIND_TEAM = 2;
-}
-
 // OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
 // BudgetService writes them.
 message OrgSummary {
   string org_id = 1;
   string slug = 2;
   string display_name = 3;
-  OrgKind kind = 4;
+  koinon.org.v1alpha1.OrgKind kind = 4;
   // member_count counts the users with an effective role in the org (its identity mode applies, as
   // for WhoAmI).
   int32 member_count = 5;
   // agent_count counts the agents that are not archived.
   int32 agent_count = 6;
-  // spent_this_month_usd is the recorded spend since month_start of the response.
+  // spent_this_month_usd is the recorded spend since month_start of the response: every charge of
+  // the org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it.
   string spent_this_month_usd = 7;
   // monthly_cap_usd is the org's monthly budget; empty when the org has none.
   string monthly_cap_usd = 8;

@@ -19,6 +19,13 @@ service OrgService {
   }
 }
 
+// OrgKind mirrors the org_kind enum in Postgres.
+enum OrgKind {
+  ORG_KIND_UNSPECIFIED = 0;
+  ORG_KIND_PERSONAL = 1;
+  ORG_KIND_TEAM = 2;
+}
+
 // Member is one user of the org with the user's effective role.
 message Member {
   string user_id = 1;

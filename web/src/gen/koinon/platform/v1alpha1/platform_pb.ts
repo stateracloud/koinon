@@ -5,17 +5,19 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { OrgKind } from "../../org/v1alpha1/org_pb";
+import { file_koinon_org_v1alpha1_org } from "../../org/v1alpha1/org_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/platform/v1alpha1/platform.proto.
  */
 export const file_koinon_platform_v1alpha1_platform: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMSKhAgoKT3JnU3VtbWFyeRIOCgZvcmdfaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSLwoEa2luZBgEIAEoDjIhLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5PcmdLaW5kEhQKDG1lbWJlcl9jb3VudBgFIAEoBRITCgthZ2VudF9jb3VudBgGIAEoBRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgHIAEoCRIXCg9tb250aGx5X2NhcF91c2QYCCABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYCSABKAkSLgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiUgoPTGlzdE9yZ3NSZXF1ZXN0EhgKEGluY2x1ZGVfcGVyc29uYWwYASABKAgSEQoJcGFnZV9zaXplGAIgASgFEhIKCnBhZ2VfdG9rZW4YAyABKAkikAEKEExpc3RPcmdzUmVzcG9uc2USMgoEb3JncxgBIAMoCzIkLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5PcmdTdW1tYXJ5EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRIvCgttb250aF9zdGFydBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiHwoNR2V0T3JnUmVxdWVzdBIOCgZvcmdfaWQYASABKAkidAoOR2V0T3JnUmVzcG9uc2USMQoDb3JnGAEgASgLMiQua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLk9yZ1N1bW1hcnkSLwoLbW9udGhfc3RhcnQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKk0KB09yZ0tpbmQSGAoUT1JHX0tJTkRfVU5TUEVDSUZJRUQQABIVChFPUkdfS0lORF9QRVJTT05BTBABEhEKDU9SR19LSU5EX1RFQU0QAjLbAQoPUGxhdGZvcm1TZXJ2aWNlEmYKCExpc3RPcmdzEikua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkxpc3RPcmdzUmVxdWVzdBoqLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5MaXN0T3Jnc1Jlc3BvbnNlIgOQAgESYAoGR2V0T3JnEicua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkdldE9yZ1JlcXVlc3QaKC5rb2lub24ucGxhdGZvcm0udjFhbHBoYTEuR2V0T3JnUmVzcG9uc2UiA5ACAUJXWlVnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9wbGF0Zm9ybS92MWFscGhhMTtwbGF0Zm9ybXYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMSKcAgoKT3JnU3VtbWFyeRIOCgZvcmdfaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSKgoEa2luZBgEIAEoDjIcLmtvaW5vbi5vcmcudjFhbHBoYTEuT3JnS2luZBIUCgxtZW1iZXJfY291bnQYBSABKAUSEwoLYWdlbnRfY291bnQYBiABKAUSHAoUc3BlbnRfdGhpc19tb250aF91c2QYByABKAkSFwoPbW9udGhseV9jYXBfdXNkGAggASgJEhwKFHBsYXRmb3JtX2NlaWxpbmdfdXNkGAkgASgJEi4KCmNyZWF0ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlIKD0xpc3RPcmdzUmVxdWVzdBIYChBpbmNsdWRlX3BlcnNvbmFsGAEgASgIEhEKCXBhZ2Vfc2l6ZRgCIAEoBRISCgpwYWdlX3Rva2VuGAMgASgJIpABChBMaXN0T3Jnc1Jlc3BvbnNlEjIKBG9yZ3MYASADKAsyJC5rb2lub24ucGxhdGZvcm0udjFhbHBoYTEuT3JnU3VtbWFyeRIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkSLwoLbW9udGhfc3RhcnQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIh8KDUdldE9yZ1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJInQKDkdldE9yZ1Jlc3BvbnNlEjEKA29yZxgBIAEoCzIkLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5PcmdTdW1tYXJ5Ei8KC21vbnRoX3N0YXJ0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcDLbAQoPUGxhdGZvcm1TZXJ2aWNlEmYKCExpc3RPcmdzEikua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkxpc3RPcmdzUmVxdWVzdBoqLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5MaXN0T3Jnc1Jlc3BvbnNlIgOQAgESYAoGR2V0T3JnEicua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkdldE9yZ1JlcXVlc3QaKC5rb2lub24ucGxhdGZvcm0udjFhbHBoYTEuR2V0T3JnUmVzcG9uc2UiA5ACAUJXWlVnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9wbGF0Zm9ybS92MWFscGhhMTtwbGF0Zm9ybXYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp, file_koinon_org_v1alpha1_org]);
 
 /**
  * OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
@@ -40,7 +42,7 @@ export type OrgSummary = Message<"koinon.platform.v1alpha1.OrgSummary"> & {
   displayName: string;
 
   /**
-   * @generated from field: koinon.platform.v1alpha1.OrgKind kind = 4;
+   * @generated from field: koinon.org.v1alpha1.OrgKind kind = 4;
    */
   kind: OrgKind;
 
@@ -60,7 +62,8 @@ export type OrgSummary = Message<"koinon.platform.v1alpha1.OrgSummary"> & {
   agentCount: number;
 
   /**
-   * spent_this_month_usd is the recorded spend since month_start of the response.
+   * spent_this_month_usd is the recorded spend since month_start of the response: every charge of
+   * the org, agent and system spend alike, as BudgetService.ListOrgBudgets counts it.
    *
    * @generated from field: string spent_this_month_usd = 7;
    */
@@ -197,34 +200,6 @@ export type GetOrgResponse = Message<"koinon.platform.v1alpha1.GetOrgResponse"> 
  */
 export const GetOrgResponseSchema: GenMessage<GetOrgResponse> = /*@__PURE__*/
   messageDesc(file_koinon_platform_v1alpha1_platform, 4);
-
-/**
- * OrgKind mirrors the org_kind enum in Postgres.
- *
- * @generated from enum koinon.platform.v1alpha1.OrgKind
- */
-export enum OrgKind {
-  /**
-   * @generated from enum value: ORG_KIND_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: ORG_KIND_PERSONAL = 1;
-   */
-  PERSONAL = 1,
-
-  /**
-   * @generated from enum value: ORG_KIND_TEAM = 2;
-   */
-  TEAM = 2,
-}
-
-/**
- * Describes the enum koinon.platform.v1alpha1.OrgKind.
- */
-export const OrgKindSchema: GenEnum<OrgKind> = /*@__PURE__*/
-  enumDesc(file_koinon_platform_v1alpha1_platform, 0);
 
 /**
  * PlatformService is the platform console's face of the install (ADR 0126 section 4). Every call is
