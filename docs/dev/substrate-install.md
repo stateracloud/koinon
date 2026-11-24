@@ -473,9 +473,11 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   idle cost), with limits of 4 CPU and 8704Mi (8.5Gi). The pool needs one node that runs the gvisor class: the node
   scheduler reserves the requests, and the largest sandbox needs 4 CPU and 8.5Gi free on that node. Change the size
   with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). The pool carries the label
-  `koinon.dev/runtime-class` with `workerPool.runtimeClassName` (empty: `openshell.runtimeClassName`, default `kata`).
-  Substrate copies it to the workers, and the substrate driver puts each sandbox only on a worker with the runtime
-  class of the sandbox. Map that class to a tier in `execution.substrate.runtimeClassTiers`. Set `workerPool.sandboxClass: microvm` for a microVM pool
+  `koinon.dev/runtime-class` with `openshell.runtimeClassName` (default `kata`): the reconciler gives this runtime class
+  to every sandbox. Substrate copies the label to the workers, and the substrate driver puts each sandbox only on a
+  worker with the runtime class of the sandbox. Map that class to a tier in `execution.substrate.runtimeClassTiers`.
+  `defaultTier` does not apply to a sandbox that names a class, so with `defaultTier` only, every command in the
+  sandbox fails ("has no isolation tier"). The chart refuses the tier `vm` on a pool that is not `microvm` (ADR 0075). Set `workerPool.sandboxClass: microvm` for a microVM pool
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
   exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
   identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps

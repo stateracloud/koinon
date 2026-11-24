@@ -67,6 +67,16 @@ other pods, so its actors could overbook the node: the chart refuses it. */}}
 {{- end }}
 {{- end }}
 {{- end }}
+{{- /* The runtime class label (see metadata below): a valid label value, and no vm tier on a pool that gives no
+microVM per sandbox (ADR 0075). */}}
+{{- with .Values.openshell.runtimeClassName }}
+{{- if not (regexMatch "^([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$" .) }}
+{{- fail (printf "openshell.runtimeClassName %q is not a valid label value (at most 63 characters): the WorkerPool carries it as the label koinon.dev/runtime-class" .) }}
+{{- end }}
+{{- if and (eq (index ($s.runtimeClassTiers | default dict) . | default "") "vm") (ne $p.sandboxClass "microvm") }}
+{{- fail (printf "execution.substrate.runtimeClassTiers.%s is vm, but the pool that serves the runtime class %q has sandboxClass %s: the vm tier needs a microVM per sandbox (ADR 0075); set execution.substrate.workerPool.sandboxClass=microvm, or map the class to hardened or dev" . . $p.sandboxClass) }}
+{{- end }}
+{{- end }}
 {{- $spec := dict "workerImage" $image "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
 {{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
 apiVersion: ate.dev/v1
@@ -79,7 +89,7 @@ metadata:
     {{- /* Substrate v1.0.0 copies the WorkerPool labels to every Worker record (workersync/syncer.go:368), and
     the substrate driver selects workers on this label with the runtime class of the sandbox
     (internal/execution/substrate/template.go RuntimeClassSelector). */}}
-    {{- with ($p.runtimeClassName | default .Values.openshell.runtimeClassName) }}
+    {{- with .Values.openshell.runtimeClassName }}
     koinon.dev/runtime-class: {{ . | quote }}
     {{- end }}
 spec:

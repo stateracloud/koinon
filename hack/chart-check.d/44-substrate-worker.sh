@@ -351,7 +351,11 @@ capacity_refused "a cpu limit from the LimitRange next to a pool memory limit" '
 # workers on koinon.dev/runtime-class with the runtime class of the sandbox (openshell.runtimeClassName).
 has "the pool carries the runtime class of the sandboxes" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" "${pool[@]}"
 has "the label follows openshell.runtimeClassName" '^    koinon.dev/runtime-class: "gvisor-x"$' "${wsub[@]}" --set openshell.runtimeClassName=gvisor-x --set 'sandboxPolicy.runtimeClasses={gvisor-x}' "${pool[@]}"
-has "workerPool.runtimeClassName sets the label" '^    koinon.dev/runtime-class: "other"$' "${wsub[@]}" --set execution.substrate.workerPool.runtimeClassName=other "${pool[@]}"
+capacity_refused "the vm tier on a gvisor pool" 'the vm tier needs a microVM per sandbox' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=vm "${pool[@]}"
+has "the vm tier on a microvm pool renders" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
+has "the hardened tier on a gvisor pool renders" '^    koinon.dev/runtime-class: "kata"$' "${wsub[@]}" --set execution.substrate.runtimeClassTiers.kata=hardened "${pool[@]}"
+long=$(printf 'k%.0s' {1..64})
+capacity_refused "a runtime class that is not a label value" 'is not a valid label value' "${wsub[@]}" --set "openshell.runtimeClassName=$long" --set "sandboxPolicy.runtimeClasses={$long}" "${pool[@]}"
 # The default image is a tag: without the interim exemption of the ReplicaSet controller (#1140) the render fails.
 if render "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "a tag pool image without the digest exemption must not render"; fi
 grep -q 'has no digest' "$out/sub.err" || fail "the digest error must say that the image has no digest"
