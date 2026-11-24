@@ -24,7 +24,8 @@ relates: ["0023", "0045", "0068", "0069", "0074", "0075", "0085", "0096"]
   [0058](0058-gateway-modes.md) (supersedes in part: shared mode is not built, Kubernetes mode is frozen,
   not ported, and deleted in step 3), [0049](0049-v01-scope-decisions.md) (Kubernetes-mode support ends
   with step 3), [0006](0006-identity-layers.md) (its open trust-domain question, answered in decision 11),
-  [0073](0073-agent-passport.md) (decision 6 delivery and the decision 12 delivery spike, in step 2),
+  [0073](0073-agent-passport.md) (decision 6 delivery and the decision 12 delivery spike, in step 2;
+  0073 decision 1 subject and 0073 decision 13, #1235),
   [0084](0084-leak-guard.md) (decision 1, in step 2: the guard is called from Koinon's MCP path, not
   through ExtMcp), [0091](0091-leak-guard-by-destination.md) (decision 4, in step 1: a reply the guard
   never saw sets both legs, for a call whose declared result would set a leg)
@@ -365,6 +366,40 @@ does today, no more (model path at parity, below).
   agent header today (`charts/koinon/templates/deployments.yaml:265`; removal research A14). Koinon's
   MCP path sets an equivalent, Koinon-named header after the key check, and NetworkPolicy keeps the tool
   servers reachable only from the gateway. Without it the tools break when the default driver changes.
+- **An org's MCP server gets no agent header** (maintainer decision 2026-11-24, #1235). Koinon's MCP path
+  sets the agent header only on a platform target (Koinon's own tool servers, `Org ""`;
+  `internal/mcpgateway/credential.go`). It never sends it to a server an org registered, and there is no
+  opt-in for it. An org's server trusts nothing of Koinon's, and the agent ID is internal data. A plain
+  header can be forged: server owners would build access checks on it, and a signed credential later
+  would then need two identity paths or break those servers. An org's server learns the caller only from
+  a signed credential made for that one server: the passport (ADR 0073 decision 13) or the server's own
+  sign-in token (ADR 0096, #237), when those are built. When the gateway speaks an MCP revision with
+  client information on each request, it sends its own client information, never the agent's, and trace
+  baggage that goes to an org's server carries no agent ID.
+  - **The fallback gateway still sends the agent header to an org's server** (maintainer decision
+    2026-11-24, #1235). agentgateway sends the agent header to every MCP target that it calls, until step 3
+    deletes that path. The render does not change. The driver selects which calls go through
+    agentgateway. With driver `agentgateway` (the default until #1239, and the fallback after it), all MCP
+    calls go through it. With driver `koinon`, every call through koinon-gateway gets no agent header on an
+    org's server. Until #1239, an agent's own MCP calls and koinon-api's live check of an agent's tools go
+    through agentgateway with both drivers. Thus before #1239, driver `koinon` removes the header only
+    from the calls that a human approved. The reconciler's probe goes through agentgateway with both
+    drivers; #1239 does not move it. Its header names a probe agent, not a real agent.
+  - The reason that the render does not change: in Kubernetes mode, a `transformation` on the one MCP
+    route sets the header before agentgateway selects the target, so it cannot leave out one target. A
+    `transformation` on the Backend runs after agentgateway injects the target's credential; the one that
+    Koinon tried stripped the credential ([research](../research/agentgateway-k8s-crds.md)). A Backend for
+    each org would change the Kubernetes-mode shape that section 4 of this ADR freezes. In standalone mode,
+    a policy on each target (`requestHeaderModifier` or `transformations` of `LocalMcpTarget`;
+    [research](../research/mcp-discovery-agentgateway.md)) can probably remove the header from an org's
+    target. Koinon does not do this: step 3 deletes the path, and no test proves that such a policy keeps
+    the target's credential on agentgateway v1.7.0. The operator text of `gateway.mcp.driver` in
+    `charts/koinon/values.yaml` tells an operator about this disclosure.
+  - The e2e assertions (`test/e2e/mcp_test.go`, `test/e2e/quickstart_test.go`) follow the path that each
+    call uses: an agent's call, a call a human approved, and a call from a client outside the cluster. An
+    org's fake server sees the agent (or Koinon's executor) on the agentgateway path, and no agent header
+    on Koinon's MCP path. The e2e install runs the Koinon case when koinon-gateway becomes its default
+    (#1239).
 - The ask tier can park a call in the path, so the second `<org>-<server>-ask` target of ADR 0057 item
   7 may fold into the main target (decided in the step 2 design). _(inferred)_
 - The same code runs in every cluster as a plain Deployment and Service, so the standalone/Kubernetes
@@ -455,6 +490,31 @@ source type, mints the actor token outside the guest for both drivers and drops 
 profile. Prior art: Fly.io's Tokenizer (a proxy that adds the credential, the client holds none), git
 `url.<base>.insteadOf`, and npm and pip registry mirrors that take a path prefix.
 
+Record (2026-11-24, #1086 part B; the choices below are decided): the org routes come from the sources
+that exist today, the code-host grant of each active agent and its npm plugin-install rule. The registry
+levels of ADR 0113 come later, in an issue of their own. The reconciler translates the same enforced
+endpoints that it renders into the OpenShell policy, and the OpenShell rules stay in force as a second
+layer. The State update gets an add-only egress half (`EgressState`, field 5), which the gateway applies on
+each revision with no ack of its own: nothing waits for it. The gateway merges the org routes with the
+platform routes file (`egress.Merge`). An org route names its org and has a `/` in its name, and a platform
+route has no `/`, so the two sets never share a name. One bad org route refuses all org routes, and the
+gateway then serves the platform routes alone. The agent deny routes go with them, so a platform file
+must not rely on them: today no platform file names a forge host. The reconciler compiles each agent's routes first, so one
+agent's fault takes away only that agent's routes. To translate the connector rules without loss, the route
+model gets: an agent scope (empty means every agent of the org; an agent route wins over an org route, and
+an org route over a platform route), segment patterns (`*` is one non-empty segment, `**` is zero or more,
+other segments match the decoded segment exactly and with case), exact query values, an explicit
+any-query flag, and deny routes. A deny route is checked before every allow, without case, and has no
+credential. It takes path patterns only, never a prefix, and ignores a trailing slash. A rule that the model cannot express exactly (a query glob, an access preset, an endpoint path,
+a protocol other than REST) gives the agent no route. The gateway agent name is the agent ID, as in
+`gateway.AgentRef`: the actor token that part C mints must carry the same value in its `agent` claim. A
+forge route names the credential `org/<org>/agent/<agent>/codehost`, a name and never a value, so it
+returns 503 `credential_unavailable` until part C attaches it. The host of a forge route comes from the
+connection's base URL, which an org admin sets: an allowed CIDR (`--egress-allowed-hosts`) admits that host
+too when it resolves into the CIDR. Known limit: the route model refuses an encoded slash in every path,
+also the npm CLI's spelling of a scoped package (`/@scope%2fname`); that needs a change of its own before
+npm traffic goes through the gateway.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
@@ -477,7 +537,8 @@ Exit criteria:
 5. Streamable HTTP and the MCP spec version Koinon pins work with the go-sdk.
 6. The model half of the suite passes against Koinon's gateway, including usage for every routed
    format and dialect against recorded fixtures; the budget cases pass as charge-after.
-7. The GitHub tools server works behind Koinon's MCP path with the Koinon-named agent header.
+7. The GitHub tools server works behind Koinon's MCP path with the Koinon-named agent header, and a
+   server an org registered gets no agent header on that path (#1235).
 8. Every catalog model with a `cache_read` price runs with caching on through Koinon's gateway (ADR
    0068's test).
 9. The quickstart e2e is green with Koinon's gateway as the default driver.

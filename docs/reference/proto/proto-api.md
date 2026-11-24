@@ -2344,6 +2344,36 @@ AgentRef names an agent.
 | agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
 | grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
 
+### Message EgressRoute
+
+EgressRoute is one org route (gateway route.Route). It names a credential, never its value.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  | name is unique in the set and holds a "/". |
+| class | 2 | `string` | singular |  | class is "forge" or "registry". |
+| org | 3 | `string` | singular |  | org is the org slug. It is never empty for a route in the state. |
+| agent | 4 | `string` | singular |  | agent narrows the route to one agent (the agent's name at the gateway). Empty: every agent of org. |
+| host | 5 | `string` | singular |  |  |
+| port | 6 | `int32` | singular |  | port is the TCP port. 0 means 443. |
+| methods | 7 | `string` | repeated |  |  |
+| path_prefixes | 8 | `string` | repeated |  |  |
+| paths | 9 | `string` | repeated |  | paths are path patterns: the segment "*" matches one segment, "**" any number of segments. |
+| query_keys | 10 | `string` | repeated |  |  |
+| query_values | 11 | `map<string, string>` | map |  | query_values are required query parameters with their one exact value. |
+| any_query | 12 | `bool` | singular |  |  |
+| deny | 13 | `bool` | singular |  | deny makes the route a refusal that wins over every allow of its scope. |
+| credential | 14 | `string` | singular |  | credential is the name of the secret the gateway attaches. Empty means none. |
+
+### Message EgressState
+
+EgressState is the org routes of the egress listener. The gateway merges them with its platform
+route file. A route that fails to load closes all org routes; it never opens one.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| routes | 1 | `koinon.gateway.v1alpha1.EgressRoute` | repeated |  |  |
+
 ### Message Key
 
 Key is the gateway-side record of an API key: id, owner and hash. The key itself never enters it.
@@ -2479,6 +2509,7 @@ so neither half is a copy of them.
 | keys | 2 | `koinon.gateway.v1alpha1.Key` | repeated |  |  |
 | model | 3 | `koinon.gateway.v1alpha1.ModelState` | singular |  |  |
 | mcp | 4 | `koinon.gateway.v1alpha1.MCPState` | singular |  |  |
+| egress | 5 | `koinon.gateway.v1alpha1.EgressState` | singular |  | egress is the org half of the forge and registry routes (ADR 0097 step 2, ADR 0120 section 2). It is applied with each revision and has no ack of its own yet. |
 
 ### Message StreamStateRequest
 

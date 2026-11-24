@@ -39,9 +39,27 @@ var _ = Describe("platform route file", func() {
 		Entry("one bad route among good ones", `{"routes":[
 			{"name":"ok","class":"registry","host":"pypi.org","methods":["GET"],"pathPrefixes":["/"]},
 			{"name":"bad","class":"registry","host":"pypi.org","methods":[],"pathPrefixes":["/"]}]}`, "no method rule"),
+		Entry("a name with a slash, which only org routes have", `{"routes":[{"name":"org/acme","class":"registry","host":"pypi.org","methods":["GET"],"pathPrefixes":["/"]}]}`, `has no "/"`),
+		Entry("an agent field", `{"routes":[{"name":"a","class":"registry","agent":"x","host":"pypi.org","methods":["GET"],"pathPrefixes":["/"]}]}`, "unknown field"),
+		Entry("a deny route with a credential field", `{"routes":[{"name":"a","class":"registry","deny":true,"credential":"x","host":"pypi.org","methods":["GET"],"paths":["/**"]}]}`, "unknown field"),
+		Entry("no path rule", `{"routes":[{"name":"a","class":"registry","host":"pypi.org","methods":["GET"]}]}`, "path"),
 		Entry("two JSON values", `{"routes":[]} {"routes":[]}`, "more than one"),
 		Entry("not JSON", `routes: []`, "route file"),
 	)
+
+	It("reads patterns, query values, any-query and deny routes", func() {
+		t, err := egress.ParsePlatformRoutes([]byte(`{"routes":[
+			{"name":"pkg","class":"registry","host":"pkgs.example.test","methods":["GET"],"paths":["/simple/*/**"],"queryValues":{"format":"json"},"anyQuery":true},
+			{"name":"no-upload","class":"registry","host":"pkgs.example.test","methods":["POST"],"paths":["/**"],"deny":true}
+		]}`))
+		Expect(err).NotTo(HaveOccurred())
+		rs := t.Routes()
+		Expect(rs).To(HaveLen(2))
+		Expect(rs[0].Paths).To(Equal([]string{"/simple/*/**"}))
+		Expect(rs[0].QueryValues).To(Equal(map[string]string{"format": "json"}))
+		Expect(rs[0].AnyQuery).To(BeTrue())
+		Expect(rs[1].Deny).To(BeTrue())
+	})
 
 	It("loads a file and refuses one over 1 MiB", func() {
 		dir := GinkgoT().TempDir()

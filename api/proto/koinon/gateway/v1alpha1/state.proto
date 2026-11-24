@@ -60,6 +60,9 @@ message StateUpdate {
   repeated Key keys = 2;
   ModelState model = 3;
   MCPState mcp = 4;
+  // egress is the org half of the forge and registry routes (ADR 0097 step 2, ADR 0120 section 2).
+  // It is applied with each revision and has no ack of its own yet.
+  EgressState egress = 5;
 }
 
 // AgentRef names an agent.
@@ -203,4 +206,37 @@ message ToolGrant {
   string target = 1;
   repeated string tools = 2;
   bool all = 3;
+}
+
+// EgressState is the org routes of the egress listener. The gateway merges them with its platform
+// route file. A route that fails to load closes all org routes; it never opens one.
+message EgressState {
+  repeated EgressRoute routes = 1;
+}
+
+// EgressRoute is one org route (gateway route.Route). It names a credential, never its value.
+message EgressRoute {
+  // name is unique in the set and holds a "/".
+  string name = 1;
+  // class is "forge" or "registry".
+  string class = 2;
+  // org is the org slug. It is never empty for a route in the state.
+  string org = 3;
+  // agent narrows the route to one agent (the agent's name at the gateway). Empty: every agent of org.
+  string agent = 4;
+  string host = 5;
+  // port is the TCP port. 0 means 443.
+  int32 port = 6;
+  repeated string methods = 7;
+  repeated string path_prefixes = 8;
+  // paths are path patterns: the segment "*" matches one segment, "**" any number of segments.
+  repeated string paths = 9;
+  repeated string query_keys = 10;
+  // query_values are required query parameters with their one exact value.
+  map<string, string> query_values = 11;
+  bool any_query = 12;
+  // deny makes the route a refusal that wins over every allow of its scope.
+  bool deny = 13;
+  // credential is the name of the secret the gateway attaches. Empty means none.
+  string credential = 14;
 }

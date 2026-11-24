@@ -53,6 +53,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -471,6 +472,8 @@ type work struct {
 	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
+	// egress are the org egress routes of an active agent (egressroutes.go).
+	egress []route.Route
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -749,7 +752,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	for i, w := range items {
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
-			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools,
+			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -1179,6 +1182,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
+		w.egress = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err
@@ -1510,7 +1514,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb) {
+	if r.specChanged(ws, spec, sb, hash) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1659,6 +1663,19 @@ func (r *Reconciler) deleteSandbox(ctx context.Context, w *work, ws, name, why s
 	r.log.Info("sandbox deletion requested", append(w.logAttrs(), "name", name, "outcome", string(outcome),
 		"took", time.Since(start).Round(time.Millisecond), "err", err)...)
 	return err
+}
+
+// specChanged says whether the sandbox must be recreated because it was made from another spec.
+// A backend with labels compares the spec hash label, the supervisor image and the install mark. A
+// backend without labels (Substrate) gives the sandbox the identity it derived from the spec
+// (execution.SpecIdentifier), which the backend keeps as long as the sandbox; a failure to derive
+// it leaves the sandbox as it is, the spec error shows when the sandbox is created.
+func (r *Reconciler) specChanged(ws string, spec execution.SandboxSpec, sb execution.Sandbox, hash string) bool {
+	if execution.IdentifiesSpecs(r.backend) {
+		want, err := r.backend.(execution.SpecIdentifier).SpecID(ws, spec)
+		return err == nil && want != sb.SpecID
+	}
+	return sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb)
 }
 
 // unmarked reports a sandbox without the install label while the backend owns what it makes: it

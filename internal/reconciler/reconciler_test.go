@@ -96,12 +96,14 @@ var _ = Describe("Reconciler", func() {
 		user    pgtype.UUID
 	)
 
-	newReconciler := func() *reconciler.Reconciler {
-		r, err := reconciler.New(pool, backend, mg,
+	// newReconcilerWith makes a reconciler that applies its gateway state to gw.
+	newReconcilerWith := func(gw *fakeModelGateway) *reconciler.Reconciler {
+		r, err := reconciler.New(pool, backend, gw,
 			reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())
 		return r
 	}
+	newReconciler := func() *reconciler.Reconciler { return newReconcilerWith(mg) }
 	pass := func(ctx context.Context, r *reconciler.Reconciler) {
 		GinkgoHelper()
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
@@ -1755,9 +1757,8 @@ var _ = Describe("Reconciler", func() {
 
 		It("cancels a running pass when the leader's connection is lost, before the follower leads", func(ctx SpecContext) {
 			cfg.ResyncInterval = time.Hour
-			// CI showed one failure of this spec (issue 1188). We could not reproduce it. On a failure,
-			// this cleanup prints the log. The log has the NOTIFY wake-ups, so it can show what started
-			// the extra pass.
+			// On a failure, print the log. It has the NOTIFY wake-ups and the pass starts of both
+			// reconcilers.
 			DeferCleanup(func() {
 				if CurrentSpecReport().Failed() {
 					GinkgoWriter.Println("reconciler log of the failed spec:\n" + logs.String())
@@ -1776,11 +1777,19 @@ var _ = Describe("Reconciler", func() {
 			})
 			run(newReconciler())
 			Eventually(entered).Should(BeClosed(), "the leader's pass is inside Apply")
-			// Later passes do not wait.
+			// entered is closed once; an Apply of the old reconciler after this one waits on hold and
+			// fails the spec below.
 			mg.mu.Lock()
-			mg.hold, mg.entered = nil, nil
+			mg.entered = nil
 			mg.mu.Unlock()
-			run(newReconciler())
+			// The follower applies to a gateway of its own, so each count below belongs to one
+			// reconciler. The new leader can run more than one pass: each NOTIFY on the reconcile
+			// channel starts one. A NOTIFY can come from a row write of any spec that shares the
+			// suite's database, from the ledger, or from a reconciler itself at the end of a key
+			// settle (notifySelf, #249). A count of all passes is thus not a check of the cancel
+			// (issue 1188).
+			follower := &fakeModelGateway{}
+			run(newReconcilerWith(follower))
 			Eventually(func() int { return strings.Count(logs.String(), "waiting for the leader lock") }).Should(Equal(2))
 
 			var terminated int
@@ -1792,16 +1801,25 @@ var _ = Describe("Reconciler", func() {
 
 			Eventually(mg.canceledAt).WithTimeout(racescale.D(2 * time.Second)).ShouldNot(BeZero())
 			Eventually(leading).WithTimeout(racescale.D(3 * time.Second)).Should(Equal(2))
-			Eventually(mg.applyTimes).Should(HaveLen(2))
 			// The order of the old pass's cancel and the new leader's first write is NOT guaranteed:
 			// the server frees the lock when the backend dies, and the old leader learns of the dead
 			// connection by its own read, so the follower can write first. The window of a silent
 			// loss is bounded by the leader's heartbeat (issue 635, the spec below).
 			// applyTimes records the start of an Apply and appliedCount its end, so the new leader's
-			// pass can have started and not yet finished here (#861): wait for the finish, and then
-			// hold the count (the old pass was cancelled and must never add to it).
-			Eventually(mg.appliedCount).Should(Equal(1), "only the new leader's pass finished")
-			Consistently(mg.appliedCount, "500ms", "50ms").Should(Equal(1))
+			// pass can have started and not yet finished (#861): wait for the finish.
+			Eventually(follower.appliedCount).Should(BeNumerically(">=", 1), "the new leader's pass finished")
+			// A wake-up starts one more pass of the new leader. The spec makes this happen in every
+			// run, so the checks below always see an extra pass and do not depend on timing.
+			before := follower.appliedCount()
+			_, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", reconciler.NotifyChannel)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(follower.appliedCount).WithTimeout(racescale.D(2*time.Second)).Should(BeNumerically(">", before), "the new leader ran another pass")
+			// The old pass was cancelled and never adds to the count, and the old reconciler starts no
+			// other Apply: it waits for the lock again.
+			Consistently(func(g Gomega) {
+				g.Expect(mg.appliedCount()).To(BeZero(), "the old leader's pass never finished an Apply")
+				g.Expect(mg.applyTimes()).To(HaveLen(1), "the old leader started no other Apply")
+			}, "500ms", "50ms").Should(Succeed())
 		})
 
 		It("stops the old leader within the detection bound after a silent connection loss (#635)", func(ctx SpecContext) {

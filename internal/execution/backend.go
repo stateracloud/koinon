@@ -303,10 +303,13 @@ type SandboxSpec struct {
 
 // Sandbox is the observed state of a sandbox.
 type Sandbox struct {
-	Name          string
-	ID            string
-	Workspace     string
-	Labels        map[string]string
+	Name      string
+	ID        string
+	Workspace string
+	Labels    map[string]string
+	// SpecID names the spec the sandbox was made from, for a backend that keeps no labels (see
+	// [SpecIdentifier]). Empty for a backend that does.
+	SpecID        string
 	Phase         Phase
 	PolicyVersion uint32
 	// Enforcement is the network enforcement mode of the sandbox's policy as the gateway reports it
@@ -317,6 +320,15 @@ type Sandbox struct {
 	// Reason and Message describe the latest condition that is not true, if any.
 	Reason  string
 	Message string
+}
+
+// SpecIdentifier is implemented by a backend whose sandboxes carry no labels (Agent Substrate has
+// none: its objects have a name and no label map). The reconciler cannot compare a spec hash label
+// with such a backend, so it asks for the identity the backend derives from a spec and compares it
+// with [Sandbox.SpecID] of the observed sandbox. The identity must live as long as the sandbox and
+// change with every field that cannot change on an existing sandbox (image, runtime class, resources).
+type SpecIdentifier interface {
+	SpecID(workspace string, spec SandboxSpec) (string, error)
 }
 
 // Phase is a sandbox lifecycle phase.

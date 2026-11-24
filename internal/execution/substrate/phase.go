@@ -61,6 +61,8 @@ func sandboxFrom(workspace string, a *ateapiv1.Actor) execution.Sandbox {
 		ID:        a.GetMetadata().GetUid(),
 		Workspace: workspace,
 		Phase:     phaseOf(a),
+		// The template name is a hash of the template's content: the durable identity of the spec.
+		SpecID: a.GetActorTemplate().GetName(),
 	}
 	if crash := a.GetStatus().GetCrash(); crash != nil && a.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_CRASHED {
 		sb.Reason = "ActorCrashed"

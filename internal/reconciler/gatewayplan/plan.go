@@ -44,6 +44,7 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpcredfile"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -68,6 +69,9 @@ type Agent struct {
 	Key gateway.Key
 	// Tools are the MCP tools the active version's grants allow.
 	Tools []gateway.ToolGrant
+	// Egress are the agent's org egress routes (#1086 part B): its forge grants and its registry
+	// rule. Only an active agent's routes go into the state.
+	Egress []route.Route
 	// Limit is the agent's budget net of spend; LimitErr is set instead when it could not be computed.
 	// Only agents with a key are looked at.
 	Limit    *gateway.Limit
@@ -321,13 +325,19 @@ type Draft struct {
 func (p *Planner) Begin(in Input) *Draft {
 	d := &Draft{p: p, in: in, Files: map[string][]byte{}}
 	tools := map[gateway.AgentRef][]gateway.ToolGrant{}
-	var keys []gateway.Key
+	var (
+		keys   []gateway.Key
+		egress []route.Route
+	)
 	for _, a := range in.Agents {
 		if a.Key.ID != "" {
 			keys = append(keys, a.Key)
 		}
 		if len(a.Tools) > 0 {
 			tools[a.Ref] = a.Tools
+		}
+		if a.Active {
+			egress = append(egress, a.Egress...)
 		}
 	}
 	providers := make([]gateway.Provider, 0, len(in.Providers))
@@ -338,6 +348,7 @@ func (p *Planner) Begin(in Input) *Draft {
 		providers = nil
 	}
 	d.state = gateway.State{Keys: keys, Providers: providers, MCP: p.toolTargets(), Tools: tools}
+	d.state.EgressRoutes = egress
 	p.warnUnpriced(d.state)
 	// Spend limits net of recorded spend (plan item L1). An agent whose budget cannot be computed
 	// fails closed (its last pushed limit, or zero) and is reported; it never stops the pass for the

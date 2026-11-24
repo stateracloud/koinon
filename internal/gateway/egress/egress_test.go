@@ -408,6 +408,85 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 		})
 	})
 
+	Context("org routes from the State stream (#1086 part B)", func() {
+		agentRoute := func(name string, deny bool) route.Route {
+			r := route.Route{
+				Name: "org/acme/agent/builder/" + name, Class: route.ClassForge, Org: "acme", Agent: "builder",
+				Host: forgeHost, Port: port, Methods: []string{"GET", "POST"}, Paths: []string{"/acme/new.git/**"},
+				AnyQuery: true, Credential: "org/acme/agent/builder/codehost",
+			}
+			if deny {
+				r.Methods, r.Paths, r.AnyQuery, r.Credential, r.Deny = []string{"POST"}, []string{"/**/git-receive-pack"}, false, "", true
+			}
+			return r
+		}
+		platform := func() *route.Table {
+			t, err := route.Compile([]route.Route{routes()[2]})
+			Expect(err).NotTo(HaveOccurred())
+			return t
+		}
+
+		It("merges the org routes with the platform routes", func() {
+			st := egress.StateRoutes{Gateway: gw, Platform: platform()}
+			Expect(st.ApplyEgress(context.Background(), []route.Route{agentRoute("forge-0", false), agentRoute("forge-1", true)})).To(Succeed())
+			// A route with a credential is enforced but refused until the gateway can attach it (part C).
+			resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/new.git/info/refs?service=git-upload-pack", token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("credential_unavailable"))
+			// The deny route refuses a push before any allow.
+			resp = do("POST", "/egress/"+authority(forgeHost)+"/acme/new.git/git-receive-pack", token(minter, acme), nil)
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("denied"))
+			Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
+			// Another agent of the org gets no route; the platform route still serves.
+			other := actortoken.Actor{Org: "acme", Agent: "reviewer", Run: "run-2"}
+			resp = do("GET", "/egress/"+authority(forgeHost)+"/acme/new.git/info/refs", token(minter, other), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("no_route"))
+			resp = do("GET", "/egress/"+authority(regHost)+"/left-pad", token(minter, other), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(upstreamCalls()).To(HaveLen(1))
+		})
+
+		DescribeTable("serves the platform routes alone when the org routes are bad",
+			func(mut func(r *route.Route)) {
+				st := egress.StateRoutes{Gateway: gw, Platform: platform()}
+				r := agentRoute("forge-0", false)
+				r.Credential = ""
+				mut(&r)
+				Expect(st.ApplyEgress(context.Background(), []route.Route{r})).NotTo(Succeed())
+				resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/new.git/info/refs", token(minter, acme), nil)
+				Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
+				// The routes of the test's own table are gone too: the platform table alone serves.
+				resp = do("GET", "/egress/"+authority(forgeHost)+"/acme/app.git/info/refs", token(minter, acme), nil)
+				Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
+				resp = do("GET", "/egress/"+authority(regHost)+"/left-pad", token(minter, acme), nil)
+				Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			},
+			Entry("no org", func(r *route.Route) { r.Org, r.Agent = "", "" }),
+			Entry("a platform-style name", func(r *route.Route) { r.Name = "registry" }),
+			Entry("a bad path pattern", func(r *route.Route) { r.Paths = []string{"bad"} }),
+			Entry("a wildcard host", func(r *route.Route) { r.Host = "*.example.test" }),
+		)
+
+		It("refuses every request with no platform file and bad org routes", func() {
+			st := egress.StateRoutes{Gateway: gw}
+			r := agentRoute("forge-0", false)
+			r.Org = ""
+			Expect(st.ApplyEgress(context.Background(), []route.Route{r})).NotTo(Succeed())
+			resp := do("GET", "/egress/"+authority(regHost)+"/left-pad", token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("no_table"))
+		})
+
+		It("refuses two org routes with the same credential in two orgs", func() {
+			a := agentRoute("forge-0", false)
+			b := agentRoute("forge-0", false)
+			b.Name, b.Org = "org/globex/agent/builder/forge-0", "globex"
+			_, err := egress.Merge(platform(), []route.Route{a, b})
+			Expect(err).To(MatchError(ContainSubstring("two orgs")))
+		})
+	})
+
 	It("needs a dialer", func() {
 		_, err := egress.New(egress.Options{})
 		Expect(err).To(HaveOccurred())

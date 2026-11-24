@@ -57,6 +57,14 @@ expect 0 internal/services/agents/service.go
 expect 0 internal/api/server.go
 expect 0 internal/execution/run.go
 expect 0 internal/gateway/policy.go
+# The leak guard's canary control runs in the kind e2e (leakGuardCanaryInTask, #1051): a change to the
+# guard, the gateway that runs it, or the control's fixtures must start that e2e.
+expect 0 internal/mcpguard/decide.go
+expect 0 internal/leakguard/taint.go
+expect 0 internal/mcpgateway/guard.go
+expect 0 internal/sinkclass/sinkclass.go
+expect 0 test/scenarios/scenarios.go
+expect 0 test/fakemodel/scripts/repo-helper.yaml
 expect 0 internal/ledger/ledger.go
 expect 0 internal/githubtools/branch.go
 expect 0 internal/tracing/export/export.go

@@ -115,6 +115,7 @@ func Register(env Env) {
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 	guardSpec(env)
+	leakCanarySpec(env)
 	usageSpec(env)
 	mcpKindSpec(env)
 	budgetOvershootSpec(env)

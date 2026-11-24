@@ -70,11 +70,9 @@ const (
 )
 
 // reasons is every reason the metric can carry, so each series exists from the start.
-var reasons = []route.Reason{
-	route.ReasonAllowed, route.ReasonNoToken, route.ReasonBadToken, route.ReasonNoTable, route.ReasonNoRoute,
-	route.ReasonMethod, route.ReasonPath, route.ReasonQuery, route.ReasonBadRequest, route.ReasonOrgMismatch,
+var reasons = append(route.Reasons(),
 	ReasonNoCredential, ReasonUpstream, ReasonDraining,
-}
+)
 
 // classNone labels a request that matched no route.
 const classNone = "none"

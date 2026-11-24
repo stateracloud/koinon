@@ -157,7 +157,10 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		if r.Agent == "" {
 			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
 			// it carries no credential, and it does not go
-			// through the gateway.
+			// through the gateway. An empty Agent marks it only while the prober and the live check use
+			// agentgateway. koinon-gateway sends no agent header to an org's server (#1235): a change that
+			// moves either one to koinon-gateway must tell this check apart by its path instead (#1239 does
+			// not move the prober).
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
 			anonymous++
 			continue
@@ -166,6 +169,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		Expect(r.ClientAuthorization).To(BeFalse(), "the gateway's own key must not reach the server: %+v", r)
 	}
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
+	// The reconciler's probe goes through agentgateway with both drivers, also after #1239 (#1235).
 	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 
 	By("a second server with insecureSkipVerify and no CA completes the real TLS handshake through the gateway")
@@ -228,7 +232,8 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 
 	By("the agent's own gateway key sees read_item directly and write_item only behind approval")
 	key := agentGatewayKey(ctx, kubectl, org, agentID)
-	local := portForward(ctx, kubectl, "svc/koinon-gateway", "8080")
+	path := installMCPPath(ctx, kubectl)
+	local := portForward(ctx, kubectl, path.service, path.port)
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-e2e", Version: "0"}, nil)
 	var session *mcp.ClientSession
 	var names []string
@@ -270,7 +275,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		}
 	}
 	Expect(called).NotTo(BeNil(), "the server saw the tool call")
-	Expect(called.Agent).To(Equal("default/" + agentID))
+	Expect(called.Agent).To(Equal(path.orgServerAgentHeader(agentID)), "the agent header on an org's server (#1235)")
 	Expect(called.Authorized).To(BeTrue())
 
 	leakGuardExfilE2E(ctx, admin, session, fake, srv.ID, agentID, key, res.Content[0].(*mcp.TextContent).Text)
@@ -403,6 +408,72 @@ func secretToken(ctx context.Context, kubectl, name string) string {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(raw).NotTo(BeEmpty(), name)
 	return string(raw)
+}
+
+// mcpPath is one MCP path of this install (ADR 0097 decision 5): koinon-gateway (gateway.mcp.driver=koinon)
+// or agentgateway, the fallback.
+type mcpPath struct {
+	koinon  bool
+	service string
+	port    string
+}
+
+// installMCPPath is the MCP path a client outside the cluster uses: koinon-gateway when the chart runs it
+// (the koinon-mcp-gateway Deployment exists), else agentgateway. The port is read from the Service. With
+// driver koinon, every step of mcpServerE2E (tool list, ask tier, leak guard) then runs on koinon-gateway.
+func installMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "--ignore-not-found",
+		"koinon-mcp-gateway", "-o", "name").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-mcp-gateway: %s", out)
+	p := mcpPath{service: "svc/koinon-gateway"}
+	if strings.TrimSpace(string(out)) != "" {
+		p = mcpPath{koinon: true, service: "svc/koinon-mcp-gateway"}
+	}
+	out, err = exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", p.service,
+		"-o", `jsonpath={.spec.ports[?(@.name=="mcp")].port}{.spec.ports[?(@.name=="llm")].port}`).CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get %s: %s", p.service, out)
+	p.port = strings.TrimSpace(string(out))
+	Expect(p.port).NotTo(BeEmpty(), "the MCP port of %s", p.service)
+	return p
+}
+
+// agentMCPPath is the MCP path an agent in a sandbox uses. koinon-agentd gives the agent its MCP URL from
+// its environment, so the path is koinon-gateway exactly when one of those values names the
+// koinon-mcp-gateway Service. Until #1239 moves the agent's MCP URL, it is agentgateway for every driver.
+func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "koinon-agentd",
+		"-o", "jsonpath={.spec.template.spec.containers[*].env[*].value}").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-agentd: %s", out)
+	if strings.Contains(string(out), "koinon-mcp-gateway.") {
+		return mcpPath{koinon: true}
+	}
+	return mcpPath{}
+}
+
+// approvedCallMCPPath is the MCP path of a call a human approved: koinon-api makes it to
+// KOINON_GATEWAY_MCP_URL, which names the koinon-mcp-gateway Service when the driver is koinon.
+func approvedCallMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "koinon-api", "-o",
+		`jsonpath={.spec.template.spec.containers[*].env[?(@.name=="KOINON_GATEWAY_MCP_URL")].value}`).CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-api: %s", out)
+	Expect(strings.TrimSpace(string(out))).NotTo(BeEmpty(), "KOINON_GATEWAY_MCP_URL of koinon-api")
+	return mcpPath{koinon: strings.Contains(string(out), "koinon-mcp-gateway.")}
+}
+
+// orgServerAgentHeader is the agent header a server an org registered sees on this path (#1235). Koinon's
+// MCP path never sends it, so the server sees none. The agentgateway render sets it on its one MCP route
+// for every target until that path is deleted, so the server sees the agent.
+func (p mcpPath) orgServerAgentHeader(agentID string) string {
+	if p.koinon {
+		return ""
+	}
+	return "default/" + agentID
 }
 
 // portForward forwards a free local port to target's port in the koinon namespace until the spec ends.

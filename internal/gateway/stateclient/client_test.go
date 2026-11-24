@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
@@ -134,6 +135,37 @@ func (m *mcpApplier) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.R
 	return "c", m.record(c.MCP[0].Name)
 }
 
+// egressApplier records the org egress routes of each revision.
+type egressApplier struct {
+	mu  sync.Mutex
+	got [][]route.Route
+	err error
+}
+
+func (e *egressApplier) ApplyEgress(_ context.Context, routes []route.Route) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.got = append(e.got, routes)
+	return e.err
+}
+
+func (e *egressApplier) calls() [][]route.Route {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([][]route.Route(nil), e.got...)
+}
+
+func (m *memStore) publishEgress(rev int64, name string, routes []route.Route) {
+	var s gateway.State
+	s.MCP = []gateway.MCPTarget{{Name: name, URL: "http://" + name + "/mcp"}}
+	s.EgressRoutes = routes
+	u := staterev.Snapshot(s)
+	u.Revision = rev
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cur = u
+}
+
 var _ = Describe("the gateway State client", func() {
 	var (
 		st     *memStore
@@ -167,10 +199,13 @@ var _ = Describe("the gateway State client", func() {
 		model, mcp = &modelApplier{}, &mcpApplier{}
 	}
 
+	var egress stateclient.EgressApplier
+	BeforeEach(func() { egress = nil })
+
 	run := func(m *stateclient.Metrics) {
 		c, err := stateclient.New(stateclient.Config{
 			URL: ts.URL, Token: func() (string, error) { return token, nil }, CopyID: "copy-test-1",
-			Model: model, MCP: mcp, MinBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond, Metrics: m,
+			Model: model, MCP: mcp, Egress: egress, MinBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond, Metrics: m,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		var ctx context.Context
@@ -190,6 +225,50 @@ var _ = Describe("the gateway State client", func() {
 			return false
 		}
 	}
+
+	Context("the org egress routes (#1086 part B)", func() {
+		forgeRoute := route.Route{
+			Name: "org/acme/agent/a1/forge-0-0", Class: route.ClassForge, Org: "acme", Agent: "a1", Host: "github.com",
+			Methods: []string{"GET"}, Paths: []string{"/acme/app.git/info/refs"}, QueryValues: map[string]string{"service": "git-upload-pack"},
+			AnyQuery: true, Credential: "org/acme/agent/a1/codehost",
+		}
+
+		It("applies them on each revision, with no ack half of their own", func() {
+			start(20 * time.Millisecond)
+			eg := &egressApplier{}
+			egress = eg
+			st.publishEgress(3, "wiki", []route.Route{forgeRoute})
+			m := stateclient.NewMetrics(nil)
+			run(m)
+			Eventually(acked(3, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+			Eventually(eg.calls).Should(HaveLen(1))
+			Expect(eg.calls()[0]).To(Equal([]route.Route{forgeRoute}))
+			for _, a := range st.ackList() {
+				Expect(a.half).To(BeElementOf(gwv1.Half_HALF_MODEL, gwv1.Half_HALF_MCP))
+			}
+
+			// A revision without org routes removes them.
+			st.publishEgress(4, "docs", nil)
+			Eventually(eg.calls, 10*time.Second, 10*time.Millisecond).Should(HaveLen(2))
+			Expect(eg.calls()[1]).To(BeEmpty())
+			Expect(testutil.ToFloat64(m.Applied.WithLabelValues("egress", "ok"))).To(Equal(2.0))
+		})
+
+		It("counts a refused set and still applies and acks the halves", func() {
+			start(20 * time.Millisecond)
+			eg := &egressApplier{err: errors.New("egress: the org routes: bad")}
+			egress = eg
+			st.publishEgress(5, "wiki", []route.Route{forgeRoute})
+			m := stateclient.NewMetrics(nil)
+			run(m)
+			Eventually(acked(5, gwv1.Half_HALF_MODEL), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+			Eventually(acked(5, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+			Eventually(func() float64 { return testutil.ToFloat64(m.Applied.WithLabelValues("egress", "failed")) }).Should(Equal(1.0))
+			// The session does not end: no reconnect re-applies the same revision.
+			Consistently(eg.calls, 200*time.Millisecond, 20*time.Millisecond).Should(HaveLen(1))
+			Expect(mcp.names()).To(Equal([]string{"wiki"}))
+		})
+	})
 
 	It("applies each half of the newest revision, then acks each half", func() {
 		start(20 * time.Millisecond)
