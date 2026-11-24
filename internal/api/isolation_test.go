@@ -63,7 +63,6 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
@@ -194,39 +193,6 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
-	ticketv1alpha1connect.TicketServiceCreateTicketProcedure: {
-		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
-				OrgId: org, AgentId: f.agent.GetId(), Title: "intruder",
-			})
-		},
-	},
-	ticketv1alpha1connect.TicketServiceListTicketsProcedure: {
-		ownOrgOK: true,
-		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
-			return c.tickets.ListTickets(ctx, &ticketv1alpha1.ListTicketsRequest{OrgId: org})
-		},
-	},
-	ticketv1alpha1connect.TicketServiceGetTicketProcedure: {
-		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: f.ticket.GetId()})
-		},
-	},
-	ticketv1alpha1connect.TicketServiceAppendMessageProcedure: {
-		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-				OrgId: org, TicketId: f.ticket.GetId(), Text: "intruder",
-			})
-		},
-	},
-	ticketv1alpha1connect.TicketServiceMoveTicketProcedure: {
-		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tickets.MoveTicket(ctx, &ticketv1alpha1.MoveTicketRequest{
-				OrgId: org, TicketId: f.ticket.GetId(), Status: ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
-			})
-		},
-	},
-
 	questionv1alpha1connect.QuestionServiceListQuestionsProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
@@ -267,32 +233,32 @@ var isolationCases = map[string]isolationCase{
 	},
 	taskv1alpha1connect.TaskServiceGetTaskProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: f.ticket.GetId()})
+			return c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: f.task.GetId()})
 		},
 	},
 	taskv1alpha1connect.TaskServiceAppendMessageProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
-				OrgId: org, TaskId: f.ticket.GetId(), Text: "intruder",
+				OrgId: org, TaskId: f.task.GetId(), Text: "intruder",
 			})
 		},
 	},
 	taskv1alpha1connect.TaskServiceSendDirectMessageProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tasks.SendDirectMessage(ctx, &taskv1alpha1.SendDirectMessageRequest{
-				OrgId: org, AgentId: f.agent.GetId(), TaskId: f.ticket.GetId(), Text: "intruder", MessageId: "00000000-0000-4000-8000-000000000001",
+				OrgId: org, AgentId: f.agent.GetId(), TaskId: f.task.GetId(), Text: "intruder", MessageId: "00000000-0000-4000-8000-000000000001",
 			})
 		},
 	},
 	taskv1alpha1connect.TaskServiceCancelTaskProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: f.ticket.GetId()})
+			return c.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: f.task.GetId()})
 		},
 	},
 
 	taskv1alpha1connect.TaskServiceNotifyTypingProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: f.ticket.GetId()})
+			return c.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: f.task.GetId()})
 		},
 	},
 
@@ -407,7 +373,7 @@ var isolationCases = map[string]isolationCase{
 
 	approvalv1alpha1connect.ApprovalServiceListApprovalsProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: f.ticket.GetId()})
+			return c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: f.task.GetId()})
 		},
 	},
 	approvalv1alpha1connect.ApprovalServiceGetApprovalProcedure: {
@@ -974,6 +940,10 @@ var isolationCases = map[string]isolationCase{
 	},
 }
 
+// removedTicketReason covers the TicketService RPCs: the handler is gone (issue #731) and the .proto stays so its
+// field numbers stay reserved, so every call gets unimplemented before it reads any org data.
+const removedTicketReason = "TicketService has no handler (issue #731): the call is unimplemented and reads no org data"
+
 // platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
 // takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
 // platformprices_test.go).
@@ -982,6 +952,11 @@ const platformPricesReason = "platform price list (ADR 0098): install-wide data,
 
 // isolationExempt lists RPCs that take no org-owned input, with the reason.
 var isolationExempt = map[string]string{
+	ticketv1alpha1connect.TicketServiceCreateTicketProcedure:             removedTicketReason,
+	ticketv1alpha1connect.TicketServiceListTicketsProcedure:              removedTicketReason,
+	ticketv1alpha1connect.TicketServiceGetTicketProcedure:                removedTicketReason,
+	ticketv1alpha1connect.TicketServiceAppendMessageProcedure:            removedTicketReason,
+	ticketv1alpha1connect.TicketServiceMoveTicketProcedure:               removedTicketReason,
 	budgetv1alpha1connect.PriceServiceListPriceProposalsProcedure:        platformPricesReason,
 	budgetv1alpha1connect.PriceServiceGetPriceProposalProcedure:          platformPricesReason,
 	budgetv1alpha1connect.PriceServiceAcceptPriceProposalProcedure:       platformPricesReason,
@@ -1066,7 +1041,7 @@ var _ = Describe("org isolation", func() {
 // none of them. A new object in newIsolationFixture goes here too.
 func foreignIDs(f orgFixture) []string {
 	return []string{
-		f.org, f.agent.GetId(), f.draft.GetId(), f.ticket.GetId(), f.run.GetId(), f.connection,
+		f.org, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
 		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost, f.githubLogin,
 		f.appSetupState,

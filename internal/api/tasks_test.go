@@ -11,7 +11,6 @@ import (
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 )
 
 var _ = Describe("TaskService", func() {
@@ -60,14 +59,6 @@ var _ = Describe("TaskService", func() {
 		Expect(kinds).To(Equal([]string{"task.created", "message", "run.queued"}))
 		Expect(got.GetRuns()).To(ConsistOf(HaveField("Id", r.GetId())))
 		Expect(got.GetTask().GetCost()).NotTo(BeNil())
-	})
-
-	It("is the same record the ticket API shows", func(ctx SpecContext) {
-		t, _ := create(ctx, member, "one record")
-		tk := member.getTicket(ctx, org, t.GetId())
-		Expect(tk.GetTicket().GetStatus()).To(Equal(ticketv1alpha1.TicketStatus_TICKET_STATUS_TODO))
-		Expect(tk.GetTicket().GetCreatedBy()).To(Equal(member.userID))
-		Expect(ticketKinds(tk)).To(Equal([]string{"ticket.created", "message", "run.queued"}), "the ticket API keeps its vocabulary")
 	})
 
 	It("refuses draft agents, empty titles and viewers", func(ctx SpecContext) {
@@ -160,21 +151,6 @@ var _ = Describe("TaskService", func() {
 
 		_, err = member.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: t.GetId()})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
-	})
-
-	It("shows a canceled task as Done in the ticket API, with the column in its timeline", func(ctx SpecContext) {
-		t, _ := create(ctx, member, "board view")
-		_, err := member.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: t.GetId()})
-		Expect(err).NotTo(HaveOccurred())
-		tk := member.getTicket(ctx, org, t.GetId())
-		Expect(tk.GetTicket().GetStatus()).To(Equal(ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE))
-		var payload map[string]any
-		for _, ev := range tk.GetEvents() {
-			if ev.GetKind() == "status.changed" {
-				payload = ev.GetPayload().AsMap()
-			}
-		}
-		Expect(payload).To(Equal(map[string]any{"from": "todo", "to": "done"}))
 	})
 
 	It("wakes the agent's sandbox when a person types, once per ten seconds, and when a task is created", func(ctx SpecContext) {

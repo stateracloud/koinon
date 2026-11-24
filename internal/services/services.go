@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package services implements Koinon's org-facing connect-rpc services
-// (plan item A3): AgentService, TicketService, RunService,
+// (plan item A3): AgentService, TaskService, RunService,
 // TemplateService, ConnectionService, ApprovalService, TokenService, ProviderService and TraceDestinationService, on the sqlc store and with the caller's Principal from the
 // auth interceptor.
 //
@@ -10,7 +10,7 @@
 // to it, so an ID from another org is simply not found. Roles per RPC:
 //
 //	viewer  Get*, List*, WatchRun
-//	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
+//	member  CreateAgentFromTemplate, CreateTask, AppendMessage, CancelTask, CancelRun
 //	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
@@ -58,7 +58,6 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/githublink"
@@ -262,7 +261,6 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 // Register registers every service on server.
 func (s *Server) Register(server *connect.Server) {
 	agentv1alpha1connect.RegisterAgentServiceHandler(server, s)
-	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
 	taskv1alpha1connect.RegisterTaskServiceHandler(server, taskAPI{s})
 	questionv1alpha1connect.RegisterQuestionServiceHandler(server, s)
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
@@ -284,7 +282,6 @@ func (s *Server) Register(server *connect.Server) {
 
 var (
 	_ agentv1alpha1connect.AgentServiceHandler             = (*Server)(nil)
-	_ ticketv1alpha1connect.TicketServiceHandler           = (*Server)(nil)
 	_ runv1alpha1connect.RunServiceHandler                 = (*Server)(nil)
 	_ templatev1alpha1connect.TemplateServiceHandler       = (*Server)(nil)
 	_ connectionv1alpha1connect.ConnectionServiceHandler   = (*Server)(nil)

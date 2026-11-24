@@ -45,14 +45,14 @@ var _ = Describe("notify targets", func() {
 				return err
 			}
 			row, _, err = questions.Create(ctx, qq, questions.Ask{
-				Org: uuid(f.org), Task: uuid(f.ticket.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
+				Org: uuid(f.org), Task: uuid(f.task.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
 				Target: questions.DefaultTarget, Recipients: recipients, Question: "Ship the report?",
 				Choices: []string{"Yes", "No"}, Default: "No", ExpiresAt: time.Now().Add(time.Hour),
 			})
 			if err != nil {
 				return err
 			}
-			_, err = questions.OpenForRun(ctx, qq, uuid(f.org), uuid(f.run.GetId()), uuid(f.ticket.GetId()))
+			_, err = questions.OpenForRun(ctx, qq, uuid(f.org), uuid(f.run.GetId()), uuid(f.task.GetId()))
 			return err
 		})).To(Succeed())
 		ad := e.agentd("agentd-notify")
@@ -107,13 +107,13 @@ var _ = Describe("notify targets", func() {
 		It("sets waiting_on_user_ids and waiting_on_name on the task", func(ctx SpecContext) {
 			openAdminsQuestion(ctx)
 			// agentd moves the task to input-required in the transaction that parks the run.
-			_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'input_required' WHERE id = $1`, f.ticket.GetId())
+			_, err := e.pool.Exec(ctx, `UPDATE tasks SET state = 'input_required' WHERE id = $1`, f.task.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			res, err := f.owner.tasks.ListTasks(ctx, &taskv1alpha1.ListTasksRequest{OrgId: f.org})
 			Expect(err).NotTo(HaveOccurred())
 			var task *taskv1alpha1.Task
 			for _, t := range res.GetTasks() {
-				if t.GetId() == f.ticket.GetId() {
+				if t.GetId() == f.task.GetId() {
 					task = t
 				}
 			}
@@ -197,7 +197,7 @@ var _ = Describe("notify targets", func() {
 
 	It("clears the sandbox wait of the agent's queued runs when it is resumed", func(ctx SpecContext) {
 		agent := f.owner.activeAgent(ctx, f.org)
-		_, r := f.owner.createTicket(ctx, f.org, agent.GetId(), "waits for a sandbox")
+		_, r := f.owner.createTask(ctx, f.org, agent.GetId(), "waits for a sandbox")
 		_, err := e.pool.Exec(ctx, `UPDATE runs SET sandbox_wait_started_at = now() - interval '2 hours' WHERE id = $1`, r.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		_, err = e.pool.Exec(ctx, `UPDATE agents SET unhealthy_at = now(), unhealthy_reason = 'its sandbox never became ready' WHERE id = $1`, agent.GetId())
