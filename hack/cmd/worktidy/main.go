@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Git is what the tool needs from git and from hack/wt.sh.
@@ -59,6 +60,10 @@ type Deps struct {
 	Docker Docker
 	Cwd    string
 	WTRoot string
+	// WTRootSet is true when KOINON_WT_ROOT is set; then only WTRoot is managed.
+	WTRootSet bool
+	// TmpBases are extra temp bases ($TMPDIR, KOINON_WT_TMP_BASES) for the kw parent rule.
+	TmpBases []string
 }
 
 // Options are the flags.
@@ -102,7 +107,7 @@ func plan(d Deps, o Options) ([]Decision, error) {
 	wtIssues := map[int]bool{}
 	for i := range wts {
 		w := &wts[i]
-		w.Managed = isManaged(w.Path, d.WTRoot)
+		w.Managed = isManaged(w.Path, d.WTRoot, d.WTRootSet, d.TmpBases)
 		w.Current = samePath(w.Path, d.Cwd)
 		if !w.Main && !w.Broken {
 			if n, err := d.Git.Status(w.Path); err != nil {
@@ -298,6 +303,7 @@ func main() {
 	flag.Parse()
 
 	root := os.Getenv("KOINON_WT_ROOT")
+	rootSet := root != ""
 	if root == "" {
 		root = "/tmp/kw"
 	}
@@ -310,12 +316,30 @@ func main() {
 	cwd, _ := os.Getwd()
 	g := newExecGit(cwd)
 	d := Deps{
-		Git:    g,
-		Forge:  execForge{dir: cwd},
-		Claims: execClaims{dir: g.toplevel},
-		Docker: execDocker{},
-		Cwd:    g.toplevel,
-		WTRoot: root,
+		Git:       g,
+		Forge:     execForge{dir: cwd},
+		Claims:    execClaims{dir: g.toplevel},
+		Docker:    execDocker{},
+		Cwd:       g.toplevel,
+		WTRoot:    root,
+		WTRootSet: rootSet,
+		TmpBases:  tmpBases(),
 	}
 	os.Exit(run(d, o, os.Stdout, os.Stderr))
+}
+
+// tmpBases lists the extra temp bases wt.sh accepts: $TMPDIR and KOINON_WT_TMP_BASES, resolved.
+func tmpBases() []string {
+	var r []string
+	cands := append([]string{os.Getenv("TMPDIR")}, strings.Split(os.Getenv("KOINON_WT_TMP_BASES"), ":")...)
+	for _, b := range cands {
+		if b == "" {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(b); err == nil {
+			b = real
+		}
+		r = append(r, filepath.Clean(b))
+	}
+	return r
 }

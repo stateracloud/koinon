@@ -263,9 +263,16 @@ var _ = Describe("parsers and scope", func() {
 		Expect(cs).To(Equal([]Claim{{Issue: 12, Lane: "lane-a", PR: 40}, {Issue: 13, Lane: "lane-b"}}))
 	})
 	It("agrees with wt.sh on the worktree root", func() {
-		Expect(isManaged("/tmp/kw/a", "/tmp/kw")).To(BeTrue())
-		Expect(isManaged("/private/tmp/claude-502/kw/a", "/tmp/kw")).To(BeTrue())
-		Expect(isManaged("/Users/me/other/a", "/tmp/kw")).To(BeFalse())
+		Expect(isManaged("/tmp/kw/a", "/tmp/kw", false, nil)).To(BeTrue())
+		Expect(isManaged("/private/tmp/claude-502/kw/a", "/tmp/kw", false, nil)).To(BeTrue())
+		Expect(isManaged("/Users/me/other/a", "/tmp/kw", false, nil)).To(BeFalse())
+		Expect(isManaged("/some/other/kw/x", "/tmp/kw", false, nil)).To(BeFalse())
+		Expect(isManaged("/opt/tmpbase/kw/x", "/tmp/kw", false, []string{"/opt/tmpbase"})).To(BeTrue())
+	})
+	It("manages only the root when KOINON_WT_ROOT is set", func() {
+		Expect(isManaged("/some/other/kw/x", "/data/wt", true, nil)).To(BeFalse())
+		Expect(isManaged("/tmp/kw/x", "/data/wt", true, nil)).To(BeFalse())
+		Expect(isManaged("/data/wt/x", "/data/wt", true, nil)).To(BeTrue())
 	})
 	It("finds the issue of a branch", func() {
 		Expect(issueOfBranch("chore/1231-tidy-tool")).To(Equal(1231))

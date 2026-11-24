@@ -174,7 +174,11 @@ func (g *execGit) RemoveClean(w Worktree) error {
 }
 
 func (g *execGit) RemoveForce(w Worktree) error {
-	_, err := sh(g.dir, "git", "worktree", "remove", "--force", w.Path)
+	// The patch is already saved. wt.sh --force skips its process check, so refuse here first.
+	if pids := cwdProcs(w.Path); len(pids) > 0 {
+		return fmt.Errorf("a process has its working directory inside %s (pid %s)", w.Path, strings.Join(pids, ","))
+	}
+	_, err := sh(g.toplevel, filepath.Join(g.toplevel, "hack", "wt.sh"), "rm", "--force", w.Name())
 	return err
 }
 
@@ -308,4 +312,32 @@ func (execDocker) PruneImages() error {
 func firstLine(s string) string {
 	l, _, _ := strings.Cut(s, "\n")
 	return l
+}
+
+// cwdProcs returns the pids of other processes whose working directory is inside dir (lsof; none when
+// lsof is missing, which matches wt.sh on a host with neither lsof nor /proc only in the unlikely case).
+func cwdProcs(dir string) []string {
+	out, err := sh(dir, "lsof", "-w", "-d", "cwd", "-Fpn")
+	if err != nil && len(out) == 0 {
+		return nil
+	}
+	real, e := filepath.EvalSymlinks(dir)
+	if e != nil {
+		real = dir
+	}
+	self := strconv.Itoa(os.Getpid())
+	var pid string
+	var hits []string
+	for _, l := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(l, "p"):
+			pid = l[1:]
+		case strings.HasPrefix(l, "n") && pid != "" && pid != self:
+			n := l[1:]
+			if n == real || strings.HasPrefix(n, real+"/") || n == dir || strings.HasPrefix(n, dir+"/") {
+				hits = append(hits, pid)
+			}
+		}
+	}
+	return hits
 }

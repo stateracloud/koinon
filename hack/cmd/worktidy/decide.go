@@ -306,9 +306,11 @@ func joinMax(s []string, n int) string {
 	return strings.Join(s, ", ")
 }
 
-// isManaged says whether a worktree path is one that hack/wt.sh manages: under the worktree root, or
-// directly inside a directory named kw (wt.sh finds worktrees that were made under another $TMPDIR).
-func isManaged(path, root string) bool {
+// isManaged says whether a worktree path is one that hack/wt.sh manages (is_managed in wt.sh): under
+// the worktree root; or, when KOINON_WT_ROOT is not set (rootSet false), directly inside a directory
+// named kw whose parent is a temp base: /tmp, /private/tmp, /private/tmp/claude-*, /var/folders/*/*/T
+// (also under /private) or one of bases ($TMPDIR and KOINON_WT_TMP_BASES).
+func isManaged(path, root string, rootSet bool, bases []string) bool {
 	path = filepath.Clean(path)
 	if root != "" {
 		root = filepath.Clean(root)
@@ -316,5 +318,23 @@ func isManaged(path, root string) bool {
 			return true
 		}
 	}
-	return filepath.Base(filepath.Dir(path)) == "kw"
+	if rootSet {
+		return false
+	}
+	parent := filepath.Dir(path)
+	if filepath.Base(parent) != "kw" {
+		return false
+	}
+	grand := filepath.Dir(parent)
+	for _, pat := range []string{"/tmp", "/private/tmp", "/private/tmp/claude-*", "/var/folders/*/*/T", "/private/var/folders/*/*/T"} {
+		if ok, _ := filepath.Match(pat, grand); ok {
+			return true
+		}
+	}
+	for _, b := range bases {
+		if b != "" && filepath.Clean(b) == grand {
+			return true
+		}
+	}
+	return false
 }
