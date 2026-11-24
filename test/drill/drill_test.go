@@ -616,6 +616,11 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 			g.Expect(st.Health).To(Equal("healthy"), st.HealthReason)
 			g.Expect(st.ToolsSyncedAt).NotTo(BeNil())
 		}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+		// ADR 0125: a tool no admin reviewed is hidden and refused, also by the ask proxy, so the drill
+		// reviews write_item (tier ask) before the agent calls it.
+		must(e2eclient.SetToolTier(ctx, func(ctx context.Context, method, path string, body ...string) (int, []byte, error) {
+			return src.client.Admin(ctx, src.token, method, path, body...)
+		}, mcp.ID, "write_item", "ask"), "review write_item")
 		approver, err := c.Agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: src.org, TemplateId: tmpl, DisplayName: "Approval agent", Harness: harness.OpenCode,
 		})
