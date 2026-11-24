@@ -53,6 +53,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -463,6 +464,8 @@ type work struct {
 	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
+	// egress are the org egress routes of an active agent (egressroutes.go).
+	egress []route.Route
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -741,7 +744,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	for i, w := range items {
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
-			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools,
+			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -1171,6 +1174,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
+		w.egress = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err

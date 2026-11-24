@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/gateway/v1alpha1/state.proto.
  */
 export const file_koinon_gateway_v1alpha1_state: GenFile = /*@__PURE__*/
-  fileDesc("CiNrb2lub24vZ2F0ZXdheS92MWFscGhhMS9zdGF0ZS5wcm90bxIXa29pbm9uLmdhdGV3YXkudjFhbHBoYTEiJQoSU3RyZWFtU3RhdGVSZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkiZAoSQWNrUmV2aXNpb25SZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkSEAoIcmV2aXNpb24YAiABKAMSKwoEaGFsZhgDIAEoDjIdLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkhhbGYiFQoTQWNrUmV2aXNpb25SZXNwb25zZSKvAQoLU3RhdGVVcGRhdGUSEAoIcmV2aXNpb24YASABKAMSKgoEa2V5cxgCIAMoCzIcLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLktleRIyCgVtb2RlbBgDIAEoCzIjLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLk1vZGVsU3RhdGUSLgoDbWNwGAQgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQU3RhdGUiJQoIQWdlbnRSZWYSCwoDb3JnGAEgASgJEgwKBG5hbWUYAiABKAkiUQoDS2V5EgoKAmlkGAEgASgJEjAKBWFnZW50GAIgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRSZWYSDAoEaGFzaBgDIAEoCSKtAQoKTW9kZWxTdGF0ZRIzCgZsaW1pdHMYASADKAsyIy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudExpbWl0EjQKCXByb3ZpZGVycxgCIAMoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByb3ZpZGVyEjQKBm1vZGVscxgDIAMoCzIkLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50TW9kZWxzIm0KCkFnZW50TGltaXQSMAoFYWdlbnQYASABKAsyIS5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudFJlZhItCgVsaW1pdBgCIAEoCzIeLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkxpbWl0IloKBUxpbWl0EgwKBHVuaXQYASABKAkSFwoPYW1vdW50X3BpY29fdXNkGAIgASgDEhYKDndpbmRvd19zZWNvbmRzGAMgASgDEhIKCmdlbmVyYXRpb24YBCABKAkiqwEKCFByb3ZpZGVyEgsKA29yZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSFAoMYXBpX2tleV9maWxlGAUgASgJEh4KFmFudGhyb3BpY193b3Jrc3BhY2VfaWQYBiABKAkSLgoGbW9kZWxzGAcgAygLMh4ua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTW9kZWwimAEKBU1vZGVsEgwKBG5hbWUYASABKAkSDgoGZm9ybWF0GAIgASgJEjMKCHRoaW5raW5nGAMgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuVGhpbmtpbmcSDQoFZ3VhcmQYBCABKAgSLQoFcHJpY2UYBSABKAsyHi5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5QcmljZSJoCghUaGlua2luZxIOCgZ0aGlua3MYASABKAkSCgoCb24YAiABKAkSCwoDb2ZmGAMgASgJEg8KB2Rpc3BsYXkYBCABKAkSDQoFYmV0YXMYBSADKAkSEwoLdXNhZ2Vfc3BsaXQYBiABKAkilQEKBVByaWNlEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCRIxCgV0aWVycxgGIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByaWNlVGllciJ8CglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEg0KBWlucHV0GAIgASgJEg4KBm91dHB1dBgDIAEoCRISCgpjYWNoZV9yZWFkGAQgASgJEhMKC2NhY2hlX3dyaXRlGAUgASgJEhEKCXJlYXNvbmluZxgGIAEoCSJPCgtBZ2VudE1vZGVscxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEg4KBm1vZGVscxgCIAMoCSJzCghNQ1BTdGF0ZRIzCgd0YXJnZXRzGAEgAygLMiIua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQVGFyZ2V0EjIKBXRvb2xzGAIgAygLMiMua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRUb29scyKlAgoJTUNQVGFyZ2V0EgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEgsKA3NzZRgDIAEoCBILCgNvcmcYBCABKAkSGQoRY3JlZGVudGlhbF9oZWFkZXIYBSABKAkSGQoRY3JlZGVudGlhbF9wcmVmaXgYBiABKAkSFwoPY3JlZGVudGlhbF9maWxlGAcgASgJEg8KB2NhX2ZpbGUYCCABKAkSHAoUaW5zZWN1cmVfc2tpcF92ZXJpZnkYCSABKAgSDwoHYnVpbHRpbhgKIAEoCRI7Cg1yZW1vdGVfYWdlbnRzGAsgAygLMiQua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuUmVtb3RlQWdlbnQSFwoPaGFuZGxlX2tleV9maWxlGAwgASgJItoBCgtSZW1vdGVBZ2VudBIMCgRuYW1lGAEgASgJEgoKAmlkGAIgASgJEhAKCGNhcmRfdXJsGAMgASgJEhkKEWNyZWRlbnRpYWxfaGVhZGVyGAQgASgJEhkKEWNyZWRlbnRpYWxfcHJlZml4GAUgASgJEhcKD2NyZWRlbnRpYWxfZmlsZRgGIAEoCRIPCgdjYV9maWxlGAcgASgJEhwKFGluc2VjdXJlX3NraXBfdmVyaWZ5GAggASgIEhEKCWNhcmRfaGFzaBgJIAEoCRIOCgZhZ2VudHMYCiADKAkicgoKQWdlbnRUb29scxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEjIKBmdyYW50cxgCIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlRvb2xHcmFudCI3CglUb29sR3JhbnQSDgoGdGFyZ2V0GAEgASgJEg0KBXRvb2xzGAIgAygJEgsKA2FsbBgDIAEoCCo6CgRIYWxmEhQKEEhBTEZfVU5TUEVDSUZJRUQQABIOCgpIQUxGX01PREVMEAESDAoISEFMRl9NQ1AQAjLoAQoTR2F0ZXdheVN0YXRlU2VydmljZRJiCgtTdHJlYW1TdGF0ZRIrLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0cmVhbVN0YXRlUmVxdWVzdBokLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlN0YXRlVXBkYXRlMAESbQoLQWNrUmV2aXNpb24SKy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlcXVlc3QaLC5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BY2tSZXZpc2lvblJlc3BvbnNlIgOQAgJCVVpTZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vZ2F0ZXdheS92MWFscGhhMTtnYXRld2F5djFhbHBoYTFiBnByb3RvMw");
+  fileDesc("CiNrb2lub24vZ2F0ZXdheS92MWFscGhhMS9zdGF0ZS5wcm90bxIXa29pbm9uLmdhdGV3YXkudjFhbHBoYTEiJQoSU3RyZWFtU3RhdGVSZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkiZAoSQWNrUmV2aXNpb25SZXF1ZXN0Eg8KB2NvcHlfaWQYASABKAkSEAoIcmV2aXNpb24YAiABKAMSKwoEaGFsZhgDIAEoDjIdLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkhhbGYiFQoTQWNrUmV2aXNpb25SZXNwb25zZSLlAQoLU3RhdGVVcGRhdGUSEAoIcmV2aXNpb24YASABKAMSKgoEa2V5cxgCIAMoCzIcLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLktleRIyCgVtb2RlbBgDIAEoCzIjLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLk1vZGVsU3RhdGUSLgoDbWNwGAQgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQU3RhdGUSNAoGZWdyZXNzGAUgASgLMiQua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuRWdyZXNzU3RhdGUiJQoIQWdlbnRSZWYSCwoDb3JnGAEgASgJEgwKBG5hbWUYAiABKAkiUQoDS2V5EgoKAmlkGAEgASgJEjAKBWFnZW50GAIgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRSZWYSDAoEaGFzaBgDIAEoCSKtAQoKTW9kZWxTdGF0ZRIzCgZsaW1pdHMYASADKAsyIy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudExpbWl0EjQKCXByb3ZpZGVycxgCIAMoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByb3ZpZGVyEjQKBm1vZGVscxgDIAMoCzIkLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50TW9kZWxzIm0KCkFnZW50TGltaXQSMAoFYWdlbnQYASABKAsyIS5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5BZ2VudFJlZhItCgVsaW1pdBgCIAEoCzIeLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkxpbWl0IloKBUxpbWl0EgwKBHVuaXQYASABKAkSFwoPYW1vdW50X3BpY29fdXNkGAIgASgDEhYKDndpbmRvd19zZWNvbmRzGAMgASgDEhIKCmdlbmVyYXRpb24YBCABKAkiqwEKCFByb3ZpZGVyEgsKA29yZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSFAoMYXBpX2tleV9maWxlGAUgASgJEh4KFmFudGhyb3BpY193b3Jrc3BhY2VfaWQYBiABKAkSLgoGbW9kZWxzGAcgAygLMh4ua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTW9kZWwimAEKBU1vZGVsEgwKBG5hbWUYASABKAkSDgoGZm9ybWF0GAIgASgJEjMKCHRoaW5raW5nGAMgASgLMiEua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuVGhpbmtpbmcSDQoFZ3VhcmQYBCABKAgSLQoFcHJpY2UYBSABKAsyHi5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5QcmljZSJoCghUaGlua2luZxIOCgZ0aGlua3MYASABKAkSCgoCb24YAiABKAkSCwoDb2ZmGAMgASgJEg8KB2Rpc3BsYXkYBCABKAkSDQoFYmV0YXMYBSADKAkSEwoLdXNhZ2Vfc3BsaXQYBiABKAkilQEKBVByaWNlEg0KBWlucHV0GAEgASgJEg4KBm91dHB1dBgCIAEoCRISCgpjYWNoZV9yZWFkGAMgASgJEhMKC2NhY2hlX3dyaXRlGAQgASgJEhEKCXJlYXNvbmluZxgFIAEoCRIxCgV0aWVycxgGIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlByaWNlVGllciJ8CglQcmljZVRpZXISFAoMY29udGV4dF9vdmVyGAEgASgDEg0KBWlucHV0GAIgASgJEg4KBm91dHB1dBgDIAEoCRISCgpjYWNoZV9yZWFkGAQgASgJEhMKC2NhY2hlX3dyaXRlGAUgASgJEhEKCXJlYXNvbmluZxgGIAEoCSJPCgtBZ2VudE1vZGVscxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEg4KBm1vZGVscxgCIAMoCSJzCghNQ1BTdGF0ZRIzCgd0YXJnZXRzGAEgAygLMiIua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuTUNQVGFyZ2V0EjIKBXRvb2xzGAIgAygLMiMua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWdlbnRUb29scyKlAgoJTUNQVGFyZ2V0EgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEgsKA3NzZRgDIAEoCBILCgNvcmcYBCABKAkSGQoRY3JlZGVudGlhbF9oZWFkZXIYBSABKAkSGQoRY3JlZGVudGlhbF9wcmVmaXgYBiABKAkSFwoPY3JlZGVudGlhbF9maWxlGAcgASgJEg8KB2NhX2ZpbGUYCCABKAkSHAoUaW5zZWN1cmVfc2tpcF92ZXJpZnkYCSABKAgSDwoHYnVpbHRpbhgKIAEoCRI7Cg1yZW1vdGVfYWdlbnRzGAsgAygLMiQua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuUmVtb3RlQWdlbnQSFwoPaGFuZGxlX2tleV9maWxlGAwgASgJItoBCgtSZW1vdGVBZ2VudBIMCgRuYW1lGAEgASgJEgoKAmlkGAIgASgJEhAKCGNhcmRfdXJsGAMgASgJEhkKEWNyZWRlbnRpYWxfaGVhZGVyGAQgASgJEhkKEWNyZWRlbnRpYWxfcHJlZml4GAUgASgJEhcKD2NyZWRlbnRpYWxfZmlsZRgGIAEoCRIPCgdjYV9maWxlGAcgASgJEhwKFGluc2VjdXJlX3NraXBfdmVyaWZ5GAggASgIEhEKCWNhcmRfaGFzaBgJIAEoCRIOCgZhZ2VudHMYCiADKAkicgoKQWdlbnRUb29scxIwCgVhZ2VudBgBIAEoCzIhLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkFnZW50UmVmEjIKBmdyYW50cxgCIAMoCzIiLmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLlRvb2xHcmFudCI3CglUb29sR3JhbnQSDgoGdGFyZ2V0GAEgASgJEg0KBXRvb2xzGAIgAygJEgsKA2FsbBgDIAEoCCJDCgtFZ3Jlc3NTdGF0ZRI0CgZyb3V0ZXMYASADKAsyJC5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5FZ3Jlc3NSb3V0ZSLjAgoLRWdyZXNzUm91dGUSDAoEbmFtZRgBIAEoCRINCgVjbGFzcxgCIAEoCRILCgNvcmcYAyABKAkSDQoFYWdlbnQYBCABKAkSDAoEaG9zdBgFIAEoCRIMCgRwb3J0GAYgASgFEg8KB21ldGhvZHMYByADKAkSFQoNcGF0aF9wcmVmaXhlcxgIIAMoCRINCgVwYXRocxgJIAMoCRISCgpxdWVyeV9rZXlzGAogAygJEksKDHF1ZXJ5X3ZhbHVlcxgLIAMoCzI1LmtvaW5vbi5nYXRld2F5LnYxYWxwaGExLkVncmVzc1JvdXRlLlF1ZXJ5VmFsdWVzRW50cnkSEQoJYW55X3F1ZXJ5GAwgASgIEgwKBGRlbnkYDSABKAgSEgoKY3JlZGVudGlhbBgOIAEoCRoyChBRdWVyeVZhbHVlc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEqOgoESGFsZhIUChBIQUxGX1VOU1BFQ0lGSUVEEAASDgoKSEFMRl9NT0RFTBABEgwKCEhBTEZfTUNQEAIy6AEKE0dhdGV3YXlTdGF0ZVNlcnZpY2USYgoLU3RyZWFtU3RhdGUSKy5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5TdHJlYW1TdGF0ZVJlcXVlc3QaJC5rb2lub24uZ2F0ZXdheS52MWFscGhhMS5TdGF0ZVVwZGF0ZTABEm0KC0Fja1JldmlzaW9uEisua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWNrUmV2aXNpb25SZXF1ZXN0Giwua29pbm9uLmdhdGV3YXkudjFhbHBoYTEuQWNrUmV2aXNpb25SZXNwb25zZSIDkAICQlVaU2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2dhdGV3YXkvdjFhbHBoYTE7Z2F0ZXdheXYxYWxwaGExYgZwcm90bzM");
 
 /**
  * @generated from message koinon.gateway.v1alpha1.StreamStateRequest
@@ -106,6 +106,14 @@ export type StateUpdate = Message<"koinon.gateway.v1alpha1.StateUpdate"> & {
    * @generated from field: koinon.gateway.v1alpha1.MCPState mcp = 4;
    */
   mcp?: MCPState | undefined;
+
+  /**
+   * egress is the org half of the forge and registry routes (ADR 0097 step 2, ADR 0120 section 2).
+   * It is applied with each revision and has no ack of its own yet.
+   *
+   * @generated from field: koinon.gateway.v1alpha1.EgressState egress = 5;
+   */
+  egress?: EgressState | undefined;
 };
 
 /**
@@ -718,6 +726,128 @@ export type ToolGrant = Message<"koinon.gateway.v1alpha1.ToolGrant"> & {
  */
 export const ToolGrantSchema: GenMessage<ToolGrant> = /*@__PURE__*/
   messageDesc(file_koinon_gateway_v1alpha1_state, 19);
+
+/**
+ * EgressState is the org routes of the egress listener. The gateway merges them with its platform
+ * route file. A route that fails to load closes all org routes; it never opens one.
+ *
+ * @generated from message koinon.gateway.v1alpha1.EgressState
+ */
+export type EgressState = Message<"koinon.gateway.v1alpha1.EgressState"> & {
+  /**
+   * @generated from field: repeated koinon.gateway.v1alpha1.EgressRoute routes = 1;
+   */
+  routes: EgressRoute[];
+};
+
+/**
+ * Describes the message koinon.gateway.v1alpha1.EgressState.
+ * Use `create(EgressStateSchema)` to create a new message.
+ */
+export const EgressStateSchema: GenMessage<EgressState> = /*@__PURE__*/
+  messageDesc(file_koinon_gateway_v1alpha1_state, 20);
+
+/**
+ * EgressRoute is one org route (gateway route.Route). It names a credential, never its value.
+ *
+ * @generated from message koinon.gateway.v1alpha1.EgressRoute
+ */
+export type EgressRoute = Message<"koinon.gateway.v1alpha1.EgressRoute"> & {
+  /**
+   * name is unique in the set and holds a "/".
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * class is "forge" or "registry".
+   *
+   * @generated from field: string class = 2;
+   */
+  class: string;
+
+  /**
+   * org is the org slug. It is never empty for a route in the state.
+   *
+   * @generated from field: string org = 3;
+   */
+  org: string;
+
+  /**
+   * agent narrows the route to one agent (the agent's name at the gateway). Empty: every agent of org.
+   *
+   * @generated from field: string agent = 4;
+   */
+  agent: string;
+
+  /**
+   * @generated from field: string host = 5;
+   */
+  host: string;
+
+  /**
+   * port is the TCP port. 0 means 443.
+   *
+   * @generated from field: int32 port = 6;
+   */
+  port: number;
+
+  /**
+   * @generated from field: repeated string methods = 7;
+   */
+  methods: string[];
+
+  /**
+   * @generated from field: repeated string path_prefixes = 8;
+   */
+  pathPrefixes: string[];
+
+  /**
+   * paths are path patterns: the segment "*" matches one segment, "**" any number of segments.
+   *
+   * @generated from field: repeated string paths = 9;
+   */
+  paths: string[];
+
+  /**
+   * @generated from field: repeated string query_keys = 10;
+   */
+  queryKeys: string[];
+
+  /**
+   * query_values are required query parameters with their one exact value.
+   *
+   * @generated from field: map<string, string> query_values = 11;
+   */
+  queryValues: { [key: string]: string };
+
+  /**
+   * @generated from field: bool any_query = 12;
+   */
+  anyQuery: boolean;
+
+  /**
+   * deny makes the route a refusal that wins over every allow of its scope.
+   *
+   * @generated from field: bool deny = 13;
+   */
+  deny: boolean;
+
+  /**
+   * credential is the name of the secret the gateway attaches. Empty means none.
+   *
+   * @generated from field: string credential = 14;
+   */
+  credential: string;
+};
+
+/**
+ * Describes the message koinon.gateway.v1alpha1.EgressRoute.
+ * Use `create(EgressRouteSchema)` to create a new message.
+ */
+export const EgressRouteSchema: GenMessage<EgressRoute> = /*@__PURE__*/
+  messageDesc(file_koinon_gateway_v1alpha1_state, 21);
 
 /**
  * Half is one of the two paths a gateway copy serves.

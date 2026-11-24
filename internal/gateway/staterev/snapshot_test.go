@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -69,6 +70,21 @@ func richState() gateway.State {
 		{Name: "docs", URL: "http://docs/sse", SSE: true},
 	}
 	s.GrantTools(agentA, gateway.ToolGrant{Target: "wiki", Tools: []string{"search", "read"}}, gateway.ToolGrant{Target: "docs", All: true})
+	s.EgressRoutes = []route.Route{
+		{
+			Name: "org/acme/agent/alpha/forge-0-0", Class: route.ClassForge, Org: "acme", Agent: "alpha", Host: "github.com", Port: 443,
+			Methods: []string{"GET"}, Paths: []string{"/acme/app.git/info/refs", "/acme/app/info/refs"},
+			QueryValues: map[string]string{"service": "git-upload-pack"}, AnyQuery: true, Credential: "org/acme/agent/alpha/codehost",
+		},
+		{
+			Name: "org/acme/agent/alpha/forge-0-1", Class: route.ClassForge, Org: "acme", Agent: "alpha", Host: "github.com",
+			Methods: []string{"POST"}, Paths: []string{"/**/git-receive-pack"}, Deny: true,
+		},
+		{
+			Name: "org/zeta/shared", Class: route.ClassRegistry, Org: "zeta", Host: "registry.npmjs.org",
+			Methods: []string{"HEAD", "GET"}, PathPrefixes: []string{"/b", "/a"}, QueryKeys: []string{"z", "y"},
+		},
+	}
 	return s
 }
 
@@ -85,6 +101,39 @@ var _ = Describe("Snapshot", func() {
 		Expect(back.MCP).To(ConsistOf(s.MCP))
 		Expect(back.Providers).To(HaveLen(2))
 		Expect(back.Providers[0].Models[1].Price.Tiers).To(Equal(s.Providers[1].Models[0].Price.Tiers))
+		Expect(back.EgressRoutes).To(HaveLen(3))
+		Expect(back.EgressRoutes[0]).To(Equal(s.EgressRoutes[0]))
+		Expect(back.EgressRoutes[1]).To(Equal(s.EgressRoutes[1]))
+		Expect(back.EgressRoutes[2].Methods).To(Equal([]string{"GET", "HEAD"}))
+	})
+
+	It("carries no egress half for a State without egress routes", func() {
+		s := richState()
+		s.EgressRoutes = nil
+		u := staterev.Snapshot(s)
+		Expect(u.GetEgress()).To(BeNil())
+		Expect(staterev.FromProto(u).EgressRoutes).To(BeEmpty())
+	})
+
+	It("sorts the egress routes, so their order never makes a new revision", func() {
+		a := richState()
+		b := richState()
+		slices.Reverse(b.EgressRoutes)
+		b.EgressRoutes[0].Methods = []string{"GET", "HEAD"}
+		b.EgressRoutes[0].PathPrefixes = []string{"/a", "/b"}
+		b.EgressRoutes[0].QueryKeys = []string{"y", "z"}
+		ba, err := proto.MarshalOptions{Deterministic: true}.Marshal(staterev.Snapshot(a))
+		Expect(err).NotTo(HaveOccurred())
+		bb, err := proto.MarshalOptions{Deterministic: true}.Marshal(staterev.Snapshot(b))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(bb).To(Equal(ba))
+	})
+
+	It("differs when an egress route changes", func() {
+		a := richState()
+		b := richState()
+		b.EgressRoutes[1].Deny = false
+		Expect(proto.Equal(staterev.Snapshot(a), staterev.Snapshot(b))).To(BeFalse())
 	})
 
 	It("is the same for the same State built in another order", func() {
@@ -150,6 +199,12 @@ var _ = Describe("secret material", func() {
 		"Providers[].Models[].Thinking.On", "Providers[].Models[].Thinking.Thinks", "Providers[].Models[].Thinking.UsageSplit",
 		"Providers[].Name", "Providers[].Org", "Providers[].Type",
 		"Tools{}[].All", "Tools{}[].Target", "Tools{}[].Tools[]", "Tools{}~Name", "Tools{}~Org",
+		// The org egress routes (#1086 part B), reviewed 2026-11-24. Credential is the name of the
+		// credential the gateway attaches (#1086 part C resolves it), never its value.
+		"EgressRoutes[].Agent", "EgressRoutes[].AnyQuery", "EgressRoutes[].Class", "EgressRoutes[].Credential",
+		"EgressRoutes[].Deny", "EgressRoutes[].Host", "EgressRoutes[].Methods[]", "EgressRoutes[].Name",
+		"EgressRoutes[].Org", "EgressRoutes[].PathPrefixes[]", "EgressRoutes[].Paths[]", "EgressRoutes[].Port",
+		"EgressRoutes[].QueryKeys[]", "EgressRoutes[].QueryValues{}", "EgressRoutes[].QueryValues{}~key",
 	}
 
 	It("lists every leaf field of State, so a new field is reviewed", func() {

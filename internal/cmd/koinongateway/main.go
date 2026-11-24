@@ -241,7 +241,7 @@ func run(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	// The egress keys and routes load before any listener starts: a bad key directory or route file
 	// stops the start, not a gateway that is half up.
-	eg, err := newEgress(cfg, reg, log)
+	eg, egState, err := newEgress(cfg, reg, log)
 	if err != nil {
 		return err
 	}
@@ -309,10 +309,14 @@ func run(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
-	sc, err := stateclient.New(stateclient.Config{
+	scfg := stateclient.Config{
 		URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) },
 		CopyID: copyID, MCP: mcpHalf, Model: modelHalf, Metrics: stateclient.NewMetrics(reg), Log: log,
-	})
+	}
+	if egState != nil {
+		scfg.Egress = egState
+	}
+	sc, err := stateclient.New(scfg)
 	if err != nil {
 		return err
 	}
@@ -438,18 +442,19 @@ func run(ctx context.Context, cfg config) error {
 }
 
 // newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
-// returns nil when it does not. It loads the actor token keys and the platform routes.
-func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress.Gateway, error) {
+// returns nil when it does not. It loads the actor token keys and the platform routes, and returns
+// the applier that merges the org routes of each State revision with them.
+func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress.Gateway, *egress.StateRoutes, error) {
 	if cfg.egressAddr == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	keys, err := actortoken.LoadPublicKeys(cfg.actorTokenKeysDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ver, err := actortoken.NewVerifier(cfg.actorTokenIssuer, keys)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// GatewayDialContext resolves each route host once, as an absolute name, and refuses Koinon's own
 	// namespace by name and internal addresses by address.
@@ -461,19 +466,22 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress
 		Log:      log,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// The org routes come from the State stream (#1086 part B). Until then, the platform file is the
-	// only table; without it every request is refused (no_table).
+	// The platform file is the table until the first State revision; then each revision merges its org
+	// routes with it (egress.StateRoutes). Without a file and before a revision, every request is
+	// refused (no_table).
+	st := &egress.StateRoutes{Gateway: eg}
 	if cfg.egressRoutesFile != "" {
 		t, err := egress.LoadPlatformRoutes(cfg.egressRoutesFile)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		st.Platform = t
 		eg.Apply(t)
 	}
 	log.Info("egress routes loaded", "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
-	return eg, nil
+	return eg, st, nil
 }
 
 // serveEgress starts the egress listener of eg, and returns nil when eg is nil. The listener's end is

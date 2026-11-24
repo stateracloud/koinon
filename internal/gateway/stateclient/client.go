@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1/gatewayv1alpha1connect"
@@ -80,6 +81,10 @@ type Config struct {
 	// then does not ack that half.
 	Model gateway.ModelPathGateway
 	MCP   gateway.MCPGateway
+	// Egress applies the org egress routes of each revision (#1086 part B); nil when the copy has no
+	// egress listener. It is not a half: it has no ack, because nothing waits for it. A failed apply
+	// is logged and counted, and the egress gateway then serves the platform routes alone.
+	Egress EgressApplier
 
 	// MinBackoff and MaxBackoff bound the wait between connection attempts (defaults above).
 	MinBackoff, MaxBackoff time.Duration
@@ -87,6 +92,11 @@ type Config struct {
 	ApplyTimeout time.Duration
 	Metrics      *Metrics
 	Log          *slog.Logger
+}
+
+// EgressApplier installs the org egress routes of a revision (egress.StateRoutes).
+type EgressApplier interface {
+	ApplyEgress(ctx context.Context, routes []route.Route) error
 }
 
 // Client keeps one gateway copy in step with the State stream.
@@ -237,7 +247,24 @@ func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 			return err
 		}))
 	}
+	if c.cfg.Egress != nil {
+		c.egress(ctx, u.GetRevision(), state.EgressRoutes)
+	}
 	return ackErr
+}
+
+// egress applies the org egress routes of every revision, also a replayed one: the apply is cheap
+// and idempotent. A failure does not end the session, because a replay carries the same routes.
+func (c *Client) egress(ctx context.Context, rev int64, routes []route.Route) {
+	actx, cancel := context.WithTimeout(ctx, c.cfg.ApplyTimeout)
+	defer cancel()
+	if err := c.cfg.Egress.ApplyEgress(actx, routes); err != nil {
+		c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultFailed).Inc()
+		c.log.Error("the org egress routes of a State revision were refused; the platform routes alone are served",
+			"revision", rev, "routes", len(routes), "err", err)
+		return
+	}
+	c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultOK).Inc()
 }
 
 func (c *Client) half(ctx context.Context, rev int64, h gwv1.Half, apply func(context.Context) error) error {
@@ -302,6 +329,7 @@ const (
 	connectFailed      = "failed"
 	resultOK           = "ok"
 	resultFailed       = "failed"
+	halfEgress         = "egress"
 )
 
 func halfLabel(h gwv1.Half) string {
@@ -327,7 +355,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"result"}),
 		Applied: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_gateway_state_revisions_applied_total",
-			Help: "State revisions applied by half (model, mcp) and result (ok, failed).",
+			Help: "State revisions applied by half (model, mcp, egress) and result (ok, failed).",
 		}, []string{"half", "result"}),
 		AckFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_gateway_state_ack_failures_total",
@@ -339,6 +367,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, h := range []string{"model", "mcp"} {
 		m.AckFailures.WithLabelValues(h)
+	}
+	for _, h := range []string{"model", "mcp", halfEgress} {
 		for _, r := range []string{resultOK, resultFailed} {
 			m.Applied.WithLabelValues(h, r)
 		}

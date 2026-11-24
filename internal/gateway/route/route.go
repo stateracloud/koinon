@@ -22,6 +22,7 @@ package route
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -47,17 +48,28 @@ type Reason string
 
 // Reasons.
 const (
-	ReasonAllowed     Reason = "allowed"
-	ReasonNoToken     Reason = "no_token"
-	ReasonBadToken    Reason = "bad_token"
-	ReasonNoTable     Reason = "no_table"
-	ReasonNoRoute     Reason = "no_route"
-	ReasonMethod      Reason = "method_not_allowed"
-	ReasonPath        Reason = "path_not_allowed"
-	ReasonQuery       Reason = "query_not_allowed"
-	ReasonBadRequest  Reason = "bad_request"
+	ReasonAllowed    Reason = "allowed"
+	ReasonNoToken    Reason = "no_token"
+	ReasonBadToken   Reason = "bad_token"
+	ReasonNoTable    Reason = "no_table"
+	ReasonNoRoute    Reason = "no_route"
+	ReasonMethod     Reason = "method_not_allowed"
+	ReasonPath       Reason = "path_not_allowed"
+	ReasonQuery      Reason = "query_not_allowed"
+	ReasonBadRequest Reason = "bad_request"
+	// ReasonOrgMismatch: a route of the host belongs to another org, or to another agent of the org.
 	ReasonOrgMismatch Reason = "org_mismatch"
+	// ReasonDenied: a deny route matches the request.
+	ReasonDenied Reason = "denied"
 )
+
+// Reasons are all reasons, in a fixed order, for metrics that create every series at start.
+func Reasons() []Reason {
+	return []Reason{
+		ReasonAllowed, ReasonNoToken, ReasonBadToken, ReasonNoTable, ReasonNoRoute, ReasonMethod, ReasonPath,
+		ReasonQuery, ReasonBadRequest, ReasonOrgMismatch, ReasonDenied,
+	}
+}
 
 // Route is one allowed destination.
 type Route struct {
@@ -66,6 +78,10 @@ type Route struct {
 	Class Class
 	// Org is the org that owns the grant. Empty means a platform default every org may use.
 	Org string
+	// Agent narrows an org route to one agent: the agent of the actor token, which is the agent's
+	// name at the gateway (gateway.AgentRef.Name). Empty means every agent of Org. A route with an
+	// agent needs an org.
+	Agent string
 	// Host is one exact lower-case host name. No wildcard, no IP literal.
 	Host string
 	// Port is the TCP port. Zero means 443.
@@ -75,9 +91,25 @@ type Route struct {
 	// PathPrefixes are the allowed paths. A prefix matches a whole path or a path under it at a
 	// segment boundary: "/v2" matches "/v2" and "/v2/x" and never "/v2x". Each starts with "/".
 	PathPrefixes []string
+	// Paths are path patterns, for rules that a prefix cannot say (a connector's network rules). A
+	// pattern is "/"-separated segments: the segment "*" matches one segment, the segment "**" matches
+	// any number of segments (zero included), and every other segment matches exactly the decoded
+	// segment of the request. No other wildcard exists. A route needs PathPrefixes or Paths.
+	Paths []string
 	// QueryKeys are the query parameters the route allows. A key not listed refuses the request, and
 	// a route with no keys allows no query at all.
 	QueryKeys []string
+	// QueryValues are required query parameters: each one must be present, and each of its values must
+	// equal the given value exactly. A key listed here is also allowed. In a deny route the parameter
+	// must be present and one value equal is enough (compared without case).
+	QueryValues map[string]string
+	// AnyQuery allows every query parameter. QueryValues still apply.
+	AnyQuery bool
+	// Deny makes the route a refusal: a request that it matches is refused, also when another route
+	// allows it. A deny route of an org or an agent applies only to that org or agent. Methods, paths
+	// and query values of a deny route are compared without case, so a deny never misses on a spelling.
+	// A deny route has no credential, no QueryKeys and no AnyQuery.
+	Deny bool
 	// Credential names the secret the gateway attaches on this route. Empty means none. It is a name,
 	// never a value.
 	Credential string
@@ -111,17 +143,61 @@ func (r Route) validate() error {
 			return fmt.Errorf("route %q: method %q must be one upper-case HTTP method", r.Name, m)
 		}
 	}
-	if len(r.PathPrefixes) == 0 {
+	if len(r.PathPrefixes) == 0 && len(r.Paths) == 0 {
 		return fmt.Errorf("route %q: no path rule", r.Name)
 	}
 	for _, p := range r.PathPrefixes {
-		if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "*?#%;") || !canonical(p) {
+		if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "*?#%;[]") || !canonical(p) {
 			return fmt.Errorf("route %q: path prefix %q must be an absolute, canonical path with no wildcard", r.Name, p)
 		}
 	}
+	for _, p := range r.Paths {
+		if err := validPattern(p); err != nil {
+			return fmt.Errorf("route %q: path %q: %w", r.Name, p, err)
+		}
+	}
 	for _, k := range r.QueryKeys {
-		if k == "" || strings.ContainsAny(k, "*&=") {
+		if !validQueryKey(k) {
 			return fmt.Errorf("route %q: bad query key %q", r.Name, k)
+		}
+	}
+	for k, v := range r.QueryValues {
+		if !validQueryKey(k) {
+			return fmt.Errorf("route %q: bad query key %q", r.Name, k)
+		}
+		if v == "" || strings.ContainsAny(v, "*?[]&=") {
+			return fmt.Errorf("route %q: query %q needs one exact value, not %q", r.Name, k, v)
+		}
+	}
+	return r.validateScope()
+}
+
+// validateScope checks the agent scope and the rules of a deny route.
+func (r Route) validateScope() error {
+	if r.Agent != "" && r.Org == "" {
+		return fmt.Errorf("route %q: a route with an agent needs an org", r.Name)
+	}
+	if r.Deny && (r.Credential != "" || len(r.QueryKeys) > 0 || r.AnyQuery) {
+		return fmt.Errorf("route %q: a deny route has no credential, no query keys and no any-query", r.Name)
+	}
+	// A deny route matches decoded segments only: a prefix compares the escaped path, so an encoded
+	// letter ("/%61dmin") would pass it.
+	if r.Deny && r.PathPrefixes != nil {
+		return fmt.Errorf("route %q: a deny route takes path patterns (paths), not path prefixes", r.Name)
+	}
+	return nil
+}
+
+func validQueryKey(k string) bool { return k != "" && !strings.ContainsAny(k, "*?[]&=") }
+
+// validPattern checks a path pattern of [Route.Paths].
+func validPattern(p string) error {
+	if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "?#%;[]\\") || !canonical(p) {
+		return errors.New("must be an absolute, canonical path")
+	}
+	for _, seg := range strings.Split(p[1:], "/") {
+		if strings.Contains(seg, "*") && seg != "*" && seg != "**" {
+			return errors.New(`a wildcard is a whole segment, "*" or "**"`)
 		}
 	}
 	return nil
@@ -179,6 +255,9 @@ func Compile(routes []Route) (*Table, error) {
 			return nil, fmt.Errorf("route name %q is used twice", r.Name)
 		}
 		seen[r.Name] = true
+		if r.Deny {
+			continue
+		}
 		if r.Credential != "" && r.Org == "" {
 			return nil, fmt.Errorf("route %q: a platform route (no org) cannot carry a credential: one secret would serve every org", r.Name)
 		}
@@ -306,30 +385,42 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 	if err != nil {
 		return Decision{Reason: ReasonBadRequest}
 	}
+	segs, ok := decodedSegments(p)
+	if !ok {
+		return Decision{Reason: ReasonBadRequest}
+	}
+	// A deny route of the actor's scope wins over every allow.
+	for i := range t.routes {
+		rt := &t.routes[i]
+		if rt.Deny && rt.Host == host && rt.port() == port && rt.inScope(actor) && rt.denies(r.Method, p, segs, q) {
+			return Decision{Reason: ReasonDenied}
+		}
+	}
 	// reason keeps the most specific refusal among routes of the host, so a deny says why.
 	reason := ReasonNoRoute
 	rank := map[Reason]int{ReasonNoRoute: 0, ReasonOrgMismatch: 1, ReasonMethod: 2, ReasonPath: 3, ReasonQuery: 4}
-	// Among the routes that allow the request, an org's own route wins over a platform route, then
-	// the longest matching path prefix, then the route name. The order of the set never decides.
+	// Among the routes that allow the request, an agent's route wins over an org's route, an org's
+	// route over a platform route, then the longest literal path, then the route name. The order of
+	// the set never decides.
 	var best *Route
 	bestLen := -1
 	for i := range t.routes {
 		rt := &t.routes[i]
-		if rt.Host != host || rt.port() != port {
+		if rt.Deny || rt.Host != host || rt.port() != port {
 			continue
 		}
 		var miss Reason
 		switch {
-		case rt.Org != "" && rt.Org != actor.Org:
+		case !rt.inScope(actor):
 			miss = ReasonOrgMismatch
 		case !slices.Contains(rt.Methods, r.Method):
 			miss = ReasonMethod
-		case !pathAllowed(rt.PathPrefixes, p):
+		case !rt.pathMatches(p, segs, false):
 			miss = ReasonPath
-		case !queryAllowed(rt.QueryKeys, q):
+		case !rt.queryAllowed(q):
 			miss = ReasonQuery
 		default:
-			l := matchLen(rt.PathPrefixes, p)
+			l := rt.matchLen(p, segs)
 			if best == nil || beats(rt, l, best, bestLen) {
 				best, bestLen = rt, l
 			}
@@ -345,10 +436,153 @@ func (t *Table) decide(actor actortoken.Actor, r Request) Decision {
 	return Decision{Reason: reason}
 }
 
-// beats reports whether route a (matching with prefix length al) is preferred over b.
+// inScope reports whether the route serves actor: a platform route serves every actor, an org route
+// the agents of its org, and an agent route that agent only.
+func (r *Route) inScope(actor actortoken.Actor) bool {
+	return (r.Org == "" || r.Org == actor.Org) && (r.Agent == "" || r.Agent == actor.Agent)
+}
+
+// scopeRank orders the scopes for the choice among allowing routes.
+func (r *Route) scopeRank() int {
+	switch {
+	case r.Agent != "":
+		return 2
+	case r.Org != "":
+		return 1
+	}
+	return 0
+}
+
+// denies reports whether the deny route r matches the request. It compares without case.
+func (r *Route) denies(method, p string, segs []string, q url.Values) bool {
+	if !slices.ContainsFunc(r.Methods, func(m string) bool { return strings.EqualFold(m, method) }) {
+		return false
+	}
+	// A trailing slash adds an empty segment; the forge treats "/x/" as "/x", so a deny pattern
+	// ignores it.
+	if n := len(segs); n > 0 && segs[n-1] == "" {
+		segs = segs[:n-1]
+	}
+	if !r.pathMatches(p, segs, true) {
+		return false
+	}
+	for k, want := range r.QueryValues {
+		if !slices.ContainsFunc(q[k], func(v string) bool { return strings.EqualFold(v, want) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// pathMatches reports whether a prefix or a pattern of r matches the path p (escaped) or its decoded
+// segments. fold compares without case, for deny routes, which have no prefixes.
+func (r *Route) pathMatches(p string, segs []string, fold bool) bool {
+	if !fold && pathAllowed(r.PathPrefixes, p) {
+		return true
+	}
+	for _, pat := range r.Paths {
+		if patternMatches(strings.Split(pat[1:], "/"), segs, fold) {
+			return true
+		}
+	}
+	return false
+}
+
+// patternMatches matches pattern segments against path segments: "*" is one segment, "**" any number
+// of segments.
+func patternMatches(pat, segs []string, fold bool) bool {
+	if len(pat) == 0 {
+		return len(segs) == 0
+	}
+	switch pat[0] {
+	case "**":
+		for i := 0; i <= len(segs); i++ {
+			if patternMatches(pat[1:], segs[i:], fold) {
+				return true
+			}
+		}
+		return false
+	case "*":
+		return len(segs) > 0 && segs[0] != "" && patternMatches(pat[1:], segs[1:], fold)
+	}
+	if len(segs) == 0 {
+		return false
+	}
+	if fold && !strings.EqualFold(pat[0], segs[0]) || !fold && pat[0] != segs[0] {
+		return false
+	}
+	return patternMatches(pat[1:], segs[1:], fold)
+}
+
+// decodedSegments splits a canonical escaped path into its decoded segments. cleanPath has already
+// refused an encoded slash, backslash, dot or NUL, so decoding cannot change the segment structure.
+func decodedSegments(p string) ([]string, bool) {
+	raw := strings.Split(p[1:], "/")
+	out := make([]string, len(raw))
+	for i, s := range raw {
+		d, err := url.PathUnescape(s)
+		if err != nil {
+			return nil, false
+		}
+		out[i] = d
+	}
+	return out, true
+}
+
+// queryAllowed applies QueryValues, then AnyQuery or QueryKeys.
+func (r *Route) queryAllowed(q url.Values) bool {
+	for k, want := range r.QueryValues {
+		vs := q[k]
+		if len(vs) == 0 {
+			return false
+		}
+		for _, v := range vs {
+			if v != want {
+				return false
+			}
+		}
+	}
+	if r.AnyQuery {
+		return true
+	}
+	for k := range q {
+		if _, ok := r.QueryValues[k]; !ok && !slices.Contains(r.QueryKeys, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchLen is how specific the match of r on the path is: the longest matching prefix, or the
+// literal length of the longest matching pattern up to its first wildcard.
+func (r *Route) matchLen(p string, segs []string) int {
+	n := 0
+	for _, pre := range r.PathPrefixes {
+		if pathAllowed([]string{pre}, p) && len(pre) > n {
+			n = len(pre)
+		}
+	}
+	for _, pat := range r.Paths {
+		parts := strings.Split(pat[1:], "/")
+		if !patternMatches(parts, segs, false) {
+			continue
+		}
+		l := 0
+		for _, part := range parts {
+			if part == "*" || part == "**" {
+				break
+			}
+			l += 1 + len(part)
+		}
+		n = max(n, l)
+	}
+	return n
+}
+
+// beats reports whether route a (matching with length al) is preferred over b.
 func beats(a *Route, al int, b *Route, bl int) bool {
-	if (a.Org != "") != (b.Org != "") {
-		return a.Org != ""
+	if a.scopeRank() != b.scopeRank() {
+		return a.scopeRank() > b.scopeRank()
 	}
 	if al != bl {
 		return al > bl
@@ -356,21 +590,12 @@ func beats(a *Route, al int, b *Route, bl int) bool {
 	return a.Name < b.Name
 }
 
-// matchLen is the length of the longest prefix that matches p.
-func matchLen(prefixes []string, p string) int {
-	n := 0
-	for _, pre := range prefixes {
-		if pathAllowed([]string{pre}, p) && len(pre) > n {
-			n = len(pre)
-		}
-	}
-	return n
-}
-
 func (r Route) clone() Route {
 	r.Methods = slices.Clone(r.Methods)
 	r.PathPrefixes = slices.Clone(r.PathPrefixes)
 	r.QueryKeys = slices.Clone(r.QueryKeys)
+	r.Paths = slices.Clone(r.Paths)
+	r.QueryValues = maps.Clone(r.QueryValues)
 	return r
 }
 
@@ -428,13 +653,4 @@ func pathAllowed(prefixes []string, p string) bool {
 		}
 	}
 	return false
-}
-
-func queryAllowed(keys []string, q url.Values) bool {
-	for k := range q {
-		if !slices.Contains(keys, k) {
-			return false
-		}
-	}
-	return true
 }
