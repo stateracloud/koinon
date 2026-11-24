@@ -28,6 +28,13 @@ fresh() { # a copy of the inputs, echoes its path
 	cp "$repo/hack/e2e-toolchain/Dockerfile" "$w/hack/e2e-toolchain/"
 	cp "$repo"/.github/workflows/*.yml "$w/.github/workflows/"
 	cp "$repo/CONTRIBUTING.md" "$w/"
+	# The fixture's .ko.yaml is the real one with a digest pin for the default base when the real file has none yet
+	# (a digest the lane could not read, #1224): the checker is tested on the form, not on this digest.
+	if grep -q '^defaultBaseImage:' "$repo/.ko.yaml"; then
+		cp "$repo/.ko.yaml" "$w/.ko.yaml"
+	else
+		{ cat "$repo/.ko.yaml"; echo "defaultBaseImage: cgr.dev/chainguard/static@sha256:$(printf 'a%.0s' {1..64})"; } >"$w/.ko.yaml"
+	fi
 	echo "$w"
 }
 run() { VERSIONS_CHECK_ROOT=$1 "$repo/hack/versions-check.sh" >"$1/out" 2>&1; }
@@ -238,6 +245,37 @@ w=$(fresh)
 mise_fixture "$w"
 printf '[[tools."aqua:kubernetes-sigs/kind"]]\nversion = "0.33.0"\nbackend = "aqua:kubernetes-sigs/kind"\n' >>"$w/mise.lock"
 expect_fail "mise.lock tool outside the five" "$w" "mise.lock: 'aqua:kubernetes-sigs/kind' is not one of the five"
+
+# .ko.yaml pins the default base image of ko by digest (#1224)
+w=$(fresh)
+run "$w"
+rc=$?
+check ".ko.yaml: a digest pin passes" 0 "$rc"
+w=$(fresh)
+grep -v '^defaultBaseImage:' "$w/.ko.yaml" >"$w/ko.new" && mv "$w/ko.new" "$w/.ko.yaml"
+echo "defaultBaseImage: cgr.dev/chainguard/static:latest" >>"$w/.ko.yaml"
+expect_fail ".ko.yaml: the default base as a tag" "$w" "defaultBaseImage is 'cgr.dev/chainguard/static:latest"
+w=$(fresh)
+grep -v '^defaultBaseImage:' "$w/.ko.yaml" >"$w/ko.new" && mv "$w/ko.new" "$w/.ko.yaml"
+expect_fail ".ko.yaml: no default base" "$w" "defaultBaseImage is '<missing>'"
+w=$(fresh)
+grep -v '^defaultBaseImage:' "$w/.ko.yaml" >"$w/ko.new" && mv "$w/ko.new" "$w/.ko.yaml"
+echo "defaultBaseImage: cgr.dev/chainguard/static@sha256:xx" >>"$w/.ko.yaml"
+expect_fail ".ko.yaml: a short digest" "$w" "defaultBaseImage is"
+w=$(fresh)
+subst "$w/.ko.yaml" "cgr.dev/chainguard/git@sha256:" "cgr.dev/chainguard/git:latest #"
+expect_fail ".ko.yaml: an override as a tag" "$w" "baseImageOverrides entry"
+w=$(fresh)
+printf 'builds:\n  - id: api\n    main: ./cmd/koinon-api\n' >>"$w/.ko.yaml"
+run "$w"
+rc=$?
+check ".ko.yaml: a builds section is not an override" 0 "$rc"
+w=$(fresh)
+subst "$w/.ko.yaml" $'\nbaseImageOverrides:\n' $'\nbaseImageOverrides:\n  "github.com/x/y/cmd/z": cgr.dev/chainguard/git:latest\n'
+expect_fail ".ko.yaml: a quoted key with a tag" "$w" "baseImageOverrides entry"
+w=$(fresh)
+rm "$w/.ko.yaml"
+expect_fail ".ko.yaml: missing" "$w" ".ko.yaml is missing"
 
 # dep-age-check fails (no network needed) for a *_VERSION with no tool_repo entry
 w=$(mktemp -d "$tmp/dep.XXXXXX") || exit 1

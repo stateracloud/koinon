@@ -393,6 +393,8 @@ e2e-forced - ^harnesses/.*\.md$
 e2e-forced - ^hack/docs-e1\.sh$
 e2e-forced - ^hack/harness-tag\.sh$
 e2e-forced - ^hack/harness-base\.sh$
+# images.sh sources the retry library for its ko builds (#1224).
+e2e-forced - ^hack/push-retry-lib\.sh$
 # The earlier names, alias links the workflows still call until they use the new names (#610).
 e2e-forced - ^hack/flavor-(tag|base)\.sh$
 # The kind, ko and helm versions e2e-kind.yml installs (old issue 565), the filter that loads them

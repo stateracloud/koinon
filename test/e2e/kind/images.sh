@@ -33,6 +33,10 @@ HARNESS_PULL_REPO=${HARNESS_PULL_REPO:-${FLAVOR_PULL_REPO:-}}
 HARNESS_CACHE=${HARNESS_CACHE:-${FLAVOR_CACHE:-}}
 export HARNESS_BASE=${HARNESS_BASE:-${FLAVOR_BASE:-}}
 
+# push_retry: one short registry fault (cgr.dev HTTP 500 on the base image pull) must not fail the run (#1224).
+# shellcheck source=hack/push-retry-lib.sh
+. "$(dirname "$0")/../../../hack/push-retry-lib.sh"
+
 REGISTRY=${KIND_REGISTRY:-localhost:5001}
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
@@ -59,10 +63,10 @@ build_ko() {
   for pair in api:./cmd/koinon-api reconciler:./cmd/koinon-reconciler agentd:./cmd/koinon-agentd gateway:./cmd/koinon-gateway; do
     flags=${GOFLAGS:-}
     [[ ${pair%%:*} == api ]] && flags="${flags:+$flags }-tags=webui"
-    GOFLAGS=$flags KO_DOCKER_REPO="$REPO/${pair%%:*}" "${KO:-ko}" build --bare --tags e2e \
+    GOFLAGS=$flags KO_DOCKER_REPO="$REPO/${pair%%:*}" push_retry "${KO:-ko}" build --bare --tags e2e \
       --platform "linux/$arch" "${pair#*:}"
   done
-  KO_DOCKER_REPO=$REPO "${KO:-ko}" build --base-import-paths --tags e2e \
+  KO_DOCKER_REPO=$REPO push_retry "${KO:-ko}" build --base-import-paths --tags e2e \
     --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
   echo "-- images: ko build and push (7 binaries): $(( $(date +%s) - ts ))s"
 }
