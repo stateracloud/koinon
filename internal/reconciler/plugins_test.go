@@ -38,8 +38,9 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 		r, err = reconciler.New(pool, openshell.New(cc), &fakeModelGateway{},
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
-				Prices:  prices.NewResolver(pricing.Embedded()),
-				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+				KeepWarmPerOrg: 2,
+				Prices:         prices.NewResolver(pricing.Embedded()),
+				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 				Harnesses: map[string]reconciler.Harness{
 					harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},

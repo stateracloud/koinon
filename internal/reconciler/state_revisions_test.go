@@ -34,8 +34,9 @@ var _ = Describe("Reconciler and the State stream", func() {
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		mg := &fakeModelGateway{}
 		cfg := reconciler.Config{
-			Prices:  prices.NewResolver(pricing.Embedded()),
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			KeepWarmPerOrg: 2,
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Harnesses: map[string]reconciler.Harness{
 				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},
@@ -92,8 +93,9 @@ var _ = Describe("Reconciler when the State stream store is slow or broken", fun
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		cfg := reconciler.Config{
-			Prices:  prices.NewResolver(pricing.Embedded()),
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			KeepWarmPerOrg: 2,
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Harnesses: map[string]reconciler.Harness{
 				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},

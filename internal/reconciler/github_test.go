@@ -125,8 +125,9 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cfg = reconciler.Config{
-			Prices:  prices.NewResolver(pricing.Embedded()),
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			KeepWarmPerOrg: 2,
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Harnesses: map[string]reconciler.Harness{
 				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},

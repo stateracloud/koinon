@@ -14,7 +14,8 @@ has "reconciler config carries the archive window (AR1)" 'archiveAfter: 168h' --
 has "reconciler config carries the archive window override" 'archiveAfter: 24h' --set reconciler.archiveAfter=24h --show-only templates/config.yaml
 has "reconciler config can turn the archive tier off" 'archiveAfter: -1h' --set reconciler.archiveAfter=-1h --show-only templates/config.yaml
 has "reconciler config carries the sandbox job bound" 'sandboxJobs: 8' --show-only templates/config.yaml
-has "reconciler config carries the keep-warm cap per org" 'keepWarmPerOrg: 2' --show-only templates/config.yaml
+has "reconciler config carries the keep-warm cap per org (default none, #1090)" 'keepWarmPerOrg: 0' --show-only templates/config.yaml
+has "reconciler config carries the keep-warm cap override" 'keepWarmPerOrg: 2' --set reconciler.keepWarmPerOrg=2 --show-only templates/config.yaml
 # Harness pre-pull (practice B6): off by default; needs a node selector; one init container per
 # harness image through koinon.imageRef and the pull secrets; never in a sandbox namespace.
 prepull=(--set harnessPrepull.enabled=true --set-string 'harnessPrepull.nodeSelector.katacontainers\.io/kata-runtime=true')

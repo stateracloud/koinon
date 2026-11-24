@@ -134,6 +134,7 @@ var _ = Describe("Reconciler", func() {
 		logs = &syncBuffer{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,

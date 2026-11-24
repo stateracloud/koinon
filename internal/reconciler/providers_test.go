@@ -49,6 +49,7 @@ var _ = Describe("Provider delivery", func() {
 		kube = fake.NewClientset()
 		svc = catalog.New(pool, ring, nil)
 		r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
@@ -572,9 +573,10 @@ var _ = Describe("Provider delivery", func() {
 			newR = func() *reconciler.Reconciler {
 				GinkgoHelper()
 				r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
-					Prices:  prices.NewResolver(pricing.Embedded()),
-					Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-					Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+					KeepWarmPerOrg: 2,
+					Prices:         prices.NewResolver(pricing.Embedded()),
+					Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+					Keys:           ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 					ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,
 					Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
 				})

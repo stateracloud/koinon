@@ -46,6 +46,7 @@ var _ = Describe("The provider echo check end to end", func() {
 		mg := &fakeModelGateway{}
 		kube := fake.NewClientset()
 		r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
