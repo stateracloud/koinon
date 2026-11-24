@@ -20,6 +20,11 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- if eq $s.namespace $s.workerNamespace }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
 {{- $name := default (printf "koinon-%s" $p.sandboxClass) $p.name }}
 {{- $userSA := dig "template" "serviceAccountName" "" ($p.spec | default dict) }}
+{{- if dig "template" "resources" nil ($p.spec | default dict) }}{{- fail "execution.substrate.workerPool.spec.template.resources is not used: set execution.substrate.workerPool.resources (both requests and limits), or set it to null for the workerLimits defaults" }}{{- end }}
+{{- $image := include "koinon.substrate.workerPoolImage" . }}
+{{- /* A tag image is admitted only through the interim digest exemption of the ReplicaSet controller (#1140). Without it
+every worker pod is refused at admission, so refuse the render instead of a pool that never starts. */}}
+{{- if and $s.workerPolicy.enabled (not (regexMatch "@sha256:[a-f0-9]{64}$" $image)) (not (has "system:serviceaccount:kube-system:replicaset-controller" $s.workerPolicy.digestExemptIdentities)) }}{{- fail (printf "execution.substrate.workerPool: the worker image %s has no digest and workerPolicy.digestExemptIdentities does not exempt the ReplicaSet controller, so the worker pods would be refused; set workerPool.workerImage to name@sha256:<digest>" $image) }}{{- end }}
 {{- $pull := (include "koinon.imagePullSecrets" . | fromYaml).imagePullSecrets }}
 {{- $sa := default $userSA $p.serviceAccountName }}
 {{- if not $sa }}{{- $sa = printf "%s-worker" $name }}{{- end }}
@@ -31,7 +36,7 @@ The WorkerPool CRD must exist (Substrate is a prerequisite); only the installer 
 {{- if not (and .requests .limits) }}{{- fail "execution.substrate.workerPool.resources needs both requests and limits (a worker pod hosts many sandboxes in its own cgroup; set it to null to use the workerLimits LimitRange defaults)" }}{{- end }}
 {{- $_ := set $tmpl "resources" . }}
 {{- end }}
-{{- $spec := dict "workerImage" (include "koinon.substrate.workerPoolImage" .) "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
+{{- $spec := dict "workerImage" $image "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
 {{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
 apiVersion: ate.dev/v1
 kind: WorkerPool

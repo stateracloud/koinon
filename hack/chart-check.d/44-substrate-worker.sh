@@ -73,7 +73,7 @@ grep -Fq '!has(src.serviceAccountToken)' <<<"$wpods" || fail "a projected servic
 grep -Fq '!has(object.spec.automountServiceAccountToken) || !object.spec.automountServiceAccountToken' <<<"$wpods" || fail "automountServiceAccountToken must be not true for worker pods (unset passes)"
 if grep -Eq 'x in \["SYS_ADMIN","NET_ADMIN"\]' <<<"$wpods"; then fail "the namespace must have no capability ceiling: only the pinned worker shape adds capabilities"; fi
 # The default pool's pinned image is a worker image (issue #1089); with the pool off and no workerShapes image, no container is.
-grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [\"ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0\"])" <<<"$(tr -d '\134' <<<"$wpods")" || fail "the default pool image is the one worker image"
+grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [\"ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0\"])" <<<"$wpods" || fail "the default pool image is the one worker image"
 nopool=(--set execution.substrate.workerPool.enabled=false)
 wpods0=$(docof 'ValidatingAdmissionPolicy\nmetadata:\n  name: koinon-koinon-worker-pods\n' <<<"$(render "${wsub[@]}" "${nopool[@]}" "${pol[@]}" | tr -d '\134')")
 grep -Fq "(c.name == 'worker' && !('worker' in variables.initNames) && c.image in [])" <<<"$wpods0" || fail "with no worker image no container is a worker container (fail closed)"
@@ -134,13 +134,13 @@ has "worker hostPath list is configurable" 'v.hostPath.path in \[\\"/dev/kvm\\"\
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$wpods" | tail -1)
 grep -Fq 'replicaset-controller' <<<"$tagline" || fail "the digest exemption must default to the platform controllers"
 if grep -Fq 'ate-controller' <<<"$tagline"; then fail "the Substrate controller must not be exempt from the digest rule by default"; fi
-custom=$(render "${wsub[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}")
+custom=$(render "${wsub[@]}" "${nopool[@]}" --set 'execution.substrate.workerPolicy.digestExemptIdentities={system:serviceaccount:x:y}' "${pol[@]}")
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$custom" | tail -1)
 grep -Fq 'system:serviceaccount:x:y' <<<"$tagline" || fail "digestExemptIdentities must set the exemption"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "digestExemptIdentities must replace the default list"; fi
 mkdir -p "$out/values"
 printf 'execution:\n  substrate:\n    workerPolicy:\n      digestExemptIdentities: []\n' >"$out/values/no-exempt.yaml"
-none=$(render "${wsub[@]}" -f "$out/values/no-exempt.yaml" "${pol[@]}")
+none=$(render "${wsub[@]}" "${nopool[@]}" -f "$out/values/no-exempt.yaml" "${pol[@]}")
 tagline=$(grep -A1 -E 'name: tagAllowed' <<<"$none" | tail -1)
 grep -Fq 'request.userInfo.username in []' <<<"$tagline" || fail "an empty digestExemptIdentities must exempt nobody"
 if grep -Fq 'replicaset-controller' <<<"$tagline"; then fail "an empty digestExemptIdentities must not fall back to the platform controllers"; fi
@@ -325,7 +325,14 @@ has "the resources are settable" 'memory: 6Gi' "${wsub[@]}" --set execution.subs
 lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
 if render "${wsub[@]}" --set execution.substrate.workerPool.resources.requests=null "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "resources without requests must not render"; fi
 grep -q 'both requests and limits' "$out/sub.err" || fail "the resources error must ask for both requests and limits"
-if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@]}" >/dev/null 2>&1; then fail "zero replicas must not render (switch the pool off instead)"; fi
+if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "zero replicas must not render (switch the pool off instead)"; fi
+grep -q 'replicas' "$out/sub.err" || fail "the zero-replicas error must name replicas"
+if render "${wsub[@]}" --set execution.substrate.workerPool.spec.template.resources.requests.cpu=4 "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "spec.template.resources must not render (it would merge with the default resources)"; fi
+grep -q 'set execution.substrate.workerPool.resources' "$out/sub.err" || fail "the spec.template.resources error must point to workerPool.resources"
+# The default image is a tag: without the interim exemption of the ReplicaSet controller (#1140) the render fails.
+if render "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "a tag pool image without the digest exemption must not render"; fi
+grep -q 'has no digest' "$out/sub.err" || fail "the digest error must say that the image has no digest"
+has "a digest pool image renders without the exemption" 'workerImage: registry.example/w@sha256:a{64}$' "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' --set "execution.substrate.workerPool.workerImage=registry.example/w@sha256:$(printf 'a%.0s' {1..64})" "${pool[@]}"
 # kubeconform checks the pool against the CRD of the pinned Substrate release (schemas/ate.dev/workerpool_v1.json).
 [[ -s hack/chart-check.d/schemas/ate.dev/workerpool_v1.json ]] || fail "the WorkerPool schema for kubeconform is missing"
 grep -Fq '"sandboxClasses"' hack/chart-check.d/schemas/ate.dev/workerpool_v1.json || fail "the WorkerPool schema must be the WorkerPool CRD"

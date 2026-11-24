@@ -851,7 +851,8 @@ execution:
       # Identities whose pods may use a tag instead of a digest. This list is used as written, so an
       # empty list means every image needs a digest.
       # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
-      # then set this to [] (the chart check pins the default). Tracking issue: #1140.
+      # then set this to [] (the chart check pins the default) and pin the default WorkerPool image by digest
+      # (the chart refuses a tag pool image without the ReplicaSet controller here). Tracking issue: #1140.
       digestExemptIdentities:
         - system:serviceaccount:kube-system:replicaset-controller
         - system:serviceaccount:kube-system:daemon-set-controller
@@ -877,8 +878,8 @@ execution:
       # images: the worker images of the class (name@sha256:...). The main container named `worker` with one of these images
       # is the worker container, the only container of the worker namespace that may add capabilities or have an
       # Unconfined profile, and it gets the capability set of this class only (issue #1176). An init container is never the
-      # worker container. The image of the WorkerPool that this chart makes (workerPool.workerImage, after the registry
-      # mirrors) is added to the list of workerPool.sandboxClass by the template. One image is in one list only. No image and
+      # worker container. The image of the WorkerPool that this chart makes (workerPool.workerImage or the pinned
+      # worker image of its class, after the registry mirrors) is added to the list of workerPool.sandboxClass by the template. One image is in one list only. No image and
       # no pool: no container is a worker container and a worker pod does not start (fail closed). Use a digest. The digest
       # rule has an interim exemption for the ReplicaSet controller (digestExemptIdentities, #1140), so a tag image also gets
       # the shape until #1140 closes.
@@ -1125,7 +1126,7 @@ execution:
         requests: {cpu: 500m, memory: 1Gi}
         limits: {cpu: "2", memory: 4Gi}
       # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
-      # does not know, template.labels and template.resources among them.
+      # does not know, template.labels among them. template.resources is refused here: use resources above.
       spec: {}
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.

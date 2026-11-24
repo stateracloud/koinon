@@ -473,7 +473,12 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   limits of 2 CPU and 4Gi. The pool needs one node that runs the gvisor class with this much free. Change the size
   with `workerPool.replicas` and `workerPool.resources`. Set `workerPool.sandboxClass: microvm` for a microVM pool
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
-  exist before `helm install`, so install Substrate first.
+  exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
+  identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps
+  ServiceAccount), or set `workerPool.enabled: false`. The default image is the tag `v1.0.0`: the interim digest
+  exemption (#1140) admits it, and the chart refuses the render when that exemption is gone. If you installed
+  Substrate with `--image-repo`, set `workerPool.workerImage` or a registry mirror (`global.registryMirrors`), or the
+  pool pulls from `ghcr.io`.
 - The chart sets resource limits in the worker namespace (`execution.substrate.workerLimits`, on by default). A
   LimitRange gives a container with no requests or limits the defaults (500m CPU and 1Gi memory as requests, 8 CPU
   and 16Gi as limits). A ResourceQuota caps the namespace at 20 pods, 64 CPU and 128Gi of requests, and 128 CPU and
@@ -509,8 +514,9 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   `Unconfined`. The policy accepts this shape only on the main container named `worker` whose image is in
   `workerPolicy.workerShapes.gvisor.images` or `workerPolicy.workerShapes.microvm.images`. The list of the image
   sets the class: a gVisor image gets only the gVisor capabilities, a micro-VM image only the micro-VM ones. One
-  image is in one list only, or the render fails. The pool `workerImage` is added to the list of
-  `workerPool.sandboxClass` when the pool is enabled. An init container named `worker` is never the worker
+  image is in one list only, or the render fails. The pool image (`workerPool.workerImage`, or the pinned worker
+  image of the class when it is empty) is added to the list of `workerPool.sandboxClass` when the pool is enabled,
+  so with the default pool the gvisor list is not empty. An init container named `worker` is never the worker
   container: Kubernetes names are unique across main and init containers, so the pod then has no worker container.
   Every other container adds no capability and uses no `Unconfined` profile. There is no capability ceiling: the class sets
   (`workerPolicy.workerShapes`) are exact. A Ginkgo spec in `internal/preflight` compares them with a vendored copy
