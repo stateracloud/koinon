@@ -664,11 +664,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(ap.GetExecutions()).To(BeEquivalentTo(1))
 		calls := guarded()
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
-		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "Koinon's executor made it, not the agent")
+		// The approval record (one execution) says Koinon's executor made the call. On agentgateway the
+		// server also sees the executor's agent header; Koinon's MCP path sends none to an org's server (#1235).
+		Expect(calls[0].Agent).To(Equal(approvedCallMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL")).orgServerAgentHeader("mcp-exec")),
+			"Koinon's executor made it, not the agent")
 		gw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
-		leakGuardCanaryInTask(ctx, c, org, agent.GetId(), fake)
+		leakGuardCanaryInTask(ctx, c, os.Getenv("KOINON_E2E_KUBECTL"), org, agent.GetId(), fake)
 		leakGuardURLInTask(ctx, c, admin, os.Getenv("KOINON_E2E_KUBECTL"), org, agent.GetId(), mcpServerID, fake)
 		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway, leak guard)")
 	})
@@ -725,7 +728,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
 		Expect(calls[0].Args).To(Equal(scenarios.PullRequest.TrackerAskArgs))
-		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "through the gateway, with the org's executor key")
+		Expect(calls[0].Agent).To(Equal(approvedCallMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL")).orgServerAgentHeader("mcp-exec")),
+			"through the gateway, with the org's executor key (no agent header on Koinon's MCP path, #1235)")
 		Expect(calls[0].Authorized).To(BeTrue())
 
 		mw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
@@ -1399,7 +1403,7 @@ func (r ledgerRow) entry() scenarios.Entry {
 // The URL case is leakGuardURLInTask. The lengths above the threshold are covered at guard level
 // (internal/mcpguard, #1133); the byte cap only alerts (#1058) and is not asserted here. search_items is auto
 // and declared external-low by mcpServerE2E.
-func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentID, fake string) {
+func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, kubectl, org, agentID, fake string) {
 	GinkgoHelper()
 	k := scenarios.PullRequest.TrackerCanary
 	By("a task whose agent reads text with a canary, then searches with it, is held by the guard on an external-low tool")
@@ -1433,8 +1437,9 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentI
 	Expect(got).To(HaveLen(2), "only the two searches that pass reach the server: %+v", got)
 	Expect(got[0].Args).To(MatchJSON(arg(k.CleanQuery)))
 	Expect(got[1].Args).To(MatchJSON(arg(k.BelowQuery)))
+	wantAgent := agentMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)
 	for _, r := range got {
-		Expect(r.Agent).To(Equal("default/" + agentID))
+		Expect(r.Agent).To(Equal(wantAgent), "the agent header on an org's server (#1235)")
 	}
 
 	By("negative control: the canary and its first 30 characters are each held as a taint approval of an external-low call")
@@ -1524,7 +1529,7 @@ func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(con
 	got := fetches()[before:]
 	Expect(got).To(HaveLen(1), "only the clean fetch reaches the server: %+v", got)
 	Expect(got[0].Args).To(MatchJSON(arg(k.CleanURL)))
-	Expect(got[0].Agent).To(Equal("default/" + agentID))
+	Expect(got[0].Agent).To(Equal(agentMCPPath(ctx, kubectl).orgServerAgentHeader(agentID)), "the agent header on an org's server (#1235)")
 
 	By("the URL rule: the canary as hex in one path component is refused on the external-low class, with no approval")
 	Expect(refusedURLRule()-refusedBefore).To(BeNumerically("==", 1), "the guard refused exactly one call by the URL rule")

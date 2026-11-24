@@ -41,7 +41,8 @@ type record struct {
 	MCPMethod string `json:"mcpMethod,omitempty"`
 	// Authorized says the credential header matched.
 	Authorized bool `json:"authorized"`
-	// Agent is the X-Koinon-Agent header agentgateway sets.
+	// Agent is the X-Koinon-Agent header agentgateway sets. It is empty on Koinon's MCP path, which sends
+	// the header to Koinon's own tool servers only (#1235).
 	Agent string `json:"agent,omitempty"`
 	// ClientAuthorization says an Authorization header arrived that is not the credential (the
 	// gateway must not forward the agent's own key).

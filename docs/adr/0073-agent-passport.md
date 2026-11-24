@@ -12,7 +12,7 @@ relates: ["0005", "0019", "0023", "0042", "0057", "0058", "0065"]
 - Date: 2026-10-28
 - Area: tenancy-identity
 - Tags: identity, mcp, agentgateway, audit
-- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 6 delivery and the decision 12 delivery spike, in step 2)
+- Amended by: [0097](0097-koinon-owned-gateway.md) (decision 6 delivery and the decision 12 delivery spike, in step 2; decision 1 subject and decision 13, #1235)
 - Amends: [0006](0006-identity-layers.md), [0043](0043-workload-identity-adapters-and-koinon-issuer.md)
 - Relates to: [0005](0005-agent-identity.md), [0019](0019-personal-agents-and-teams.md), [0023](0023-observability-and-audit.md), [0042](0042-ask-tier-park-and-execute.md), [0057](0057-mcp-servers.md), [0058](0058-gateway-modes.md), [0065](0065-work-model-tasks-inbox.md), [#28](https://github.com/stateracloud/koinon/issues/28)
 - Pending verification: the gateway delivery spike (decision 6)
@@ -100,7 +100,8 @@ procoduck decided the open points on 2026-10-28.
      Ingress, without authentication.
    - An operator may also mirror both documents to a public bucket. AWS and Entra federation need
      this when the install is not reachable from the internet.
-   - The subject is `koinon:<org>:<agent>`, as in 0043. The SPIFFE form of
+   - The subject is `koinon:<org>:<agent>`, as in 0043, for Koinon's own tool servers. A server an
+     org registered gets a pairwise subject (decision 13). The SPIFFE form of
      [0006](0006-identity-layers.md) stays an alias for a later SPIRE issuer.
 
 2. **Signing keys and rotation.**
@@ -208,6 +209,25 @@ procoduck decided the open points on 2026-10-28.
     cloud adapters on the same issuer, the OAuth authorization server with per-user OAuth (v0.2),
     viewer tokens for preview URLs ([#28](https://github.com/stateracloud/koinon/issues/28), v0.3)
     and the external A2A gateway (v1.0).
+
+13. **A server an org registered gets no agent header, and a pairwise subject** (amendment 2026-11-24,
+    [#1235](https://github.com/stateracloud/koinon/issues/1235); [0097](0097-koinon-owned-gateway.md)
+    decision 5).
+    - On Koinon's MCP path, the unsigned agent header goes only to Koinon's own tool servers. A server an
+      org registered (org-run or third-party) never gets it there, and no setting turns it on. The
+      agentgateway fallback still sends it (0097 decision 5, the fallback gateway).
+    - Such a server learns the caller only from a credential signed for that one server: this passport
+      (decision 4, one audience) or the server's own sign-in token
+      ([0096](0096-mcp-oauth-sign-in.md)).
+    - In a passport for such a server, `sub` is an opaque ID made for the pair (agent, audience): a
+      pairwise subject in the sense of OpenID Connect Core section 8.1. Two servers get different IDs
+      for one agent, so they cannot correlate it. Decision 1's `koinon:<org>:<agent>` stays the subject
+      for Koinon's own tool servers.
+    - Every Koinon claim that carries an internal ID (`org`, `agent`, `run`, `task`, `requested_by`,
+      `approval`, `on_behalf_of`) and each subject in the `act` chain follow the same rule in such a
+      passport: the design of the token service (step 1 of decision 12)
+      makes each one pairwise or leaves it out. Decision 8 (opt-in for third-party servers) is
+      unchanged.
 
 ```mermaid
 sequenceDiagram
