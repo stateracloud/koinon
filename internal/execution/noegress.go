@@ -10,6 +10,13 @@ import "context"
 // holds the credentials and the per-route rules (ADR 0097) and the execution layer's network is
 // default-deny. EnsurePolicy reports version 0.
 //
+// CreateSandbox drops what the reconciler renders for the OpenShell path and a Compute-only driver
+// has no place for (issue #1245): the provider records (no credential in the guest, ADR 0119 D2),
+// the grant-derived network rules (egress is the gateway's, ADR 0097) and the per-sandbox filesystem
+// policy (the guest launcher applies one fixed Landlock policy to every guest process, D1, so
+// nothing is lost). The reconciler's SandboxPolicy and the launcher's default policy are compared
+// in a reconciler spec. Resources, labels, image and runtime class pass through.
+//
 // It is the one place that says "no egress", so the reconciler keeps one code path. It goes away
 // when the OpenShell driver and the Egress half do (epic 1082, D9): the reconciler then takes
 // [Compute].
@@ -26,4 +33,11 @@ func (noEgress) DeleteProvider(context.Context, string, string) error        { r
 func (noEgress) DeleteProviderProfile(context.Context, string, string) error { return nil }
 func (noEgress) EnsurePolicy(context.Context, string, string, Policy) (uint32, error) {
 	return 0, nil
+}
+
+// CreateSandbox implements [Compute] without the fields of the Egress half.
+func (n noEgress) CreateSandbox(ctx context.Context, workspace string, spec SandboxSpec) (Sandbox, error) {
+	spec.Providers = nil
+	spec.Policy = Policy{}
+	return n.Compute.CreateSandbox(ctx, workspace, spec)
 }

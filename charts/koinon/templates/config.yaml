@@ -60,12 +60,10 @@ data:
         {{- with .Values.execution.substrate.defaultTier }}
         defaultTier: {{ . | quote }}
         {{- end }}
-        {{- if .Values.execution.substrate.runtimeClassTiers }}
         runtimeClassTiers:
-          {{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers }}
+          {{- range $class, $tier := (include "koinon.substrateTierMap" . | fromJson) }}
           - {{ printf "%s=%s" $class $tier | quote }}
           {{- end }}
-        {{- end }}
         {{- $mirrors := include "koinon.imageMirrorEntries" . | fromJsonArray }}
         {{- if $mirrors }}
         imageMirrors:

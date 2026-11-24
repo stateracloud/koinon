@@ -47,7 +47,13 @@ has "the default tier is in the reconciler config" 'defaultTier: "dev"' "${sub[@
 tiers=(--set execution.substrate.runtimeClassTiers.kata=vm --set execution.substrate.runtimeClassTiers.gvisor=hardened)
 env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"gvisor=hardened,kata=vm"' "${sub[@]}" "${tiers[@]}"
 has "the class tiers are in the reconciler config" '- "kata=vm"' "${sub[@]}" "${tiers[@]}" --show-only templates/config.yaml
-lacks "no tier list without class tiers" 'runtimeClassTiers' "${sub[@]}" --show-only templates/config.yaml
+# The class the reconciler puts on every sandbox (openshell.runtimeClassName) always has a tier (#1245).
+has "the requested class gets the default tier" '- "kata=dev"' "${sub[@]}" --show-only templates/config.yaml
+env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"kata=dev"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"gvisor=hardened,kata=vm"' "${sub[@]}" "${tiers[@]}" --set execution.substrate.defaultTier=dev
+env_is KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS '"gvisor=hardened,kata=dev"' "${sub[@]}" --set execution.substrate.runtimeClassTiers.gvisor=hardened
+if render "${sub[@]}" --set execution.substrate.defaultTier= --set execution.substrate.runtimeClassTiers.gvisor=hardened >/dev/null 2>"$out/sub.err"; then fail "class tiers without the requested class and without a default tier must not render"; fi
+grep -q 'openshell.runtimeClassName' "$out/sub.err" || fail "the missing-class error must name openshell.runtimeClassName"
 if render "${sub[@]}" --set execution.substrate.defaultTier= >/dev/null 2>"$out/sub.err"; then fail "substrate without a tier must not render"; fi
 grep -q 'defaultTier' "$out/sub.err" || fail "the missing-tier error must name execution.substrate.defaultTier"
 render "${sub[@]}" --set execution.substrate.defaultTier= "${tiers[@]}" >/dev/null 2>&1 || fail "class tiers alone must render"

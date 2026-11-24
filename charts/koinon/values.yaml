@@ -791,9 +791,12 @@ execution:
     guestImage: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
     # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
-    # a class that is not here cannot run one. With substrate, set this or defaultTier.
+    # a class that is not here cannot run one. With substrate, set this or defaultTier. The reconciler
+    # puts openshell.runtimeClassName on every sandbox, so that class always has a tier: its entry here
+    # wins, else defaultTier applies to it, else the render fails (issue #1245).
     runtimeClassTiers: {}
-    # Tier of a sandbox that names no runtime class. Empty means there is none.
+    # Tier of a sandbox that names no runtime class, and of openshell.runtimeClassName when it has no
+    # entry above. Empty means there is none.
     defaultTier: ""
     # Required true with substrate: the guest image does not yet carry the guest launcher and the
     # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:

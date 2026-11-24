@@ -14,6 +14,7 @@ execution:
     # NetworkPolicy fences the Substrate namespaces.
     workerPolicy:
       installerIdentities: [system:admin]
+    # The tier of openshell.runtimeClassName, the class the reconciler puts on every sandbox (#1245).
     defaultTier: dev
 sandboxObserver:
   enabled: false
