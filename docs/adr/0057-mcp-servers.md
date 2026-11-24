@@ -7,7 +7,7 @@ amends: ["0014"]
 ---
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
-- Status: Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below)
+- Status: Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below); where the MCP server screens live (the org page at `/mcp-servers`, the platform list in the console) superseded in part by [0126](0126-web-ui-v2.md)
 - Date: 2026-10-23
 - Area: connectors-tools
 - Tags: mcp, connectors, approvals, egress, credentials
