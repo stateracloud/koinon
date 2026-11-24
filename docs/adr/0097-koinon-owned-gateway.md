@@ -24,7 +24,8 @@ relates: ["0023", "0045", "0068", "0069", "0074", "0075", "0085", "0096"]
   [0058](0058-gateway-modes.md) (supersedes in part: shared mode is not built, Kubernetes mode is frozen,
   not ported, and deleted in step 3), [0049](0049-v01-scope-decisions.md) (Kubernetes-mode support ends
   with step 3), [0006](0006-identity-layers.md) (its open trust-domain question, answered in decision 11),
-  [0073](0073-agent-passport.md) (decision 6 delivery and the decision 12 delivery spike, in step 2),
+  [0073](0073-agent-passport.md) (decision 6 delivery and the decision 12 delivery spike, in step 2;
+  decision 1 subject and decision 13, #1235),
   [0084](0084-leak-guard.md) (decision 1, in step 2: the guard is called from Koinon's MCP path, not
   through ExtMcp), [0091](0091-leak-guard-by-destination.md) (decision 4, in step 1: a reply the guard
   never saw sets both legs, for a call whose declared result would set a leg)
@@ -376,9 +377,10 @@ does today, no more (model path at parity, below).
     sets the header with a `transformation` on the one MCP route (standalone: the `mcp` policies), which
     runs before the target is chosen, so it cannot leave out one target. A `transformation` on the
     Backend runs after the target's credential is injected and strips it
-    ([research](../research/agentgateway-k8s-crds.md)), and a Backend per org is the Kubernetes-mode
-    shape this ADR freezes (decision 4). agentgateway is the fallback driver only, so the gap is
-    accepted there. The e2e assertions (`test/e2e/mcp_test.go`, `test/e2e/quickstart_test.go`) follow the
+    ([research](../research/agentgateway-k8s-crds.md)). A Backend for each org would change the
+    Kubernetes-mode shape (one MCP Backend with a condition for each org target) that this ADR freezes
+    (decision 4). agentgateway is the default MCP driver until #1239 and the fallback after it. The gap
+    is accepted on that driver until step 3. The e2e assertions (`test/e2e/mcp_test.go`, `test/e2e/quickstart_test.go`) follow the
     path the call uses: an org's fake server sees the agent on the agentgateway path and no agent header
     on Koinon's MCP path. The e2e install runs the Koinon case when koinon-gateway becomes its default
     (#1239).

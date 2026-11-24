@@ -415,7 +415,8 @@ type mcpPath struct {
 }
 
 // installMCPPath is the MCP path a client outside the cluster uses: koinon-gateway when the chart runs it
-// (the koinon-mcp-gateway Deployment exists), else agentgateway. The port is read from the Service.
+// (the koinon-mcp-gateway Deployment exists), else agentgateway. The port is read from the Service. With
+// driver koinon, every step of mcpServerE2E (tool list, ask tier, leak guard) then runs on koinon-gateway.
 func installMCPPath(ctx context.Context, kubectl string) mcpPath {
 	GinkgoHelper()
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
