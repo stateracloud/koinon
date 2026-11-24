@@ -326,6 +326,9 @@ lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[
 if render "${wsub[@]}" --set execution.substrate.workerPool.resources.requests=null "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "resources without requests must not render"; fi
 grep -q 'both requests and limits' "$out/sub.err" || fail "the resources error must ask for both requests and limits"
 if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@]}" >/dev/null 2>&1; then fail "zero replicas must not render (switch the pool off instead)"; fi
+# kubeconform checks the pool against the CRD of the pinned Substrate release (schemas/ate.dev/workerpool_v1.json).
+[[ -s hack/chart-check.d/schemas/ate.dev/workerpool_v1.json ]] || fail "the WorkerPool schema for kubeconform is missing"
+grep -Fq '"sandboxClasses"' hack/chart-check.d/schemas/ate.dev/workerpool_v1.json || fail "the WorkerPool schema must be the WorkerPool CRD"
 has "the default WorkerPool" 'kind: WorkerPool' "${wsub[@]}" "${wp[@]}" "${pool[@]}"
 pooldocs=$(render "${wsub[@]}" "${wp[@]}" "${pool[@]}")
 grep -Eq 'namespace: "ate-workers"' <<<"$pooldocs" || fail "the WorkerPool must be in the worker namespace"
