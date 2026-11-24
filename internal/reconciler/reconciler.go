@@ -108,6 +108,10 @@ type Config struct {
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
+	// MCPGateway is koinon-gateway's MCP listener as sandboxes reach it, when koinon-gateway serves the
+	// agents' MCP path (gateway.mcp.driver=koinon, ADR 0097 decision 5). The sandbox profile then allows
+	// /mcp on it and not on Gateway. Zero: agentgateway serves /mcp on Gateway.
+	MCPGateway Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
 	Keys catalog.Opener
 	// ProviderKeys receives the opened keys for the gateway. Required when any served
@@ -302,6 +306,9 @@ type Reconciler struct {
 func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway, secrets SecretStore, cfg Config) (*Reconciler, error) {
 	if cfg.Gateway.Host == "" || cfg.Gateway.Port == 0 {
 		return nil, errors.New("reconciler: the agentgateway endpoint is required")
+	}
+	if (cfg.MCPGateway.Host == "") != (cfg.MCPGateway.Port == 0) {
+		return nil, errors.New("reconciler: the MCP gateway endpoint needs both a host and a port")
 	}
 	if cfg.Prices.IsZero() {
 		return nil, errors.New("reconciler: Prices is required (prices.NewResolver)")
