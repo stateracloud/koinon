@@ -32,11 +32,14 @@ import (
 	"github.com/spf13/pflag"
 	"go.opentelemetry.io/otel"
 
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
+	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/usagewire"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
@@ -82,6 +85,20 @@ type config struct {
 	recipientKeyDir string
 	wrapping        wrapping.Config
 
+	// egressAddr serves the forge and registry routes (#1086, package egress) on a listener of their
+	// own. Empty: no egress listener.
+	egressAddr string
+	// actorTokenIssuer and actorTokenKeysDir check the actor token: the issuer the minter writes and a
+	// directory of Ed25519 public keys, one <kid>.pub file each. The gateway holds no minting key.
+	actorTokenIssuer  string
+	actorTokenKeysDir string
+	// egressRoutesFile holds the platform routes (no org, no credential). Empty: no platform route.
+	egressRoutesFile string
+	// namespace is Koinon's namespace, and egressAllowedHosts the internal hosts the platform allows:
+	// the URL policy that the egress dialer applies to every upstream address.
+	namespace          string
+	egressAllowedHosts []string
+
 	drain time.Duration
 	// shutdownDelay is how long the gateway keeps serving after SIGTERM, with /readyz at 503.
 	shutdownDelay time.Duration
@@ -106,6 +123,16 @@ func (c *config) flags(fs *pflag.FlagSet) {
 			"it is not ready while a row needs a key it cannot unwrap. The key-wrapping flags (--kek-backend and the --openbao-* or --awskms-* flags) name the gateway's own wrapping key")
 	c.wrapping.Flags(fs)
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
+	fs.StringVar(&c.egressAddr, "egress-addr", "",
+		"address of the egress listener that serves the forge and registry routes at "+egress.PathPrefix+"<host>[:port]/<path>; empty disables it")
+	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "", "issuer of the actor identity tokens that the egress routes accept")
+	fs.StringVar(&c.actorTokenKeysDir, "actor-token-keys-dir", "",
+		"directory of the Ed25519 public keys that check actor tokens, one <key id>.pub PEM file each (a mounted ConfigMap or Secret)")
+	fs.StringVar(&c.egressRoutesFile, "egress-routes-file", "",
+		"JSON file of the platform egress routes, which every org may use: no org and no credential. Empty: only the routes of Koinon state")
+	fs.StringVar(&c.namespace, "namespace", "", "Koinon's namespace: the egress routes never reach a Service in it")
+	fs.StringSliceVar(&c.egressAllowedHosts, "egress-allowed-hosts", nil,
+		"internal hosts (names, IPs or CIDRs, optionally with a port) that the egress routes may reach although they are internal")
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
 	fs.DurationVar(&c.drain, "drain-timeout", 30*time.Second,
@@ -126,6 +153,20 @@ func (c *config) validate() error {
 	}
 	if !c.mcpPath && !c.modelPath {
 		return errors.New("--mcp-path=false needs --model-path: the gateway would serve nothing")
+	}
+	if c.egressAddr != "" {
+		if c.actorTokenIssuer == "" || c.actorTokenKeysDir == "" {
+			return errors.New("--egress-addr needs --actor-token-issuer and --actor-token-keys-dir: the egress routes check the actor token")
+		}
+		if c.namespace == "" {
+			return errors.New("--egress-addr needs --namespace: the egress dialer refuses Koinon's own Services")
+		}
+		if c.egressAddr == c.listenAddr {
+			return errors.New("--egress-addr must differ from --listen-addr")
+		}
+		if err := catalog.ValidateAllowedHosts(c.egressAllowedHosts); err != nil {
+			return fmt.Errorf("--egress-allowed-hosts: %w", err)
+		}
 	}
 	if c.shutdownDelay < 0 {
 		return errors.New("--shutdown-delay must not be negative")
@@ -156,6 +197,7 @@ func NewRootCommand() *cobra.Command {
 	c.flags(cmd.Flags())
 	cmd.AddCommand(newKeysCommand())
 	cli.EnvAlias(cmd, "pod-name", "POD_NAME")
+	cli.EnvAlias(cmd, "namespace", "POD_NAMESPACE")
 	for _, n := range []string{"state-url", "state-token-file"} {
 		if err := cmd.MarkFlagRequired(n); err != nil {
 			panic(fmt.Sprintf("koinon-gateway: %v", err))
@@ -197,6 +239,12 @@ func run(ctx context.Context, cfg config) error {
 		return err // fail at start, not on the first request
 	}
 	reg := metrics.NewRegistry()
+	// The egress keys and routes load before any listener starts: a bad key directory or route file
+	// stops the start, not a gateway that is half up.
+	eg, err := newEgress(cfg, reg, log)
+	if err != nil {
+		return err
+	}
 	gopts := mcpgateway.Options{
 		Metrics: mcpgateway.NewMetrics(reg),
 		Tracer:  otel.Tracer("koinon-gateway"),
@@ -306,8 +354,13 @@ func run(ctx context.Context, cfg config) error {
 		Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
 		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
 	}
-	served := make(chan error, 1)
+	served := make(chan error, 2)
 	safego.Go(ctx, log, "mcp-listener", func(context.Context) { served <- srv.Serve(ln) })
+	egSrv, err := serveEgress(ctx, cfg, eg, log, served)
+	if err != nil {
+		_ = srv.Close()
+		return err
+	}
 	safego.Go(ctx, log, "mcp-sweep", func(ctx context.Context) {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
@@ -331,8 +384,12 @@ func run(ctx context.Context, cfg config) error {
 
 	select {
 	case err := <-served:
+		if egSrv != nil {
+			_ = egSrv.Close()
+		}
+		_ = srv.Close()
 		if !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("MCP listener: %w", err)
+			return fmt.Errorf("listener: %w", err)
 		}
 		return nil
 	case <-ctx.Done():
@@ -344,15 +401,32 @@ func run(ctx context.Context, cfg config) error {
 	// Drain: new requests get 503 and the pool retires; a call in flight finishes first.
 	log.Info("draining koinon-gateway", "timeout", cfg.drain.String())
 	gw.Drain()
+	if eg != nil {
+		eg.Drain()
+	}
 	if mg != nil {
 		mg.Drain()
 	}
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.drain)
 	defer cancel()
+	egDone := make(chan struct{})
+	if egSrv == nil {
+		close(egDone)
+	} else {
+		// The egress listener drains with the MCP listener, under the same deadline.
+		safego.Go(sctx, log, "egress-drain", func(ctx context.Context) {
+			defer close(egDone)
+			if err := egSrv.Shutdown(ctx); err != nil {
+				_ = egSrv.Close()
+				log.Warn("drain deadline passed: open egress requests were closed", "err", err)
+			}
+		})
+	}
 	if err := srv.Shutdown(sctx); err != nil {
 		_ = srv.Close()
 		log.Warn("drain deadline passed: open requests were closed", "err", err)
 	}
+	<-egDone
 	if exp != nil {
 		// Run flushes what is queued once its context ends; wait for it so the last records reach the ledger.
 		stopExport()
@@ -361,6 +435,66 @@ func run(ctx context.Context, cfg config) error {
 	stopHealth()
 	log.Info("stopped koinon-gateway")
 	return nil
+}
+
+// newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
+// returns nil when it does not. It loads the actor token keys and the platform routes.
+func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress.Gateway, error) {
+	if cfg.egressAddr == "" {
+		return nil, nil
+	}
+	keys, err := actortoken.LoadPublicKeys(cfg.actorTokenKeysDir)
+	if err != nil {
+		return nil, err
+	}
+	ver, err := actortoken.NewVerifier(cfg.actorTokenIssuer, keys)
+	if err != nil {
+		return nil, err
+	}
+	// GatewayDialContext resolves each route host once, as an absolute name, and refuses Koinon's own
+	// namespace by name and internal addresses by address.
+	policy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: cfg.egressAllowedHosts}
+	eg, err := egress.New(egress.Options{
+		Verifier: ver,
+		Dial:     policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
+		Metrics:  egress.NewMetrics(reg),
+		Log:      log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The org routes come from the State stream (#1086 part B). Until then, the platform file is the
+	// only table; without it every request is refused (no_table).
+	if cfg.egressRoutesFile != "" {
+		t, err := egress.LoadPlatformRoutes(cfg.egressRoutesFile)
+		if err != nil {
+			return nil, err
+		}
+		eg.Apply(t)
+	}
+	log.Info("egress routes loaded", "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
+	return eg, nil
+}
+
+// serveEgress starts the egress listener of eg, and returns nil when eg is nil. The listener's end is
+// sent to served.
+func serveEgress(ctx context.Context, cfg config, eg *egress.Gateway, log *slog.Logger, served chan<- error) (*http.Server, error) {
+	if eg == nil {
+		return nil, nil
+	}
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.egressAddr)
+	if err != nil {
+		return nil, fmt.Errorf("egress listener: %w", err)
+	}
+	// The handler is served as it is, never through a ServeMux: a mux cleans the path, and the gate
+	// must see the path the guest sent so it can refuse one that is not canonical.
+	srv := &http.Server{
+		Handler: eg.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
+	}
+	safego.Go(ctx, log, "egress-listener", func(context.Context) { served <- srv.Serve(ln) })
+	log.Info("egress listener started", "listen", ln.Addr().String())
+	return srv, nil
 }
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is

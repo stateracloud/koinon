@@ -472,6 +472,55 @@ func (p URLPolicy) SandboxDialContext(d *net.Dialer) func(ctx context.Context, n
 	return p.dialer(d, true)
 }
 
+// GatewayDialContext is the dialer of the gateway's egress routes (#1086). It resolves every name once, as
+// an absolute name, so the gateway pod's search domains never turn a route host into a Service name, and
+// it dials only the addresses of that lookup. Before it resolves, it refuses by name what check refuses by
+// name: a single label, localhost, a numeric host that resolvers read in different ways, and a name in
+// Koinon's own namespace. The address rules then apply as in DialContext, so an allowed CIDR that holds
+// a ClusterIP still does not open Koinon's own Services by name. The name rules apply to an allowed name
+// too. An allowed CIDR admits every route host that resolves into it, a public name included: the
+// platform allows a range for every route.
+func (p URLPolicy) GatewayDialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	q := p
+	// The gateway asks for absolute names, so no search list applies; ShortName then refuses a single
+	// label and the .svc forms only.
+	q.Search = &ResolverSearch{ClusterDomain: p.search().ClusterDomain}
+	dial := q.dialer(d, true)
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if why := p.ownName(host); why != "" {
+			return nil, invalid("the host %q is refused: %s", host, why)
+		}
+		return dial(ctx, network, addr)
+	}
+}
+
+// ownName returns why a host names the gateway or Koinon's own namespace, and "" for any other host. A
+// Service name in the namespace is refused in every form and for every cluster DNS domain
+// (<svc>.<ns>.svc, <svc>.<ns>.svc.<any domain>). The short form <svc>.<ns> is refused too, unless the
+// namespace is a public suffix (a namespace "dev" must not refuse registry.example.dev); the absolute
+// lookup of the dialer keeps that form from reaching a Service in any case.
+func (p URLPolicy) ownName(host string) string {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	switch {
+	case host == "localhost" || strings.HasSuffix(host, ".localhost"):
+		return "it is the gateway itself"
+	case p.Namespace == "":
+		return ""
+	}
+	ns := strings.ToLower(p.Namespace)
+	if strings.HasSuffix(host, "."+ns+".svc") || strings.Contains(host, "."+ns+".svc.") {
+		return "it is in Koinon's own namespace"
+	}
+	if _, icann := publicsuffix.PublicSuffix(ns); !icann && strings.HasSuffix(host, "."+ns) {
+		return "it is in Koinon's own namespace"
+	}
+	return ""
+}
+
 // sandboxHost is the host rule of the sandbox URL check and dial: a numeric host that a resolver could read
 // differently (numericHost), then a name that a search domain would expand (ShortName). host is lower case
 // and as written, with its trailing dot if it has one.
