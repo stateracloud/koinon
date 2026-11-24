@@ -166,7 +166,7 @@ func New(opts Options) (*Gateway, error) {
 	g.proxy = &httputil.ReverseProxy{
 		Rewrite:        g.rewrite,
 		Transport:      t,
-		ModifyResponse: modifyResponse,
+		ModifyResponse: g.modifyResponse,
 		ErrorHandler:   g.upstreamError,
 		ErrorLog:       slog.NewLogLogger(opts.Log.Handler(), slog.LevelWarn),
 		// Stream as the upstream sends: a git fetch or a package download can be large.
@@ -190,6 +190,7 @@ type target struct {
 	path      string // the escaped path the gate checked
 	rawQuery  string
 	route     route.Route
+	decision  route.Decision
 }
 
 type targetKey struct{}
@@ -200,6 +201,12 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authority, path, ok := split(r)
+	if ok {
+		// The gate checks the escaped path; rewrite sends it decoded too. A path that does not decode is
+		// refused here, so rewrite never sends a request without its path.
+		_, err := url.PathUnescape(path)
+		ok = err == nil
+	}
 	if !ok {
 		g.refuse(w, r, route.Decision{Reason: route.ReasonBadRequest}, "")
 		return
@@ -224,10 +231,14 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, r, d, authority)
 		return
 	}
-	host, port := hostPort(authority)
-	t := target{authority: canonicalAuthority(host, port), path: path, rawQuery: r.URL.RawQuery, route: d.Route}
-	g.log(r, d, host, http.StatusOK)
-	g.opts.Metrics.count(d.Route.Class, route.ReasonAllowed)
+	// The upstream is the route's host and port, not the guest's text: the gate's decision and the dial
+	// target come from one source. The log line and the count come with the response (modifyResponse)
+	// or the failure (upstreamError), so each request counts one result.
+	port := d.Route.Port
+	if port == 0 {
+		port = 443
+	}
+	t := target{authority: canonicalAuthority(d.Route.Host, port), path: path, rawQuery: r.URL.RawQuery, route: d.Route, decision: d}
 	g.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), targetKey{}, t)))
 }
 
@@ -289,14 +300,18 @@ func (g *Gateway) rewrite(pr *httputil.ProxyRequest) {
 	// The guest's User-Agent stays (registries use it); nothing names the gateway or the actor.
 }
 
-// modifyResponse rewrites a redirect so the guest follows it through the gateway again. The gateway
-// never follows it itself: the gate decides on the next request.
-func modifyResponse(resp *http.Response) error {
+// modifyResponse logs and counts the allowed request, removes a refusal header the upstream sent (only
+// the gateway says why it refused), and rewrites a redirect so the guest follows it through the gateway
+// again. The gateway never follows it itself: the gate decides on the next request.
+func (g *Gateway) modifyResponse(resp *http.Response) error {
+	t, _ := resp.Request.Context().Value(targetKey{}).(target)
+	g.log(resp.Request, t.decision, t.route.Host, resp.StatusCode)
+	g.opts.Metrics.count(t.route.Class, route.ReasonAllowed)
+	resp.Header.Del(RefusalHeader)
 	loc := resp.Header.Get("Location")
 	if loc == "" || resp.StatusCode < 300 || resp.StatusCode > 399 {
 		return nil
 	}
-	t, _ := resp.Request.Context().Value(targetKey{}).(target)
 	u, err := url.Parse(loc)
 	if err != nil {
 		resp.Header.Del("Location")
@@ -349,10 +364,21 @@ func (g *Gateway) refuse(w http.ResponseWriter, r *http.Request, d route.Decisio
 		status = http.StatusServiceUnavailable
 	}
 	g.opts.Metrics.count(d.Route.Class, d.Reason)
-	host, _ := hostPort(authority)
+	// The host goes to the log only for a verified actor, so a caller without a token cannot write text
+	// into the gateway's log.
+	host := ""
+	if d.Actor.Org != "" {
+		host, _ = hostPort(authority)
+	}
 	g.log(r, d, host, status)
-	w.Header().Set(RefusalHeader, string(d.Reason))
-	http.Error(w, "koinon-gateway: egress refused: "+string(d.Reason), status)
+	// The guest never learns that another org has a route to the host: org_mismatch is no_route on the
+	// wire. The log and the metric keep the true reason.
+	wire := d.Reason
+	if wire == route.ReasonOrgMismatch {
+		wire = route.ReasonNoRoute
+	}
+	w.Header().Set(RefusalHeader, string(wire))
+	http.Error(w, "koinon-gateway: egress refused: "+string(wire), status)
 }
 
 // log writes one line per request: who, which route, the host and the result. Never the token, the

@@ -430,13 +430,18 @@ Record (2026-11-24, #1086 part A; the choices below are decided): the transport 
 routes is a path-addressed reverse proxy, `<gateway>/egress/<host>[:port]/<path>`, in the package
 `internal/gateway/egress`. There is no CONNECT, no TLS interception and no gateway CA in the guest. The guest
 reaches the gateway by name (ADR 0119 P-B), and git `insteadOf` and the npm, pip and Go registry settings
-point at that prefix. The upstream leg is `https` only and dials through the URL policy of the catalog
-(`catalog.URLPolicy.DialContext`), so a route never reaches loopback, link-local, metadata or Koinon's own
-Services. The handler runs on a listener of its own (`--egress-addr`, off by default) and never under a
+point at that prefix. The upstream leg is `https` only. The upstream is the matched route's host and port,
+not the guest's text. It dials through `catalog.URLPolicy.GatewayDialContext`: the dialer resolves each host
+once as an absolute name, so the gateway pod's search domains never expand it. It refuses a single label,
+localhost and a name in Koinon's namespace by name, and loopback, link-local, metadata and private
+addresses by address unless the platform allows them. The handler runs on a listener of its own (`--egress-addr`, off by default) and never under a
 ServeMux, so the gate sees the path the guest sent. The gateway removes the actor token, `Authorization`,
 `Cookie` and the proxy and forwarding headers before it forwards, and rewrites an `https` redirect to the
 egress prefix; it drops any other redirect target. Logs and the metric
-`koinon_gateway_egress_requests_total{class,reason}` carry no token, path, query or ID. A route that names
+`koinon_gateway_egress_requests_total{class,reason}` carry no token, path, query or ID, and each request
+counts one result. The guest sees `no_route` when another org owns the route (`org_mismatch` stays in the
+log and the metric), so a guest cannot learn the hosts of other orgs. The gateway removes a refusal
+header that the upstream sends. A route that names
 a credential is refused (`credential_unavailable`) until part C attaches it. Platform routes (no org, no
 credential) load from a JSON file; one bad route refuses the file. The parts: part A serves the routes in
 the binary; part B puts the org and agent routes into the State stream, from the forge grants and the

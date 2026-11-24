@@ -311,8 +311,39 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/app.git/info/refs",
 				token(minter, actortoken.Actor{Org: "globex", Agent: "a"}), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
-			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("org_mismatch"))
+			// On the wire it looks like a host with no route, so a guest cannot learn the hosts of
+			// other orgs. The metric and the log keep the true reason.
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("no_route"))
+			b, _ := io.ReadAll(resp.Body)
+			Expect(string(b)).NotTo(ContainSubstring("org_mismatch"))
+			Expect(count("none", "org_mismatch")).To(Equal(1.0))
+			Expect(logs.String()).To(ContainSubstring(`"result":"org_mismatch"`))
 			Expect(upstreamCalls()).To(BeEmpty())
+		})
+
+		It("counts one result for a request whose upstream fails", func() {
+			upstream.Close()
+			resp := do("GET", "/egress/"+authority(regHost)+"/pkg", token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusBadGateway))
+			Expect(count("registry", "upstream_error")).To(Equal(1.0))
+			Expect(count("registry", "allowed")).To(Equal(0.0))
+		})
+
+		It("removes a refusal header that the upstream sends", func() {
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(egress.RefusalHeader, "no_route")
+				_, _ = io.WriteString(w, "upstream body")
+			}
+			resp := do("GET", "/egress/"+authority(regHost)+"/pkg", token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(resp.Header.Values(egress.RefusalHeader)).To(BeEmpty())
+		})
+
+		It("writes no host to the log for a caller without a valid token", func() {
+			resp := do("GET", "/egress/attacker-text.example.test/x", "", nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
+			Expect(logs.String()).To(ContainSubstring(`"result":"no_token"`))
+			Expect(logs.String()).NotTo(ContainSubstring("attacker-text"))
 		})
 
 		It("closes a route that names a credential until the gateway can attach it", func() {
@@ -353,7 +384,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 				},
 			}
 			strict, err := egress.New(egress.Options{
-				Verifier: ver, Dial: policy.DialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
+				Verifier: ver, Dial: policy.GatewayDialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			table, err := route.Compile(routes())

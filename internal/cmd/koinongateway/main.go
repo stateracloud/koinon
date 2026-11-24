@@ -239,6 +239,12 @@ func run(ctx context.Context, cfg config) error {
 		return err // fail at start, not on the first request
 	}
 	reg := metrics.NewRegistry()
+	// The egress keys and routes load before any listener starts: a bad key directory or route file
+	// stops the start, not a gateway that is half up.
+	eg, err := newEgress(cfg, reg, log)
+	if err != nil {
+		return err
+	}
 	gopts := mcpgateway.Options{
 		Metrics: mcpgateway.NewMetrics(reg),
 		Tracer:  otel.Tracer("koinon-gateway"),
@@ -350,7 +356,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	served := make(chan error, 2)
 	safego.Go(ctx, log, "mcp-listener", func(context.Context) { served <- srv.Serve(ln) })
-	eg, egSrv, err := startEgress(ctx, cfg, reg, log, served)
+	egSrv, err := serveEgress(ctx, cfg, eg, log, served)
 	if err != nil {
 		_ = srv.Close()
 		return err
@@ -431,42 +437,54 @@ func run(ctx context.Context, cfg config) error {
 	return nil
 }
 
-// startEgress starts the egress listener of the forge and registry routes when cfg names one. It
-// returns nil values when it does not. The listener's end is sent to served.
-func startEgress(ctx context.Context, cfg config, reg prometheus.Registerer, log *slog.Logger, served chan<- error) (*egress.Gateway, *http.Server, error) {
+// newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
+// returns nil when it does not. It loads the actor token keys and the platform routes.
+func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger) (*egress.Gateway, error) {
 	if cfg.egressAddr == "" {
-		return nil, nil, nil
+		return nil, nil
 	}
 	keys, err := actortoken.LoadPublicKeys(cfg.actorTokenKeysDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	ver, err := actortoken.NewVerifier(cfg.actorTokenIssuer, keys)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	// GatewayDialContext resolves each route host once, as an absolute name, and refuses Koinon's own
+	// namespace by name and internal addresses by address.
 	policy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: cfg.egressAllowedHosts}
 	eg, err := egress.New(egress.Options{
 		Verifier: ver,
-		Dial:     policy.DialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
+		Dial:     policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
 		Metrics:  egress.NewMetrics(reg),
 		Log:      log,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// The org routes come from the State stream (#1086 part B). Until then, the platform file is the
 	// only table; without it every request is refused (no_table).
 	if cfg.egressRoutesFile != "" {
 		t, err := egress.LoadPlatformRoutes(cfg.egressRoutesFile)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		eg.Apply(t)
 	}
+	log.Info("egress routes loaded", "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
+	return eg, nil
+}
+
+// serveEgress starts the egress listener of eg, and returns nil when eg is nil. The listener's end is
+// sent to served.
+func serveEgress(ctx context.Context, cfg config, eg *egress.Gateway, log *slog.Logger, served chan<- error) (*http.Server, error) {
+	if eg == nil {
+		return nil, nil
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.egressAddr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("egress listener: %w", err)
+		return nil, fmt.Errorf("egress listener: %w", err)
 	}
 	// The handler is served as it is, never through a ServeMux: a mux cleans the path, and the gate
 	// must see the path the guest sent so it can refuse one that is not canonical.
@@ -475,8 +493,8 @@ func startEgress(ctx context.Context, cfg config, reg prometheus.Registerer, log
 		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
 	}
 	safego.Go(ctx, log, "egress-listener", func(context.Context) { served <- srv.Serve(ln) })
-	log.Info("egress listener started", "listen", ln.Addr().String(), "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
-	return eg, srv, nil
+	log.Info("egress listener started", "listen", ln.Addr().String())
+	return srv, nil
 }
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is
