@@ -30,7 +30,7 @@ for f in "${value_files[@]}"; do
 			grep -qF -- "$want" <<<"$rendered" || { echo "$name: Substrate preflight hook lacks '$want'" >&2; exit 1; }
 		done
 		# The CRDs and Deployments the hook may read are the ones internal/preflight/substrate.go checks.
-		crds=$(sed -n '/^var SubstrateCRDs = /,/^}/p' internal/preflight/substrate.go | sed -nE 's/^\s*"([a-z]+)\." \+ SubstrateCRDGroup,?$/\1/p')
+		crds=$(sed -n '/^var SubstrateCRDs = /,/^}/p' internal/preflight/substrate.go | sed -nE 's/^[[:space:]]*"([a-z]+)\." \+ SubstrateCRDGroup,?$/\1/p')
 		[[ -n $crds ]] || { echo "$name: no SubstrateCRDs found in internal/preflight/substrate.go" >&2; exit 1; }
 		for c in $crds; do
 			grep -qF -- "- $c.ate.dev" <<<"$rendered" || { echo "$name: Substrate preflight ClusterRole lacks CRD $c.ate.dev" >&2; exit 1; }
@@ -42,6 +42,10 @@ for f in "${value_files[@]}"; do
 		for absent in '--openshell-address' '--runtime-class=' '--agent-sandbox-' 'sandboxes.agents.x-k8s.io' 'runtimeclasses' 'configmaps' 'openshell-tls'; do
 			if grep -qF -- "$absent" <<<"$rendered"; then echo "$name: Substrate preflight hook has OpenShell '$absent'" >&2; exit 1; fi
 		done
+		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment.
+		kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --show-only templates/preflight.yaml)
+		grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
+			{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
 	elif grep -qF -- '--driver=substrate' <<<"$rendered"; then
 		echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2
 		exit 1

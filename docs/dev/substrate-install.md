@@ -223,9 +223,11 @@ warnings. `koinon-api substrate install` runs them, and `koinon-api preflight --
 again on request. The hook does not check the WorkerPools: at pre-install the chart's own pool does not exist
 yet.
 
-The RBAC of the hook is read-only: `get` on the three Substrate CRDs and on the Deployments `ate-api-server`
-and `atenet-router` by name (a ClusterRole, because Substrate's namespace may not exist yet), plus the CNPG and
-GatewayClass reads of the chosen modes.
+The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and on the Deployments
+`ate-api-server` and `atenet-router` by name (a ClusterRole, because Substrate's namespace may not exist yet),
+plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
+Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
+get pod logs, and create and delete NetworkPolicies.
 
 ## Service-account issuer
 
