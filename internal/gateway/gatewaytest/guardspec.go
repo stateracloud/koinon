@@ -20,30 +20,37 @@ import (
 // the guard before the server sees it and again with the result, the guard's refusal is final, and
 // a guard that does not answer refuses the call (failClosed). Without a guard address the gateway
 // refuses every call to an org's server and keeps Koinon's own tools working.
+// callTool calls tool through the gateway at url as the agent of key, with args, and returns the
+// text the agent reads and whether the call failed.
+func callTool(ctx context.Context, url, key, tool string, args map[string]any) (string, bool) {
+	GinkgoHelper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
+	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: url + "/mcp", HTTPClient: &http.Client{Transport: bearer{key: key, base: http.DefaultTransport}},
+		DisableStandaloneSSE: true, MaxRetries: -1,
+	}, nil)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = s.Close() }()
+	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+	if err != nil {
+		return err.Error(), true
+	}
+	var text string
+	for _, c := range res.Content {
+		if t, ok := c.(*mcp.TextContent); ok {
+			text += t.Text
+		}
+	}
+	return text, res.IsError
+}
+
 func guardSpec(env Env) {
 	const target = "acme-guarded"
 	agent := gateway.AgentRef{Org: "acme", Name: "guarded"}
 
 	// call returns the text the agent reads, and whether the call failed.
 	call := func(ctx context.Context, url, key, tool string) (string, bool) {
-		client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
-		s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-			Endpoint: url + "/mcp", HTTPClient: &http.Client{Transport: bearer{key: key, base: http.DefaultTransport}},
-			DisableStandaloneSSE: true, MaxRetries: -1,
-		}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		defer func() { _ = s.Close() }()
-		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool})
-		if err != nil {
-			return err.Error(), true
-		}
-		var text string
-		for _, c := range res.Content {
-			if t, ok := c.(*mcp.TextContent); ok {
-				text += t.Text
-			}
-		}
-		return text, res.IsError
+		return callTool(ctx, url, key, tool, nil)
 	}
 	toolCalls := func(l *headerLog) int {
 		return len(slices.DeleteFunc(l.values("Mcp-Method"), func(m string) bool { return m != "tools/call" }))
