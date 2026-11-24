@@ -3,6 +3,7 @@
 package mcpgateway_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 
@@ -13,17 +14,22 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 var _ = Describe("the MCP path", func() {
 	var (
 		acmeLog, globexLog, openLog *upstreamLog
+		platformLog                 *upstreamLog
 		guard                       *recordingGuard
 		audit                       *auditLog
 		gw                          *mcpgateway.Gateway
 		cfg                         gateway.MCPConfig
 		front                       *httptest.Server
 		keyAcme, keyNoGrant, keyX   gateway.IssuedKey
+		keyExec, keyTools           gateway.IssuedKey
+		agentExec                   = gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
+		agentTools                  = gateway.AgentRef{Org: "acme", Name: "tools-user"}
 		agentAcme                   = gateway.AgentRef{Org: "acme", Name: "wiki-reader"}
 		agentNone                   = gateway.AgentRef{Org: "acme", Name: "no-mcp"}
 		agentCross                  = gateway.AgentRef{Org: "acme", Name: "cross"}
@@ -35,6 +41,9 @@ var _ = Describe("the MCP path", func() {
 		DeferCleanup(func() { acme.CloseClientConnections(); acme.Close() })
 		DeferCleanup(func() { globex.CloseClientConnections(); globex.Close() })
 		DeferCleanup(func() { open.CloseClientConnections(); open.Close() })
+		platformLog = &upstreamLog{}
+		platform := fakeUpstream("koinon-tools", platformLog)
+		DeferCleanup(func() { platform.CloseClientConnections(); platform.Close() })
 
 		guard = &recordingGuard{refuse: map[string]string{}}
 		audit = &auditLog{}
@@ -46,13 +55,16 @@ var _ = Describe("the MCP path", func() {
 		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
 
 		keyAcme, keyNoGrant, keyX = mustKey(agentAcme), mustKey(agentNone), mustKey(agentCross)
+		keyExec, keyTools = mustKey(agentExec), mustKey(agentTools)
 		cfg = gateway.MCPConfig{
-			Keys: []gateway.Key{keyAcme.Key, keyNoGrant.Key, keyX.Key},
+			Keys: []gateway.Key{keyAcme.Key, keyNoGrant.Key, keyX.Key, keyExec.Key, keyTools.Key},
 			MCPState: gateway.MCPState{
 				MCP: []gateway.MCPTarget{
 					{Name: "acme-wiki", Org: "acme", URL: acme.URL + "/mcp", CredentialHeader: "X-Api-Key", CredentialFile: writeFile("acme-key", fakeToken+"\n")},
 					{Name: "globex-wiki", Org: "globex", URL: globex.URL + "/mcp", CredentialHeader: "X-Api-Key", CredentialFile: writeFile("globex-key", fakeToken+"-globex")},
 					{Name: "acme-open", Org: "acme", URL: open.URL + "/mcp"},
+					// A platform target: one of Koinon's own tool servers (Org "").
+					{Name: "koinon-tools", URL: platform.URL + "/mcp"},
 				},
 				Tools: map[gateway.AgentRef][]gateway.ToolGrant{
 					agentAcme: {
@@ -61,6 +73,9 @@ var _ = Describe("the MCP path", func() {
 					},
 					// A grant that names another org's target does nothing.
 					agentCross: {{Target: "globex-wiki", Tools: []string{"read_item"}}},
+					// The org's executor runs the calls a human approved (gatewayplan, applyMCP).
+					agentExec:  {{Target: "acme-wiki", Tools: []string{"read_item"}}},
+					agentTools: {{Target: "koinon-tools", Tools: []string{"read_item"}}},
 				},
 			},
 		}
@@ -113,6 +128,50 @@ var _ = Describe("the MCP path", func() {
 		// The agent header is for Koinon's own tool servers only: an org's server never learns the agent.
 		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
 		Expect(openLog.header(gateway.AgentHeader)).To(BeEmpty())
+	})
+
+	// Issue #38: an approved ask-tier call runs with the org's executor key (mcpservers.CallTool). The
+	// executor reaches only servers an org registered (gatewayplan). On Koinon's MCP path such a server
+	// gets no agent header, not the executor and not the agent that asked (ADR 0073 decision 13, ADR
+	// 0097 decision 5, #1235). It learns the caller only from the passport (ADR 0073 decision 12).
+	It("sends an approved call to an org's server with the credential and no agent header", func(ctx SpecContext) {
+		res, err := mcpservers.CallTool(ctx, mcpservers.CallRequest{
+			GatewayMCPURL: front.URL + "/mcp", Key: keyExec.Material, Target: "acme-wiki", Tool: "read_item",
+			Arguments: json.RawMessage(`{"text":"x"}`), Idempotency: "approval-1",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res["isError"]).To(BeFalse())
+		Expect(res["content"]).To(ContainElement(HaveKeyWithValue("text", "acme-wiki read x")))
+		Expect(acmeLog.header("X-Api-Key")).To(HaveEach(fakeToken))
+		Expect(acmeLog.header("Authorization")).To(BeEmpty(), "the executor key never goes upstream")
+		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
+		// The approval ID is Koinon's internal ID (ADR 0073 decision 13): it does not reach the server.
+		Expect(acmeLog.meta()).To(HaveExactElements(Not(HaveKey("dev.koinon/approval"))))
+		// The gateway audit names the executor, the holder of the key. This spec does not cover the
+		// approval row that names the asking agent (approvals.executeMCP).
+		audit.mu.Lock()
+		defer audit.mu.Unlock()
+		Expect(audit.rows).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Agent": Equal(agentExec), "Target": Equal("acme-wiki"), "Tool": Equal("read_item"),
+			"Outcome": Equal(mcpgateway.OutcomeOK), "CredKind": Equal(mcpgateway.CredentialStatic),
+		})))
+	})
+
+	// The counterpart of the spec above: Koinon's own tool server does get the agent header, set by
+	// the gateway from the key, not by the agent (credentialTransport).
+	It("sends the agent header to Koinon's own tool server, and not the value the agent sends", func(ctx SpecContext) {
+		c := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0"}, nil)
+		s, err := c.Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint: front.URL + "/mcp", DisableStandaloneSSE: true, MaxRetries: -1,
+			HTTPClient: &http.Client{Transport: headerSetter{key: keyTools.Material, name: gateway.AgentHeader, value: "globex/someone-else"}},
+		}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = s.Close() })
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "koinon-tools_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(text(res)).To(Equal("koinon-tools read x"))
+		Expect(platformLog.header(gateway.AgentHeader)).To(HaveEach(agentTools.String()))
+		Expect(platformLog.header(gateway.AgentHeader)).NotTo(BeEmpty())
 	})
 
 	It("refuses an unknown key, a missing key and a key outside the Authorization header", func(ctx SpecContext) {

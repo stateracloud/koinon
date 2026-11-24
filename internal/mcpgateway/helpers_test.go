@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -27,6 +28,13 @@ type upstreamLog struct {
 	mu      sync.Mutex
 	headers []http.Header
 	roots   []string
+	metas   []map[string]any // the _meta of each read_item call
+}
+
+func (l *upstreamLog) meta() []map[string]any {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.metas)
 }
 
 func (l *upstreamLog) header(name string) []string {
@@ -52,6 +60,9 @@ func fakeUpstream(name string, l *upstreamLog) *httptest.Server {
 	newServer := func(*http.Request) *mcp.Server {
 		s := mcp.NewServer(&mcp.Implementation{Name: name, Version: "0"}, nil)
 		mcp.AddTool(s, &mcp.Tool{Name: "read_item", Description: "reads " + name}, func(_ context.Context, r *mcp.CallToolRequest, a echoArgs) (*mcp.CallToolResult, any, error) {
+			l.mu.Lock()
+			l.metas = append(l.metas, map[string]any(r.Params.Meta))
+			l.mu.Unlock()
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " read " + a.Text}}}, nil, nil
 		})
 		mcp.AddTool(s, &mcp.Tool{Name: "write_item", Description: "writes " + name}, func(context.Context, *mcp.CallToolRequest, echoArgs) (*mcp.CallToolResult, any, error) {
