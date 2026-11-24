@@ -276,7 +276,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
         {t.unavailable && <Badge variant="outline">Not offered</Badge>}
       </div>
       {t.unavailable && (
-        <p role="note" className="text-sm text-amber-700 dark:text-amber-400">
+        <p role="note" className="text-sm text-warning">
           {t.unavailable}. Agents are not offered this tool, whatever its tier.
         </p>
       )}
