@@ -460,13 +460,14 @@ layer. The State update gets an add-only egress half (`EgressState`, field 5), w
 each revision with no ack of its own: nothing waits for it. The gateway merges the org routes with the
 platform routes file (`egress.Merge`). An org route names its org and has a `/` in its name, and a platform
 route has no `/`, so the two sets never share a name. One bad org route refuses all org routes, and the
-gateway then serves the platform routes alone. The reconciler compiles each agent's routes first, so one
+gateway then serves the platform routes alone. The agent deny routes go with them, so a platform file
+must not rely on them: today no platform file names a forge host. The reconciler compiles each agent's routes first, so one
 agent's fault takes away only that agent's routes. To translate the connector rules without loss, the route
 model gets: an agent scope (empty means every agent of the org; an agent route wins over an org route, and
 an org route over a platform route), segment patterns (`*` is one non-empty segment, `**` is zero or more,
 other segments match the decoded segment exactly and with case), exact query values, an explicit
 any-query flag, and deny routes. A deny route is checked before every allow, without case, and has no
-credential. A rule that the model cannot express exactly (a query glob, an access preset, an endpoint path,
+credential. It takes path patterns only, never a prefix, and ignores a trailing slash. A rule that the model cannot express exactly (a query glob, an access preset, an endpoint path,
 a protocol other than REST) gives the agent no route. The gateway agent name is the agent ID, as in
 `gateway.AgentRef`: the actor token that part C mints must carry the same value in its `agent` claim. A
 forge route names the credential `org/<org>/agent/<agent>/codehost`, a name and never a value, so it

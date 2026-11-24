@@ -367,6 +367,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, h := range []string{"model", "mcp"} {
 		m.AckFailures.WithLabelValues(h)
+	}
+	for _, h := range []string{"model", "mcp", halfEgress} {
 		for _, r := range []string{resultOK, resultFailed} {
 			m.Applied.WithLabelValues(h, r)
 		}

@@ -150,6 +150,7 @@ var _ = Describe("agent-scoped and pattern routes", func() {
 		Entry("receive-pack in upper case", "POST", "/acme/app.git/GIT-RECEIVE-PACK", ""),
 		Entry("receive-pack with an encoded letter", "POST", "/acme/app.git/git%2Dreceive-pack", ""),
 		Entry("the method in lower case", "post", "/acme/app.git/git-receive-pack", ""),
+		Entry("a trailing slash", "POST", "/acme/app.git/git-receive-pack/", ""),
 	)
 
 	It("applies a deny route only in its scope", func() {
@@ -181,6 +182,9 @@ var _ = Describe("agent-scoped and pattern routes", func() {
 		Entry("a bad query key", func(r *route.Route) { r.QueryValues = map[string]string{"a=b": "c"} }),
 		Entry("a deny route with a credential", func(r *route.Route) { r.Deny = true }),
 		Entry("a deny route with any query", func(r *route.Route) { r.Deny, r.Credential = true, "" }),
+		Entry("a deny route with a path prefix (compared escaped, so %61 would pass it)", func(r *route.Route) {
+			r.Deny, r.Credential, r.AnyQuery, r.Paths, r.PathPrefixes = true, "", false, nil, []string{"/admin"}
+		}),
 	)
 
 	It("lists every reason", func() {

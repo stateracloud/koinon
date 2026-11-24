@@ -180,6 +180,11 @@ func (r Route) validateScope() error {
 	if r.Deny && (r.Credential != "" || len(r.QueryKeys) > 0 || r.AnyQuery) {
 		return fmt.Errorf("route %q: a deny route has no credential, no query keys and no any-query", r.Name)
 	}
+	// A deny route matches decoded segments only: a prefix compares the escaped path, so an encoded
+	// letter ("/%61dmin") would pass it.
+	if r.Deny && r.PathPrefixes != nil {
+		return fmt.Errorf("route %q: a deny route takes path patterns (paths), not path prefixes", r.Name)
+	}
 	return nil
 }
 
@@ -453,6 +458,11 @@ func (r *Route) denies(method, p string, segs []string, q url.Values) bool {
 	if !slices.ContainsFunc(r.Methods, func(m string) bool { return strings.EqualFold(m, method) }) {
 		return false
 	}
+	// A trailing slash adds an empty segment; the forge treats "/x/" as "/x", so a deny pattern
+	// ignores it.
+	if n := len(segs); n > 0 && segs[n-1] == "" {
+		segs = segs[:n-1]
+	}
 	if !r.pathMatches(p, segs, true) {
 		return false
 	}
@@ -465,13 +475,9 @@ func (r *Route) denies(method, p string, segs []string, q url.Values) bool {
 }
 
 // pathMatches reports whether a prefix or a pattern of r matches the path p (escaped) or its decoded
-// segments. fold compares without case, for deny routes.
+// segments. fold compares without case, for deny routes, which have no prefixes.
 func (r *Route) pathMatches(p string, segs []string, fold bool) bool {
-	if fold {
-		if pathAllowed(lower(r.PathPrefixes), strings.ToLower(p)) {
-			return true
-		}
-	} else if pathAllowed(r.PathPrefixes, p) {
+	if !fold && pathAllowed(r.PathPrefixes, p) {
 		return true
 	}
 	for _, pat := range r.Paths {
@@ -480,14 +486,6 @@ func (r *Route) pathMatches(p string, segs []string, fold bool) bool {
 		}
 	}
 	return false
-}
-
-func lower(in []string) []string {
-	out := make([]string, len(in))
-	for i, s := range in {
-		out[i] = strings.ToLower(s)
-	}
-	return out
 }
 
 // patternMatches matches pattern segments against path segments: "*" is one segment, "**" any number
