@@ -129,12 +129,45 @@ func (g *execGit) Branches() ([]Branch, error) {
 	return bs, nil
 }
 
-// SavePatch writes <dir>/<name>-<time>/{staged,unstaged,untracked}.patch. Each patch applies with
-// `git apply`. The untracked patch holds every untracked file that git does not ignore.
+// patchName is the directory name of one saved patch: worktree name, branch (slashes become dashes)
+// and a UTC timestamp.
+func patchName(w Worktree, now time.Time) string {
+	br := strings.NewReplacer("/", "-", " ", "-").Replace(w.Branch)
+	if br == "" {
+		br = "detached"
+	}
+	return w.Name() + "-" + br + "-" + now.UTC().Format("20060102T150405Z")
+}
+
+// defaultPatchDir is where --force-dirty saves patches when --patch-dir is not set: inside the git
+// common directory of the repository, which survives a reboot (the worktree root is under /tmp).
+// commonDir is the output of `git rev-parse --git-common-dir`, relative to base when it is relative.
+func defaultPatchDir(base, commonDir string) string {
+	commonDir = strings.TrimSpace(commonDir)
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(base, commonDir)
+	}
+	return filepath.Join(filepath.Clean(commonDir), "worktidy-patches")
+}
+
+// SavePatch writes <dir>/<name>-<branch>-<time>/{staged,unstaged,untracked}.patch. Each patch applies
+// with `git apply`. The untracked patch holds every untracked file that git does not ignore. It never
+// reuses a directory: a second run in the same second gets a numeric suffix.
 func (g *execGit) SavePatch(w Worktree, dir string) (string, error) {
-	out := filepath.Join(dir, w.Name()+"-"+time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.MkdirAll(out, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
+	}
+	base := filepath.Join(dir, patchName(w, time.Now()))
+	out := base
+	for i := 2; ; i++ {
+		err := os.Mkdir(out, 0o750)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) || i > 1000 {
+			return "", err
+		}
+		out = fmt.Sprintf("%s-%d", base, i)
 	}
 	staged, err := sh(w.Path, "git", "diff", "--cached", "--binary")
 	if err != nil {
@@ -226,6 +259,31 @@ func (f execForge) PRs() (map[string][]PR, error) {
 // execClaims reads `hack/claim.sh mine`: "#N<TAB>lane<TAB>pr P<TAB>holder".
 type execClaims struct{ dir string }
 
+// Held reads `hack/claim.sh show <N>` ("#N: held", "  holder: ..."), which sees a claim of any identity.
+func (c execClaims) Held(issue int) (string, bool, error) {
+	out, err := sh(c.dir, filepath.Join(c.dir, "hack", "claim.sh"), "show", strconv.Itoa(issue))
+	if err != nil {
+		return "", false, err
+	}
+	holder, held := parseShow(string(out))
+	return holder, held, nil
+}
+
+// parseShow reads the output of `claim.sh show`: the state is in the first line, the holder in a later one.
+func parseShow(s string) (holder string, held bool) {
+	for i, l := range nonEmptyLines(s) {
+		l = strings.TrimSpace(l)
+		if i == 0 {
+			held = strings.HasSuffix(l, ": held")
+			continue
+		}
+		if h, ok := strings.CutPrefix(l, "holder:"); ok {
+			holder = strings.TrimSpace(h)
+		}
+	}
+	return holder, held
+}
+
 func (c execClaims) Mine() ([]Claim, error) {
 	out, err := sh(c.dir, filepath.Join(c.dir, "hack", "claim.sh"), "mine")
 	if err != nil {
@@ -296,7 +354,23 @@ func (execDocker) Facts() DockerFacts {
 		}
 		f.UnusedImgs++
 	}
+	if df, err := sh("", "docker", "system", "df", "--format", "{{.Type}}\t{{.Reclaimable}}"); err == nil {
+		f.UnusedSize = parseDfReclaimable(string(df))
+	}
 	return f
+}
+
+// parseDfReclaimable reads `docker system df --format "{{.Type}}\t{{.Reclaimable}}"` and returns the
+// reclaimable size of the Images row ("1.2GB (45%)" gives "1.2GB"), or "" when there is no such row.
+func parseDfReclaimable(s string) string {
+	for _, l := range nonEmptyLines(s) {
+		t, r, ok := strings.Cut(l, "\t")
+		if ok && strings.EqualFold(strings.TrimSpace(t), "Images") {
+			r, _, _ = strings.Cut(strings.TrimSpace(r), " ")
+			return r
+		}
+	}
+	return ""
 }
 
 func (execDocker) PruneContainers() error {

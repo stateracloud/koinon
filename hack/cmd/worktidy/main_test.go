@@ -6,7 +6,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -82,12 +86,23 @@ func (f fakeForge) PRs() (map[string][]PR, error) {
 }
 
 type fakeClaims struct {
-	cs  []Claim
-	err error
+	cs      []Claim
+	err     error
+	other   map[int]string
+	heldErr error
 }
 
 func (f fakeClaims) Mine() ([]Claim, error) {
 	return f.cs, f.err
+}
+
+// Held answers from other: issue -> holder of a claim of another identity.
+func (f fakeClaims) Held(issue int) (string, bool, error) {
+	if f.heldErr != nil {
+		return "", false, f.heldErr
+	}
+	h, ok := f.other[issue]
+	return h, ok, nil
 }
 
 type fakeDocker struct {
@@ -234,6 +249,54 @@ var _ = Describe("decideClaim", func() {
 	})
 })
 
+var _ = Describe("patch and docker helpers", func() {
+	It("puts the default patch directory in the git common directory, absolute", func() {
+		Expect(defaultPatchDir("/repo", ".git\n")).To(Equal("/repo/.git/worktidy-patches"))
+		Expect(defaultPatchDir("/repo/wt", "/repo/.git\n")).To(Equal("/repo/.git/worktidy-patches"))
+	})
+	It("names a patch after the worktree, the branch and a UTC time", func() {
+		w := Worktree{Path: "/tmp/kw/dirty", Branch: "feat/2-dirty"}
+		n := patchName(w, time.Date(2026, 11, 24, 1, 2, 3, 0, time.UTC))
+		Expect(n).To(Equal("dirty-feat-2-dirty-20261124T010203Z"))
+	})
+	It("never reuses a patch directory", func() {
+		repo := GinkgoT().TempDir()
+		for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "x"}} {
+			c := exec.Command("git", args...)
+			c.Dir = repo
+			Expect(c.Run()).To(Succeed())
+		}
+		Expect(os.WriteFile(filepath.Join(repo, "new.txt"), []byte("hi\n"), 0o600)).To(Succeed())
+		dir := filepath.Join(GinkgoT().TempDir(), "patches")
+		g := &execGit{dir: repo, toplevel: repo}
+		w := Worktree{Path: repo, Branch: "feat/1-x"}
+		p1, err := g.SavePatch(w, dir)
+		Expect(err).NotTo(HaveOccurred())
+		p2, err := g.SavePatch(w, dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(p2).NotTo(Equal(p1))
+		Expect(filepath.Join(p1, "untracked.patch")).To(BeARegularFile())
+	})
+	It("reads the reclaimable size of the Images row of docker system df", func() {
+		df := "Images\t1.5GB (45%)\nContainers\t0B (0%)\nLocal Volumes\t2GB (10%)\n"
+		Expect(parseDfReclaimable(df)).To(Equal("1.5GB"))
+		Expect(parseDfReclaimable("Containers\t0B (0%)\n")).To(Equal(""))
+	})
+	It("labels the unused image count as an estimate", func() {
+		ds := decideDocker(DockerFacts{Stopped: 1, UnusedImgs: 2, UnusedSize: "1.5GB"}, false)
+		Expect(ds[1].Reason).To(And(ContainSubstring("about 2"), ContainSubstring("estimate"), ContainSubstring("1.5GB")))
+	})
+	It("reads claim.sh show", func() {
+		h, ok := parseShow("#5: held\n  holder: bob#lane\n  lane:   lane\n")
+		Expect(ok).To(BeTrue())
+		Expect(h).To(Equal("bob#lane"))
+		_, ok = parseShow("#5: no claim\n")
+		Expect(ok).To(BeFalse())
+		_, ok = parseShow("#5: released\n  holder: bob#lane\n")
+		Expect(ok).To(BeFalse())
+	})
+})
+
 var _ = Describe("decideDocker", func() {
 	It("refuses while a container runs or a kind cluster exists, unless forced", func() {
 		f := DockerFacts{Running: []string{"web"}, Stopped: 2, UnusedImgs: 3}
@@ -315,6 +378,29 @@ var _ = Describe("run", func() {
 		dk = &fakeDocker{facts: DockerFacts{Stopped: 1, UnusedImgs: 2}}
 		dep = Deps{Git: g, Forge: fakeForge{prs: prs}, Claims: fakeClaims{cs: []Claim{{Issue: 77, Lane: "x"}}}, Docker: dk, Cwd: mainP, WTRoot: root}
 		out = &bytes.Buffer{}
+	})
+
+	It("keeps a worktree whose issue is claimed by another identity", func() {
+		dep.Claims = fakeClaims{other: map[int]string{1: "bob#lane"}}
+		decs, err := plan(dep, Options{})
+		Expect(err).NotTo(HaveOccurred())
+		for _, dc := range decs {
+			if dc.Kind == "worktree" && dc.Name == "done" {
+				Expect(dc.Action).To(Equal(ActKeep))
+				Expect(dc.Reason).To(ContainSubstring("held by bob#lane"))
+			}
+		}
+	})
+
+	It("keeps a worktree when the claim state of its issue is unknown", func() {
+		dep.Claims = fakeClaims{heldErr: errors.New("gh failed")}
+		decs, _ := plan(dep, Options{})
+		for _, dc := range decs {
+			if dc.Kind == "worktree" && dc.Name == "done" {
+				Expect(dc.Action).To(Equal(ActKeep))
+				Expect(dc.Reason).To(HavePrefix("unknown: claim state"))
+			}
+		}
 	})
 
 	It("changes nothing in a dry run", func() {

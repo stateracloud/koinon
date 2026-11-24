@@ -99,7 +99,7 @@ it. The tool is `hack/cmd/worktidy` (`go tool worktidy -h` lists the flags: `--j
 `--patch-dir`, `--force-docker`). It removes only a worktree whose pull request is merged and whose
 tree is clean, through `hack/wt.sh rm` (which also checks claims and processes). A dirty tree stays,
 unless you pass `--force-dirty`: then the tool first saves staged, unstaged and untracked changes as
-patches under `$KOINON_WT_ROOT/.patches` and prints the path. It deletes a local branch only when
+patches under `<git common dir>/worktidy-patches` (it survives a reboot; `--patch-dir` changes it) and prints the path. The directory name holds the worktree, the branch and a UTC time. The tool asks `hack/claim.sh show` for the issue of each worktree it would remove, so a claim of any identity keeps the worktree. It deletes a local branch only when
 its pull request is MERGED with that same tip and no worktree holds it. It never touches the main
 checkout or a worktree with an open pull request. It only reports a claim that has no worktree and
 no open pull request; release it with `hack/claim.sh release`. When gh or the network fails, the

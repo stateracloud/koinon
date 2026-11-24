@@ -287,7 +287,7 @@ func decideDocker(f DockerFacts, force bool) []Decision {
 		return []Decision{mk("docker", ActKeep, "refused while "+strings.Join(block, " and ")+"; use --force-docker")}
 	}
 	c := mk("stopped-containers", ActRemove, fmt.Sprintf("%d stopped container(s)", f.Stopped))
-	i := mk("unused-images", ActRemove, fmt.Sprintf("%d unused image(s), %s", f.UnusedImgs, orDash(f.UnusedSize)))
+	i := mk("unused-images", ActRemove, fmt.Sprintf("about %d unused image(s) (estimate: docker image prune --all removes every image that no container uses), %s reclaimable", f.UnusedImgs, orDash(f.UnusedSize)))
 	if f.Stopped == 0 {
 		c.Action, c.Reason = ActKeep, "no stopped container"
 	}

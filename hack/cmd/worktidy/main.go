@@ -40,9 +40,11 @@ type Forge interface {
 	PRs() (map[string][]PR, error)
 }
 
-// Claims lists the claims this identity holds. An error means unknown.
+// Claims lists the claims this identity holds. An error means unknown. Held asks about one issue and
+// sees a claim of any identity, as hack/wt.sh rm does.
 type Claims interface {
 	Mine() ([]Claim, error)
+	Held(issue int) (holder string, held bool, err error)
 }
 
 // Docker is the opt-in part.
@@ -125,6 +127,16 @@ func plan(d Deps, o Options) ([]Decision, error) {
 			wtIssues[n] = true
 		}
 		dec := decideWorktree(*w, prsByBranch[w.Branch], prsKnown, claimed[issueOfBranch(w.Branch)], o.ForceDirty)
+		// wt.sh rm refuses for a live claim of any identity, so ask before a removal is planned.
+		if n := issueOfBranch(w.Branch); n > 0 && !claimed[n] && (dec.Action == ActRemove || dec.Action == ActPatchRemove) {
+			holder, held, err := d.Claims.Held(n)
+			switch {
+			case err != nil:
+				dec.Action, dec.Reason = ActKeep, "unknown: claim state of the issue; "+firstLine(err.Error())
+			case held:
+				dec.Action, dec.Reason = ActKeep, "a claim on the issue is held by "+orDash(holder)
+			}
+		}
 		out = append(out, dec)
 		// A worktree that goes away frees its branch for the branch pass.
 		if w.Branch != "" && dec.Action != ActRemove && dec.Action != ActPatchRemove {
@@ -299,7 +311,7 @@ func main() {
 	flag.BoolVar(&o.ForceDirty, "force-dirty", false, "also remove a merged worktree with uncommitted files, after saving a patch")
 	flag.BoolVar(&o.WithDocker, "docker", false, "also clean stopped containers and unused images (never volumes)")
 	flag.BoolVar(&o.ForceDocker, "force-docker", false, "with --docker: go on while a container runs or a kind cluster exists")
-	flag.StringVar(&o.PatchDir, "patch-dir", "", "where --force-dirty saves patches (default: <worktree root>/.patches)")
+	flag.StringVar(&o.PatchDir, "patch-dir", "", "where --force-dirty saves patches (default: <git common dir>/worktidy-patches, which survives a reboot)")
 	flag.Parse()
 
 	root := os.Getenv("KOINON_WT_ROOT")
@@ -310,11 +322,16 @@ func main() {
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real
 	}
-	if o.PatchDir == "" {
-		o.PatchDir = filepath.Join(root, ".patches")
-	}
 	cwd, _ := os.Getwd()
 	g := newExecGit(cwd)
+	if o.PatchDir == "" {
+		if out, err := sh(g.toplevel, "git", "rev-parse", "--git-common-dir"); err == nil {
+			o.PatchDir = defaultPatchDir(g.toplevel, string(out))
+		} else if o.ForceDirty {
+			fmt.Fprintln(os.Stderr, "worktidy: cannot find the git common directory; use --patch-dir")
+			os.Exit(2)
+		}
+	}
 	d := Deps{
 		Git:       g,
 		Forge:     execForge{dir: cwd},
