@@ -83,11 +83,17 @@ The maintainer decided on 2026-11-24 to hide a tool until an admin reviews it.
 
 - Positive: a new tool's text reaches the model only after a person reads it, or after an admin chose to
   trust the server.
-- Positive: a hostile server cannot fill the database or the audit log with new names.
+- Positive: a hostile server cannot fill the database or the audit log with new names. This limit
+  covers new names only. A server that changes the text of a stored tool on each probe still writes one
+  `mcp_tool.sync` event per sync (a follow-up).
 - Negative: an admin must review each new tool before an agent can use it. Part 2 of #1216 adds an
   approve-all action and a "tools waiting" notice to make this light.
 - Negative: rows of tools that a server no longer lists can fill the limit. There is no admin action to
-  delete them yet (a follow-up).
+  delete them yet (a follow-up). A row from before the pin (#1132) that has a tier but no approved hash
+  counts as unreviewed until the sync adopts its pin; an absent row of that kind keeps its place.
+- Negative: an approval request that an agent recorded for an unreviewed tool before this change, or
+  while "show new tools before review" was on, still runs when a person approves it. A person decided
+  that call, so the risk is low.
 - Follow-ups: part 2 of #1216 (the API, declarative and console switch, approve-all and the notice). The
   ask proxy serves the current text of an approved ask-tier tool that has a pending change; it does not
   apply the pin (a follow-up). When PR 1228 has merged, main changes "Relates to" 0097 to "Amends" and adds

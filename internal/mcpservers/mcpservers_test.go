@@ -824,6 +824,22 @@ var _ = Describe("Service", func() {
 					"at most one sync event, for the names of the last stored round that went absent")
 			})
 
+			It("keeps the limit and writes one event when two syncs of one server run at the same time", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				lists := [2][]mcpservers.ListedTool{append(round(0), round(1)...), append(round(2), round(3)...)}
+				var wg sync.WaitGroup
+				errs := make([]error, 2)
+				for i := range 2 {
+					wg.Go(func() { _, errs[i] = svc.SyncTools(ctx, org, sid, lists[i]) })
+				}
+				wg.Wait()
+				Expect(errs[0]).NotTo(HaveOccurred())
+				Expect(errs[1]).NotTo(HaveOccurred())
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools))
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(1))
+			})
+
 			It("still records a change to a tool an admin reviewed while the server is at the limit", func(ctx SpecContext) {
 				s := create(ctx, "junk", "")
 				sid := uuidOf(s.ID)
