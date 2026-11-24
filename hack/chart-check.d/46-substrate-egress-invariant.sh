@@ -54,4 +54,5 @@ if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.apiServerA
 grep -Fq 'apiServerApps lists "atenet-egress"' "$out/egressapp.err" || fail "the error for atenet-egress in apiServerApps must name apiServerApps and the app"
 # An extraEgress rule with an empty `to` list opens its ports to ANY address: the invariant must catch it in the real render.
 emp=$(render "${wsub[@]}" --set-json 'execution.substrate.workerNetworkPolicy.extraEgress=[{"to":[],"ports":[{"port":22}]}]' --show-only templates/substrate-networkpolicy.yaml) || fail "the render with an extraEgress rule with an empty to must succeed"
-[[ $(toless_policies <<<"$emp") != "" ]] || fail "an extraEgress rule with to: [] must make the egress invariant find a policy without a destination"
+# The render without extraEgress already reports the apiServerPorts policies on purpose, so test for the policy that the rule adds.
+[[ $(toless_policies <<<"$emp") == $'koinon-substrate-api-only\nkoinon-substrate-api-server\nkoinon-substrate-control' ]] || fail "an extraEgress rule with to: [] must make the egress invariant find koinon-substrate-control as a policy without a destination (besides the apiServerPorts policies)"
