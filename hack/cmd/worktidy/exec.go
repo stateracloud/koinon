@@ -314,27 +314,51 @@ func firstLine(s string) string {
 	return l
 }
 
-// cwdProcs returns the pids of other processes whose working directory is inside dir (lsof; none when
-// lsof is missing, which matches wt.sh on a host with neither lsof nor /proc only in the unlikely case).
+// cwdProcs returns the pids of other processes whose working directory is inside dir. It runs lsof from
+// outside dir (lsof lists itself, and its cwd would be dir), and reads /proc where lsof is missing, as
+// wt.sh proc_reason does.
 func cwdProcs(dir string) []string {
-	out, err := sh(dir, "lsof", "-w", "-d", "cwd", "-Fpn")
-	if err != nil && len(out) == 0 {
-		return nil
-	}
 	real, e := filepath.EvalSymlinks(dir)
 	if e != nil {
 		real = dir
 	}
 	self := strconv.Itoa(os.Getpid())
-	var pid string
+	if _, err := exec.LookPath("lsof"); err == nil {
+		out, err := sh("", "lsof", "-w", "-d", "cwd", "-Fpcn")
+		if err == nil || len(out) > 0 {
+			return parseLsofCwd(string(out), dir, real, self)
+		}
+		return nil
+	}
 	var hits []string
-	for _, l := range strings.Split(string(out), "\n") {
+	matches, _ := filepath.Glob("/proc/[0-9]*/cwd")
+	for _, m := range matches {
+		pid := strings.TrimSuffix(strings.TrimPrefix(m, "/proc/"), "/cwd")
+		n, err := os.Readlink(m)
+		if err == nil && pid != self && inDir(n, dir, real) {
+			hits = append(hits, pid)
+		}
+	}
+	return hits
+}
+
+func inDir(n, dir, real string) bool {
+	return n == real || strings.HasPrefix(n, real+"/") || n == dir || strings.HasPrefix(n, dir+"/")
+}
+
+// parseLsofCwd reads `lsof -Fpcn` output and returns the pids whose cwd is inside dir. It skips the pid
+// self and any lsof process (the child that produced the output).
+func parseLsofCwd(out, dir, real, self string) []string {
+	var pid, cmd string
+	var hits []string
+	for _, l := range strings.Split(out, "\n") {
 		switch {
 		case strings.HasPrefix(l, "p"):
-			pid = l[1:]
-		case strings.HasPrefix(l, "n") && pid != "" && pid != self:
-			n := l[1:]
-			if n == real || strings.HasPrefix(n, real+"/") || n == dir || strings.HasPrefix(n, dir+"/") {
+			pid, cmd = l[1:], ""
+		case strings.HasPrefix(l, "c"):
+			cmd = l[1:]
+		case strings.HasPrefix(l, "n") && pid != "" && pid != self && cmd != "lsof":
+			if inDir(l[1:], dir, real) {
 				hits = append(hits, pid)
 			}
 		}
