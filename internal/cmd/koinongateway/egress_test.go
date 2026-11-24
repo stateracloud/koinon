@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 const actorIssuer = "https://koinon-api.koinon.svc"
@@ -112,7 +113,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 			_ = resp.Body.Close()
 			return resp.StatusCode, resp.Header.Get(egress.RefusalHeader)
 		}
-		Eventually(func() int { c, _ := get("/egress/registry.npmjs.org/left-pad", ""); return c }, 10*time.Second, 50*time.Millisecond).
+		Eventually(func() int { c, _ := get("/egress/registry.npmjs.org/left-pad", ""); return c }, racescale.D(10*time.Second), 50*time.Millisecond).
 			Should(Equal(http.StatusUnauthorized))
 		code, reason := get("/egress/registry.npmjs.org/left-pad", "")
 		Expect(reason).To(Equal(string(route.ReasonNoToken)))
@@ -132,7 +133,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		term()
 		Consistently(func() string { _, r := get("/egress/evil.example.test/x", token); return r }, 200*time.Millisecond, 20*time.Millisecond).
 			Should(Equal(string(route.ReasonNoRoute)))
-		Eventually(done, 10*time.Second).Should(Receive(BeNil()))
+		Eventually(done, racescale.D(10*time.Second)).Should(Receive(BeNil()))
 		code, _ = get("/egress/evil.example.test/x", token)
 		Expect(code).To(Equal(0), "the listener is closed after the drain")
 	}, SpecTimeout(40*time.Second))
