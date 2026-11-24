@@ -1637,14 +1637,15 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 			Expect(testutil.ToFloat64(metrics.Unseen)).To(BeZero())
 		})
 
-		// The documented gap (ADR 0097, #269): a notification on the call's stream (notifications/message,
-		// notifications/progress) is relayed by agentgateway without asking the guard, which has two
-		// inputs only, the call and its successful result. A stream that carries a notification and then
-		// a guarded result looks to the guard exactly like a stream with the result alone: the call
-		// closes and the session holds the result's legs. Exit: ADR 0097 step 2, v0.2, where Koinon's
-		// gateway hands the guard every message. When this spec fails, the gap is closed: update ADR
-		// 0097 and #254.
-		It("does not see a notification on a call's stream: the documented gap until v0.2 (#269)", func(ctx SpecContext) {
+		// The documented gap of the agentgateway fallback (ADR 0097, #254): a notification on the call's
+		// stream (notifications/message, notifications/progress) is relayed by agentgateway without asking
+		// the guard, which has two inputs only, the call and its successful result. A stream that carries a
+		// notification and then a guarded result looks to the guard exactly like a stream with the result
+		// alone: the call closes and the session holds the result's legs. Koinon's gateway, the default MCP
+		// driver since #1239, hands the guard every message, so the gap holds only with
+		// gateway.mcp.driver=agentgateway. Exit: ADR 0097 step 3 deletes agentgateway and this spec with it.
+		// When this spec fails before then, the gap is closed: update ADR 0097 and #254.
+		It("does not see a notification on a call's stream: the documented gap of the agentgateway fallback (#254)", func(ctx SpecContext) {
 			var inputs []string
 			ext := reflect.TypeFor[extmcp.ExtMcpServer]()
 			for i := range ext.NumMethod() {
