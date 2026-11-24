@@ -157,8 +157,9 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if err != nil {
 		return nil, err
 	}
+	// A RoundTripper must not change the SDK's request: every header goes on a clone.
+	req = req.Clone(req.Context())
 	if t.target.Org == "" {
-		req = req.Clone(req.Context())
 		req.Header.Set(gateway.AgentHeader, t.agent.String())
 	}
 	if cred.Header == "" {
@@ -171,9 +172,6 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	if !credentialSafeURL(req.URL.String()) {
 		return nil, errors.New("mcpgateway: refused to send a credential over a URL that is not https")
-	}
-	if t.target.Org != "" {
-		req = req.Clone(req.Context())
 	}
 	req.Header.Set(cred.Header, cred.Value)
 	return t.base.RoundTrip(req)

@@ -232,11 +232,11 @@ func guardSpec(env Env) {
 
 	// #254, ADR 0097 step 1 exit criterion 2 as one case: the real gateway, the real leak guard
 	// (internal/mcpguard.Server on Postgres) and a server that answers a guarded call with a JSON-RPC
-	// error. The error reaches the agent unseen by the guard, and the guard then holds the session
-	// fail-closed. Runs in both modes: the guard is an ExtMcp server at Env.Host either way. A gateway
-	// that runs the guard in its process (Guard.Local) shows it the error reply, so the session keeps
-	// only the server's declared leg and is not held.
-	Describe(env.Name+": the real MCP leak guard holds a session fail-closed after a reply it never saw (#254)", Ordered, func() {
+	// error. With the gap, the error reaches the agent unseen by the guard, and the guard then holds the
+	// session fail-closed. Without it (a gateway that shows the guard the error reply, such as one that
+	// runs the guard in its process), the session keeps only the server's declared leg and is not held.
+	// One It runs per gateway; the other skips.
+	Describe(env.Name+": the real MCP leak guard and a guarded call that a server answers with an error (#254)", Ordered, func() {
 		const (
 			wiki = "wiki" // private data, answers with an error
 			sink = "sink" // sets no leg; its tools are external-high
@@ -281,30 +281,40 @@ func guardSpec(env Env) {
 			}
 		})
 
-		It("lets the error reach the agent, then needs an approval, with both legs, for the next clean external-high call", func(ctx SpecContext) {
+		It("sees the error reply, gives the agent none of its text, and does not hold the session", func(ctx SpecContext) {
+			if env.KnownGaps["#254"] != "" {
+				Skip("known gap #254: " + env.KnownGaps["#254"])
+			}
 			text, failed := call(ctx, url, key, rg.Target(sink)+"_write_item")
 			Expect(failed).To(BeFalse(), "a clean session passes a clean external-high call: "+text)
 
 			text, failed = call(ctx, url, key, rg.Target(wiki)+"_fail_item")
 			Expect(failed).To(BeTrue(), text)
+			// The guard saw the error reply, so it records it like a result. The wiki's declared leg is
+			// set and nothing more; no reply went unseen, so the session is not held fail-closed, and the
+			// next clean external-high call passes. The agent got the gateway's fixed text.
+			Expect(text).NotTo(ContainSubstring(replyCanary), "the server's error text reached the agent")
+			text, failed = call(ctx, url, key, rg.Target(sink)+"_write_item")
+			Expect(failed).To(BeFalse(), "a reply the guard saw does not hold the session: "+text)
+			var private, untrusted bool
+			Expect(rg.Pool.QueryRow(ctx, `SELECT bool_or(private_data), bool_or(untrusted_input) FROM leak_guard_sessions
+				WHERE org_id = $1 AND agent_id = $2`, rg.Org, rg.Agent.ID).Scan(&private, &untrusted)).To(Succeed())
+			Expect(private).To(BeTrue(), "the guard recorded the error reply of a private-data server")
+			Expect(untrusted).To(BeFalse(), "a reply the guard saw sets only the server's declared legs")
+			var approvals int
+			Expect(rg.Pool.QueryRow(ctx, `SELECT count(*) FROM approval_requests WHERE org_id = $1`, rg.Org).Scan(&approvals)).To(Succeed())
+			Expect(approvals).To(BeZero())
+		})
+
+		It("lets the error reach the agent, then needs an approval, with both legs, for the next clean external-high call", func(ctx SpecContext) {
 			if env.KnownGaps["#254"] == "" {
-				// The gap closed: the guard saw the error reply, so it records it like a result. The
-				// wiki's declared leg is set and nothing more; no reply went unseen, so the session is not
-				// held fail-closed, and the next clean external-high call passes. The agent got the
-				// gateway's fixed text, none of the server's.
-				Expect(text).NotTo(ContainSubstring(replyCanary), "the server's error text reached the agent")
-				text, failed = call(ctx, url, key, rg.Target(sink)+"_write_item")
-				Expect(failed).To(BeFalse(), "a reply the guard saw does not hold the session: "+text)
-				var private, untrusted bool
-				Expect(rg.Pool.QueryRow(ctx, `SELECT bool_or(private_data), bool_or(untrusted_input) FROM leak_guard_sessions
-					WHERE org_id = $1 AND agent_id = $2`, rg.Org, rg.Agent.ID).Scan(&private, &untrusted)).To(Succeed())
-				Expect(private).To(BeTrue(), "the guard recorded the error reply of a private-data server")
-				Expect(untrusted).To(BeFalse(), "a reply the guard saw sets only the server's declared legs")
-				var approvals int
-				Expect(rg.Pool.QueryRow(ctx, `SELECT count(*) FROM approval_requests WHERE org_id = $1`, rg.Org).Scan(&approvals)).To(Succeed())
-				Expect(approvals).To(BeZero())
-				return
+				Skip("the gateway shows the guard every reply: see the spec that it sees the error reply")
 			}
+			text, failed := call(ctx, url, key, rg.Target(sink)+"_write_item")
+			Expect(failed).To(BeFalse(), "a clean session passes a clean external-high call: "+text)
+
+			text, failed = call(ctx, url, key, rg.Target(wiki)+"_fail_item")
+			Expect(failed).To(BeTrue(), text)
 			Expect(text).To(ContainSubstring(replyCanary), "the error reply reached the agent, which the guard never saw")
 
 			text, failed = call(ctx, url, key, rg.Target(sink)+"_write_item")

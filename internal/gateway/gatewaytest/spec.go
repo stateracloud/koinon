@@ -715,15 +715,16 @@ func mcpServersSpec(env Env) {
 			return out
 		}
 		// echoed checks what the agent got of a server that echoes the credential it saw: the echo as the
-		// server sent it, or, on a gateway that scrubs credentials, the text without the value.
+		// server sent it, or, on a gateway that scrubs credentials, the echo with the whole credential
+		// value replaced by the scrub placeholder, and nothing else changed.
 		echoed := func(text, prefix, credential string) {
 			GinkgoHelper()
 			if !env.ScrubsCredentials {
 				Expect(text).To(Equal(prefix + credential))
 				return
 			}
-			Expect(text).To(HavePrefix(prefix))
-			Expect(text).NotTo(ContainSubstring("not-a-real-token"), "the gateway gave the agent the credential it opened")
+			Expect(text).To(Equal(prefix+"[redacted:secret]"),
+				"the gateway gave the agent the credential it opened, or changed more than the value")
 		}
 
 		BeforeAll(func(ctx SpecContext) {
