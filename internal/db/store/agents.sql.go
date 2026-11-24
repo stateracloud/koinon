@@ -816,3 +816,59 @@ func (q *Queries) SetAgentsKeepWarmGranted(ctx context.Context, arg SetAgentsKee
 	_, err := q.db.Exec(ctx, setAgentsKeepWarmGranted, arg.Granted, arg.OrgID, arg.Ids)
 	return err
 }
+
+const updateAgentProfile = `-- name: UpdateAgentProfile :one
+UPDATE agents
+SET display_name = $1, harness = $2
+WHERE org_id = $3 AND id = $4 AND status <> 'archived'
+  AND (harness = $2 OR active_version_id IS NULL)
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+`
+
+type UpdateAgentProfileParams struct {
+	DisplayName string
+	Harness     string
+	OrgID       pgtype.UUID
+	ID          pgtype.UUID
+}
+
+// The agent's own fields that UpdateAgent changes without a new version: the display name, and the
+// harness of an agent that was never activated (ADR 0126 section 5).
+func (q *Queries) UpdateAgentProfile(ctx context.Context, arg UpdateAgentProfileParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentProfile,
+		arg.DisplayName,
+		arg.Harness,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Harness,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
+		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
+	)
+	return i, err
+}

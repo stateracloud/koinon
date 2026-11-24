@@ -1773,6 +1773,9 @@ type Querier interface {
 	// The domain lock of the anchor job, taken before the install head (ADR 0100 decision 1.7): one
 	// anchor is written at a time across API replicas. Returns false when another transaction holds it.
 	TryLockAuditAnchor(ctx context.Context) (bool, error)
+	// The agent's own fields that UpdateAgent changes without a new version: the display name, and the
+	// harness of an agent that was never activated (ADR 0126 section 5).
+	UpdateAgentProfile(ctx context.Context, arg UpdateAgentProfileParams) (Agent, error)
 	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
 	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)

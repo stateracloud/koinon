@@ -15,6 +15,7 @@ org it acts in; IDs from another org are not found.
 | --- | --- | --- | --- | --- |
 | ActivateAgent | `koinon.agent.v1alpha1.ActivateAgentRequest` | `koinon.agent.v1alpha1.ActivateAgentResponse` | - | ActivateAgent activates a draft, or moves an active agent to its newer proposed version (ADR 0066), and so approves the grants that version proposes. Admins and owners only. |
 | ArchiveAgent | `koinon.agent.v1alpha1.ArchiveAgentRequest` | `koinon.agent.v1alpha1.ArchiveAgentResponse` | - | ArchiveAgent archives a draft or active agent and cancels its unfinished runs. Admins and owners only. |
+| CreateAgent | `koinon.agent.v1alpha1.CreateAgentRequest` | `koinon.agent.v1alpha1.CreateAgentResponse` | - | CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The result is a draft: it does not run, and its grants and triggers have no effect, until an admin or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the platform's blank-agent default; admins change it with BudgetService. Audited. Members and above. |
 | CreateAgentFromTemplate | `koinon.agent.v1alpha1.CreateAgentFromTemplateRequest` | `koinon.agent.v1alpha1.CreateAgentFromTemplateResponse` | - | CreateAgentFromTemplate creates a draft agent from a template. Members and above. |
 | GetAgent | `koinon.agent.v1alpha1.GetAgentRequest` | `koinon.agent.v1alpha1.GetAgentResponse` | - | GetAgent returns one agent. Viewers and above. |
 | GetAgentModel | `koinon.agent.v1alpha1.GetAgentModelRequest` | `koinon.agent.v1alpha1.GetAgentModelResponse` | - | GetAgentModel says which model the agent's next run uses and where that choice comes from, and lists the models an admin may pick. Admins and owners only. |
@@ -27,6 +28,7 @@ org it acts in; IDs from another org are not found.
 | SetAgentSandboxResources | `koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse` | - | SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left empty so the template's value and then the platform default apply. A value outside the platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the model it is a setting of the agent, not a new version; a change recreates the sandbox at the next run (the size is part of the sandbox spec hash). Audited, with the old and the new override. Admins and owners only. |
 | SetAgentThinking | `koinon.agent.v1alpha1.SetAgentThinkingRequest` | `koinon.agent.v1alpha1.SetAgentThinkingResponse` | - | SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting with an empty value so the version's value (a template's spec.model.thinking) and then the default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old and the new value. Admins and owners only. |
 | SetAgentTriggers | `koinon.agent.v1alpha1.SetAgentTriggersRequest` | `koinon.agent.v1alpha1.SetAgentTriggersResponse` | - | SetAgentTriggers proposes a new version with the given triggers (everything else carried over from the latest version). The triggers fire nothing until ActivateAgent activates that version; an active agent keeps running its active version meanwhile. Audited. Admins and owners only. |
+| UpdateAgent | `koinon.agent.v1alpha1.UpdateAgentRequest` | `koinon.agent.v1alpha1.UpdateAgentResponse` | - | UpdateAgent changes the fields that update_mask names. A change to a version field (instructions, model, grants, triggers, run_limits) adds a new version with everything else carried over from the latest one. On an active agent the new version is proposed: the agent keeps running its active version, with its approved grants and triggers, until ActivateAgent activates the new one (ADR 0066). display_name changes the agent at once; harness changes only before the first activation, within the template's allowed harnesses, and adds a version, so an activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners update any agent of the org; a member updates only a draft that they created. |
 
 ### Message ActivateAgentRequest
 
@@ -83,6 +85,21 @@ Agent is an agent and the definition it runs.
 | keep_warm_granted | 27 | `bool` | singular |  | Whether the reconciler granted the request under the operator's per-org cap (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new request reads false until the reconciler's next pass. |
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 
+### Message AgentDefinition
+
+AgentDefinition is what a person sets on an agent without a template, and what UpdateAgent
+changes.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| display_name | 1 | `string` | singular |  | 1 to 200 characters. |
+| instructions | 2 | `string` | singular |  | Markdown instructions for the agent. Required. |
+| model | 3 | `string` | singular |  | A model the org serves and has a price for; empty or "default" follows the org default. |
+| harness | 4 | `string` | singular |  | A harness by name (ADR 0112); empty picks the platform's default harness. |
+| grants | 5 | `koinon.template.v1alpha1.Grant` | repeated |  | The grants the agent proposes, one per connector type, each with its connection and targets in connection_id and repositories. A grant names a connector type, scopes that the type has, and a preset. targets_min and targets_max are ignored. ActivateAgent approves them. |
+| triggers | 6 | `koinon.template.v1alpha1.Trigger` | repeated |  | The complete list of triggers. They fire nothing until ActivateAgent activates the version. |
+| run_limits | 7 | `koinon.template.v1alpha1.RunLimits` | singular |  | The limits of one run; a zero or empty value takes the platform default. |
+
 ### Message ArchiveAgentRequest
 
 ArchiveAgentRequest names the agent.
@@ -117,6 +134,23 @@ CreateAgentFromTemplateRequest names the template and the user's choices.
 ### Message CreateAgentFromTemplateResponse
 
 CreateAgentFromTemplateResponse holds the new draft.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
+
+### Message CreateAgentRequest
+
+CreateAgentRequest names the org and the definition of the new draft.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| definition | 2 | `koinon.agent.v1alpha1.AgentDefinition` | singular |  |  |
+
+### Message CreateAgentResponse
+
+CreateAgentResponse holds the new draft.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -400,6 +434,26 @@ ThinkingState is the agent's thinking setting and what it resolves to (ADR 0069 
 | always_thinks | 6 | `bool` | singular |  | Whether the effective model thinks whatever the setting. A UI then offers no off choice and says "this model always thinks"; setting "off" is refused with that message. |
 | off_overridden | 7 | `bool` | singular |  | Whether the setting resolves to off and the model thinks anyway (it always thinks). The setting is kept for a model that can stop; runs think. |
 | notice | 8 | `string` | singular |  | What a UI shows about the setting: "this model always thinks; your off setting doesn't apply" when off_overridden, empty otherwise. |
+
+### Message UpdateAgentRequest
+
+UpdateAgentRequest names the agent, the version the change is based on and the fields to change.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| base_version | 3 | `int32` | singular |  | Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the call fails with FailedPrecondition. |
+| definition | 4 | `koinon.agent.v1alpha1.AgentDefinition` | singular |  | The new values. Only the fields that update_mask names are read. |
+| update_mask | 5 | `google.protobuf.FieldMask` | singular |  | The AgentDefinition fields to change, by field name, for example "instructions". Required: an empty mask or an unknown name fails with InvalidArgument. |
+
+### Message UpdateAgentResponse
+
+UpdateAgentResponse holds the agent with its new latest version.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
 
 ### Enum AgentStatus
 
