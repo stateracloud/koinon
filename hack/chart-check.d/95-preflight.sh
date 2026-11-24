@@ -15,17 +15,37 @@ for f in "${value_files[@]}"; do
 		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
 		continue
 	fi
-	if [[ $name == substrate-values ]]; then
-		# koinon-api substrate install runs the Substrate preflight before helm install (#1088).
-		[[ $enabled == false ]] || { echo "$name: the OpenShell preflight hook renders with execution.driver=substrate" >&2; exit 1; }
-		continue
-	fi
 	[[ $enabled == true ]] || { echo "$name: preflight hook not rendered" >&2; exit 1; }
 	rendered=$(preflight_job "$f")
 	for want in 'kind: Job' 'helm.sh/hook: pre-install,pre-upgrade' 'helm.sh/hook-output-log-policy: hook-failed,hook-succeeded' \
 		'kind: ClusterRole' '- preflight'; do
 		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
 	done
+	if [[ $name == substrate-values ]]; then
+		# execution.driver=substrate (#1089): the hook runs the Substrate checks (Kubernetes 1.37, the CRDs, the
+		# pinned api server, the router), not the OpenShell ones, and starts no Substrate probe pod: those
+		# need a privileged namespace of their own that only koinon-api substrate install makes.
+		for want in '- --driver=substrate' '- --substrate-namespace=ate-system' '- --substrate-worker-namespace=ate-workers' \
+			'- --substrate-probes=false' '- --seccomp-probe=false' 'resourceNames: [ate-api-server, atenet-router]'; do
+			grep -qF -- "$want" <<<"$rendered" || { echo "$name: Substrate preflight hook lacks '$want'" >&2; exit 1; }
+		done
+		# The CRDs and Deployments the hook may read are the ones internal/preflight/substrate.go checks.
+		crds=$(sed -n '/^var SubstrateCRDs = /,/^}/p' internal/preflight/substrate.go | sed -nE 's/^\s*"([a-z]+)\." \+ SubstrateCRDGroup,?$/\1/p')
+		[[ -n $crds ]] || { echo "$name: no SubstrateCRDs found in internal/preflight/substrate.go" >&2; exit 1; }
+		for c in $crds; do
+			grep -qF -- "- $c.ate.dev" <<<"$rendered" || { echo "$name: Substrate preflight ClusterRole lacks CRD $c.ate.dev" >&2; exit 1; }
+		done
+		for d in 'APIServerDeployment = "ate-api-server"' 'RouterDeployment = "atenet-router"'; do
+			grep -qF -- "s.$d" internal/preflight/substrate.go ||
+				{ echo "$name: the Deployment default s.$d is not in internal/preflight/substrate.go" >&2; exit 1; }
+		done
+		for absent in '--openshell-address' '--runtime-class=' '--agent-sandbox-' 'sandboxes.agents.x-k8s.io' 'runtimeclasses' 'configmaps' 'openshell-tls'; do
+			if grep -qF -- "$absent" <<<"$rendered"; then echo "$name: Substrate preflight hook has OpenShell '$absent'" >&2; exit 1; fi
+		done
+	elif grep -qF -- '--driver=substrate' <<<"$rendered"; then
+		echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2
+		exit 1
+	fi
 	# The ClusterRole is get-only, except that in cnpg mode the CNPG operator check lists
 	# exactly validatingwebhookconfigurations and endpointslices (neither can be narrowed by
 	# resourceNames).

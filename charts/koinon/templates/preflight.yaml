@@ -4,7 +4,14 @@ Install preflight ("koinon-api preflight", plan item H2) as a pre-install and pr
 runs before everything else, the migration Job included. It fails the install with a clear message
 when Agent Sandbox, the OpenShell gateway, the sandbox RuntimeClass, the CNPG operator (cnpg mode)
 or agentgateway's GatewayClass (kubernetes mode) is missing, and warns when Kata guest seccomp is
-off (ADRs 0048, 0049) or when the cluster does not enforce NetworkPolicy. helm.sh/hook-output-log-policy makes Helm 4 print the Job's output; a
+off (ADRs 0048, 0049) or when the cluster does not enforce NetworkPolicy.
+
+With execution.driver=substrate (issue #1089) it runs "koinon-api preflight --driver substrate" instead: it
+fails below Kubernetes 1.37, when the Substrate CRDs are missing, when the api server is not the pinned
+release or not ready, and when the router does not allow the atenet client. The probe pods of that driver
+(issuer, node devices, user namespaces) need a privileged namespace of their own, which a hook must not
+create; koinon-api substrate install runs them, and here they only warn (--substrate-probes=false). The
+WorkerPools are not checked: the chart's own pool does not exist yet at pre-install. helm.sh/hook-output-log-policy makes Helm 4 print the Job's output; a
 failed Job is kept for `kubectl logs job/<name>`.
 
 RBAC is read-only get on exactly the objects checked, by name. The seccomp probe additionally
@@ -12,11 +19,14 @@ creates, reads and deletes one short-lived unprivileged pod in the release names
 NetworkPolicy probe two such pods (koinon-api's image, the default runtime) and one NetworkPolicy
 that selects only its own server pod, all deleted when it ends.
 */ -}}
-{{- if and .Values.preflight.enabled (ne (.Values.execution.driver | default "openshell") "substrate") }}
+{{- if .Values.preflight.enabled }}
 {{- include "koinon.validate" . }}
 {{- $name := include "koinon.componentName" (list . "preflight") }}
 {{- $clusterName := printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
-{{- $probe := .Values.preflight.seccompProbe.enabled }}
+{{- $substrate := eq (include "koinon.substrate" .) "true" }}
+{{- $sub := .Values.execution.substrate }}
+{{- /* The guest seccomp probe is Kata's (ADR 0048); the Substrate driver has no use for it. */ -}}
+{{- $probe := and .Values.preflight.seccompProbe.enabled (not $substrate) }}
 {{- $netpol := .Values.preflight.networkPolicyProbe.enabled }}
 apiVersion: v1
 kind: ServiceAccount
@@ -40,7 +50,14 @@ rules:
   - apiGroups: [apiextensions.k8s.io]
     resources: [customresourcedefinitions]
     resourceNames:
+      {{- if $substrate }}
+      # The Substrate CRDs (internal/preflight/substrate.go SubstrateCRDs).
+      - sandboxconfigs.ate.dev
+      - workerpools.ate.dev
+      - csidriverconfigs.ate.dev
+      {{- else }}
       - sandboxes.agents.x-k8s.io
+      {{- end }}
       {{- if eq .Values.gateway.mode "kubernetes" }}
       - agentgatewaybackends.agentgateway.dev
       - agentgatewaymodels.agentgateway.dev
@@ -51,11 +68,21 @@ rules:
       - clusters.postgresql.cnpg.io
       {{- end }}
     verbs: [get]
+  {{- if $substrate }}
+  # Substrate's api server (its release tag and ready replicas) and the router (its SPIFFE allow-list), in
+  # execution.substrate.namespace. A ClusterRole: the namespace may not exist yet, and a Role there would
+  # fail the hook before the preflight can say so.
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [ate-api-server, atenet-router]
+    verbs: [get]
+  {{- else }}
   # The Agent Sandbox controller, for its release version (its namespace is checked by name).
   - apiGroups: [apps]
     resources: [deployments]
     resourceNames: [{{ .Values.preflight.agentSandbox.controller }}{{ if eq .Values.gateway.mode "kubernetes" }}, {{ .Values.preflight.agentgateway.controller }}{{ end }}]
     verbs: [get]
+  {{- end }}
   {{- if eq .Values.postgres.mode "cnpg" }}
   # The CNPG operator: the webhook that validates its Clusters names the operator's Service,
   # whose ready endpoints say the operator runs (wherever it was installed).
@@ -66,6 +93,7 @@ rules:
     resources: [endpointslices]
     verbs: [list]
   {{- end }}
+  {{- if not $substrate }}
   # OpenShell's gateway configuration, to check its sandbox pull secrets and supervisor image. A
   # ClusterRole because the ConfigMap is in OpenShell's namespace, which may not exist yet (a Role
   # there would fail the hook before the preflight can say so); resourceNames pins the one object.
@@ -85,6 +113,7 @@ rules:
     resources: [runtimeclasses]
     resourceNames: [{{ .Values.openshell.runtimeClassName }}]
     verbs: [get]
+  {{- end }}
   {{- if eq .Values.gateway.mode "kubernetes" }}
   - apiGroups: [gateway.networking.k8s.io]
     resources: [gatewayclasses]
@@ -188,6 +217,12 @@ spec:
             - --gateway-class={{ .Values.gateway.kubernetes.gatewayClassName }}
             - --agentgateway-namespace={{ .Values.preflight.agentgateway.namespace }}
             - --agentgateway-controller={{ .Values.preflight.agentgateway.controller }}
+            {{- if $substrate }}
+            - --driver=substrate
+            - --substrate-namespace={{ $sub.namespace }}
+            - --substrate-worker-namespace={{ $sub.workerNamespace }}
+            - --substrate-probes=false
+            {{- else }}
             - --runtime-class={{ .Values.openshell.runtimeClassName }}
             - --openshell-address={{ include "koinon.openshellAddress" . }}
             {{- if .Values.openshell.clientTLSSecret }}
@@ -212,6 +247,7 @@ spec:
             {{- end }}
             - --agent-sandbox-namespace={{ .Values.preflight.agentSandbox.namespace }}
             - --agent-sandbox-controller={{ .Values.preflight.agentSandbox.controller }}
+            {{- end }}
             - --seccomp-probe={{ $probe }}
             - --netpol-probe={{ $netpol }}
             {{- if or $probe $netpol }}
@@ -239,11 +275,11 @@ spec:
           terminationMessagePolicy: FallbackToLogsOnError
           resources:
             {{- toYaml .Values.preflight.resources | nindent 12 }}
-          {{- with (include "koinon.openshellVolumeMount" .) }}
+          {{- with (and (not $substrate) (include "koinon.openshellVolumeMount" .)) }}
           volumeMounts:
             {{- . | nindent 12 }}
           {{- end }}
-      {{- with (include "koinon.openshellVolume" .) }}
+      {{- with (and (not $substrate) (include "koinon.openshellVolume" .)) }}
       volumes:
         {{- . | nindent 8 }}
       {{- end }}

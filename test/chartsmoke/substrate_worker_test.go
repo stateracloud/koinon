@@ -74,6 +74,20 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(ca.Ignored).To(HaveKeyWithValue("RoleBinding", 1))
 	})
 
+	// The install preflight with the Substrate driver (issue #1089): the hook Job runs the Substrate checks and
+	// no Substrate probe pod. "Rendered startup" runs this Job against the API server and requires its report
+	// with no Forbidden answer, which proves its read-only RBAC.
+	It("renders the preflight hook Job with the Substrate checks", func(ctx SpecContext) {
+		values := filepath.Join(chartDir, "ci", "substrate-values.yaml")
+		pre := helmRenderWith(ctx, values, showOnly("templates/preflight.yaml")...)
+		Expect(pre.Jobs).To(HaveLen(1))
+		args := pre.Jobs[0].Spec.Template.Spec.Containers[0].Args
+		Expect(args).To(ContainElements("preflight", "--driver=substrate", "--substrate-namespace=ate-system",
+			"--substrate-worker-namespace=ate-workers", "--substrate-probes=false", "--seccomp-probe=false"))
+		Expect(args).NotTo(ContainElement(HavePrefix("--openshell-address")))
+		Expect(args).NotTo(ContainElement(HavePrefix("--runtime-class")))
+	})
+
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {
 		r := helmRender(ctx, filepath.Join(chartDir, "ci", "external-standalone-values.yaml"))
 		Expect(r.Ignored).NotTo(HaveKey("WorkerPool"))

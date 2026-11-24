@@ -769,7 +769,8 @@ execution:
   # openshell (the default until the epic flips it) or substrate (Agent Substrate). Install Substrate
   # first with `koinon-api substrate install`, which also runs its preflight. With substrate the
   # openshell section, sandboxObserver, sandboxNetworkPolicy and sandboxLimitRange are not used (the
-  # chart refuses the last three when they are on), and the install preflight Job is skipped.
+  # chart refuses the last three when they are on), and the install preflight Job runs the Substrate
+  # checks (Kubernetes 1.37, the CRDs, the pinned api server, the router) without the Substrate probe pods.
   driver: openshell
   substrate:
     # ateapi's host:port, for example api.ate-system.svc.cluster.local:443. Required with substrate.
