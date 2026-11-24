@@ -8,7 +8,9 @@ package platformv1alpha1connect
 
 import (
 	connect "connectrpc.com/connect/v2"
-	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
+	context "context"
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
+	sync "sync"
 )
 
 const (
@@ -16,8 +18,47 @@ const (
 	PlatformServiceName = "koinon.platform.v1alpha1.PlatformService"
 )
 
+// These constants are the procedure names of the RPCs defined in this package. They're exposed at
+// runtime as Spec.Procedure and as the final two segments of the HTTP route.
+//
+// Note that these are different from the fully-qualified method names used by
+// google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to
+// reflection-formatted method names, remove the leading slash and convert the remaining slash to a
+// period.
+const (
+	// PlatformServiceListOrgsProcedure is the procedure name of the PlatformService's ListOrgs RPC.
+	PlatformServiceListOrgsProcedure = "/koinon.platform.v1alpha1.PlatformService/ListOrgs"
+	// PlatformServiceGetOrgProcedure is the procedure name of the PlatformService's GetOrg RPC.
+	PlatformServiceGetOrgProcedure = "/koinon.platform.v1alpha1.PlatformService/GetOrg"
+)
+
+var (
+	platformServiceListOrgsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_platform_v1alpha1_platform_proto.Services().ByName("PlatformService").Methods().ByName("ListOrgs"),
+			Procedure:        PlatformServiceListOrgsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	platformServiceGetOrgSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_platform_v1alpha1_platform_proto.Services().ByName("PlatformService").Methods().ByName("GetOrg"),
+			Procedure:        PlatformServiceGetOrgProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+)
+
 // PlatformServiceClient is a client for the koinon.platform.v1alpha1.PlatformService service.
 type PlatformServiceClient interface {
+	// ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are
+	// left out unless include_personal is set.
+	ListOrgs(context.Context, *v1alpha1.ListOrgsRequest) (*v1alpha1.ListOrgsResponse, error)
+	// GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the
+	// "acting as platform admin" banner (ADR 0126 section 4).
+	GetOrg(context.Context, *v1alpha1.GetOrgRequest) (*v1alpha1.GetOrgResponse, error)
 }
 
 // NewPlatformServiceClient constructs a client for the koinon.platform.v1alpha1.PlatformService
@@ -29,19 +70,77 @@ func NewPlatformServiceClient(client *connect.Client) PlatformServiceClient {
 // PlatformServiceHandler is an implementation of the koinon.platform.v1alpha1.PlatformService
 // service.
 type PlatformServiceHandler interface {
+	// ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are
+	// left out unless include_personal is set.
+	ListOrgs(context.Context, *v1alpha1.ListOrgsRequest) (*v1alpha1.ListOrgsResponse, error)
+	// GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the
+	// "acting as platform admin" banner (ADR 0126 section 4).
+	GetOrg(context.Context, *v1alpha1.GetOrgRequest) (*v1alpha1.GetOrgResponse, error)
 }
 
 // RegisterPlatformServiceHandler registers svc as the koinon.platform.v1alpha1.PlatformService
 // implementation on server.
 func RegisterPlatformServiceHandler(server *connect.Server, svc PlatformServiceHandler) {
-	server.Register()
+	adapter := platformServiceHandler{svc: svc}
+	server.Register(
+		connect.Method{Spec: platformServiceListOrgsSpec(), Handler: adapter.listOrgs},
+		connect.Method{Spec: platformServiceGetOrgSpec(), Handler: adapter.getOrg},
+	)
 }
 
 // UnimplementedPlatformServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedPlatformServiceHandler struct{}
 
+func (UnimplementedPlatformServiceHandler) ListOrgs(context.Context, *v1alpha1.ListOrgsRequest) (*v1alpha1.ListOrgsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.platform.v1alpha1.PlatformService.ListOrgs is not implemented")
+}
+
+func (UnimplementedPlatformServiceHandler) GetOrg(context.Context, *v1alpha1.GetOrgRequest) (*v1alpha1.GetOrgResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.platform.v1alpha1.PlatformService.GetOrg is not implemented")
+}
+
 type platformServiceClient struct {
 	client *connect.Client
 }
 
+func (c *platformServiceClient) ListOrgs(ctx context.Context, req *v1alpha1.ListOrgsRequest) (*v1alpha1.ListOrgsResponse, error) {
+	var res v1alpha1.ListOrgsResponse
+	if err := c.client.CallUnary(ctx, platformServiceListOrgsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *platformServiceClient) GetOrg(ctx context.Context, req *v1alpha1.GetOrgRequest) (*v1alpha1.GetOrgResponse, error) {
+	var res v1alpha1.GetOrgResponse
+	if err := c.client.CallUnary(ctx, platformServiceGetOrgSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 type platformServiceHandler struct{ svc PlatformServiceHandler }
+
+func (h platformServiceHandler) listOrgs(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListOrgsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListOrgs(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h platformServiceHandler) getOrg(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetOrgRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetOrg(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}

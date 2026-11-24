@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.org.v1alpha1;
+
+import "koinon/auth/v1alpha1/auth.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1;orgv1alpha1";
+
+// OrgService reads the org itself for its members (ADR 0126). Every role may call it. A platform
+// admin may call it for any org (ADR 0126 section 4: the UI shows the "acting as platform admin"
+// banner when the admin is not a member). It reads only.
+service OrgService {
+  // ListMembers lists the users with an effective role in the org, by display name. The org's
+  // identity mode applies, as for WhoAmI (ADR 0004). It is the data for "reports to a person".
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Member is one user of the org with the user's effective role.
+message Member {
+  string user_id = 1;
+  string display_name = 2;
+  koinon.auth.v1alpha1.OrgRole role = 3;
+}
+
+message ListMembersRequest {
+  string org_id = 1;
+  // page_size is 100 by default and at most 500.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page.
+  string page_token = 3;
+}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}

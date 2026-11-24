@@ -5,22 +5,257 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/platform/v1alpha1/platform.proto.
  */
 export const file_koinon_platform_v1alpha1_platform: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMTIRCg9QbGF0Zm9ybVNlcnZpY2VCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vcGxhdGZvcm0vdjFhbHBoYTE7cGxhdGZvcm12MWFscGhhMWIGcHJvdG8z");
+  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMSKhAgoKT3JnU3VtbWFyeRIOCgZvcmdfaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSLwoEa2luZBgEIAEoDjIhLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5PcmdLaW5kEhQKDG1lbWJlcl9jb3VudBgFIAEoBRITCgthZ2VudF9jb3VudBgGIAEoBRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgHIAEoCRIXCg9tb250aGx5X2NhcF91c2QYCCABKAkSHAoUcGxhdGZvcm1fY2VpbGluZ191c2QYCSABKAkSLgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiUgoPTGlzdE9yZ3NSZXF1ZXN0EhgKEGluY2x1ZGVfcGVyc29uYWwYASABKAgSEQoJcGFnZV9zaXplGAIgASgFEhIKCnBhZ2VfdG9rZW4YAyABKAkikAEKEExpc3RPcmdzUmVzcG9uc2USMgoEb3JncxgBIAMoCzIkLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5PcmdTdW1tYXJ5EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRIvCgttb250aF9zdGFydBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiHwoNR2V0T3JnUmVxdWVzdBIOCgZvcmdfaWQYASABKAkidAoOR2V0T3JnUmVzcG9uc2USMQoDb3JnGAEgASgLMiQua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLk9yZ1N1bW1hcnkSLwoLbW9udGhfc3RhcnQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKk0KB09yZ0tpbmQSGAoUT1JHX0tJTkRfVU5TUEVDSUZJRUQQABIVChFPUkdfS0lORF9QRVJTT05BTBABEhEKDU9SR19LSU5EX1RFQU0QAjLbAQoPUGxhdGZvcm1TZXJ2aWNlEmYKCExpc3RPcmdzEikua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkxpc3RPcmdzUmVxdWVzdBoqLmtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMS5MaXN0T3Jnc1Jlc3BvbnNlIgOQAgESYAoGR2V0T3JnEicua29pbm9uLnBsYXRmb3JtLnYxYWxwaGExLkdldE9yZ1JlcXVlc3QaKC5rb2lub24ucGxhdGZvcm0udjFhbHBoYTEuR2V0T3JnUmVzcG9uc2UiA5ACAUJXWlVnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9wbGF0Zm9ybS92MWFscGhhMTtwbGF0Zm9ybXYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
- * PlatformService is the first Koinon API surface. It has no methods yet;
- * it exists so code generation and `buf breaking` run from day one.
+ * OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
+ * BudgetService writes them.
+ *
+ * @generated from message koinon.platform.v1alpha1.OrgSummary
+ */
+export type OrgSummary = Message<"koinon.platform.v1alpha1.OrgSummary"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string slug = 2;
+   */
+  slug: string;
+
+  /**
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: koinon.platform.v1alpha1.OrgKind kind = 4;
+   */
+  kind: OrgKind;
+
+  /**
+   * member_count counts the users with an effective role in the org (its identity mode applies, as
+   * for WhoAmI).
+   *
+   * @generated from field: int32 member_count = 5;
+   */
+  memberCount: number;
+
+  /**
+   * agent_count counts the agents that are not archived.
+   *
+   * @generated from field: int32 agent_count = 6;
+   */
+  agentCount: number;
+
+  /**
+   * spent_this_month_usd is the recorded spend since month_start of the response.
+   *
+   * @generated from field: string spent_this_month_usd = 7;
+   */
+  spentThisMonthUsd: string;
+
+  /**
+   * monthly_cap_usd is the org's monthly budget; empty when the org has none.
+   *
+   * @generated from field: string monthly_cap_usd = 8;
+   */
+  monthlyCapUsd: string;
+
+  /**
+   * platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none.
+   *
+   * @generated from field: string platform_ceiling_usd = 9;
+   */
+  platformCeilingUsd: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 10;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.platform.v1alpha1.OrgSummary.
+ * Use `create(OrgSummarySchema)` to create a new message.
+ */
+export const OrgSummarySchema: GenMessage<OrgSummary> = /*@__PURE__*/
+  messageDesc(file_koinon_platform_v1alpha1_platform, 0);
+
+/**
+ * @generated from message koinon.platform.v1alpha1.ListOrgsRequest
+ */
+export type ListOrgsRequest = Message<"koinon.platform.v1alpha1.ListOrgsRequest"> & {
+  /**
+   * include_personal also lists the personal orgs.
+   *
+   * @generated from field: bool include_personal = 1;
+   */
+  includePersonal: boolean;
+
+  /**
+   * page_size is 50 by default and at most 200.
+   *
+   * @generated from field: int32 page_size = 2;
+   */
+  pageSize: number;
+
+  /**
+   * page_token is the next_page_token of the previous page, with the same include_personal.
+   *
+   * @generated from field: string page_token = 3;
+   */
+  pageToken: string;
+};
+
+/**
+ * Describes the message koinon.platform.v1alpha1.ListOrgsRequest.
+ * Use `create(ListOrgsRequestSchema)` to create a new message.
+ */
+export const ListOrgsRequestSchema: GenMessage<ListOrgsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_platform_v1alpha1_platform, 1);
+
+/**
+ * @generated from message koinon.platform.v1alpha1.ListOrgsResponse
+ */
+export type ListOrgsResponse = Message<"koinon.platform.v1alpha1.ListOrgsResponse"> & {
+  /**
+   * @generated from field: repeated koinon.platform.v1alpha1.OrgSummary orgs = 1;
+   */
+  orgs: OrgSummary[];
+
+  /**
+   * next_page_token is empty on the last page.
+   *
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+
+  /**
+   * month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from.
+   *
+   * @generated from field: google.protobuf.Timestamp month_start = 3;
+   */
+  monthStart?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.platform.v1alpha1.ListOrgsResponse.
+ * Use `create(ListOrgsResponseSchema)` to create a new message.
+ */
+export const ListOrgsResponseSchema: GenMessage<ListOrgsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_platform_v1alpha1_platform, 2);
+
+/**
+ * @generated from message koinon.platform.v1alpha1.GetOrgRequest
+ */
+export type GetOrgRequest = Message<"koinon.platform.v1alpha1.GetOrgRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.platform.v1alpha1.GetOrgRequest.
+ * Use `create(GetOrgRequestSchema)` to create a new message.
+ */
+export const GetOrgRequestSchema: GenMessage<GetOrgRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_platform_v1alpha1_platform, 3);
+
+/**
+ * @generated from message koinon.platform.v1alpha1.GetOrgResponse
+ */
+export type GetOrgResponse = Message<"koinon.platform.v1alpha1.GetOrgResponse"> & {
+  /**
+   * @generated from field: koinon.platform.v1alpha1.OrgSummary org = 1;
+   */
+  org?: OrgSummary | undefined;
+
+  /**
+   * month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from.
+   *
+   * @generated from field: google.protobuf.Timestamp month_start = 2;
+   */
+  monthStart?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.platform.v1alpha1.GetOrgResponse.
+ * Use `create(GetOrgResponseSchema)` to create a new message.
+ */
+export const GetOrgResponseSchema: GenMessage<GetOrgResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_platform_v1alpha1_platform, 4);
+
+/**
+ * OrgKind mirrors the org_kind enum in Postgres.
+ *
+ * @generated from enum koinon.platform.v1alpha1.OrgKind
+ */
+export enum OrgKind {
+  /**
+   * @generated from enum value: ORG_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ORG_KIND_PERSONAL = 1;
+   */
+  PERSONAL = 1,
+
+  /**
+   * @generated from enum value: ORG_KIND_TEAM = 2;
+   */
+  TEAM = 2,
+}
+
+/**
+ * Describes the enum koinon.platform.v1alpha1.OrgKind.
+ */
+export const OrgKindSchema: GenEnum<OrgKind> = /*@__PURE__*/
+  enumDesc(file_koinon_platform_v1alpha1_platform, 0);
+
+/**
+ * PlatformService is the platform console's face of the install (ADR 0126 section 4). Every call is
+ * for a platform admin only; any other caller gets PermissionDenied. It reads only: create, update,
+ * archive and delete of an org need a decision first (ADR 0126 section 7).
  *
  * @generated from service koinon.platform.v1alpha1.PlatformService
  */
 export const PlatformService: GenService<{
+  /**
+   * ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are
+   * left out unless include_personal is set.
+   *
+   * @generated from rpc koinon.platform.v1alpha1.PlatformService.ListOrgs
+   */
+  listOrgs: {
+    methodKind: "unary";
+    input: typeof ListOrgsRequestSchema;
+    output: typeof ListOrgsResponseSchema;
+  },
+  /**
+   * GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the
+   * "acting as platform admin" banner (ADR 0126 section 4).
+   *
+   * @generated from rpc koinon.platform.v1alpha1.PlatformService.GetOrg
+   */
+  getOrg: {
+    methodKind: "unary";
+    input: typeof GetOrgRequestSchema;
+    output: typeof GetOrgResponseSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_platform_v1alpha1_platform, 0);
 

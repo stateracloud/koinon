@@ -2964,6 +2964,45 @@ ToolSink is what a tool declares about its calls (ADR 0091 decision 2).
 | TIER_AUTO | 2 | AUTO: the agent calls the tool directly. |
 | TIER_NEVER | 3 | NEVER: no agent may call the tool. |
 
+## koinon.org.v1alpha1
+
+Files: `koinon/org/v1alpha1/org.proto`
+
+### Service OrgService
+
+OrgService reads the org itself for its members (ADR 0126). Every role may call it. A platform
+admin may call it for any org (ADR 0126 section 4: the UI shows the "acting as platform admin"
+banner when the admin is not a member). It reads only.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ListMembers | `koinon.org.v1alpha1.ListMembersRequest` | `koinon.org.v1alpha1.ListMembersResponse` | - | ListMembers lists the users with an effective role in the org, by display name. The org's identity mode applies, as for WhoAmI (ADR 0004). It is the data for "reports to a person". |
+
+### Message ListMembersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| page_size | 2 | `int32` | singular |  | page_size is 100 by default and at most 500. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page. |
+
+### Message ListMembersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| members | 1 | `koinon.org.v1alpha1.Member` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message Member
+
+Member is one user of the org with the user's effective role.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| user_id | 1 | `string` | singular |  |  |
+| display_name | 2 | `string` | singular |  |  |
+| role | 3 | `koinon.auth.v1alpha1.OrgRole` | singular |  |  |
+
 ## koinon.orgsettings.v1alpha1
 
 Files: `koinon/orgsettings/v1alpha1/orgsettings.proto`
@@ -3165,11 +3204,71 @@ Files: `koinon/platform/v1alpha1/platform.proto`
 
 ### Service PlatformService
 
-PlatformService is the first Koinon API surface. It has no methods yet;
-it exists so code generation and `buf breaking` run from day one.
+PlatformService is the platform console's face of the install (ADR 0126 section 4). Every call is
+for a platform admin only; any other caller gets PermissionDenied. It reads only: create, update,
+archive and delete of an org need a decision first (ADR 0126 section 7).
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
+| GetOrg | `koinon.platform.v1alpha1.GetOrgRequest` | `koinon.platform.v1alpha1.GetOrgResponse` | - | GetOrg reads one live org, also one the platform admin is not a member of. The UI then shows the "acting as platform admin" banner (ADR 0126 section 4). |
+| ListOrgs | `koinon.platform.v1alpha1.ListOrgsRequest` | `koinon.platform.v1alpha1.ListOrgsResponse` | - | ListOrgs lists the live orgs by slug, with their counts, spend and budget. Personal orgs are left out unless include_personal is set. |
+
+### Message GetOrgRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message GetOrgResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgSummary` | singular |  |  |
+| month_start | 2 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
+
+### Message ListOrgsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| include_personal | 1 | `bool` | singular |  | include_personal also lists the personal orgs. |
+| page_size | 2 | `int32` | singular |  | page_size is 50 by default and at most 200. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page, with the same include_personal. |
+
+### Message ListOrgsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| orgs | 1 | `koinon.platform.v1alpha1.OrgSummary` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+| month_start | 3 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
+
+### Message OrgSummary
+
+OrgSummary is one org as the platform console shows it. Amounts are USD decimal text, the way
+BudgetService writes them.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| slug | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  |  |
+| kind | 4 | `koinon.platform.v1alpha1.OrgKind` | singular |  |  |
+| member_count | 5 | `int32` | singular |  | member_count counts the users with an effective role in the org (its identity mode applies, as for WhoAmI). |
+| agent_count | 6 | `int32` | singular |  | agent_count counts the agents that are not archived. |
+| spent_this_month_usd | 7 | `string` | singular |  | spent_this_month_usd is the recorded spend since month_start of the response. |
+| monthly_cap_usd | 8 | `string` | singular |  | monthly_cap_usd is the org's monthly budget; empty when the org has none. |
+| platform_ceiling_usd | 9 | `string` | singular |  | platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none. |
+| created_at | 10 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Enum OrgKind
+
+OrgKind mirrors the org_kind enum in Postgres.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| ORG_KIND_UNSPECIFIED | 0 |  |
+| ORG_KIND_PERSONAL | 1 |  |
+| ORG_KIND_TEAM | 2 |  |
 
 ## koinon.provider.v1alpha1
 
