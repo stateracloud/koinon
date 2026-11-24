@@ -425,5 +425,5 @@ tier_notes() {
 }
 tn_default=$(tier_notes)
 grep -Fq 'run at defaultTier' <<<"$tn_default" || fail "NOTES say the runtime class runs at defaultTier when it has no tier entry"
-tn_entry=$(tier_notes --set "execution.substrate.runtimeClassTiers.kata=vm")
+tn_entry=$(tier_notes --set "execution.substrate.runtimeClassTiers.kata=hardened")
 if grep -Fq 'run at defaultTier' <<<"$tn_entry"; then fail "NOTES stay quiet when runtimeClassTiers names the runtime class"; fi
