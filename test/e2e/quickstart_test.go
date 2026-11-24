@@ -669,6 +669,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
 		leakGuardCanaryInTask(ctx, c, org, agent.GetId(), fake)
+		leakGuardURLInTask(ctx, c, admin, os.Getenv("KOINON_E2E_KUBECTL"), org, agent.GetId(), mcpServerID, fake)
 		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway, leak guard)")
 	})
 
@@ -1395,9 +1396,9 @@ func (r ledgerRow) entry() scenarios.Entry {
 //     card names the taint and the external-low class, and the server never sees them, not even after the
 //     approver denies them.
 //
-// The URL refusal and the lengths above the threshold are covered at guard level (internal/mcpguard, #1133);
-// the byte cap only alerts (#1058) and is not asserted here. search_items is auto and declared external-low
-// by mcpServerE2E.
+// The URL case is leakGuardURLInTask. The lengths above the threshold are covered at guard level
+// (internal/mcpguard, #1133); the byte cap only alerts (#1058) and is not asserted here. search_items is auto
+// and declared external-low by mcpServerE2E.
 func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentID, fake string) {
 	GinkgoHelper()
 	k := scenarios.PullRequest.TrackerCanary
@@ -1467,4 +1468,94 @@ func leakGuardCanaryInTask(ctx context.Context, c *e2eclient.Client, org, agentI
 		Expect(r.Args).NotTo(ContainSubstring("amber-falcon"), "the canary reached the upstream server")
 	}
 	Expect(searches()[before:]).To(HaveLen(2))
+}
+
+// leakGuardURLInTask is the URL case of the canary control (#1051, ADR 0084, ADR 0091), on the same path as
+// leakGuardCanaryInTask. It declares fetch_url with the fetch derivation, so the class of each call comes from
+// its URL: a host the org has not trusted is external-low. It runs after the escape hook (in mcpServerE2E),
+// which expects fetch_url undeclared. The script reads the fake canary (both legs), then fetches three URLs:
+//
+//   - positive control: a clean URL passes and reaches the server;
+//   - the URL rule: the canary's first 30 characters as hex in one path component. The text match cannot
+//     read hex; the shape rule refuses the call (decision refuse, reason url_rule, class external-low), with
+//     no approval, and the server never sees it;
+//   - the text match: the whole canary in the query of a URL of a valid shape is held for an approval whose
+//     card names the taint and the external-low class, and the server never sees it, not even after the
+//     approver denies it.
+//
+// fetch_url stays auto (leakGuardExfilE2E) until the step ends, and keeps this declaration after it.
+func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(context.Context, string, string, ...string) (int, []byte),
+	kubectl, org, agentID, serverID, fake string,
+) {
+	GinkgoHelper()
+	k := scenarios.PullRequest.TrackerFetch
+	canary := scenarios.PullRequest.TrackerCanary
+	By("a task whose agent reads text with a canary, then fetches URLs with it, is refused or held by the guard on an external-low fetch")
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	setToolSinkE2E(ctx, admin, serverID, "fetch_url", `{"sinkClass":"external-high","derivation":"fetch","addressArgs":["url"]}`)
+	fetches := func() (out []fakeMCPRecord) {
+		for _, r := range fakeMCPRequests(ctx, fake) {
+			if r.Tool == "fetch_url" {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	arg := func(u string) string { b, _ := json.Marshal(map[string]string{"url": u}); return string(b) }
+	refusedURLRule := func() float64 { return guardDecisions(ctx, kubectl, "refuse", "url_rule", "external-low") }
+	before := len(fetches())
+	all := len(fakeMCPRequests(ctx, fake))
+	refusedBefore := refusedURLRule()
+	res, err := c.Tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+		OrgId: org, AgentId: agentID, Title: "Tracker fetch canary",
+		Message: k.Prompt + ": read an item from the tracker, then fetch the pages it names.",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	runID := res.GetRun().GetId()
+	var seq int64
+	var evKinds []string
+	w := watchRun(context.WithoutCancel(ctx), c, org, runID, 0)
+	parked := w.until(ctx, c, org, runID, 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+		return r.GetState() == runv1alpha1.RunState_RUN_STATE_PARKED
+	})
+	Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
+
+	By("positive control: a clean URL to a host the org has not trusted reaches the server")
+	got := fetches()[before:]
+	Expect(got).To(HaveLen(1), "only the clean fetch reaches the server: %+v", got)
+	Expect(got[0].Args).To(MatchJSON(arg(k.CleanURL)))
+	Expect(got[0].Agent).To(Equal("default/" + agentID))
+
+	By("the URL rule: the canary as hex in one path component is refused on the external-low class, with no approval")
+	Expect(refusedURLRule()-refusedBefore).To(BeNumerically("==", 1), "the guard refused exactly one call by the URL rule")
+
+	By("the text match: the canary in the query of a valid URL is held as a taint approval of an external-low call")
+	list, err := c.Approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(list.GetApprovals()).To(HaveLen(1), "one approval, for the leaking URL; the refused call has none")
+	d, err := c.Approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+	Expect(err).NotTo(HaveOccurred())
+	ap := d.GetApproval()
+	Expect(ap.GetConnector()).To(Equal("mcp"))
+	Expect(ap.GetTool()).To(Equal("fetch_url"))
+	Expect(ap.GetArgsJson()).To(MatchJSON(arg(k.LeakURL)))
+	lg := ap.GetMcp().GetLeakGuard()
+	Expect(lg).NotTo(BeNil(), "the approval is the leak guard's")
+	Expect(lg.GetSinkClass()).To(Equal("external-low"), "the fetch derivation reads the class from the URL's host")
+	Expect(lg.GetReasons()).To(ContainElement("taint"))
+	_, err = c.Approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: ap.GetId()})
+	Expect(err).NotTo(HaveOccurred())
+
+	By("the canary never reaches the server, refused, held or denied")
+	w.until(ctx, c, org, runID, 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+		return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
+	})
+	// Every request the server logged since the task, not only the fetches: neither form of the canary travels to it.
+	for _, r := range fakeMCPRequests(ctx, fake)[all:] {
+		Expect(r.Args).NotTo(ContainSubstring(k.EncodedURL), "the hex canary reached the upstream server")
+		Expect(r.Args).NotTo(ContainSubstring("amber-falcon"), "the canary reached the upstream server")
+		Expect(r.Args).NotTo(ContainSubstring(canary.AtQuery), "the canary's first 30 characters reached the upstream server")
+	}
+	Expect(fetches()[before:]).To(HaveLen(1))
+	Expect(refusedURLRule() - refusedBefore).To(BeNumerically("==", 1))
 }
