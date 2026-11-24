@@ -56,7 +56,7 @@ var _ = Describe("the MCP path", func() {
 				},
 				Tools: map[gateway.AgentRef][]gateway.ToolGrant{
 					agentAcme: {
-						{Target: "acme-wiki", Tools: []string{"read_item", "write_item", "fail", "roots", "sample", "log"}},
+						{Target: "acme-wiki", Tools: []string{"read_item", "write_item", "fail", "roots", "sample", "elicit", "log"}},
 						{Target: "acme-open", Tools: []string{"read_item"}},
 					},
 					// A grant that names another org's target does nothing.
@@ -70,7 +70,7 @@ var _ = Describe("the MCP path", func() {
 
 	It("lists only the granted tools of the targets the agent's org may see, with the target as prefix", func(ctx SpecContext) {
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyAcme.Material))).To(ConsistOf(
-			"acme-wiki_read_item", "acme-wiki_write_item", "acme-wiki_fail", "acme-wiki_roots", "acme-wiki_sample", "acme-wiki_log",
+			"acme-wiki_read_item", "acme-wiki_write_item", "acme-wiki_fail", "acme-wiki_roots", "acme-wiki_sample", "acme-wiki_elicit", "acme-wiki_log",
 			"acme-open_read_item"))
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyNoGrant.Material))).To(BeEmpty())
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyX.Material))).To(BeEmpty())
@@ -181,6 +181,34 @@ var _ = Describe("the MCP path", func() {
 			return append([]mcpgateway.Violation(nil), guard.violations...)
 		}).Should(ContainElement(mcpgateway.ViolationSampling))
 		Expect(guard.sawText("canary-sampling")).To(BeTrue())
+	})
+
+	It("refuses elicitation in form and URL mode, reports it to the guard and still shows the guard the request", func(ctx SpecContext) {
+		s := connect(ctx, front.URL, keyAcme.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_elicit"})
+		Expect(err).NotTo(HaveOccurred())
+		var answers []string
+		for _, c := range res.Content {
+			answers = append(answers, c.(*mcp.TextContent).Text)
+		}
+		// The target gets the gateway's own refusal for each mode, not an answer.
+		Expect(answers).To(HaveExactElements(
+			And(HavePrefix("form: "), ContainSubstring("refused: the gateway offers no elicitation")),
+			And(HavePrefix("url: "), ContainSubstring("refused: the gateway offers no elicitation"))))
+		Eventually(func() int {
+			guard.mu.Lock()
+			defer guard.mu.Unlock()
+			n := 0
+			for _, v := range guard.violations {
+				if v == mcpgateway.ViolationElicitation {
+					n++
+				}
+			}
+			return n
+		}).Should(Equal(2), "one violation for each mode")
+		Expect(guard.sawText("canary-elicit-form")).To(BeTrue())
+		Expect(guard.sawText("canary-elicit-url")).To(BeTrue())
+		Expect(guard.sawText(elicitURL)).To(BeTrue())
 	})
 
 	It("shows the guard every message kind: results, errors, notifications and server requests", func(ctx SpecContext) {
