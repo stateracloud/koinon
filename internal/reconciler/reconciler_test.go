@@ -1710,7 +1710,11 @@ var _ = Describe("Reconciler", func() {
 
 			Expect(stop()).To(BeNumerically("<", 2*time.Second))
 			release()
-			// No orphaned backend takes the lock once the holder is gone.
+			t := time.Now()
+			// The server frees the lock only when the holder's backend ends, which is after the client
+			// closed the socket (#1257). Wait for that, then check that no orphaned backend takes it.
+			Eventually(func() int { return holders(ctx) }).WithTimeout(racescale.D(5 * time.Second)).WithPolling(time.Millisecond).Should(BeZero())
+			GinkgoWriter.Printf("lock freed %s after release() returned\n", time.Since(t))
 			Consistently(func() int { return holders(ctx) }, "1s", "100ms").Should(BeZero())
 			Expect(leading()).To(BeZero())
 		})

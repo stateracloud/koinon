@@ -200,3 +200,43 @@ func FakeModelRequests(ctx context.Context, base string) ([]FakeModelRequest, er
 	}
 	return out, nil
 }
+
+// SetToolTier sets an MCP tool's tier as the console does: it reads the tool's text hash first and sends it,
+// so the decision approves the text the admin saw (#1173). A tool that no admin reviewed stays hidden from
+// tools/list and refused until this call (ADR 0125), so a test that calls a tool reviews it first. admin is
+// the caller's authenticated Admin call.
+func SetToolTier(ctx context.Context, admin func(ctx context.Context, method, path string, body ...string) (int, []byte, error), serverID, tool, tier string) error {
+	code, body, err := admin(ctx, http.MethodGet, "/mcp-servers/"+serverID+"/tools")
+	if err != nil {
+		return fmt.Errorf("list the tools of %s: %w", serverID, err)
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("list the tools of %s: status %d: %s", serverID, code, body)
+	}
+	var list struct {
+		Tools []struct {
+			Name     string `json:"name"`
+			ToolHash string `json:"toolHash"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return fmt.Errorf("decode the tools of %s: %w", serverID, err)
+	}
+	hash := ""
+	for _, t := range list.Tools {
+		if t.Name == tool {
+			hash = t.ToolHash
+		}
+	}
+	if hash == "" {
+		return fmt.Errorf("%s must be in the tool list of %s: %s", tool, serverID, body)
+	}
+	code, body, err = admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+tool+"/tier", fmt.Sprintf(`{"tier":%q,"toolHash":%q}`, tier, hash))
+	if err != nil {
+		return fmt.Errorf("set the tier of %s: %w", tool, err)
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("set the tier of %s: status %d: %s", tool, code, body)
+	}
+	return nil
+}

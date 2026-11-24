@@ -191,8 +191,8 @@ for (const vp of viewports) {
       await expect(card.getByRole('status')).toContainText('Done')
       expect(seen.approve).toEqual([expect.objectContaining({ approvalId: 'ap-1', argsSha256: sha })])
       // The status badge fades from its pending colours; axe must not sample mid-transition.
-      await expect(card.locator('header [data-slot="badge"]')).toHaveCSS('background-color', 'oklch(0.97 0 0)')
-      await expect(card.locator('header [data-slot="badge"]')).toHaveCSS('color', 'oklch(0.205 0 0)')
+      await expect(card.locator('header [data-slot="badge"]')).toHaveCSS('background-color', 'rgb(253, 253, 255)')
+      await expect(card.locator('header [data-slot="badge"]')).toHaveCSS('color', 'rgb(36, 35, 60)')
       await expectNoHorizontalScroll(page)
       await expectAccessible(page)
     })

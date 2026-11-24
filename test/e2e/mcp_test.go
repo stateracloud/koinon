@@ -26,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
 
@@ -568,26 +569,13 @@ func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass st
 	return n
 }
 
-// setToolTierE2E sets a tool's tier as the console does: it reads the tool's text hash first and sends
-// it, so the decision approves the text the admin saw (#1173).
+// setToolTierE2E sets a tool's tier as the console does (e2eclient.SetToolTier): an unreviewed tool stays
+// hidden until an admin reviews it (ADR 0125).
 func setToolTierE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), serverID, tool, tier string) {
 	GinkgoHelper()
-	code, body := admin(ctx, http.MethodGet, "/mcp-servers/"+serverID+"/tools")
-	Expect(code).To(Equal(http.StatusOK), string(body))
-	var list struct {
-		Tools []struct {
-			Name     string `json:"name"`
-			ToolHash string `json:"toolHash"`
-		} `json:"tools"`
-	}
-	Expect(json.Unmarshal(body, &list)).To(Succeed())
-	hash := ""
-	for _, t := range list.Tools {
-		if t.Name == tool {
-			hash = t.ToolHash
-		}
-	}
-	Expect(hash).NotTo(BeEmpty(), "%s must be in the server's tool list: %s", tool, body)
-	code, body = admin(ctx, http.MethodPut, "/mcp-servers/"+serverID+"/tools/"+tool+"/tier", fmt.Sprintf(`{"tier":%q,"toolHash":%q}`, tier, hash))
-	Expect(code).To(Equal(http.StatusOK), string(body))
+	err := e2eclient.SetToolTier(ctx, func(ctx context.Context, method, path string, body ...string) (int, []byte, error) {
+		code, b := admin(ctx, method, path, body...)
+		return code, b, nil
+	}, serverID, tool, tier)
+	Expect(err).NotTo(HaveOccurred())
 }
