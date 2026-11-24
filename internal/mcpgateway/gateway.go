@@ -65,9 +65,10 @@ type Options struct {
 // Gateway is the MCP path. It implements [gateway.MCPGateway]: ApplyMCP swaps its configuration,
 // and Handler serves agents.
 type Gateway struct {
-	o    Options
-	g    failClosed // the guard, as the gateway calls it: not loaded or panicking refuses
-	snap atomic.Pointer[snapshot]
+	o     Options
+	creds ScrubbedSource // o.Credentials wrapped with o.Scrub: the only source the gateway reads (#1221)
+	g     failClosed     // the guard, as the gateway calls it: not loaded or panicking refuses
+	snap  atomic.Pointer[snapshot]
 
 	left leftOutSet // the tools each list left out (#1132)
 
@@ -105,11 +106,10 @@ func New(o Options) *Gateway {
 	if o.Scrub == nil {
 		o.Scrub = NewCredentialScrub()
 	}
-	o.Credentials = o.Scrub.Source(o.Credentials)
 	o.Logger = slog.New(o.Scrub.Handler(o.Logger.Handler()))
 	o.Tracer = o.Scrub.Tracer(o.Tracer)
 	o.Scrub.use(o.Metrics, o.Logger)
-	g := &Gateway{o: o, g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
+	g := &Gateway{o: o, creds: o.Scrub.Source(o.Credentials), g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
 	g.snap.Store(&snapshot{})
 	return g
 }

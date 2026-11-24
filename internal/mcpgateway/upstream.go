@@ -160,11 +160,12 @@ func (g *Gateway) session(ctx context.Context, t gateway.MCPTarget, agent gatewa
 // bundle or skipped verification applies to this client only, the credential is set on every request
 // (and only to the target's host, over https), and a redirect is never followed, so the credential
 // stays with the target. base nil is http.DefaultTransport. The MCP path and the A2A outbound client
-// (ADR 0123 decision 7) both build their clients here, so one rule covers both.
-func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gateway.AgentRef, src CredentialSource) (*http.Client, error) {
-	if src == nil {
+// (ADR 0123 decision 7) both build their clients here, so one rule covers both. src is a [ScrubbedSource]:
+// only [CredentialScrub.Source] makes one, so every credential this client sends was recorded first (#1221).
+func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gateway.AgentRef, src ScrubbedSource) (*http.Client, error) {
+	if src.IsZero() {
 		// No default source: a caller that has none would open the credential where the scrub cannot record it.
-		return nil, errors.New("mcpgateway: no credential source")
+		return nil, ErrNoCredentialSource
 	}
 	if base == nil {
 		base = http.DefaultTransport
@@ -193,7 +194,7 @@ func NewTargetHTTPClient(base http.RoundTripper, t gateway.MCPTarget, agent gate
 }
 
 func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget) (*upstream, error) {
-	hc, err := NewTargetHTTPClient(g.o.HTTPClient.Transport, t, key.agent, g.o.Credentials)
+	hc, err := NewTargetHTTPClient(g.o.HTTPClient.Transport, t, key.agent, g.creds)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +238,7 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	// Message.Credential is the kind at connect time, kept for the life of the session (it ends at the
 	// idle TTL or a config change). The credential value is read on every request, not here.
 	credKind := CredentialError
-	if c, err := g.o.Credentials.Credential(ctx, t, key.agent); err == nil {
+	if c, err := g.creds.Credential(ctx, t, key.agent); err == nil {
 		credKind = c.Kind
 	}
 	gt := &guardTransport{

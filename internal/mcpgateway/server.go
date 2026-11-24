@@ -300,7 +300,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		finish(OutcomeRefusedGuard)
 		return refusedResult(reasonToolChanged)
 	}
-	if c, err := g.o.Credentials.Credential(ctx, t, agent); err == nil {
+	if c, err := g.creds.Credential(ctx, t, agent); err == nil {
 		row.CredKind, row.RecipientKeyID = c.Kind, c.RecipientKeyID
 	} else {
 		row.CredKind = CredentialError

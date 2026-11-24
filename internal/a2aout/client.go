@@ -43,7 +43,9 @@ type Options struct {
 	Agent gateway.AgentRef
 	// Credentials resolves the credential on every request. It is required: a built-in passes the source that
 	// [mcpgateway.Builtin.Call] gave it, so the gateway records each value it opens (#1221). There is no default.
-	Credentials mcpgateway.CredentialSource
+	// Only [mcpgateway.CredentialScrub.Source] makes this type, so a caller cannot pass a source that skips the
+	// scrub; the zero value is refused.
+	Credentials mcpgateway.ScrubbedSource
 	// Policy is the platform URL policy (ADR 0120 egress): the client dials only addresses it
 	// allows, checked at dial time, as the other outbound clients of Koinon do.
 	Policy catalog.URLPolicy
@@ -114,8 +116,8 @@ func New(ctx context.Context, o Options) (*Client, error) {
 // open applies the defaults of the options and builds the HTTP client of the target: the same client for
 // a call and for a card read, so one rule covers the credential, the TLS trust and the size limit.
 func open(o Options) (*http.Client, *url.URL, Options, error) {
-	if o.Credentials == nil {
-		return nil, nil, o, errors.New("a2aout: no credential source")
+	if o.Credentials.IsZero() {
+		return nil, nil, o, fmt.Errorf("a2aout: %w", mcpgateway.ErrNoCredentialSource)
 	}
 	if o.RequestTimeout <= 0 {
 		o.RequestTimeout = defaultRequestTimeout

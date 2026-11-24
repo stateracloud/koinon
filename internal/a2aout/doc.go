@@ -8,8 +8,8 @@
 //
 //   - It dials through the platform URL policy, checked at dial time (the same transport rule as
 //     the code-host clients, issue 657), with no proxy and no redirect.
-//   - The credential is read on each request from a [mcpgateway.CredentialSource] and set by the
-//     HTTP client. It goes to the host of the target only and only over https. No sandbox, image,
+//   - The credential is read on each request from a [mcpgateway.ScrubbedSource] and set by the
+//     HTTP client. Only the credential scrub makes that type, so each value is recorded first. It goes to the host of the target only and only over https. No sandbox, image,
 //     home volume, log line or error holds it.
 //   - The agent card must offer an interface on the host of the target.
 //   - A response is bounded in size, and the text it holds is cut and treated as quoted data.

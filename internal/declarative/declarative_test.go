@@ -37,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/sinkclass"
@@ -150,6 +151,72 @@ var _ = Describe("Importer", func() {
 		Expect(list[0].Removed).To(BeFalse())
 		Expect(list[0].DisabledReason).To(BeEmpty())
 		Expect(list[0].HasCredential).To(BeFalse())
+	})
+
+	// A Secret saved before the short-credential check (#1221) fails on every sync. Its disabled key must still
+	// apply, so an admin can switch the server off while the value is fixed. Only a disable applies; the row keeps
+	// its old value and the Secret gets the Invalid Event.
+	It("applies disabled: true of an mcp-server Secret whose only fault is a short credential", func(ctx SpecContext) {
+		imp.Outward = outward.New(pool)
+		base := map[string]string{"name": "tracker", "url": "https://mcp.example.com/mcp", "credentialScheme": "Bearer", "credential": "fake-00008"}
+		with := func(kv ...string) map[string]string {
+			out := map[string]string{}
+			for k, v := range base {
+				out[k] = v
+			}
+			for j := 0; j+1 < len(kv); j += 2 {
+				out[kv[j]] = kv[j+1]
+			}
+			return out
+		}
+		adminDisabled := func(ctx context.Context) bool {
+			GinkgoHelper()
+			list, err := mcp.List(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list).To(HaveLen(1))
+			Expect(list[0].HasCredential).To(BeTrue(), "the row keeps its old value")
+			return list[0].AdminDisabled != nil
+		}
+		invalidEvents := func(ctx context.Context) int {
+			GinkgoHelper()
+			c := 0
+			for _, e := range events(ctx) {
+				if e.Reason == declarative.ReasonInvalid && strings.Contains(e.Message, declarative.KeyCredential) {
+					c++
+				}
+			}
+			return c
+		}
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, base)
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeFalse())
+
+		By("a short credential with another fault applies nothing")
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, with("credential", "fake-07", declarative.KeyDisabled, "true", declarative.KeyInsecureSkipVerify, "maybe"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeFalse())
+
+		By("a short credential and disabled: false changes nothing")
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, with("credential", "fake-07", declarative.KeyDisabled, "false"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeFalse())
+		Expect(invalidEvents(ctx)).To(BeNumerically(">=", 1), "the Secret is refused")
+
+		By("a short credential and disabled: true disables the row and still refuses the Secret")
+		before := invalidEvents(ctx)
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, with("credential", "fake-07", declarative.KeyDisabled, "true"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeTrue())
+		Expect(invalidEvents(ctx)).To(BeNumerically(">", before), "the Secret is still refused")
+		Expect(logs.String()).NotTo(ContainSubstring("fake-07"))
+
+		By("an enable waits until the Secret is valid again")
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, with("credential", "fake-07", declarative.KeyDisabled, "false"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeTrue())
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, with(declarative.KeyDisabled, "false"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(adminDisabled(ctx)).To(BeFalse())
 	})
 
 	It("skips an mcp-server Secret while the install is held, and still applies the rest of the pass", func(ctx SpecContext) {

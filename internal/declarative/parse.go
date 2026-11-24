@@ -224,14 +224,39 @@ func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, er
 			errs = append(errs, err)
 		} else if err := mcpservers.ValidateRemote(d.URL, d.Transport, header, d.CredentialPrefix); err != nil {
 			errs = append(errs, err)
-		} else if err := mcpservers.ValidateCredentialValue(d.CredentialValue); err != nil {
+		} else {
 			// Here too, not only at apply: a held plan (held.go) parses only, and must not say "would apply" (#1221).
-			errs = append(errs, fmt.Errorf("%s: %w", KeyCredential, err))
-		} else if err := mcpservers.ValidateTLSTrust(d.URL, d.CABundle, d.InsecureSkipVerify); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle+"/"+KeyInsecureSkipVerify, err))
+			// The TLS check runs as well, so a Secret whose only fault is a short credential can be told apart
+			// ([OnlyShortCredential]).
+			if err := mcpservers.ValidateCredentialValue(d.CredentialValue); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", KeyCredential, err))
+			}
+			if err := mcpservers.ValidateTLSTrust(d.URL, d.CABundle, d.InsecureSkipVerify); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle+"/"+KeyInsecureSkipVerify, err))
+			}
 		}
 	}
 	return d, errors.Join(errs...)
+}
+
+// OnlyShortCredential reports whether err, an error of [ParseMCPServer], is the short-credential check alone
+// (#1221): every other key of the Secret is valid. A Secret saved before that check came with a short value
+// then still has its disabled key applied, so an admin can switch the server off while the value is fixed.
+func OnlyShortCredential(err error) bool {
+	if err == nil {
+		return false
+	}
+	errs := []error{err}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = j.Unwrap()
+	}
+	for _, e := range errs {
+		var inv *catalog.InvalidError
+		if !errors.As(e, &inv) || inv.Reason != mcpservers.ReasonCredentialTooShort {
+			return false
+		}
+	}
+	return len(errs) > 0
 }
 
 // DeclaredConnection is a connection declared by a Secret of type connection.

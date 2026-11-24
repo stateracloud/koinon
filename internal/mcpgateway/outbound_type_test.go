@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package mcpgateway_test
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/a2aout"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
+)
+
+// The outbound clients take only a [mcpgateway.ScrubbedSource], which only [mcpgateway.CredentialScrub.Source]
+// makes, so code that sends a credential the scrub did not record does not compile (#1221, ADR 0097).
+var _ = Describe("the scrubbed credential type (#1221)", func() {
+	It("does not compile code that sends a credential around the scrub", func(ctx SpecContext) {
+		const dir = "testdata/bypass"
+		want := wantLines(filepath.Join(dir, "bypass.go"))
+		Expect(want).To(HaveLen(5), "each bypass in the package has a want marker")
+
+		goBin, err := exec.LookPath("go")
+		Expect(err).NotTo(HaveOccurred(), "the go command builds the bypass package")
+		cmd := exec.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./"+dir)
+		out, err := cmd.CombinedOutput()
+		Expect(err).To(HaveOccurred(), "the bypass package compiled:\n%s", out)
+		var exit *exec.ExitError
+		Expect(errors.As(err, &exit)).To(BeTrue(), "go build failed to run: %v", err)
+		for tag, line := range want {
+			Expect(string(out)).To(MatchRegexp(`bypass\.go:%d:\d+: `, line), "no compile error for %s:\n%s", tag, out)
+		}
+	})
+
+	It("fails closed with the zero value", func(ctx SpecContext) {
+		var zero mcpgateway.ScrubbedSource
+		Expect(zero.IsZero()).To(BeTrue())
+		_, err := zero.Credential(ctx, gateway.MCPTarget{Name: "remote"}, gateway.AgentRef{Org: "acme"})
+		Expect(err).To(MatchError(mcpgateway.ErrNoCredentialSource))
+
+		_, err = mcpgateway.NewTargetHTTPClient(nil, gateway.MCPTarget{URL: "https://agent.example"}, gateway.AgentRef{Org: "acme"}, zero)
+		Expect(err).To(MatchError(mcpgateway.ErrNoCredentialSource))
+
+		_, err = a2aout.FetchCard(ctx, a2aout.Options{Target: gateway.MCPTarget{URL: "https://agent.example"}})
+		Expect(err).To(MatchError(mcpgateway.ErrNoCredentialSource))
+		_, err = a2aout.New(ctx, a2aout.Options{Target: gateway.MCPTarget{URL: "https://agent.example"}, CardHash: strings.Repeat("0", 64)})
+		Expect(err).To(MatchError(mcpgateway.ErrNoCredentialSource))
+	})
+
+	It("gives the zero value for a nil source and records the values of a real one", func(ctx SpecContext) {
+		sc := mcpgateway.NewCredentialScrub()
+		Expect(sc.Source(nil).IsZero()).To(BeTrue())
+		Expect(sc.Source(mcpgateway.ScrubbedSource{}).IsZero()).To(BeTrue())
+
+		src := sc.Source(mapCredentials{"remote": fakeToken})
+		Expect(src.IsZero()).To(BeFalse())
+		Expect(sc.Source(src)).To(Equal(src), "wrapping twice with the same scrub gives the same source")
+		c, err := src.Credential(ctx, gateway.MCPTarget{Name: "remote"}, gateway.AgentRef{Org: "acme"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.Value).To(Equal(fakeToken))
+		Expect(sc.TextFor("acme", fakeToken)).To(Equal("[redacted:secret]"))
+	})
+})
+
+// wantLines gives the line of each "// want: <tag>" marker in the file, by tag.
+func wantLines(path string) map[string]int {
+	GinkgoHelper()
+	f, err := os.Open(path)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = f.Close() }()
+	marker := regexp.MustCompile(`// want: (\S+)$`)
+	out := map[string]int{}
+	s := bufio.NewScanner(f)
+	for n := 1; s.Scan(); n++ {
+		if m := marker.FindStringSubmatch(strings.TrimSpace(s.Text())); m != nil {
+			Expect(out).NotTo(HaveKey(m[1]), fmt.Sprintf("tag %s is used twice", m[1]))
+			out[m[1]] = n
+		}
+	}
+	Expect(s.Err()).NotTo(HaveOccurred())
+	return out
+}
