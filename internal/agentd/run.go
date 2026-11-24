@@ -506,7 +506,7 @@ func (r *runner) execute(ctx context.Context) error {
 	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
 	cmd, err := launchCommand(agent.Harness, endpoints{
-		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
+		ModelBaseURL: gw + "/v1", Model: model, MCPURL: cfg.MCPURL, Format: format, CacheMarker: marker,
 		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg), CompactionTokens: facts.CompactionTokens,
 	})
 	if err != nil {
