@@ -273,7 +273,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      random functions (not deterministic, and it changes on every render).
 7. **No internet egress for atelet** (except the apiServerPorts rule, amendment 10: TCP 443 and 6443 to any address). The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
-   an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
+   an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet (other than the apiServerPorts rule), and default-deny
    holds in the control-plane namespace too. Status: the staging is built
    ([#1157](https://github.com/stateracloud/koinon/issues/1157); `substrate-install.md`). The read by atelet from
    the cluster store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
@@ -299,7 +299,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    - **atenet-router is on the actor path.** `atenet-router` is in `apiServerApps`: its ingress mode
      (`--mode=ingress`, the `routerAddress` of the driver) watches EndpointSlices through client-go (Substrate v1.0.0,
      `cmd/atenet/internal/router/router.go:73-95`, Role in `manifests/ate-install/atenet-router.yaml:16-50`). It also
-     handles actor traffic. It now has TCP 443 and 6443 to any address, the internet included. On main it had no
+     handles actor traffic. It now has TCP 443 and 6443 to any address, the internet included. Before this amendment it had no
      internet route. A compromise of the router through actor traffic therefore gets this route out.
    - **atenet-egress.** `atenet-egress` is in `controlPlaneApps` but NOT in `apiServerApps`: it has no API server
      client (`atenet-egress.yaml:30-38`, no RBAC), so it gets no TCP route to any address and its egress to the
