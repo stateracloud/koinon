@@ -4,6 +4,7 @@ package mcpgateway_test
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,19 +25,27 @@ import (
 // makes, so code that sends a credential the scrub did not record does not compile (#1221, ADR 0097).
 var _ = Describe("the scrubbed credential type (#1221)", func() {
 	It("does not compile code that sends a credential around the scrub", func(ctx SpecContext) {
+		// The source is bypass.go.txt, not a .go file, so `go vet`, golangci-lint and the other tools that take
+		// a changed directory do not try to compile it. An overlay gives it to `go build` as bypass.go.
 		const dir = "testdata/bypass"
-		want := wantLines(filepath.Join(dir, "bypass.go"))
+		src, err := filepath.Abs(filepath.Join(dir, "bypass.go.txt"))
+		Expect(err).NotTo(HaveOccurred())
+		want := wantLines(src)
 		Expect(want).To(HaveLen(5), "each bypass in the package has a want marker")
+		overlay := filepath.Join(GinkgoT().TempDir(), "overlay.json")
+		raw, err := json.Marshal(map[string]map[string]string{"Replace": {strings.TrimSuffix(src, ".txt"): src}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.WriteFile(overlay, raw, 0o600)).To(Succeed())
 
 		goBin, err := exec.LookPath("go")
 		Expect(err).NotTo(HaveOccurred(), "the go command builds the bypass package")
-		cmd := exec.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./"+dir)
+		cmd := exec.CommandContext(ctx, goBin, "build", "-overlay", overlay, "-o", os.DevNull, "./"+dir)
 		out, err := cmd.CombinedOutput()
 		Expect(err).To(HaveOccurred(), "the bypass package compiled:\n%s", out)
 		var exit *exec.ExitError
 		Expect(errors.As(err, &exit)).To(BeTrue(), "go build failed to run: %v", err)
 		for tag, line := range want {
-			Expect(string(out)).To(MatchRegexp(`bypass\.go:%d:\d+: `, line), "no compile error for %s:\n%s", tag, out)
+			Expect(string(out)).To(MatchRegexp(`bypass\.go(\.txt)?:%d:\d+: `, line), "no compile error for %s:\n%s", tag, out)
 		}
 	})
 

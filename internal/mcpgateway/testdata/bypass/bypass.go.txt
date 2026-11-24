@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package bypass must not compile. Each function is code that would send a credential that the scrub did not
-// record (#1221). The spec in outbound_type_test.go builds this package and expects one error for each.
+// record (#1221). The spec in outbound_type_test.go builds this package (as bypass.go, through an overlay) and
+// expects one error for each.
 package bypass
 
 import (
