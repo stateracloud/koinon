@@ -434,7 +434,7 @@ func (g *Gateway) scrubResponse(resp *http.Response, t target) error {
 	if hit {
 		onHit()
 	}
-	resp.Body = newScrubBody(resp.Body, t.cred.needles, resp.Trailer, onHit)
+	resp.Body = newScrubBody(resp.Body, t.cred.needles, func() http.Header { return resp.Trailer }, onHit)
 	return nil
 }
 

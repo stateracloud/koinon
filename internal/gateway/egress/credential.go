@@ -192,12 +192,13 @@ type scrubBody struct {
 	eof     bool
 	err     error
 	onHit   func()
-	// trailer is the response's trailer map. Its values arrive only when src reaches its end, so they
-	// are masked there, before the proxy copies them after the body.
-	trailer http.Header
+	// trailer gives the response's trailer map. Its values arrive only when src reaches its end, so they
+	// are masked there, before the proxy copies them after the body. It is read at the end, not before:
+	// the transport sets a new map there when the upstream declared no trailer.
+	trailer func() http.Header
 }
 
-func newScrubBody(src io.ReadCloser, needles [][]byte, trailer http.Header, onHit func()) *scrubBody {
+func newScrubBody(src io.ReadCloser, needles [][]byte, trailer func() http.Header, onHit func()) *scrubBody {
 	keep := 0
 	for _, n := range needles {
 		keep = max(keep, len(n)-1)
@@ -237,7 +238,7 @@ func (s *scrubBody) Read(p []byte) (int, error) {
 		hit := false
 		if err != nil {
 			s.eof, s.err = true, err
-			hit = maskHeader(s.trailer, s.needles)
+			hit = maskHeader(s.trailer(), s.needles)
 		}
 		if (mask(s.buf, s.needles) || hit) && s.onHit != nil {
 			s.onHit()

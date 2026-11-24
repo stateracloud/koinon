@@ -672,6 +672,20 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(resp.Trailer.Get("X-Echo-Trailer")).To(Equal("token=" + strings.Repeat("*", len(value))))
 		})
 
+		It("masks the credential in a trailer the upstream did not declare", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, "body")
+				w.(http.Flusher).Flush()
+				w.Header().Set(http.TrailerPrefix+"X-Late", "token="+value)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			_, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.Trailer.Get("X-Late")).To(Equal("token=" + strings.Repeat("*", len(value))))
+		})
+
 		It("passes a response with no body, whatever its Content-Encoding says", func() {
 			apply(cred)
 			answer = func(w http.ResponseWriter, _ *http.Request) {
