@@ -201,8 +201,8 @@ type Agent struct {
 	Harness string `protobuf:"bytes,28,opt,name=harness,proto3" json:"harness,omitempty"`
 	// The agent's team label (SetAgentPlacement); empty for no team.
 	Team string `protobuf:"bytes,29,opt,name=team,proto3" json:"team,omitempty"`
-	// Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only;
-	// AgentSummary also gives the name.
+	// Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also
+	// of a person who left the org since; AgentSummary gives the name and leaves out such a person.
 	ReportsTo     *AgentReportsTo `protobuf:"bytes,30,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

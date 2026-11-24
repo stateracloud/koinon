@@ -217,8 +217,8 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
   team: string;
 
   /**
-   * Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only;
-   * AgentSummary also gives the name.
+   * Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also
+   * of a person who left the org since; AgentSummary gives the name and leaves out such a person.
    *
    * @generated from field: koinon.agent.v1alpha1.AgentReportsTo reports_to = 30;
    */

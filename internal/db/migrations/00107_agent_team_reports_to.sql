@@ -24,6 +24,6 @@ ALTER TABLE agents
 CREATE INDEX agents_org_created ON agents (org_id, created_at, id);
 CREATE INDEX agents_org_team ON agents (org_id, (team = ''), team, created_at, id) WHERE status <> 'archived';
 
--- The summary of a page of agents: the newest run of each agent and the runs that run now.
+-- The summary of a page of agents: the newest run of each agent. The runs that run now use the
+-- unique index runs_one_active_per_agent.
 CREATE INDEX runs_agent_created ON runs (org_id, agent_id, created_at DESC, id DESC);
-CREATE INDEX runs_agent_running ON runs (org_id, agent_id) WHERE state IN ('starting', 'running');

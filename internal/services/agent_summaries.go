@@ -268,11 +268,15 @@ func normalizeTeam(team string) (string, error) {
 	if utf8.RuneCountInString(team) > maxTeamLength {
 		return "", connect.NewError(connect.CodeInvalidArgument, "team is longer than 64 characters")
 	}
-	if !utf8.ValidString(team) || strings.ContainsFunc(team, unicode.IsControl) {
-		return "", connect.NewError(connect.CodeInvalidArgument, "team has a control character or is not UTF-8")
+	if !utf8.ValidString(team) || strings.ContainsFunc(team, isHiddenRune) {
+		return "", connect.NewError(connect.CodeInvalidArgument, "team has a control or format character, or is not UTF-8")
 	}
 	return team, nil
 }
+
+// isHiddenRune is a control character or a format character (a bidirectional override, a
+// zero-width character): the label would show other text than it holds.
+func isHiddenRune(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
 
 // SetAgentPlacement implements AgentService: the agent's team and whom it reports to.
 func (s *Server) SetAgentPlacement(ctx context.Context, req *agentv1alpha1.SetAgentPlacementRequest) (*agentv1alpha1.SetAgentPlacementResponse, error) {
@@ -316,7 +320,9 @@ func (s *Server) SetAgentPlacement(ctx context.Context, req *agentv1alpha1.SetAg
 		if cur.Status == store.AgentStatusArchived {
 			return connect.NewError(connect.CodeFailedPrecondition, "the agent is archived")
 		}
-		if parentAgent.Valid {
+		// A parent that does not change is not checked again: a team change keeps a parent that was
+		// archived or left the org later.
+		if parentAgent.Valid && parentAgent != cur.ReportsToAgentID {
 			// The read is scoped to the org: an agent of another org is not found.
 			p, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: parentAgent})
 			if err != nil {
@@ -333,7 +339,7 @@ func (s *Server) SetAgentPlacement(ctx context.Context, req *agentv1alpha1.SetAg
 				return connect.NewError(connect.CodeFailedPrecondition, "reports_to would make a cycle: that agent reports to this one")
 			}
 		}
-		if parentUser.Valid {
+		if parentUser.Valid && parentUser != cur.ReportsToUserID {
 			member, err := q.HasOrgMembership(ctx, store.HasOrgMembershipParams{OrgID: c.org, UserID: parentUser})
 			if err != nil {
 				return err

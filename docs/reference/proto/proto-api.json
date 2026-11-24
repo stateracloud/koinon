@@ -509,7 +509,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only;\nAgentSummary also gives the name."
+              "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
             }
           ]
         },
