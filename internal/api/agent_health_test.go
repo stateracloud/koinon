@@ -17,7 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/runoutcome"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/services"
@@ -44,15 +44,15 @@ var _ = Describe("agent health and fresh sessions", func() {
 	}
 
 	Describe("an unhealthy agent", func() {
-		It("takes no new runs: creating a ticket and sending a message are refused with the reason", func(ctx SpecContext) {
-			t, r := owner.createTicket(ctx, org, agent.GetId(), "before")
+		It("takes no new runs: creating a task and sending a message are refused with the reason", func(ctx SpecContext) {
+			t, r := owner.createTask(ctx, org, agent.GetId(), "before")
 			_, err := e.pool.Exec(ctx, `UPDATE runs SET state = 'canceled', outcome_reason = 'test', finished_at = now(), ready_at = NULL WHERE id = $1`, r.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			unhealthy(ctx)
-			_, err = owner.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{OrgId: org, AgentId: agent.GetId(), Title: "after", Message: "hi"})
+			_, err = owner.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{OrgId: org, AgentId: agent.GetId(), Title: "after", Message: "hi"})
 			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 			Expect(err.Error()).To(And(ContainSubstring("unhealthy"), ContainSubstring("stuck three times"), ContainSubstring("resumes")))
-			_, err = owner.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{OrgId: org, TicketId: t.GetId(), Text: "more"})
+			_, err = owner.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: t.GetId(), Text: "more"})
 			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		})
 
@@ -71,7 +71,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 				VALUES ($1, $2, 'ws-health', 'sb-health', 'pv-health', 'key-health', 'gen-1')`, org, agent.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			for range 3 {
-				t, r := owner.createTicket(ctx, org, agent.GetId(), "x")
+				t, r := owner.createTask(ctx, org, agent.GetId(), "x")
 				_, err := e.pool.Exec(ctx, `UPDATE runs SET state = 'canceled', outcome_reason = 'test', finished_at = now(), ready_at = NULL WHERE id = $1`, r.GetId())
 				Expect(err).NotTo(HaveOccurred())
 				_, err = e.pool.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, task_id, processes, outcome, work)
@@ -96,7 +96,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 
 			_, err = admin.agents.ResumeAgent(ctx, &agentv1alpha1.ResumeAgentRequest{OrgId: org, AgentId: agent.GetId()})
 			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition), "it is not unhealthy any more")
-			_, _ = owner.createTicket(ctx, org, agent.GetId(), "runs again")
+			_, _ = owner.createTask(ctx, org, agent.GetId(), "runs again")
 		})
 	})
 
@@ -143,7 +143,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 	Describe("activating with 'apply to open tickets'", func() {
 		// open makes a ticket with a stored session; done is a finished one.
 		open := func(ctx SpecContext, title string, status string) string {
-			t, _ := owner.createTicket(ctx, org, agent.GetId(), title)
+			t, _ := owner.createTask(ctx, org, agent.GetId(), title)
 			_, err := e.pool.Exec(ctx, `UPDATE tasks SET harness_session_id = 'ses_1', harness_session_cwd = '/sandbox/work',
 				harness_session_generation = 'gen-1' WHERE id = $1`, t.GetId())
 			Expect(err).NotTo(HaveOccurred())
@@ -254,7 +254,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 
 		It("leaves other agents' tickets alone", func(ctx SpecContext) {
 			other := owner.activeAgent(ctx, org)
-			t, _ := owner.createTicket(ctx, org, other.GetId(), "theirs")
+			t, _ := owner.createTask(ctx, org, other.GetId(), "theirs")
 			_, err := e.pool.Exec(ctx, `UPDATE tasks SET harness_session_id = 's', harness_session_cwd = '/w' WHERE id = $1`, t.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			reactivate(ctx, true)
@@ -262,23 +262,23 @@ var _ = Describe("agent health and fresh sessions", func() {
 		})
 	})
 
-	It("shows the agent's notes to anyone who can see the ticket, in GetTicket", func(ctx SpecContext) {
-		t, _ := owner.createTicket(ctx, org, agent.GetId(), "notes")
+	It("shows the agent's notes to anyone who can see the task, in GetTask", func(ctx SpecContext) {
+		t, _ := owner.createTask(ctx, org, agent.GetId(), "notes")
 		_, err := e.pool.Exec(ctx, `UPDATE tasks SET agent_summary = 'Where things stand.', agent_summary_at = now() WHERE id = $1`, t.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		viewer := e.userIn(ctx, org, store.OrgRoleViewer)
-		got := viewer.getTicket(ctx, org, t.GetId()).GetTicket()
+		got := viewer.getTask(ctx, org, t.GetId()).GetTask()
 		Expect(got.GetAgentSummary()).To(Equal("Where things stand."))
 		Expect(got.GetAgentSummaryAt()).NotTo(BeNil())
-		list, err := viewer.tickets.ListTickets(ctx, &ticketv1alpha1.ListTicketsRequest{OrgId: org})
+		list, err := viewer.tasks.ListTasks(ctx, &taskv1alpha1.ListTasksRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
-		for _, lt := range list.GetTickets() {
+		for _, lt := range list.GetTasks() {
 			Expect(lt.GetAgentSummary()).To(BeEmpty(), "the list stays small")
 		}
 	})
 
 	It("renders the approval to push saved work as a diffstat, without opening the files", func(ctx SpecContext) {
-		t, r := owner.createTicket(ctx, org, agent.GetId(), "saved")
+		t, r := owner.createTask(ctx, org, agent.GetId(), "saved")
 		sid := guuid.NewString()
 		manifest := `{"repo":"acme/widgets","base":"` + strings.Repeat("a", 40) + `","files":[` +
 			`{"path":"src/a.go","status":"M","mode":"100644","size":10,"added":3,"deleted":1},{"path":"old.txt","status":"D","size":0,"added":0,"deleted":7}],` +

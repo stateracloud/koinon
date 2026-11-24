@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	connect "connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/proto"
@@ -16,8 +17,10 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -271,7 +274,7 @@ var _ = Describe("AgentService", func() {
 			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(),
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
-		_, err = viewer.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+		_, err = viewer.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: a.GetId(), Title: "nope",
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
@@ -279,8 +282,8 @@ var _ = Describe("AgentService", func() {
 
 	It("archives an agent and cancels its unfinished runs; only admins may", func(ctx SpecContext) {
 		a := owner.activeAgent(ctx, org)
-		t1, r1 := owner.createTicket(ctx, org, a.GetId(), "one")
-		_, r2 := owner.createTicket(ctx, org, a.GetId(), "two")
+		t1, r1 := owner.createTask(ctx, org, a.GetId(), "one")
+		_, r2 := owner.createTask(ctx, org, a.GetId(), "two")
 		e.agentd("agentd-a").mustClaim(ctx, org) // r1 runs, r2 queued
 
 		member := e.userIn(ctx, org, store.OrgRoleMember)
@@ -293,16 +296,16 @@ var _ = Describe("AgentService", func() {
 		for _, r := range []*runv1alpha1.Run{r1, r2} {
 			Expect(owner.getRun(ctx, org, r.GetId()).GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 		}
-		Expect(ticketKinds(owner.getTicket(ctx, org, t1.GetId()))).To(ContainElement("run.canceled"))
+		Expect(taskKinds(owner.getTask(ctx, org, t1.GetId()))).To(ContainElement("run.canceled"))
 
-		_, err = owner.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+		_, err = owner.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: a.GetId(), Title: "after archive",
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})
 })
 
-var _ = Describe("TicketService and run scheduling", func() {
+var _ = Describe("TaskService and run scheduling", func() {
 	var (
 		e      *env
 		org    string
@@ -319,33 +322,43 @@ var _ = Describe("TicketService and run scheduling", func() {
 		ad = e.agentd("agentd-a")
 	})
 
-	It("queues a run with the template's caps when a member creates a ticket", func(ctx SpecContext) {
-		t, r := member.createTicket(ctx, org, agent.GetId(), "add a badge")
-		Expect(t.GetStatus()).To(Equal(ticketv1alpha1.TicketStatus_TICKET_STATUS_TODO))
+	// ADR 0065 (issue #731): the TicketService handler is gone and its .proto stays. A call is
+	// unimplemented, not a 500 and not a page of the web UI.
+	It("answers a call to a TicketService method with unimplemented", func(ctx SpecContext) {
+		old := ticketv1alpha1connect.NewTicketServiceClient(connect.NewClient(connecthttp.NewTransport(member.b.http, member.b.e.srv.URL)))
+		_, err := old.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{OrgId: org, AgentId: agent.GetId(), Title: "old", Message: "hi"})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnimplemented))
+		_, err = old.ListTickets(ctx, &ticketv1alpha1.ListTicketsRequest{OrgId: org})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnimplemented))
+	})
+
+	It("queues a run with the template's caps when a member creates a task", func(ctx SpecContext) {
+		t, r := member.createTask(ctx, org, agent.GetId(), "add a badge")
+		Expect(t.GetState()).To(Equal(taskv1alpha1.TaskState_TASK_STATE_SUBMITTED))
 		Expect(r.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_QUEUED))
 		Expect(r.GetMaxWallClockSeconds()).To(Equal(int64(1800)))
 		Expect(r.GetMaxModelRequests()).To(Equal(int64(300)))
 		Expect(r.GetMaxSpendUsd()).To(Equal("5.00"))
 
-		got := member.getTicket(ctx, org, t.GetId())
-		Expect(ticketKinds(got)).To(Equal([]string{"ticket.created", "message", "run.queued"}))
+		got := member.getTask(ctx, org, t.GetId())
+		Expect(taskKinds(got)).To(Equal([]string{"task.created", "message", "run.queued"}))
 		Expect(got.GetEvents()[1].GetPayload().AsMap()).To(HaveKeyWithValue("text", "please add a badge"))
 		Expect(got.GetEvents()[1].GetActorUserId()).To(Equal(member.userID))
 		Expect(got.GetRuns()).To(ConsistOf(HaveField("Id", r.GetId())))
 	})
 
-	It("refuses tickets for draft agents", func(ctx SpecContext) {
+	It("refuses tasks for draft agents", func(ctx SpecContext) {
 		draft := owner.draftAgent(ctx, org)
-		_, err := member.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+		_, err := member.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: draft.GetId(), Title: "x",
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})
 
 	It("queues one run per message unless one is already queued", func(ctx SpecContext) {
-		t, r1 := member.createTicket(ctx, org, agent.GetId(), "first")
-		res, err := member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-			OrgId: org, TicketId: t.GetId(), Text: "also this",
+		t, r1 := member.createTask(ctx, org, agent.GetId(), "first")
+		res, err := member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+			OrgId: org, TaskId: t.GetId(), Text: "also this",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetRun()).To(BeNil(), "the queued run will see the message")
@@ -353,21 +366,21 @@ var _ = Describe("TicketService and run scheduling", func() {
 
 		running := ad.mustClaim(ctx, org)
 		Expect(running.ID.String()).To(Equal(r1.GetId()))
-		res, err = member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-			OrgId: org, TicketId: t.GetId(), Text: "and one more",
+		res, err = member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+			OrgId: org, TaskId: t.GetId(), Text: "and one more",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_QUEUED))
 	})
 
-	It("queues concurrent messages on one ticket at most once", func(ctx SpecContext) {
-		t, _ := member.createTicket(ctx, org, agent.GetId(), "first")
+	It("queues concurrent messages on one task at most once", func(ctx SpecContext) {
+		t, _ := member.createTask(ctx, org, agent.GetId(), "first")
 		ad.mustClaim(ctx, org)
 		done := make(chan error, 8)
 		for range 8 {
 			go func() {
-				_, err := member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-					OrgId: org, TicketId: t.GetId(), Text: "ping",
+				_, err := member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+					OrgId: org, TaskId: t.GetId(), Text: "ping",
 				})
 				done <- err
 			}()
@@ -378,10 +391,10 @@ var _ = Describe("TicketService and run scheduling", func() {
 		Expect(count(ctx, e, `SELECT count(*) FROM runs WHERE state = 'queued'`)).To(Equal(1))
 	})
 
-	It("runs one ticket per agent at a time, in FIFO order", func(ctx SpecContext) {
-		_, r1 := member.createTicket(ctx, org, agent.GetId(), "one")
-		_, r2 := member.createTicket(ctx, org, agent.GetId(), "two")
-		_, r3 := member.createTicket(ctx, org, agent.GetId(), "three")
+	It("runs one task per agent at a time, in FIFO order", func(ctx SpecContext) {
+		_, r1 := member.createTask(ctx, org, agent.GetId(), "one")
+		_, r2 := member.createTask(ctx, org, agent.GetId(), "two")
+		_, r3 := member.createTask(ctx, org, agent.GetId(), "three")
 
 		first := ad.mustClaim(ctx, org)
 		Expect(first.ID.String()).To(Equal(r1.GetId()))
@@ -394,16 +407,16 @@ var _ = Describe("TicketService and run scheduling", func() {
 	})
 
 	// Behaviour from old issue 19, awaiting procoduck's decision: a parked run does not
-	// hold the agent's slot, so another ticket runs while one waits for an
-	// approval. A ticket's own next run still waits for its parked run.
-	It("lets another ticket run while one is parked, but not the parked ticket's next run", func(ctx SpecContext) {
-		t1, r1 := member.createTicket(ctx, org, agent.GetId(), "one")
-		_, r2 := member.createTicket(ctx, org, agent.GetId(), "two")
+	// hold the agent's slot, so another task runs while one waits for an
+	// approval. A task's own next run still waits for its parked run.
+	It("lets another task run while one is parked, but not the parked task's next run", func(ctx SpecContext) {
+		t1, r1 := member.createTask(ctx, org, agent.GetId(), "one")
+		_, r2 := member.createTask(ctx, org, agent.GetId(), "two")
 		parked := ad.park(ctx, ad.mustClaim(ctx, org))
 		Expect(parked.ID.String()).To(Equal(r1.GetId()))
 
-		res, err := member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-			OrgId: org, TicketId: t1.GetId(), Text: "while you wait",
+		res, err := member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+			OrgId: org, TaskId: t1.GetId(), Text: "while you wait",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		follow := res.GetRun()
@@ -413,50 +426,49 @@ var _ = Describe("TicketService and run scheduling", func() {
 		Expect(next.ID.String()).To(Equal(r2.GetId()), "the parked run frees the agent")
 		ad.finish(ctx, next)
 		_, err = ad.claim(ctx, org)
-		Expect(err).To(HaveOccurred(), "ticket one's follow-up waits for its parked run")
+		Expect(err).To(HaveOccurred(), "task one's follow-up waits for its parked run")
 		Expect(member.getRun(ctx, org, follow.GetId()).GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_QUEUED))
 	})
 
-	It("cancels a ticket's queued runs when it moves to Done", func(ctx SpecContext) {
-		member.createTicket(ctx, org, agent.GetId(), "blocker")
+	It("cancels a task's queued runs when it is canceled", func(ctx SpecContext) {
+		member.createTask(ctx, org, agent.GetId(), "blocker")
 		running := ad.mustClaim(ctx, org)
-		t, r := member.createTicket(ctx, org, agent.GetId(), "queued")
+		t, r := member.createTask(ctx, org, agent.GetId(), "queued")
 
-		res, err := member.tickets.MoveTicket(ctx, &ticketv1alpha1.MoveTicketRequest{
-			OrgId: org, TicketId: t.GetId(), Status: ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
-		})
+		res, err := member.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: t.GetId()})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.GetTicket().GetStatus()).To(Equal(ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE))
+		Expect(res.GetTask().GetState()).To(Equal(taskv1alpha1.TaskState_TASK_STATE_CANCELED))
 		Expect(res.GetCanceledRuns()).To(ConsistOf(HaveField("Id", r.GetId())))
-		got := member.getTicket(ctx, org, t.GetId())
+		got := member.getTask(ctx, org, t.GetId())
 		last := got.GetEvents()[len(got.GetEvents())-1]
 		Expect(last.GetKind()).To(Equal("run.canceled"))
-		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "ticket_done"))
-		Expect(ticketKinds(got)).To(ContainElement("status.changed"))
+		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "task ended"))
+		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "ticket_done")) // the stored vocabulary of old events (runoutcome.ReasonTaskDone)
+		Expect(taskKinds(got)).To(ContainElement("status.changed"))
 
-		// Done refuses messages; the running run of another ticket is untouched.
-		_, err = member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{
-			OrgId: org, TicketId: t.GetId(), Text: "hello?",
+		// A canceled task refuses messages; the running run of another task is untouched.
+		_, err = member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+			OrgId: org, TaskId: t.GetId(), Text: "hello?",
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		Expect(member.getRun(ctx, org, running.ID.String()).GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_RUNNING))
 
-		list, err := member.tickets.ListTickets(ctx, &ticketv1alpha1.ListTicketsRequest{
-			OrgId: org, Status: ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
+		list, err := member.tasks.ListTasks(ctx, &taskv1alpha1.ListTasksRequest{
+			OrgId: org, State: taskv1alpha1.TaskState_TASK_STATE_CANCELED,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(list.GetTickets()).To(ConsistOf(HaveField("Id", t.GetId())))
-		list, err = member.tickets.ListTickets(ctx, &ticketv1alpha1.ListTicketsRequest{OrgId: org})
+		Expect(list.GetTasks()).To(ConsistOf(HaveField("Id", t.GetId())))
+		list, err = member.tasks.ListTasks(ctx, &taskv1alpha1.ListTasksRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(list.GetTickets()).To(HaveLen(2))
+		Expect(list.GetTasks()).To(HaveLen(2))
 	})
 
-	It("cancels a run on request, with a ticket event naming the user", func(ctx SpecContext) {
-		t, r := member.createTicket(ctx, org, agent.GetId(), "cancel me")
+	It("cancels a run on request, with a task event naming the user", func(ctx SpecContext) {
+		t, r := member.createTask(ctx, org, agent.GetId(), "cancel me")
 		res, err := member.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: org, RunId: r.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
-		got := member.getTicket(ctx, org, t.GetId())
+		got := member.getTask(ctx, org, t.GetId())
 		last := got.GetEvents()[len(got.GetEvents())-1]
 		Expect(last.GetKind()).To(Equal("run.canceled"))
 		Expect(last.GetActorUserId()).To(Equal(member.userID))
@@ -468,7 +480,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 
 	Describe("run caps", func() {
 		It("cancels runs past the wall-clock cap, not counting parked time", func(ctx SpecContext) {
-			tOver, rOver := member.createTicket(ctx, org, agent.GetId(), "slow")
+			tOver, rOver := member.createTask(ctx, org, agent.GetId(), "slow")
 			over := ad.mustClaim(ctx, org)
 			Expect(over.ID.String()).To(Equal(rOver.GetId()))
 			// 31 minutes owned: over the 30-minute cap.
@@ -481,15 +493,15 @@ var _ = Describe("TicketService and run scheduling", func() {
 			got := member.getRun(ctx, org, rOver.GetId())
 			Expect(got.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 			Expect(got.GetOutcomeReason()).To(ContainSubstring("wall-clock cap"))
-			ticket := member.getTicket(ctx, org, tOver.GetId())
-			last := lastEventOfKind(ticket, "run.canceled")
-			Expect(last.GetActorKind()).To(Equal(ticketv1alpha1.ActorKind_ACTOR_KIND_SYSTEM))
+			task := member.getTask(ctx, org, tOver.GetId())
+			last := lastEventOfKind(task, "run.canceled")
+			Expect(last.GetActorKind()).To(Equal(taskv1alpha1.ActorKind_ACTOR_KIND_SYSTEM))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "wall_clock_cap"))
 
-			ad.finish(ctx, ad.mustClaim(ctx, org)) // the continuation run of the first ticket (issue #99)
+			ad.finish(ctx, ad.mustClaim(ctx, org)) // the continuation run of the first task (issue #99)
 
 			// Started 40 minutes ago but parked for 20 of them: within the cap.
-			_, rIn := member.createTicket(ctx, org, agent.GetId(), "patient")
+			_, rIn := member.createTask(ctx, org, agent.GetId(), "patient")
 			in := ad.park(ctx, ad.mustClaim(ctx, org))
 			Expect(in.ID.String()).To(Equal(rIn.GetId()))
 			_, err = e.pool.Exec(ctx, `UPDATE runs SET started_at = now() - interval '40 minutes',
@@ -507,7 +519,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 		})
 
 		It("writes the agent's last reply into the note of a run it cancels at the cap", func(ctx SpecContext) {
-			t, r := member.createTicket(ctx, org, agent.GetId(), "slow with a reply")
+			t, r := member.createTask(ctx, org, agent.GetId(), "slow with a reply")
 			run := ad.mustClaim(ctx, org)
 			Expect(run.ID.String()).To(Equal(r.GetId()))
 			_, err := ad.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
@@ -521,8 +533,8 @@ var _ = Describe("TicketService and run scheduling", func() {
 			n, err := sweep(ctx, e)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(Equal(1))
-			ticket := member.getTicket(ctx, org, t.GetId())
-			last := lastEventOfKind(ticket, "run.canceled") // the continuation run's queueing follows it
+			task := member.getTask(ctx, org, t.GetId())
+			last := lastEventOfKind(task, "run.canceled") // the continuation run's queueing follows it
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "wall_clock_cap"))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summary", "partial"))
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summarySource", "reply"))
@@ -530,7 +542,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 		})
 
 		It("reports the tokens a run used without ending it at any total (ADR 0081)", func(ctx SpecContext) {
-			_, r := member.createTicket(ctx, org, agent.GetId(), "chatty")
+			_, r := member.createTask(ctx, org, agent.GetId(), "chatty")
 			run := ad.mustClaim(ctx, org)
 			_, err := recordTokens(ctx, e, run, 1_999_999)
 			Expect(err).NotTo(HaveOccurred())
@@ -540,8 +552,8 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(member.getRun(ctx, org, r.GetId()).GetTokensUsed()).To(Equal(int64(41_999_999)))
 		})
 
-		It("shows the recorded spend of each run and of the ticket", func(ctx SpecContext) {
-			t, r := member.createTicket(ctx, org, agent.GetId(), "costly")
+		It("shows the recorded spend of each run and of the task", func(ctx SpecContext) {
+			t, r := member.createTask(ctx, org, agent.GetId(), "costly")
 			run := ad.mustClaim(ctx, org)
 			for i, cost := range []string{"0.0015", "0.25"} {
 				_, err := e.pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, run_id, task_id, request_id,
@@ -553,13 +565,13 @@ var _ = Describe("TicketService and run scheduling", func() {
 			want := &runv1alpha1.Cost{Requests: 2, InputTokens: 200, OutputTokens: 40, Usd: "0.2515", Priced: true}
 			Expect(proto.Equal(member.getRun(ctx, org, r.GetId()).GetCost(), want)).To(BeTrue())
 
-			ticket := member.getTicket(ctx, org, t.GetId())
-			Expect(proto.Equal(ticket.GetTicket().GetCost(), want)).To(BeTrue())
-			Expect(proto.Equal(ticket.GetRuns()[0].GetCost(), want)).To(BeTrue())
+			task := member.getTask(ctx, org, t.GetId())
+			Expect(proto.Equal(task.GetTask().GetCost(), want)).To(BeTrue())
+			Expect(proto.Equal(task.GetRuns()[0].GetCost(), want)).To(BeTrue())
 
-			// A ticket without spend shows zero.
-			t2, _ := member.createTicket(ctx, org, agent.GetId(), "free")
-			Expect(member.getTicket(ctx, org, t2.GetId()).GetTicket().GetCost().GetUsd()).To(Equal("0.00"))
+			// A task without spend shows zero.
+			t2, _ := member.createTask(ctx, org, agent.GetId(), "free")
+			Expect(member.getTask(ctx, org, t2.GetId()).GetTask().GetCost().GetUsd()).To(Equal("0.00"))
 		})
 	})
 })

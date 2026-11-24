@@ -98,7 +98,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(set.GetLimits().GetTemplateDefault()).To(Equal(l.GetTemplateDefault()))
 
 		By("a run queued afterwards carries the override")
-		_, r := owner.createTicket(ctx, org, a.GetId(), "limited")
+		_, r := owner.createTask(ctx, org, a.GetId(), "limited")
 		Expect(r.GetMaxModelRequests()).To(Equal(int64(40)))
 		Expect(r.GetMaxSpendUsd()).To(Equal("0.25"))
 

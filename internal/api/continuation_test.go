@@ -14,7 +14,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/runlimits"
@@ -80,7 +80,7 @@ var _ = Describe("continuation runs", func() {
 	orgID := func() pgtype.UUID { return uuid(org) }
 
 	It("queues a continuation run of the same task when a run hits its time cap", func(ctx SpecContext) {
-		member.createTicket(ctx, org, agentI, "long job")
+		member.createTask(ctx, org, agentI, "long job")
 		first := ad.mustClaim(ctx, org)
 		timeCap(ctx, first)
 
@@ -99,7 +99,7 @@ var _ = Describe("continuation runs", func() {
 	})
 
 	It("stops after 3 continuations and blocks the task on its owner", func(ctx SpecContext) {
-		member.createTicket(ctx, org, agentI, "endless job")
+		member.createTask(ctx, org, agentI, "endless job")
 		run := ad.mustClaim(ctx, org)
 		for i := 1; i <= 3; i++ {
 			timeCap(ctx, run)
@@ -121,7 +121,7 @@ var _ = Describe("continuation runs", func() {
 	Describe("the per-task USD cap", func() {
 		It("uses the org's default: no continuation once the task has spent it", func(ctx SpecContext) {
 			Expect(orgsettings.SetContinuationTaskSpend(ctx, q, orgID(), money.FromCents(100))).To(Succeed())
-			member.createTicket(ctx, org, agentI, "costly job")
+			member.createTask(ctx, org, agentI, "costly job")
 			run := ad.mustClaim(ctx, org)
 			spend(ctx, run, "1.25")
 			timeCap(ctx, run)
@@ -138,7 +138,7 @@ var _ = Describe("continuation runs", func() {
 
 		It("sums the spend of every run of the task, continuations included", func(ctx SpecContext) {
 			Expect(orgsettings.SetContinuationTaskSpend(ctx, q, orgID(), money.FromCents(100))).To(Succeed())
-			member.createTicket(ctx, org, agentI, "two runs")
+			member.createTask(ctx, org, agentI, "two runs")
 			run := ad.mustClaim(ctx, org)
 			spend(ctx, run, "0.60")
 			timeCap(ctx, run)
@@ -151,7 +151,7 @@ var _ = Describe("continuation runs", func() {
 		})
 
 		It("falls back to the platform default when the org sets none", func(ctx SpecContext) {
-			member.createTicket(ctx, org, agentI, "default cap")
+			member.createTask(ctx, org, agentI, "default cap")
 			run := ad.mustClaim(ctx, org)
 			spend(ctx, run, "19.99")
 			timeCap(ctx, run)
@@ -164,7 +164,7 @@ var _ = Describe("continuation runs", func() {
 				OrgID: orgID(), AgentID: uuid(agentI), UpdatedBy: "test",
 				TaskSpendUsd: pgtype.Text{String: money.FromCents(1000).Numeric(), Valid: true},
 			})).To(Succeed())
-			member.createTicket(ctx, org, agentI, "agent cap higher")
+			member.createTask(ctx, org, agentI, "agent cap higher")
 			run := ad.mustClaim(ctx, org)
 			spend(ctx, run, "1.50")
 			timeCap(ctx, run)
@@ -188,7 +188,7 @@ var _ = Describe("continuation runs", func() {
 			Expect(q.SetAgentContinuationLimits(ctx, store.SetAgentContinuationLimitsParams{
 				OrgID: orgID(), AgentID: uuid(agentI), UpdatedBy: "test", MaxContinuations: two,
 			})).To(Succeed())
-			member.createTicket(ctx, org, agentI, "two only")
+			member.createTask(ctx, org, agentI, "two only")
 			run := ad.mustClaim(ctx, org)
 			for range 2 {
 				timeCap(ctx, run)
@@ -204,7 +204,7 @@ var _ = Describe("continuation runs", func() {
 			Expect(q.SetAgentContinuationLimits(ctx, store.SetAgentContinuationLimitsParams{
 				OrgID: orgID(), AgentID: uuid(agentI), UpdatedBy: "test", MaxContinuations: pgtype.Int4{Valid: true},
 			})).To(Succeed())
-			member.createTicket(ctx, org, agentI, "no continuation")
+			member.createTask(ctx, org, agentI, "no continuation")
 			run := ad.mustClaim(ctx, org)
 			timeCap(ctx, run)
 			Expect(queued(ctx, run)).To(BeFalse())
@@ -213,18 +213,18 @@ var _ = Describe("continuation runs", func() {
 	})
 
 	It("queues nothing when a follow-up message already queued the next run", func(ctx SpecContext) {
-		t, _ := member.createTicket(ctx, org, agentI, "followed up")
+		t, _ := member.createTask(ctx, org, agentI, "followed up")
 		run := ad.mustClaim(ctx, org)
 		_, err := e.pool.Exec(ctx, `UPDATE runs SET started_at = now() - interval '31 minutes' WHERE id = $1`, run.ID)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{OrgId: org, TicketId: t.GetId(), Text: "also this"})
+		_, err = member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: t.GetId(), Text: "also this"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = sweep(ctx, e)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(task(ctx, run).ContinuationCount).To(BeZero())
 	})
 	It("blocks a task again at its next time cap after a person's message resumed it", func(ctx SpecContext) {
-		t, _ := member.createTicket(ctx, org, agentI, "blocked then resumed")
+		t, _ := member.createTask(ctx, org, agentI, "blocked then resumed")
 		run := ad.mustClaim(ctx, org)
 		for range 3 {
 			timeCap(ctx, run)
@@ -233,7 +233,7 @@ var _ = Describe("continuation runs", func() {
 		timeCap(ctx, run)
 		Expect(task(ctx, run).State).To(Equal(store.TaskStateInputRequired))
 
-		_, err := member.tickets.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{OrgId: org, TicketId: t.GetId(), Text: "keep going"})
+		_, err := member.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: t.GetId(), Text: "keep going"})
 		Expect(err).NotTo(HaveOccurred())
 		run = ad.mustClaim(ctx, org)
 		timeCap(ctx, run)

@@ -321,7 +321,7 @@ var _ = Describe("TraceDestinationService", func() {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		a := owner.activeAgent(ctx, org)
 
-		_, r := owner.createTicket(ctx, org, a.GetId(), "untraced")
+		_, r := owner.createTask(ctx, org, a.GetId(), "untraced")
 		traced, err := e.traces.DecideRun(ctx, uuid(org), uuid(r.GetId()))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(traced).To(BeFalse(), "an org without a destination traces nothing")
@@ -333,7 +333,7 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(traced).To(BeFalse(), "the run was decided before the destination existed and keeps its decision")
 
 		a2 := owner.activeAgent(ctx, org)
-		_, r2 := owner.createTicket(ctx, org, a2.GetId(), "traced")
+		_, r2 := owner.createTask(ctx, org, a2.GetId(), "traced")
 		traced, err = e.traces.DecideRun(ctx, uuid(org), uuid(r2.GetId()))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(traced).To(BeTrue(), "the default samples every run")

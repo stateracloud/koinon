@@ -58,7 +58,7 @@ func (e *env) pendingCodeHostApproval(ctx context.Context, f orgFixture, connect
 	risk, err := json.Marshal(githubtools.AssessRisk(pr))
 	Expect(err).NotTo(HaveOccurred())
 	row, err := store.New(e.pool).CreateApprovalRequest(ctx, store.CreateApprovalRequestParams{
-		OrgID: uuid(f.org), TaskID: uuid(f.ticket.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
+		OrgID: uuid(f.org), TaskID: uuid(f.task.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
 		Connector: connector, Tool: scenarios.GiteaAsk.PRTool, Target: githubtools.Target(connector, repo),
 		ArgsJson: string(args), ArgsSha256: githubtools.HashArgs(args), Risk: risk,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -139,7 +139,7 @@ var _ = Describe("the scripted approver (hack/answer-question.sh, hack/approve-p
 		out, code = script(ctx, post, "answer-question.sh", e.srv.URL, jar, f.org, f.run.GetId(), q.ID.String())
 		Expect(code).To(Equal(0), out)
 		Expect(out).To(ContainSubstring("answered " + q.ID.String()))
-		got, err := f.owner.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: f.org, TaskId: f.ticket.GetId()})
+		got, err := f.owner.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: f.org, TaskId: f.task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetQuestions()).To(HaveLen(1))
 		Expect(got.GetQuestions()[0].GetState()).To(Equal(questionv1alpha1.QuestionState_QUESTION_STATE_ANSWERED))

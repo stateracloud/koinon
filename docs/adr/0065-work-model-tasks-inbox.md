@@ -231,9 +231,9 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   moved the ticket to To do. Every park the code makes today is an approval park, so no other
   park reason has a mapping yet: `ask_user` (TK3) parks to input-required, and `a2a` stays
   working. Task events keep their rows: `ticket.created` becomes `task.created`, and the `from`
-  and `to` of `status.changed` become states. `TicketService` stays as a deprecated layer over
-  tasks until TK2: the column is derived from the state (completed, canceled and failed show as
-  Done) and a move to Done completes the task.
+  and `to` of `status.changed` become states. `TicketService` stayed for a while as a deprecated layer over
+  tasks: the column was derived from the state (completed, canceled and failed showed as Done) and
+  a move to Done completed the task. Issue #731 removed that layer (see Routes below).
   TK1 keeps today's behaviour otherwise: a run starting does not move a task to working and runs
   do not end tasks, so a task stays submitted while its agent works, as a ticket stayed in To do;
   that comes with TK2/TK3/LT1, and the diagram above is the target.
@@ -278,8 +278,10 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 
 - **Routes.** `/` is the inbox; `/board` is the board (secondary view); `/tasks/{id}` is a task. A
   task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
-  web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); `TicketService` stays on the
-  server, deprecated.
+  web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); Issue #731 removed the `TicketService` handler
+  (2026-11-24): a call to a `TicketService` method now gets `unimplemented`. The `.proto` file stays so
+  its field numbers stay reserved, and there is no replacement for "move to Done": people do not move
+  tasks. `TaskService` is the replacement.
 - **Inbox items.** An item is a `kind` in a union (`web/src/lib/inbox.ts`) with one renderer per
   kind (`web/src/components/inbox.tsx`); a new kind (TK3's question, a reply to validate, a
   report) is one more member and one more renderer. Today: `approval` (a pending approval the

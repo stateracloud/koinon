@@ -41,9 +41,6 @@ var _ = Describe("the database enum to proto enum tables", func() {
 		Entry("question state", audited(questionStateToProto, store.AllQuestionStateValues())),
 		Entry("question answer kind", audited(answerKindToProto, store.AllQuestionAnswerKindValues())),
 		Entry("connection status", audited(connectionStatusToProto, store.AllConnectionStatusValues())),
-		Entry("ticket column", audited(ticketColumn, store.AllTaskStateValues())),
-		Entry("ticket column name", audited(ticketColumnName, store.AllTaskStateValues())),
-		Entry("ticket actor kind", audited(ticketActorKind, store.AllTaskActorKindValues())),
 	)
 
 	It("reports a missing row, a zero row and an extra row", func() {

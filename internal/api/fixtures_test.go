@@ -32,11 +32,10 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
-	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
@@ -50,7 +49,6 @@ type client struct {
 	b            *browser
 	userID       string
 	agents       agentv1alpha1connect.AgentServiceClient
-	tickets      ticketv1alpha1connect.TicketServiceClient
 	tasks        taskv1alpha1connect.TaskServiceClient
 	runs         runv1alpha1connect.RunServiceClient
 	templates    templatev1alpha1connect.TemplateServiceClient
@@ -71,7 +69,6 @@ func newClient(b *browser) *client {
 	return &client{
 		b:            b,
 		agents:       agentv1alpha1connect.NewAgentServiceClient(cc),
-		tickets:      ticketv1alpha1connect.NewTicketServiceClient(cc),
 		tasks:        taskv1alpha1connect.NewTaskServiceClient(cc),
 		runs:         runv1alpha1connect.NewRunServiceClient(cc),
 		templates:    templatev1alpha1connect.NewTemplateServiceClient(cc),
@@ -237,16 +234,16 @@ func (c *client) activeAgent(ctx context.Context, org string) *agentv1alpha1.Age
 	return res.GetAgent()
 }
 
-func (c *client) createTicket(ctx context.Context, org, agent, title string) (*ticketv1alpha1.Ticket, *runv1alpha1.Run) {
-	res, err := c.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+func (c *client) createTask(ctx context.Context, org, agent, title string) (*taskv1alpha1.Task, *runv1alpha1.Run) {
+	res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 		OrgId: org, AgentId: agent, Title: title, Message: "please " + title,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	return res.GetTicket(), res.GetRun()
+	return res.GetTask(), res.GetRun()
 }
 
-func (c *client) getTicket(ctx context.Context, org, ticket string) *ticketv1alpha1.GetTicketResponse {
-	res, err := c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket})
+func (c *client) getTask(ctx context.Context, org, task string) *taskv1alpha1.GetTaskResponse {
+	res, err := c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task})
 	Expect(err).NotTo(HaveOccurred())
 	return res
 }
@@ -257,15 +254,15 @@ func (c *client) getRun(ctx context.Context, org, run string) *runv1alpha1.Run {
 	return res.GetRun()
 }
 
-// orgFixture is one org with an owner, an active agent, a ticket and its
+// orgFixture is one org with an owner, an active agent, a task and its
 // queued run, all made through the API.
 type orgFixture struct {
-	org    string
-	owner  *client
-	agent  *agentv1alpha1.Agent
-	draft  *agentv1alpha1.Agent // set by newIsolationFixture
-	ticket *ticketv1alpha1.Ticket
-	run    *runv1alpha1.Run
+	org   string
+	owner *client
+	agent *agentv1alpha1.Agent
+	draft *agentv1alpha1.Agent // set by newIsolationFixture
+	task  *taskv1alpha1.Task
+	run   *runv1alpha1.Run
 	// connection and appKey are set by newIsolationFixture.
 	connection string
 	appKey     []byte
@@ -297,7 +294,7 @@ func (e *env) newOrgFixture(ctx context.Context) orgFixture {
 	var f orgFixture
 	f.org, f.owner = e.newTeamOrg(ctx)
 	f.agent = f.owner.activeAgent(ctx, f.org)
-	f.ticket, f.run = f.owner.createTicket(ctx, f.org, f.agent.GetId(), "fix the README")
+	f.task, f.run = f.owner.createTask(ctx, f.org, f.agent.GetId(), "fix the README")
 	Expect(f.run).NotTo(BeNil())
 	return f
 }
@@ -362,7 +359,7 @@ func uuid(s string) (id pgtype.UUID) {
 	return id
 }
 
-func ticketKinds(res *ticketv1alpha1.GetTicketResponse) []string {
+func taskKinds(res *taskv1alpha1.GetTaskResponse) []string {
 	var kinds []string
 	for _, e := range res.GetEvents() {
 		kinds = append(kinds, e.GetKind())
@@ -370,9 +367,9 @@ func ticketKinds(res *ticketv1alpha1.GetTicketResponse) []string {
 	return kinds
 }
 
-// lastEventOfKind is the ticket's latest event of the kind; a run that hit its time cap is followed
+// lastEventOfKind is the task's latest event of the kind; a run that hit its time cap is followed
 // by its continuation run's events (issue #99).
-func lastEventOfKind(res *ticketv1alpha1.GetTicketResponse, kind string) *ticketv1alpha1.TicketEvent {
+func lastEventOfKind(res *taskv1alpha1.GetTaskResponse, kind string) *taskv1alpha1.TaskEvent {
 	GinkgoHelper()
 	evs := res.GetEvents()
 	for i := len(evs) - 1; i >= 0; i-- {
@@ -380,7 +377,7 @@ func lastEventOfKind(res *ticketv1alpha1.GetTicketResponse, kind string) *ticket
 			return evs[i]
 		}
 	}
-	Fail("no " + kind + " event on the ticket")
+	Fail("no " + kind + " event on the task")
 	return nil
 }
 

@@ -117,9 +117,9 @@ func enqueue(ctx context.Context, q *store.Queries, t store.Task) (*runv1alpha1.
 }
 
 // createTask creates a task owned by an active agent, created by the caller, with its first
-// message and a queued run. It is what both TaskService and the ticket compatibility layer call.
+// message and a queued run. TaskService calls it.
 func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, title, msg string) (store.Task, *runv1alpha1.Run, error) {
-	// A held install queues no new work, on the task and the ticket API alike (ADR 0107).
+	// A held install queues no new work (ADR 0107).
 	if err := s.hold.Err(); err != nil {
 		return store.Task{}, nil, err
 	}
@@ -233,12 +233,11 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 	return tasks, costs, err
 }
 
-// appendMessage adds a user message to a task and queues a run unless one is queued already. With
-// reopen, a message on a completed task reopens it; without, a completed task refuses it (the deprecated
-// ticket API, where Done is a board column a person chose).
-func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string, reopen bool) (store.TaskEvent, *runv1alpha1.Run, error) {
-	// The message and its queued run commit together, so a held install refuses the whole call
-	// (task and ticket API alike): it queues no new work (ADR 0107).
+// appendMessage adds a user message to a task and queues a run unless one is queued already. A
+// message on a completed task reopens it.
+func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string) (store.TaskEvent, *runv1alpha1.Run, error) {
+	// The message and its queued run commit together, so a held install refuses the whole call:
+	// it queues no new work (ADR 0107).
 	if err := s.hold.Err(); err != nil {
 		return store.TaskEvent{}, nil, err
 	}
@@ -253,7 +252,7 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		if err != nil {
 			return nil, err
 		}
-		if reopen && t.State == store.TaskStateCompleted {
+		if t.State == store.TaskStateCompleted {
 			// A run that succeeded completes its task (ADR 0065); a follow-up reopens it, as it
 			// does a direct-message thread (ADR 0066).
 			if t, err = q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: c.org, ID: id, State: store.TaskStateSubmitted}); err != nil {
@@ -290,7 +289,7 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 
 // setState moves a task to a state on behalf of the caller and records the change on the timeline.
 // Moving to an end state cancels the task's queued runs. A task already in the state is returned
-// unchanged and the canceled runs are still swept, as the ticket API always did.
+// unchanged and the canceled runs are still swept.
 //
 // cancelMsg is the outcome of the queued runs it cancels.
 //
@@ -333,8 +332,8 @@ func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, cancelM
 	return task, runs, err
 }
 
-// taskAPI implements TaskService. It is a type of its own because AppendMessage is also a method
-// of TicketService, with other types, on Server.
+// taskAPI implements TaskService. It is a type of its own so that the service handler methods stay
+// apart from the other methods of Server.
 type taskAPI struct{ *Server }
 
 var _ taskv1alpha1connect.TaskServiceHandler = taskAPI{}
@@ -496,7 +495,7 @@ func (a taskAPI) AppendMessage(ctx context.Context, req *taskv1alpha1.AppendMess
 	if err != nil {
 		return nil, err
 	}
-	ev, run, err := a.appendMessage(ctx, c, id, msg, true)
+	ev, run, err := a.appendMessage(ctx, c, id, msg)
 	if errors.Is(err, errTaskEnded) {
 		err = connect.NewError(connect.CodeFailedPrecondition, "task has ended")
 	}
