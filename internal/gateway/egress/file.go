@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
@@ -19,13 +20,17 @@ const maxRoutesFile = 1 << 20
 // fileRoute is one route of the platform route file. The names are fixed; an unknown field is an
 // error, so a typo cannot drop a rule.
 type fileRoute struct {
-	Name         string   `json:"name"`
-	Class        string   `json:"class"`
-	Host         string   `json:"host"`
-	Port         int      `json:"port,omitempty"`
-	Methods      []string `json:"methods"`
-	PathPrefixes []string `json:"pathPrefixes"`
-	QueryKeys    []string `json:"queryKeys,omitempty"`
+	Name         string            `json:"name"`
+	Class        string            `json:"class"`
+	Host         string            `json:"host"`
+	Port         int               `json:"port,omitempty"`
+	Methods      []string          `json:"methods"`
+	PathPrefixes []string          `json:"pathPrefixes,omitempty"`
+	Paths        []string          `json:"paths,omitempty"`
+	QueryKeys    []string          `json:"queryKeys,omitempty"`
+	QueryValues  map[string]string `json:"queryValues,omitempty"`
+	AnyQuery     bool              `json:"anyQuery,omitempty"`
+	Deny         bool              `json:"deny,omitempty"`
 }
 
 type routesFile struct {
@@ -67,9 +72,15 @@ func ParsePlatformRoutes(b []byte) (*route.Table, error) {
 	}
 	rs := make([]route.Route, 0, len(rf.Routes))
 	for _, r := range rf.Routes {
+		if strings.Contains(r.Name, "/") {
+			// The names of org routes from Koinon state hold a "/" (gatewayplan), so the two sets can
+			// never collide.
+			return nil, fmt.Errorf("egress: the route file: route %q: a platform route name has no \"/\"", r.Name)
+		}
 		rs = append(rs, route.Route{
 			Name: r.Name, Class: route.Class(r.Class), Host: r.Host, Port: r.Port,
-			Methods: r.Methods, PathPrefixes: r.PathPrefixes, QueryKeys: r.QueryKeys,
+			Methods: r.Methods, PathPrefixes: r.PathPrefixes, Paths: r.Paths, QueryKeys: r.QueryKeys,
+			QueryValues: r.QueryValues, AnyQuery: r.AnyQuery, Deny: r.Deny,
 		})
 	}
 	t, err := route.Compile(rs)

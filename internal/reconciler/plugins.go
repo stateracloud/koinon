@@ -7,7 +7,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/execution"
-	harnessdesc "github.com/stateracloud/koinon/internal/harness"
 )
 
 // Plugin installs (template option harness.pluginInstalls, off by default). An OpenCode agent
@@ -25,7 +24,7 @@ const NPMRegistryHost = "registry.npmjs.org"
 // version is cfg, running the binaries of f. ok is false when the version does not turn
 // plugin installs on or the harness lacks the option (harness.Descriptor.PluginInstalls).
 func PluginInstallRule(cfg agentconfig.Config, name string, f Harness) (rule execution.NetworkRule, ok bool) {
-	if !cfg.Harness.PluginInstalls || !harnessdesc.SupportsPluginInstalls(name) || len(f.Binaries) == 0 {
+	if !PluginInstallsOn(cfg, name) || len(f.Binaries) == 0 {
 		return execution.NetworkRule{}, false
 	}
 	return execution.NetworkRule{

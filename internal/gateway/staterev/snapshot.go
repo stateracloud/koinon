@@ -12,10 +12,12 @@ package staterev
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"time"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
@@ -27,9 +29,10 @@ import (
 // pass that changes nothing publishes nothing.
 func Snapshot(s gateway.State) *gwv1.StateUpdate {
 	return &gwv1.StateUpdate{
-		Keys:  keysToProto(s.Keys),
-		Model: modelToProto(s.ModelState),
-		Mcp:   mcpToProto(s.MCPState),
+		Keys:   keysToProto(s.Keys),
+		Model:  modelToProto(s.ModelState),
+		Mcp:    mcpToProto(s.MCPState),
+		Egress: egressToProto(s.EgressState),
 	}
 }
 
@@ -76,7 +79,36 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 			s.Tools[a] = append(s.Tools[a], gateway.ToolGrant{Target: g.GetTarget(), Tools: slices.Clone(g.GetTools()), All: g.GetAll()})
 		}
 	}
+	for _, r := range u.GetEgress().GetRoutes() {
+		s.EgressRoutes = append(s.EgressRoutes, route.Route{
+			Name: r.GetName(), Class: route.Class(r.GetClass()), Org: r.GetOrg(), Agent: r.GetAgent(),
+			Host: r.GetHost(), Port: int(r.GetPort()), Methods: slices.Clone(r.GetMethods()),
+			PathPrefixes: slices.Clone(r.GetPathPrefixes()), Paths: slices.Clone(r.GetPaths()),
+			QueryKeys: slices.Clone(r.GetQueryKeys()), QueryValues: maps.Clone(r.GetQueryValues()),
+			AnyQuery: r.GetAnyQuery(), Deny: r.GetDeny(), Credential: r.GetCredential(),
+		})
+	}
 	return s
+}
+
+// egressToProto returns the egress half, or nil when it has no route, so a State without org
+// routes gives the same message as before the half existed.
+func egressToProto(e gateway.EgressState) *gwv1.EgressState {
+	if len(e.EgressRoutes) == 0 {
+		return nil
+	}
+	out := &gwv1.EgressState{}
+	for _, r := range e.EgressRoutes {
+		out.Routes = append(out.Routes, &gwv1.EgressRoute{
+			Name: r.Name, Class: string(r.Class), Org: r.Org, Agent: r.Agent, Host: r.Host,
+			Port:    int32(r.Port), //nolint:gosec // route.Compile bounds the port to 0..65535
+			Methods: sortedCopy(r.Methods), PathPrefixes: sortedCopy(r.PathPrefixes), Paths: sortedCopy(r.Paths),
+			QueryKeys: sortedCopy(r.QueryKeys), QueryValues: maps.Clone(r.QueryValues),
+			AnyQuery: r.AnyQuery, Deny: r.Deny, Credential: r.Credential,
+		})
+	}
+	slices.SortFunc(out.Routes, func(a, b *gwv1.EgressRoute) int { return cmp.Compare(a.GetName(), b.GetName()) })
+	return out
 }
 
 func agentToProto(a gateway.AgentRef) *gwv1.AgentRef { return &gwv1.AgentRef{Org: a.Org, Name: a.Name} }

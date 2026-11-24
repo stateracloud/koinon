@@ -19,6 +19,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -140,6 +141,22 @@ var _ = Describe("Planner", func() {
 			Expect(keyIDs(pl.State)).To(Equal([]string{"key-a1"}))
 			Expect(pl.State.Limits).NotTo(HaveKey(gateway.AgentRef{Org: "acme", Name: "a2"}))
 		})
+	})
+
+	It("carries the egress routes of active agents only (#1086 part B)", func() {
+		r := func(name string) route.Route {
+			return route.Route{
+				Name: "org/acme/agent/" + name + "/registry-0-0", Class: route.ClassRegistry, Org: "acme", Agent: name,
+				Host: "registry.npmjs.org", Methods: []string{"GET"}, Paths: []string{"/**"}, AnyQuery: true,
+			}
+		}
+		active := agent(acme, 1, "a1")
+		active.Egress = []route.Route{r("a1")}
+		draft := agent(acme, 2, "a2")
+		draft.Active = false
+		draft.Egress = []route.Route{r("a2")}
+		pl := settle(newPlanner(0).Begin(gatewayplan.Input{Now: t0, Orgs: []gatewayplan.Org{acme}, Agents: []gatewayplan.Agent{active, draft}}), nil, nil, lk)
+		Expect(pl.State.EgressRoutes).To(Equal([]route.Route{r("a1")}))
 	})
 
 	Describe("a limit that cannot be computed fails closed", func() {

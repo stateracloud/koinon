@@ -9673,6 +9673,159 @@
           ]
         },
         {
+          "name": "EgressRoute",
+          "fullName": "koinon.gateway.v1alpha1.EgressRoute",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressRoute is one org route (gateway route.Route). It names a credential, never its value.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "name is unique in the set and holds a \"/\"."
+            },
+            {
+              "name": "class",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "class is \"forge\" or \"registry\"."
+            },
+            {
+              "name": "org",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug. It is never empty for a route in the state."
+            },
+            {
+              "name": "agent",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent narrows the route to one agent (the agent's name at the gateway). Empty: every agent of org."
+            },
+            {
+              "name": "host",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "port",
+              "number": 6,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "port is the TCP port. 0 means 443."
+            },
+            {
+              "name": "methods",
+              "number": 7,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "path_prefixes",
+              "number": 8,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "paths",
+              "number": 9,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "paths are path patterns: the segment \"*\" matches one segment, \"**\" any number of segments."
+            },
+            {
+              "name": "query_keys",
+              "number": 10,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "query_values",
+              "number": 11,
+              "type": "map<string, string>",
+              "label": "map",
+              "oneof": "",
+              "deprecated": false,
+              "description": "query_values are required query parameters with their one exact value."
+            },
+            {
+              "name": "any_query",
+              "number": 12,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "deny",
+              "number": 13,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "deny makes the route a refusal that wins over every allow of its scope."
+            },
+            {
+              "name": "credential",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "credential is the name of the secret the gateway attaches. Empty means none."
+            }
+          ]
+        },
+        {
+          "name": "EgressState",
+          "fullName": "koinon.gateway.v1alpha1.EgressState",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressState is the org routes of the egress listener. The gateway merges them with its platform\nroute file. A route that fails to load closes all org routes; it never opens one.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "routes",
+              "number": 1,
+              "type": "koinon.gateway.v1alpha1.EgressRoute",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "Key",
           "fullName": "koinon.gateway.v1alpha1.Key",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -10326,6 +10479,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "egress",
+              "number": 5,
+              "type": "koinon.gateway.v1alpha1.EgressState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "egress is the org half of the forge and registry routes (ADR 0097 step 2, ADR 0120 section 2).\nIt is applied with each revision and has no ack of its own yet."
             }
           ]
         },

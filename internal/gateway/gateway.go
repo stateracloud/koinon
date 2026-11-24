@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/thinking"
@@ -633,6 +634,15 @@ type State struct {
 	Keys []Key
 	ModelState
 	MCPState
+	EgressState
+}
+
+// EgressState is the org half of the forge and registry routes of the egress listener (ADR 0097
+// step 2, #1086 part B). It needs no key: the egress listener authenticates with the actor token.
+type EgressState struct {
+	// EgressRoutes are org routes. Each names its org, and its name holds a "/". The gateway merges
+	// them with its platform route file (egress.Merge).
+	EgressRoutes []route.Route
 }
 
 // ModelConfig is what the model path is handed: the keys and the model half of a State. A driver

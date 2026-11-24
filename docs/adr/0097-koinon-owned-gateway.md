@@ -452,6 +452,30 @@ source type, mints the actor token outside the guest for both drivers and drops 
 profile. Prior art: Fly.io's Tokenizer (a proxy that adds the credential, the client holds none), git
 `url.<base>.insteadOf`, and npm and pip registry mirrors that take a path prefix.
 
+Record (2026-11-24, #1086 part B; the choices below are decided): the org routes come from the sources
+that exist today, the code-host grant of each active agent and its npm plugin-install rule. The registry
+levels of ADR 0113 come later, in an issue of their own. The reconciler translates the same enforced
+endpoints that it renders into the OpenShell policy, and the OpenShell rules stay in force as a second
+layer. The State update gets an add-only egress half (`EgressState`, field 5), which the gateway applies on
+each revision with no ack of its own: nothing waits for it. The gateway merges the org routes with the
+platform routes file (`egress.Merge`). An org route names its org and has a `/` in its name, and a platform
+route has no `/`, so the two sets never share a name. One bad org route refuses all org routes, and the
+gateway then serves the platform routes alone. The reconciler compiles each agent's routes first, so one
+agent's fault takes away only that agent's routes. To translate the connector rules without loss, the route
+model gets: an agent scope (empty means every agent of the org; an agent route wins over an org route, and
+an org route over a platform route), segment patterns (`*` is one non-empty segment, `**` is zero or more,
+other segments match the decoded segment exactly and with case), exact query values, an explicit
+any-query flag, and deny routes. A deny route is checked before every allow, without case, and has no
+credential. A rule that the model cannot express exactly (a query glob, an access preset, an endpoint path,
+a protocol other than REST) gives the agent no route. The gateway agent name is the agent ID, as in
+`gateway.AgentRef`: the actor token that part C mints must carry the same value in its `agent` claim. A
+forge route names the credential `org/<org>/agent/<agent>/codehost`, a name and never a value, so it
+returns 503 `credential_unavailable` until part C attaches it. The host of a forge route comes from the
+connection's base URL, which an org admin sets: an allowed CIDR (`--egress-allowed-hosts`) admits that host
+too when it resolves into the CIDR. Known limit: the route model refuses an encoded slash in every path,
+also the npm CLI's spelling of a scoped package (`/@scope%2fname`); that needs a change of its own before
+npm traffic goes through the gateway.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
