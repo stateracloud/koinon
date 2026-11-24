@@ -40,7 +40,7 @@ var _ = Describe("SealedCredentials", func() {
 		Expect(err).NotTo(HaveOccurred())
 		b, err := json.Marshal(env)
 		Expect(err).NotTo(HaveOccurred())
-		p := filepath.Join(dir, forgecredfile.SealedName(uuid(nameOrg), uuid(nameAgent), b))
+		p := filepath.Join(dir, forgecredfile.SealedName(uuid(nameOrg), uuid(nameAgent), "scope", b))
 		Expect(os.WriteFile(p, b, 0o600)).To(Succeed())
 		return p
 	}
@@ -87,11 +87,20 @@ var _ = Describe("SealedCredentials", func() {
 	})
 
 	It("refuses a plaintext file", func() {
-		p := filepath.Join(dir, "forgev2-"+org+"-"+agent+"-0a1b2c3d")
+		p := filepath.Join(dir, "forgev2-"+org+"-"+agent+"-0a1b2c3d-0a1b2c3d")
 		Expect(os.WriteFile(p, []byte(value), 0o600)).To(Succeed())
 		_, err := open(p, agent)
 		Expect(err).To(HaveOccurred())
 		Expect(failures).To(Equal([]string{"format"}))
+	})
+
+	It("refuses a path that is relative or not clean", func() {
+		p := write(gk, org, agent, org, agent, value)
+		for _, bad := range []string{filepath.Base(p), filepath.Dir(p) + "/x/../" + filepath.Base(p)} {
+			_, err := open(bad, agent)
+			Expect(err).To(HaveOccurred(), bad)
+		}
+		Expect(failures).To(Equal([]string{"format", "format"}))
 	})
 
 	It("refuses a value that cannot go in a header", func() {

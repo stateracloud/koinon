@@ -20,10 +20,12 @@ var _ = Describe("Forge credentials (#1086 part C)", func() {
 	var lk *fakeLookups
 	BeforeEach(func() { lk = &fakeLookups{} })
 
-	// fileOf is a forge credential file name of agent n of acme, as the reconciler names it.
-	fileOf := func(n byte, hash string) string {
-		return forgecredfile.SealedPrefix + acme.ID.String() + "-" + uuid(n).String() + "-" + hash
+	// fileOf is a forge credential file name of agent n of acme, as the reconciler names it, for a token
+	// of the scope "github".
+	fileIn := func(n byte, scope, hash string) string {
+		return forgecredfile.Family(acme.ID, uuid(n), scope) + hash
 	}
+	fileOf := func(n byte, hash string) string { return fileIn(n, "github", hash) }
 	withForge := func(a gatewayplan.Agent, file string) gatewayplan.Agent {
 		a.Forge = &gatewayplan.ForgeCredential{Name: "org/acme/agent/" + a.Ref.Name + "/codehost", File: file, Scheme: route.SchemeBasic, User: "x-access-token"}
 		return a
@@ -99,6 +101,24 @@ var _ = Describe("Forge credentials (#1086 part C)", func() {
 		Expect(pl.State.EgressCredentials).To(HaveLen(1))
 		Expect(pl.State.EgressCredentials[0].File).To(Equal(path.Join(keyDir, f0)), "never another agent's file")
 		Expect(pl.Keep).To(And(HaveKey(f0), HaveKey(f1), Not(HaveKey(other))))
+	})
+
+	It("never keeps serving a file of another scope while the new one settles", func() {
+		p := newPlanner(time.Minute)
+		old, next := fileIn(1, "github", "aaaaaaaa"), fileIn(1, "gitea", "bbbbbbbb")
+		pl := settle(p.Begin(in(t0.Add(-time.Hour), withForge(agent(acme, 1, "a1"), old))), nil, nil, lk)
+		pl.Applied(gatewayplan.ApplyResult{})
+
+		// The agent's binding moved to another connection or host: the old token must not go there.
+		pl = settle(p.Begin(in(t0, withForge(agent(acme, 1, "a1"), next))), []string{next}, map[string]bool{old: true, next: true}, lk)
+		Expect(pl.State.EgressCredentials).To(BeEmpty())
+		Expect(pl.Keep).NotTo(HaveKey(old))
+	})
+
+	It("after a restart never falls back to a file of another scope", func() {
+		other, next := fileIn(1, "github", "ffffffff"), fileIn(1, "gitea", "00000000")
+		pl := settle(newPlanner(time.Minute).Begin(in(t0, withForge(agent(acme, 1, "a1"), next))), []string{next}, map[string]bool{other: true, next: true}, lk)
+		Expect(pl.State.EgressCredentials).To(BeEmpty())
 	})
 
 	It("mounts the files where the MCP credentials are, apart from the provider keys", func() {

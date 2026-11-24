@@ -657,6 +657,32 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(string(b)).To(Equal("echo " + strings.Repeat("*", len(value))))
 		})
 
+		It("masks the credential in a trailer, whose value arrives after the body", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Trailer", "X-Echo-Trailer")
+				_, _ = io.WriteString(w, "body")
+				w.Header().Set("X-Echo-Trailer", "token="+value)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			b, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).To(Equal("body"))
+			Expect(resp.Trailer.Get("X-Echo-Trailer")).To(Equal("token=" + strings.Repeat("*", len(value))))
+		})
+
+		It("passes a response with no body, whatever its Content-Encoding says", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Encoding", "br")
+				w.WriteHeader(http.StatusNotModified)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusNotModified))
+			Expect(count("forge", "upstream_error")).To(Equal(0.0))
+		})
+
 		It("keeps the credential set and the table together: a new revision drops the old credential", func() {
 			apply(cred)
 			apply()

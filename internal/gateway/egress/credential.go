@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +70,8 @@ func (s SealedCredentials) Open(c route.Credential) (string, error) {
 func (s SealedCredentials) open(c route.Credential) (string, error) {
 	base := filepath.Base(c.File)
 	org, agent, ok := forgecredfile.ParseSealed(base)
-	if !ok || agent != c.Agent {
+	// The path is absolute and clean, so it names exactly the file of the key mount the State gives.
+	if !ok || agent != c.Agent || !filepath.IsAbs(c.File) || filepath.Clean(c.File) != c.File {
 		// The file name binds the envelope to one agent; a file of another agent is never sent.
 		return "", &OpenError{Reason: gatewaykeys.ReasonFormat, Err: secretstore.ErrUnsupportedFormat}
 	}
@@ -190,14 +192,32 @@ type scrubBody struct {
 	eof     bool
 	err     error
 	onHit   func()
+	// trailer is the response's trailer map. Its values arrive only when src reaches its end, so they
+	// are masked there, before the proxy copies them after the body.
+	trailer http.Header
 }
 
-func newScrubBody(src io.ReadCloser, needles [][]byte, onHit func()) *scrubBody {
+func newScrubBody(src io.ReadCloser, needles [][]byte, trailer http.Header, onHit func()) *scrubBody {
 	keep := 0
 	for _, n := range needles {
 		keep = max(keep, len(n)-1)
 	}
-	return &scrubBody{src: src, needles: needles, keep: keep, onHit: onHit}
+	return &scrubBody{src: src, needles: needles, keep: keep, trailer: trailer, onHit: onHit}
+}
+
+// maskHeader masks the needles in every value of h in place. It reports whether one was found.
+func maskHeader(h http.Header, needles [][]byte) bool {
+	hit := false
+	for k, vs := range h {
+		for i := range vs {
+			b := []byte(vs[i])
+			if mask(b, needles) {
+				hit = true
+				h[k][i] = string(b)
+			}
+		}
+	}
+	return hit
 }
 
 func (s *scrubBody) Read(p []byte) (int, error) {
@@ -214,10 +234,12 @@ func (s *scrubBody) Read(p []byte) (int, error) {
 		}
 		n, err := s.src.Read(s.chunk)
 		s.buf = append(s.buf, s.chunk[:n]...)
+		hit := false
 		if err != nil {
 			s.eof, s.err = true, err
+			hit = maskHeader(s.trailer, s.needles)
 		}
-		if mask(s.buf, s.needles) && s.onHit != nil {
+		if (mask(s.buf, s.needles) || hit) && s.onHit != nil {
 			s.onHit()
 		}
 		if s.eof {

@@ -420,28 +420,13 @@ var errEncoded = errors.New("egress: a credentialed route answered with an encod
 // Content-Encoding the transport did not decode cannot be scanned, so it is refused: the gateway asked
 // for none it cannot read.
 func (g *Gateway) scrubResponse(resp *http.Response, t target) error {
-	if ce := resp.Header.Get("Content-Encoding"); ce != "" && !strings.EqualFold(ce, "identity") {
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" && !strings.EqualFold(ce, "identity") && hasBody(resp) {
 		_ = resp.Body.Close()
 		return errEncoded
 	}
-	hit := false
-	for k, vs := range resp.Header {
-		for i := range vs {
-			b := []byte(vs[i])
-			if mask(b, t.cred.needles) {
-				hit = true
-				resp.Header[k][i] = string(b)
-			}
-		}
-	}
-	for k, vs := range resp.Trailer {
-		for i := range vs {
-			b := []byte(vs[i])
-			if mask(b, t.cred.needles) {
-				hit = true
-				resp.Trailer[k][i] = string(b)
-			}
-		}
+	hit := maskHeader(resp.Header, t.cred.needles)
+	if maskHeader(resp.Trailer, t.cred.needles) {
+		hit = true
 	}
 	onHit := func() {
 		g.opts.Log.Warn("egress response held the credential; masked", "route", t.route.Name, "class", string(t.route.Class))
@@ -449,8 +434,18 @@ func (g *Gateway) scrubResponse(resp *http.Response, t target) error {
 	if hit {
 		onHit()
 	}
-	resp.Body = newScrubBody(resp.Body, t.cred.needles, onHit)
+	resp.Body = newScrubBody(resp.Body, t.cred.needles, resp.Trailer, onHit)
 	return nil
+}
+
+// hasBody reports whether a response can carry a body. A HEAD answer, 1xx, 204 and 304 never do, so
+// their Content-Encoding header describes no bytes the gateway must scan.
+func hasBody(resp *http.Response) bool {
+	if resp.Request != nil && resp.Request.Method == http.MethodHead {
+		return false
+	}
+	c := resp.StatusCode
+	return c >= 200 && c != http.StatusNoContent && c != http.StatusNotModified
 }
 
 func gatewayForm(authority string, u *url.URL) string {

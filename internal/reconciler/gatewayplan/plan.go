@@ -785,8 +785,8 @@ func (p *Planner) settleMCP(servers []*MCPServer, files map[string][]byte, settl
 
 // settleForge returns the egress credentials of the active agents and the data keys to keep. A credential
 // whose new file is still reaching the gateway pod keeps its previously applied file, else (after a
-// restart of the reconciler) a file of the same agent that the key store still holds; without one it is
-// left out, and its routes fail closed (503 credential_unavailable) until the file has arrived.
+// restart of the reconciler) a file that the key store still holds, in both cases only a file of the
+// same family (the same agent and scope, forgecredfile.Family); without one it is left out, and its routes fail closed (503 credential_unavailable) until the file has arrived.
 func (p *Planner) settleForge(agents []Agent, files map[string][]byte, settling, present map[string]bool) ([]route.Credential, map[string]bool) {
 	keep := map[string]bool{}
 	for name := range files {
@@ -802,9 +802,11 @@ func (p *Planner) settleForge(agents []Agent, files map[string][]byte, settling,
 		f := a.Forge
 		file := f.File
 		if settling[file] {
+			family, _ := forgecredfile.FamilyOf(file)
 			prev := p.appliedForge[f.Name]
-			if prev == "" {
-				prev = presentForgeFile(a, file, present)
+			if family == "" || !strings.HasPrefix(prev, family) {
+				// A file of another scope (connection, grant or host) is never served in its place.
+				prev = presentForgeFile(family, file, present)
 			}
 			if prev == "" {
 				p.log.Info("a new forge credential is still reaching the gateway; the agent's forge routes wait for it", "org", a.Ref.Org, "agent", a.Ref.Name)
@@ -820,13 +822,16 @@ func (p *Planner) settleForge(agents []Agent, files map[string][]byte, settling,
 	return out, keep
 }
 
-// presentForgeFile returns a file of agent a, other than file, that the key store holds: the last
-// name in sort order, so the choice is stable. Its token may be older, but it is the agent's own.
-func presentForgeFile(a Agent, file string, present map[string]bool) string {
-	prefix := forgecredfile.SealedPrefix + a.Org.ID.String() + "-" + a.ID.String() + "-"
+// presentForgeFile returns a file of the same family as file (the same agent and scope), other than
+// file, that the key store holds: the last name in sort order, so the choice is stable. Its token may be
+// older, but it was minted for the same agent, connection, grant and hosts.
+func presentForgeFile(family, file string, present map[string]bool) string {
+	if family == "" {
+		return ""
+	}
 	best := ""
 	for name, ok := range present {
-		if ok && name != file && strings.HasPrefix(name, prefix) && name > best {
+		if ok && name != file && strings.HasPrefix(name, family) && name > best {
 			best = name
 		}
 	}

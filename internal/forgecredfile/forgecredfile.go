@@ -6,11 +6,16 @@
 //
 // The file is one entry of the gateway's key Secret:
 //
-//	forgev2-<org ID>-<agent ID>-<8 hex of the envelope's SHA-256>     ciphertext (envelope v2, opened by the gateway)
+//	forgev2-<org ID>-<agent ID>-<8 hex of the scope>-<8 hex of the envelope>     ciphertext (envelope v2, opened by the gateway)
 //
 // The name carries the org ID and the agent ID because the binding of the envelope names them. The name
 // is not trusted: a wrong org or agent ID makes the envelope fail to open, and the gateway also checks
 // that the agent ID is the agent of the route that names the credential.
+//
+// The scope tag is a hash of what the token was minted for: the connection, its repositories and
+// permissions, and the forge hosts of the routes that send it. While a new file settles, the reconciler
+// may keep serving an older file of the same agent only when its scope tag is the same, so a token is
+// never sent to a host or a connection it was not minted for.
 package forgecredfile
 
 import (
@@ -38,23 +43,42 @@ func Binding(org, agent string) secretstore.Binding {
 	return secretstore.Binding{OrgID: org, Table: AgentsTable, RowID: agent, Column: TokenColumn}
 }
 
-// SealedName is the file name of a v2 envelope of an agent's forge token.
-func SealedName(org, agent pgtype.UUID, envelope []byte) string {
-	sum := sha256.Sum256(envelope)
-	return SealedPrefix + org.String() + "-" + agent.String() + "-" + hex.EncodeToString(sum[:4])
+// SealedName is the file name of a v2 envelope of an agent's forge token minted for scope.
+func SealedName(org, agent pgtype.UUID, scope string, envelope []byte) string {
+	return Family(org, agent, scope) + tag(envelope)
 }
 
-const uuidLen = 36
+// Family is the start of the name of every file of the agent's forge token minted for scope: two files
+// of one family differ only in the envelope.
+func Family(org, agent pgtype.UUID, scope string) string {
+	return SealedPrefix + org.String() + "-" + agent.String() + "-" + tag([]byte(scope)) + "-"
+}
+
+func tag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:4])
+}
+
+const (
+	uuidLen = 36
+	tagLen  = 8
+	// nameLen is the length of a name after the prefix: two IDs and two tags, each after a '-' but the first.
+	nameLen = 2*uuidLen + 2*tagLen + 3
+)
 
 // ParseSealed reads the org ID and the agent ID from the base name of a forge credential file. It
 // reports false for any other name.
 func ParseSealed(base string) (org, agent string, ok bool) {
 	rest, found := strings.CutPrefix(base, SealedPrefix)
-	if !found || len(rest) != 2*uuidLen+1+8+1 || rest[uuidLen] != '-' || rest[2*uuidLen+1] != '-' {
+	scopeAt := 2*uuidLen + 2
+	if !found || len(rest) != nameLen || rest[uuidLen] != '-' || rest[scopeAt-1] != '-' || rest[scopeAt+tagLen] != '-' {
 		return "", "", false
 	}
 	org, agent = rest[:uuidLen], rest[uuidLen+1:2*uuidLen+1]
-	for _, c := range rest[2*uuidLen+2:] {
+	for i, c := range rest[scopeAt:] {
+		if i == tagLen {
+			continue
+		}
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return "", "", false
 		}
@@ -64,6 +88,14 @@ func ParseSealed(base string) (org, agent string, ok bool) {
 		return "", "", false
 	}
 	return org, agent, true
+}
+
+// FamilyOf returns the family of a forge credential file name (see Family), or false for any other name.
+func FamilyOf(base string) (string, bool) {
+	if _, _, ok := ParseSealed(base); !ok {
+		return "", false
+	}
+	return base[:len(base)-tagLen], true
 }
 
 // IsSealed reports whether a base name is a forge credential file name.

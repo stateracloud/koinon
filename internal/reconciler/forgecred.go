@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,14 +61,13 @@ func (r *Reconciler) forgeCredential(ctx context.Context, w *work, read GitHubRe
 		return nil, nil, nil
 	}
 	name := CodeHostCredentialName(agentRef(w.org, w.agent.ID))
-	named := false
+	var hosts []string
 	for _, rt := range routes {
 		if rt.Credential == name {
-			named = true
-			break
+			hosts = append(hosts, net.JoinHostPort(rt.Host, strconv.Itoa(rt.Port)))
 		}
 	}
-	if !named {
+	if len(hosts) == 0 {
 		return nil, nil, nil
 	}
 	if r.cfg.GitHub == nil {
@@ -90,7 +91,7 @@ func (r *Reconciler) forgeCredential(ctx context.Context, w *work, read GitHubRe
 	}
 	k := agentKey{w.org.ID, w.agent.ID}
 	rev := tokenRevision(tok)
-	scope := scopeOf(read)
+	scope := scopeOf(read, hosts)
 	r.mu.Lock()
 	s, ok := r.forgeSeals[k]
 	r.mu.Unlock()
@@ -105,7 +106,7 @@ func (r *Reconciler) forgeCredential(ctx context.Context, w *work, read GitHubRe
 		if err != nil {
 			return nil, nil, fmt.Errorf("seal the code-host token: %w", err)
 		}
-		s = forgeSeal{scope: scope, rev: rev, keyID: pub.ID(), file: forgecredfile.SealedName(w.org.ID, w.agent.ID, b), env: b}
+		s = forgeSeal{scope: scope, rev: rev, keyID: pub.ID(), file: forgecredfile.SealedName(w.org.ID, w.agent.ID, scope, b), env: b}
 		r.mu.Lock()
 		r.forgeSeals[k] = s
 		r.mu.Unlock()
@@ -113,9 +114,10 @@ func (r *Reconciler) forgeCredential(ctx context.Context, w *work, read GitHubRe
 	return &gatewayplan.ForgeCredential{Name: name, File: s.file, Scheme: route.SchemeBasic, User: ForgeUser}, s.env, nil
 }
 
-// scopeOf names the connection and the scope a token is minted for, so a changed grant never reuses the
-// envelope of a token minted for the old one.
-func scopeOf(read GitHubRead) string {
+// scopeOf names the connection and the scope a token is minted for, and the forge hosts it is sent to.
+// A changed grant or host never reuses the envelope of a token minted for the old one, and the file name
+// carries a hash of it, so the planner never serves the old file in its place (forgecredfile.Family).
+func scopeOf(read GitHubRead, hosts []string) string {
 	repos := slices.Clone(read.Repositories)
 	slices.Sort(repos)
 	perms := make([]string, 0, len(read.Permissions))
@@ -123,7 +125,10 @@ func scopeOf(read GitHubRead) string {
 		perms = append(perms, k+"="+v)
 	}
 	slices.Sort(perms)
-	return read.ConnectionID + "\x00" + strings.Join(repos, ",") + "\x00" + strings.Join(perms, ",")
+	hosts = slices.Clone(hosts)
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
+	return read.ConnectionID + "\x00" + strings.Join(repos, ",") + "\x00" + strings.Join(perms, ",") + "\x00" + strings.Join(hosts, ",")
 }
 
 // pruneForgeSeals drops the sealed tokens of agents that are not in the pass.
