@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -45,7 +46,13 @@ const (
 	// may have changed after the last probe started. Any role may notify the channel, so this bound
 	// also holds when many gateway replicas, or a misbehaving client, send wakes.
 	mcpProbeWakeEvery = 5 * time.Second
+	// mcpProbeKeyRetries is how many probes in a row koinon-gateway may refuse for the probe key before
+	// the prober records the refusal (issue #1260).
+	mcpProbeKeyRetries = 3
 )
+
+// errProbeKeyRefused is a probe that the gateway answered with 401: it did not know the probe key.
+var errProbeKeyRefused = errors.New("the gateway refused the probe key")
 
 // RunProber probes until ctx ends. It is started by Run and only has work on the replica that
 // leads.
@@ -183,12 +190,18 @@ func (r *Reconciler) probeEach(ctx context.Context, probes []gatewayplan.Probe) 
 type bearerTransport struct {
 	key  string
 	base http.RoundTripper
+	// refused is set when the gateway answers 401.
+	refused *atomic.Bool
 }
 
 func (b bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+b.key)
-	return b.base.RoundTrip(req)
+	resp, err := b.base.RoundTrip(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && b.refused != nil {
+		b.refused.Store(true)
+	}
+	return resp, err
 }
 
 // probeEndpoint is the gateway that serves the agents' MCP path, so the prober lists a server's tools
@@ -206,13 +219,17 @@ func (r *Reconciler) probeEndpoint() Endpoint {
 func (r *Reconciler) listTools(ctx context.Context, p gatewayplan.Probe) ([]mcpservers.ListedTool, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-mcp-prober", Version: "0"}, nil)
 	ep := r.probeEndpoint()
+	var refused atomic.Bool
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             fmt.Sprintf("http://%s:%d/mcp", ep.Host, ep.Port),
-		HTTPClient:           &http.Client{Transport: bearerTransport{key: p.Material, base: http.DefaultTransport}},
+		HTTPClient:           &http.Client{Transport: bearerTransport{key: p.Material, base: http.DefaultTransport, refused: &refused}},
 		DisableStandaloneSSE: true,
 		MaxRetries:           -1,
 	}, nil)
 	if err != nil {
+		if refused.Load() {
+			return nil, fmt.Errorf("connect: %w: %w", errProbeKeyRefused, err)
+		}
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	defer func() { _ = session.Close() }()
@@ -222,6 +239,9 @@ func (r *Reconciler) listTools(ctx context.Context, p gatewayplan.Probe) ([]mcps
 	for range mcpMaxToolPages {
 		res, err := session.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
 		if err != nil {
+			if refused.Load() {
+				return nil, fmt.Errorf("tools/list: %w: %w", errProbeKeyRefused, err)
+			}
 			return nil, fmt.Errorf("tools/list: %w", err)
 		}
 		for _, t := range res.Tools {
@@ -256,11 +276,15 @@ func jsonOf(v any) (json.RawMessage, error) {
 	return b, err
 }
 
-func (r *Reconciler) probeOne(ctx context.Context, p gatewayplan.Probe) {
-	ctx, cancel := context.WithTimeout(ctx, mcpProbeTimeout)
+func (r *Reconciler) probeOne(runCtx context.Context, p gatewayplan.Probe) {
+	ctx, cancel := context.WithTimeout(runCtx, mcpProbeTimeout)
 	defer cancel()
 	log := r.log.With("org", p.OrgSlug, "server", p.Name)
 	tools, err := r.listTools(ctx, p)
+	if r.retryRefusedKey(runCtx, p, err) {
+		log.Debug("koinon-gateway refused the probe key; probing again after its State poll", "err", err)
+		return
+	}
 	reason := ""
 	switch {
 	case err != nil:
@@ -294,4 +318,41 @@ func (r *Reconciler) probeOne(ctx context.Context, p gatewayplan.Probe) {
 	} else if changed {
 		log.Info("MCP server is healthy")
 	}
+}
+
+// retryRefusedKey reports whether a probe that koinon-gateway refused for its key is queued again
+// instead of recorded. koinon-gateway learns new probe keys and targets through the State stream
+// (publish, then NOTIFY or its poll), but the prober runs right after the pass applied them, so its first
+// probe after a restart or for a new server can come before the gateway has them. Such a refusal is not
+// the server's fault: up to mcpProbeKeyRetries refusals in a row are queued again after
+// MCPProbeKeyRetryAfter and not recorded; the refusals after them are recorded. Any other outcome resets
+// the count. ctx is the prober's run context, not the probe's own timeout. agentgateway (MCPGateway
+// unset) gets its keys with the config that the pass applied, so its refusals are recorded at once.
+//
+// Interim, issue #1260: exit when the reconciler probes only after every live koinon-gateway copy acked
+// the MCP half of the revision (staterev.AllAcked, ADR 0097 decision 2.1); then remove this retry.
+func (r *Reconciler) retryRefusedKey(ctx context.Context, p gatewayplan.Probe, err error) bool {
+	refused := r.cfg.MCPGateway.Host != "" && errors.Is(err, errProbeKeyRefused)
+	r.probeMu.Lock()
+	if !refused {
+		delete(r.probeKeyRetries, p.Server)
+		r.probeMu.Unlock()
+		return false
+	}
+	if r.probeKeyRetries[p.Server] >= mcpProbeKeyRetries {
+		// The count stays at the cap, so later refusals are recorded at once until another outcome.
+		r.probeMu.Unlock()
+		return false
+	}
+	if r.probeKeyRetries == nil {
+		r.probeKeyRetries = map[pgtype.UUID]int{}
+	}
+	r.probeKeyRetries[p.Server]++
+	r.probeMu.Unlock()
+	time.AfterFunc(r.cfg.MCPProbeKeyRetryAfter, func() {
+		if ctx.Err() == nil {
+			r.probeSoon([]gatewayplan.Probe{p})
+		}
+	})
+	return true
 }

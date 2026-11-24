@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -364,7 +367,7 @@ var _ = Describe("Org MCP servers", func() {
 			host, port, stop, _ = fakeGatewayServer(target, tools...)
 			return host, port, stop
 		}
-		probingVia := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint) *reconciler.Reconciler {
+		probingWith := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint, keyRetryAfter time.Duration) *reconciler.Reconciler {
 			osg := fakegateway.New()
 			cc, err := osg.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -372,12 +375,38 @@ var _ = Describe("Org MCP servers", func() {
 			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
 				KeepWarmPerOrg: 2,
 				Prices:         prices.NewResolver(pricing.Embedded()),
-				Gateway:        gw, MCPGateway: mcpGW, Keys: ring,
+				Gateway:        gw, MCPGateway: mcpGW, Keys: ring, MCPProbeKeyRetryAfter: keyRetryAfter,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			return rr
+		}
+		probingVia := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint) *reconciler.Reconciler {
+			return probingWith(ctx, gw, mcpGW, 0)
+		}
+		// refusingFront answers 401, as koinon-gateway does for a probe key it does not know yet, while
+		// refuse is set; else it passes the request to the gateway at host:port. refused counts the 401s.
+		refusingFront := func(host string, port int, refuse *atomic.Bool, refused *atomic.Int32) reconciler.Endpoint {
+			back := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port))})
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if refuse.Load() {
+					refused.Add(1)
+					http.Error(w, "refused: unknown gateway key", http.StatusUnauthorized)
+					return
+				}
+				back.ServeHTTP(w, req)
+			}))
+			DeferCleanup(func() { ts.CloseClientConnections(); ts.Close() })
+			u, _ := url.Parse(ts.URL)
+			p, _ := strconv.Atoi(u.Port())
+			return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}
+		}
+		runProber := func(ctx SpecContext, rr *reconciler.Reconciler) {
+			pctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); rr.RunProber(pctx) }() // the default tick is a minute
+			DeferCleanup(func() { cancel(); <-done })
 		}
 		probing := func(ctx SpecContext, host string, port int) *reconciler.Reconciler {
 			return probingVia(ctx, reconciler.Endpoint{Host: host, Port: uint32(port)}, reconciler.Endpoint{})
@@ -431,6 +460,77 @@ var _ = Describe("Org MCP servers", func() {
 			after, err := svc.Get(ctx, org, s.ID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(after.Health).To(Equal("healthy"))
+		})
+
+		It("does not record a probe that koinon-gateway refused for its key, and probes again after the State poll (#1260)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			var refuse atomic.Bool
+			var refused atomic.Int32
+			refuse.Store(true)
+			front := refusingFront(host, port, &refuse, &refused)
+			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, racescale.D(2*time.Second))
+			runProber(ctx, rr)
+
+			// The pass serves the server and probes it at once: koinon-gateway does not know the key yet.
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			Eventually(refused.Load).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 1))
+			got, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.HealthCheckedAt).To(BeNil(), "a refused probe key is not recorded")
+
+			// koinon-gateway read the revision: the probe queued again finds the tools.
+			refuse.Store(false)
+			Eventually(func(g Gomega) {
+				got, err := svc.Get(ctx, org, s.ID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.Health).To(Equal("healthy"))
+			}).WithTimeout(racescale.D(15 * time.Second)).Should(Succeed())
+			Expect(tiers(ctx, s)).To(HaveKey("read"))
+		})
+
+		It("records koinon-gateway's refusal of the probe key after three probes queued again (#1260)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			var refuse atomic.Bool
+			var refused atomic.Int32
+			refuse.Store(true)
+			front := refusingFront(host, port, &refuse, &refused)
+			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, 100*time.Millisecond)
+			runProber(ctx, rr)
+
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			Eventually(func(g Gomega) {
+				got, err := svc.Get(ctx, org, s.ID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.HealthCheckedAt).NotTo(BeNil(), "the fourth refusal is recorded")
+			}).WithTimeout(racescale.D(15 * time.Second)).Should(Succeed())
+			// The first probe and its three retries each got a 401 before the refusal was recorded.
+			Expect(refused.Load()).To(BeNumerically(">=", 4))
+		})
+
+		It("records agentgateway's refusal of the probe key at once: the pass applied its keys (#1260)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			var refuse atomic.Bool
+			var refused atomic.Int32
+			refuse.Store(true)
+			front := refusingFront(host, port, &refuse, &refused)
+			rr := probingWith(ctx, front, reconciler.Endpoint{}, 100*time.Millisecond)
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			rr.ProbeAll(ctx)
+
+			Expect(refused.Load()).To(BeNumerically(">=", 1))
+			got, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.HealthCheckedAt).NotTo(BeNil(), "the refusal is recorded at once")
 		})
 
 		It("probes a newly served server right after the pass that applied it, not at the next tick (old issue 226)", func(ctx SpecContext) {

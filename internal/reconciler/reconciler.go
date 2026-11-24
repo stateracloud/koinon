@@ -55,6 +55,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
+	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -95,6 +96,9 @@ const (
 	DefaultLeaderPingTimeout = 4 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
 	DefaultMCPProbeInterval = 60 * time.Second
+	// DefaultMCPProbeKeyRetryAfter is the State poll interval of koinon-gateway
+	// (stateserver.DefaultPollInterval): by then the gateway has read the revision with the new probe key.
+	DefaultMCPProbeKeyRetryAfter = stateserver.DefaultPollInterval
 )
 
 // Endpoint is a host and port.
@@ -155,6 +159,9 @@ type Config struct {
 	// MCPProbeInterval is the time between health probes of each org MCP server. Default
 	// DefaultMCPProbeInterval.
 	MCPProbeInterval time.Duration
+	// MCPProbeKeyRetryAfter is the wait before the prober asks koinon-gateway again after it refused a
+	// probe key (401). Default DefaultMCPProbeKeyRetryAfter. Used only with MCPGateway set (issue #1260).
+	MCPProbeKeyRetryAfter time.Duration
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
@@ -304,6 +311,9 @@ type Reconciler struct {
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
 	probeHeld  map[pgtype.UUID]bool
+	// probeKeyRetries counts, per server, the probes in a row that koinon-gateway refused for the probe
+	// key and that were queued again, not recorded (issue #1260). Under probeMu.
+	probeKeyRetries map[pgtype.UUID]int
 }
 
 // New returns a Reconciler.
@@ -337,6 +347,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
+	}
+	if cfg.MCPProbeKeyRetryAfter == 0 {
+		cfg.MCPProbeKeyRetryAfter = DefaultMCPProbeKeyRetryAfter
 	}
 	if cfg.LeaderHeartbeat <= 0 {
 		cfg.LeaderHeartbeat = DefaultLeaderHeartbeat
