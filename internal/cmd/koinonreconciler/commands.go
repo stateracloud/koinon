@@ -285,7 +285,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
-	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "koinon-gateway's MCP listener URL as sandboxes reach it (gateway.mcp.driver=koinon): agent sandboxes may send /mcp there and not to agentgateway; empty: agentgateway serves /mcp")
+	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "koinon-gateway's MCP listener URL as sandboxes reach it (gateway.mcp.driver=koinon): agent sandboxes may send /mcp there and not to agentgateway, and the MCP prober lists tools there; empty: agentgateway serves /mcp")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
 	fs.StringVar(&c.gatewayDeployment, "gateway-deployment", "", "standalone agentgateway Deployment that owns the ConfigMap when the reconciler creates it")
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")

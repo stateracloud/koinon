@@ -70,8 +70,8 @@ has "koinon-gateway mounts the MCP credentials Secret" 'secretName: koinon-gatew
 has "koinon-gateway mounts the MCP credentials read-only" 'mountPath: /secrets/mcp$' "${mcp[@]}" "${mcp_only[@]}"
 n=$(render "${mcp[@]}" "${mcp_only[@]}" | grep -c 'automountServiceAccountToken: false' || true)
 [ "$n" = 2 ] || fail "koinon-gateway mounts a service account token ($n of 2 places say false)"
-# agentgateway mounts both Secrets: it serves MCP with the fallback, and the reconciler's MCP prober lists tools
-# through it with either driver.
+# agentgateway mounts both Secrets: it serves MCP with the fallback, and with either driver its config keeps the
+# MCP targets whose credential it can open (the reconciler renders one State for both gateways).
 has "agentgateway mounts the provider keys" 'secretName: koinon-gateway-providers$' --show-only templates/gateway-standalone.yaml
 has "agentgateway mounts the MCP credentials" 'secretName: koinon-gateway-mcp-keys$' --show-only templates/gateway-standalone.yaml
 has "agentgateway mounts the MCP credentials with the fallback" 'secretName: koinon-gateway-mcp-keys$' "${fb[@]}" --show-only templates/gateway-standalone.yaml

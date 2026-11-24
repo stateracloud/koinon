@@ -191,11 +191,23 @@ func (b bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return b.base.RoundTrip(req)
 }
 
+// probeEndpoint is the gateway that serves the agents' MCP path, so the prober lists a server's tools
+// as an agent would see them: koinon-gateway when it serves /mcp (gateway.mcp.driver=koinon, #1239),
+// else agentgateway. agentgateway leaves out a target whose credential is sealed to the gateway key
+// (ADR 0097 decision 12), so a probe through it would find no tools for that server.
+func (r *Reconciler) probeEndpoint() Endpoint {
+	if r.cfg.MCPGateway.Host != "" {
+		return r.cfg.MCPGateway
+	}
+	return r.cfg.Gateway
+}
+
 // listTools lists the server's tools through the gateway, with the gateway's prefix removed.
 func (r *Reconciler) listTools(ctx context.Context, p gatewayplan.Probe) ([]mcpservers.ListedTool, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-mcp-prober", Version: "0"}, nil)
+	ep := r.probeEndpoint()
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint:             fmt.Sprintf("http://%s:%d/mcp", r.cfg.Gateway.Host, r.cfg.Gateway.Port),
+		Endpoint:             fmt.Sprintf("http://%s:%d/mcp", ep.Host, ep.Port),
 		HTTPClient:           &http.Client{Transport: bearerTransport{key: p.Material, base: http.DefaultTransport}},
 		DisableStandaloneSSE: true,
 		MaxRetries:           -1,

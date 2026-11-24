@@ -110,7 +110,8 @@ type Config struct {
 	Gateway Endpoint
 	// MCPGateway is koinon-gateway's MCP listener as sandboxes reach it, when koinon-gateway serves the
 	// agents' MCP path (gateway.mcp.driver=koinon, ADR 0097 decision 5). The sandbox profile then allows
-	// /mcp on it and not on Gateway. Zero: agentgateway serves /mcp on Gateway.
+	// /mcp on it and not on Gateway, and the MCP prober lists tools through it. Zero: agentgateway serves /mcp
+	// on Gateway.
 	MCPGateway Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
 	Keys catalog.Opener

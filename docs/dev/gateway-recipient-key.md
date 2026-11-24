@@ -28,9 +28,8 @@ uses koinon-gateway:
   path (`/v1`) stays on agentgateway.
 - The gateway recipient key is on. When a key is active and the write gate is open, koinon-api seals new MCP
   credentials to it (envelope v2). agentgateway cannot open v2.
-- The reconciler's MCP prober still lists tools through agentgateway. A server with a v2 credential then
-  shows as unhealthy and its tools are withdrawn from agents (ADR 0097 12.5, known limits). To keep every
-  server reachable until the prober moves, set `gateway.mcp.koinon.recipientKey.enabled=false`.
+- The reconciler's MCP prober lists tools through koinon-gateway (`gateway.mcpUrl`), so a server with a v2
+  credential is probed as agents see it.
 - koinon-gateway needs `gateway.mode=standalone`. With `gateway.mode=kubernetes` the render fails until you
   set `gateway.mcp.driver=agentgateway`.
 - koinon-gateway needs its own database login (`postgres.cnpg.existingSecrets.mcpgateway`, or the key

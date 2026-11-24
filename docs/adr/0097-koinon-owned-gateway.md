@@ -831,12 +831,10 @@ move, once.
      a sealed credential. The standalone renderer leaves such a target out of agentgateway's config, so no
      envelope goes upstream. #1239 moves the agents' MCP calls (koinon-agentd's `KOINON_AGENT_MCP_URL`, and the
      sandbox profile's `/mcp` rules on a second endpoint, koinon-gateway's Service) and koinon-api's live tool
-     check (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway. One path stays on agentgateway: the reconciler's
-     MCP prober (`internal/reconciler/mcpprobe.go`) lists tools through agentgateway's `/mcp`. agentgateway has no
-     target for a server with a sealed credential, so the probe finds no tools and marks the server unhealthy,
-     and the plan then gives no agent a grant to it. Until a follow-up moves the prober to koinon-gateway, an
-     operator who needs agents to reach every server keeps `gateway.mcp.koinon.recipientKey.enabled` off: with
-     no active key koinon-api writes v1.
+     check (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway. It also moves the reconciler's MCP prober
+     (`internal/reconciler/mcpprobe.go`, the `gateway.mcpUrl` setting): through agentgateway, which has no target
+     for a server with a sealed credential, the probe would find no tools, mark the server unhealthy, and the
+     plan would then give no agent a grant to it. With the agentgateway driver the prober stays on agentgateway.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.

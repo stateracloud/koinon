@@ -432,7 +432,9 @@ gateway:
             # automatic token). Empty is the API server's default audience.
             audience: ""
           awskms:
-            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). It MUST differ from
+            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). Required when the key's KMS
+            # is awskms: with the default driver (koinon) and recipientKey on, the render fails until you set it.
+            # It MUST differ from
             # secrets.kek.kms.awskms.keyId. Policies: the gateway role kms:Decrypt on it; the key-admin role
             # kms:Encrypt and kms:Decrypt. With IRSA set both ARNs, the chart puts each on its ServiceAccount.
             keyId: ""

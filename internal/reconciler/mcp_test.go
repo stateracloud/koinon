@@ -360,19 +360,22 @@ var _ = Describe("Org MCP servers", func() {
 			host, port, stop, _ = fakeGatewayServer(target, tools...)
 			return host, port, stop
 		}
-		probing := func(ctx SpecContext, host string, port int) *reconciler.Reconciler {
+		probingVia := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint) *reconciler.Reconciler {
 			osg := fakegateway.New()
 			cc, err := osg.Start()
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
 				Prices:  prices.NewResolver(pricing.Embedded()),
-				Gateway: reconciler.Endpoint{Host: host, Port: uint32(port)}, Keys: ring,
+				Gateway: gw, MCPGateway: mcpGW, Keys: ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			return rr
+		}
+		probing := func(ctx SpecContext, host string, port int) *reconciler.Reconciler {
+			return probingVia(ctx, reconciler.Endpoint{Host: host, Port: uint32(port)}, reconciler.Endpoint{})
 		}
 		tiers := func(ctx SpecContext, s mcpservers.Server) map[string]mcpservers.Tool {
 			GinkgoHelper()
@@ -403,6 +406,26 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(after.Health).To(Equal("healthy"))
 			Expect(after.ToolsSyncedAt).NotTo(BeNil())
+		})
+
+		It("lists tools through koinon-gateway, not agentgateway, when koinon-gateway serves /mcp (#1239)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			// agentgateway lists nothing for the server, as it does for a target whose credential is
+			// sealed to the gateway key (ADR 0097 decision 12).
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			rr := probingVia(ctx,
+				reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)},
+				reconciler.Endpoint{Host: host, Port: uint32(port)})
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			rr.ProbeAll(ctx)
+
+			Expect(tiers(ctx, s)).To(HaveKey("read"))
+			after, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Health).To(Equal("healthy"))
 		})
 
 		It("probes a newly served server right after the pass that applied it, not at the next tick (old issue 226)", func(ctx SpecContext) {

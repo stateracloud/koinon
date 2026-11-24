@@ -406,7 +406,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # koinon-api seals a stored MCP credential to the gateway's public key once a key is active (ADR 0097 decision
 # 12.5 step 0). With this driver koinon-gateway serves every MCP path of the agents and of koinon-api, and
 # opens v2. With agentgateway koinon-api seals v1, which agentgateway can read. agentgateway leaves a sealed
-# target out of its config; the reconciler's MCP prober still lists tools through agentgateway (see the ADR).
+# target out of its config; with this driver the reconciler's MCP prober lists tools through koinon-gateway.
 - name: KOINON_GATEWAY_MCP_SEAL_V2
   value: "true"
 # Sealing starts only when this many pods of every component report that they read the sealed format
