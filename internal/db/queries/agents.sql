@@ -137,3 +137,126 @@ SET sandbox_cpu_request = sqlc.narg(cpu_request), sandbox_cpu_limit = sqlc.narg(
     sandbox_memory_request = sqlc.narg(memory_request), sandbox_memory_limit = sqlc.narg(memory_limit)
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: ListAgentsPage :many
+-- One page of the org's agents, oldest first, after the cursor (created_at, id) when it is set.
+SELECT * FROM agents
+WHERE org_id = @org_id
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR (created_at, id) > (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at, id
+LIMIT @page_size;
+
+-- name: ListAgentSummaries :many
+-- One page of agent cards (ADR 0126 section 4) in one query: the agents that are not archived,
+-- ordered by team (no team last), then oldest first, after the cursor when it is set. The
+-- waiting_on_you count follows the inbox rules of web/src/lib/inbox.ts (buildInbox) for the
+-- caller: @is_approver is an admin or above (approvals, an unhealthy agent), @can_answer a member
+-- or above (questions).
+SELECT a.id, a.display_name, a.status, a.harness, a.model AS model_setting, a.team, a.created_at,
+       a.unhealthy_at, a.reports_to_agent_id, pa.display_name AS reports_to_agent_name,
+       ru.id AS reports_to_user_id, ru.display_name AS reports_to_user_name,
+       lv.config AS latest_config, av.config AS active_config, coalesce(ab.daily_limit::text, '')::text AS own_daily_limit,
+       coalesce(lr.state::text, '')::text AS last_run_state, lr.at AS last_run_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = a.org_id AND r.agent_id = a.id AND r.state IN ('starting', 'running'))::int AS running_runs,
+       sp.cost_usd AS spent_today, sp.input_tokens AS input_tokens_today, sp.cache_read_tokens AS cache_read_tokens_today,
+       (CASE WHEN @is_approver::bool THEN
+          (SELECT count(*) FROM approval_requests ap
+           WHERE ap.org_id = a.org_id AND ap.agent_id = a.id AND ap.status = 'pending')
+          + (CASE WHEN a.unhealthy_at IS NOT NULL THEN 1 ELSE 0 END)
+        ELSE 0 END
+        + CASE WHEN @can_answer::bool THEN
+          (SELECT count(*) FROM questions qn
+           JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+           JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                      AND qr.user_id = @user_id AND qr.removed_at IS NULL
+           WHERE qn.org_id = a.org_id AND qn.agent_id = a.id AND qn.state = 'open' AND r.state = 'parked')
+        ELSE 0 END
+        + (SELECT count(*) FROM tasks t
+           WHERE t.org_id = a.org_id AND t.agent_id = a.id AND t.state = 'input_required'
+             AND t.created_by_user_id = @user_id
+             -- An approval covers its task, whoever may decide it.
+             AND NOT EXISTS (SELECT 1 FROM approval_requests ap
+                             WHERE ap.org_id = t.org_id AND ap.task_id = t.id AND ap.status = 'pending')
+             -- A question the caller may answer covers its task (counted above).
+             AND NOT (@can_answer::bool AND EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                            AND qr.user_id = @user_id AND qr.removed_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'))
+             -- A task that waits on other people's answer is not the caller's item
+             -- (ListQuestionWaitersForTasks).
+             AND (NOT EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
+                 JOIN users wu ON wu.id = qr.user_id AND wu.deleted_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'
+                   AND EXISTS (SELECT 1 FROM org_memberships om
+                               WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
+               OR EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                            AND qr.user_id = @user_id AND qr.removed_at IS NULL
+                 JOIN users wu ON wu.id = qr.user_id AND wu.deleted_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'
+                   AND EXISTS (SELECT 1 FROM org_memberships om
+                               WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member')))))::int AS waiting_on_you
+FROM agents a
+LEFT JOIN agents pa ON pa.org_id = a.org_id AND pa.id = a.reports_to_agent_id
+LEFT JOIN users ru ON ru.id = a.reports_to_user_id AND ru.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.org_id = a.org_id AND om.user_id = ru.id)
+LEFT JOIN agent_versions lv ON lv.org_id = a.org_id AND lv.agent_id = a.id AND lv.version = a.latest_version
+LEFT JOIN agent_versions av ON av.org_id = a.org_id AND av.id = a.active_version_id
+LEFT JOIN agent_budgets ab ON ab.org_id = a.org_id AND ab.agent_id = a.id
+LEFT JOIN LATERAL (
+    SELECT r.state, coalesce(r.finished_at, r.started_at, r.created_at)::timestamptz AS at
+    FROM runs r
+    WHERE r.org_id = a.org_id AND r.agent_id = a.id
+    ORDER BY r.created_at DESC, r.id DESC
+    LIMIT 1
+) lr ON true
+CROSS JOIN LATERAL (
+    SELECT coalesce(sum(s.cost_usd), 0)::text AS cost_usd,
+           coalesce(sum(s.input_tokens), 0)::bigint AS input_tokens,
+           coalesce(sum(s.cache_read_tokens), 0)::bigint AS cache_read_tokens
+    FROM spend_entries s
+    WHERE s.org_id = a.org_id AND s.agent_id = a.id AND s.occurred_at >= @day_start
+) sp
+WHERE a.org_id = @org_id AND a.status <> 'archived'
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR (a.team = '', a.team, a.created_at, a.id)
+          > (sqlc.narg(after_no_team)::bool, sqlc.narg(after_team)::text, sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY a.team = '', a.team, a.created_at, a.id
+LIMIT @page_size;
+
+-- name: LockAgentReportsTo :exec
+-- Serialises reports-to changes in one org, so two changes cannot make a cycle together.
+SELECT pg_advisory_xact_lock(hashtextextended('agent-reports-to:' || (sqlc.arg(org_id)::uuid)::text, 0));
+
+-- name: AgentReportsToReaches :one
+-- Whether the reports-to chain up from @start_id (inclusive) reaches @target_id. UNION stops on a
+-- chain that repeats, so a bad row cannot loop.
+WITH RECURSIVE up(id) AS (
+    SELECT sqlc.arg(start_id)::uuid
+    UNION
+    SELECT a.reports_to_agent_id FROM agents a JOIN up ON a.org_id = @org_id AND a.id = up.id
+    WHERE a.reports_to_agent_id IS NOT NULL
+)
+SELECT EXISTS (SELECT 1 FROM up WHERE up.id = sqlc.arg(target_id)::uuid)::bool;
+
+-- name: HasOrgMembership :one
+-- Whether the user (not deleted) holds any role in the org, viewer included.
+SELECT EXISTS (
+    SELECT 1 FROM org_memberships om JOIN users u ON u.id = om.user_id AND u.deleted_at IS NULL
+    WHERE om.org_id = @org_id AND om.user_id = @user_id
+)::bool;
+
+-- name: SetAgentPlacement :one
+UPDATE agents
+SET team = @team, reports_to_agent_id = sqlc.narg(reports_to_agent_id), reports_to_user_id = sqlc.narg(reports_to_user_id)
+WHERE org_id = @org_id AND id = @id
+RETURNING *;

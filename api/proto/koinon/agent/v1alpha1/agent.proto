@@ -5,6 +5,7 @@ syntax = "proto3";
 package koinon.agent.v1alpha1;
 
 import "google/protobuf/timestamp.proto";
+import "koinon/run/v1alpha1/run.proto";
 import "koinon/template/v1alpha1/template.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1";
@@ -21,7 +22,7 @@ service AgentService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // ListAgents returns the org's agents, oldest first. Viewers and above.
+  // ListAgents returns one page of the org's agents, oldest first. Viewers and above.
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -91,6 +92,19 @@ service AgentService {
   // ArchiveAgent archives a draft or active agent and cancels its unfinished
   // runs. Admins and owners only.
   rpc ArchiveAgent(ArchiveAgentRequest) returns (ArchiveAgentResponse);
+
+  // ListAgentSummaries returns one page of the org's agents that are not archived, as cards
+  // (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what
+  // waits on the caller. The page comes from one database query. Ordered by team (agents with no
+  // team last), then oldest first. Viewers and above.
+  rpc ListAgentSummaries(ListAgentSummariesRequest) returns (ListAgentSummariesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent
+  // parent must be an agent of the same org that is not archived, and must not make a cycle; a
+  // person must be a member of the org. Audited as agent.placement.set. Admins and owners only.
+  rpc SetAgentPlacement(SetAgentPlacementRequest) returns (SetAgentPlacementResponse);
 }
 
 // AgentStatus is the agent lifecycle (ADR 0020).
@@ -156,6 +170,22 @@ message Agent {
   // The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
   // agent is created.
   string harness = 28;
+  // The agent's team label (SetAgentPlacement); empty for no team.
+  string team = 29;
+  // Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only;
+  // AgentSummary also gives the name.
+  AgentReportsTo reports_to = 30;
+}
+
+// AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
+message AgentReportsTo {
+  oneof target {
+    string agent_id = 1;
+    string user_id = 2;
+  }
+  // The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored
+  // in SetAgentPlacement.
+  string display_name = 3;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -206,14 +236,20 @@ message GetAgentResponse {
   Agent agent = 1;
 }
 
-// ListAgentsRequest names the org.
+// ListAgentsRequest names the org and the page.
 message ListAgentsRequest {
   string org_id = 1;
+  // page_size is 500 by default and at most 500.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page.
+  string page_token = 3;
 }
 
-// ListAgentsResponse lists the org's agents.
+// ListAgentsResponse lists one page of the org's agents.
 message ListAgentsResponse {
   repeated Agent agents = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // ActivateAgentRequest names the draft and the version the caller reviewed.
@@ -456,4 +492,72 @@ message RunAgentTriggerRequest {
 // RunAgentTriggerResponse names the task the fire created.
 message RunAgentTriggerResponse {
   string task_id = 1;
+}
+
+// ListAgentSummariesRequest names the org and the page.
+message ListAgentSummariesRequest {
+  string org_id = 1;
+  // page_size is 50 by default and at most 200.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page.
+  string page_token = 3;
+}
+
+// ListAgentSummariesResponse lists one page of agent cards.
+message ListAgentSummariesResponse {
+  repeated AgentSummary agents = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+  // The start of today (UTC) for the spend and token fields.
+  google.protobuf.Timestamp day_start = 3;
+}
+
+// AgentSummary is what an agent card shows (ADR 0126 section 4).
+message AgentSummary {
+  string agent_id = 1;
+  string display_name = 2;
+  AgentStatus status = 3;
+  string harness = 4;
+  // The agent's own model setting, else the model of its latest version.
+  string model = 5;
+  string team = 6;
+  // Unset for nobody. A person who is no longer a member of the org does not show.
+  AgentReportsTo reports_to = 7;
+  google.protobuf.Timestamp created_at = 8;
+  // Set while the agent is unhealthy (ADR 0054).
+  google.protobuf.Timestamp unhealthy_at = 9;
+  // The state of the agent's newest run; unspecified when it has no run.
+  koinon.run.v1alpha1.RunState last_run_state = 10;
+  // When the newest run finished, else started, else was queued.
+  google.protobuf.Timestamp last_run_at = 11;
+  // How many runs of the agent start or run now.
+  int32 running_runs = 12;
+  // USD spent today (from day_start), as a decimal string.
+  string spent_today_usd = 13;
+  // The agent's daily limit in USD; empty when it has none.
+  string daily_limit_usd = 14;
+  // Input tokens today (they include cache reads) and the cache reads among them. The cache read
+  // share is cache_read_tokens_today / input_tokens_today.
+  int64 input_tokens_today = 15;
+  int64 cache_read_tokens_today = 16;
+  // The next due time of the active version's schedule triggers (ADR 0066); unset when none. The
+  // run starts up to 30 seconds after it (the scheduler's jitter).
+  google.protobuf.Timestamp next_scheduled_at = 17;
+  // The inbox items of the caller for this agent: approvals the caller may decide, questions the
+  // caller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin.
+  int32 waiting_on_you = 18;
+}
+
+// SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.
+message SetAgentPlacementRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // At most 64 characters, no control characters. Spaces at the ends are removed.
+  string team = 3;
+  AgentReportsTo reports_to = 4;
+}
+
+// SetAgentPlacementResponse holds the agent as GetAgent would return it.
+message SetAgentPlacementResponse {
+  Agent agent = 1;
 }

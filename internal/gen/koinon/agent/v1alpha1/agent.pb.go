@@ -9,6 +9,7 @@
 package agentv1alpha1
 
 import (
+	v1alpha11 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -197,7 +198,12 @@ type Agent struct {
 	KeepWarmGranted bool `protobuf:"varint,27,opt,name=keep_warm_granted,json=keepWarmGranted,proto3" json:"keep_warm_granted,omitempty"`
 	// The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the
 	// agent is created.
-	Harness       string `protobuf:"bytes,28,opt,name=harness,proto3" json:"harness,omitempty"`
+	Harness string `protobuf:"bytes,28,opt,name=harness,proto3" json:"harness,omitempty"`
+	// The agent's team label (SetAgentPlacement); empty for no team.
+	Team string `protobuf:"bytes,29,opt,name=team,proto3" json:"team,omitempty"`
+	// Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only;
+	// AgentSummary also gives the name.
+	ReportsTo     *AgentReportsTo `protobuf:"bytes,30,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -429,6 +435,113 @@ func (x *Agent) GetHarness() string {
 	return ""
 }
 
+func (x *Agent) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+func (x *Agent) GetReportsTo() *AgentReportsTo {
+	if x != nil {
+		return x.ReportsTo
+	}
+	return nil
+}
+
+// AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
+type AgentReportsTo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Target:
+	//
+	//	*AgentReportsTo_AgentId
+	//	*AgentReportsTo_UserId
+	Target isAgentReportsTo_Target `protobuf_oneof:"target"`
+	// The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored
+	// in SetAgentPlacement.
+	DisplayName   string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentReportsTo) Reset() {
+	*x = AgentReportsTo{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentReportsTo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentReportsTo) ProtoMessage() {}
+
+func (x *AgentReportsTo) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentReportsTo.ProtoReflect.Descriptor instead.
+func (*AgentReportsTo) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AgentReportsTo) GetTarget() isAgentReportsTo_Target {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *AgentReportsTo) GetAgentId() string {
+	if x != nil {
+		if x, ok := x.Target.(*AgentReportsTo_AgentId); ok {
+			return x.AgentId
+		}
+	}
+	return ""
+}
+
+func (x *AgentReportsTo) GetUserId() string {
+	if x != nil {
+		if x, ok := x.Target.(*AgentReportsTo_UserId); ok {
+			return x.UserId
+		}
+	}
+	return ""
+}
+
+func (x *AgentReportsTo) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+type isAgentReportsTo_Target interface {
+	isAgentReportsTo_Target()
+}
+
+type AgentReportsTo_AgentId struct {
+	AgentId string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3,oneof"`
+}
+
+type AgentReportsTo_UserId struct {
+	UserId string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3,oneof"`
+}
+
+func (*AgentReportsTo_AgentId) isAgentReportsTo_Target() {}
+
+func (*AgentReportsTo_UserId) isAgentReportsTo_Target() {}
+
 // CreateAgentFromTemplateRequest names the template and the user's choices.
 type CreateAgentFromTemplateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -455,7 +568,7 @@ type CreateAgentFromTemplateRequest struct {
 
 func (x *CreateAgentFromTemplateRequest) Reset() {
 	*x = CreateAgentFromTemplateRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[1]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +580,7 @@ func (x *CreateAgentFromTemplateRequest) String() string {
 func (*CreateAgentFromTemplateRequest) ProtoMessage() {}
 
 func (x *CreateAgentFromTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[1]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +593,7 @@ func (x *CreateAgentFromTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAgentFromTemplateRequest.ProtoReflect.Descriptor instead.
 func (*CreateAgentFromTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{1}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateAgentFromTemplateRequest) GetOrgId() string {
@@ -551,7 +664,7 @@ type GrantBinding struct {
 
 func (x *GrantBinding) Reset() {
 	*x = GrantBinding{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[2]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +676,7 @@ func (x *GrantBinding) String() string {
 func (*GrantBinding) ProtoMessage() {}
 
 func (x *GrantBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[2]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +689,7 @@ func (x *GrantBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrantBinding.ProtoReflect.Descriptor instead.
 func (*GrantBinding) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{2}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GrantBinding) GetConnector() string {
@@ -610,7 +723,7 @@ type CreateAgentFromTemplateResponse struct {
 
 func (x *CreateAgentFromTemplateResponse) Reset() {
 	*x = CreateAgentFromTemplateResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[3]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +735,7 @@ func (x *CreateAgentFromTemplateResponse) String() string {
 func (*CreateAgentFromTemplateResponse) ProtoMessage() {}
 
 func (x *CreateAgentFromTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[3]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +748,7 @@ func (x *CreateAgentFromTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAgentFromTemplateResponse.ProtoReflect.Descriptor instead.
 func (*CreateAgentFromTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{3}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateAgentFromTemplateResponse) GetAgent() *Agent {
@@ -656,7 +769,7 @@ type GetAgentRequest struct {
 
 func (x *GetAgentRequest) Reset() {
 	*x = GetAgentRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[4]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +781,7 @@ func (x *GetAgentRequest) String() string {
 func (*GetAgentRequest) ProtoMessage() {}
 
 func (x *GetAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[4]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +794,7 @@ func (x *GetAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{4}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetAgentRequest) GetOrgId() string {
@@ -708,7 +821,7 @@ type GetAgentResponse struct {
 
 func (x *GetAgentResponse) Reset() {
 	*x = GetAgentResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[5]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -720,7 +833,7 @@ func (x *GetAgentResponse) String() string {
 func (*GetAgentResponse) ProtoMessage() {}
 
 func (x *GetAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[5]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -733,7 +846,7 @@ func (x *GetAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{5}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetAgentResponse) GetAgent() *Agent {
@@ -743,17 +856,21 @@ func (x *GetAgentResponse) GetAgent() *Agent {
 	return nil
 }
 
-// ListAgentsRequest names the org.
+// ListAgentsRequest names the org and the page.
 type ListAgentsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// page_size is 500 by default and at most 500.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is the next_page_token of the previous page.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListAgentsRequest) Reset() {
 	*x = ListAgentsRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[6]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -765,7 +882,7 @@ func (x *ListAgentsRequest) String() string {
 func (*ListAgentsRequest) ProtoMessage() {}
 
 func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[6]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -778,7 +895,7 @@ func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentsRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{6}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListAgentsRequest) GetOrgId() string {
@@ -788,17 +905,33 @@ func (x *ListAgentsRequest) GetOrgId() string {
 	return ""
 }
 
-// ListAgentsResponse lists the org's agents.
+func (x *ListAgentsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListAgentsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+// ListAgentsResponse lists one page of the org's agents.
 type ListAgentsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Agents        []*Agent               `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Agents []*Agent               `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	// next_page_token is empty on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListAgentsResponse) Reset() {
 	*x = ListAgentsResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[7]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +943,7 @@ func (x *ListAgentsResponse) String() string {
 func (*ListAgentsResponse) ProtoMessage() {}
 
 func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[7]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,7 +956,7 @@ func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentsResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{7}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListAgentsResponse) GetAgents() []*Agent {
@@ -831,6 +964,13 @@ func (x *ListAgentsResponse) GetAgents() []*Agent {
 		return x.Agents
 	}
 	return nil
+}
+
+func (x *ListAgentsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 // ActivateAgentRequest names the draft and the version the caller reviewed.
@@ -851,7 +991,7 @@ type ActivateAgentRequest struct {
 
 func (x *ActivateAgentRequest) Reset() {
 	*x = ActivateAgentRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[8]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -863,7 +1003,7 @@ func (x *ActivateAgentRequest) String() string {
 func (*ActivateAgentRequest) ProtoMessage() {}
 
 func (x *ActivateAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[8]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -876,7 +1016,7 @@ func (x *ActivateAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateAgentRequest.ProtoReflect.Descriptor instead.
 func (*ActivateAgentRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{8}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ActivateAgentRequest) GetOrgId() string {
@@ -919,7 +1059,7 @@ type ActivateAgentResponse struct {
 
 func (x *ActivateAgentResponse) Reset() {
 	*x = ActivateAgentResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[9]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -931,7 +1071,7 @@ func (x *ActivateAgentResponse) String() string {
 func (*ActivateAgentResponse) ProtoMessage() {}
 
 func (x *ActivateAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[9]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -944,7 +1084,7 @@ func (x *ActivateAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateAgentResponse.ProtoReflect.Descriptor instead.
 func (*ActivateAgentResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{9}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ActivateAgentResponse) GetAgent() *Agent {
@@ -972,7 +1112,7 @@ type ResumeAgentRequest struct {
 
 func (x *ResumeAgentRequest) Reset() {
 	*x = ResumeAgentRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -984,7 +1124,7 @@ func (x *ResumeAgentRequest) String() string {
 func (*ResumeAgentRequest) ProtoMessage() {}
 
 func (x *ResumeAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -997,7 +1137,7 @@ func (x *ResumeAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeAgentRequest.ProtoReflect.Descriptor instead.
 func (*ResumeAgentRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{10}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ResumeAgentRequest) GetOrgId() string {
@@ -1024,7 +1164,7 @@ type ResumeAgentResponse struct {
 
 func (x *ResumeAgentResponse) Reset() {
 	*x = ResumeAgentResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1036,7 +1176,7 @@ func (x *ResumeAgentResponse) String() string {
 func (*ResumeAgentResponse) ProtoMessage() {}
 
 func (x *ResumeAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1049,7 +1189,7 @@ func (x *ResumeAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeAgentResponse.ProtoReflect.Descriptor instead.
 func (*ResumeAgentResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{11}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ResumeAgentResponse) GetAgent() *Agent {
@@ -1070,7 +1210,7 @@ type ArchiveAgentRequest struct {
 
 func (x *ArchiveAgentRequest) Reset() {
 	*x = ArchiveAgentRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1082,7 +1222,7 @@ func (x *ArchiveAgentRequest) String() string {
 func (*ArchiveAgentRequest) ProtoMessage() {}
 
 func (x *ArchiveAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1095,7 +1235,7 @@ func (x *ArchiveAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArchiveAgentRequest.ProtoReflect.Descriptor instead.
 func (*ArchiveAgentRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{12}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ArchiveAgentRequest) GetOrgId() string {
@@ -1122,7 +1262,7 @@ type ArchiveAgentResponse struct {
 
 func (x *ArchiveAgentResponse) Reset() {
 	*x = ArchiveAgentResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1134,7 +1274,7 @@ func (x *ArchiveAgentResponse) String() string {
 func (*ArchiveAgentResponse) ProtoMessage() {}
 
 func (x *ArchiveAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1147,7 +1287,7 @@ func (x *ArchiveAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArchiveAgentResponse.ProtoReflect.Descriptor instead.
 func (*ArchiveAgentResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{13}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ArchiveAgentResponse) GetAgent() *Agent {
@@ -1173,7 +1313,7 @@ type SetAgentTriggersRequest struct {
 
 func (x *SetAgentTriggersRequest) Reset() {
 	*x = SetAgentTriggersRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[14]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1185,7 +1325,7 @@ func (x *SetAgentTriggersRequest) String() string {
 func (*SetAgentTriggersRequest) ProtoMessage() {}
 
 func (x *SetAgentTriggersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[14]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1198,7 +1338,7 @@ func (x *SetAgentTriggersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentTriggersRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentTriggersRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{14}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetAgentTriggersRequest) GetOrgId() string {
@@ -1239,7 +1379,7 @@ type SetAgentTriggersResponse struct {
 
 func (x *SetAgentTriggersResponse) Reset() {
 	*x = SetAgentTriggersResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[15]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1391,7 @@ func (x *SetAgentTriggersResponse) String() string {
 func (*SetAgentTriggersResponse) ProtoMessage() {}
 
 func (x *SetAgentTriggersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[15]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1404,7 @@ func (x *SetAgentTriggersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentTriggersResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentTriggersResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{15}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetAgentTriggersResponse) GetAgent() *Agent {
@@ -1285,7 +1425,7 @@ type GetAgentModelRequest struct {
 
 func (x *GetAgentModelRequest) Reset() {
 	*x = GetAgentModelRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1297,7 +1437,7 @@ func (x *GetAgentModelRequest) String() string {
 func (*GetAgentModelRequest) ProtoMessage() {}
 
 func (x *GetAgentModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[16]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1310,7 +1450,7 @@ func (x *GetAgentModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentModelRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentModelRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{16}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetAgentModelRequest) GetOrgId() string {
@@ -1338,7 +1478,7 @@ type ServedModel struct {
 
 func (x *ServedModel) Reset() {
 	*x = ServedModel{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1350,7 +1490,7 @@ func (x *ServedModel) String() string {
 func (*ServedModel) ProtoMessage() {}
 
 func (x *ServedModel) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[17]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1363,7 +1503,7 @@ func (x *ServedModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServedModel.ProtoReflect.Descriptor instead.
 func (*ServedModel) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{17}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ServedModel) GetName() string {
@@ -1402,7 +1542,7 @@ type GetAgentModelResponse struct {
 
 func (x *GetAgentModelResponse) Reset() {
 	*x = GetAgentModelResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1554,7 @@ func (x *GetAgentModelResponse) String() string {
 func (*GetAgentModelResponse) ProtoMessage() {}
 
 func (x *GetAgentModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[18]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1567,7 @@ func (x *GetAgentModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentModelResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentModelResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{18}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetAgentModelResponse) GetSetting() string {
@@ -1510,7 +1650,7 @@ type ThinkingState struct {
 
 func (x *ThinkingState) Reset() {
 	*x = ThinkingState{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1522,7 +1662,7 @@ func (x *ThinkingState) String() string {
 func (*ThinkingState) ProtoMessage() {}
 
 func (x *ThinkingState) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[19]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1535,7 +1675,7 @@ func (x *ThinkingState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThinkingState.ProtoReflect.Descriptor instead.
 func (*ThinkingState) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{19}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ThinkingState) GetSetting() string {
@@ -1607,7 +1747,7 @@ type SetAgentModelRequest struct {
 
 func (x *SetAgentModelRequest) Reset() {
 	*x = SetAgentModelRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1619,7 +1759,7 @@ func (x *SetAgentModelRequest) String() string {
 func (*SetAgentModelRequest) ProtoMessage() {}
 
 func (x *SetAgentModelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[20]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1632,7 +1772,7 @@ func (x *SetAgentModelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentModelRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentModelRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{20}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SetAgentModelRequest) GetOrgId() string {
@@ -1666,7 +1806,7 @@ type SetAgentModelResponse struct {
 
 func (x *SetAgentModelResponse) Reset() {
 	*x = SetAgentModelResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1818,7 @@ func (x *SetAgentModelResponse) String() string {
 func (*SetAgentModelResponse) ProtoMessage() {}
 
 func (x *SetAgentModelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[21]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1831,7 @@ func (x *SetAgentModelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentModelResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentModelResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{21}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SetAgentModelResponse) GetModel() *GetAgentModelResponse {
@@ -1714,7 +1854,7 @@ type SetAgentThinkingRequest struct {
 
 func (x *SetAgentThinkingRequest) Reset() {
 	*x = SetAgentThinkingRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1726,7 +1866,7 @@ func (x *SetAgentThinkingRequest) String() string {
 func (*SetAgentThinkingRequest) ProtoMessage() {}
 
 func (x *SetAgentThinkingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[22]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1739,7 +1879,7 @@ func (x *SetAgentThinkingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentThinkingRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentThinkingRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{22}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SetAgentThinkingRequest) GetOrgId() string {
@@ -1773,7 +1913,7 @@ type SetAgentThinkingResponse struct {
 
 func (x *SetAgentThinkingResponse) Reset() {
 	*x = SetAgentThinkingResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1785,7 +1925,7 @@ func (x *SetAgentThinkingResponse) String() string {
 func (*SetAgentThinkingResponse) ProtoMessage() {}
 
 func (x *SetAgentThinkingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[23]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1798,7 +1938,7 @@ func (x *SetAgentThinkingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentThinkingResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentThinkingResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{23}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SetAgentThinkingResponse) GetModel() *GetAgentModelResponse {
@@ -1822,7 +1962,7 @@ type SandboxResources struct {
 
 func (x *SandboxResources) Reset() {
 	*x = SandboxResources{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1834,7 +1974,7 @@ func (x *SandboxResources) String() string {
 func (*SandboxResources) ProtoMessage() {}
 
 func (x *SandboxResources) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[24]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1847,7 +1987,7 @@ func (x *SandboxResources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxResources.ProtoReflect.Descriptor instead.
 func (*SandboxResources) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{24}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SandboxResources) GetCpuRequest() string {
@@ -1889,7 +2029,7 @@ type SandboxRange struct {
 
 func (x *SandboxRange) Reset() {
 	*x = SandboxRange{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1901,7 +2041,7 @@ func (x *SandboxRange) String() string {
 func (*SandboxRange) ProtoMessage() {}
 
 func (x *SandboxRange) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[25]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1914,7 +2054,7 @@ func (x *SandboxRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxRange.ProtoReflect.Descriptor instead.
 func (*SandboxRange) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{25}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SandboxRange) GetMin() string {
@@ -1944,7 +2084,7 @@ type SandboxBounds struct {
 
 func (x *SandboxBounds) Reset() {
 	*x = SandboxBounds{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[26]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1956,7 +2096,7 @@ func (x *SandboxBounds) String() string {
 func (*SandboxBounds) ProtoMessage() {}
 
 func (x *SandboxBounds) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[26]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1969,7 +2109,7 @@ func (x *SandboxBounds) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxBounds.ProtoReflect.Descriptor instead.
 func (*SandboxBounds) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{26}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SandboxBounds) GetCpuRequest() *SandboxRange {
@@ -2011,7 +2151,7 @@ type GetAgentSandboxResourcesRequest struct {
 
 func (x *GetAgentSandboxResourcesRequest) Reset() {
 	*x = GetAgentSandboxResourcesRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[27]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2023,7 +2163,7 @@ func (x *GetAgentSandboxResourcesRequest) String() string {
 func (*GetAgentSandboxResourcesRequest) ProtoMessage() {}
 
 func (x *GetAgentSandboxResourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[27]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2036,7 +2176,7 @@ func (x *GetAgentSandboxResourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentSandboxResourcesRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentSandboxResourcesRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{27}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetAgentSandboxResourcesRequest) GetOrgId() string {
@@ -2074,7 +2214,7 @@ type SandboxResourcesState struct {
 
 func (x *SandboxResourcesState) Reset() {
 	*x = SandboxResourcesState{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[28]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2086,7 +2226,7 @@ func (x *SandboxResourcesState) String() string {
 func (*SandboxResourcesState) ProtoMessage() {}
 
 func (x *SandboxResourcesState) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[28]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2099,7 +2239,7 @@ func (x *SandboxResourcesState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxResourcesState.ProtoReflect.Descriptor instead.
 func (*SandboxResourcesState) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{28}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SandboxResourcesState) GetOverride() *SandboxResources {
@@ -2147,7 +2287,7 @@ type GetAgentSandboxResourcesResponse struct {
 
 func (x *GetAgentSandboxResourcesResponse) Reset() {
 	*x = GetAgentSandboxResourcesResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[29]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2159,7 +2299,7 @@ func (x *GetAgentSandboxResourcesResponse) String() string {
 func (*GetAgentSandboxResourcesResponse) ProtoMessage() {}
 
 func (x *GetAgentSandboxResourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[29]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2172,7 +2312,7 @@ func (x *GetAgentSandboxResourcesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentSandboxResourcesResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentSandboxResourcesResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{29}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetAgentSandboxResourcesResponse) GetState() *SandboxResourcesState {
@@ -2195,7 +2335,7 @@ type SetAgentSandboxResourcesRequest struct {
 
 func (x *SetAgentSandboxResourcesRequest) Reset() {
 	*x = SetAgentSandboxResourcesRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[30]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2207,7 +2347,7 @@ func (x *SetAgentSandboxResourcesRequest) String() string {
 func (*SetAgentSandboxResourcesRequest) ProtoMessage() {}
 
 func (x *SetAgentSandboxResourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[30]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2220,7 +2360,7 @@ func (x *SetAgentSandboxResourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentSandboxResourcesRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentSandboxResourcesRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{30}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SetAgentSandboxResourcesRequest) GetOrgId() string {
@@ -2254,7 +2394,7 @@ type SetAgentSandboxResourcesResponse struct {
 
 func (x *SetAgentSandboxResourcesResponse) Reset() {
 	*x = SetAgentSandboxResourcesResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[31]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2266,7 +2406,7 @@ func (x *SetAgentSandboxResourcesResponse) String() string {
 func (*SetAgentSandboxResourcesResponse) ProtoMessage() {}
 
 func (x *SetAgentSandboxResourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[31]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2279,7 +2419,7 @@ func (x *SetAgentSandboxResourcesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentSandboxResourcesResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentSandboxResourcesResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{31}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SetAgentSandboxResourcesResponse) GetState() *SandboxResourcesState {
@@ -2301,7 +2441,7 @@ type SetAgentKeepWarmRequest struct {
 
 func (x *SetAgentKeepWarmRequest) Reset() {
 	*x = SetAgentKeepWarmRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2313,7 +2453,7 @@ func (x *SetAgentKeepWarmRequest) String() string {
 func (*SetAgentKeepWarmRequest) ProtoMessage() {}
 
 func (x *SetAgentKeepWarmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[32]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2326,7 +2466,7 @@ func (x *SetAgentKeepWarmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentKeepWarmRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentKeepWarmRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{32}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SetAgentKeepWarmRequest) GetOrgId() string {
@@ -2360,7 +2500,7 @@ type SetAgentKeepWarmResponse struct {
 
 func (x *SetAgentKeepWarmResponse) Reset() {
 	*x = SetAgentKeepWarmResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2372,7 +2512,7 @@ func (x *SetAgentKeepWarmResponse) String() string {
 func (*SetAgentKeepWarmResponse) ProtoMessage() {}
 
 func (x *SetAgentKeepWarmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[33]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2385,7 +2525,7 @@ func (x *SetAgentKeepWarmResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentKeepWarmResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentKeepWarmResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{33}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SetAgentKeepWarmResponse) GetAgent() *Agent {
@@ -2408,7 +2548,7 @@ type RunAgentTriggerRequest struct {
 
 func (x *RunAgentTriggerRequest) Reset() {
 	*x = RunAgentTriggerRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2420,7 +2560,7 @@ func (x *RunAgentTriggerRequest) String() string {
 func (*RunAgentTriggerRequest) ProtoMessage() {}
 
 func (x *RunAgentTriggerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[34]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2433,7 +2573,7 @@ func (x *RunAgentTriggerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAgentTriggerRequest.ProtoReflect.Descriptor instead.
 func (*RunAgentTriggerRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{34}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RunAgentTriggerRequest) GetOrgId() string {
@@ -2467,7 +2607,7 @@ type RunAgentTriggerResponse struct {
 
 func (x *RunAgentTriggerResponse) Reset() {
 	*x = RunAgentTriggerResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2479,7 +2619,7 @@ func (x *RunAgentTriggerResponse) String() string {
 func (*RunAgentTriggerResponse) ProtoMessage() {}
 
 func (x *RunAgentTriggerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[35]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2492,7 +2632,7 @@ func (x *RunAgentTriggerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAgentTriggerResponse.ProtoReflect.Descriptor instead.
 func (*RunAgentTriggerResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{35}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *RunAgentTriggerResponse) GetTaskId() string {
@@ -2502,12 +2642,447 @@ func (x *RunAgentTriggerResponse) GetTaskId() string {
 	return ""
 }
 
+// ListAgentSummariesRequest names the org and the page.
+type ListAgentSummariesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// page_size is 50 by default and at most 200.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is the next_page_token of the previous page.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAgentSummariesRequest) Reset() {
+	*x = ListAgentSummariesRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAgentSummariesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAgentSummariesRequest) ProtoMessage() {}
+
+func (x *ListAgentSummariesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAgentSummariesRequest.ProtoReflect.Descriptor instead.
+func (*ListAgentSummariesRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ListAgentSummariesRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ListAgentSummariesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListAgentSummariesRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+// ListAgentSummariesResponse lists one page of agent cards.
+type ListAgentSummariesResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Agents []*AgentSummary        `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	// next_page_token is empty on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	// The start of today (UTC) for the spend and token fields.
+	DayStart      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=day_start,json=dayStart,proto3" json:"day_start,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAgentSummariesResponse) Reset() {
+	*x = ListAgentSummariesResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAgentSummariesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAgentSummariesResponse) ProtoMessage() {}
+
+func (x *ListAgentSummariesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAgentSummariesResponse.ProtoReflect.Descriptor instead.
+func (*ListAgentSummariesResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ListAgentSummariesResponse) GetAgents() []*AgentSummary {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
+func (x *ListAgentSummariesResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+func (x *ListAgentSummariesResponse) GetDayStart() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DayStart
+	}
+	return nil
+}
+
+// AgentSummary is what an agent card shows (ADR 0126 section 4).
+type AgentSummary struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	AgentId     string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	DisplayName string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Status      AgentStatus            `protobuf:"varint,3,opt,name=status,proto3,enum=koinon.agent.v1alpha1.AgentStatus" json:"status,omitempty"`
+	Harness     string                 `protobuf:"bytes,4,opt,name=harness,proto3" json:"harness,omitempty"`
+	// The agent's own model setting, else the model of its latest version.
+	Model string `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	Team  string `protobuf:"bytes,6,opt,name=team,proto3" json:"team,omitempty"`
+	// Unset for nobody. A person who is no longer a member of the org does not show.
+	ReportsTo *AgentReportsTo        `protobuf:"bytes,7,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Set while the agent is unhealthy (ADR 0054).
+	UnhealthyAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=unhealthy_at,json=unhealthyAt,proto3" json:"unhealthy_at,omitempty"`
+	// The state of the agent's newest run; unspecified when it has no run.
+	LastRunState v1alpha11.RunState `protobuf:"varint,10,opt,name=last_run_state,json=lastRunState,proto3,enum=koinon.run.v1alpha1.RunState" json:"last_run_state,omitempty"`
+	// When the newest run finished, else started, else was queued.
+	LastRunAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=last_run_at,json=lastRunAt,proto3" json:"last_run_at,omitempty"`
+	// How many runs of the agent start or run now.
+	RunningRuns int32 `protobuf:"varint,12,opt,name=running_runs,json=runningRuns,proto3" json:"running_runs,omitempty"`
+	// USD spent today (from day_start), as a decimal string.
+	SpentTodayUsd string `protobuf:"bytes,13,opt,name=spent_today_usd,json=spentTodayUsd,proto3" json:"spent_today_usd,omitempty"`
+	// The agent's daily limit in USD; empty when it has none.
+	DailyLimitUsd string `protobuf:"bytes,14,opt,name=daily_limit_usd,json=dailyLimitUsd,proto3" json:"daily_limit_usd,omitempty"`
+	// Input tokens today (they include cache reads) and the cache reads among them. The cache read
+	// share is cache_read_tokens_today / input_tokens_today.
+	InputTokensToday     int64 `protobuf:"varint,15,opt,name=input_tokens_today,json=inputTokensToday,proto3" json:"input_tokens_today,omitempty"`
+	CacheReadTokensToday int64 `protobuf:"varint,16,opt,name=cache_read_tokens_today,json=cacheReadTokensToday,proto3" json:"cache_read_tokens_today,omitempty"`
+	// The next due time of the active version's schedule triggers (ADR 0066); unset when none. The
+	// run starts up to 30 seconds after it (the scheduler's jitter).
+	NextScheduledAt *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=next_scheduled_at,json=nextScheduledAt,proto3" json:"next_scheduled_at,omitempty"`
+	// The inbox items of the caller for this agent: approvals the caller may decide, questions the
+	// caller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin.
+	WaitingOnYou  int32 `protobuf:"varint,18,opt,name=waiting_on_you,json=waitingOnYou,proto3" json:"waiting_on_you,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSummary) Reset() {
+	*x = AgentSummary{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSummary) ProtoMessage() {}
+
+func (x *AgentSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSummary.ProtoReflect.Descriptor instead.
+func (*AgentSummary) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *AgentSummary) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetStatus() AgentStatus {
+	if x != nil {
+		return x.Status
+	}
+	return AgentStatus_AGENT_STATUS_UNSPECIFIED
+}
+
+func (x *AgentSummary) GetHarness() string {
+	if x != nil {
+		return x.Harness
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetReportsTo() *AgentReportsTo {
+	if x != nil {
+		return x.ReportsTo
+	}
+	return nil
+}
+
+func (x *AgentSummary) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *AgentSummary) GetUnhealthyAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UnhealthyAt
+	}
+	return nil
+}
+
+func (x *AgentSummary) GetLastRunState() v1alpha11.RunState {
+	if x != nil {
+		return x.LastRunState
+	}
+	return v1alpha11.RunState(0)
+}
+
+func (x *AgentSummary) GetLastRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRunAt
+	}
+	return nil
+}
+
+func (x *AgentSummary) GetRunningRuns() int32 {
+	if x != nil {
+		return x.RunningRuns
+	}
+	return 0
+}
+
+func (x *AgentSummary) GetSpentTodayUsd() string {
+	if x != nil {
+		return x.SpentTodayUsd
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetDailyLimitUsd() string {
+	if x != nil {
+		return x.DailyLimitUsd
+	}
+	return ""
+}
+
+func (x *AgentSummary) GetInputTokensToday() int64 {
+	if x != nil {
+		return x.InputTokensToday
+	}
+	return 0
+}
+
+func (x *AgentSummary) GetCacheReadTokensToday() int64 {
+	if x != nil {
+		return x.CacheReadTokensToday
+	}
+	return 0
+}
+
+func (x *AgentSummary) GetNextScheduledAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextScheduledAt
+	}
+	return nil
+}
+
+func (x *AgentSummary) GetWaitingOnYou() int32 {
+	if x != nil {
+		return x.WaitingOnYou
+	}
+	return 0
+}
+
+// SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.
+type SetAgentPlacementRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// At most 64 characters, no control characters. Spaces at the ends are removed.
+	Team          string          `protobuf:"bytes,3,opt,name=team,proto3" json:"team,omitempty"`
+	ReportsTo     *AgentReportsTo `protobuf:"bytes,4,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentPlacementRequest) Reset() {
+	*x = SetAgentPlacementRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentPlacementRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentPlacementRequest) ProtoMessage() {}
+
+func (x *SetAgentPlacementRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentPlacementRequest.ProtoReflect.Descriptor instead.
+func (*SetAgentPlacementRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *SetAgentPlacementRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetAgentPlacementRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SetAgentPlacementRequest) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+func (x *SetAgentPlacementRequest) GetReportsTo() *AgentReportsTo {
+	if x != nil {
+		return x.ReportsTo
+	}
+	return nil
+}
+
+// SetAgentPlacementResponse holds the agent as GetAgent would return it.
+type SetAgentPlacementResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentPlacementResponse) Reset() {
+	*x = SetAgentPlacementResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentPlacementResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentPlacementResponse) ProtoMessage() {}
+
+func (x *SetAgentPlacementResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentPlacementResponse.ProtoReflect.Descriptor instead.
+func (*SetAgentPlacementResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *SetAgentPlacementResponse) GetAgent() *Agent {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
 var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xfa\n" +
-	"\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\x1a'koinon/template/v1alpha1/template.proto\"\xd4\v\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -2541,7 +3116,15 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x11sandbox_resources\x18\x19 \x01(\v2'.koinon.agent.v1alpha1.SandboxResourcesR\x10sandboxResources\x12\x1b\n" +
 	"\tkeep_warm\x18\x1a \x01(\bR\bkeepWarm\x12*\n" +
 	"\x11keep_warm_granted\x18\x1b \x01(\bR\x0fkeepWarmGranted\x12\x18\n" +
-	"\aharness\x18\x1c \x01(\tR\aharness\"\xc1\x02\n" +
+	"\aharness\x18\x1c \x01(\tR\aharness\x12\x12\n" +
+	"\x04team\x18\x1d \x01(\tR\x04team\x12D\n" +
+	"\n" +
+	"reports_to\x18\x1e \x01(\v2%.koinon.agent.v1alpha1.AgentReportsToR\treportsTo\"u\n" +
+	"\x0eAgentReportsTo\x12\x1b\n" +
+	"\bagent_id\x18\x01 \x01(\tH\x00R\aagentId\x12\x19\n" +
+	"\auser_id\x18\x02 \x01(\tH\x00R\x06userId\x12!\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayNameB\b\n" +
+	"\x06target\"\xc1\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
@@ -2563,11 +3146,15 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\"F\n" +
 	"\x10GetAgentResponse\x122\n" +
-	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\"*\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\"f\n" +
 	"\x11ListAgentsRequest\x12\x15\n" +
-	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"J\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"r\n" +
 	"\x12ListAgentsResponse\x124\n" +
-	"\x06agents\x18\x01 \x03(\v2\x1c.koinon.agent.v1alpha1.AgentR\x06agents\"\x95\x01\n" +
+	"\x06agents\x18\x01 \x03(\v2\x1c.koinon.agent.v1alpha1.AgentR\x06agents\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x95\x01\n" +
 	"\x14ActivateAgentRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x18\n" +
@@ -2672,7 +3259,46 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\"2\n" +
 	"\x17RunAgentTriggerResponse\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId*w\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"n\n" +
+	"\x19ListAgentSummariesRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\xba\x01\n" +
+	"\x1aListAgentSummariesResponse\x12;\n" +
+	"\x06agents\x18\x01 \x03(\v2#.koinon.agent.v1alpha1.AgentSummaryR\x06agents\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x127\n" +
+	"\tday_start\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bdayStart\"\xd3\x06\n" +
+	"\fAgentSummary\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12:\n" +
+	"\x06status\x18\x03 \x01(\x0e2\".koinon.agent.v1alpha1.AgentStatusR\x06status\x12\x18\n" +
+	"\aharness\x18\x04 \x01(\tR\aharness\x12\x14\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12\x12\n" +
+	"\x04team\x18\x06 \x01(\tR\x04team\x12D\n" +
+	"\n" +
+	"reports_to\x18\a \x01(\v2%.koinon.agent.v1alpha1.AgentReportsToR\treportsTo\x129\n" +
+	"\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12=\n" +
+	"\funhealthy_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vunhealthyAt\x12C\n" +
+	"\x0elast_run_state\x18\n" +
+	" \x01(\x0e2\x1d.koinon.run.v1alpha1.RunStateR\flastRunState\x12:\n" +
+	"\vlast_run_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tlastRunAt\x12!\n" +
+	"\frunning_runs\x18\f \x01(\x05R\vrunningRuns\x12&\n" +
+	"\x0fspent_today_usd\x18\r \x01(\tR\rspentTodayUsd\x12&\n" +
+	"\x0fdaily_limit_usd\x18\x0e \x01(\tR\rdailyLimitUsd\x12,\n" +
+	"\x12input_tokens_today\x18\x0f \x01(\x03R\x10inputTokensToday\x125\n" +
+	"\x17cache_read_tokens_today\x18\x10 \x01(\x03R\x14cacheReadTokensToday\x12F\n" +
+	"\x11next_scheduled_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\x0fnextScheduledAt\x12$\n" +
+	"\x0ewaiting_on_you\x18\x12 \x01(\x05R\fwaitingOnYou\"\xa6\x01\n" +
+	"\x18SetAgentPlacementRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x12\n" +
+	"\x04team\x18\x03 \x01(\tR\x04team\x12D\n" +
+	"\n" +
+	"reports_to\x18\x04 \x01(\v2%.koinon.agent.v1alpha1.AgentReportsToR\treportsTo\"O\n" +
+	"\x19SetAgentPlacementResponse\x122\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent*w\n" +
 	"\vAgentStatus\x12\x1c\n" +
 	"\x18AGENT_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12AGENT_STATUS_DRAFT\x10\x01\x12\x17\n" +
@@ -2683,7 +3309,7 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x12MODEL_SOURCE_AGENT\x10\x01\x12\x18\n" +
 	"\x14MODEL_SOURCE_VERSION\x10\x02\x12\x1c\n" +
 	"\x18MODEL_SOURCE_ORG_DEFAULT\x10\x03\x12\x15\n" +
-	"\x11MODEL_SOURCE_NONE\x10\x042\xed\f\n" +
+	"\x11MODEL_SOURCE_NONE\x10\x042\xe5\x0e\n" +
 	"\fAgentService\x12\x88\x01\n" +
 	"\x17CreateAgentFromTemplate\x125.koinon.agent.v1alpha1.CreateAgentFromTemplateRequest\x1a6.koinon.agent.v1alpha1.CreateAgentFromTemplateResponse\x12`\n" +
 	"\bGetAgent\x12&.koinon.agent.v1alpha1.GetAgentRequest\x1a'.koinon.agent.v1alpha1.GetAgentResponse\"\x03\x90\x02\x01\x12f\n" +
@@ -2699,7 +3325,9 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x18GetAgentSandboxResources\x126.koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest\x1a7.koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse\"\x03\x90\x02\x01\x12\x8b\x01\n" +
 	"\x18SetAgentSandboxResources\x126.koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest\x1a7.koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse\x12p\n" +
 	"\x0fRunAgentTrigger\x12-.koinon.agent.v1alpha1.RunAgentTriggerRequest\x1a..koinon.agent.v1alpha1.RunAgentTriggerResponse\x12g\n" +
-	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
+	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponse\x12~\n" +
+	"\x12ListAgentSummaries\x120.koinon.agent.v1alpha1.ListAgentSummariesRequest\x1a1.koinon.agent.v1alpha1.ListAgentSummariesResponse\"\x03\x90\x02\x01\x12v\n" +
+	"\x11SetAgentPlacement\x12/.koinon.agent.v1alpha1.SetAgentPlacementRequest\x1a0.koinon.agent.v1alpha1.SetAgentPlacementResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
 
 var (
 	file_koinon_agent_v1alpha1_agent_proto_rawDescOnce sync.Once
@@ -2714,126 +3342,149 @@ func file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_agent_v1alpha1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(AgentStatus)(0),                         // 0: koinon.agent.v1alpha1.AgentStatus
 	(ModelSource)(0),                         // 1: koinon.agent.v1alpha1.ModelSource
 	(*Agent)(nil),                            // 2: koinon.agent.v1alpha1.Agent
-	(*CreateAgentFromTemplateRequest)(nil),   // 3: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	(*GrantBinding)(nil),                     // 4: koinon.agent.v1alpha1.GrantBinding
-	(*CreateAgentFromTemplateResponse)(nil),  // 5: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	(*GetAgentRequest)(nil),                  // 6: koinon.agent.v1alpha1.GetAgentRequest
-	(*GetAgentResponse)(nil),                 // 7: koinon.agent.v1alpha1.GetAgentResponse
-	(*ListAgentsRequest)(nil),                // 8: koinon.agent.v1alpha1.ListAgentsRequest
-	(*ListAgentsResponse)(nil),               // 9: koinon.agent.v1alpha1.ListAgentsResponse
-	(*ActivateAgentRequest)(nil),             // 10: koinon.agent.v1alpha1.ActivateAgentRequest
-	(*ActivateAgentResponse)(nil),            // 11: koinon.agent.v1alpha1.ActivateAgentResponse
-	(*ResumeAgentRequest)(nil),               // 12: koinon.agent.v1alpha1.ResumeAgentRequest
-	(*ResumeAgentResponse)(nil),              // 13: koinon.agent.v1alpha1.ResumeAgentResponse
-	(*ArchiveAgentRequest)(nil),              // 14: koinon.agent.v1alpha1.ArchiveAgentRequest
-	(*ArchiveAgentResponse)(nil),             // 15: koinon.agent.v1alpha1.ArchiveAgentResponse
-	(*SetAgentTriggersRequest)(nil),          // 16: koinon.agent.v1alpha1.SetAgentTriggersRequest
-	(*SetAgentTriggersResponse)(nil),         // 17: koinon.agent.v1alpha1.SetAgentTriggersResponse
-	(*GetAgentModelRequest)(nil),             // 18: koinon.agent.v1alpha1.GetAgentModelRequest
-	(*ServedModel)(nil),                      // 19: koinon.agent.v1alpha1.ServedModel
-	(*GetAgentModelResponse)(nil),            // 20: koinon.agent.v1alpha1.GetAgentModelResponse
-	(*ThinkingState)(nil),                    // 21: koinon.agent.v1alpha1.ThinkingState
-	(*SetAgentModelRequest)(nil),             // 22: koinon.agent.v1alpha1.SetAgentModelRequest
-	(*SetAgentModelResponse)(nil),            // 23: koinon.agent.v1alpha1.SetAgentModelResponse
-	(*SetAgentThinkingRequest)(nil),          // 24: koinon.agent.v1alpha1.SetAgentThinkingRequest
-	(*SetAgentThinkingResponse)(nil),         // 25: koinon.agent.v1alpha1.SetAgentThinkingResponse
-	(*SandboxResources)(nil),                 // 26: koinon.agent.v1alpha1.SandboxResources
-	(*SandboxRange)(nil),                     // 27: koinon.agent.v1alpha1.SandboxRange
-	(*SandboxBounds)(nil),                    // 28: koinon.agent.v1alpha1.SandboxBounds
-	(*GetAgentSandboxResourcesRequest)(nil),  // 29: koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
-	(*SandboxResourcesState)(nil),            // 30: koinon.agent.v1alpha1.SandboxResourcesState
-	(*GetAgentSandboxResourcesResponse)(nil), // 31: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
-	(*SetAgentSandboxResourcesRequest)(nil),  // 32: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
-	(*SetAgentSandboxResourcesResponse)(nil), // 33: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
-	(*SetAgentKeepWarmRequest)(nil),          // 34: koinon.agent.v1alpha1.SetAgentKeepWarmRequest
-	(*SetAgentKeepWarmResponse)(nil),         // 35: koinon.agent.v1alpha1.SetAgentKeepWarmResponse
-	(*RunAgentTriggerRequest)(nil),           // 36: koinon.agent.v1alpha1.RunAgentTriggerRequest
-	(*RunAgentTriggerResponse)(nil),          // 37: koinon.agent.v1alpha1.RunAgentTriggerResponse
-	(v1alpha1.Flavor)(0),                     // 38: koinon.template.v1alpha1.Flavor
-	(*v1alpha1.Grant)(nil),                   // 39: koinon.template.v1alpha1.Grant
-	(*v1alpha1.RunLimits)(nil),               // 40: koinon.template.v1alpha1.RunLimits
-	(*timestamppb.Timestamp)(nil),            // 41: google.protobuf.Timestamp
-	(*v1alpha1.Trigger)(nil),                 // 42: koinon.template.v1alpha1.Trigger
+	(*AgentReportsTo)(nil),                   // 3: koinon.agent.v1alpha1.AgentReportsTo
+	(*CreateAgentFromTemplateRequest)(nil),   // 4: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	(*GrantBinding)(nil),                     // 5: koinon.agent.v1alpha1.GrantBinding
+	(*CreateAgentFromTemplateResponse)(nil),  // 6: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	(*GetAgentRequest)(nil),                  // 7: koinon.agent.v1alpha1.GetAgentRequest
+	(*GetAgentResponse)(nil),                 // 8: koinon.agent.v1alpha1.GetAgentResponse
+	(*ListAgentsRequest)(nil),                // 9: koinon.agent.v1alpha1.ListAgentsRequest
+	(*ListAgentsResponse)(nil),               // 10: koinon.agent.v1alpha1.ListAgentsResponse
+	(*ActivateAgentRequest)(nil),             // 11: koinon.agent.v1alpha1.ActivateAgentRequest
+	(*ActivateAgentResponse)(nil),            // 12: koinon.agent.v1alpha1.ActivateAgentResponse
+	(*ResumeAgentRequest)(nil),               // 13: koinon.agent.v1alpha1.ResumeAgentRequest
+	(*ResumeAgentResponse)(nil),              // 14: koinon.agent.v1alpha1.ResumeAgentResponse
+	(*ArchiveAgentRequest)(nil),              // 15: koinon.agent.v1alpha1.ArchiveAgentRequest
+	(*ArchiveAgentResponse)(nil),             // 16: koinon.agent.v1alpha1.ArchiveAgentResponse
+	(*SetAgentTriggersRequest)(nil),          // 17: koinon.agent.v1alpha1.SetAgentTriggersRequest
+	(*SetAgentTriggersResponse)(nil),         // 18: koinon.agent.v1alpha1.SetAgentTriggersResponse
+	(*GetAgentModelRequest)(nil),             // 19: koinon.agent.v1alpha1.GetAgentModelRequest
+	(*ServedModel)(nil),                      // 20: koinon.agent.v1alpha1.ServedModel
+	(*GetAgentModelResponse)(nil),            // 21: koinon.agent.v1alpha1.GetAgentModelResponse
+	(*ThinkingState)(nil),                    // 22: koinon.agent.v1alpha1.ThinkingState
+	(*SetAgentModelRequest)(nil),             // 23: koinon.agent.v1alpha1.SetAgentModelRequest
+	(*SetAgentModelResponse)(nil),            // 24: koinon.agent.v1alpha1.SetAgentModelResponse
+	(*SetAgentThinkingRequest)(nil),          // 25: koinon.agent.v1alpha1.SetAgentThinkingRequest
+	(*SetAgentThinkingResponse)(nil),         // 26: koinon.agent.v1alpha1.SetAgentThinkingResponse
+	(*SandboxResources)(nil),                 // 27: koinon.agent.v1alpha1.SandboxResources
+	(*SandboxRange)(nil),                     // 28: koinon.agent.v1alpha1.SandboxRange
+	(*SandboxBounds)(nil),                    // 29: koinon.agent.v1alpha1.SandboxBounds
+	(*GetAgentSandboxResourcesRequest)(nil),  // 30: koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
+	(*SandboxResourcesState)(nil),            // 31: koinon.agent.v1alpha1.SandboxResourcesState
+	(*GetAgentSandboxResourcesResponse)(nil), // 32: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
+	(*SetAgentSandboxResourcesRequest)(nil),  // 33: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
+	(*SetAgentSandboxResourcesResponse)(nil), // 34: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
+	(*SetAgentKeepWarmRequest)(nil),          // 35: koinon.agent.v1alpha1.SetAgentKeepWarmRequest
+	(*SetAgentKeepWarmResponse)(nil),         // 36: koinon.agent.v1alpha1.SetAgentKeepWarmResponse
+	(*RunAgentTriggerRequest)(nil),           // 37: koinon.agent.v1alpha1.RunAgentTriggerRequest
+	(*RunAgentTriggerResponse)(nil),          // 38: koinon.agent.v1alpha1.RunAgentTriggerResponse
+	(*ListAgentSummariesRequest)(nil),        // 39: koinon.agent.v1alpha1.ListAgentSummariesRequest
+	(*ListAgentSummariesResponse)(nil),       // 40: koinon.agent.v1alpha1.ListAgentSummariesResponse
+	(*AgentSummary)(nil),                     // 41: koinon.agent.v1alpha1.AgentSummary
+	(*SetAgentPlacementRequest)(nil),         // 42: koinon.agent.v1alpha1.SetAgentPlacementRequest
+	(*SetAgentPlacementResponse)(nil),        // 43: koinon.agent.v1alpha1.SetAgentPlacementResponse
+	(v1alpha1.Flavor)(0),                     // 44: koinon.template.v1alpha1.Flavor
+	(*v1alpha1.Grant)(nil),                   // 45: koinon.template.v1alpha1.Grant
+	(*v1alpha1.RunLimits)(nil),               // 46: koinon.template.v1alpha1.RunLimits
+	(*timestamppb.Timestamp)(nil),            // 47: google.protobuf.Timestamp
+	(*v1alpha1.Trigger)(nil),                 // 48: koinon.template.v1alpha1.Trigger
+	(v1alpha11.RunState)(0),                  // 49: koinon.run.v1alpha1.RunState
 }
 var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	0,  // 0: koinon.agent.v1alpha1.Agent.status:type_name -> koinon.agent.v1alpha1.AgentStatus
-	38, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	39, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
-	39, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
-	40, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
-	41, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
-	41, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
-	41, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
-	41, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
-	42, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	42, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	41, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
-	26, // 12: koinon.agent.v1alpha1.Agent.sandbox_resources:type_name -> koinon.agent.v1alpha1.SandboxResources
-	38, // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	4,  // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
-	2,  // 15: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 16: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 17: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 18: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 19: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 20: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	42, // 21: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
-	2,  // 22: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 23: koinon.agent.v1alpha1.GetAgentModelResponse.source:type_name -> koinon.agent.v1alpha1.ModelSource
-	19, // 24: koinon.agent.v1alpha1.GetAgentModelResponse.available:type_name -> koinon.agent.v1alpha1.ServedModel
-	21, // 25: koinon.agent.v1alpha1.GetAgentModelResponse.thinking:type_name -> koinon.agent.v1alpha1.ThinkingState
-	20, // 26: koinon.agent.v1alpha1.SetAgentModelResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
-	20, // 27: koinon.agent.v1alpha1.SetAgentThinkingResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
-	27, // 28: koinon.agent.v1alpha1.SandboxBounds.cpu_request:type_name -> koinon.agent.v1alpha1.SandboxRange
-	27, // 29: koinon.agent.v1alpha1.SandboxBounds.cpu_limit:type_name -> koinon.agent.v1alpha1.SandboxRange
-	27, // 30: koinon.agent.v1alpha1.SandboxBounds.memory_request:type_name -> koinon.agent.v1alpha1.SandboxRange
-	27, // 31: koinon.agent.v1alpha1.SandboxBounds.memory_limit:type_name -> koinon.agent.v1alpha1.SandboxRange
-	26, // 32: koinon.agent.v1alpha1.SandboxResourcesState.override:type_name -> koinon.agent.v1alpha1.SandboxResources
-	26, // 33: koinon.agent.v1alpha1.SandboxResourcesState.template:type_name -> koinon.agent.v1alpha1.SandboxResources
-	26, // 34: koinon.agent.v1alpha1.SandboxResourcesState.effective:type_name -> koinon.agent.v1alpha1.SandboxResources
-	28, // 35: koinon.agent.v1alpha1.SandboxResourcesState.bounds:type_name -> koinon.agent.v1alpha1.SandboxBounds
-	30, // 36: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
-	26, // 37: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest.resources:type_name -> koinon.agent.v1alpha1.SandboxResources
-	30, // 38: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
-	2,  // 39: koinon.agent.v1alpha1.SetAgentKeepWarmResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	3,  // 40: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	6,  // 41: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
-	8,  // 42: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
-	10, // 43: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
-	16, // 44: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
-	12, // 45: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
-	18, // 46: koinon.agent.v1alpha1.AgentService.GetAgentModel:input_type -> koinon.agent.v1alpha1.GetAgentModelRequest
-	22, // 47: koinon.agent.v1alpha1.AgentService.SetAgentModel:input_type -> koinon.agent.v1alpha1.SetAgentModelRequest
-	24, // 48: koinon.agent.v1alpha1.AgentService.SetAgentThinking:input_type -> koinon.agent.v1alpha1.SetAgentThinkingRequest
-	34, // 49: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:input_type -> koinon.agent.v1alpha1.SetAgentKeepWarmRequest
-	29, // 50: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
-	32, // 51: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
-	36, // 52: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:input_type -> koinon.agent.v1alpha1.RunAgentTriggerRequest
-	14, // 53: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
-	5,  // 54: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	7,  // 55: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
-	9,  // 56: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
-	11, // 57: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
-	17, // 58: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
-	13, // 59: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
-	20, // 60: koinon.agent.v1alpha1.AgentService.GetAgentModel:output_type -> koinon.agent.v1alpha1.GetAgentModelResponse
-	23, // 61: koinon.agent.v1alpha1.AgentService.SetAgentModel:output_type -> koinon.agent.v1alpha1.SetAgentModelResponse
-	25, // 62: koinon.agent.v1alpha1.AgentService.SetAgentThinking:output_type -> koinon.agent.v1alpha1.SetAgentThinkingResponse
-	35, // 63: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:output_type -> koinon.agent.v1alpha1.SetAgentKeepWarmResponse
-	31, // 64: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
-	33, // 65: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
-	37, // 66: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:output_type -> koinon.agent.v1alpha1.RunAgentTriggerResponse
-	15, // 67: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
-	54, // [54:68] is the sub-list for method output_type
-	40, // [40:54] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	44, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	45, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
+	45, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
+	46, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
+	47, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
+	47, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
+	47, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
+	47, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
+	48, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	48, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
+	47, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
+	27, // 12: koinon.agent.v1alpha1.Agent.sandbox_resources:type_name -> koinon.agent.v1alpha1.SandboxResources
+	3,  // 13: koinon.agent.v1alpha1.Agent.reports_to:type_name -> koinon.agent.v1alpha1.AgentReportsTo
+	44, // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	5,  // 15: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
+	2,  // 16: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 17: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 18: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 19: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 20: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 21: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	48, // 22: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
+	2,  // 23: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 24: koinon.agent.v1alpha1.GetAgentModelResponse.source:type_name -> koinon.agent.v1alpha1.ModelSource
+	20, // 25: koinon.agent.v1alpha1.GetAgentModelResponse.available:type_name -> koinon.agent.v1alpha1.ServedModel
+	22, // 26: koinon.agent.v1alpha1.GetAgentModelResponse.thinking:type_name -> koinon.agent.v1alpha1.ThinkingState
+	21, // 27: koinon.agent.v1alpha1.SetAgentModelResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
+	21, // 28: koinon.agent.v1alpha1.SetAgentThinkingResponse.model:type_name -> koinon.agent.v1alpha1.GetAgentModelResponse
+	28, // 29: koinon.agent.v1alpha1.SandboxBounds.cpu_request:type_name -> koinon.agent.v1alpha1.SandboxRange
+	28, // 30: koinon.agent.v1alpha1.SandboxBounds.cpu_limit:type_name -> koinon.agent.v1alpha1.SandboxRange
+	28, // 31: koinon.agent.v1alpha1.SandboxBounds.memory_request:type_name -> koinon.agent.v1alpha1.SandboxRange
+	28, // 32: koinon.agent.v1alpha1.SandboxBounds.memory_limit:type_name -> koinon.agent.v1alpha1.SandboxRange
+	27, // 33: koinon.agent.v1alpha1.SandboxResourcesState.override:type_name -> koinon.agent.v1alpha1.SandboxResources
+	27, // 34: koinon.agent.v1alpha1.SandboxResourcesState.template:type_name -> koinon.agent.v1alpha1.SandboxResources
+	27, // 35: koinon.agent.v1alpha1.SandboxResourcesState.effective:type_name -> koinon.agent.v1alpha1.SandboxResources
+	29, // 36: koinon.agent.v1alpha1.SandboxResourcesState.bounds:type_name -> koinon.agent.v1alpha1.SandboxBounds
+	31, // 37: koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
+	27, // 38: koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest.resources:type_name -> koinon.agent.v1alpha1.SandboxResources
+	31, // 39: koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse.state:type_name -> koinon.agent.v1alpha1.SandboxResourcesState
+	2,  // 40: koinon.agent.v1alpha1.SetAgentKeepWarmResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	41, // 41: koinon.agent.v1alpha1.ListAgentSummariesResponse.agents:type_name -> koinon.agent.v1alpha1.AgentSummary
+	47, // 42: koinon.agent.v1alpha1.ListAgentSummariesResponse.day_start:type_name -> google.protobuf.Timestamp
+	0,  // 43: koinon.agent.v1alpha1.AgentSummary.status:type_name -> koinon.agent.v1alpha1.AgentStatus
+	3,  // 44: koinon.agent.v1alpha1.AgentSummary.reports_to:type_name -> koinon.agent.v1alpha1.AgentReportsTo
+	47, // 45: koinon.agent.v1alpha1.AgentSummary.created_at:type_name -> google.protobuf.Timestamp
+	47, // 46: koinon.agent.v1alpha1.AgentSummary.unhealthy_at:type_name -> google.protobuf.Timestamp
+	49, // 47: koinon.agent.v1alpha1.AgentSummary.last_run_state:type_name -> koinon.run.v1alpha1.RunState
+	47, // 48: koinon.agent.v1alpha1.AgentSummary.last_run_at:type_name -> google.protobuf.Timestamp
+	47, // 49: koinon.agent.v1alpha1.AgentSummary.next_scheduled_at:type_name -> google.protobuf.Timestamp
+	3,  // 50: koinon.agent.v1alpha1.SetAgentPlacementRequest.reports_to:type_name -> koinon.agent.v1alpha1.AgentReportsTo
+	2,  // 51: koinon.agent.v1alpha1.SetAgentPlacementResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	4,  // 52: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	7,  // 53: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
+	9,  // 54: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
+	11, // 55: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
+	17, // 56: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
+	13, // 57: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
+	19, // 58: koinon.agent.v1alpha1.AgentService.GetAgentModel:input_type -> koinon.agent.v1alpha1.GetAgentModelRequest
+	23, // 59: koinon.agent.v1alpha1.AgentService.SetAgentModel:input_type -> koinon.agent.v1alpha1.SetAgentModelRequest
+	25, // 60: koinon.agent.v1alpha1.AgentService.SetAgentThinking:input_type -> koinon.agent.v1alpha1.SetAgentThinkingRequest
+	35, // 61: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:input_type -> koinon.agent.v1alpha1.SetAgentKeepWarmRequest
+	30, // 62: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest
+	33, // 63: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:input_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest
+	37, // 64: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:input_type -> koinon.agent.v1alpha1.RunAgentTriggerRequest
+	15, // 65: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
+	39, // 66: koinon.agent.v1alpha1.AgentService.ListAgentSummaries:input_type -> koinon.agent.v1alpha1.ListAgentSummariesRequest
+	42, // 67: koinon.agent.v1alpha1.AgentService.SetAgentPlacement:input_type -> koinon.agent.v1alpha1.SetAgentPlacementRequest
+	6,  // 68: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	8,  // 69: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
+	10, // 70: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
+	12, // 71: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
+	18, // 72: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
+	14, // 73: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
+	21, // 74: koinon.agent.v1alpha1.AgentService.GetAgentModel:output_type -> koinon.agent.v1alpha1.GetAgentModelResponse
+	24, // 75: koinon.agent.v1alpha1.AgentService.SetAgentModel:output_type -> koinon.agent.v1alpha1.SetAgentModelResponse
+	26, // 76: koinon.agent.v1alpha1.AgentService.SetAgentThinking:output_type -> koinon.agent.v1alpha1.SetAgentThinkingResponse
+	36, // 77: koinon.agent.v1alpha1.AgentService.SetAgentKeepWarm:output_type -> koinon.agent.v1alpha1.SetAgentKeepWarmResponse
+	32, // 78: koinon.agent.v1alpha1.AgentService.GetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse
+	34, // 79: koinon.agent.v1alpha1.AgentService.SetAgentSandboxResources:output_type -> koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse
+	38, // 80: koinon.agent.v1alpha1.AgentService.RunAgentTrigger:output_type -> koinon.agent.v1alpha1.RunAgentTriggerResponse
+	16, // 81: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
+	40, // 82: koinon.agent.v1alpha1.AgentService.ListAgentSummaries:output_type -> koinon.agent.v1alpha1.ListAgentSummariesResponse
+	43, // 83: koinon.agent.v1alpha1.AgentService.SetAgentPlacement:output_type -> koinon.agent.v1alpha1.SetAgentPlacementResponse
+	68, // [68:84] is the sub-list for method output_type
+	52, // [52:68] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_koinon_agent_v1alpha1_agent_proto_init() }
@@ -2841,14 +3492,18 @@ func file_koinon_agent_v1alpha1_agent_proto_init() {
 	if File_koinon_agent_v1alpha1_agent_proto != nil {
 		return
 	}
-	file_koinon_agent_v1alpha1_agent_proto_msgTypes[1].OneofWrappers = []any{}
+	file_koinon_agent_v1alpha1_agent_proto_msgTypes[1].OneofWrappers = []any{
+		(*AgentReportsTo_AgentId)(nil),
+		(*AgentReportsTo_UserId)(nil),
+	}
+	file_koinon_agent_v1alpha1_agent_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_agent_v1alpha1_agent_proto_rawDesc), len(file_koinon_agent_v1alpha1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   36,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

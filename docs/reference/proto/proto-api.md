@@ -19,11 +19,13 @@ org it acts in; IDs from another org are not found.
 | GetAgent | `koinon.agent.v1alpha1.GetAgentRequest` | `koinon.agent.v1alpha1.GetAgentResponse` | - | GetAgent returns one agent. Viewers and above. |
 | GetAgentModel | `koinon.agent.v1alpha1.GetAgentModelRequest` | `koinon.agent.v1alpha1.GetAgentModelResponse` | - | GetAgentModel says which model the agent's next run uses and where that choice comes from, and lists the models an admin may pick. Admins and owners only. |
 | GetAgentSandboxResources | `koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse` | - | GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override, the template's values, what the next sandbox gets, and the platform bounds an override must stay inside (ADR 0083). Admins and owners only. |
-| ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns the org's agents, oldest first. Viewers and above. |
+| ListAgentSummaries | `koinon.agent.v1alpha1.ListAgentSummariesRequest` | `koinon.agent.v1alpha1.ListAgentSummariesResponse` | - | ListAgentSummaries returns one page of the org's agents that are not archived, as cards (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what waits on the caller. The page comes from one database query. Ordered by team (agents with no team last), then oldest first. Viewers and above. |
+| ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns one page of the org's agents, oldest first. Viewers and above. |
 | ResumeAgent | `koinon.agent.v1alpha1.ResumeAgentRequest` | `koinon.agent.v1alpha1.ResumeAgentResponse` | - | ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners only. |
 | RunAgentTrigger | `koinon.agent.v1alpha1.RunAgentTriggerRequest` | `koinon.agent.v1alpha1.RunAgentTriggerResponse` | - | RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited. Admins and owners only. |
 | SetAgentKeepWarm | `koinon.agent.v1alpha1.SetAgentKeepWarmRequest` | `koinon.agent.v1alpha1.SetAgentKeepWarmResponse` | - | SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts when found stopped), or withdraws the request. A request, not a promise: the operator caps the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a setting of the agent, not a new version. Audited, with the old and the new value. Fails with FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01). |
 | SetAgentModel | `koinon.agent.v1alpha1.SetAgentModelRequest` | `koinon.agent.v1alpha1.SetAgentModelResponse` | - | SetAgentModel sets the agent's model, or clears it with "default". It is a setting of the agent, not a new version: it applies to the agent's next run. The model must be one the org serves and has a price for. Audited, with the old and the new value. Admins and owners only. |
+| SetAgentPlacement | `koinon.agent.v1alpha1.SetAgentPlacementRequest` | `koinon.agent.v1alpha1.SetAgentPlacementResponse` | - | SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent parent must be an agent of the same org that is not archived, and must not make a cycle; a person must be a member of the org. Audited as agent.placement.set. Admins and owners only. |
 | SetAgentSandboxResources | `koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse` | - | SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left empty so the template's value and then the platform default apply. A value outside the platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the model it is a setting of the agent, not a new version; a change recreates the sandbox at the next run (the size is part of the sandbox spec hash). Audited, with the old and the new override. Admins and owners only. |
 | SetAgentThinking | `koinon.agent.v1alpha1.SetAgentThinkingRequest` | `koinon.agent.v1alpha1.SetAgentThinkingResponse` | - | SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting with an empty value so the version's value (a template's spec.model.thinking) and then the default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old and the new value. Admins and owners only. |
 | SetAgentTriggers | `koinon.agent.v1alpha1.SetAgentTriggersRequest` | `koinon.agent.v1alpha1.SetAgentTriggersResponse` | - | SetAgentTriggers proposes a new version with the given triggers (everything else carried over from the latest version). The triggers fire nothing until ActivateAgent activates that version; an active agent keeps running its active version meanwhile. Audited. Admins and owners only. |
@@ -82,6 +84,43 @@ Agent is an agent and the definition it runs.
 | keep_warm | 26 | `bool` | singular |  | Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049 amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org. |
 | keep_warm_granted | 27 | `bool` | singular |  | Whether the reconciler granted the request under the operator's per-org cap (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new request reads false until the reconciler's next pass. |
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
+| team | 29 | `string` | singular |  | The agent's team label (SetAgentPlacement); empty for no team. |
+| reports_to | 30 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only; AgentSummary also gives the name. |
+
+### Message AgentReportsTo
+
+AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent_id | 1 | `string` | singular | target |  |
+| user_id | 2 | `string` | singular | target |  |
+| display_name | 3 | `string` | singular |  | The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored in SetAgentPlacement. |
+
+### Message AgentSummary
+
+AgentSummary is what an agent card shows (ADR 0126 section 4).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent_id | 1 | `string` | singular |  |  |
+| display_name | 2 | `string` | singular |  |  |
+| status | 3 | `koinon.agent.v1alpha1.AgentStatus` | singular |  |  |
+| harness | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  | The agent's own model setting, else the model of its latest version. |
+| team | 6 | `string` | singular |  |  |
+| reports_to | 7 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Unset for nobody. A person who is no longer a member of the org does not show. |
+| created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
+| unhealthy_at | 9 | `google.protobuf.Timestamp` | singular |  | Set while the agent is unhealthy (ADR 0054). |
+| last_run_state | 10 | `koinon.run.v1alpha1.RunState` | singular |  | The state of the agent's newest run; unspecified when it has no run. |
+| last_run_at | 11 | `google.protobuf.Timestamp` | singular |  | When the newest run finished, else started, else was queued. |
+| running_runs | 12 | `int32` | singular |  | How many runs of the agent start or run now. |
+| spent_today_usd | 13 | `string` | singular |  | USD spent today (from day_start), as a decimal string. |
+| daily_limit_usd | 14 | `string` | singular |  | The agent's daily limit in USD; empty when it has none. |
+| input_tokens_today | 15 | `int64` | singular |  | Input tokens today (they include cache reads) and the cache reads among them. The cache read share is cache_read_tokens_today / input_tokens_today. |
+| cache_read_tokens_today | 16 | `int64` | singular |  |  |
+| next_scheduled_at | 17 | `google.protobuf.Timestamp` | singular |  | The next due time of the active version's schedule triggers (ADR 0066); unset when none. The run starts up to 30 seconds after it (the scheduler's jitter). |
+| waiting_on_you | 18 | `int32` | singular |  | The inbox items of the caller for this agent: approvals the caller may decide, questions the caller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin. |
 
 ### Message ArchiveAgentRequest
 
@@ -190,21 +229,44 @@ the targets it is narrowed to.
 | connection_id | 2 | `string` | singular |  | A connection of that type in the org (ConnectionService). |
 | repositories | 3 | `string` | repeated |  | For GitHub: repositories as owner/name. Their number must be within the template grant's targets min and max, and the connection's installation must be able to access each of them. |
 
-### Message ListAgentsRequest
+### Message ListAgentSummariesRequest
 
-ListAgentsRequest names the org.
+ListAgentSummariesRequest names the org and the page.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | org_id | 1 | `string` | singular |  |  |
+| page_size | 2 | `int32` | singular |  | page_size is 50 by default and at most 200. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page. |
+
+### Message ListAgentSummariesResponse
+
+ListAgentSummariesResponse lists one page of agent cards.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agents | 1 | `koinon.agent.v1alpha1.AgentSummary` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+| day_start | 3 | `google.protobuf.Timestamp` | singular |  | The start of today (UTC) for the spend and token fields. |
+
+### Message ListAgentsRequest
+
+ListAgentsRequest names the org and the page.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| page_size | 2 | `int32` | singular |  | page_size is 500 by default and at most 500. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page. |
 
 ### Message ListAgentsResponse
 
-ListAgentsResponse lists the org's agents.
+ListAgentsResponse lists one page of the org's agents.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | agents | 1 | `koinon.agent.v1alpha1.Agent` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
 
 ### Message ResumeAgentRequest
 
@@ -329,6 +391,25 @@ SetAgentModelResponse holds the result, as GetAgentModel would return it.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | model | 1 | `koinon.agent.v1alpha1.GetAgentModelResponse` | singular |  |  |
+
+### Message SetAgentPlacementRequest
+
+SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| team | 3 | `string` | singular |  | At most 64 characters, no control characters. Spaces at the ends are removed. |
+| reports_to | 4 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  |  |
+
+### Message SetAgentPlacementResponse
+
+SetAgentPlacementResponse holds the agent as GetAgent would return it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
 
 ### Message SetAgentSandboxResourcesRequest
 
