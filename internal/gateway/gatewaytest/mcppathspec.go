@@ -16,13 +16,16 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
-// RegisterMCP adds the specs of the MCP path alone for env: the cases a gateway that serves only the
-// MCP path (koinon-gateway, ADR 0097 step 2) must pass, with no model path and no leak guard. Env.Start
-// is given guardURL "" and a Driver that applies the MCP half of a State. The targets are platform
-// targets (Org ""): a gateway without a guard refuses an org's target, so the cases that need one
-// (the guard specs of [Register]) are not here.
+// RegisterMCP adds the MCP cases of the suite for env: the cases a gateway that serves only the MCP
+// path (koinon-gateway, ADR 0097 step 2) must pass, with no model path. Env.Start is given a Driver
+// that applies the MCP half of a State, and the leak guard in both forms ([Guard]): a gateway that runs
+// the guard in its process uses Guard.Local. These are the MCP cases of [Register] too.
 func RegisterMCP(env Env) {
 	mcpPathSpec(env)
+	mcpServersSpec(env)
+	loneTargetSpec(env)
+	guardSpec(env)
+	mcpKindSpec(env)
 }
 
 func mcpPathSpec(env Env) {
@@ -98,7 +101,7 @@ func mcpPathSpec(env Env) {
 			state.GrantTools(agentReader, gateway.ToolGrant{Target: "alpha", Tools: []string{"read_item"}})
 			state.GrantTools(agentBoth, gateway.ToolGrant{Target: "alpha", All: true}, gateway.ToolGrant{Target: "beta", Tools: []string{"read_item"}})
 			state.GrantTools(agentOld, gateway.ToolGrant{Target: "beta", All: true})
-			gw, err = env.Start(ctx, []int{port(alpha), port(beta)}, map[string]string{"mcp_key": "koinon_test_not-a-real-token-alpha\n"}, "")
+			gw, err = env.Start(ctx, []int{port(alpha), port(beta)}, map[string]string{"mcp_key": "koinon_test_not-a-real-token-alpha\n"}, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			_, err = gw.Driver.Apply(ctx, state)

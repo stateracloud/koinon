@@ -51,11 +51,12 @@ type Env struct {
 	// file Start was given under name.
 	KeyFile func(name string) string
 	// Start brings up an empty gateway that can reach the given test-host ports, and writes files
-	// (name to content) where KeyFile(name) points. guardURL is the MCP leak guard the driver
-	// renders (Options.GuardURL; "" for none, when every call to an org's server is refused). The
+	// (name to content) where KeyFile(name) points. guard is the MCP leak guard: a driver that renders
+	// agentgateway uses guard.URL (Options.GuardURL), and a gateway that runs the guard in its process
+	// uses guard.Local. The zero Guard is none, when every call to an org's server is refused. The
 	// specs then call Apply on the returned driver. It skips the spec when the environment is
 	// missing.
-	Start func(ctx context.Context, hostPorts []int, files map[string]string, guardURL string) (*Gateway, error)
+	Start func(ctx context.Context, hostPorts []int, files map[string]string, guard Guard) (*Gateway, error)
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
@@ -76,6 +77,10 @@ type Env struct {
 	// KnownGaps maps an issue ("#N") to why this driver's gateway fails the cases wrapped in
 	// [KnownGap] for it. A gateway without the gap leaves it out and the case runs plainly.
 	KnownGaps map[string]string
+	// ScrubsCredentials is set for a gateway that removes the credential values it opened from what it
+	// gives to agents (koinon-gateway, #1174). A server that echoes its credential then reaches the agent
+	// without it. A gateway without the scrub (agentgateway) passes the echo on as the server sent it.
+	ScrubsCredentials bool
 }
 
 // Gateway is a started gateway under test.
@@ -275,7 +280,7 @@ func llmSpec(env Env) {
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},
-				map[string]string{"globex_key": "globex-upstream-key"}, "")
+				map[string]string{"globex_key": "globex-upstream-key"}, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			driver, logs, llmURL = gw.Driver, gw.Logs, gw.URL
@@ -709,6 +714,17 @@ func mcpServersSpec(env Env) {
 			}
 			return out
 		}
+		// echoed checks what the agent got of a server that echoes the credential it saw: the echo as the
+		// server sent it, or, on a gateway that scrubs credentials, the text without the value.
+		echoed := func(text, prefix, credential string) {
+			GinkgoHelper()
+			if !env.ScrubsCredentials {
+				Expect(text).To(Equal(prefix + credential))
+				return
+			}
+			Expect(text).To(HavePrefix(prefix))
+			Expect(text).NotTo(ContainSubstring("not-a-real-token"), "the gateway gave the agent the credential it opened")
+		}
 
 		BeforeAll(func(ctx SpecContext) {
 			acme := fakeRemote("acme-wiki", acmeLog, "X-Api-Key")
@@ -757,7 +773,7 @@ func mcpServersSpec(env Env) {
 			guard := startGuard()
 			gw, err := env.Start(ctx, []int{port(acme), port(bearerSrv), port(globex), port(tools), port(open), guard.Port()}, map[string]string{
 				"acme-wiki-key": "not-a-real-token-acme", "acme-bearer-key": "not-a-real-token-bearer", "globex-wiki-key": "not-a-real-token-globex",
-			}, guard.URL(env.Host))
+			}, guard.Ref(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			logs, llmURL = gw.Logs, gw.URL
@@ -813,12 +829,15 @@ func mcpServersSpec(env Env) {
 				AddReportEntry("upstream", fmt.Sprint(h.Values("X-Api-Key"), h.Values("Authorization")))
 			}
 			acmeLog.mu.Unlock()
-			Expect(text).To(Equal("acme-wiki saw not-a-real-token-acme"))
+			// The server got the gateway's credential, never the agent's.
+			Expect(acmeLog.values("X-Api-Key")).To(ContainElement("not-a-real-token-acme"))
 			Expect(acmeLog.values("X-Api-Key")).NotTo(ContainElement("agent-chose-this"))
+			echoed(text, "acme-wiki saw ", "not-a-real-token-acme")
 
 			res, err = session(ctx, keyAcme.Material).CallTool(ctx, &mcp.CallToolParams{Name: "acme-bearer_read_item"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("acme-bearer saw Bearer not-a-real-token-bearer"))
+			Expect(bearerLog.values("Authorization")).To(ContainElement("Bearer not-a-real-token-bearer"))
+			echoed(res.Content[0].(*mcp.TextContent).Text, "acme-bearer saw ", "Bearer not-a-real-token-bearer")
 
 			// The one tool the grant did not name is refused.
 			res, err = session(ctx, keyAcme.Material).CallTool(ctx, &mcp.CallToolParams{Name: "acme-bearer_write_item"})
@@ -934,7 +953,7 @@ func loneTargetSpec(env Env) {
 			state.GrantTools(keyAcme.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
 			state.GrantTools(keyGl.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
 			guard := startGuard()
-			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
+			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.Ref(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			llmURL = gw.URL

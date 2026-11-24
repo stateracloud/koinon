@@ -281,6 +281,13 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		return refusedResult("refused: no such tool")
 	}
 	tools, all, allowed := s.allowedTools(agent, target)
+	if s.needsGuard(agent, target, tool) {
+		// Granted, but the target serves nothing without a guard: say so, not "not granted".
+		row.Target, row.Tool = target, tool
+		row.Verdict = gateway.GuardUnconfiguredReason
+		finish(OutcomeRefusedGuard)
+		return refusedResult(gateway.GuardUnconfiguredReason)
+	}
 	if !allowed || (!all && !tools[tool]) {
 		finish(OutcomeRefusedGrant)
 		return refusedResult("refused: the tool is not granted to this agent")

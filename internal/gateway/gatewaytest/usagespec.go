@@ -216,7 +216,7 @@ func usageSpec(env Env) {
 			}
 			state.Providers = []gateway.Provider{oai, ant}
 
-			gw, err = env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": "koinon_test_not-a-real-token-upstream"}, "")
+			gw, err = env.Start(ctx, []int{port(srv)}, map[string]string{"provider_key": "koinon_test_not-a-real-token-upstream"}, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			_, err = gw.Driver.Apply(ctx, state)

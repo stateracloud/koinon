@@ -120,6 +120,10 @@ type snapshot struct {
 	keys    map[string]gateway.Key // by "sha256:" hash
 	targets map[string]gateway.MCPTarget
 	grants  map[gateway.AgentRef][]gateway.ToolGrant
+	// guardless are the org targets left out because this gateway has no leak guard. They serve
+	// nothing; a granted call to one is refused with gateway.GuardUnconfiguredReason, so the agent and
+	// the operator learn the cause and not "not granted" (ADR 0097: the guard fails closed).
+	guardless map[string]gateway.MCPTarget
 }
 
 // ErrInvalidConfig means ApplyMCP refused the config; the gateway keeps the one it had.
@@ -137,9 +141,10 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 	}
 	seen := map[string]bool{}
 	s := &snapshot{
-		keys:    map[string]gateway.Key{},
-		targets: map[string]gateway.MCPTarget{},
-		grants:  map[gateway.AgentRef][]gateway.ToolGrant{},
+		keys:      map[string]gateway.Key{},
+		targets:   map[string]gateway.MCPTarget{},
+		grants:    map[gateway.AgentRef][]gateway.ToolGrant{},
+		guardless: map[string]gateway.MCPTarget{},
 	}
 	for _, k := range c.Keys {
 		if k.ID == "" || !strings.HasPrefix(k.Hash, "sha256:") {
@@ -162,6 +167,7 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 		case seen[t.Name]:
 			// Two entries claim one name: neither can be trusted to be the right one.
 			delete(s.targets, t.Name)
+			delete(s.guardless, t.Name)
 			drop(t.Name, dropDuplicateName)
 		case t.Name == "" || strings.Contains(t.Name, "_"):
 			drop("", dropInvalidName)
@@ -172,6 +178,7 @@ func (g *Gateway) ApplyMCP(ctx context.Context, c gateway.MCPConfig) (gateway.Re
 			drop(t.Name, dropNoURL)
 		case isAllowGuard(g.o.Guard) && t.Org != "":
 			drop(t.Name, dropOrgNeedsGuard)
+			s.guardless[t.Name] = t
 		case t.Builtin == "" && t.CredentialHeader != "" && !credentialSafeURL(t.URL):
 			drop(t.Name, dropCredentialNeedsHTTPS)
 		default:
@@ -261,11 +268,19 @@ func visible(t gateway.MCPTarget, agent gateway.AgentRef) bool {
 // allowedTools returns the tools of target the agent may use: nil and all==true for every tool.
 func (s *snapshot) allowedTools(agent gateway.AgentRef, target string) (tools map[string]bool, all, ok bool) {
 	t, found := s.targets[target]
-	if !found || !visible(t, agent) {
+	if !found {
+		return nil, false, false
+	}
+	return s.granted(agent, t)
+}
+
+// granted is allowedTools for a target the caller has found.
+func (s *snapshot) granted(agent gateway.AgentRef, t gateway.MCPTarget) (tools map[string]bool, all, ok bool) {
+	if !visible(t, agent) {
 		return nil, false, false
 	}
 	for _, gr := range s.grants[agent] {
-		if gr.Target != target {
+		if gr.Target != t.Name {
 			continue
 		}
 		if gr.All {
@@ -280,6 +295,17 @@ func (s *snapshot) allowedTools(agent gateway.AgentRef, target string) (tools ma
 		ok = true
 	}
 	return tools, all, ok
+}
+
+// needsGuard reports a call the grants allow to a target that serves nothing only because this
+// gateway has no leak guard. Another org's target is never reported: its name stays hidden.
+func (s *snapshot) needsGuard(agent gateway.AgentRef, target, tool string) bool {
+	t, found := s.guardless[target]
+	if !found {
+		return false
+	}
+	tools, all, ok := s.granted(agent, t)
+	return ok && (all || tools[tool])
 }
 
 // Drain makes the gateway refuse new requests with 503 and retire every upstream session. A call in

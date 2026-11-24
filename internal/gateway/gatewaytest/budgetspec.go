@@ -66,7 +66,7 @@ func budgetOvershootSpec(env Env) {
 			// Room for two responses.
 			state.SetLimit(nearAgent, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0025"), Window: 24 * time.Hour})
 
-			gw, err = env.Start(ctx, []int{port(srv)}, nil, "")
+			gw, err = env.Start(ctx, []int{port(srv)}, nil, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			_, err = gw.Driver.Apply(ctx, state)

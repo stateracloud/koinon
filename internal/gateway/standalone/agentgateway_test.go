@@ -125,8 +125,8 @@ var _ = func() bool {
 		KnownGaps: gatewaytest.AgentgatewayV170Gaps,
 		Host:      testcontainers.HostInternal,
 		KeyFile:   func(name string) string { return "/secrets/upstream/" + name },
-		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
-			r, err := startStandalone(ctx, ports, files, guardURL)
+		Start: func(ctx context.Context, ports []int, files map[string]string, guard gatewaytest.Guard) (*gatewaytest.Gateway, error) {
+			r, err := startStandalone(ctx, ports, files, guard.URL)
 			if err != nil {
 				return nil, err
 			}

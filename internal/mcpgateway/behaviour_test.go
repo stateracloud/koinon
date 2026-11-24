@@ -4,6 +4,7 @@ package mcpgateway_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,19 +40,28 @@ var _ = func() bool {
 		Name:    "koinon-gateway",
 		Host:    "127.0.0.1",
 		KeyFile: func(name string) string { return filepath.Join(dir, name) },
-		Start: func(_ context.Context, _ []int, files map[string]string, _ string) (*gatewaytest.Gateway, error) {
+		// The gateway scrubs the credentials it opened from what agents get (#1174).
+		ScrubsCredentials: true,
+		Start: func(_ context.Context, _ []int, files map[string]string, guard gatewaytest.Guard) (*gatewaytest.Gateway, error) {
 			for name, content := range files {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 					return nil, err
 				}
 			}
-			gw := mcpgateway.New(mcpgateway.Options{})
+			// The guard runs in the process, as in koinon-gateway (ADR 0097 decision 5). No guard is
+			// AllowGuard, which serves no org target.
+			var logs syncBuffer
+			gw := mcpgateway.New(mcpgateway.Options{
+				Guard:  guard.Local,
+				Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			})
 			mux := http.NewServeMux()
 			mux.Handle("/mcp", gw.Handler())
 			srv := httptest.NewServer(mux)
 			return &gatewaytest.Gateway{
 				Driver: mcpDriver{gw: gw},
 				URL:    srv.URL,
+				Logs:   func(context.Context) string { return logs.String() },
 				Stop: func(context.Context) error {
 					gw.Drain()
 					srv.CloseClientConnections()

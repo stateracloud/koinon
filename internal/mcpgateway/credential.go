@@ -141,6 +141,10 @@ func (c StaticCredentials) open(base string, content []byte) (plain []byte, keyI
 
 // credentialTransport sets the credential on each upstream request. The SDK builds the request, so
 // no header of the agent's request is ever on it.
+//
+// A platform target (Org "": Koinon's own tool servers) also gets gateway.AgentHeader, the agent the key
+// check found (ADR 0097 decision 5, exit criterion 7). Those servers trust it because only the gateway
+// reaches them. An org's server never gets it: it trusts nothing of Koinon's and needs no agent ID.
 type credentialTransport struct {
 	base   http.RoundTripper
 	target gateway.MCPTarget
@@ -153,6 +157,10 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if err != nil {
 		return nil, err
 	}
+	if t.target.Org == "" {
+		req = req.Clone(req.Context())
+		req.Header.Set(gateway.AgentHeader, t.agent.String())
+	}
 	if cred.Header == "" {
 		return t.base.RoundTrip(req)
 	}
@@ -164,7 +172,9 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if !credentialSafeURL(req.URL.String()) {
 		return nil, errors.New("mcpgateway: refused to send a credential over a URL that is not https")
 	}
-	req = req.Clone(req.Context())
+	if t.target.Org != "" {
+		req = req.Clone(req.Context())
+	}
 	req.Header.Set(cred.Header, cred.Value)
 	return t.base.RoundTrip(req)
 }

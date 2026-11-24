@@ -110,6 +110,9 @@ var _ = Describe("the MCP path", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(openLog.header("X-Api-Key")).To(BeEmpty())
 		Expect(openLog.header("Authorization")).To(BeEmpty())
+		// The agent header is for Koinon's own tool servers only: an org's server never learns the agent.
+		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
+		Expect(openLog.header(gateway.AgentHeader)).To(BeEmpty())
 	})
 
 	It("refuses an unknown key, a missing key and a key outside the Authorization header", func(ctx SpecContext) {

@@ -44,7 +44,7 @@ func dollarSpec(env Env) {
 			Expect(err).NotTo(HaveOccurred())
 			state.AddKey(k.Key)
 			key = k.Material
-			gw, err = env.Start(ctx, []int{port(upstream)}, nil, "")
+			gw, err = env.Start(ctx, []int{port(upstream)}, nil, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			_, err = gw.Driver.Apply(ctx, state)

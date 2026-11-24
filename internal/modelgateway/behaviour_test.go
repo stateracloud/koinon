@@ -81,7 +81,7 @@ var _ = func() bool {
 		NoTranslation:   true,
 		GatewayBudgets:  true,
 		KeyFile:         func(name string) string { return filepath.Join(dir, name) },
-		Start: func(_ context.Context, _ []int, files map[string]string, _ string) (*gatewaytest.Gateway, error) {
+		Start: func(_ context.Context, _ []int, files map[string]string, _ gatewaytest.Guard) (*gatewaytest.Gateway, error) {
 			for name, content := range files {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 					return nil, err
