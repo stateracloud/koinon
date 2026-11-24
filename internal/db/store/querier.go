@@ -1094,6 +1094,15 @@ type Querier interface {
 	ListOrgIDsWithSeedWork(ctx context.Context) ([]pgtype.UUID, error)
 	// Users whose highest role in the org is at least @min_role (deleted users excluded).
 	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
+	// The users with an effective role in the org, by display name and then id, after the cursor
+	// (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships
+	// (ADR 0004); the highest role wins.
+	ListOrgMembers(ctx context.Context, arg ListOrgMembersParams) ([]ListOrgMembersRow, error)
+	// The live orgs by slug after @after_slug, with member and agent counts, budget and spend since
+	// @since, for the platform console (ADR 0126). Platform admins only. @only_org_id narrows the list
+	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
+	// member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
+	ListOrgSummaries(ctx context.Context, arg ListOrgSummariesParams) ([]ListOrgSummariesRow, error)
 	// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
 	// unmarked list command (issue 511). An org that is deleted counts as not in the database: the
 	// reconciler does not walk it.

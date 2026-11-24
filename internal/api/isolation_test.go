@@ -47,11 +47,14 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/leakguard/v1alpha1/leakguardv1alpha1connect"
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
+	orgv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1/orgv1alpha1connect"
 	orgsettingsv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1/orgsettingsv1alpha1connect"
 	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
-	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
+	platformv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1/platformv1alpha1connect"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
@@ -190,6 +193,25 @@ var isolationCases = map[string]isolationCase{
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+
+	orgv1alpha1connect.OrgServiceListMembersProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgs.ListMembers(ctx, &orgv1alpha1.ListMembersRequest{OrgId: org})
+		},
+	},
+	// The platform console reads (ADR 0126): an org owner or admin is not a platform admin, so both
+	// are refused with PermissionDenied, for another org's ID and for the caller's own org.
+	platformv1alpha1connect.PlatformServiceListOrgsProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return c.platform.ListOrgs(ctx, &platformv1alpha1.ListOrgsRequest{IncludePersonal: true})
+		},
+	},
+	platformv1alpha1connect.PlatformServiceGetOrgProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platform.GetOrg(ctx, &platformv1alpha1.GetOrgRequest{OrgId: org})
 		},
 	},
 
@@ -1041,7 +1063,7 @@ var _ = Describe("org isolation", func() {
 // none of them. A new object in newIsolationFixture goes here too.
 func foreignIDs(f orgFixture) []string {
 	return []string{
-		f.org, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
+		f.org, f.owner.userID, f.viewer.userID, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
 		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost, f.githubLogin,
 		f.appSetupState,
@@ -1053,6 +1075,7 @@ func foreignIDs(f orgFixture) []string {
 func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture {
 	f := e.newOrgFixture(ctx)
 	f.draft = f.owner.draftAgent(ctx, f.org)
+	f.viewer = e.userIn(ctx, f.org, store.OrgRoleViewer)
 	f.appKey = appKey
 	res, err := f.owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 		OrgId: f.org, AppId: 1, InstallationId: 2, PrivateKey: string(appKey),

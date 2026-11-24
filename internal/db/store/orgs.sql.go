@@ -160,6 +160,149 @@ func (q *Queries) ListOrgIDsWithRunWork(ctx context.Context) ([]pgtype.UUID, err
 	return items, nil
 }
 
+const listOrgMembers = `-- name: ListOrgMembers :many
+SELECT u.id AS user_id, u.display_name, max(om.role)::org_role AS role
+FROM org_memberships om
+JOIN orgs o ON o.id = om.org_id
+JOIN users u ON u.id = om.user_id
+WHERE om.org_id = $1
+  AND o.deleted_at IS NULL
+  AND u.deleted_at IS NULL
+  AND (o.identity_mode = 'hybrid'
+       OR (o.identity_mode = 'platform' AND om.source = 'manual')
+       OR (o.identity_mode = 'idp' AND (om.source = 'idp_group' OR om.role = 'owner')))
+  AND (u.display_name, u.id) > ($2::text, $3::uuid)
+GROUP BY u.id, u.display_name
+ORDER BY u.display_name, u.id
+LIMIT $4
+`
+
+type ListOrgMembersParams struct {
+	OrgID     pgtype.UUID
+	AfterName string
+	AfterID   pgtype.UUID
+	RowLimit  int32
+}
+
+type ListOrgMembersRow struct {
+	UserID      pgtype.UUID
+	DisplayName string
+	Role        OrgRole
+}
+
+// The users with an effective role in the org, by display name and then id, after the cursor
+// (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships
+// (ADR 0004); the highest role wins.
+func (q *Queries) ListOrgMembers(ctx context.Context, arg ListOrgMembersParams) ([]ListOrgMembersRow, error) {
+	rows, err := q.db.Query(ctx, listOrgMembers,
+		arg.OrgID,
+		arg.AfterName,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgMembersRow
+	for rows.Next() {
+		var i ListOrgMembersRow
+		if err := rows.Scan(&i.UserID, &i.DisplayName, &i.Role); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgSummaries = `-- name: ListOrgSummaries :many
+SELECT o.id AS org_id, o.slug, o.display_name, o.kind, o.created_at,
+       (SELECT count(DISTINCT om.user_id)
+        FROM org_memberships om
+        JOIN users u ON u.id = om.user_id
+        WHERE om.org_id = o.id AND u.deleted_at IS NULL
+          AND (o.identity_mode = 'hybrid'
+               OR (o.identity_mode = 'platform' AND om.source = 'manual')
+               OR (o.identity_mode = 'idp' AND (om.source = 'idp_group' OR om.role = 'owner'))))::bigint AS member_count,
+       (SELECT count(*) FROM agents a WHERE a.org_id = o.id AND a.status <> 'archived')::bigint AS agent_count,
+       coalesce(b.monthly_cap::text, '')::text AS monthly_cap,
+       coalesce(b.platform_ceiling::text, '')::text AS platform_ceiling,
+       coalesce((SELECT sum(s.cost_usd) FROM spend_entries s WHERE s.org_id = o.id AND s.occurred_at >= $1), 0)::text AS spent
+FROM orgs o
+LEFT JOIN org_budgets b ON b.org_id = o.id
+WHERE o.deleted_at IS NULL
+  AND ($2::uuid IS NULL OR o.id = $2::uuid)
+  AND ($3::bool OR $2::uuid IS NOT NULL OR o.kind = 'team')
+  AND o.slug > $4::text
+ORDER BY o.slug
+LIMIT $5
+`
+
+type ListOrgSummariesParams struct {
+	Since           pgtype.Timestamptz
+	OnlyOrgID       pgtype.UUID
+	IncludePersonal bool
+	AfterSlug       string
+	RowLimit        int32
+}
+
+type ListOrgSummariesRow struct {
+	OrgID           pgtype.UUID
+	Slug            string
+	DisplayName     string
+	Kind            OrgKind
+	CreatedAt       pgtype.Timestamptz
+	MemberCount     int64
+	AgentCount      int64
+	MonthlyCap      string
+	PlatformCeiling string
+	Spent           string
+}
+
+// The live orgs by slug after @after_slug, with member and agent counts, budget and spend since
+// @since, for the platform console (ADR 0126). Platform admins only. @only_org_id narrows the list
+// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
+// member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
+func (q *Queries) ListOrgSummaries(ctx context.Context, arg ListOrgSummariesParams) ([]ListOrgSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listOrgSummaries,
+		arg.Since,
+		arg.OnlyOrgID,
+		arg.IncludePersonal,
+		arg.AfterSlug,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgSummariesRow
+	for rows.Next() {
+		var i ListOrgSummariesRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Slug,
+			&i.DisplayName,
+			&i.Kind,
+			&i.CreatedAt,
+			&i.MemberCount,
+			&i.AgentCount,
+			&i.MonthlyCap,
+			&i.PlatformCeiling,
+			&i.Spent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsPendingDefaultModel = `-- name: ListOrgsPendingDefaultModel :many
 SELECT id FROM orgs
 WHERE default_model_pending AND deleted_at IS NULL

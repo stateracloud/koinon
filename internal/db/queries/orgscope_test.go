@@ -61,6 +61,7 @@ var crossOrgQueries = map[string]string{
 	"platform_prices.sql:ProviderTypeInUse":                 "the price refresh's auto mode: whether any org has a provider of a type, a yes or no only (ADR 0098)",
 	"platform_prices.sql:ListModelsOfProviderType":          "the unpriced-model count: resolves every org's models of a provider type against that org's prices, reported as a count only (ADR 0098)",
 	"prices.sql:ListPendingMigratedPrices":                  "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
+	"orgs.sql:ListOrgSummaries":                             "platform admins: the platform console's org list and org read (ADR 0126), with counts, cap, ceiling and spend of every org",
 	"orgs.sql:ListOrgIDsWithRunWork":                        "the agentd claim loop: finds the live orgs with a claimable or expired-lease run, returning org ids only; every claim query after it is scoped by @org_id",
 	"code_host_pollers.sql:ListOrgIDsWithCodeHostPollers":   "the code-host poll leader: finds the orgs with a poller, returning org ids only; the sync and the claim after it are scoped by @org_id",
 	"code_host_pollers.sql:NextCodeHostPollAt":              "the code-host poll leader: the earliest due time over every poller, a time only, no row or ID, to know how long to sleep",
