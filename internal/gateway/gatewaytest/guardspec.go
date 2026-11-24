@@ -16,10 +16,6 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
-// guardSpec is the MCP leak guard as the gateway applies it (ADR 0091): every tools/call goes to
-// the guard before the server sees it and again with the result, the guard's refusal is final, and
-// a guard that does not answer refuses the call (failClosed). Without a guard address the gateway
-// refuses every call to an org's server and keeps Koinon's own tools working.
 // callTool calls tool through the gateway at url as the agent of key, with args, and returns the
 // text the agent reads and whether the call failed.
 func callTool(ctx context.Context, url, key, tool string, args map[string]any) (string, bool) {
@@ -44,6 +40,10 @@ func callTool(ctx context.Context, url, key, tool string, args map[string]any) (
 	return text, res.IsError
 }
 
+// guardSpec is the MCP leak guard as the gateway applies it (ADR 0091): every tools/call goes to
+// the guard before the server sees it and again with the result, the guard's refusal is final, and
+// a guard that does not answer refuses the call (failClosed). Without a guard address the gateway
+// refuses every call to an org's server and keeps Koinon's own tools working.
 func guardSpec(env Env) {
 	const target = "acme-guarded"
 	agent := gateway.AgentRef{Org: "acme", Name: "guarded"}

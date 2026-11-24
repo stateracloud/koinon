@@ -147,7 +147,7 @@ func leakCanarySpec(env Env) {
 			Expect(failed).To(BeFalse(), text)
 			Expect(text).To(ContainSubstring(leakCanary), "the agent reads the note")
 			var private, untrusted bool
-			Expect(rg.Pool.QueryRow(ctx, `SELECT bool_or(private_data), bool_or(untrusted_input) FROM leak_guard_sessions
+			Expect(rg.Pool.QueryRow(ctx, `SELECT coalesce(bool_or(private_data), false), coalesce(bool_or(untrusted_input), false) FROM leak_guard_sessions
 				WHERE org_id = $1 AND agent_id = $2`, rg.Org, rg.Agent.ID).Scan(&private, &untrusted)).To(Succeed())
 			Expect(private).To(BeTrue())
 			Expect(untrusted).To(BeTrue())
@@ -189,11 +189,8 @@ func leakCanarySpec(env Env) {
 		})
 
 		It("never sends the canary to the upstream server", func() {
+			// Exactly the two clean queries: no held call, and no part of one, left the gateway.
 			Expect(webSrv.Queries()).To(Equal([]string{"release notes 2026", canaryBelow}), "only the two clean calls left")
-			for _, q := range webSrv.Queries() {
-				Expect(q).NotTo(ContainSubstring(canaryAt))
-				Expect(q).NotTo(ContainSubstring("amber-falcon"))
-			}
 		})
 	})
 }
