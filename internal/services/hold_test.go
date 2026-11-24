@@ -22,7 +22,6 @@ import (
 	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
@@ -116,12 +115,8 @@ var _ = Describe("restore hold", func() {
 		Expect(err).To(MatchError(restorehold.ErrHeld))
 	})
 
-	It("queues no run from the ticket API, a follow-up message or a trigger fire", func() {
-		_, err := held.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{OrgId: org, AgentId: org, Title: "t", Message: "m"})
-		refused(err)
-		_, err = held.AppendMessage(ctx, &ticketv1alpha1.AppendMessageRequest{OrgId: org, TicketId: org, Text: "hi"})
-		refused(err)
-		_, err = taskAPI{held}.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: org, Text: "hi"})
+	It("queues no run from a follow-up message or a trigger fire", func() {
+		_, err := taskAPI{held}.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{OrgId: org, TaskId: org, Text: "hi"})
 		refused(err)
 		_, _, err = held.CreateTriggeredTask(ctx, TriggeredTask{})
 		Expect(err).To(MatchError(restorehold.ErrHeld))

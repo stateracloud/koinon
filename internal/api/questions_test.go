@@ -33,14 +33,14 @@ func (e *env) openQuestionWith(ctx context.Context, f orgFixture, question strin
 		qq := store.New(tx)
 		var err error
 		row, _, err = questions.Create(ctx, qq, questions.Ask{
-			Org: uuid(f.org), Task: uuid(f.ticket.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
+			Org: uuid(f.org), Task: uuid(f.task.GetId()), Run: uuid(f.run.GetId()), Agent: uuid(f.agent.GetId()),
 			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: uuid(f.owner.userID)}, Recipients: []pgtype.UUID{uuid(f.owner.userID)}, Question: question, Draft: "Fixed in 1.2.",
 			Choices: choices, Default: def, ExpiresAt: time.Now().Add(time.Hour),
 		})
 		if err != nil {
 			return err
 		}
-		_, err = questions.OpenForRun(ctx, qq, uuid(f.org), uuid(f.run.GetId()), uuid(f.ticket.GetId()))
+		_, err = questions.OpenForRun(ctx, qq, uuid(f.org), uuid(f.run.GetId()), uuid(f.task.GetId()))
 		return err
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -87,8 +87,8 @@ var _ = Describe("QuestionService", func() {
 		Expect(got[0].GetCanAnswer()).To(BeTrue())
 
 		Expect(list(ctx, member, "")).To(BeEmpty(), "a question is the addressee's")
-		Expect(list(ctx, member, f.ticket.GetId())).To(BeEmpty())
-		Expect(list(ctx, f.owner, f.ticket.GetId())).To(HaveLen(1))
+		Expect(list(ctx, member, f.task.GetId())).To(BeEmpty())
+		Expect(list(ctx, f.owner, f.task.GetId())).To(HaveLen(1))
 	})
 
 	It("answers, resumes the parked run once and refuses a second answer", func(ctx SpecContext) {
@@ -119,7 +119,7 @@ var _ = Describe("QuestionService", func() {
 		resumed, err := ad.q.GetRun(ctx, store.GetRunParams{OrgID: run.OrgID, ID: run.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resumed.ReadyAt.Valid).To(BeTrue(), "the run can be claimed again")
-		task, err := f.owner.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: f.org, TaskId: f.ticket.GetId()})
+		task, err := f.owner.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: f.org, TaskId: f.task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(task.GetTask().GetState()).NotTo(Equal(taskv1alpha1.TaskState_TASK_STATE_INPUT_REQUIRED))
 

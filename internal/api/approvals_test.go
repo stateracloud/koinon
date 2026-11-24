@@ -30,7 +30,7 @@ func (e *env) pendingApproval(ctx context.Context, f orgFixture) store.ApprovalR
 	args, err := githubtools.Canonical(githubtools.CommentArgs{IssueNumber: 7, Body: "Opened a PR."})
 	Expect(err).NotTo(HaveOccurred())
 	req, err := store.New(e.pool).CreateApprovalRequest(ctx, store.CreateApprovalRequestParams{
-		OrgID: uuid(f.org), TaskID: uuid(f.ticket.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
+		OrgID: uuid(f.org), TaskID: uuid(f.task.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
 		Connector: "github", Tool: githubtools.ToolCommentOnIssue, Target: "github:acme/widgets",
 		ArgsJson: string(args), ArgsSha256: githubtools.HashArgs(args), Risk: []byte(`{"files":0,"bytes":0}`),
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -110,7 +110,7 @@ var _ = Describe("ApprovalService", func() {
 		list, err = member.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: f.org})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(BeEmpty())
-		list, err = member.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: f.org, TicketId: f.ticket.GetId()})
+		list, err = member.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: f.org, TicketId: f.task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
 		By("approving a request that is no longer pending stays FailedPrecondition (HTTP 400)")
@@ -216,7 +216,7 @@ var _ = Describe("ApprovalService.GetApprovalDiff", func() {
 		risk, err := json.Marshal(githubtools.AssessRisk(pr))
 		Expect(err).NotTo(HaveOccurred())
 		row, err := store.New(e.pool).CreateApprovalRequest(ctx, store.CreateApprovalRequestParams{
-			OrgID: uuid(f.org), TaskID: uuid(f.ticket.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
+			OrgID: uuid(f.org), TaskID: uuid(f.task.GetId()), RunID: uuid(f.run.GetId()), AgentID: uuid(f.agent.GetId()),
 			Connector: "github", Tool: githubtools.ToolCreatePullRequest, Target: "github:acme/widgets",
 			ArgsJson: string(args), ArgsSha256: githubtools.HashArgs(args), Risk: risk,
 			Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
