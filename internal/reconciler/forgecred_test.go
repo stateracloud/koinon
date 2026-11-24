@@ -43,6 +43,13 @@ type staticRecipient struct {
 
 func (s staticRecipient) Current() (secretstore.RecipientPublicKey, error) { return s.pub, nil }
 
+// rotatingRecipient is a gateway key source whose key the spec can change between passes.
+type rotatingRecipient struct {
+	pub *secretstore.RecipientPublicKey
+}
+
+func (s rotatingRecipient) Current() (secretstore.RecipientPublicKey, error) { return *s.pub, nil }
+
 var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 	const mcpSecret, mcpDir = "koinon-gateway-mcp", "/secrets/mcp"
 	var (
@@ -187,6 +194,45 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 			}
 		}
 		Expect(n).To(Equal(1))
+	})
+
+	It("seals the token again when the gateway key changes: the new key opens the new file, the old key does not", func(ctx SpecContext) {
+		pub := gk.Public()
+		r := newReconciler(rotatingRecipient{pub: &pub})
+		_, agent := readAgent(ctx)
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		before := credOf(agent)
+		Expect(before).To(HaveLen(1))
+
+		gk2, err := secretstore.GenerateRecipientKey(secretstore.DefaultRecipientSuite())
+		Expect(err).NotTo(HaveOccurred())
+		pub = gk2.Public()
+
+		// The new file settles before the state names it, so allow a few passes.
+		var after []route.Credential
+		for range 3 {
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			after = credOf(agent)
+			if len(after) == 1 && after[0].File != before[0].File {
+				break
+			}
+		}
+		Expect(after).To(HaveLen(1))
+		Expect(after[0].File).NotTo(Equal(before[0].File), "a new gateway key gives a new envelope and a new file")
+
+		base := path.Base(after[0].File)
+		data := secretData(ctx)
+		Expect(data).To(HaveKey(base))
+		dir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(dir, base), data[base], 0o600)).To(Succeed())
+		local := after[0]
+		local.File = filepath.Join(dir, base)
+
+		v, err := egress.SealedCredentials{Keys: secretstore.NewRecipientKeyring(gk2)}.Open(local)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v).To(Equal("koinon_test_not-a-real-token"))
+		_, err = egress.SealedCredentials{Keys: secretstore.NewRecipientKeyring(gk)}.Open(local)
+		Expect(err).To(HaveOccurred(), "the old gateway key cannot open the resealed token")
 	})
 
 	It("delivers no credential without a gateway key source, so the forge routes fail closed", func(ctx SpecContext) {
