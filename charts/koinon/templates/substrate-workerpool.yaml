@@ -36,6 +36,35 @@ every worker pod is refused at admission, so refuse the render instead of a pool
 {{- if not (and .requests .limits) }}{{- fail "execution.substrate.workerPool.resources needs both requests and limits (a worker pod hosts many sandboxes in its own cgroup; set it to null to use the workerLimits LimitRange defaults)" }}{{- end }}
 {{- $_ := set $tmpl "resources" . }}
 {{- end }}
+{{- /* Capacity: a worker offers its pod limits (less a memory reserve) to all its actors, and an actor books
+its own limits. A pool whose worker limits are below the largest sandbox the sizing bounds permit never
+places that sandbox. The limits come from workerPool.resources, else from the workerLimits LimitRange
+default; a worker with no limit reports no capacity and places nothing. */}}
+{{- $lim := dict }}
+{{- if $s.workerLimits.enabled }}{{- $lim = deepCopy ($s.workerLimits.limitRange.default | default dict) }}{{- end }}
+{{- with $p.resources }}{{- $lim = mergeOverwrite $lim (deepCopy (.limits | default dict)) }}{{- end }}
+{{- $src := ternary "execution.substrate.workerPool.resources.limits" "execution.substrate.workerLimits.limitRange.default" (not (empty $p.resources)) }}
+{{- $bounds := .Values.sandbox.resources.bounds }}
+{{- range $r := list (dict "name" "cpu" "max" (toString $bounds.cpu.limit.max)) (dict "name" "memory" "max" (toString $bounds.memory.limit.max)) }}
+{{- $have := toString (index $lim $r.name | default "") }}
+{{- if not $have }}
+{{- fail (printf "execution.substrate.workerPool: the worker pods have no %s limit, so each worker reports no %s capacity and places no sandbox; set execution.substrate.workerPool.resources.limits.%s (at least sandbox.resources.bounds.%s.limit.max)" $r.name $r.name $r.name $r.name) }}
+{{- end }}
+{{- if $r.max }}
+{{- $hv := include "koinon.quantity" (dict "q" $have "what" (printf "%s.%s" $src $r.name)) | float64 }}
+{{- $mv := include "koinon.quantity" (dict "q" $r.max "what" (printf "sandbox.resources.bounds.%s.limit.max" $r.name)) | float64 }}
+{{- if eq $r.name "cpu" }}
+{{- if lt $hv $mv }}
+{{- fail (printf "execution.substrate.workerPool: the worker cpu limit %s (%s.cpu) is below sandbox.resources.bounds.cpu.limit.max %s, so a sandbox at that limit fits on no worker; raise %s.cpu to at least %s, or lower sandbox.resources.bounds.cpu.limit.max" $have $src $r.max $src $r.max) }}
+{{- end }}
+{{- else }}
+{{- $need := include "koinon.substrate.workerMemoryNeed" (dict "mem" $mv "class" $p.sandboxClass) | float64 }}
+{{- if lt $hv $need }}
+{{- fail (printf "execution.substrate.workerPool: the worker memory limit %s (%s.memory) is below %dMi, which a sandbox at sandbox.resources.bounds.memory.limit.max %s needs on a %s worker (the limit plus the 64Mi worker reserve and the per-actor overhead of the class); raise %s.memory to at least %dMi, or lower sandbox.resources.bounds.memory.limit.max" $have $src (int (ceil (divf $need 1048576.0))) $r.max $p.sandboxClass $src (int (ceil (divf $need 1048576.0))) ) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- $spec := dict "workerImage" $image "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
 {{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}
 apiVersion: ate.dev/v1

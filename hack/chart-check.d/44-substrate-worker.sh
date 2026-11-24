@@ -316,12 +316,12 @@ lacks "no WorkerPool with the openshell driver even when it is on" 'kind: Worker
 has "the default pool runs the pinned gvisor worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" "${pool[@]}"
 has "the default microvm pool runs the pinned microvm worker image" 'workerImage: ghcr.io/agent-substrate/substrate/ateworker-microvm:v1.0.0$' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm "${pool[@]}"
 has "the pinned worker image follows the registry mirrors" 'workerImage: mirror.example/gh/agent-substrate/substrate/ateworker-gvisor:v1.0.0$' "${wsub[@]}" --set 'global.registryMirrors.ghcr\.io=mirror.example/gh' "${pool[@]}"
-# The size: one replica that requests 500m CPU and 1Gi (limits 2 CPU, 4Gi); every value is settable.
+# The size: one replica that requests 500m CPU and 1Gi (limits 4 CPU, 8704Mi: the largest sandbox); every value is settable.
 sized=$(render "${wsub[@]}" "${pool[@]}")
 grep -Eq '^  replicas: 1$' <<<"$sized" || fail "the default pool has one replica"
-grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ' | grep -Fq 'limits:cpu:"2"memory:4Girequests:cpu:500mmemory:1Gi' || fail "the default pool size is 500m/1Gi requests and 2/4Gi limits"
+grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ' | grep -Fq 'limits:cpu:"4"memory:8704Mirequests:cpu:500mmemory:1Gi' || fail "the default pool size is 500m/1Gi requests and 4/8704Mi limits"
 has "replicas is the size value" '^  replicas: 3$' "${wsub[@]}" --set execution.substrate.workerPool.replicas=3 "${pool[@]}"
-has "the resources are settable" 'memory: 6Gi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=6Gi "${pool[@]}"
+has "the resources are settable" 'memory: 10Gi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=10Gi "${pool[@]}"
 lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
 if render "${wsub[@]}" --set execution.substrate.workerPool.resources.requests=null "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "resources without requests must not render"; fi
 grep -q 'both requests and limits' "$out/sub.err" || fail "the resources error must ask for both requests and limits"
@@ -329,6 +329,23 @@ if render "${wsub[@]}" --set execution.substrate.workerPool.replicas=0 "${pool[@
 grep -q 'replicas' "$out/sub.err" || fail "the zero-replicas error must name replicas"
 if render "${wsub[@]}" --set execution.substrate.workerPool.spec.template.resources.requests.cpu=4 "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "spec.template.resources must not render (it would merge with the default resources)"; fi
 grep -q 'set execution.substrate.workerPool.resources' "$out/sub.err" || fail "the spec.template.resources error must point to workerPool.resources"
+# Capacity: the worker limits must fit the largest sandbox (sandbox.resources.bounds.*.limit.max). The
+# memory need is the limit plus the 64Mi reserve, plus 4Mi + 8Mi/GiB for microvm: 8256Mi gvisor, 8324Mi microvm.
+capacity_refused() { # capacity_refused <what> <stderr text> <render args...>: the render must fail and name the text
+  local what=$1 text=$2; shift 2
+  if render "$@" >/dev/null 2>"$out/sub.err"; then fail "$what must not render"; return; fi
+  grep -Fq "$text" "$out/sub.err" || fail "$what: the error must say: $text"
+}
+capacity_refused "a worker cpu limit below the sandbox cpu maximum" 'the worker cpu limit 3 (execution.substrate.workerPool.resources.limits.cpu) is below sandbox.resources.bounds.cpu.limit.max 4' "${wsub[@]}" --set-string execution.substrate.workerPool.resources.limits.cpu=3 "${pool[@]}"
+grep -Fq 'or lower sandbox.resources.bounds.cpu.limit.max' "$out/sub.err" || fail "the cpu capacity error must name both values to change"
+capacity_refused "a gvisor worker memory limit below 8256Mi" 'is below 8256Mi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=8255Mi "${pool[@]}"
+has "a gvisor worker memory limit of 8256Mi renders" 'memory: 8256Mi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=8256Mi "${pool[@]}"
+capacity_refused "a microvm worker memory limit below 8324Mi" 'is below 8324Mi' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm --set execution.substrate.workerPool.resources.limits.memory=8323Mi "${pool[@]}"
+has "a microvm worker memory limit of 8324Mi renders" 'memory: 8324Mi' "${wsub[@]}" --set execution.substrate.workerPool.sandboxClass=microvm --set execution.substrate.workerPool.resources.limits.memory=8324Mi "${pool[@]}"
+has "a lower sandbox maximum allows a smaller worker" 'memory: 2Gi' "${wsub[@]}" --set-string sandbox.resources.bounds.cpu.limit.max=1 --set sandbox.resources.bounds.memory.limit.max=1Gi --set sandbox.resources.bounds.memory.request.max=1Gi --set-string execution.substrate.workerPool.resources.limits.cpu=1 --set execution.substrate.workerPool.resources.limits.memory=2Gi "${pool[@]}"
+has "resources null checks the LimitRange default limits (8 CPU, 16Gi fit)" 'kind: WorkerPool' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
+capacity_refused "resources null with a LimitRange default below the maximum" '(execution.substrate.workerLimits.limitRange.default.cpu) is below' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set-string execution.substrate.workerLimits.limitRange.default.cpu=2 "${pool[@]}"
+capacity_refused "resources null and no workerLimits" 'the worker pods have no cpu limit' "${wsub[@]}" --set execution.substrate.workerPool.resources=null --set execution.substrate.workerLimits.enabled=false "${pool[@]}"
 # The default image is a tag: without the interim exemption of the ReplicaSet controller (#1140) the render fails.
 if render "${wsub[@]}" --set-json 'execution.substrate.workerPolicy.digestExemptIdentities=[]' "${pool[@]}" >/dev/null 2>"$out/sub.err"; then fail "a tag pool image without the digest exemption must not render"; fi
 grep -q 'has no digest' "$out/sub.err" || fail "the digest error must say that the image has no digest"

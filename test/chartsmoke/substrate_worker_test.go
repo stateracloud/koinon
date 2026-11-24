@@ -121,7 +121,7 @@ var _ = Describe("substrate worker namespace", func() {
 		Expect(spec["replicas"]).To(BeEquivalentTo(1))
 		Expect(spec["template"]).To(HaveKeyWithValue("resources", map[string]any{
 			"requests": map[string]any{"cpu": "500m", "memory": "1Gi"},
-			"limits":   map[string]any{"cpu": "2", "memory": "4Gi"},
+			"limits":   map[string]any{"cpu": "4", "memory": "8704Mi"},
 		}))
 
 		sized := workerPools(ctx, values, append(showOnly("templates/substrate-workerpool.yaml"),

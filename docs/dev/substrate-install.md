@@ -469,9 +469,10 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - The chart creates the default WorkerPool (issue #1089). It is on by default with `execution.driver: substrate`.
   `koinon-api substrate install` and ate-setup create no pool. `helm upgrade` changes the pool, and `helm uninstall`
   removes it. The default pool is `koinon-gvisor`: one replica of the pinned worker image
-  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory, with
-  limits of 2 CPU and 4Gi. The pool needs one node that runs the gvisor class with this much free. Change the size
-  with `workerPool.replicas` and `workerPool.resources`. Set `workerPool.sandboxClass: microvm` for a microVM pool
+  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory (the
+  idle cost), with limits of 4 CPU and 8704Mi (8.5Gi). The pool needs one node that runs the gvisor class: the node
+  scheduler reserves the requests, and the largest sandbox needs 4 CPU and 8.5Gi free on that node. Change the size
+  with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). Set `workerPool.sandboxClass: microvm` for a microVM pool
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
   exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
   identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps
@@ -479,6 +480,28 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   exemption (#1140) admits it, and the chart refuses the render when that exemption is gone. If you installed
   Substrate with `--image-repo`, set `workerPool.workerImage` or a registry mirror (`global.registryMirrors`), or the
   pool pulls from `ghcr.io`.
+- **Worker capacity** (Substrate v1.0.0). Read this before you change the pool size.
+  - One worker pod runs many sandboxes. Its pod **limits** are one capacity that all its sandboxes share. The worker
+    keeps 64Mi of the memory limit for itself. The pod requests do not add capacity: they only tell the node
+    scheduler what to reserve.
+  - Each sandbox books its own limits from that capacity: the CPU and memory limits of the agent (or its requests, when
+    it has no limits). A microVM sandbox also books 4Mi plus 8Mi for each GiB of its memory limit. A sandbox starts
+    only on a worker with free capacity in every dimension.
+  - There is no queue in Substrate and no autoscaling: `workerPool.replicas` is a fixed count. When no worker has
+    room, Substrate refuses the sandbox ("no worker has room"). Koinon then shows the run as waiting for its sandbox,
+    puts it back in the queue, and tries again. A run that waits longer than the sandbox wait cap of the org (1 hour
+    by default) fails with the class `sandbox_unavailable`.
+  - One worker must fit the largest sandbox that the sizing bounds permit: CPU limit at least
+    `sandbox.resources.bounds.cpu.limit.max`, memory limit at least `sandbox.resources.bounds.memory.limit.max` plus
+    64Mi (plus the microVM overhead for a microVM pool). The chart refuses the render when it does not. The check
+    uses `workerPool.resources.limits`, or the `workerLimits` LimitRange default limits when `workerPool.resources`
+    is null. A worker with no limit reports no capacity, so the chart also refuses a pool with no limit.
+  - To size for N agents that run at the same time, add up their limits. With the default agent (2 CPU, 2Gi), N
+    agents need 2N CPU and 2N Gi in total over all replicas, and each replica also needs 64Mi for the worker. For
+    example, 8 default agents fit on 2 replicas with limits of 8 CPU and 8256Mi each (4 agents on each), or on 4
+    replicas with the default limits of 4 CPU and 8704Mi (2 agents on each). With the default bounds, a replica
+    cannot be smaller than 4 CPU and 8256Mi. Every replica adds its requests to the node cost and to the
+    `workerLimits` quota.
 - The chart sets resource limits in the worker namespace (`execution.substrate.workerLimits`, on by default). A
   LimitRange gives a container with no requests or limits the defaults (500m CPU and 1Gi memory as requests, 8 CPU
   and 16Gi as limits). A ResourceQuota caps the namespace at 20 pods, 64 CPU and 128Gi of requests, and 128 CPU and

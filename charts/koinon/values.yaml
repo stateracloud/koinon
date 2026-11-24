@@ -1095,9 +1095,12 @@ execution:
     # renders). helm upgrade changes the size, helm uninstall removes the pool. Set enabled=false to manage the
     # pools yourself. The fields follow Substrate v1.0.0's WorkerPoolSpec: sandboxClasses takes exactly one
     # class (immutable), and node placement, resources and the pull ServiceAccount live under spec.template.
-    # Node cost of the default: one worker pod that requests 500m CPU and 1Gi memory (limits 2 CPU, 4Gi), on
-    # one node that runs the gvisor class. A worker pod hosts many sandboxes in its own cgroup: size
-    # replicas and resources for the sandboxes you run (see workerLimits).
+    # Node cost of the default: one worker pod that requests 500m CPU and 1Gi memory (the idle cost), with
+    # limits of 4 CPU and 8704Mi, on one node that runs the gvisor class. To run the largest sandbox, that
+    # node needs 4 CPU and 8.5Gi free. Capacity (docs/dev/substrate-install.md): a worker offers its pod
+    # LIMITS to all its sandboxes, each sandbox books its own limits, and there is no queue and no
+    # autoscaling: with no room a run waits and then fails as sandbox_unavailable. Size replicas and
+    # resources for the sandboxes you run at the same time.
     workerPool:
       enabled: true
       # Empty derives koinon-<sandboxClass>, so a pool name never claims a tier its class does not give.
@@ -1122,9 +1125,15 @@ execution:
       # spec.template.resources of every worker pod, with BOTH requests and limits (the workerLimits
       # LimitRange refuses a pod with requests above its default limit). null leaves the LimitRange defaults
       # ({} does not: Helm merges it with these defaults).
+      # The limits are the worker's capacity. The render fails when they are below the largest sandbox
+      # (sandbox.resources.bounds.*.limit.max). Default: one sandbox at the permitted maximum.
+      #   cpu:    4 = sandbox.resources.bounds.cpu.limit.max
+      #   memory: 8Gi (bounds.memory.limit.max) + 64Mi worker reserve + per-actor overhead (gvisor 0;
+      #           microvm 4Mi + 8Mi per GiB = 68Mi) = 8256Mi (gvisor), 8324Mi (microvm); rounded up to
+      #           8704Mi (8.5Gi), so the default fits both classes.
       resources:
         requests: {cpu: 500m, memory: 1Gi}
-        limits: {cpu: "2", memory: 4Gi}
+        limits: {cpu: "4", memory: 8704Mi}
       # Merged over the generated spec (maps merge, lists replace). The place for fields this chart
       # does not know, template.labels among them. template.resources is refused here: use resources above.
       spec: {}
