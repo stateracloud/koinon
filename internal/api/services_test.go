@@ -442,7 +442,7 @@ var _ = Describe("TaskService and run scheduling", func() {
 		got := member.getTask(ctx, org, t.GetId())
 		last := got.GetEvents()[len(got.GetEvents())-1]
 		Expect(last.GetKind()).To(Equal("run.canceled"))
-		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "task ended"))
+		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "task ended"))
 		Expect(taskKinds(got)).To(ContainElement("status.changed"))
 
 		// A canceled task refuses messages; the running run of another task is untouched.

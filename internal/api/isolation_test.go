@@ -63,6 +63,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
@@ -942,11 +943,20 @@ var isolationCases = map[string]isolationCase{
 // platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
 // takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
 // platformprices_test.go).
+// removedTicketReason covers the TicketService RPCs: the handler is gone (issue #731) and the .proto stays so its
+// field numbers stay reserved, so every call gets unimplemented before it reads any org data.
+const removedTicketReason = "TicketService has no handler (issue #731): the call is unimplemented and reads no org data"
+
 const platformPricesReason = "platform price list (ADR 0098): install-wide data, platform admins only; refused to " +
 	"everyone else in platformprices_test.go"
 
 // isolationExempt lists RPCs that take no org-owned input, with the reason.
 var isolationExempt = map[string]string{
+	ticketv1alpha1connect.TicketServiceCreateTicketProcedure:             removedTicketReason,
+	ticketv1alpha1connect.TicketServiceListTicketsProcedure:              removedTicketReason,
+	ticketv1alpha1connect.TicketServiceGetTicketProcedure:                removedTicketReason,
+	ticketv1alpha1connect.TicketServiceAppendMessageProcedure:            removedTicketReason,
+	ticketv1alpha1connect.TicketServiceMoveTicketProcedure:               removedTicketReason,
 	budgetv1alpha1connect.PriceServiceListPriceProposalsProcedure:        platformPricesReason,
 	budgetv1alpha1connect.PriceServiceGetPriceProposalProcedure:          platformPricesReason,
 	budgetv1alpha1connect.PriceServiceAcceptPriceProposalProcedure:       platformPricesReason,
