@@ -38,6 +38,7 @@ const (
 
 type fakeMCPRecord struct {
 	Method              string `json:"method"`
+	Path                string `json:"path"`
 	MCPMethod           string `json:"mcpMethod"`
 	Authorized          bool   `json:"authorized"`
 	Agent               string `json:"agent"`
@@ -154,14 +155,12 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(recs).NotTo(BeEmpty())
 	anonymous := 0
 	for _, r := range recs {
-		if r.Agent == "" {
+		if r.Path == "/oauth-mcp" {
 			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
-			// it carries no credential, and it does not go
-			// through the gateway. An empty Agent marks it only while the prober and the live check use
-			// agentgateway. koinon-gateway sends no agent header to an org's server (#1235): a change that
-			// moves either one to koinon-gateway must tell this check apart by its path instead (#1239 does
-			// not move the prober).
+			// it carries no credential, and it does not go through the gateway. Its path tells it apart: an
+			// empty agent header does not, because koinon-gateway sends none to an org's server (#1235).
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
+			Expect(r.Agent).To(BeEmpty(), "the add-time check does not go through the gateway: %+v", r)
 			anonymous++
 			continue
 		}
@@ -169,8 +168,14 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		Expect(r.ClientAuthorization).To(BeFalse(), "the gateway's own key must not reach the server: %+v", r)
 	}
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
-	// The reconciler's probe goes through agentgateway with both drivers, also after #1239 (#1235).
-	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
+	// The reconciler's probe lists the tools through koinon-gateway with driver koinon, and through
+	// agentgateway with the fallback (#1239). Only agentgateway sends the probe agent's header (#1235).
+	if probe := probeMCPPath(ctx, kubectl); probe.koinon {
+		Expect(recs).To(HaveEach(HaveField("Agent", BeEmpty())),
+			"koinon-gateway sends no agent header to an org's server, also not on the probe (#1235)")
+	} else {
+		Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
+	}
 
 	By("a second server with insecureSkipVerify and no CA completes the real TLS handshake through the gateway")
 	// The fake's certificate is signed by a per-run CA that is in no root store, so only the skipped
@@ -367,12 +372,15 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 	// The same attack from a real sandbox (test/escape, label leakguard): the install is guarded and both
 	// tools are auto right now, which is why the suite runs from here and not as a job of its own (#348).
 	// test/e2e/run.sh sets the hook when ESCAPE_MCP=1.
+	// The sandbox dials the install's MCP path: koinon-gateway with driver koinon (the sandbox profile allows
+	// /mcp only there), agentgateway with the fallback (#1239).
 	if hook := os.Getenv("KOINON_E2E_ESCAPE_HOOK"); hook != "" {
 		By("the same attack from a sandbox is stopped too (test/escape, label leakguard)")
+		path := installMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL"))
 		cmd := exec.CommandContext(ctx, hook)
 		cmd.Env = append(os.Environ(),
-			"KOINON_ESCAPE_MCP_HOST=koinon-gateway.koinon.svc.cluster.local",
-			"KOINON_ESCAPE_MCP_PORT=8080",
+			"KOINON_ESCAPE_MCP_HOST="+strings.TrimPrefix(path.service, "svc/")+".koinon.svc.cluster.local",
+			"KOINON_ESCAPE_MCP_PORT="+path.port,
 			fmt.Sprintf("KOINON_ESCAPE_MCP_KEY=%s", key),
 			"KOINON_ESCAPE_MCP_RECEIVER_URL="+fake,
 			"KOINON_ESCAPE_MCP_RECEIVER_CA="+os.Getenv("KOINON_E2E_FAKEMCP_CA"),
@@ -441,7 +449,7 @@ func installMCPPath(ctx context.Context, kubectl string) mcpPath {
 
 // agentMCPPath is the MCP path an agent in a sandbox uses. koinon-agentd gives the agent its MCP URL from
 // its environment, so the path is koinon-gateway exactly when one of those values names the
-// koinon-mcp-gateway Service. Until #1239 moves the agent's MCP URL, it is agentgateway for every driver.
+// koinon-mcp-gateway Service: with driver koinon the chart sets KOINON_AGENT_MCP_URL to it (#1239).
 func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 	GinkgoHelper()
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -452,6 +460,19 @@ func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 		return mcpPath{koinon: true}
 	}
 	return mcpPath{}
+}
+
+// probeMCPPath is the MCP path of the reconciler's tool probe: koinon-gateway when the reconciler's config
+// names koinon-gateway's MCP listener (gateway.standalone.mcpUrl, set with driver koinon, #1239), else
+// agentgateway.
+func probeMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "configmap", "koinon-config",
+		"-o", "jsonpath={.data}").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get configmap koinon-config: %s", out)
+	Expect(strings.TrimSpace(string(out))).NotTo(BeEmpty(), "the data of configmap koinon-config")
+	return mcpPath{koinon: strings.Contains(string(out), "mcpUrl: http://koinon-mcp-gateway.")}
 }
 
 // approvedCallMCPPath is the MCP path of a call a human approved: koinon-api makes it to
