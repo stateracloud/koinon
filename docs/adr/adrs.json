@@ -582,7 +582,8 @@
       "0107",
       "0110",
       "0116",
-      "0121"
+      "0121",
+      "0125"
     ]
   },
   {
@@ -1517,7 +1518,8 @@
       "0071",
       "0073",
       "0091",
-      "0121"
+      "0121",
+      "0125"
     ]
   },
   {
@@ -2582,7 +2584,8 @@
     "related_by": [
       "0093",
       "0096",
-      "0113"
+      "0113",
+      "0125"
     ]
   },
   {
@@ -2765,7 +2768,8 @@
       "0096",
       "0099",
       "0112",
-      "0114"
+      "0114",
+      "0125"
     ]
   },
   {
@@ -3549,6 +3553,31 @@
       "0079",
       "0090",
       "0118"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0125",
+    "file": "0125-hide-unreviewed-mcp-tools.md",
+    "title": "Hide MCP tools that no admin reviewed",
+    "status": "proposed",
+    "date": "2026-11-24",
+    "area": "security-audit",
+    "tags": [
+      "mcp",
+      "leak-guard",
+      "security",
+      "audit"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0023",
+      "0057",
+      "0091",
+      "0097"
     ],
     "related_by": []
   }

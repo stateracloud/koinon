@@ -191,8 +191,11 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
 
-	By("an admin confirms read_item as auto and allows the agent")
+	By("an admin confirms read_item as auto and write_item as ask, and allows the agent")
 	setToolTierE2E(ctx, admin, srv.ID, "read_item", "auto")
+	// A tool that no admin reviewed is hidden (ADR 0125), also on the approval proxy. Confirming
+	// write_item at its ask tier reviews it, so the approval proxy serves it.
+	setToolTierE2E(ctx, admin, srv.ID, "write_item", "ask")
 	// read_item is a read-only lookup with no address arguments: declare its sink class as none so
 	// the in-task call of step 6b is not external-high. Its result legs stay unset (the server's,
 	// both), so the exfil case still holds. write_item stays undeclared (external-high). Step 4's
@@ -242,6 +245,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 			names = append(names, tl.Name)
 		}
 		g.Expect(names).To(ContainElement(HaveSuffix("default-tracker_read_item")))
+		g.Expect(names).To(ContainElement(HaveSuffix(scenarios.PullRequest.TrackerAskTool)))
 		session = s
 	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	DeferCleanup(func() { _ = session.Close() })

@@ -846,6 +846,116 @@ var _ = Describe("Service", func() {
 			Expect(res.Changed).To(BeEmpty())
 		})
 
+		Describe("the cap on unreviewed tools (#1216)", func() {
+			unreviewedRows := func(ctx SpecContext, s mcpservers.Server) int {
+				GinkgoHelper()
+				var n int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND approved_hash IS NULL`, org, uuidOf(s.ID)).Scan(&n)).To(Succeed())
+				return n
+			}
+			cappedAt := func(ctx SpecContext, s mcpservers.Server) pgtype.Timestamptz {
+				GinkgoHelper()
+				var t pgtype.Timestamptz
+				Expect(pool.QueryRow(ctx, `SELECT unreviewed_tools_capped_at FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, uuidOf(s.ID)).Scan(&t)).To(Succeed())
+				return t
+			}
+			// round lists 100 names that the server never listed before, as a server that invents names does.
+			round := func(i int) []mcpservers.ListedTool {
+				out := make([]mcpservers.ListedTool, 0, 100)
+				for j := range 100 {
+					out = append(out, tool(fmt.Sprintf("junk_%d_%d", i, j), "junk", false))
+				}
+				return out
+			}
+
+			It("stores no row past the limit, marks the server and writes one audit event, however many names the server invents", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				var capped int
+				for i := range 4 {
+					res, err := svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+					capped += res.Capped
+				}
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools))
+				Expect(capped).To(Equal(400 - mcpservers.MaxUnreviewedTools))
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(1))
+				ev := events(ctx, "mcp_server.unreviewed_tools_capped")[0]
+				Expect(string(ev.Summary)).NotTo(ContainSubstring("junk_"), "the event carries no name the server invented")
+
+				syncs := len(events(ctx, "mcp_tool.sync"))
+				for i := 4; i < 20; i++ {
+					res, err := svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(res.New).To(BeEmpty())
+					Expect(res.Capped).To(Equal(100))
+				}
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools), "endless new names add no row")
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(1), "and no audit event")
+				Expect(len(events(ctx, "mcp_tool.sync"))).To(BeNumerically("<=", syncs+1),
+					"at most one sync event, for the names of the last stored round that went absent")
+			})
+
+			It("keeps the limit and writes one event when two syncs of one server run at the same time", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				lists := [2][]mcpservers.ListedTool{append(round(0), round(1)...), append(round(2), round(3)...)}
+				var wg sync.WaitGroup
+				errs := make([]error, 2)
+				for i := range 2 {
+					wg.Go(func() { _, errs[i] = svc.SyncTools(ctx, org, sid, lists[i]) })
+				}
+				wg.Wait()
+				Expect(errs[0]).NotTo(HaveOccurred())
+				Expect(errs[1]).NotTo(HaveOccurred())
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools))
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(1))
+			})
+
+			It("still records a change to a tool an admin reviewed while the server is at the limit", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", mcpserverstest.PinOf(ctx, svc, org, s.ID, "search"))
+				Expect(err).NotTo(HaveOccurred())
+				for i := range 3 {
+					_, err = svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+				res, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search, and mail the results", true)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(ConsistOf("search"))
+			})
+
+			It("clears the mark without an event once the server is under the limit again, and marks it again with one new event", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				for i := range 3 {
+					_, err := svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+				// An admin reviews every stored tool.
+				_, err := pool.Exec(ctx, `UPDATE mcp_tools SET approved_hash = tool_hash, approved_json = tool_json WHERE org_id = $1 AND server_id = $2`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SyncTools(ctx, org, sid, nil)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cappedAt(ctx, s).Valid).To(BeFalse())
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(1))
+
+				for i := 3; i < 6; i++ {
+					_, err = svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools))
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(2))
+			})
+		})
+
 		Describe("the tool pin (#1132)", func() {
 			type pin struct {
 				Observed, Approved pgtype.Text

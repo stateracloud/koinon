@@ -185,6 +185,26 @@ SELECT * FROM mcp_tools
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 FOR UPDATE;
 
+-- name: LockMCPServerForToolSync :one
+-- Locks the server row until the transaction ends, so two syncs of one server run one after the other
+-- and the count of unreviewed tools a sync reads stays true until it commits (#1216).
+SELECT * FROM mcp_servers
+WHERE org_id = @org_id AND id = @id
+FOR NO KEY UPDATE;
+
+-- name: MarkMCPServerToolsCapped :execrows
+-- The sync found the server at the limit of unreviewed tools. One row means the server was under the
+-- limit before: the caller writes the one audit event. Zero rows means it was marked already.
+UPDATE mcp_servers
+SET unreviewed_tools_capped_at = now()
+WHERE org_id = @org_id AND id = @id AND unreviewed_tools_capped_at IS NULL;
+
+-- name: ClearMCPServerToolsCapped :exec
+-- The server is under the limit of unreviewed tools again (an admin reviewed some).
+UPDATE mcp_servers
+SET unreviewed_tools_capped_at = NULL
+WHERE org_id = @org_id AND id = @id AND unreviewed_tools_capped_at IS NOT NULL;
+
 -- name: NotifyMCPProbe :exec
 -- The gateway asks the prober to sync one server now (#1173). The channel is
 -- mcpservers.ProbeWakeChannel and the payload mcpservers.ProbeWakePayload: IDs only, no tool text.
@@ -319,7 +339,8 @@ SELECT org_id, id, name, url, transport, credential_header, credential_prefix, s
        declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since,
        consecutive_failures, tools_synced_at, created_by, created_at, updated_at, kind, exposes_untrusted_input,
        exposes_private_data, code_host_connection_id, credential_lost_at, admin_disabled_at, admin_disabled_by,
-       admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify
+       admin_disabled_note, admin_disabled_under_by, admin_disabled_under_note, ca_bundle, insecure_skip_verify,
+       show_unreviewed_tools, unreviewed_tools_capped_at
 FROM mcp_servers
 WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND admin_disabled_at IS NULL AND removed_at IS NULL AND credential_lost_at IS NULL;
 

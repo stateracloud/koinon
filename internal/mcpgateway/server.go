@@ -301,11 +301,12 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		finish(OutcomeRefusedGuard)
 		return refusedResult(reasonToolListUnreadable)
 	}
-	// A tool that a list left out changed since an admin approved it: no call reaches the target.
-	if g.left.has(poolKey{target: target, agent: agent}, tool) {
-		row.Verdict = reasonToolChanged
+	// A tool that a list left out (it changed since an admin approved it, or no admin reviewed it yet):
+	// no call reaches the target.
+	if reason, left := g.left.refusal(poolKey{target: target, agent: agent}, tool); left {
+		row.Verdict = reason
 		finish(OutcomeRefusedGuard)
-		return refusedResult(reasonToolChanged)
+		return refusedResult(reason)
 	}
 	if c, err := g.creds.Credential(ctx, t, agent); err == nil {
 		row.CredKind, row.RecipientKeyID = c.Kind, c.RecipientKeyID

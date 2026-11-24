@@ -269,7 +269,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"reason"}),
 		ToolsLeftOut: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_gateway_mcp_tools_left_out_total",
-			Help: "Tools the MCP path left out of a tools/list because they changed since approval, were over the limit or unusable, by reason.",
+			Help: "Tools the MCP path left out of a tools/list because they changed since approval, no admin reviewed them, were over the limit or unusable, by reason.",
 		}, []string{"reason"}),
 		CredentialRedactions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_gateway_credential_redactions_total",
@@ -287,7 +287,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, p := range []string{redactAgent, redactTelemetry} {
 		m.CredentialRedactions.WithLabelValues(p)
 	}
-	for _, r := range []string{leftChanged, leftOverLimit, leftUnusable, leftUnreadable} {
+	for _, r := range []string{leftChanged, leftOverLimit, leftUnusable, leftUnreadable, leftUnreviewed} {
 		m.ToolsLeftOut.WithLabelValues(r)
 	}
 	for _, r := range []string{guardNotLoaded, guardPanic} {
