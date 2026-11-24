@@ -404,6 +404,26 @@ func (i *Importer) syncDisabled(ctx context.Context, org pgtype.UUID, typ string
 	return nil
 }
 
+// honourDisable applies disabled: true of a Secret that is refused for another reason, to the items it already
+// manages. A disabled key that is false or not valid changes nothing.
+func (i *Importer) honourDisable(ctx context.Context, org pgtype.UUID, kind outward.Kind, sec *corev1.Secret) error {
+	if i.Outward == nil {
+		return nil
+	}
+	disabled, err := ParseDisabled(sec)
+	if err != nil || !disabled {
+		return nil
+	}
+	n, err := i.Outward.SyncDeclared(ctx, org, kind, sec.Name, true)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		i.log().Info("applied the disabled key of a refused declarative Secret", "secret", sec.Name, "org", sec.Labels[LabelOrg], "kind", string(kind), "items", n)
+	}
+	return nil
+}
+
 // declaredDisabled reads the Secret's disabled key; false when the install does not run the switch.
 func (i *Importer) declaredDisabled(sec *corev1.Secret) (bool, error) {
 	if i.Outward == nil {
@@ -468,6 +488,14 @@ func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *core
 func (i *Importer) applyMCPServer(ctx context.Context, org pgtype.UUID, sec *corev1.Secret, version string) error {
 	d, err := ParseMCPServer(sec, version)
 	if err != nil {
+		if OnlyShortCredential(err) {
+			// The Secret is refused, so the row it declared keeps its old value. A disabled key in it still
+			// applies: a row saved before the short-credential check (#1221) can be switched off while the value
+			// is fixed. Only a disable applies here; an enable waits until the Secret is valid again.
+			if herr := i.honourDisable(ctx, org, outward.MCPServer, sec); herr != nil {
+				return herr
+			}
+		}
 		return &invalidError{err}
 	}
 	if i.MCP == nil {

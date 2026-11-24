@@ -26,8 +26,10 @@ type Builtin interface {
 	// creds is the gateway's credential source, wrapped with its credential scrub: every value it gives is
 	// recorded before the built-in can use it, and is removed from the logs, spans and results of the
 	// gateway (#1174, ADR 0097). A built-in opens each credential through creds and through no source of
-	// its own, so a built-in cannot leave the scrub out (#1221).
-	Call(ctx context.Context, creds CredentialSource, t gateway.MCPTarget, agent gateway.AgentRef, tool string, args json.RawMessage) BuiltinResult
+	// its own. The outbound clients ([NewTargetHTTPClient], a2aout) take only a [ScrubbedSource], so a
+	// built-in that sends a credential from a source of its own through them does not compile (#1221). An
+	// HTTP client of the built-in's own is not covered: the test of each built-in kind catches that.
+	Call(ctx context.Context, creds ScrubbedSource, t gateway.MCPTarget, agent gateway.AgentRef, tool string, args json.RawMessage) BuiltinResult
 }
 
 // BuiltinResult is the answer of a [Builtin] tool.
@@ -49,7 +51,7 @@ func (g *Gateway) callBuiltin(ctx context.Context, agent gateway.AgentRef, t gat
 		finish(OutcomeUpstreamError)
 		return refusedResult("the target is not available")
 	}
-	r := b.Call(cctx, g.o.Credentials, t, agent, tool, args)
+	r := b.Call(cctx, g.creds, t, agent, tool, args)
 	// A built-in can quote a credential it opened. The result is scrubbed with the values of the org as it
 	// enters, so the guard, the audit and the agent see one text.
 	r.Result = g.o.Scrub.Result(agent.Org, r.Result)

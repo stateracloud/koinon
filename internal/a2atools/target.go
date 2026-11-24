@@ -89,7 +89,7 @@ func fail(text string) mcpgateway.BuiltinResult {
 
 // Call implements [mcpgateway.Builtin]. The credential of a remote agent is read from creds only: it is the
 // gateway's source, which records each value in the credential scrub (#1174, #1221).
-func (t *Target) Call(ctx context.Context, creds mcpgateway.CredentialSource, tgt gateway.MCPTarget, agent gateway.AgentRef, tool string, raw json.RawMessage) mcpgateway.BuiltinResult {
+func (t *Target) Call(ctx context.Context, creds mcpgateway.ScrubbedSource, tgt gateway.MCPTarget, agent gateway.AgentRef, tool string, raw json.RawMessage) mcpgateway.BuiltinResult {
 	var a args
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -146,7 +146,7 @@ func (t *Target) Call(ctx context.Context, creds mcpgateway.CredentialSource, tg
 // call is one tool call, with what the handles need.
 type call struct {
 	t     *Target
-	creds mcpgateway.CredentialSource
+	creds mcpgateway.ScrubbedSource
 	h     handles
 	org   string
 	agent gateway.AgentRef

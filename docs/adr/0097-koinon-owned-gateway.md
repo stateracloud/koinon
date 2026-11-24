@@ -828,8 +828,11 @@ move, once.
        bytes is not matched (it would remove ordinary words). So koinon-api refuses to save a credential value, or
        the token after an auth scheme word in it, shorter than 8 bytes (#1221): Connect gives the ErrorInfo reason
        `CREDENTIAL_TOO_SHORT`, REST gives 400 `invalid_request`. A value saved before that check can still be
-       opened: the gateway counts it (`koinon_gateway_credential_too_short_total`) and logs the target once. `koinon_gateway_credential_redactions_total`
-       counts the texts it changed, by path (`agent` or `telemetry`). The open that goes over a cap never loses its
+       opened: the gateway counts it (`koinon_gateway_credential_too_short_total`) and logs the target once. A
+       declared Secret that holds such a value is refused on each sync, and its server keeps the old value; its
+       `disabled: true` still applies when the short value is its only fault (#1221). During a restore hold, the
+       plan reports such a Secret as refused only; the disable applies at the release.
+       `koinon_gateway_credential_redactions_total` counts the texts it changed, by path (`agent` or `telemetry`). The open that goes over a cap never loses its
        own values to that cap; an open at the same time can (see Batching).
        A value that a cap removes before 24 hours is no longer scrubbed: `koinon_gateway_credential_evictions_total`
        counts these, so an operator sees a cap that is too low for the credentials in use.
@@ -838,10 +841,16 @@ move, once.
        holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
        own issue. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
        its org's audit row of a call changes. Only a reader of that org's audit can see this. Each call of a built-in
-       target gets the gateway's recording source as an argument of `Builtin.Call`, and the outbound clients have no
-       default source (a nil source is an error). Go cannot stop a built-in from building a source of its own, so
-       each built-in kind has a test that the gateway records the value it opens; a built-in that uses another
-       source fails it (#1221).
+       target gets the gateway's recording source as an argument of `Builtin.Call`. Its type is `ScrubbedSource`,
+       which only `CredentialScrub.Source` can make (its field is not exported). The outbound clients
+       (`NewTargetHTTPClient` and the A2A client, also for the card read in koinon-api) take this type and no
+       other, so code that sends a credential the scrub did not record through them does not compile; a test builds such code and
+       expects each error. The zero value has no source: a read fails, and the outbound clients refuse it. The type
+       proves that a scrub recorded the value, not which scrub. Two gaps stay, so each built-in kind keeps a test
+       that the gateway records the value it opens, and a built-in that uses another source fails it (#1221). A
+       built-in can make a scrub of its own (`NewCredentialScrub`) and send through it, and it can read a source of
+       its own and quote the value or send it with an HTTP client of its own. The card read in koinon-api has no gateway scrub: it uses a scrub
+       for that read only. That value is the one the admin saves, and the read does not log it.
      - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
        in it until the next rebuild. That rebuild runs at the next change at least one second later, and with traffic
        at most one minute later. Until then the value can only over-scrub a process record. A removal marks a value

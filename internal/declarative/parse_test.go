@@ -143,6 +143,26 @@ func TestParseMCPServerShortCredential(t *testing.T) {
 	if _, err := declarative.ParseMCPServer(sec("fake-008"), "v"); err != nil {
 		t.Errorf("8 bytes: %v", err)
 	}
+
+	// OnlyShortCredential tells a Secret whose only fault is the short value apart: its disabled key still applies.
+	_, err := declarative.ParseMCPServer(sec("fake-07"), "v")
+	if !declarative.OnlyShortCredential(err) {
+		t.Errorf("7 bytes alone: OnlyShortCredential = false for %v", err)
+	}
+	if declarative.OnlyShortCredential(nil) {
+		t.Error("nil: OnlyShortCredential = true")
+	}
+	both := sec("fake-07")
+	both.Data["url"] = []byte("http://mcp.example.com/mcp")
+	both.Data[declarative.KeyCABundle] = []byte("not a PEM bundle")
+	if _, err := declarative.ParseMCPServer(both, "v"); err == nil || declarative.OnlyShortCredential(err) {
+		t.Errorf("7 bytes and a CA bundle on http: want another fault too, got %v", err)
+	}
+	both = sec("fake-07")
+	both.Data[declarative.KeyInsecureSkipVerify] = []byte("maybe")
+	if _, err := declarative.ParseMCPServer(both, "v"); err == nil || declarative.OnlyShortCredential(err) {
+		t.Errorf("7 bytes and a bad insecureSkipVerify: want another fault too, got %v", err)
+	}
 }
 
 // TestParseMCPServerCABundle covers the optional caBundle key of an mcp-server Secret (#278).

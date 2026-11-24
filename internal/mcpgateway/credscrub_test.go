@@ -773,11 +773,12 @@ func (b keyEchoBuiltin) Tools() []*mcp.Tool {
 	return []*mcp.Tool{{Name: "echo", InputSchema: map[string]any{"type": "object"}}}
 }
 
-func (b keyEchoBuiltin) Call(ctx context.Context, creds mcpgateway.CredentialSource, t gateway.MCPTarget, agent gateway.AgentRef, _ string, _ json.RawMessage) mcpgateway.BuiltinResult {
+func (b keyEchoBuiltin) Call(ctx context.Context, creds mcpgateway.ScrubbedSource, t gateway.MCPTarget, agent gateway.AgentRef, _ string, _ json.RawMessage) mcpgateway.BuiltinResult {
+	var src mcpgateway.CredentialSource = creds
 	if b.own != nil {
-		creds = b.own
+		src = b.own
 	}
-	c, _ := creds.Credential(ctx, gateway.MCPTarget{Name: "remote", Org: t.Org}, agent)
+	c, _ := src.Credential(ctx, gateway.MCPTarget{Name: "remote", Org: t.Org}, agent)
 	return mcpgateway.BuiltinResult{
 		Result:     &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "the remote said " + c.Value}}},
 		Credential: mcpgateway.CredentialStatic,
@@ -836,9 +837,11 @@ var _ = Describe("the gateway scrubs what a built-in target opened (#1174, #1221
 	})
 
 	// A built-in that opens its credential through a source of its own, not the one that [Builtin.Call] gives
-	// it, must fail the check above. Go cannot stop a built-in from building such a source, so this check is
-	// the guard. This spec proves that this check fails for such a built-in. The A2A target has its own spec
-	// of the same kind, through the real target (internal/a2atools/gateway_test.go); a new built-in kind adds one.
+	// it, must fail the check above. The outbound clients take only a [mcpgateway.ScrubbedSource], so a built-in
+	// cannot send such a credential (the compile spec in outbound_type_test.go). Go cannot stop a built-in from
+	// reading a source of its own and quoting the value, as this fake does, so this check stays the guard for
+	// that. This spec proves that the check fails for such a built-in. The A2A target has its own spec of the
+	// same kind, through the real target (internal/a2atools/gateway_test.go); a new built-in kind adds one.
 	It("fails the check for a built-in that opens its credential through a source of its own", func(ctx SpecContext) {
 		got, sc, guard := callEcho(ctx, keyEchoBuiltin{own: mapCredentials{"remote": fakeToken}})
 		failures := InterceptGomegaFailures(func() { expectScrubbed(got, sc, guard) })

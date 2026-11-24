@@ -516,13 +516,51 @@ func (e *scrubbedError) As(target any) bool {
 	return true
 }
 
-// Source returns src with every credential it gives recorded before the caller can use it. The gateway wraps
-// its own source with it, and gives the wrapped source to every call of a [Builtin].
-func (s *CredentialScrub) Source(src CredentialSource) CredentialSource {
-	if r, ok := src.(recordingSource); ok && r.s == s {
-		return src
+// ErrNoCredentialSource is the error of a read through the zero [ScrubbedSource], and of an outbound client
+// that gets one. No credential goes out.
+var ErrNoCredentialSource = errors.New("mcpgateway: no credential source")
+
+// ScrubbedSource is a credential source whose every value is recorded in a [CredentialScrub] before the caller
+// gets it (#1174, #1221). Only [CredentialScrub.Source] makes a usable one: its field is not exported, so code
+// outside this package cannot put a source of its own in it. The outbound clients ([NewTargetHTTPClient], and
+// through it the A2A client) take this type and no other, so a credential that they send went through a scrub
+// first. Code that skips the scrub does not compile.
+//
+// The zero value holds no source: each read fails with [ErrNoCredentialSource], and [NewTargetHTTPClient]
+// refuses it. The type proves that a scrub recorded the value; it does not prove which scrub. A built-in uses
+// the one that [Builtin.Call] gives it, which is the gateway's (ADR 0097).
+type ScrubbedSource struct{ r *recordingSource }
+
+// Credential implements [CredentialSource].
+func (s ScrubbedSource) Credential(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) (Credential, error) {
+	if s.r == nil {
+		return Credential{}, ErrNoCredentialSource
 	}
-	return recordingSource{src: src, s: s}
+	return s.r.Credential(ctx, t, agent)
+}
+
+// IsZero reports whether s holds no source: it is the zero value, not made by [CredentialScrub.Source].
+func (s ScrubbedSource) IsZero() bool { return s.r == nil }
+
+// Source returns src with every credential it gives recorded before the caller can use it. The gateway wraps
+// its own source with it, and gives the wrapped source to every call of a [Builtin]. A nil src gives the zero
+// ScrubbedSource, which fails closed.
+func (s *CredentialScrub) Source(src CredentialSource) ScrubbedSource {
+	if s == nil {
+		return ScrubbedSource{}
+	}
+	switch r := src.(type) {
+	case nil:
+		return ScrubbedSource{}
+	case ScrubbedSource:
+		if r.r == nil {
+			return ScrubbedSource{}
+		}
+		if r.r.s == s {
+			return r
+		}
+	}
+	return ScrubbedSource{r: &recordingSource{src: src, s: s}}
 }
 
 type recordingSource struct {
@@ -530,7 +568,7 @@ type recordingSource struct {
 	s   *CredentialScrub
 }
 
-func (r recordingSource) Credential(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) (Credential, error) {
+func (r *recordingSource) Credential(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef) (Credential, error) {
 	c, err := r.src.Credential(ctx, t, agent)
 	if c.Value != "" {
 		token := strings.TrimSpace(strings.TrimPrefix(c.Value, t.CredentialPrefix))

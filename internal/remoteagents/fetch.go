@@ -57,9 +57,11 @@ func (s *Service) defaultFetch(ctx context.Context, r FetchRequest, policy catal
 	if r.Header != "" {
 		value = r.Prefix + r.Secret
 	}
-	return a2aout.FetchCard(ctx, a2aout.Options{
-		Target: t, Policy: policy, Credentials: memCredentials{header: r.Header, value: value},
-	})
+	// koinon-api has no gateway scrub. The read takes a scrub of its own, which records the value for this
+	// read only: the outbound client takes no source that skips a scrub (#1221). The value is the one the
+	// admin saves, and this read does not log it or put it in the card.
+	creds := mcpgateway.NewCredentialScrub().Source(memCredentials{header: r.Header, value: value})
+	return a2aout.FetchCard(ctx, a2aout.Options{Target: t, Policy: policy, Credentials: creds})
 }
 
 // reasonOf maps the error of a card read to a fixed text. The text never carries data from the agent.
