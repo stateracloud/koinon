@@ -72,3 +72,48 @@ WHERE id = @org_id AND default_model_pending;
 UPDATE orgs
 SET default_model = @default_model::text
 WHERE id = @org_id AND default_model IS NULL AND deleted_at IS NULL;
+
+-- name: ListOrgSummaries :many
+-- The live orgs by slug after @after_slug, with member and agent counts, budget and spend since
+-- @since, for the platform console (ADR 0126). Platform admins only. @only_org_id narrows the list
+-- to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
+-- member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
+SELECT o.id AS org_id, o.slug, o.display_name, o.kind, o.created_at,
+       (SELECT count(DISTINCT om.user_id)
+        FROM org_memberships om
+        JOIN users u ON u.id = om.user_id
+        WHERE om.org_id = o.id AND u.deleted_at IS NULL
+          AND (o.identity_mode = 'hybrid'
+               OR (o.identity_mode = 'platform' AND om.source = 'manual')
+               OR (o.identity_mode = 'idp' AND (om.source = 'idp_group' OR om.role = 'owner'))))::bigint AS member_count,
+       (SELECT count(*) FROM agents a WHERE a.org_id = o.id AND a.status <> 'archived')::bigint AS agent_count,
+       coalesce(b.monthly_cap::text, '')::text AS monthly_cap,
+       coalesce(b.platform_ceiling::text, '')::text AS platform_ceiling,
+       coalesce((SELECT sum(s.cost_usd) FROM spend_entries s WHERE s.org_id = o.id AND s.occurred_at >= @since), 0)::text AS spent
+FROM orgs o
+LEFT JOIN org_budgets b ON b.org_id = o.id
+WHERE o.deleted_at IS NULL
+  AND (sqlc.narg(only_org_id)::uuid IS NULL OR o.id = sqlc.narg(only_org_id)::uuid)
+  AND (@include_personal::bool OR sqlc.narg(only_org_id)::uuid IS NOT NULL OR o.kind = 'team')
+  AND o.slug > @after_slug::text
+ORDER BY o.slug
+LIMIT @row_limit;
+
+-- name: ListOrgMembers :many
+-- The users with an effective role in the org, by display name and then id, after the cursor
+-- (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships
+-- (ADR 0004); the highest role wins.
+SELECT u.id AS user_id, u.display_name, max(om.role)::org_role AS role
+FROM org_memberships om
+JOIN orgs o ON o.id = om.org_id
+JOIN users u ON u.id = om.user_id
+WHERE om.org_id = @org_id
+  AND o.deleted_at IS NULL
+  AND u.deleted_at IS NULL
+  AND (o.identity_mode = 'hybrid'
+       OR (o.identity_mode = 'platform' AND om.source = 'manual')
+       OR (o.identity_mode = 'idp' AND (om.source = 'idp_group' OR om.role = 'owner')))
+  AND (u.display_name, u.id) > (@after_name::text, @after_id::uuid)
+GROUP BY u.id, u.display_name
+ORDER BY u.display_name, u.id
+LIMIT @row_limit;
