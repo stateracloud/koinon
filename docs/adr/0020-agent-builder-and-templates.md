@@ -75,7 +75,7 @@ stateDiagram-v2
 ## Amendment 2026-11-24 (blank agent and UpdateAgent, #1266)
 
 - `CreateAgent` makes an agent without a template ([0126](0126-web-ui-v2.md) section 5). Its definition goes through the checks of a template: the schema bounds, the connector catalog, grant binding, trigger rules and the served-model check. It starts as a draft with the lowest daily spend limit of the shipped templates. The same admin-only `ActivateAgent` puts it in effect.
-- `UpdateAgent` writes a new proposed version (field mask, `base_version`). On an active agent, the running version does not change until an admin or owner activates the new one. A member can change only a draft that they created and that was never activated.
+- `UpdateAgent` writes a new proposed version (field mask, `base_version`). On an active agent, the running version does not change until an admin or owner activates the new one. A member can change only a draft that they created and that was never activated. A new display name takes effect at once and adds no version. A harness change is allowed only before the first activation, and it adds a version, so an admin cannot activate a version number that they reviewed before the change.
 
 ## Upstream verification
 

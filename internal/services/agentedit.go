@@ -43,8 +43,12 @@ const blankDailySpendCents = 100
 // BlankAgentDailySpend is blankDailySpendCents as money.
 var BlankAgentDailySpend = money.FromCents(blankDailySpendCents)
 
-// maxInstructions is the template schema's bound on spec.instructions, in characters.
-const maxInstructions = 32768
+// The template schema's bounds: spec.instructions in characters, and the run limits.
+const (
+	maxInstructions  = 32768
+	maxModelRequests = 100000
+	maxRunSpendCents = 99999999
+)
 
 // The AgentDefinition fields UpdateAgent changes, by update_mask path.
 const (
@@ -112,6 +116,10 @@ func runLimitsFromProto(p *templatev1alpha1.RunLimits, prev templates.RunLimits)
 		return out, invalidArg("run_limits.max_duration_seconds exceeds %s", templates.MaxRunDuration)
 	case p.GetMaxModelRequests() < 0:
 		return out, invalidArg("run_limits.max_model_requests is negative")
+	case p.GetMaxModelRequests() > maxModelRequests:
+		return out, invalidArg("run_limits.max_model_requests exceeds %d", maxModelRequests)
+	case len(p.GetMaxSpendUsd()) > len("999999.99"):
+		return out, invalidArg("run_limits.max_spend_usd exceeds 999999.99")
 	}
 	out.MaxDuration = templates.Duration{Duration: d}
 	out.MaxModelRequests = p.GetMaxModelRequests()
@@ -123,6 +131,9 @@ func runLimitsFromProto(p *templatev1alpha1.RunLimits, prev templates.RunLimits)
 		}
 		if err := out.MaxSpendUSD.UnmarshalJSON(raw); err != nil {
 			return out, invalidArg("run_limits.max_spend_usd: %v", err)
+		}
+		if out.MaxSpendUSD > maxRunSpendCents {
+			return out, invalidArg("run_limits.max_spend_usd exceeds 999999.99")
 		}
 	}
 	return out, nil
@@ -457,6 +468,19 @@ func (s *Server) UpdateAgent(ctx context.Context, req *agentv1alpha1.UpdateAgent
 		if chosen, err = pickHarness(d.GetHarness()); err != nil {
 			return nil, err
 		}
+		if a.TemplateID.Valid {
+			row, err := s.q.GetTemplate(ctx, a.TemplateID)
+			if err != nil {
+				return nil, s.dbError(err, "template")
+			}
+			t, err := decodeTemplate(row)
+			if err != nil {
+				return nil, s.dbError(err, "template")
+			}
+			if !slices.Contains(t.Spec.Harness.Allowed, templates.HarnessName(chosen)) {
+				return nil, invalidArg("harness is not allowed by the template")
+			}
+		}
 		if next.Harness.PluginInstalls && !harness.SupportsPluginInstalls(chosen) {
 			return nil, invalidArg("harness %q cannot install plugins, which the agent's version turns on", chosen)
 		}
@@ -492,7 +516,10 @@ func (s *Server) UpdateAgent(ctx context.Context, req *agentv1alpha1.UpdateAgent
 		}
 		before := map[string]any{"version": cur.LatestVersion}
 		after := map[string]any{}
-		if len(changed) > 0 {
+		// A harness change also adds a version, though the config is the same: an admin activates
+		// a version number, so a change after their review must not pass under the number they
+		// reviewed (ADR 0020).
+		if len(changed) > 0 || chosen != cur.Harness {
 			raw, err := next.Marshal()
 			if err != nil {
 				return err

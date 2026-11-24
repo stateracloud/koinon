@@ -151,7 +151,7 @@
             },
             {
               "name": "UpdateAgent",
-              "description": "UpdateAgent changes the fields that update_mask names. A change to a version field\n(instructions, model, grants, triggers, run_limits) adds a new version with everything else\ncarried over from the latest one. On an active agent the new version is proposed: the agent\nkeeps running its active version, with its approved grants and triggers, until ActivateAgent\nactivates the new one (ADR 0066). display_name changes the agent at once; harness changes only\nbefore the first activation. Audited, with the old and the new values. Admins and owners\nupdate any agent of the org; a member updates only a draft that they created.",
+              "description": "UpdateAgent changes the fields that update_mask names. A change to a version field\n(instructions, model, grants, triggers, run_limits) adds a new version with everything else\ncarried over from the latest one. On an active agent the new version is proposed: the agent\nkeeps running its active version, with its approved grants and triggers, until ActivateAgent\nactivates the new one (ADR 0066). display_name changes the agent at once; harness changes only\nbefore the first activation, within the template's allowed harnesses, and adds a version, so\nan activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners\nupdate any agent of the org; a member updates only a draft that they created.",
               "requestType": "koinon.agent.v1alpha1.UpdateAgentRequest",
               "responseType": "koinon.agent.v1alpha1.UpdateAgentResponse",
               "clientStreaming": false,

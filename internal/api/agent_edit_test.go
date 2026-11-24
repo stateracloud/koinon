@@ -111,6 +111,15 @@ var _ = Describe("agent editor", func() {
 					d.RunLimits = &templatev1alpha1.RunLimits{MaxSpendUsd: "1.234"}
 				},
 				"trigger notifies": notifyStranger,
+				"many requests": func(d *agentv1alpha1.AgentDefinition) {
+					d.RunLimits = &templatev1alpha1.RunLimits{MaxModelRequests: 100001}
+				},
+				"huge spend": func(d *agentv1alpha1.AgentDefinition) {
+					d.RunLimits = &templatev1alpha1.RunLimits{MaxSpendUsd: "92233720368547758"}
+				},
+				"over max spend": func(d *agentv1alpha1.AgentDefinition) {
+					d.RunLimits = &templatev1alpha1.RunLimits{MaxSpendUsd: "1000000"}
+				},
 			} {
 				Expect(codeOf(bad(mod))).To(Equal(connect.CodeInvalidArgument), name)
 			}

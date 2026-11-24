@@ -257,7 +257,8 @@ type AgentServiceClient interface {
 	// carried over from the latest one. On an active agent the new version is proposed: the agent
 	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
 	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
-	// before the first activation. Audited, with the old and the new values. Admins and owners
+	// before the first activation, within the template's allowed harnesses, and adds a version, so
+	// an activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners
 	// update any agent of the org; a member updates only a draft that they created.
 	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
@@ -339,7 +340,8 @@ type AgentServiceHandler interface {
 	// carried over from the latest one. On an active agent the new version is proposed: the agent
 	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
 	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
-	// before the first activation. Audited, with the old and the new values. Admins and owners
+	// before the first activation, within the template's allowed harnesses, and adds a version, so
+	// an activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners
 	// update any agent of the org; a member updates only a draft that they created.
 	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
