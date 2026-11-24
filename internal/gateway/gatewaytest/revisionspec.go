@@ -38,7 +38,7 @@ func revisionSpec(env Env) {
 				Models: []gateway.Model{{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 			}}}
 			var err error
-			gw, err = env.Start(ctx, []int{port(upstream)}, nil, "")
+			gw, err = env.Start(ctx, []int{port(upstream)}, nil, Guard{})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			_, err = gw.Driver.Apply(ctx, state)

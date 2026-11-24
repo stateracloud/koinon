@@ -220,7 +220,7 @@ func mcpKindSpec(env Env) {
 			state := gateway.State{MCP: []gateway.MCPTarget{{Name: target, Org: "acme", URL: "http://" + env.Host + ":" + itoa(port(srv)) + "/mcp"}}}
 			state.AddKey(k.Key)
 			state.GrantTools(agent, gateway.ToolGrant{Target: target, Tools: []string{"echo", "rpc_error", "log", "sample", "elicit", "elicit_url", "record"}})
-			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.URL(env.Host))
+			gw, err := env.Start(ctx, []int{port(srv), guard.Port()}, nil, guard.Ref(env.Host))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(gw.Stop)
 			url, logs = gw.URL, gw.Logs

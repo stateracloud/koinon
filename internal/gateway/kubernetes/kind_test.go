@@ -266,8 +266,8 @@ var _ = func() bool {
 		KeyFile:   func(name string) string { return "/provider-keys/" + name },
 		// The key stage answers before any response policy runs (old issue 342).
 		Unmarked: []string{gatewaytest.RefusalLLMKey, gatewaytest.RefusalMCPKey},
-		Start: func(ctx context.Context, ports []int, files map[string]string, guardURL string) (*gatewaytest.Gateway, error) {
-			g, err := startKube(ctx, ports, files, gwk8s.Options{GuardURL: guardURL})
+		Start: func(ctx context.Context, ports []int, files map[string]string, guard gatewaytest.Guard) (*gatewaytest.Gateway, error) {
+			g, err := startKube(ctx, ports, files, gwk8s.Options{GuardURL: guard.URL})
 			if err != nil {
 				return nil, err
 			}

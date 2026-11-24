@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported, as in every spec file
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
@@ -21,8 +22,9 @@ import (
 type FakeGuard struct {
 	extmcp.UnimplementedExtMcpServer
 
-	srv  *grpc.Server
-	port int
+	srv     *grpc.Server
+	port    int
+	stopped atomic.Bool
 
 	mu        sync.Mutex
 	refuse    map[string]string // tool (as the gateway names it) -> reason, before the call
@@ -75,8 +77,12 @@ func (g *FakeGuard) URL(host string) string {
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(g.port))
 }
 
-// Stop takes the guard down, as when koinon-api is not running.
-func (g *FakeGuard) Stop() { g.srv.Stop() }
+// Stop takes the guard down, as when koinon-api is not running. The in-process form (Ref) then
+// reports that its rules are not loaded.
+func (g *FakeGuard) Stop() {
+	g.stopped.Store(true)
+	g.srv.Stop()
+}
 
 // Refuse makes the guard refuse a call to tool before it reaches the server.
 func (g *FakeGuard) Refuse(tool, reason string) {

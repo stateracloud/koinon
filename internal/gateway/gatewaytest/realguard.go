@@ -4,11 +4,14 @@ package gatewaytest
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"net/http/httptest"
 	"strconv"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported, as in every spec file
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 	"google.golang.org/grpc"
@@ -39,9 +42,10 @@ type RealGuard struct {
 	Slug  string
 	Agent store.Agent
 
-	svc  *mcpservers.Service
-	port int
-	srv  *grpc.Server
+	svc   *mcpservers.Service
+	port  int
+	srv   *grpc.Server
+	local *mcpguard.GatewayGuard
 }
 
 // AgentRef is the agent as the gateway's keys and the guard's metadata name it.
@@ -57,19 +61,29 @@ func (g *RealGuard) URL(host string) string {
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(g.port))
 }
 
+// Ref is the guard in both forms: the ExtMcp server at host, and the adapter koinon-gateway runs in its
+// process (mcpguard.GatewayGuard) on the same guard and database.
+func (g *RealGuard) Ref(host string) Guard { return Guard{URL: g.URL(host), Local: g.local} }
+
 // Target is the gateway target name of the org's server.
 func (g *RealGuard) Target(server string) string { return mcpservers.TargetName(g.Slug, server) }
 
 // Server registers the org's MCP server with the tools, each on the auto tier, and declares its
 // data class: legs are mcpservers.LegPrivateData and mcpservers.LegUntrustedInput, none for a
 // server whose results set neither leg. A tool nobody declared is external-high.
-func (g *RealGuard) Server(ctx context.Context, name string, legs []string, tools ...string) {
+//
+// The tools are synced as srv publishes them, as the prober does (internal/reconciler): the approved
+// hash is then the hash of the text a gateway lists, so a gateway that pins tools (#1132) serves them.
+func (g *RealGuard) Server(ctx context.Context, name string, srv *httptest.Server, legs []string, tools ...string) {
 	GinkgoHelper()
 	s, err := g.svc.Create(ctx, g.Org, audit.System("koinon-test:realguard"), g.User, mcpservers.Input{Name: name, URL: "https://" + name + ".example.com/mcp"})
 	Expect(err).NotTo(HaveOccurred())
+	published := publishedTools(ctx, srv)
 	var listed []mcpservers.ListedTool
 	for _, t := range tools {
-		listed = append(listed, mcpservers.ListedTool{Name: t, Description: t})
+		lt, ok := published[t]
+		Expect(ok).To(BeTrue(), "the server does not publish the tool %q", t)
+		listed = append(listed, lt)
 	}
 	_, err = g.svc.SyncTools(ctx, g.Org, uuidOf(s.ID), listed)
 	Expect(err).NotTo(HaveOccurred())
@@ -79,6 +93,35 @@ func (g *RealGuard) Server(ctx context.Context, name string, legs []string, tool
 	}
 	_, err = g.svc.SetDataClass(ctx, g.Org, audit.System("koinon-test:realguard"), s.ID, mcpservers.Declaration{Kind: mcpservers.KindOther, Legs: append([]string{}, legs...)})
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// publishedTools lists srv's tools directly, by name, in the form the prober syncs them.
+func publishedTools(ctx context.Context, srv *httptest.Server) map[string]mcpservers.ListedTool {
+	GinkgoHelper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test-realguard", Version: "0"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp", DisableStandaloneSSE: true, MaxRetries: -1}, nil)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = session.Close() }()
+	res, err := session.ListTools(ctx, nil)
+	Expect(err).NotTo(HaveOccurred())
+	raw := func(v any) json.RawMessage {
+		b, err := json.Marshal(v)
+		Expect(err).NotTo(HaveOccurred())
+		return b
+	}
+	out := map[string]mcpservers.ListedTool{}
+	for _, t := range res.Tools {
+		lt := mcpservers.ListedTool{Name: t.Name, Description: t.Description, Title: t.Title, InputSchema: raw(t.InputSchema)}
+		if t.Annotations != nil {
+			lt.ReadOnlyHint = t.Annotations.ReadOnlyHint
+			lt.Annotations = raw(t.Annotations)
+		}
+		if t.OutputSchema != nil {
+			lt.OutputSchema = raw(t.OutputSchema)
+		}
+		out[t.Name] = lt
+	}
+	return out
 }
 
 // Risk is the risk document of the org's only approval request, as JSON.
@@ -131,6 +174,8 @@ func startRealGuard(ctx context.Context) *RealGuard {
 		ByteCap: 64, Approve: mcpask.New(pool, mcpask.Options{}).RequestApproval, OwnTargets: []string{"github", "koinon"},
 	})
 	extmcp.RegisterExtMcpServer(g.srv, mcpguard.NewServer(guard))
+	g.local = mcpguard.NewGatewayGuard(guard, nil)
+	Expect(g.local.Load(ctx)).To(Succeed())
 	l, err := net.Listen("tcp", "0.0.0.0:0") //nolint:gosec,noctx // the kind cluster reaches the test host over the network
 	Expect(err).NotTo(HaveOccurred())
 	_, p, _ := net.SplitHostPort(l.Addr().String())

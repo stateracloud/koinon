@@ -223,4 +223,34 @@ var _ = Describe("the guard in the MCP path", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rev).To(Equal(rev2), "the revision names what serves")
 	})
+
+	It("tells an agent that a granted org target needs a guard, and hides another org's target", func(ctx SpecContext) {
+		g2 := mcpgateway.New(mcpgateway.Options{})
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", g2.Handler())
+		front2 := httptest.NewServer(mux)
+		DeferCleanup(front2.Close)
+		k := mustKey(agent)
+		_, err := g2.ApplyMCP(ctx, gateway.MCPConfig{Keys: []gateway.Key{k.Key}, MCPState: gateway.MCPState{
+			MCP: []gateway.MCPTarget{
+				{Name: "acme-wiki", Org: "acme", URL: "https://wiki.example/mcp"},
+				{Name: "globex-wiki", Org: "globex", URL: "https://globex.example/mcp"},
+			},
+			Tools: map[gateway.AgentRef][]gateway.ToolGrant{
+				agent: {{Target: "acme-wiki", Tools: []string{"read_item"}}, {Target: "globex-wiki", All: true}},
+			},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front2.URL, k.Material)
+		for name, want := range map[string]string{
+			"acme-wiki_read_item":   gateway.GuardUnconfiguredReason,
+			"acme-wiki_write_item":  "not granted", // the grant does not name it
+			"globex-wiki_read_item": "not granted", // another org's target: its name stays hidden
+		} {
+			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsError).To(BeTrue(), name)
+			Expect(text(res)).To(ContainSubstring(want), name)
+		}
+	})
 })
