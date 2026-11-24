@@ -927,7 +927,7 @@ execution:
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
       # only ingress rules for them. A pod that a later Substrate version adds has no egress until a list names it.
-      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerPorts. The installer
+      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerPorts (any address). The installer
       # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
       apiOnlyApps: [k8s-credential-provider]
       # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
@@ -1010,7 +1010,8 @@ execution:
         # ate-api-server.yaml:80, atelet.yaml:143 and atenet-router.yaml:192.
         scrapePorts: [9090]
       # Fence of the namespace of the identity-certificate controller (pod-certificate-controller.yaml): default deny,
-      # and the Kubernetes API server for the controller. It serves no port and calls nothing else.
+      # and the Kubernetes API server ports (apiServerPorts, to any address) for the controller. It serves no port and calls
+      # nothing else.
       podcertSystem:
         enabled: true
         namespace: podcertificate-controller-system
@@ -1019,7 +1020,7 @@ execution:
     # The ONE image source of the node agent (issue #1170, ADR 0120 section 6.9). atelet pulls every actor image itself,
     # and the Substrate namespaces deny internet egress except the apiServerPorts rule (TCP 443 and 6443 to any address
     # for the apiServerApps, ADR 0120 amendment 10), so atelet reaches one pull-through cache. By default the chart runs
-    # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has internet egress, and
+    # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has a purpose-made internet route (the apiServerPorts rule is the exception), and
     # atelet checks the manifest and every layer against the digest of the reference, so the cache needs no trust.
     # Actor image references are rewritten to it in the driver (the digest is kept): <cache host>/<upstream host>/<path>.
     # CHOOSE THE MIRROR NAME ONCE: the rewritten reference is part of the actor template hash, so a changed fullname,

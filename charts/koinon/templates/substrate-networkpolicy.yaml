@@ -124,7 +124,8 @@ spec:
 ---
 # The one default-deny egress policy of the control-plane namespace: every pod of the namespace has no egress unless a
 # policy below allows it per app (control plane, API-only pods, the bucket-init Job, the image source). A pod that no
-# list names, such as a pod of a later Substrate version, has no egress at all (fail closed). The pods that call
+# list names, such as a pod of a later Substrate version, has no egress at all (fail closed; the apiServerPorts rule
+# below covers the listed apiServerApps only). The pods that call
 # nothing (ate-idp-server, postgres, rustfs) need no other policy. Their ingress is Substrate's own
 # (ate-system-networkpolicies.yaml: default-deny-ingress at line 38, ate-idp-server at 168, postgres at 97; rustfs at
 # kind/rustfs.yaml:140), so this policy lists no Ingress type: a second ingress rule here would only add to it.
@@ -140,6 +141,8 @@ spec:
   policyTypes: [Egress]
   egress: []
 {{- if not $np.apiServerApps }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerApps is empty: the control plane would lose the Kubernetes API server" }}{{- end }}
+{{- $egressApp := dig "matchLabels" "app" "atenet-egress" $np.atenetEgressSelector }}
+{{- if has $egressApp $np.apiServerApps }}{{- fail (printf "execution.substrate.workerNetworkPolicy.apiServerApps lists %q, the app of the pods that carry worker traffic out (atenetEgressSelector): it has no API server client, and the port rule would give it a TCP route to any address, the internet included (ADR 0120 amendment 10). Remove it from apiServerApps." $egressApp) }}{{- end }}
 ---
 # The pods that call the Kubernetes API server (ADR 0120 amendment 10, issue 1172): TCP on apiServerPorts to any
 # address. A separate policy with its own app list, so atenet-egress is not selected: it has no API server client

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Proof for issue #1172 (ADR 0120 amendment 10): a pod behind the Substrate fence reaches the Kubernetes API server
+# MANUAL proof, not in CI (run it by hand when you change the fence; the chart check in hack/chart-check.sh is the CI
+# part). Proof for issue #1172 (ADR 0120 amendment 10): a pod behind the Substrate fence reaches the Kubernetes API server
 # through the chart's ports-only egress rule, with NO address listed, and cannot reach another port.
 #
 # It makes its own throwaway kind cluster (default CNI, kindnet, which enforces NetworkPolicy on kind v0.33),
@@ -14,7 +15,9 @@
 #   5. the rendered policies carry no ipBlock;
 #   6. in ate-system (substrate-networkpolicy.yaml): a pod labelled app=atenet-egress (a control-plane pod outside
 #      apiServerApps: it has no API server client) cannot reach the server on 6443, and pods labelled app=atelet and
-#      app=atenet-router (in apiServerApps: the router watches EndpointSlices) can.
+#      app=atenet-router (in apiServerApps: the router watches EndpointSlices) can;
+#   7. a pod labelled app=k8s-credential-provider (apiOnlyApps) can reach the server on 6443;
+#   8. in the workers namespace (the workers policy applied): a worker pod cannot reach the server on 6443.
 # No cluster but its own is touched: every kubectl and helm call takes the kubeconfig file of this cluster.
 # Needs docker, kind, kubectl and helm 4. KEEP_CLUSTER=1 keeps the cluster for debugging.
 
@@ -43,12 +46,6 @@ kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
 kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --kubeconfig "$KUBECONFIG" --wait 180s
 docker image inspect "$PROBE_IMAGE" >/dev/null 2>&1 || docker pull "$PROBE_IMAGE"
 kind load docker-image "$PROBE_IMAGE" --name "$CLUSTER"
-
-# The API server endpoint and the kubelet of the same node.
-ep=$(k get endpoints kubernetes -n default -o jsonpath='{.subsets[0].addresses[0].ip}')
-port=$(k get endpoints kubernetes -n default -o jsonpath='{.subsets[0].ports[0].port}')
-[[ -n $ep && -n $port ]] || fail "cannot read the API server endpoint"
-echo "API server endpoint $ep:$port; "
 
 # The chart's own policies (the fence template), with the default ports and no address.
 k create namespace ate-system >/dev/null
@@ -115,20 +112,30 @@ echo "ok (smoke, not proof of the rule): the fenced pod reaches the kubernetes S
 pod ate-system egress "app=atenet-egress"
 pod ate-system atelet "app=atelet"
 pod ate-system router "app=atenet-router"
-wait_fenced() { # wait_fenced <pod>: port 8080 closes once the fence applies to the pod
+wait_fenced() { # wait_fenced <namespace> <pod>: port 8080 closes once the fence applies to the pod
 	local ok=0
 	for _ in $(seq 1 12); do
-		if [[ $(nc_rc ate-system "$1" "$sip" 8080) != 0 ]]; then ok=1; break; fi
+		if [[ $(nc_rc "$1" "$2" "$sip" 8080) != 0 ]]; then ok=1; break; fi
 	done
-	[[ $ok == 1 ]] || fail "the $1 pod can still reach port 8080: the Substrate fence does not apply"
+	[[ $ok == 1 ]] || fail "the $2 pod in $1 can still reach port 8080: the Substrate fence does not apply"
 }
-wait_fenced egress
+wait_fenced ate-system egress
 [[ $(nc_rc ate-system egress "$sip" 6443) != 0 ]] || fail "a pod labelled atenet-egress must NOT reach TCP 6443 at an address outside the control plane"
 echo "ok: a pod labelled atenet-egress cannot reach the server on 6443"
-wait_fenced atelet
+wait_fenced ate-system atelet
 [[ $(nc_rc ate-system atelet "$sip" 6443) == 0 ]] || fail "a pod labelled atelet must reach TCP 6443 (apiServerApps)"
 echo "ok: a pod labelled atelet reaches the server on 6443"
-wait_fenced router
+wait_fenced ate-system router
 [[ $(nc_rc ate-system router "$sip" 6443) == 0 ]] || fail "a pod labelled atenet-router must reach TCP 6443 (apiServerApps: EndpointSlice watch)"
 echo "ok: a pod labelled atenet-router reaches the server on 6443"
+pod ate-system apionly "app=k8s-credential-provider"
+wait_fenced ate-system apionly
+[[ $(nc_rc ate-system apionly "$sip" 6443) == 0 ]] || fail "a pod labelled k8s-credential-provider must reach TCP 6443 (apiOnlyApps)"
+echo "ok: a pod labelled k8s-credential-provider (apiOnlyApps) reaches the server on 6443"
+
+# A worker pod (the workers policy selects every pod of the namespace): no route to 6443 at any address.
+pod ate-workers worker "ate.dev/worker-pool=probe"
+wait_fenced ate-workers worker
+[[ $(nc_rc ate-workers worker "$sip" 6443) != 0 ]] || fail "a worker pod must NOT reach TCP 6443: workers get no API server route (ADR 0120 section 2.4)"
+echo "ok: a worker pod in the workers namespace cannot reach the server on 6443"
 echo "PASS"

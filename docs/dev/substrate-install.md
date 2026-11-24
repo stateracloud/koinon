@@ -306,7 +306,8 @@ command that removes the partial install.
 Substrate ships the SandboxConfig `gvisor-default`. It points at `gs://gvisor/...`, so atelet reads the
 gVisor tarball from the internet. Koinon keeps the Substrate namespaces closed to the internet (ADR 0120
 section 6), so the installer puts the pinned tarball in the cluster object store and applies a SandboxConfig
-that points there. Pods in the cluster then download the tarball with no egress to the internet. This is
+that points there. Pods in the cluster then download the tarball with no purpose-made egress to the internet (the apiServerPorts rule of
+ADR 0120 amendment 10 still opens TCP 443 and 6443 to any address for the control pods that call the API server). This is
 step 8 of the install, on the `kind` and `generic` platforms when the install has the gvisor class. On `gke`
 the `gs://` default stays: that route has no in-cluster object store.
 
@@ -406,7 +407,7 @@ reads the same nodes.
 ## The image cache
 
 With `execution.driver: substrate` the chart installs a Zot pull-through registry (`execution.substrate.imageCache`,
-on by default; ADR 0120 section 6, item 9). It is the one image source of atelet. Only the cache has a route to the internet by design,
+on by default; ADR 0120 section 6, item 9). It is the one image source of atelet. Only the cache has a purpose-made route to the internet (the apiServerPorts rule, ADR 0120 amendment 10, is the exception),
 and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.io`, `quay.io`) on port 443.
 
 - **The rewrite.** The driver rewrites the registry of every actor image to
@@ -456,7 +457,7 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
   an operator source together.
 - **Check.** `kubectl -n <namespace> get deploy <release>-imagecache`; the atelet logs name the cache host and show no
   `x509: certificate signed by unknown authority`; `kubectl -n ate-system get cm koinon-imagecache-ca` holds one
-  certificate; the Zot logs show the sync of the image; no pod in `ate-system` reaches the internet.
+  certificate; the Zot logs show the sync of the image; no pod in `ate-system` reaches the internet except on the `apiServerPorts` (TCP 443 and 6443), which the pods of `apiServerApps` open to any address.
 
 ## Worker namespace and admission
 
@@ -490,9 +491,9 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
 - The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
   pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
-  no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server only. The `rustfs-bucket-init`
+  no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server ports only (to any address). The `rustfs-bucket-init`
   Job pod has no `app` label, so `bucketInitJobs` selects it by Job name and it gets DNS and the object store S3
-  port only (`objectStoreApp`, `objectStorePort`). A pod that a later Substrate version adds has no egress until a
+  port only (`objectStoreApp`, `objectStorePort`). A pod that a later Substrate version adds has no egress (not even the apiServerPorts rule) until a
   list names it. Their ingress stays Substrate's own policies (`ate-system-networkpolicies.yaml`,
   `kind/rustfs.yaml`), because NetworkPolicies add up. Confirm the lists against your Substrate manifests.
 - The worker container may have extra privileges in one exact shape, and only in the worker namespace. Substrate
@@ -510,7 +511,8 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   together in that bump. With an empty image list the policy denies every worker container (fail closed).
 - atelet pulls actor images from one image source, such as a pull-through cache. Set `workerNetworkPolicy.imageSource`
   to a `podSelector` (with a `namespaceSelector`) for a cache in the cluster, or to `cidrs` for a cache outside it,
-  and set `port`. Set one of them: the render fails when you set both, and with neither atelet has no image egress.
+  and set `port`. Set one of them: the render fails when you set both, and with neither atelet has no image egress
+  (except the `apiServerPorts` rule, TCP 443 and 6443 to any address, ADR 0120 amendment 10).
   Actor image references must go through `global.registryMirrors` or `global.imageRegistry` (the digest is kept).
   Choose the mirror name once: it is part of the actor template hash, so a change re-hashes every template.
   Needs main: the driver side of the actor image rewrite is not in this chart.
@@ -521,7 +523,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   in-cluster pull-through cache on this setting.
 - The two other namespaces of the Substrate setup have a NetworkPolicy fence, from the same switch
   (`workerNetworkPolicy.enabled`). `podcertificate-controller-system` has default deny for ingress and egress, and the
-  controller reaches the Kubernetes API server (`apiServerPorts`) and nothing else
+  controller reaches the Kubernetes API server ports (`apiServerPorts`, to any address) and nothing else
   (`workerNetworkPolicy.podcertSystem`). `otel-system` has default deny and one policy per app: the collector takes
   OTLP (4317, 4318) from `ate-system` and its read ports (8889, 8888) from Prometheus, and sends traces to Jaeger;
   Jaeger takes OTLP from the collector only; Prometheus reaches DNS, the API server, the collector and the metrics
@@ -545,10 +547,11 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   Only the pods of `workerNetworkPolicy.apiServerApps` (default `atelet`, `ate-controller`, `ate-api-server`, `atenet-router`), the
   `apiOnlyApps`, the podcert controller and the otel Prometheus get the rule. `atenet-router` needs it (its EndpointSlice watch). `atenet-egress` does
   not use the API server and gets no route, so the pod that carries worker traffic out has no TCP route to any address.
-  The cost: a compromised control pod can open these ports to any server. This includes atelet: a TLS registry on
+  The cost: a compromised control pod can open these ports to any server. This includes atenet-router, which handles
+  actor traffic (its `--mode=ingress` is the `routerAddress` of the driver), and atelet: a TLS registry on
   port 443 is reachable at L3, and only the image rewrite and the `SandboxConfig` source limit atelet to the one image
   source. Worker pods get no such rule.
-  `test/e2e/kind/apiserver-egress.sh` proves the rule on kind.
+  `test/e2e/kind/apiserver-egress.sh` proves the rule on kind (manual, not in CI).
 - atelet needs no purpose-made internet egress (it still has the TCP 443 API server rule above) when the gVisor tarball comes from the cluster object store. The installer
   stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
   issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.
