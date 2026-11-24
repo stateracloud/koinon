@@ -64,8 +64,9 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 		r, err := reconciler.New(pool, backend, &fakeModelGateway{},
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
 			reconciler.Config{
-				Prices:  prices.NewResolver(pricing.Embedded()),
-				Gateway: reconciler.Endpoint{Host: host, Port: 8080},
+				KeepWarmPerOrg: 2,
+				Prices:         prices.NewResolver(pricing.Embedded()),
+				Gateway:        reconciler.Endpoint{Host: host, Port: 8080},
 				Harnesses: map[string]reconciler.Harness{
 					harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},

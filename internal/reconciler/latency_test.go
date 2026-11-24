@@ -66,6 +66,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		mg = &fakeModelGateway{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
@@ -474,18 +475,21 @@ var _ = Describe("Reconciler latency defaults", func() {
 			Expect([]bool{granted(agents[0]), granted(agents[3])}).To(Equal([]bool{false, true}))
 		})
 
-		It("grants no keep-warm when the cap is negative", func(ctx SpecContext) {
+		DescribeTable("grants no keep-warm when the cap is zero (the default) or negative", func(ctx SpecContext, limit int) {
 			a := onDemand(ctx)
 			keepWarm(ctx, org, a.ID)
 			none, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
-				func() reconciler.Config { c := cfg; c.KeepWarmPerOrg = -1; return c }())
+				func() reconciler.Config { c := cfg; c.KeepWarmPerOrg = limit; return c }())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(none.ReconcileAll(ctx)).To(Succeed())
 			Expect(created()).To(Equal(0))
 			var g bool
 			Expect(pool.QueryRow(ctx, `SELECT keep_warm_granted FROM agents WHERE id = $1`, a.ID).Scan(&g)).To(Succeed())
 			Expect(g).To(BeFalse(), "the request stays, not granted")
-		})
+		},
+			Entry("zero, the default (#1090)", reconciler.DefaultKeepWarmPerOrg),
+			Entry("negative", -1),
+		)
 
 		It("keeps the grant of an agent whose prepare fails once, and the next agent does not take its place", func(ctx SpecContext) {
 			first, second := onDemand(ctx), onDemand(ctx)

@@ -132,3 +132,13 @@ with it and with the code (`internal/reconciler`).
   follow-up above applies to every first run, not only those after a suspend.
 - Open (tracked, not decided here): the API and UI for the setting with the org-admin check (#100);
   preparing the image and volume at activation (#101); a per-org rate limit on sandbox starts (#27).
+
+## Amendment (2026-11-24): keep-warm defaults to none (#1090)
+
+The default of `reconciler.keepWarmPerOrg` is now 0: no agent is kept warm. The text above that says
+"default 2" records the earlier choice. A value of 0 and a negative value both grant none. An operator who
+wants warm agents sets a positive cap.
+
+Reason: on Substrate a warm agent is a running actor. It holds its full CPU and memory limits in the
+worker pool. A suspended agent resumes in about 1 second (lab measurement of 2026-11-24, issue #1090).
+The maintainer decided this on #1090.

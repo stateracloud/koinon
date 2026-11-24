@@ -13,7 +13,7 @@ function keepWarmText(agent: Pick<Agent, 'keepWarm' | 'keepWarmGranted' | 'statu
   if (!agent.keepWarm) return 'Off. The sandbox starts when a run needs it and stops when it is idle.'
   if (agent.keepWarmGranted) return 'Granted. The sandbox stays up and is not stopped when idle.'
   if (agent.status === AgentStatus.DRAFT) return 'Requested. It is granted once the agent is active, if the operator’s cap allows.'
-  return 'Requested, not granted. The operator caps keep-warm sandboxes per organisation and the oldest agents come first, so this one starts on demand. A new request waits for the next reconciler pass.'
+  return 'Requested, not granted. The operator caps keep-warm sandboxes per organisation (the install setting reconciler.keepWarmPerOrg, which is 0 by default, so none) and the oldest agents come first. Until it is granted, the sandbox starts on demand. A new request waits for the next reconciler pass.'
 }
 
 /**
