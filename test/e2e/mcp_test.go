@@ -450,6 +450,18 @@ func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 	return mcpPath{}
 }
 
+// approvedCallMCPPath is the MCP path of a call a human approved: koinon-api makes it to
+// KOINON_GATEWAY_MCP_URL, which names the koinon-mcp-gateway Service when the driver is koinon.
+func approvedCallMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "koinon-api", "-o",
+		`jsonpath={.spec.template.spec.containers[*].env[?(@.name=="KOINON_GATEWAY_MCP_URL")].value}`).CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-api: %s", out)
+	Expect(strings.TrimSpace(string(out))).NotTo(BeEmpty(), "KOINON_GATEWAY_MCP_URL of koinon-api")
+	return mcpPath{koinon: strings.Contains(string(out), "koinon-mcp-gateway.")}
+}
+
 // orgServerAgentHeader is the agent header a server an org registered sees on this path (#1235). Koinon's
 // MCP path never sends it, so the server sees none. The agentgateway render sets it on its one MCP route
 // for every target until that path is deleted, so the server sees the agent.

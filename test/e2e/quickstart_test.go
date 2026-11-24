@@ -664,7 +664,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(ap.GetExecutions()).To(BeEquivalentTo(1))
 		calls := guarded()
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
-		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "Koinon's executor made it, not the agent")
+		// The approval record (one execution) says Koinon's executor made the call. On agentgateway the
+		// server also sees the executor's agent header; Koinon's MCP path sends none to an org's server (#1235).
+		Expect(calls[0].Agent).To(Equal(approvedCallMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL")).orgServerAgentHeader("mcp-exec")),
+			"Koinon's executor made it, not the agent")
 		gw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
@@ -725,7 +728,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
 		Expect(calls[0].Args).To(Equal(scenarios.PullRequest.TrackerAskArgs))
-		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "through the gateway, with the org's executor key")
+		Expect(calls[0].Agent).To(Equal(approvedCallMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL")).orgServerAgentHeader("mcp-exec")),
+			"through the gateway, with the org's executor key (no agent header on Koinon's MCP path, #1235)")
 		Expect(calls[0].Authorized).To(BeTrue())
 
 		mw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
