@@ -88,6 +88,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		backend = openshell.New(conn)
 		now = time.Now()
 		cfg = reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
