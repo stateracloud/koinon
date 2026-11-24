@@ -19,7 +19,7 @@ here moved out of AGENTS.md in issue 842; they are unchanged.
   push, PR, board, optional auto-merge). Wait on a PR with `hack/pr-wait.sh`
   (in the background) and merge it with `hack/pr-merge.sh <PR>` (refuses a draft, reads every
   required context on the head); read why CI failed with `hack/ci-fail.sh <PR>`. Worktrees:
-  `hack/wt.sh`.
+  `hack/wt.sh`. Clean-up: `make tidy` (below).
 - Mark the PR ready (`hack/ship.sh --ready`, `gh pr ready`) before you wait on it with
   `hack/pr-wait.sh`: a draft runs nothing in CI (its `go` and `web` report "draft: not run") and its
   green is not merge evidence.
@@ -92,6 +92,19 @@ call `claim.sh`. `hack/claim.sh mine` lists your claims with their lanes. Two se
 are one holder; the lock does not separate them. Each session that runs at the same time as another
 one uses its own `--lane`. Each lane tests its own worktree: `hack/e2e-remote.sh` tests the
 checkout it is run from, so run it from the lane's worktree.
+
+**Clean-up.** `make tidy` is a dry run: it prints one line for each linked worktree, local branch,
+claim and (with `DOCKER=1`) group of Docker objects, and what it would do. `make tidy APPLY=1` does
+it. The tool is `hack/cmd/worktidy` (`go tool worktidy -h` lists the flags: `--json`, `--force-dirty`,
+`--patch-dir`, `--force-docker`). It removes only a worktree whose pull request is merged and whose
+tree is clean, through `hack/wt.sh rm` (which also checks claims and processes). A dirty tree stays,
+unless you pass `--force-dirty`: then the tool first saves staged, unstaged and untracked changes as
+patches under `$KOINON_WT_ROOT/.patches` and prints the path. It deletes a local branch only when
+its pull request is MERGED with that same tip and no worktree holds it. It never touches the main
+checkout or a worktree with an open pull request. It only reports a claim that has no worktree and
+no open pull request; release it with `hack/claim.sh release`. When gh or the network fails, the
+state is "unknown" and nothing is removed. Docker cleaning never removes volumes and refuses while a
+container runs or a kind cluster exists, unless you pass `--force-docker`.
 
 ## Working alongside another human
 

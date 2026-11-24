@@ -58,6 +58,10 @@ test-web: ## Run web tests
 .PHONY: lint
 lint: lint-go lint-web lint-proto migrate-lint adr-lint audit-batch-lint ## Run all linters
 
+.PHONY: tidy
+tidy: ## Report finished worktrees, merged branches and old claims (APPLY=1 cleans, DOCKER=1 adds Docker; hack/cmd/worktidy)
+	$(GO) tool worktidy $(if $(APPLY),--apply) $(if $(DOCKER),--docker)
+
 .PHONY: lint-go
 lint-go: ## Lint Go code (per-worktree lock and cache, #236)
 	hack/golangci-lint.sh run

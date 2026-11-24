@@ -13,6 +13,7 @@ tool (
 	github.com/stateracloud/koinon/hack/cmd/bash5lint
 	github.com/stateracloud/koinon/hack/cmd/dashboardmetrics
 	github.com/stateracloud/koinon/hack/cmd/drillwebrun
+	github.com/stateracloud/koinon/hack/cmd/worktidy
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 	gotest.tools/gotestsum
