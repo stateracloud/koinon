@@ -40,8 +40,7 @@ const substrateImage2 = "registry.example.com/koinon/sandbox@sha256:111111111111
 // (reconciler.Config.Checkpoints). The fake Substrate keeps an actor's files across a suspend and
 // drops them with DeleteActor, as Substrate does with the snapshot prefix (lab, 2026-11-24).
 //
-// Each spec that shows a loss of the home says so in a "HOME LOST" comment. The PR that adds these
-// specs names the same cases.
+// Each spec that shows a loss of the home says so in a "HOME LOST" comment.
 var _ = Describe("The agent home on the Substrate driver", func() {
 	const marker = "notes/marker.txt"
 	markerPath := path.Join(checkpoint.HomeDir, marker)
@@ -64,8 +63,8 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		GinkgoHelper()
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 	}
-	at := func(d time.Duration) {
-		t := time.Now().Add(d)
+	at := func(off time.Duration) {
+		t := time.Now().Add(off)
 		now.Store(&t)
 	}
 	build := func() {
@@ -218,11 +217,44 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			pass(ctx) // the pass after the deletion creates the new actor
 			running()
 			// HOME LOST: with checkpoints off, a recreation deletes the actor (and its snapshot prefix)
-			// and creates a new one from the image. Nothing restores the home.
-			Expect(cl.Calls("DeleteActor")).To(Equal(1))
+			// and creates a new one from the image. Nothing restores the home. The marker came in by an
+			// upload, not by a run: even with checkpoints on, home_dirtied_at would not protect it.
+			Expect(cl.Calls("DeleteActor")).To(Equal(1), "no second delete")
 			Expect(cl.Calls("CreateActor")).To(Equal(2))
 			Expect(row(ctx).RestoreCheckpointID.Valid).To(BeFalse(), "no checkpoint to restore from")
 			Expect(home()).To(BeNil(), "the new actor has a fresh root filesystem")
+		})
+
+		It("loses the home when the repair recreates a crashed actor", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			cl.Crash(ws, names.Sandbox, "guest kernel panic")
+			Expect(home()).To(Equal(markerBody), "the crashed actor still has its files")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("CreateActor")
+			}).Should(Equal(2))
+			running()
+			// HOME LOST: with checkpoints off, the repair path deletes the failed actor (homeGate lets
+			// it) and creates a new one. The files of the crashed actor are not read first.
+			Expect(cl.Calls("DeleteActor")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID.Valid).To(BeFalse(), "no checkpoint to restore from")
+			Expect(home()).To(BeNil())
+		})
+
+		It("keeps the suspended actor, and so the home, of a deleted agent with retention retain", func(ctx SpecContext) {
+			cfg.HomeRetention = reconciler.RetentionRetain
+			build()
+			idleStop(ctx)
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+
+			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			pass(ctx)
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			Expect(home()).To(Equal(markerBody))
+			Expect(row(ctx).State).To(Equal(store.SandboxStateRetained))
 		})
 
 		It("deletes the home with the agent", func(ctx SpecContext) {
