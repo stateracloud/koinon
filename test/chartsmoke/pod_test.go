@@ -651,7 +651,7 @@ func fillVolume(ctx context.Context, docker *testcontainers.DockerClient, image,
 	// helper, as the kubelet does (issue 1242).
 	if code, out, err := helper.Exec(ctx, []string{"chown", "-R", "0:" + strconv.Itoa(fsGroup), "/vol"}); err != nil || code != 0 {
 		o, _ := io.ReadAll(out)
-		return fmt.Errorf("set the owners of volume %s: exit %d: %v %s", name, code, err, o)
+		return fmt.Errorf("set the owners of volume %s: exit %d: %s: %w", name, code, o, err)
 	}
 	return nil
 }
