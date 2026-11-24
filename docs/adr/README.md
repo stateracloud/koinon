@@ -42,7 +42,7 @@ are in [0046](0046-adr-conventions.md).
 | [0015](0015-agent-environment-and-browser.md) | Agent environment and browser | Accepted; amended by [0044](0044-in-sandbox-credential-exception.md) (and its amendment of 2026-11-11), [0113](0113-agent-package-access.md) and [0114](0114-model-credentials-by-type.md) |
 | [0016](0016-harness-and-deployment.md) | Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster | Accepted |
 | [0017](0017-board-and-chat-interaction-model.md) | Board and chat are two views of one ticket | Superseded by [0055](0055-chat-as-its-own-object.md) and [0065](0065-work-model-tasks-inbox.md) |
-| [0018](0018-v1-screens.md) | v1 screens and automatic personal orgs | Accepted |
+| [0018](0018-v1-screens.md) | v1 screens and automatic personal orgs | Accepted; the screen list, the home screen, the platform admin screen and the personal org in the org list superseded in part by [0126](0126-web-ui-v2.md) |
 | [0019](0019-personal-agents-and-teams.md) | Personal agents call team agents through membership | Accepted |
 | [0020](0020-agent-builder-and-templates.md) | Agent builder proposes, admins activate | Accepted |
 | [0021](0021-connector-setup-guides.md) | Machine-readable connector setup guides and secure inputs | Accepted |
@@ -81,7 +81,7 @@ are in [0046](0046-adr-conventions.md).
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted; amended 2026-10-24 (below): detection, saving the work, the loop guard |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted; amended 2026-10-23, 2026-10-24, 2026-10-28, 2026-10-29, 2026-10-31, 2026-11-06 and 2026-11-11 (below); price order amended by [0098](0098-price-catalogue-updates-from-public-sources.md) |
-| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below) |
+| [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted; amended 2026-10-24, 2026-10-30, 2026-10-31 and 2026-11-01 by [0084](0084-leak-guard.md) (below); where the MCP server screens live (the org page at `/mcp-servers`, the platform list in the console) superseded in part by [0126](0126-web-ui-v2.md) |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted; amended 2026-10-25 and 2026-10-26 (below) |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted; amended by [0112](0112-harness-definitions.md) |
 | [0060](0060-migrations-as-a-job.md) | Migrations run as a Job, not on start; an Argo CD Sync hook under Argo | Accepted |
@@ -148,3 +148,4 @@ are in [0046](0046-adr-conventions.md).
 | [0123](0123-a2a-external-edge.md) | External A2A edge | Proposed |
 | [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |
 | [0125](0125-hide-unreviewed-mcp-tools.md) | Hide MCP tools that no admin reviewed | Proposed (needs main: ADR number) |
+| [0126](0126-web-ui-v2.md) | Web UI v2: brand look, org home, platform console and new-agent flow | Accepted (maintainer decisions of 2026-11-24; mockups approved: "Mocks lgtm") |

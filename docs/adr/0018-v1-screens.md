@@ -7,7 +7,7 @@ decides: design.md#18
 ---
 # 0018. v1 screens and automatic personal orgs
 
-- Status: Accepted
+- Status: Accepted; the screen list, the home screen, the platform admin screen and the personal org in the org list superseded in part by [0126](0126-web-ui-v2.md)
 - Amended by: [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
 - Area: frontend-ux
