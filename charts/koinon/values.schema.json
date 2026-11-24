@@ -847,7 +847,8 @@
                 "objectStoreApp": {"$ref": "#/definitions/nonEmpty"},
                 "objectStorePort": {"type": "integer", "minimum": 1, "maximum": 65535},
                 "atenetEgressSelector": {"type": "object"},
-                "apiServerCIDRs": {"type": "array", "items": {"type": "string"}},
+                "apiServerApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "apiServerPorts": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
                 "extraEgress": {"type": "array", "items": {"type": "object"}},
                 "telemetry": {
                   "type": "object",

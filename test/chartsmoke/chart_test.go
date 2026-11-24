@@ -37,6 +37,8 @@ type rendered struct {
 	Foreign []runtime.Object
 	// Ignored lists the kinds the smoke test does not apply (policies, Services, ...).
 	Ignored map[string]int
+	// IgnoredNames lists the metadata names of the NetworkPolicies in Ignored, in render order.
+	IgnoredNames map[string][]string
 }
 
 func (r *rendered) deployment(name string) *appsv1.Deployment {
@@ -88,7 +90,7 @@ func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *re
 	if err := cmd.Run(); err != nil {
 		panic(fmt.Sprintf("helm template -f %s: %v\n%s", valuesFile, err, stderr.String()))
 	}
-	r := &rendered{Ignored: map[string]int{}}
+	r := &rendered{Ignored: map[string]int{}, IgnoredNames: map[string][]string{}}
 	dec := scheme.Codecs.UniversalDeserializer()
 	for _, doc := range strings.Split(out.String(), "\n---") {
 		if strings.TrimSpace(stripComments(doc)) == "" {
@@ -121,6 +123,9 @@ func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *re
 			r.Objects = append(r.Objects, obj)
 		default:
 			r.Ignored[gvk.Kind]++
+			if gvk.Kind == "NetworkPolicy" {
+				r.IgnoredNames[gvk.Kind] = append(r.IgnoredNames[gvk.Kind], mustMeta(obj).GetName())
+			}
 		}
 	}
 	return r

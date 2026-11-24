@@ -219,7 +219,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      image is a pinned worker image. Every other container in the namespace adds nothing and is never Unconfined.
      The namespace has no capability ceiling. A spec compares the sets with a vendored copy of the source at the
      pinned commit and fails on a change.
-   - **One image source.** atelet reaches one image source (a pull-through cache): a pod selector for a cache in
+   - **One image source** (at the network layer for ports other than the apiServerPorts of amendment 10). atelet reaches one image source (a pull-through cache): a pod selector for a cache in
      the cluster, or an operator CIDR and port. Actor image references are rewritten by the driver (item 9; the operator values
      are `imageMirrors` and `imageRegistry`), with the digest kept. The mirror name is chosen once, because it is part of the actor
      template hash. The default in-cluster cache is in item 9.
@@ -227,7 +227,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      namespace, because the installer opens a port-forward to the object store. Each request carries an audit
      annotation. No identity may do it in the worker namespace.
    - **Fence.** The control-plane namespace has one default-deny egress policy and per-app allow rules, so a pod with
-     no rule has no egress.
+     no rule has no egress (except the apiServerPorts rule, amendment 10, for the pods that carry it).
    - **Observer.** The Koinon reconciler may read the worker namespace, to say why a sandbox does not start: a
      `Role` and `RoleBinding` (`substrate-observer.yaml`, issue #1162) with `get`, `list` and `watch` on pods, events,
      Deployments, ReplicaSets and WorkerPools. No write, no Secret and no pod subresource. It replaces the OpenShell
@@ -235,7 +235,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
 9. **Amendment (issue #1170): the default image cache.**
    - **Decision.** With the Substrate driver the chart installs a Zot pull-through registry in the release namespace
      (`execution.substrate.imageCache`, on by default). It is the one image source of atelet. Only the cache has
-     internet egress: 443 to the internet, not to the private ranges, and only to the upstreams that are listed
+     a purpose-made internet route (except the apiServerPorts rule, amendment 10): 443 to the internet, not to the private ranges, and only to the upstreams that are listed
      (`ghcr.io`, `docker.io`, `quay.io`; the list is a value). The `substrate-image-source` NetworkPolicy of
      item 8 selects the cache pods in the release namespace on the cache port.
    - **The cache needs no trust.** atelet checks the digest of every image. A reference without a digest is
@@ -263,20 +263,60 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
      Secret to make a new one. A new certificate needs a restart of the cache pod.
    - **Zot.** The config sets `http.compat: [docker2s2]`: without it Zot refuses Docker media types.
    - **Open: not proven on a cluster.** The Zot sync configuration has not run against a live Zot, and the kind
-     proof (an actor starts with atelet internet egress denied) is not done.
+     proof (an actor starts with atelet internet egress denied) is not done. Since amendment 10 atelet can open TCP 443 and
+     6443 to any address, so that proof can show only that other ports are denied.
    - **Air gap.** The operator turns the cache off (`imageCache.enabled=false`) and sets `imageMirrors` (a map from
      a host to a mirror prefix) or `imageRegistry` for one mirror, and an `imageSource` CIDR for the mirror. The
      chart refuses both at once, so atelet has one source.
    - **Rejected.** Kyverno or a CNI feature to name a registry (a NetworkPolicy cannot name one; rules at the
      cluster edge are the operator's). `global.registryMirrors` for the rewrite (above). A certificate from the Helm
      random functions (not deterministic, and it changes on every render).
-7. **No internet egress for atelet.** The gVisor runtime asset comes from the cluster object store, not from
+7. **No internet egress for atelet** (except the apiServerPorts rule, amendment 10: TCP 443 and 6443 to any address). The gVisor runtime asset comes from the cluster object store, not from
    the internet. Koinon stages the pinned gVisor tarball in the object store and ships a `SandboxConfig` with
    an `s3://` source and the same SHA-256. With that, atelet needs no egress to the internet, and default-deny
    holds in the control-plane namespace too. Status: the staging is built
    ([#1157](https://github.com/stateracloud/koinon/issues/1157); `substrate-install.md`). The read by atelet from
    the cluster store, with egress denied, is not yet proven. The kind check must prove it, and must restart every
    DaemonSet in `ate-system` after the policies apply.
+10. **Amendment (issue #1172): the API server route is a port rule.**
+   - **Decision.** The fenced control pods that call the Kubernetes API server may open TCP on the ports in
+     `execution.substrate.workerNetworkPolicy.apiServerPorts` (default 443 and 6443) to any address. These pods are the
+     `apiServerApps` (default atelet, ate-controller, ate-api-server and atenet-router: their own policy, not the control policy), the `apiOnlyApps`, the certificate (podcert) controller
+     and the Prometheus of `otel-system`. The rule names no destination. The value `apiServerCIDRs` is removed: an
+     `ipBlock` is not a safe peer (below), so a narrowing value would only fail on some CNIs. An operator who wants a
+     narrower rule disables the chart fence for a namespace and writes their own, or adds a rule with `extraEgress`.
+   - **Why.** NetworkPolicy has no CNI-neutral peer for the API server. The `kubernetes` Service address and its
+     endpoint addresses match as an `ipBlock` on some CNIs and not on others. On kindnet only the endpoint address
+     matches. On Cilium in its default `policy-cidr-match-mode`, an `ipBlock` never matches a node address, so no
+     `apiServerCIDRs` value works and the podcert controller lost the API server with `i/o timeout`. Other charts
+     solve the same problem with ports and no destination: cert-manager allows TCP 80, 443 and 6443 with no `to`,
+     and Bitnami charts have `kubeAPIServerPorts` (443, 6443, 8443) to any address
+     (research note 2026-11-24, `apiserver-egress-networkpolicy`).
+   - **Cost.** A compromised control pod can open a connection to any server on these ports, in the cluster or on the
+     internet, not only to the API server. This is wider than the old address rule on a CNI that matched it. What
+     stays: the rule is TCP only and covers only the pods named above. Actor and worker pods get no new egress (section
+     2.4 holds).
+   - **atenet-router is on the actor path.** `atenet-router` is in `apiServerApps`: its ingress mode
+     (`--mode=ingress`, the `routerAddress` of the driver) watches EndpointSlices through client-go (Substrate v1.0.0,
+     `cmd/atenet/internal/router/router.go:73-95`, Role in `manifests/ate-install/atenet-router.yaml:16-50`). It also
+     handles actor traffic. It now has TCP 443 and 6443 to any address, the internet included. On main it had no
+     internet route. A compromise of the router through actor traffic therefore gets this route out.
+   - **atenet-egress.** `atenet-egress` is in `controlPlaneApps` but NOT in `apiServerApps`: it has no API server
+     client (`atenet-egress.yaml:30-38`, no RBAC), so it gets no TCP route to any address and its egress to the
+     gateway and API stays the only route out. The render fails when `apiServerApps` lists the app of the egress pods.
+   - **Items 7 and 9 and the image source.** Items 7, 8 and 9 now hold with one exception: atelet (and every other pod
+     of `apiServerApps`) can open TCP 443 to any address, so "no internet egress for atelet" and "one image source"
+     hold at the network layer for other ports only. A TLS registry on 443 is reachable at L3, and only the image
+     rewrite and the `SandboxConfig` source limit atelet to the cache. The other routes of the fence are unchanged.
+     The pods still need a valid ServiceAccount token or a client certificate to use the API server, and the API
+     server's own RBAC and the admission policies of item 6 bind what they can do.
+   - **What would replace it.** A peer for the API server that works on every CNI. The Network Policy API
+     (`ClusterNetworkPolicy`, sig-network) has a `nodes` peer, which is alpha, so the chart cannot use it. Track it
+     and replace the port rule when it is generally available and the CNIs we run support it.
+   - **Proof.** `test/e2e/kind/apiserver-egress.sh` (manual, not in CI) makes a kind cluster, applies the chart's fence,
+     and shows that a fenced pod reaches TCP 6443 at an address that the policy does not name and cannot reach another
+     port, and that a worker pod cannot reach 6443. The chart check `hack/chart-check.sh` asserts that only the expected
+     policies carry an egress rule without a destination.
 
 ### 7. OpenShell driver profile for the window
 

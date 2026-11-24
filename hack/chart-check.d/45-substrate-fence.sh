@@ -36,8 +36,10 @@ grep -Fq 'app: "opentelemetry-collector"' <<<"$back" || fail "the trace backend 
 if grep -Fq 'egress' <<<"$back"; then fail "the trace backend must have no egress rule"; fi
 # The identity-certificate controller reaches the API server only and takes no ingress.
 pcd=$(docof "name: koinon-substrate-podcert-controller\n" <<<"$fdocs")
-grep -Fq 'cidr: "192.0.2.10/32"' <<<"$pcd" || fail "the podcert controller must reach the API server CIDRs"
+apiport "the podcert controller" "$pcd"
 if grep -Eq '^  ingress:|namespaceSelector|podSelector: \{\}' <<<"$pcd"; then fail "the podcert controller must reach the API server only"; fi
+prom=$(docof "name: koinon-substrate-otel-prometheus\n" <<<"$fdocs")
+apiport "the otel Prometheus policy" "$prom"
 # Switches and failures.
 lacks "no otel fence when switched off" 'otel-default-deny' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.otelSystem.enabled=false
 lacks "no podcert fence when switched off" 'podcert-default-deny' "${wsub[@]}" --set execution.substrate.workerNetworkPolicy.podcertSystem.enabled=false

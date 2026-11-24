@@ -914,8 +914,8 @@ execution:
     # NetworkPolicies of both namespaces. No CNI-specific feature.
     # Worker namespace: worker pods may reach atenet-egress and DNS, and nothing else
     # (ADR 0120 section 2.4). Control-plane namespace: the pods whose `app` label is in
-    # controlPlaneApps may reach each other, the worker namespace, the gateway, DNS and the Kubernetes
-    # API server. A pod with another `app` label is not selected by that policy (it is not fenced),
+    # controlPlaneApps may reach each other, the worker namespace, the gateway and DNS. The Kubernetes
+    # API server ports go only to apiServerApps and apiOnlyApps (their own policies, ADR 0120 amendment 10). A pod with another `app` label is not selected by that policy (it is not fenced),
     # so keep the list in step with the Substrate manifests.
     workerNetworkPolicy:
       enabled: true
@@ -928,13 +928,15 @@ execution:
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
       # only ingress rules for them. A pod that a later Substrate version adds has no egress until a list names it.
-      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerCIDRs. The installer
+      # The pods that call the Kubernetes API server and nothing else: DNS and apiServerPorts (any address). The installer
       # applies k8s-credential-provider with a credential provider only; a policy that selects no pod does nothing.
       apiOnlyApps: [k8s-credential-provider]
       # The Job pods that have no `app` label, selected by `batch.kubernetes.io/job-name`: the object store
       # bucket-init Job (kind/rustfs.yaml:93-133). They get DNS and the object store S3 port only.
       # The ONE image source of the node agent (ADR 0120 section 6, issue 1089): the pods in `apps` (atelet) get egress
-      # to it and to no other registry. Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
+      # to it and to no other registry at the image source rule; atelet can still open TCP on apiServerPorts (443) to any
+      # address, so a TLS registry on 443 is reachable at L3 and only the image rewrite and the SandboxConfig source limit it
+      # (ADR 0120 amendment 10). Set it to an in-cluster pull-through cache (podSelector, and namespaceSelector
       # when it runs in another namespace) OR to operator cidrs, with the port. Both set: the render fails. None set:
       # the node agent has no image egress (fail closed), which a cluster that serves images from the node needs.
       # With imageCache.enabled (the default) the chart sets this itself, and setting podSelector or cidrs fails the
@@ -955,14 +957,27 @@ execution:
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
-      # CIDRs of the Kubernetes API server. Only the control-plane pods get this route; worker pods get none
-      # (ADR 0120 section 2.4). Required while the policy is enabled: the render fails when empty, because the
-      # policy would cut Substrate's control plane off from the Kubernetes API server. Name the address that
-      # the CNI matches, and no default holds for every cluster: a CNI that matches before the Service
-      # translation sees the ClusterIP of the `kubernetes` Service (`kubectl get svc kubernetes -n default`,
-      # for example 10.96.0.1 on kind by default, 10.250.0.1 in the kind e2e cluster); one that matches after
-      # it sees the endpoint (`kubectl get endpoints kubernetes -n default`). When in doubt, list both.
-      apiServerCIDRs: []
+      # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Keep a
+      # pod out of this list unless it needs it. Evidence, Substrate v1.0.0 (b34fbee7):
+      #  - atenet-router DOES call it: ingress mode builds a client-go clientset for the EndpointSlice resolver
+      #    (cmd/atenet/internal/router/router.go:73-95, "Only ingress needs Kubernetes"). Its manifest has
+      #    ServiceAccount atenet-router, Role atenet-router-endpointslices (endpointslices get, list, watch) and a
+      #    RoleBinding (manifests/ate-install/atenet-router.yaml:16-50, serviceAccountName at :194), and no
+      #    automountServiceAccountToken override, so the token is mounted.
+      #  - atenet-egress does NOT: ServiceAccount only, "No RBAC is bound ... on purpose ... no Kubernetes access"
+      #    (atenet-egress.yaml:30-38, serviceAccountName at :1181), and --mode=egress builds no client
+      #    (router.go:75-79). It stays out: it carries worker traffic out and gets no TCP route to any address.
+      apiServerApps: [atelet, ate-controller, ate-api-server, atenet-router]
+      # TCP ports of the Kubernetes API server. The pods that call the API server (the apiServerApps, the
+      # apiOnlyApps, the podcert controller, Prometheus of otel-system) may open these ports to ANY address, and no
+      # worker pod gets this route (ADR 0120 section 2.4 and amendment 10). The rule names no address because
+      # NetworkPolicy has no CNI-neutral peer for the API server: an ipBlock for the `kubernetes` Service address
+      # or for its endpoint addresses matches on some CNIs and times out on others (Cilium in its default mode never
+      # matches an ipBlock against a node address). The cost: a compromised control pod can reach any server on
+      # these ports. The list must not be empty (the render fails: an empty port list opens every port). Add the
+      # port of a managed control plane when it is not 443 or 6443 (`kubectl get endpoints kubernetes -n default`
+      # shows it).
+      apiServerPorts: [443, 6443]
       # Extra egress rules for the control-plane pods, in networking.k8s.io/v1 form, for an object store
       # or database outside the cluster.
       extraEgress: []
@@ -996,15 +1011,17 @@ execution:
         # ate-api-server.yaml:80, atelet.yaml:143 and atenet-router.yaml:192.
         scrapePorts: [9090]
       # Fence of the namespace of the identity-certificate controller (pod-certificate-controller.yaml): default deny,
-      # and the Kubernetes API server for the controller. It serves no port and calls nothing else.
+      # and the Kubernetes API server ports (apiServerPorts, to any address) for the controller. It serves no port and calls
+      # nothing else.
       podcertSystem:
         enabled: true
         namespace: podcertificate-controller-system
         app: podcertificate-controller
 
     # The ONE image source of the node agent (issue #1170, ADR 0120 section 6.9). atelet pulls every actor image itself,
-    # and the Substrate namespaces deny internet egress, so atelet reaches one pull-through cache. By default the chart runs
-    # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has internet egress, and
+    # and the Substrate namespaces deny internet egress except the apiServerPorts rule (TCP 443 and 6443 to any address
+    # for the apiServerApps, ADR 0120 amendment 10), so atelet reaches one pull-through cache. By default the chart runs
+    # it: a Zot registry in Koinon's namespace with the sync extension on demand. Only the cache has a purpose-made internet route (the apiServerPorts rule is the exception), and
     # atelet checks the manifest and every layer against the digest of the reference, so the cache needs no trust.
     # Actor image references are rewritten to it in the driver (the digest is kept): <cache host>/<upstream host>/<path>.
     # CHOOSE THE MIRROR NAME ONCE: the rewritten reference is part of the actor template hash, so a changed fullname,

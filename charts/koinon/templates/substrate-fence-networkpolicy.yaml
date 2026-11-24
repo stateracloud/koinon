@@ -32,7 +32,6 @@ A CNI that does not enforce NetworkPolicy ignores all of it (the preflight probe
 {{- $tel := $np.telemetry }}
 {{- $otel := $np.otelSystem }}
 {{- $pc := $np.podcertSystem }}
-{{- if and (or $otel.enabled $pc.enabled) (not $np.apiServerCIDRs) }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerCIDRs is empty: the fence of otel-system and podcertificate-controller-system would cut them off from the Kubernetes API server." }}{{- end }}
 {{- $otlp := list }}
 {{- range $tel.ports }}{{- $otlp = append $otlp (dict "port" . "protocol" "TCP") }}{{- end }}
 {{- if and $otel.enabled (not $otel.collectorReadPorts) }}{{- fail "execution.substrate.workerNetworkPolicy.otelSystem.collectorReadPorts is empty: an empty port list in a NetworkPolicy would open every port" }}{{- end }}
@@ -170,14 +169,7 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-    - to:
-        {{- range $np.apiServerCIDRs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - {port: 443, protocol: TCP}
-        - {port: 6443, protocol: TCP}
+{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
     - to:
         - podSelector:
             matchLabels:
@@ -226,13 +218,6 @@ spec:
       app: {{ $pc.app | quote }}
   policyTypes: [Egress]
   egress:
-    - to:
-        {{- range $np.apiServerCIDRs }}
-        - ipBlock:
-            cidr: {{ . | quote }}
-        {{- end }}
-      ports:
-        - {port: 443, protocol: TCP}
-        - {port: 6443, protocol: TCP}
+{{- include "koinon.substrate.apiServerEgress" $ | nindent 4 }}
 {{- end }}
 {{- end }}
