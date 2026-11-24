@@ -78,7 +78,7 @@ var _ = Describe("KEK Secret guard policies", Label("escape", "admission"), Orde
 			"--set", "secrets.kek.kms.backend=openbao", "--set", "secrets.kek.kms.openbao.address=https://bao.example:8200",
 			"--set", "secrets.kek.kms.openbao.key=koinon-kek",
 			// The gateway-key guard (driver koinon, the default since #1239) renders from the same
-			// template; it has its own switch and is not what these specs test.
+			// template; it has its own switch and its own specs (admission_gwkey_test.go).
 			"--set", "gateway.mcp.koinon.recipientKey.guard.enabled=false")
 		Expect(policies).To(HaveLen(2))
 		Expect(bindings).To(HaveLen(2))
