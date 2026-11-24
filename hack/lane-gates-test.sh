@@ -35,6 +35,7 @@ case ${!v:-ok} in
 ok) echo "$g ok 1s" ;;
 fail) echo "$g FAIL 1s"; echo "boom"; exit 1 ;;
 incomplete) echo "$g INCOMPLETE 1s (skipped: docker)"; echo "INCOMPLETE (missing docker)"; exit 3 ;;
+incomplete_vc) echo "$g INCOMPLETE 1s (skipped: volumecopy)"; echo "INCOMPLETE (missing volumecopy)"; exit 3 ;;
 realfail) # full log: failed spec early, EPERM text in the tail, like Koinon's own sandbox tests
 	printf -- '--- FAIL: TestSandbox (0.1s)\nline\nline\nline\nline\nline\nopen /x: operation not permitted\ngo-test verdict: FAILED: x\n' >"$STUB_DIR/$g.inner"
 	echo "$g FAIL 1s log=$STUB_DIR/$g.inner"; tail -n 5 "$STUB_DIR/$g.inner" | sed 's/^/  | /'; exit 1 ;;
@@ -111,6 +112,10 @@ expect "fail" 1 '^gate=go rc=1 seconds=[0-9]+ verdict=fail log=' '^gate=tidy .*v
 # exit 3 from a gate (missing requirement): notrun with the reason, never fail.
 run STUB_GATES="go" STUB_go=incomplete
 expect "incomplete" 3 '^gate=go rc=3 .*verdict=notrun reason="missing docker"' '^lane-gates INCOMPLETE'
+
+# The chart smoke probe skipped (a runtime that does not copy into a volume): notrun with the reason.
+run STUB_GATES="chartsmoke" STUB_chartsmoke=incomplete_vc
+expect "chartsmoke volumecopy" 3 '^gate=chartsmoke rc=3 .*verdict=notrun reason="missing volumecopy"' '^lane-gates INCOMPLETE'
 
 # A real failure whose tail mentions EPERM: classified from the inner log, which is the logged path.
 run STUB_DIR="$tmp" STUB_GATES="go" STUB_go=realfail
@@ -283,6 +288,27 @@ EOF2
 chmod +x "$tmp/make-vitest"
 out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-vitest" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
 expect "vitest failure beats sandbox denial" 1 '^gate=escape rc=1 .*verdict=fail'
+# The pnpm store lock denied by a sandbox is notrun, although pnpm prints "Error:" (#1242).
+cat >"$tmp/make-pnpmlock" <<'EOF2'
+#!/usr/bin/env bash
+echo "Error: ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK"
+echo "  Failed to open the store operation lock: Operation not permitted (os error 1)"
+exit 1
+EOF2
+chmod +x "$tmp/make-pnpmlock"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-pnpmlock" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "pnpm store lock denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="sandbox denial \(pnpm store lock\)"'
+# The pnpm lock signature next to a real test failure is still a fail (failure markers win).
+cat >"$tmp/make-pnpmlock-fail" <<'EOF2'
+#!/usr/bin/env bash
+echo " FAIL  src/app.test.ts > renders"
+echo "Error: ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK"
+echo "  Failed to open the store operation lock: Operation not permitted (os error 1)"
+exit 1
+EOF2
+chmod +x "$tmp/make-pnpmlock-fail"
+out=$(cd "$repo" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-pnpmlock-fail" STUB_GATES="go" STUB_JOBS="escape" PATH="$tmp/bin-up:$PATH" bash "$script" "$nonempty_base" 2>&1); rc=$?
+expect "pnpm store lock with a real failure" 1 '^gate=escape rc=1 .*verdict=fail'
 # Hooks print a warning.
 run STUB_GATES="go"
 expect "hook warning" 0 'warning: test hook LANE_GATES_PREFLIGHT is set'

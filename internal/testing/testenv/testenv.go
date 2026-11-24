@@ -64,6 +64,11 @@ var Docker = Requirement{Name: "docker", check: dockerErr}
 // (`setup-envtest use -p path`).
 var Envtest = Requirement{Name: "envtest", check: envtestErr}
 
+// Check is a requirement of your own: name is the token KOINON_REQUIRE lists, check returns nil when
+// the machine has the feature and otherwise says what is missing. Use it for a runtime feature a
+// suite relies on and that not every machine has (testenv.Docker only proves a daemon answers).
+func Check(name string, check func() error) Requirement { return Requirement{Name: name, check: check} }
+
 // Var is a requirement met when the environment variable is set and not empty, for a suite that
 // runs against a system someone else starts (the e2e install, an OpenShell gateway).
 func Var(name, variable string) Requirement {

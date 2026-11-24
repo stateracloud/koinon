@@ -143,3 +143,16 @@ var _ = Describe("dockerCheck", func() {
 		Expect(dockerCheck(time.Second, boom)).To(MatchError(ContainSubstring("panicked: boom")))
 	})
 })
+
+var _ = Describe("Check", func() {
+	It("is met when the function returns nil and carries its error otherwise", func() {
+		Expect(Check("feature", func() error { return nil }).Err()).To(Succeed())
+		err := Check("feature", func() error { return errors.New("no feature") }).Err()
+		Expect(err).To(MatchError("no feature"))
+		skip, msg := decide(Check("feature", func() error { return errors.New("no feature") }), "")
+		Expect(skip).To(BeTrue())
+		Expect(msg).To(Equal("koinon:requires=feature: no feature"))
+		skip, _ = decide(Check("feature", func() error { return errors.New("no feature") }), "feature")
+		Expect(skip).To(BeFalse())
+	})
+})

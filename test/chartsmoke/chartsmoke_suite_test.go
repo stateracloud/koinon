@@ -61,7 +61,7 @@ func TestChartSmoke(t *testing.T) {
 var images map[string]string
 
 var _ = BeforeSuite(func(ctx SpecContext) {
-	testenv.Require(testenv.Envtest, testenv.Docker)
+	testenv.Require(testenv.Envtest, testenv.Docker, volumeCopy)
 	images = buildImages(ctx, "../..")
 	DeferCleanup(func(ctx context.Context) { removeImages(ctx, images) })
 	Expect(images).To(HaveLen(len(koinonImages)))

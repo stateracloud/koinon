@@ -598,19 +598,31 @@ func volumeFiles(data map[string][]byte, items []corev1.KeyToPath, defaultMode *
 
 // fileVolume creates a Docker volume holding the files, owned by root and group fsGroup as the
 // kubelet leaves a volume of a pod with an fsGroup (root and group 0 without one), and returns
-// its mount. Docker writes into a volume through a container, so a helper container that is
-// never started has the volume mounted while the files are copied in with their owners.
+// its mount.
 func (r *runner) fileVolume(ctx context.Context, files map[string]volumeFile, fsGroup int, target string, readOnly bool) testcontainers.ContainerMount {
 	name := uniqname.Name("chartsmoke")
 	r.dockerVolumes = append(r.dockerVolumes, name)
-	helper, err := testcontainers.Run(ctx, r.helperImage,
-		testcontainers.WithNoStart(),
+	if err := fillVolume(ctx, r.docker, r.helperImage, name, files, fsGroup); err != nil {
+		panic(err)
+	}
+	return testcontainers.ContainerMount{Source: testcontainers.GenericVolumeMountSource{Name: name}, Target: testcontainers.ContainerMountTarget(target), ReadOnly: readOnly}
+}
+
+// fillVolume writes the files into the Docker volume name (created on first use) with their owners.
+// Docker writes into a volume through a container. The helper container must be RUNNING during the
+// copy: a Docker-compatible runtime may not copy into the volumes of a created or exited container
+// (the copy succeeds and the volume stays empty), while moby does (issue 1242). The helper runs
+// `sleep` and is removed after the copy.
+func fillVolume(ctx context.Context, docker *testcontainers.DockerClient, image, name string, files map[string]volumeFile, fsGroup int) error {
+	helper, err := testcontainers.Run(ctx, image,
+		testcontainers.WithEntrypoint("sleep"), testcontainers.WithCmd("600"),
 		testcontainers.WithMounts(testcontainers.VolumeMount(name, "/vol")))
 	if helper != nil {
-		defer func() { _ = testcontainers.TerminateContainer(helper) }()
+		// sleep as PID 1 ignores SIGTERM: do not wait out the stop grace period.
+		defer func() { _ = testcontainers.TerminateContainer(helper, testcontainers.StopTimeout(0)) }()
 	}
 	if err != nil {
-		panic(fmt.Sprintf("create the helper container for volume %s: %v", name, err))
+		return fmt.Errorf("start the helper container for volume %s: %w", name, err)
 	}
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -631,10 +643,17 @@ func (r *runner) fileVolume(ctx context.Context, files map[string]volumeFile, fs
 		must(err)
 	}
 	must(tw.Close())
-	if _, err := r.docker.CopyToContainer(ctx, helper.GetContainerID(), client.CopyToContainerOptions{DestinationPath: "/", Content: &buf}); err != nil {
-		panic(fmt.Sprintf("fill volume %s: %v", name, err))
+	if _, err := docker.CopyToContainer(ctx, helper.GetContainerID(), client.CopyToContainerOptions{DestinationPath: "/", Content: &buf}); err != nil {
+		return fmt.Errorf("fill volume %s: %w", name, err)
 	}
-	return testcontainers.ContainerMount{Source: testcontainers.GenericVolumeMountSource{Name: name}, Target: testcontainers.ContainerMountTarget(target), ReadOnly: readOnly}
+	// moby keeps the group of the tar entries; another runtime may write them as root and group 0,
+	// so a pod user that reads the file through its fsGroup is denied. Set the owners in the running
+	// helper, as the kubelet does (issue 1242).
+	if code, out, err := helper.Exec(ctx, []string{"chown", "-R", "0:" + strconv.Itoa(fsGroup), "/vol"}); err != nil || code != 0 {
+		o, _ := io.ReadAll(out)
+		return fmt.Errorf("set the owners of volume %s: exit %d: %s: %w", name, code, o, err)
+	}
+	return nil
 }
 
 func must(err error) {

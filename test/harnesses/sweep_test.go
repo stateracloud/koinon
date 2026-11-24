@@ -81,7 +81,10 @@ var _ = Describe("koinon-agentd's sandbox sweep", func() {
 		name, job := container(ctx, "exec sleep infinity", "KOINON_SANDBOX_STANDIN=1")
 		stdout, stderr, code := tryExec(ctx, name, "/bin/sh", "-c", "kill() { :; }\n"+script, "sweep")
 		Expect(code).To(Equal(1), stderr)
-		Expect(stderr).To(ContainSubstring("still running: " + job))
+		// The sweep lists every live process of the user in /proc (lexicographic) order, so the job's
+		// current `sleep 0.1` child (a live process too, correctly counted) can come before the job
+		// whenever its PID sorts lower ("305 4"): match the job anywhere in the list (issue 1242).
+		Expect(stderr).To(MatchRegexp(`(?m)^still running:( [0-9]+)* ` + job + `( [0-9]+)*$`))
 		Expect(stdout).To(MatchRegexp(`(?m)^survivors: .*\b` + job + `:[0-9]+\b`))
 		var survivors []string
 		for _, l := range strings.Split(stdout, "\n") {
