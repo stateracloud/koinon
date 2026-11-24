@@ -558,6 +558,45 @@ render. Only the pods that call the API server use this rule; worker pods never 
 {{- end }}
 
 {{/*
+koinon.substrate.workerPoolImage: the worker image of the WorkerPool that the chart makes, after the registry mirrors
+(koinon.imageRef), or "" when the chart makes no pool. An empty workerPool.workerImage takes the worker image of the
+pinned Substrate release for the pool's class: <repository>/ateworker-<class>:<version>. The pin is the one of
+internal/preflight/substratepin.go (SubstratePinnedImageRepo, SubstratePinnedVersion); test/chartsmoke fails when the two
+differ. Substrate v1.0.0 publishes tags only (see workerPolicy.digestExemptIdentities); pin a digest in workerImage.
+*/}}
+{{- define "koinon.substrate.pinnedImageRepo" -}}ghcr.io/agent-substrate/substrate{{- end }}
+{{- define "koinon.substrate.pinnedVersion" -}}v1.0.0{{- end }}
+{{/*
+koinon.substrate.workerMemoryNeed gives the memory (bytes, float) that one worker pod's limit must have to
+place an actor with a memory limit of .mem bytes, for sandbox class .class. The worker offers its pod
+limits.memory less a reserve as capacity, and the scheduler books each actor at its limit plus the
+per-actor overhead of the class. Substrate v1.0.0 (b34fbee7):
+- reserve 64Mi in both classes: 32Mi + 2 x 16Mi (cmd/ateworker-gvisor/memory.go:27-35,
+  cmd/ateworker-microvm/run.go:152 with checkpoint.go:336-337)
+- overhead: gvisor none (cmd/ateworker-gvisor/main.go:315-328); microvm 4Mi + 8Mi per GiB of the limit
+  (cmd/ateworker-microvm/run.go:147, booked by cmd/ateapi/internal/scheduling/scheduling.go:278-293)
+*/}}
+{{- define "koinon.substrate.workerMemoryNeed" -}}
+{{- $mi := 1048576.0 -}}
+{{- $need := addf .mem (mulf 64.0 $mi) -}}
+{{- if eq .class "microvm" -}}
+{{- $need = addf $need (mulf 4.0 $mi) (mulf (divf .mem 1073741824.0) (mulf 8.0 $mi)) -}}
+{{- end -}}
+{{- $need -}}
+{{- end }}
+
+{{- define "koinon.substrate.workerPoolImage" -}}
+{{- $p := .Values.execution.substrate.workerPool -}}
+{{- if and (eq (include "koinon.substrate" .) "true") $p.enabled -}}
+{{- $img := $p.workerImage -}}
+{{- if not $img -}}
+{{- $img = printf "%s/ateworker-%s:%s" (include "koinon.substrate.pinnedImageRepo" .) $p.sandboxClass (include "koinon.substrate.pinnedVersion" .) -}}
+{{- end -}}
+{{- include "koinon.imageRef" (list . $img) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 koinon.narrowCIDR fails the render when a CIDR of workerNetworkPolicy.imageSource.cidrs is wider than one image source
 needs (issue #1176). The rule reads the prefix length, so every spelling of a range is caught (0.0.0.0/0, 0.0.0.0/1,
 1.0.0.0/8, ::/0, 0::/0, 2000::/3):

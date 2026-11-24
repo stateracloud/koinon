@@ -867,6 +867,9 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 		// The default exempts the platform controllers from the digest rule (worker images are tags in
 		// Substrate v1.0.0, #1140). The specs test the rule itself, so they exempt nobody.
 		"--set", "execution.substrate.workerPolicy.digestExemptIdentities={}",
+		// The default WorkerPool has a tag image, which the chart refuses without the exemption; the specs
+		// test the policy, not the pool.
+		"--set", "execution.substrate.workerPool.enabled=false",
 		"--set", "execution.substrate.workerPolicy.workerShapes.gvisor.images={"+workerDigest+"}",
 		"--set", "execution.substrate.workerPolicy.workerShapes.microvm.images={"+microvmDigest+"}",
 		"--set", "sandboxObserver.enabled=false", "--set", "sandboxNetworkPolicy.enabled=false", "--set", "sandboxLimitRange.enabled=false",

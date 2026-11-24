@@ -142,9 +142,12 @@ echo "== duplicate list entries"
 go run ./hack/chartlint "$out"/*.yaml
 
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
+# The CRD kinds that no catalog has (Substrate's ate.dev WorkerPool, issue #1089) are in hack/chart-check.d/schemas,
+# made from the CRDs of the pinned release: kubeconform checks them, it does not skip them.
 "${KUBECONFORM[@]}" \
 	-strict -summary \
 	-kubernetes-version "$KUBERNETES_VERSION" \
 	-schema-location default \
+	-schema-location "hack/chart-check.d/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
 	-schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/${CRDS_CATALOG}/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
 	"$out"/*.yaml

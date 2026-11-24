@@ -78,9 +78,10 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		mg := &fakeModelGateway{}
 		cfg := reconciler.Config{
-			Prices:      prices.NewResolver(pricing.Embedded()),
-			Gateway:     reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			ToolServers: map[string]string{"github": toolsURL},
+			KeepWarmPerOrg: 2,
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			ToolServers:    map[string]string{"github": toolsURL},
 			Harnesses: map[string]reconciler.Harness{
 				harness.OpenCode: {Image: image, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 			},

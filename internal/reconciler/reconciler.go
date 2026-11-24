@@ -81,8 +81,10 @@ const (
 // Defaults.
 const (
 	DefaultIdleTimeout = 10 * time.Minute
-	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org (old issue 315).
-	DefaultKeepWarmPerOrg = 2
+	// DefaultKeepWarmPerOrg is the default cap of keep-warm sandboxes per org: none. A warm agent is
+	// a running actor that holds its full CPU and memory limits in the worker pool, and a suspended
+	// agent resumes in about a second (measured, #1090).
+	DefaultKeepWarmPerOrg = 0
 	DefaultResyncInterval = 30 * time.Second
 	// DefaultLeaderHeartbeat is how long the leader's lock connection may be silent before the
 	// leader checks it with a query (issue 635).
@@ -176,7 +178,7 @@ type Config struct {
 	// SandboxJobs bounds the per-sandbox jobs running at once. Default 8.
 	SandboxJobs int
 	// KeepWarmPerOrg caps the sandboxes an org's admins can keep warm (agents.keep_warm, old issue 315).
-	// Default 2; a negative value grants none. Over the cap the oldest agents win.
+	// Default 0, which grants none, as does a negative value. Over the cap the oldest agents win.
 	KeepWarmPerOrg int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
@@ -331,9 +333,6 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.WorkTimeout <= 0 {
 		cfg.WorkTimeout = DefaultWorkTimeout
-	}
-	if cfg.KeepWarmPerOrg == 0 {
-		cfg.KeepWarmPerOrg = DefaultKeepWarmPerOrg
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval

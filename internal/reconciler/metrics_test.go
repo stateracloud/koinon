@@ -57,6 +57,7 @@ var _ = Describe("Reconciler metrics", func() {
 		addProvider(ctx, org, user, "upstream", "", "fake")
 		r, err = reconciler.New(pool, openshell.New(conn), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace},
 			reconciler.Config{
+				KeepWarmPerOrg: 2,
 				Prices:         prices.NewResolver(pricing.Embedded()),
 				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 				Keys:           ring,

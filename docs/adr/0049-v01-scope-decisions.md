@@ -403,3 +403,13 @@ The decision of 2026-11-12 supersedes "v0.1 is private" for the registry: the im
 public release (the `RELEASE_SIGNING` switch of the release workflow), and a pre-alpha notice on the docs site and its README. The reason
 for deferring signing, the public Rekor log, is accepted now. Record: ADR [0027](0027-repo-and-versioning.md),
 amendment of 2026-11-12.
+
+## Amendment (2026-11-24): keep-warm defaults to none (#1090)
+
+The default of `reconciler.keepWarmPerOrg` is now 0: no agent is kept warm. The text above that says
+"default 2" records the earlier choice. A value of 0 and a negative value both grant none. An operator who
+wants warm agents sets a positive cap.
+
+Reason: on Substrate a warm agent is a running actor. It holds its full CPU and memory limits in the
+worker pool. A suspended agent resumes in about 1 second (lab measurement of 2026-11-24, issue #1090).
+The maintainer decided this on #1090.

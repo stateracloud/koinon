@@ -66,8 +66,7 @@ no worker image no container is a worker container, so a worker pod has no extra
 does not start: the policy fails closed. */}}
 {{- $gvisorImages := $w.workerShapes.gvisor.images | default list }}
 {{- $microImages := $w.workerShapes.microvm.images | default list }}
-{{- if and $s.workerPool.enabled $s.workerPool.workerImage }}
-{{- $poolImage := include "koinon.imageRef" (list . $s.workerPool.workerImage) }}
+{{- with $poolImage := include "koinon.substrate.workerPoolImage" . }}
 {{- if eq $s.workerPool.sandboxClass "microvm" }}{{- $microImages = append $microImages $poolImage }}{{- else }}{{- $gvisorImages = append $gvisorImages $poolImage }}{{- end }}
 {{- end }}
 {{- range $gvisorImages }}{{- if has . $microImages }}{{- fail (printf "execution.substrate.workerPolicy.workerShapes: the image %s is in the gvisor and the microvm list; a worker image has one sandbox class" .) }}{{- end }}{{- end }}

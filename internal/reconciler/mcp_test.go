@@ -65,6 +65,7 @@ var _ = Describe("Org MCP servers", func() {
 		kube = fake.NewClientset()
 		svc = mcpservers.New(pool, ring, nil).WithURLPolicy(testPolicy)
 		r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
@@ -175,6 +176,7 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 		rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
@@ -206,6 +208,7 @@ var _ = Describe("Org MCP servers", func() {
 		// Without the koinon MCP driver (agentgateway would send the envelope upstream as the key), the
 		// sealed server is left out, and its file leaves the Secret.
 		rr2, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
@@ -229,8 +232,9 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 		rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
-			Prices:  prices.NewResolver(pricing.Embedded()),
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}, Keys: ring,
+			KeepWarmPerOrg: 2,
+			Prices:         prices.NewResolver(pricing.Embedded()),
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}, Keys: ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 			ProviderKeyDir: "/secrets/providers",
 			MCPKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: mcpSecret},
@@ -366,8 +370,9 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
 			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
-				Prices:  prices.NewResolver(pricing.Embedded()),
-				Gateway: gw, MCPGateway: mcpGW, Keys: ring,
+				KeepWarmPerOrg: 2,
+				Prices:         prices.NewResolver(pricing.Embedded()),
+				Gateway:        gw, MCPGateway: mcpGW, Keys: ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
 			})
