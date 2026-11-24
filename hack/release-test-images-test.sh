@@ -117,6 +117,7 @@ flaky() { # FAIL_N MESSAGE [RC]: runs push_retry on the fake; prints its status;
 	local rc=0
 	rm -f "$tmp/fl-n"
 	(
+		# shellcheck source=hack/push-retry-lib.sh
 		. "$here/push-retry-lib.sh"
 		export TMP=$tmp FL_FAIL_N=$1 FL_MSG=$2 FL_RC=${3:-1} PUSH_RETRY_DELAY=0
 		push_retry "$tmp/bin/flaky"
@@ -145,7 +146,9 @@ check "UNAUTHORIZED is not retried" "$(flaky 99 'GET: UNAUTHORIZED: authenticati
 check "...one run" "$(cat "$tmp/fl-n")" 1
 check "...and no retry message" "$(grep -c 'push retry' "$tmp/fl-err")" 0
 # test/e2e/kind/images.sh runs both ko builds through push_retry and sources the library.
+# shellcheck disable=SC2016 # the greps match the literal text ${KO:-ko}
 check "images.sh: two ko builds under push_retry" "$(grep -c 'push_retry "\${KO:-ko}" build' "$here/../test/e2e/kind/images.sh")" 2
+# shellcheck disable=SC2016 # the greps match the literal text ${KO:-ko}
 check "images.sh: no ko build outside push_retry" "$(grep '"\${KO:-ko}" build' "$here/../test/e2e/kind/images.sh" | grep -vc 'push_retry')" 0
 check "images.sh: sources the retry library" "$(grep -c 'push-retry-lib.sh"$' "$here/../test/e2e/kind/images.sh")" 1
 
