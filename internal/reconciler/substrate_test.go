@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"slices"
@@ -37,6 +38,7 @@ const substrateImage = "ghcr.io/stateracloud/koinon/sandbox@sha256:0000000000000
 var _ = Describe("Reconciler on the Substrate driver", func() {
 	var (
 		cl   *fakeate.Cluster
+		d    *substrate.Driver
 		org  pgtype.UUID
 		user pgtype.UUID
 		r    *reconciler.Reconciler
@@ -59,7 +61,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		DeferCleanup(cl.Stop)
 		DeferCleanup(control.Close)
 		DeferCleanup(router.Close)
-		d := substrate.New(control, router, substrate.Config{
+		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
 			// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
@@ -98,11 +100,6 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Eventually(func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		Expect(cl.Calls("CreateActor")).To(Equal(1))
 
-		By("the template carries no provider, no network rule and no filesystem policy: the guest launcher holds the fixed policy")
-		tmpl, ok := cl.Template(ws, cl.TemplateOf(ws, names.Sandbox))
-		Expect(ok).To(BeTrue())
-		Expect(tmpl.String()).NotTo(ContainSubstring("provider"))
-
 		By("an idle sandbox is suspended")
 		coolDown(ctx, org, agent.ID)
 		advance(9 * time.Minute)
@@ -118,6 +115,22 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		pass(ctx)
 		Eventually(func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		Expect(cl.Calls("CreateActor")).To(Equal(1), "resumed, not re-created")
+	})
+
+	It("the adapter drops provider records, network rules and a filesystem policy; the plain driver refuses them", func(ctx SpecContext) {
+		withEgress := execution.SandboxSpec{
+			Name: "egress-probe", Image: substrateImage, RuntimeClassName: "kata", Providers: []string{"upstream"},
+			Policy: execution.Policy{
+				Filesystem: execution.FilesystemPolicy{ReadWrite: []string{"/work"}},
+				Network:    map[string]execution.NetworkRule{"github": {Binaries: []string{"/usr/bin/git"}}},
+			},
+		}
+		_, err := d.EnsureWorkspace(ctx, ws, nil)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = d.CreateSandbox(ctx, ws, withEgress)
+		Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "plain driver: %v", err)
+		_, err = execution.WithoutEgress(d).CreateSandbox(ctx, ws, withEgress)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("recreates nothing on later passes", func(ctx SpecContext) {

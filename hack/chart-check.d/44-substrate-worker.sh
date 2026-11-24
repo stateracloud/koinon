@@ -356,3 +356,18 @@ for f in spec.minReadySeconds spec.revisionHistoryLimit spec.template.metadata.f
 done
 grep -Fq "matches('^[0-9a-f]{64}\$')" <<<"$cadocs" || fail "the CA stamp rule must check the format of the stamp"
 grep -Fq "variables.caMetaNew.all(k, k == 'deprecated.daemonset.template.generation'" <<<"$cadocs" || fail "the CA stamp rule must compare the annotations of the DaemonSet, except the generation mirror of the API server"
+
+# NOTES say when a runtime class runs at defaultTier (issue #1245). NOTES are printed by install, not by template.
+tier_notes() {
+	local out rc=0
+	out=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set "$ADDRESS" "${wsub[@]}" "$@" 2>&1) || rc=$?
+	if [[ $rc -ne 0 ]]; then
+		fail "helm install --dry-run=client for the Substrate tier NOTES failed: $(head -1 <<<"$out")"
+		return 0
+	fi
+	printf '%s\n' "$out"
+}
+tn_default=$(tier_notes)
+grep -Fq 'run at defaultTier' <<<"$tn_default" || fail "NOTES say the runtime class runs at defaultTier when it has no tier entry"
+tn_entry=$(tier_notes --set "execution.substrate.runtimeClassTiers.kata=vm")
+if grep -Fq 'run at defaultTier' <<<"$tn_entry"; then fail "NOTES stay quiet when runtimeClassTiers names the runtime class"; fi

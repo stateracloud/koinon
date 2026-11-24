@@ -247,9 +247,11 @@ func (d *Driver) EnsureWorkspace(ctx context.Context, name string, _ map[string]
 	return execution.Workspace{Name: name, ID: as.GetMetadata().GetUid(), Active: as.GetMetadata().GetDeleteTime() == nil}, nil
 }
 
-// CreateSandbox implements execution.Compute. It refuses a spec that asks for what Substrate
-// cannot do inside the driver: provider records and network rules belong to the gateway (ADR 0097),
-// so a driver that dropped them would run a sandbox with less fencing than the caller asked for.
+// CreateSandbox implements execution.Compute. It refuses a spec that carries provider records,
+// network rules or a filesystem policy. The production path never sends them: the adapter
+// (execution.WithoutEgress, noegress.go) drops these fields, because the gateway owns egress and the
+// guest launcher holds one fixed policy (decisions D1 and D2 of epic #1082). The refusal guards a
+// caller that goes around the adapter.
 func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execution.SandboxSpec) (execution.Sandbox, error) {
 	const op = "CreateSandbox"
 	if err := checkSpec(op, spec); err != nil {
@@ -291,11 +293,10 @@ func (d *Driver) SpecID(workspace string, spec execution.SandboxSpec) (string, e
 
 var _ execution.SpecIdentifier = (*Driver)(nil)
 
-// checkSpec refuses what the driver cannot carry out. Provider records and network rules belong to
-// the gateway (ADR 0097). Filesystem paths belong to the guest launcher's Landlock configuration
-// (ADR 0119, #1087), which this driver does not render yet: a driver that dropped them would run
-// the sandbox without the fencing the caller asked for, and ADR 0045 makes Landlock a hard
-// requirement.
+// checkSpec refuses what the driver cannot carry out: provider records, network rules and filesystem
+// paths. It is a guard against a caller that goes around the adapter (noegress.go), which drops these
+// fields on purpose under decisions D1 and D2 of epic #1082 (egress belongs to the gateway, ADR 0097;
+// the guest launcher applies one fixed policy, ADR 0119).
 func checkSpec(op string, spec execution.SandboxSpec) error {
 	if len(spec.Providers) > 0 || len(spec.Policy.Network) > 0 {
 		return fail(op, execution.ErrUnsupported,

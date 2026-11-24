@@ -796,7 +796,8 @@ execution:
     # wins, else defaultTier applies to it, else the render fails (issue #1245).
     runtimeClassTiers: {}
     # Tier of a sandbox that names no runtime class, and of openshell.runtimeClassName when it has no
-    # entry above. Empty means there is none.
+    # entry above: that class then runs at this tier whatever its name (kata included), and NOTES.txt
+    # says so. Empty means there is none.
     defaultTier: ""
     # Required true with substrate: the guest image does not yet carry the guest launcher and the
     # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:
