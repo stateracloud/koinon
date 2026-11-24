@@ -44,8 +44,11 @@ var _ = Describe("the scrubbed credential type (#1221)", func() {
 		Expect(err).To(HaveOccurred(), "the bypass package compiled:\n%s", out)
 		var exit *exec.ExitError
 		Expect(errors.As(err, &exit)).To(BeTrue(), "go build failed to run: %v", err)
-		for tag, line := range want {
-			Expect(string(out)).To(MatchRegexp(`bypass\.go(\.txt)?:%d:\d+: `, line), "no compile error for %s:\n%s", tag, out)
+		// Each line must fail with its own message: a guard that is gone (a renamed or deleted type) fails
+		// with another error, and the spec catches that.
+		for tag, w := range want {
+			Expect(string(out)).To(MatchRegexp(`bypass\.go(\.txt)?:%d:\d+: [^\n]*%s`, w.line, regexp.QuoteMeta(w.msg)),
+				"no compile error %q for %s:\n%s", w.msg, tag, out)
 		}
 	})
 
@@ -68,6 +71,8 @@ var _ = Describe("the scrubbed credential type (#1221)", func() {
 		sc := mcpgateway.NewCredentialScrub()
 		Expect(sc.Source(nil).IsZero()).To(BeTrue())
 		Expect(sc.Source(mcpgateway.ScrubbedSource{}).IsZero()).To(BeTrue())
+		var none *mcpgateway.CredentialScrub
+		Expect(none.Source(mcpgateway.StaticCredentials{}).IsZero()).To(BeTrue(), "a nil scrub records nothing, so it gives no source")
 
 		src := sc.Source(mapCredentials{"remote": fakeToken})
 		Expect(src.IsZero()).To(BeFalse())
@@ -79,19 +84,25 @@ var _ = Describe("the scrubbed credential type (#1221)", func() {
 	})
 })
 
-// wantLines gives the line of each "// want: <tag>" marker in the file, by tag.
-func wantLines(path string) map[string]int {
+// wantMarker is one `// want: <tag> "<message>"` marker: the line must fail to compile with that message.
+type wantMarker struct {
+	line int
+	msg  string
+}
+
+// wantLines gives each want marker in the file, by tag.
+func wantLines(path string) map[string]wantMarker {
 	GinkgoHelper()
 	f, err := os.Open(path)
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = f.Close() }()
-	marker := regexp.MustCompile(`// want: (\S+)$`)
-	out := map[string]int{}
+	marker := regexp.MustCompile(`// want: (\S+) "([^"]+)"$`)
+	out := map[string]wantMarker{}
 	s := bufio.NewScanner(f)
 	for n := 1; s.Scan(); n++ {
 		if m := marker.FindStringSubmatch(strings.TrimSpace(s.Text())); m != nil {
 			Expect(out).NotTo(HaveKey(m[1]), fmt.Sprintf("tag %s is used twice", m[1]))
-			out[m[1]] = n
+			out[m[1]] = wantMarker{line: n, msg: m[2]}
 		}
 	}
 	Expect(s.Err()).NotTo(HaveOccurred())

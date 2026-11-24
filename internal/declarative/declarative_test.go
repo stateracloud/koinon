@@ -209,6 +209,9 @@ var _ = Describe("Importer", func() {
 		Expect(adminDisabled(ctx)).To(BeTrue())
 		Expect(invalidEvents(ctx)).To(BeNumerically(">", before), "the Secret is still refused")
 		Expect(logs.String()).NotTo(ContainSubstring("fake-07"))
+		for _, e := range events(ctx) {
+			Expect(e.Message).NotTo(ContainSubstring("fake-07"), "an Event quotes the value")
+		}
 
 		By("an enable waits until the Secret is valid again")
 		put(ctx, "tracker", declarative.TypeMCPServer, slug, with("credential", "fake-07", declarative.KeyDisabled, "false"))

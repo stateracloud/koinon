@@ -27,7 +27,8 @@ type Builtin interface {
 	// recorded before the built-in can use it, and is removed from the logs, spans and results of the
 	// gateway (#1174, ADR 0097). A built-in opens each credential through creds and through no source of
 	// its own. The outbound clients ([NewTargetHTTPClient], a2aout) take only a [ScrubbedSource], so a
-	// built-in that sends a credential from a source of its own does not compile (#1221).
+	// built-in that sends a credential from a source of its own through them does not compile (#1221). An
+	// HTTP client of the built-in's own is not covered: the test of each built-in kind catches that.
 	Call(ctx context.Context, creds ScrubbedSource, t gateway.MCPTarget, agent gateway.AgentRef, tool string, args json.RawMessage) BuiltinResult
 }
 

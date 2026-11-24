@@ -109,7 +109,10 @@ func New(o Options) *Gateway {
 	o.Logger = slog.New(o.Scrub.Handler(o.Logger.Handler()))
 	o.Tracer = o.Scrub.Tracer(o.Tracer)
 	o.Scrub.use(o.Metrics, o.Logger)
-	g := &Gateway{o: o, creds: o.Scrub.Source(o.Credentials), g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
+	// o.Credentials is replaced with the wrapped source, so no line in the package can read the raw one.
+	creds := o.Scrub.Source(o.Credentials)
+	o.Credentials = creds
+	g := &Gateway{o: o, creds: creds, g: failClosed{g: o.Guard, log: o.Logger, m: o.Metrics}, pool: map[poolKey]*upstream{}}
 	g.snap.Store(&snapshot{})
 	return g
 }

@@ -546,6 +546,9 @@ func (s ScrubbedSource) IsZero() bool { return s.r == nil }
 // its own source with it, and gives the wrapped source to every call of a [Builtin]. A nil src gives the zero
 // ScrubbedSource, which fails closed.
 func (s *CredentialScrub) Source(src CredentialSource) ScrubbedSource {
+	if s == nil {
+		return ScrubbedSource{}
+	}
 	switch r := src.(type) {
 	case nil:
 		return ScrubbedSource{}

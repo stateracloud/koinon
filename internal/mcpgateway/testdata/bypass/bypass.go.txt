@@ -18,12 +18,12 @@ import (
 
 // HTTPClient builds the outbound client with a source of its own.
 func HTTPClient() {
-	_, _ = mcpgateway.NewTargetHTTPClient(nil, gateway.MCPTarget{}, gateway.AgentRef{}, mcpgateway.StaticCredentials{}) // want: bypass-http-client
+	_, _ = mcpgateway.NewTargetHTTPClient(nil, gateway.MCPTarget{}, gateway.AgentRef{}, mcpgateway.StaticCredentials{}) // want: bypass-http-client "ScrubbedSource value in argument to mcpgateway.NewTargetHTTPClient"
 }
 
 // A2A gives the A2A client a source of its own.
 func A2A() {
-	_ = a2aout.Options{Credentials: mcpgateway.StaticCredentials{}} // want: bypass-a2a
+	_ = a2aout.Options{Credentials: mcpgateway.StaticCredentials{}} // want: bypass-a2a "ScrubbedSource value in struct literal"
 }
 
 // ownSource is a built-in whose Call takes any source, so the gateway could not hand it the scrubbed one.
@@ -35,14 +35,14 @@ func (ownSource) Call(context.Context, mcpgateway.CredentialSource, gateway.MCPT
 	return mcpgateway.BuiltinResult{}
 }
 
-var _ mcpgateway.Builtin = ownSource{} // want: bypass-builtin
+var _ mcpgateway.Builtin = ownSource{} // want: bypass-builtin "does not implement mcpgateway.Builtin (wrong type for method Call)"
 
 // Wrap puts a source of its own in the scrubbed type without a scrub.
 func Wrap() mcpgateway.ScrubbedSource {
-	return mcpgateway.ScrubbedSource(mcpgateway.StaticCredentials{}) // want: bypass-convert
+	return mcpgateway.ScrubbedSource(mcpgateway.StaticCredentials{}) // want: bypass-convert "to type mcpgateway.ScrubbedSource"
 }
 
 // Literal sets the field of the scrubbed type from outside the package.
 func Literal() mcpgateway.ScrubbedSource {
-	return mcpgateway.ScrubbedSource{r: nil} // want: bypass-literal
+	return mcpgateway.ScrubbedSource{r: nil} // want: bypass-literal "unexported field r in struct literal of type mcpgateway.ScrubbedSource"
 }
