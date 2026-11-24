@@ -319,7 +319,8 @@ has "the pinned worker image follows the registry mirrors" 'workerImage: mirror.
 # The size: one replica that requests 500m CPU and 1Gi (limits 4 CPU, 8704Mi: the largest sandbox); every value is settable.
 sized=$(render "${wsub[@]}" "${pool[@]}")
 grep -Eq '^  replicas: 1$' <<<"$sized" || fail "the default pool has one replica"
-grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ' | grep -Fq 'limits:cpu:"4"memory:8704Mirequests:cpu:500mmemory:1Gi' || fail "the default pool size is 500m/1Gi requests and 4/8704Mi limits"
+sizeline=$(grep -A6 '^    resources:' <<<"$sized" | tr -d '\n ')
+grep -Fq 'limits:cpu:"4"memory:8704Mirequests:cpu:500mmemory:1Gi' <<<"$sizeline" || fail "the default pool size is 500m/1Gi requests and 4/8704Mi limits"
 has "replicas is the size value" '^  replicas: 3$' "${wsub[@]}" --set execution.substrate.workerPool.replicas=3 "${pool[@]}"
 has "the resources are settable" 'memory: 10Gi' "${wsub[@]}" --set execution.substrate.workerPool.resources.limits.memory=10Gi "${pool[@]}"
 lacks "resources null leaves the LimitRange defaults" '^    resources:' "${wsub[@]}" --set execution.substrate.workerPool.resources=null "${pool[@]}"
