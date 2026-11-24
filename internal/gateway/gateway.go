@@ -643,6 +643,9 @@ type EgressState struct {
 	// EgressRoutes are org routes. Each names its org, and its name holds a "/". The gateway merges
 	// them with its platform route file (egress.Merge).
 	EgressRoutes []route.Route
+	// EgressCredentials say where the gateway reads each credential that EgressRoutes name (#1086
+	// part C): a sealed file, never a value. A route whose credential is not here is refused.
+	EgressCredentials []route.Credential
 }
 
 // ModelConfig is what the model path is handed: the keys and the model half of a State. A driver

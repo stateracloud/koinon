@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package egress serves the forge and registry L7 routes of Koinon's gateway (ADR 0097 step 2 as
-// amended by ADR 0119 D1 and D11, ADR 0120 section 2). It is #1086 part A: the gateway binary serves
-// the route table of package route. The route set comes from the State stream in part B, and the
-// credential of a route from the secret store in part C.
+// amended by ADR 0119 D1 and D11, ADR 0120 section 2). The gateway binary serves the route table of
+// package route (#1086 part A). The org routes come from the State stream (part B), and the credential
+// of a route is a sealed file that only the gateway key opens (part C).
 //
 // A guest never names the gateway as an HTTP proxy, and the gateway never terminates TLS for a host
 // it does not own. The guest addresses the gateway by name, and the path names the upstream:
@@ -23,8 +23,13 @@
 //     caller gives (the URL policy of package catalog in the binary: no loopback, link-local,
 //     metadata or private address unless the platform allowed the host).
 //   - The actor token, Authorization, Cookie, Proxy-* and Forwarded headers of the guest never reach
-//     the upstream. The gateway alone attaches a credential to a route (part C). Until part C, a route
-//     that names a credential is refused.
+//     the upstream. The gateway alone attaches a credential, and only to the route that names it: the
+//     credential's org and agent are the route's, the route matched the actor's token, and the value
+//     goes to the route's own host over HTTPS. A route whose credential cannot be read is refused
+//     (credential_unavailable); it is never served without it.
+//   - The credential never comes back to the guest: on a credentialed route the gateway asks the
+//     upstream for an uncompressed body, refuses an encoded one, and masks the value (and its basic
+//     form) in the response headers and the body.
 //   - The gateway does not follow redirects. A redirect to an https URL comes back rewritten to the
 //     gateway form, so the guest's next request passes the gate again.
 //   - Logs and metrics never hold the token, a credential, the path or the query. Metric labels are
@@ -61,7 +66,7 @@ const RefusalHeader = "Koinon-Egress-Refusal"
 
 // Reasons that the handler adds to the ones of package route. The set is fixed (ADR 0023).
 const (
-	// ReasonNoCredential: the route names a credential and the gateway cannot attach it yet.
+	// ReasonNoCredential: the route names a credential and the gateway cannot read it.
 	ReasonNoCredential route.Reason = "credential_unavailable" //nolint:gosec // a refusal reason, not a credential
 	// ReasonUpstream: the upstream could not be reached or failed before it answered.
 	ReasonUpstream route.Reason = "upstream_error"
@@ -124,12 +129,26 @@ type Options struct {
 	Metrics               *Metrics
 	// Log gets one line per request. The binary passes the scrubbed logger.
 	Log *slog.Logger
+	// Credentials opens the credentials that routes name. Nil refuses every credentialed route until
+	// SetCredentials.
+	Credentials CredentialOpener
+	// Scrub, when set, gets each credential value before it is sent, so the scrubbed logger masks it
+	// (org is the route's org). The binary passes the log scrubber of the MCP path.
+	Scrub func(org string, values ...string)
+}
+
+// state is one installed set: the route table and the credentials its routes name. Both change
+// together, so a request never pairs a route with the credential of another set.
+type state struct {
+	table *route.Table
+	creds map[string]route.Credential
 }
 
 // Gateway serves the egress routes. The zero value is not usable; call New.
 type Gateway struct {
 	opts     Options
-	table    atomic.Pointer[route.Table]
+	state    atomic.Pointer[state]
+	opener   atomic.Pointer[CredentialOpener]
 	draining atomic.Bool
 	proxy    *httputil.ReverseProxy
 }
@@ -146,6 +165,9 @@ func New(opts Options) (*Gateway, error) {
 		opts.ResponseHeaderTimeout = 60 * time.Second
 	}
 	g := &Gateway{opts: opts}
+	if opts.Credentials != nil {
+		g.SetCredentials(opts.Credentials)
+	}
 	t := &http.Transport{
 		// Never an environment proxy: the route names the host the gateway connects to.
 		Proxy:                 nil,
@@ -173,8 +195,24 @@ func New(opts Options) (*Gateway, error) {
 	return g, nil
 }
 
-// Apply installs the route table. Nil removes it, and then every request is refused.
-func (g *Gateway) Apply(t *route.Table) { g.table.Store(t) }
+// Apply installs the route table with no credentials. Nil removes it, and then every request is
+// refused.
+func (g *Gateway) Apply(t *route.Table) { g.state.Store(&state{table: t}) }
+
+// ApplyWithCredentials installs the route table and the credentials its routes name in one step.
+func (g *Gateway) ApplyWithCredentials(t *route.Table, creds map[string]route.Credential) {
+	g.state.Store(&state{table: t, creds: creds})
+}
+
+// SetCredentials sets the opener of the credentials. The binary calls it once the gateway keys load;
+// until then every credentialed route is refused.
+func (g *Gateway) SetCredentials(o CredentialOpener) {
+	if o == nil {
+		g.opener.Store(nil)
+		return
+	}
+	g.opener.Store(&o)
+}
 
 // Drain makes the gateway refuse new requests. Requests in flight finish.
 func (g *Gateway) Drain() { g.draining.Store(true) }
@@ -189,6 +227,7 @@ type target struct {
 	rawQuery  string
 	route     route.Route
 	decision  route.Decision
+	cred      attached // empty for a route without a credential
 }
 
 type targetKey struct{}
@@ -209,7 +248,11 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, r, route.Decision{Reason: route.ReasonBadRequest}, "")
 		return
 	}
-	d := route.NewGate(g.opts.Verifier, g.table.Load()).Check(route.Request{
+	st := g.state.Load()
+	if st == nil {
+		st = &state{}
+	}
+	d := route.NewGate(g.opts.Verifier, st.table).Check(route.Request{
 		// The upstream leg is always HTTPS: the gateway dials nothing else.
 		Scheme:    "https",
 		Token:     r.Header.Get(route.TokenHeader),
@@ -222,12 +265,14 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, r, d, authority)
 		return
 	}
+	var cred attached
 	if d.Route.Credential != "" {
-		// Part C attaches the credential from the secret store. Until then the route is closed, never
-		// served without its credential and never served with one from another source.
-		d.Allowed, d.Reason = false, ReasonNoCredential
-		g.refuse(w, r, d, authority)
-		return
+		var ok bool
+		if cred, ok = g.credential(st, d); !ok {
+			d.Allowed, d.Reason = false, ReasonNoCredential
+			g.refuse(w, r, d, authority)
+			return
+		}
 	}
 	// The upstream is the route's host and port, not the guest's text: the gate's decision and the dial
 	// target come from one source. The log line and the count come with the response (modifyResponse)
@@ -236,8 +281,36 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	if port == 0 {
 		port = 443
 	}
-	t := target{authority: canonicalAuthority(d.Route.Host, port), path: path, rawQuery: r.URL.RawQuery, route: d.Route, decision: d}
+	t := target{authority: canonicalAuthority(d.Route.Host, port), path: path, rawQuery: r.URL.RawQuery, route: d.Route, decision: d, cred: cred}
 	g.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), targetKey{}, t)))
+}
+
+// credential reads the credential that the allowed route d names. It fails closed: a credential that
+// is not in the set, that belongs to another org or agent, or that cannot be opened refuses the route.
+func (g *Gateway) credential(st *state, d route.Decision) (attached, bool) {
+	c, ok := st.creds[d.Route.Credential]
+	op := g.opener.Load()
+	if !ok || op == nil || c.Org != d.Route.Org || c.Agent != d.Route.Agent || d.Route.Agent == "" {
+		return attached{}, false
+	}
+	v, err := (*op).Open(c)
+	if err == nil {
+		var a attached
+		if a, err = attach(c, v); err == nil {
+			if g.opts.Scrub != nil {
+				g.opts.Scrub(c.Org, v, a.header)
+			}
+			return a, true
+		}
+	}
+	// The error names a file or a fixed reason, never the value.
+	reason := "read"
+	var oe *OpenError
+	if errors.As(err, &oe) {
+		reason = oe.Reason
+	}
+	g.opts.Log.Warn("egress credential unavailable", "route", d.Route.Name, "class", string(d.Route.Class), "kind", reason)
+	return attached{}, false
 }
 
 // split reads the upstream authority and the escaped upstream path from a request to the gateway. It
@@ -295,6 +368,12 @@ func (g *Gateway) rewrite(pr *httputil.ProxyRequest) {
 	for _, h := range guestOnly {
 		out.Header.Del(h)
 	}
+	if t.cred.header != "" {
+		out.Header.Set("Authorization", t.cred.header)
+		// No Accept-Encoding of the guest: the transport then asks for gzip itself and decodes it, so
+		// the gateway sees, and scrubs, the plain body.
+		out.Header.Del("Accept-Encoding")
+	}
 	// The guest's User-Agent stays (registries use it); nothing names the gateway or the actor.
 }
 
@@ -303,6 +382,11 @@ func (g *Gateway) rewrite(pr *httputil.ProxyRequest) {
 // again. The gateway never follows it itself: the gate decides on the next request.
 func (g *Gateway) modifyResponse(resp *http.Response) error {
 	t, _ := resp.Request.Context().Value(targetKey{}).(target)
+	if t.cred.header != "" {
+		if err := g.scrubResponse(resp, t); err != nil {
+			return err
+		}
+	}
 	g.log(resp.Request, t.decision, t.route.Host, resp.StatusCode)
 	g.opts.Metrics.count(t.route.Class, route.ReasonAllowed)
 	resp.Header.Del(RefusalHeader)
@@ -329,6 +413,41 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	return nil
 }
 
+// errEncoded refuses a response of a credentialed route that the gateway cannot scan.
+var errEncoded = errors.New("egress: a credentialed route answered with an encoded body")
+
+// scrubResponse masks the credential in the response of a credentialed route. A body with a
+// Content-Encoding the transport did not decode cannot be scanned, so it is refused: the gateway asked
+// for none it cannot read.
+func (g *Gateway) scrubResponse(resp *http.Response, t target) error {
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" && !strings.EqualFold(ce, "identity") && hasBody(resp) {
+		_ = resp.Body.Close()
+		return errEncoded
+	}
+	hit := maskHeader(resp.Header, t.cred.needles)
+	if maskHeader(resp.Trailer, t.cred.needles) {
+		hit = true
+	}
+	onHit := func() {
+		g.opts.Log.Warn("egress response held the credential; masked", "route", t.route.Name, "class", string(t.route.Class))
+	}
+	if hit {
+		onHit()
+	}
+	resp.Body = newScrubBody(resp.Body, t.cred.needles, func() http.Header { return resp.Trailer }, onHit)
+	return nil
+}
+
+// hasBody reports whether a response can carry a body. A HEAD answer, 1xx, 204 and 304 never do, so
+// their Content-Encoding header describes no bytes the gateway must scan.
+func hasBody(resp *http.Response) bool {
+	if resp.Request != nil && resp.Request.Method == http.MethodHead {
+		return false
+	}
+	c := resp.StatusCode
+	return c >= 200 && c != http.StatusNoContent && c != http.StatusNotModified
+}
+
 func gatewayForm(authority string, u *url.URL) string {
 	host, port := hostPort(authority)
 	s := PathPrefix + canonicalAuthority(host, port) + u.EscapedPath()
@@ -349,8 +468,14 @@ func (g *Gateway) upstreamError(w http.ResponseWriter, r *http.Request, err erro
 	if errors.Is(err, context.Canceled) {
 		reason = "canceled"
 	}
-	// The error can name the upstream address; it holds no token and no credential (none is attached).
-	g.opts.Log.Warn("egress upstream failed", "route", t.route.Name, "class", string(t.route.Class), "kind", reason, "err", err)
+	if errors.Is(err, errEncoded) {
+		reason = "encoded"
+	}
+	// The error can name the upstream address. The credential goes in a header, which no transport
+	// error quotes; the text is masked all the same.
+	msg := []byte(err.Error())
+	mask(msg, t.cred.needles)
+	g.opts.Log.Warn("egress upstream failed", "route", t.route.Name, "class", string(t.route.Class), "kind", reason, "err", string(msg))
 	w.Header().Set(RefusalHeader, string(ReasonUpstream))
 	http.Error(w, "koinon-gateway: the upstream could not be reached", http.StatusBadGateway)
 }

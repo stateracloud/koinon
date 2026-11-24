@@ -127,6 +127,10 @@ type Config struct {
 	// MCPSealed is true when koinon-gateway serves every MCP path (gateway.mcp.driver=koinon). Only then does the
 	// reconciler serve a sealed (v2) credential: agentgateway would send the envelope upstream as the key.
 	MCPSealed bool
+	// ForgeRecipient is the gateway key the reconciler seals an agent's code-host token to, for the
+	// agent's forge routes at koinon-gateway (#1086 part C, ADR 0097 decision 12). Nil delivers no forge
+	// credential: those routes fail closed (503 credential_unavailable).
+	ForgeRecipient RecipientKeys
 	// Prices finds the price of each served model; required (prices.NewResolver).
 	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
@@ -256,6 +260,9 @@ type Reconciler struct {
 	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// forgeSeals is the sealed code-host token of each agent (under mu), so an unchanged token keeps its
+	// file name between passes.
+	forgeSeals map[agentKey]forgeSeal
 	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
@@ -394,7 +401,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
-		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
+		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
 		plan: gatewayplan.New(gatewayplan.Config{
@@ -466,6 +473,10 @@ type work struct {
 	tools []gateway.ToolGrant
 	// egress are the org egress routes of an active agent (egressroutes.go).
 	egress []route.Route
+	// forge is the sealed code-host credential that egress names, and forgeFile its envelope; nil
+	// when the agent has none.
+	forge     *gatewayplan.ForgeCredential
+	forgeFile []byte
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -740,11 +751,17 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		live[agentKey{w.org.ID, w.agent.ID}] = true
 	}
 	r.releaseRecreatesExcept(live, q.Busy)
+	r.pruneForgeSeals(live)
 	agents := make([]gatewayplan.Agent, len(items))
+	egressFiles := map[string][]byte{}
 	for i, w := range items {
+		if w.forge != nil {
+			egressFiles[w.forge.File] = w.forgeFile
+		}
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
 			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
+			Forge: w.forge,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -771,7 +788,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	draft := r.plan.Begin(gatewayplan.Input{
 		Now: now, Orgs: orgRefs, Agents: agents,
 		Providers: served.providers, ProviderFiles: served.files, ModelIDs: served.modelIDs,
-		MCP: mcpServed.servers, MCPFiles: mcpServed.files, LedgerEnforcesBudgets: ledgerEnforces, Allowances: allowances,
+		MCP: mcpServed.servers, MCPFiles: mcpServed.files, EgressFiles: egressFiles, LedgerEnforcesBudgets: ledgerEnforces, Allowances: allowances,
 	})
 	// An agent whose budget cannot be computed fails closed (its last pushed limit, or zero) and is
 	// reported; it never stops the pass for the other agents and orgs.
@@ -1174,7 +1191,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
-		w.egress = r.agentEgress(ctx, w)
+		w.egress, w.forge, w.forgeFile = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err

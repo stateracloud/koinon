@@ -2398,6 +2398,21 @@ AgentRef names an agent.
 | agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
 | grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
 
+### Message EgressCredential
+
+EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
+0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the
+value. The envelope is bound to the org ID and the agent ID in the file name.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| name | 1 | `string` | singular |  | name is the name that the routes give in their credential field. |
+| org | 2 | `string` | singular |  | org is the org slug and agent the agent's name at the gateway: the routes that name the credential must have the same org and agent. |
+| agent | 3 | `string` | singular |  |  |
+| file | 4 | `string` | singular |  |  |
+| scheme | 5 | `string` | singular |  | scheme is how the value goes upstream in the Authorization header: "basic" (base64 of user ":" value) or "bearer". |
+| user | 6 | `string` | singular |  | user is the user name of the basic scheme, for example "x-access-token" for a forge token. |
+
 ### Message EgressRoute
 
 EgressRoute is one org route (gateway route.Route). It names a credential, never its value.
@@ -2427,6 +2442,7 @@ route file. A route that fails to load closes all org routes; it never opens one
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | routes | 1 | `koinon.gateway.v1alpha1.EgressRoute` | repeated |  |  |
+| credentials | 2 | `koinon.gateway.v1alpha1.EgressCredential` | repeated |  | credentials say where the gateway reads each credential that a route names, and how it sends it (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable). |
 
 ### Message Key
 

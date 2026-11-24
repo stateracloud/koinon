@@ -40,6 +40,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
@@ -238,6 +239,17 @@ func serve(ctx context.Context, cfg config) error {
 	// The guest's resolver follows the cluster's DNS domain (#1054).
 	search := catalog.SubstrateSearchFor(cfg.clusterDomain)
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts), Search: &search}
+	// The forge credential (#1086 part C) is sealed to the gateway key, as koinon-api seals MCP
+	// credentials: only with koinon-gateway, which holds that key. A gateway that does not read the
+	// credential refuses the forge routes (503 credential_unavailable), so no format gate is needed.
+	var forgeRecipient reconciler.RecipientKeys
+	if cfg.mcpSealed {
+		gatewayKeys := &gatewaykeys.PublicKeys{}
+		safego.Go(ctx, log, "gateway-public-key", func(ctx context.Context) {
+			gatewayKeys.Run(ctx, pool, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
+		})
+		forgeRecipient = gatewayKeys
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
@@ -249,6 +261,7 @@ func serve(ctx context.Context, cfg config) error {
 			MCPKeys:             mcpKeyStore(kube, cfg),
 			MCPKeyDir:           cfg.mcpKeysDir,
 			MCPSealed:           cfg.mcpSealed,
+			ForgeRecipient:      forgeRecipient,
 			URLPolicy:           urlPolicy,
 			ProviderKeySettle:   cfg.keySettle,
 			Harnesses:           cfg.harnesses(),

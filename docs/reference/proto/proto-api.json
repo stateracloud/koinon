@@ -9880,6 +9880,69 @@
           ]
         },
         {
+          "name": "EgressCredential",
+          "fullName": "koinon.gateway.v1alpha1.EgressCredential",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR\n0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the\nvalue. The envelope is bound to the org ID and the agent ID in the file name.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "name is the name that the routes give in their credential field."
+            },
+            {
+              "name": "org",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug and agent the agent's name at the gateway: the routes that name the\ncredential must have the same org and agent."
+            },
+            {
+              "name": "agent",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "file",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "scheme",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "scheme is how the value goes upstream in the Authorization header: \"basic\" (base64 of\nuser \":\" value) or \"bearer\"."
+            },
+            {
+              "name": "user",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "user is the user name of the basic scheme, for example \"x-access-token\" for a forge token."
+            }
+          ]
+        },
+        {
           "name": "EgressRoute",
           "fullName": "koinon.gateway.v1alpha1.EgressRoute",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -10029,6 +10092,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "credentials",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.EgressCredential",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "credentials say where the gateway reads each credential that a route names, and how it sends it\n(#1086 part C). A route whose credential is not here is refused (503 credential_unavailable)."
             }
           ]
         },

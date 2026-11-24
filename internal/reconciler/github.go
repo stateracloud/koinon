@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -257,11 +256,8 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	// The revision names the token by its expiry, never by its value: a new token is pushed
 	// into the existing record (OpenShell merges credentials; the stable placeholder keeps
 	// resolving), so running processes switch to it without a restart.
-	rev := "github-token-expires-" + tok.ExpiresAt.UTC().Format(time.RFC3339)
-	if tok.Revision != "" {
-		// A static token (Gitea) does not expire: its revision changes when the token does.
-		rev = "github-token-" + tok.Revision
-	}
+	// A static token (Gitea) does not expire: its revision changes when the token does.
+	rev := tokenRevision(tok)
 	value := tok.Value()
 	creds := make(map[string]string, len(GitHubTokenEnvVars))
 	for _, env := range GitHubTokenEnvVars {
