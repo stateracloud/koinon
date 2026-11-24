@@ -426,6 +426,25 @@ classes, and one credential on two orgs. It serves `https` only, and a platform 
 it forwards. Slice 2 puts the route set into the State stream and serves the routes in the gateway
 binary; slice 3 reads the credential from the secret store and drops the OpenShell transition profile.
 
+Record (2026-11-24, #1086 part A; the choices below are decided): the transport of the forge and registry
+routes is a path-addressed reverse proxy, `<gateway>/egress/<host>[:port]/<path>`, in the package
+`internal/gateway/egress`. There is no CONNECT, no TLS interception and no gateway CA in the guest. The guest
+reaches the gateway by name (ADR 0119 P-B), and git `insteadOf` and the npm, pip and Go registry settings
+point at that prefix. The upstream leg is `https` only and dials through the URL policy of the catalog
+(`catalog.URLPolicy.DialContext`), so a route never reaches loopback, link-local, metadata or Koinon's own
+Services. The handler runs on a listener of its own (`--egress-addr`, off by default) and never under a
+ServeMux, so the gate sees the path the guest sent. The gateway removes the actor token, `Authorization`,
+`Cookie` and the proxy and forwarding headers before it forwards, and rewrites an `https` redirect to the
+egress prefix; it drops any other redirect target. Logs and the metric
+`koinon_gateway_egress_requests_total{class,reason}` carry no token, path, query or ID. A route that names
+a credential is refused (`credential_unavailable`) until part C attaches it. Platform routes (no org, no
+credential) load from a JSON file; one bad route refuses the file. The parts: part A serves the routes in
+the binary; part B puts the org and agent routes into the State stream, from the forge grants and the
+registry levels of ADR 0113; part C attaches the credential from the secret store through the scrubbed
+source type, mints the actor token outside the guest for both drivers and drops the OpenShell transition
+profile. Prior art: Fly.io's Tokenizer (a proxy that adds the credential, the client holds none), git
+`url.<base>.insteadOf`, and npm and pip registry mirrors that take a path prefix.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_

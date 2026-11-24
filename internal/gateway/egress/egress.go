@@ -62,7 +62,7 @@ const RefusalHeader = "Koinon-Egress-Refusal"
 // Reasons that the handler adds to the ones of package route. The set is fixed (ADR 0023).
 const (
 	// ReasonNoCredential: the route names a credential and the gateway cannot attach it yet.
-	ReasonNoCredential route.Reason = "credential_unavailable"
+	ReasonNoCredential route.Reason = "credential_unavailable" //nolint:gosec // a refusal reason, not a credential
 	// ReasonUpstream: the upstream could not be reached or failed before it answered.
 	ReasonUpstream route.Reason = "upstream_error"
 	// ReasonDraining: the gateway stops and takes no new request.
