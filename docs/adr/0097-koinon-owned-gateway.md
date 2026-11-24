@@ -434,7 +434,9 @@ point at that prefix. The upstream leg is `https` only. The upstream is the matc
 not the guest's text. It dials through `catalog.URLPolicy.GatewayDialContext`: the dialer resolves each host
 once as an absolute name, so the gateway pod's search domains never expand it. It refuses a single label,
 localhost and a name in Koinon's namespace by name, and loopback, link-local, metadata and private
-addresses by address unless the platform allows them. The handler runs on a listener of its own (`--egress-addr`, off by default) and never under a
+addresses by address unless the platform allows them. The namespace rule holds for every cluster DNS
+domain. An allowed CIDR (`--egress-allowed-hosts`) admits every route host that resolves into it, an org's
+route host included: part B must state this where org admins write routes. The handler runs on a listener of its own (`--egress-addr`, off by default) and never under a
 ServeMux, so the gate sees the path the guest sent. The gateway removes the actor token, `Authorization`,
 `Cookie` and the proxy and forwarding headers before it forwards, and rewrites an `https` redirect to the
 egress prefix; it drops any other redirect target. Logs and the metric

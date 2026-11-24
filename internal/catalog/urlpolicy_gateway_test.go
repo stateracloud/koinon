@@ -40,12 +40,23 @@ var _ = Describe("URLPolicy for the gateway's egress routes (#1086)", func() {
 		Entry("a Service in Koinon's namespace, .svc", "koinon-api.koinon.svc:443"),
 		Entry("a Service in Koinon's namespace, in full", "koinon-api.koinon.svc.cluster.local:443"),
 		Entry("the same with a trailing dot and upper case", "Koinon-API.Koinon.svc.cluster.local.:443"),
+		Entry("a Service in Koinon's namespace, another cluster domain", "koinon-api.koinon.svc.corp.k8s:443"),
 		Entry("a single label", "koinon-api:443"),
 		Entry("a .svc short name", "gitea.dev.svc:443"),
 		Entry("localhost", "localhost:443"),
 		Entry("a name under localhost", "x.localhost:443"),
 		Entry("a numeric host that resolvers read in different ways", "0x7f.1:443"),
 	)
+
+	It("does not refuse a public host when the namespace is a top-level domain", func(ctx SpecContext) {
+		p := pol()
+		p.Namespace = "dev"
+		_, err := p.GatewayDialContext(&net.Dialer{Timeout: 1})(ctx, "tcp", "registry.example.dev:443")
+		Expect(err).NotTo(MatchError(ContainSubstring("own namespace")))
+		Expect(looked).To(Equal([]string{"registry.example.dev."}))
+		_, err = p.GatewayDialContext(&net.Dialer{Timeout: 1})(ctx, "tcp", "koinon-api.dev.svc.cluster.local:443")
+		Expect(err).To(MatchError(ContainSubstring("own namespace")))
+	})
 
 	It("looks a name up once, as an absolute name, so no search domain expands it", func(ctx SpecContext) {
 		p := pol()

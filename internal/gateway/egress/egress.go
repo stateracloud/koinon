@@ -343,6 +343,10 @@ func gatewayForm(authority string, u *url.URL) string {
 func (g *Gateway) upstreamError(w http.ResponseWriter, r *http.Request, err error) {
 	t, _ := r.Context().Value(targetKey{}).(target)
 	g.opts.Metrics.count(t.route.Class, ReasonUpstream)
+	// The request line names the actor for a failed upstream too, so the audit shows who tried.
+	d := t.decision
+	d.Allowed, d.Reason = false, ReasonUpstream
+	g.log(r, d, t.route.Host, http.StatusBadGateway)
 	reason := "upstream"
 	if errors.Is(err, context.Canceled) {
 		reason = "canceled"

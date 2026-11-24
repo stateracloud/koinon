@@ -327,6 +327,10 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(resp.StatusCode).To(Equal(http.StatusBadGateway))
 			Expect(count("registry", "upstream_error")).To(Equal(1.0))
 			Expect(count("registry", "allowed")).To(Equal(0.0))
+			// The audit line names the actor of the failed request.
+			Expect(logs.String()).To(ContainSubstring(`"result":"upstream_error"`))
+			Expect(logs.String()).To(ContainSubstring(`"org":"acme"`))
+			Expect(logs.String()).To(ContainSubstring(`"run":"run-1"`))
 		})
 
 		It("removes a refusal header that the upstream sends", func() {
