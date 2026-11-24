@@ -6,12 +6,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 /* Geist and Geist Mono are variable fonts that the npm packages ship; Vite bundles the files, so the UI loads no
-   font from a network host (ADR 0126 section 1, point 2). Licence: src/assets/fonts/LICENSE-OFL-1.1.txt. */
+   font from a network host (ADR 0126 section 1, point 2). Licence: public/LICENSE-fonts-OFL-1.1.txt (served as /LICENSE-fonts-OFL-1.1.txt). */
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
-/* One dark-mode strategy: `dark:` follows data-theme. The old `.dark` class was never set by any code. */
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+/* One dark-mode strategy: `dark:` follows data-theme and is on unless the theme is light (dark is the default, also
+   when the attribute is missing). The old `.dark` class was never set by any code. */
+@custom-variant dark (&:not(:where([data-theme="light"], [data-theme="light"] *)));
 
 @theme inline {
   --font-sans: "Geist Variable", system-ui, sans-serif;
@@ -126,6 +127,7 @@
   --muted-foreground: #555571;
   --accent: #fdfdff;
   --accent-foreground: #24233c;
+  /* ADR 0126 draft has #b33731: as text (text-destructive) on the light page ground it gives 4.48:1. */
   --destructive: #b13530;
   --destructive-foreground: #ffffff;
   --border: #bbbbd1;

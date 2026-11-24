@@ -11,9 +11,11 @@ test('theme: no wrong-theme flash, no font from a network host, K monogram, swit
   await page.setViewportSize({ width: 1280, height: 720 })
   if (shots) mkdirSync(shots, { recursive: true })
   const external: string[] = []
+  const fonts: string[] = []
   page.on('request', (r) => {
     const u = new URL(r.url())
     if (u.hostname !== 'localhost') external.push(r.url())
+    if (u.pathname.endsWith('.woff2')) fonts.push(r.url())
   })
   await mockApi(page, {
     unary: {
@@ -36,6 +38,8 @@ test('theme: no wrong-theme flash, no font from a network host, K monogram, swit
   await expect(html).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(28, 27, 41)')
   await expect(page.locator('body')).toHaveCSS('font-family', /Geist Variable/)
+  await page.evaluate(`document.fonts.load('16px "Geist Variable"')`)
+  expect(fonts.length, 'a Geist file loads from this origin').toBeGreaterThan(0)
   expect(await page.evaluate(`document.fonts.check('16px "Geist Variable"')`)).toBe(true)
   await expect(page.getByRole('link', { name: 'Koinon' }).locator('svg')).toBeVisible()
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')

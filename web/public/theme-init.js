@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sets data-theme on <html> before the first paint, so the page never flashes the wrong theme.
 // The UI sends script-src 'self', so this is a file and not an inline script. The same rules live
-// in src/lib/theme.ts; keep the storage key and the rules in step (src/lib/theme.test.ts checks it).
+// in src/lib/theme.ts; keep the storage key and the rules in step (src/components/theme-switch.test.tsx checks it).
 ;(function () {
   var choice = 'system'
   try {

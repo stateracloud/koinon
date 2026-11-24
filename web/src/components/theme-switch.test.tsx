@@ -102,19 +102,22 @@ describe('the dark: variant', () => {
     })
     const out = compiled.build(['dark:bg-raised'])
     expect(out).toContain('dark\\:bg-raised')
-    expect(out).toContain('data-theme="dark"')
+    expect(out).toContain('data-theme="light"')
     expect(out).not.toMatch(/\.dark\b[^\\-]/)
 
     const el = document.createElement('div')
     el.className = 'dark:bg-raised'
     document.body.append(el)
     // The rule's selector as the browser would match it, with the class selector escaped as in the output.
-    const rule = /(\.dark\\:bg-raised:where\([^{]+\))\s*\{/.exec(out)?.[1] 
+    const rule = /(\.dark\\:bg-raised:not\([^{]+\))\s*\{/.exec(out)?.[1] 
     expect(rule).toBeTruthy()
     document.documentElement.setAttribute('data-theme', 'dark')
     expect(el.matches(rule!)).toBe(true)
     document.documentElement.setAttribute('data-theme', 'light')
     expect(el.matches(rule!)).toBe(false)
+    // Dark is the default: with no attribute (theme-init.js blocked) the variant applies too.
+    document.documentElement.removeAttribute('data-theme')
+    expect(el.matches(rule!)).toBe(true)
     el.remove()
   })
 })

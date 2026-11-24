@@ -32,7 +32,7 @@ export function contrast(a: string, b: string): number {
 }
 
 // [text token, grounds it is used on]. `overlay` carries foreground text only: the ADR dark overlay (#555468)
-// gives muted text 3.5:1, so a menu or dialog must not put muted or status text on it.
+// gives muted, primary and status text 3.4 to 4.7:1, so a menu or dialog must not put them on it.
 const text: [string, string[]][] = [
   ['foreground', ['background', 'card', 'raised', 'overlay']],
   ['card-foreground', ['card']],
@@ -43,6 +43,9 @@ const text: [string, string[]][] = [
   ['success', ['background', 'card', 'raised']],
   ['danger', ['background', 'card', 'raised']],
   ['info', ['background', 'card', 'raised']],
+  // Error text (text-destructive) sits on the page and card grounds. Dark on raised is 4.35:1, so not there.
+  ['destructive', ['background', 'card']],
+  ['muted-foreground', ['muted']],
   ['primary-foreground', ['primary']],
   ['secondary-foreground', ['secondary']],
   ['accent-foreground', ['accent']],
@@ -52,7 +55,7 @@ const text: [string, string[]][] = [
 ]
 // Non-text parts: the control border, the focus ring and the logo parts against the grounds they sit on.
 const nonText: [string, string[]][] = [
-  ['input', ['background', 'card']],
+  ['input', ['background', 'card', 'raised']],
   ['ring', ['background', 'card']],
   ['primary', ['background', 'card']],
   ['logo-gold', ['background', 'card']],
