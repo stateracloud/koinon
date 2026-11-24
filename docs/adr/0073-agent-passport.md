@@ -209,6 +209,23 @@ procoduck decided the open points on 2026-10-28.
     viewer tokens for preview URLs ([#28](https://github.com/stateracloud/koinon/issues/28), v0.3)
     and the external A2A gateway (v1.0).
 
+13. **A server an org registered gets no agent header, and a pairwise subject** (amendment 2026-11-24,
+    [#1235](https://github.com/stateracloud/koinon/issues/1235); [0097](0097-koinon-owned-gateway.md)
+    decision 5).
+    - The unsigned agent header goes only to Koinon's own tool servers. A server an org registered
+      (org-run or third-party) never gets it, and no setting turns it on.
+    - Such a server learns the caller only from a credential signed for that one server: this passport
+      (decision 4, one audience) or the server's own sign-in token
+      ([0096](0096-mcp-oauth-sign-in.md)).
+    - In a passport for such a server, `sub` is an opaque ID made for the pair (agent, audience): a
+      pairwise subject in the sense of OpenID Connect Core section 8.1. Two servers get different IDs
+      for one agent, so they cannot correlate it. Decision 1's `koinon:<org>:<agent>` stays the subject
+      for Koinon's own tool servers.
+    - The Koinon claims that carry an internal ID (`agent`, `run`, `task`, `requested_by`, `approval`)
+      follow the same rule in such a passport: the design of the token service (step 1 of decision 12)
+      makes each one pairwise or leaves it out. Decision 8 (opt-in for third-party servers) is
+      unchanged.
+
 ```mermaid
 sequenceDiagram
   participant A as Agent (sandbox)

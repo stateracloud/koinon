@@ -228,7 +228,8 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 
 	By("the agent's own gateway key sees read_item directly and write_item only behind approval")
 	key := agentGatewayKey(ctx, kubectl, org, agentID)
-	local := portForward(ctx, kubectl, "svc/koinon-gateway", "8080")
+	path := installMCPPath(ctx, kubectl)
+	local := portForward(ctx, kubectl, path.service, path.port)
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-e2e", Version: "0"}, nil)
 	var session *mcp.ClientSession
 	var names []string
@@ -270,7 +271,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		}
 	}
 	Expect(called).NotTo(BeNil(), "the server saw the tool call")
-	Expect(called.Agent).To(Equal("default/" + agentID))
+	Expect(called.Agent).To(Equal(path.orgServerAgentHeader(agentID)), "the agent header on an org's server (#1235)")
 	Expect(called.Authorized).To(BeTrue())
 
 	leakGuardExfilE2E(ctx, admin, session, fake, srv.ID, agentID, key, res.Content[0].(*mcp.TextContent).Text)
@@ -403,6 +404,36 @@ func secretToken(ctx context.Context, kubectl, name string) string {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(raw).NotTo(BeEmpty(), name)
 	return string(raw)
+}
+
+// mcpPath is the MCP path of this install (ADR 0097 decision 5): koinon-gateway when the chart runs it
+// (gateway.mcp.driver=koinon, the koinon-mcp-gateway Deployment exists), else agentgateway, the fallback.
+type mcpPath struct {
+	koinon  bool
+	service string
+	port    string
+}
+
+func installMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "deployment", "--ignore-not-found",
+		"koinon-mcp-gateway", "-o", "name").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get deployment koinon-mcp-gateway: %s", out)
+	if strings.TrimSpace(string(out)) != "" {
+		return mcpPath{koinon: true, service: "svc/koinon-mcp-gateway", port: "8080"}
+	}
+	return mcpPath{service: "svc/koinon-gateway", port: "8080"}
+}
+
+// orgServerAgentHeader is the agent header a server an org registered sees on this path (#1235). Koinon's
+// MCP path never sends it, so the server sees none. The agentgateway render sets it on its one MCP route
+// for every target until that path is deleted, so the server sees the agent.
+func (p mcpPath) orgServerAgentHeader(agentID string) string {
+	if p.koinon {
+		return ""
+	}
+	return "default/" + agentID
 }
 
 // portForward forwards a free local port to target's port in the koinon namespace until the spec ends.
