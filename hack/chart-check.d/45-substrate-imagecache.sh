@@ -38,7 +38,7 @@ grep -Fq 'scheme: HTTPS' <<<"$idep" || fail "the cache probes must use TLS"
 grep -Fq 'secretName: koinon-imagecache-tls' <<<"$idep" || fail "the cache must mount the generated TLS Secret"
 # Zot reloads its server certificate when the mounted files change (issue #1191, point 3). The kubelet updates a Secret
 # volume only without subPath, so a subPath here would stop a rotated leaf certificate from reaching the cache.
-hit -F 'subPath' <<<"$idep" && fail "the cache pod must mount its TLS Secret without subPath (Zot reloads the certificate)"
+grep -A3 -- '- name: tls$' <<<"$idep" | hit -F 'subPath' && fail "the cache pod must mount its TLS Secret without subPath (Zot reloads the certificate)"
 grep -Fq 'sizeLimit: 20Gi' <<<"$idep" || fail "the cache store must be bounded without persistence"
 # Every image through koinon.imageRef, every pod with the pull secrets (ADR 0061).
 has "the Zot image follows global.registryMirrors" 'image: mirror.example.com/ghcr/project-zot/zot:' "${isub[@]}" --set 'global.registryMirrors.ghcr\.io=mirror.example.com/ghcr' "${icache[@]}"

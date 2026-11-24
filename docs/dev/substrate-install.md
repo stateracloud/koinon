@@ -460,10 +460,15 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     cause a second restart after that. On the first install the cache Deployment does not exist yet, so the Job cannot
     stamp it. The cache starts with the current Secret, and the first `helm upgrade` adds the stamp. That upgrade
     restarts the cache pod once.
-  - Zot (v2.1.23) also reloads its server certificate when the files of the mounted Secret change, without a
-    restart. The kubelet updates a Secret volume in about one minute, because the chart mounts it without `subPath`.
-    Thus a new leaf certificate (for example from cert-manager through `imageCache.tls.existingSecret`) reaches the
-    cache before the next `helm upgrade`. A new CA still needs `helm upgrade`: only the hook Job copies it to atelet.
+  - The pinned Zot image also reloads its server certificate when the files of the mounted Secret change, without a
+    restart. The kubelet updates a Secret volume only when the mount has no `subPath`. The chart mounts it without
+    `subPath`. The update can take one to two minutes. Because of this, a new leaf certificate from the same CA (for
+    example from cert-manager through `imageCache.tls.existingSecret`) reaches the cache before the next
+    `helm upgrade`.
+  - **A CA change needs `helm upgrade` immediately.** Zot serves a leaf from the new CA after the Secret volume
+    update, but atelet trusts only the CA in `koinon-imagecache-ca`. Only the hook Job writes that ConfigMap. Until
+    `helm upgrade` runs, atelet refuses the certificate of the cache and every pull through the cache fails with
+    `x509: certificate signed by unknown authority`. Run `helm upgrade` immediately after a CA change.
   - Every route gets the same patch. The installer adds it on the kind and generic routes through the overlay. On the
     gke route the installer does not know the overlay directory of the pinned tree, so after `ate-setup` it adds the
     same volume, mount and `SSL_CERT_DIR` to the live atelet DaemonSet (one definition in `internal/imagecacheca`,
