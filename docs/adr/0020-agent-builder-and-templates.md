@@ -72,6 +72,11 @@ stateDiagram-v2
 
 - `ActivateAgent` also moves an active agent to its newer proposed version ([0066](0066-triggers-and-scheduling.md)); re-activating the version it already runs is refused, so a concurrent duplicate activation gets `Aborted`.
 
+## Amendment 2026-11-24 (blank agent and UpdateAgent, #1266)
+
+- `CreateAgent` makes an agent without a template ([0126](0126-web-ui-v2.md) section 5). Its definition goes through the checks of a template: the schema bounds, the connector catalog, grant binding, trigger rules and the served-model check. It starts as a draft with the lowest daily spend limit of the shipped templates. The same admin-only `ActivateAgent` puts it in effect.
+- `UpdateAgent` writes a new proposed version (field mask, `base_version`). On an active agent, the running version does not change until an admin or owner activates the new one. A member can change only a draft that they created and that was never activated.
+
 ## Upstream verification
 
 None needed. Checked 2026-10-21.

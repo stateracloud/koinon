@@ -61,6 +61,10 @@ const (
 	AgentServiceRunAgentTriggerProcedure = "/koinon.agent.v1alpha1.AgentService/RunAgentTrigger"
 	// AgentServiceArchiveAgentProcedure is the procedure name of the AgentService's ArchiveAgent RPC.
 	AgentServiceArchiveAgentProcedure = "/koinon.agent.v1alpha1.AgentService/ArchiveAgent"
+	// AgentServiceCreateAgentProcedure is the procedure name of the AgentService's CreateAgent RPC.
+	AgentServiceCreateAgentProcedure = "/koinon.agent.v1alpha1.AgentService/CreateAgent"
+	// AgentServiceUpdateAgentProcedure is the procedure name of the AgentService's UpdateAgent RPC.
+	AgentServiceUpdateAgentProcedure = "/koinon.agent.v1alpha1.AgentService/UpdateAgent"
 )
 
 var (
@@ -166,6 +170,20 @@ var (
 			Procedure:  AgentServiceArchiveAgentProcedure,
 		}
 	})
+	agentServiceCreateAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("CreateAgent"),
+			Procedure:  AgentServiceCreateAgentProcedure,
+		}
+	})
+	agentServiceUpdateAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("UpdateAgent"),
+			Procedure:  AgentServiceUpdateAgentProcedure,
+		}
+	})
 )
 
 // AgentServiceClient is a client for the koinon.agent.v1alpha1.AgentService service.
@@ -228,6 +246,20 @@ type AgentServiceClient interface {
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
+	// CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section
+	// 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The
+	// result is a draft: it does not run, and its grants and triggers have no effect, until an admin
+	// or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the
+	// platform's blank-agent default; admins change it with BudgetService. Audited. Members and above.
+	CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error)
+	// UpdateAgent changes the fields that update_mask names. A change to a version field
+	// (instructions, model, grants, triggers, run_limits) adds a new version with everything else
+	// carried over from the latest one. On an active agent the new version is proposed: the agent
+	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
+	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
+	// before the first activation. Audited, with the old and the new values. Admins and owners
+	// update any agent of the org; a member updates only a draft that they created.
+	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
 
 // NewAgentServiceClient constructs a client for the koinon.agent.v1alpha1.AgentService service.
@@ -296,6 +328,20 @@ type AgentServiceHandler interface {
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
+	// CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section
+	// 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The
+	// result is a draft: it does not run, and its grants and triggers have no effect, until an admin
+	// or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the
+	// platform's blank-agent default; admins change it with BudgetService. Audited. Members and above.
+	CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error)
+	// UpdateAgent changes the fields that update_mask names. A change to a version field
+	// (instructions, model, grants, triggers, run_limits) adds a new version with everything else
+	// carried over from the latest one. On an active agent the new version is proposed: the agent
+	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
+	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
+	// before the first activation. Audited, with the old and the new values. Admins and owners
+	// update any agent of the org; a member updates only a draft that they created.
+	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
 
 // RegisterAgentServiceHandler registers svc as the koinon.agent.v1alpha1.AgentService
@@ -317,6 +363,8 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceSetAgentSandboxResourcesSpec(), Handler: adapter.setAgentSandboxResources},
 		connect.Method{Spec: agentServiceRunAgentTriggerSpec(), Handler: adapter.runAgentTrigger},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
+		connect.Method{Spec: agentServiceCreateAgentSpec(), Handler: adapter.createAgent},
+		connect.Method{Spec: agentServiceUpdateAgentSpec(), Handler: adapter.updateAgent},
 	)
 }
 
@@ -377,6 +425,14 @@ func (UnimplementedAgentServiceHandler) RunAgentTrigger(context.Context, *v1alph
 
 func (UnimplementedAgentServiceHandler) ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.ArchiveAgent is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.CreateAgent is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.UpdateAgent is not implemented")
 }
 
 type agentServiceClient struct {
@@ -490,6 +546,22 @@ func (c *agentServiceClient) RunAgentTrigger(ctx context.Context, req *v1alpha1.
 func (c *agentServiceClient) ArchiveAgent(ctx context.Context, req *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error) {
 	var res v1alpha1.ArchiveAgentResponse
 	if err := c.client.CallUnary(ctx, agentServiceArchiveAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) CreateAgent(ctx context.Context, req *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error) {
+	var res v1alpha1.CreateAgentResponse
+	if err := c.client.CallUnary(ctx, agentServiceCreateAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) UpdateAgent(ctx context.Context, req *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error) {
+	var res v1alpha1.UpdateAgentResponse
+	if err := c.client.CallUnary(ctx, agentServiceUpdateAgentSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -659,6 +731,30 @@ func (h agentServiceHandler) archiveAgent(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.ArchiveAgent(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) createAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.CreateAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CreateAgent(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) updateAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.UpdateAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.UpdateAgent(ctx, &req)
 	if err != nil {
 		return err
 	}

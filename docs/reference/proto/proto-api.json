@@ -33,6 +33,15 @@
               "deprecated": false
             },
             {
+              "name": "CreateAgent",
+              "description": "CreateAgent creates a draft agent without a template: the \"Blank agent\" form (ADR 0126 section\n5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The\nresult is a draft: it does not run, and its grants and triggers have no effect, until an admin\nor owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the\nplatform's blank-agent default; admins change it with BudgetService. Audited. Members and above.",
+              "requestType": "koinon.agent.v1alpha1.CreateAgentRequest",
+              "responseType": "koinon.agent.v1alpha1.CreateAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "CreateAgentFromTemplate",
               "description": "CreateAgentFromTemplate creates a draft agent from a template. Members\nand above.",
               "requestType": "koinon.agent.v1alpha1.CreateAgentFromTemplateRequest",
@@ -136,6 +145,15 @@
               "description": "SetAgentTriggers proposes a new version with the given triggers (everything else carried over\nfrom the latest version). The triggers fire nothing until ActivateAgent activates that\nversion; an active agent keeps running its active version meanwhile. Audited. Admins and\nowners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentTriggersRequest",
               "responseType": "koinon.agent.v1alpha1.SetAgentTriggersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "UpdateAgent",
+              "description": "UpdateAgent changes the fields that update_mask names. A change to a version field\n(instructions, model, grants, triggers, run_limits) adds a new version with everything else\ncarried over from the latest one. On an active agent the new version is proposed: the agent\nkeeps running its active version, with its approved grants and triggers, until ActivateAgent\nactivates the new one (ADR 0066). display_name changes the agent at once; harness changes only\nbefore the first activation. Audited, with the old and the new values. Admins and owners\nupdate any agent of the org; a member updates only a draft that they created.",
+              "requestType": "koinon.agent.v1alpha1.UpdateAgentRequest",
+              "responseType": "koinon.agent.v1alpha1.UpdateAgentResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -478,6 +496,78 @@
           ]
         },
         {
+          "name": "AgentDefinition",
+          "fullName": "koinon.agent.v1alpha1.AgentDefinition",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "AgentDefinition is what a person sets on an agent without a template, and what UpdateAgent\nchanges.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "display_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "1 to 200 characters."
+            },
+            {
+              "name": "instructions",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Markdown instructions for the agent. Required."
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A model the org serves and has a price for; empty or \"default\" follows the org default."
+            },
+            {
+              "name": "harness",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A harness by name (ADR 0112); empty picks the platform's default harness."
+            },
+            {
+              "name": "grants",
+              "number": 5,
+              "type": "koinon.template.v1alpha1.Grant",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The grants the agent proposes, one per connector type, each with its connection and targets\nin connection_id and repositories. A grant names a connector type, scopes that the type has,\nand a preset. targets_min and targets_max are ignored. ActivateAgent approves them."
+            },
+            {
+              "name": "triggers",
+              "number": 6,
+              "type": "koinon.template.v1alpha1.Trigger",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The complete list of triggers. They fire nothing until ActivateAgent activates the version."
+            },
+            {
+              "name": "run_limits",
+              "number": 7,
+              "type": "koinon.template.v1alpha1.RunLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The limits of one run; a zero or empty value takes the platform default."
+            }
+          ]
+        },
+        {
           "name": "ArchiveAgentRequest",
           "fullName": "koinon.agent.v1alpha1.ArchiveAgentRequest",
           "file": "koinon/agent/v1alpha1/agent.proto",
@@ -599,6 +689,51 @@
           "fullName": "koinon.agent.v1alpha1.CreateAgentFromTemplateResponse",
           "file": "koinon/agent/v1alpha1/agent.proto",
           "description": "CreateAgentFromTemplateResponse holds the new draft.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateAgentRequest",
+          "fullName": "koinon.agent.v1alpha1.CreateAgentRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "CreateAgentRequest names the org and the definition of the new draft.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "definition",
+              "number": 2,
+              "type": "koinon.agent.v1alpha1.AgentDefinition",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateAgentResponse",
+          "fullName": "koinon.agent.v1alpha1.CreateAgentResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "CreateAgentResponse holds the new draft.",
           "deprecated": false,
           "fields": [
             {
@@ -1527,6 +1662,78 @@
               "oneof": "",
               "deprecated": false,
               "description": "What a UI shows about the setting: \"this model always thinks; your off setting doesn't apply\"\nwhen off_overridden, empty otherwise."
+            }
+          ]
+        },
+        {
+          "name": "UpdateAgentRequest",
+          "fullName": "koinon.agent.v1alpha1.UpdateAgentRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "UpdateAgentRequest names the agent, the version the change is based on and the fields to change.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "base_version",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the\ncall fails with FailedPrecondition."
+            },
+            {
+              "name": "definition",
+              "number": 4,
+              "type": "koinon.agent.v1alpha1.AgentDefinition",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The new values. Only the fields that update_mask names are read."
+            },
+            {
+              "name": "update_mask",
+              "number": 5,
+              "type": "google.protobuf.FieldMask",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The AgentDefinition fields to change, by field name, for example \"instructions\". Required: an\nempty mask or an unknown name fails with InvalidArgument."
+            }
+          ]
+        },
+        {
+          "name": "UpdateAgentResponse",
+          "fullName": "koinon.agent.v1alpha1.UpdateAgentResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "UpdateAgentResponse holds the agent with its new latest version.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         }

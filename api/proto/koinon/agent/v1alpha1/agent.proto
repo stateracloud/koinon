@@ -4,6 +4,7 @@ syntax = "proto3";
 
 package koinon.agent.v1alpha1;
 
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "koinon/template/v1alpha1/template.proto";
 
@@ -91,6 +92,22 @@ service AgentService {
   // ArchiveAgent archives a draft or active agent and cancels its unfinished
   // runs. Admins and owners only.
   rpc ArchiveAgent(ArchiveAgentRequest) returns (ArchiveAgentResponse);
+
+  // CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section
+  // 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The
+  // result is a draft: it does not run, and its grants and triggers have no effect, until an admin
+  // or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the
+  // platform's blank-agent default; admins change it with BudgetService. Audited. Members and above.
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse);
+
+  // UpdateAgent changes the fields that update_mask names. A change to a version field
+  // (instructions, model, grants, triggers, run_limits) adds a new version with everything else
+  // carried over from the latest one. On an active agent the new version is proposed: the agent
+  // keeps running its active version, with its approved grants and triggers, until ActivateAgent
+  // activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
+  // before the first activation. Audited, with the old and the new values. Admins and owners
+  // update any agent of the org; a member updates only a draft that they created.
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
 }
 
 // AgentStatus is the agent lifecycle (ADR 0020).
@@ -456,4 +473,55 @@ message RunAgentTriggerRequest {
 // RunAgentTriggerResponse names the task the fire created.
 message RunAgentTriggerResponse {
   string task_id = 1;
+}
+
+// AgentDefinition is what a person sets on an agent without a template, and what UpdateAgent
+// changes.
+message AgentDefinition {
+  // 1 to 200 characters.
+  string display_name = 1;
+  // Markdown instructions for the agent. Required.
+  string instructions = 2;
+  // A model the org serves and has a price for; empty or "default" follows the org default.
+  string model = 3;
+  // A harness by name (ADR 0112); empty picks the platform's default harness.
+  string harness = 4;
+  // The grants the agent proposes, one per connector type, each with its connection and targets
+  // in connection_id and repositories. A grant names a connector type, scopes that the type has,
+  // and a preset. targets_min and targets_max are ignored. ActivateAgent approves them.
+  repeated koinon.template.v1alpha1.Grant grants = 5;
+  // The complete list of triggers. They fire nothing until ActivateAgent activates the version.
+  repeated koinon.template.v1alpha1.Trigger triggers = 6;
+  // The limits of one run; a zero or empty value takes the platform default.
+  koinon.template.v1alpha1.RunLimits run_limits = 7;
+}
+
+// CreateAgentRequest names the org and the definition of the new draft.
+message CreateAgentRequest {
+  string org_id = 1;
+  AgentDefinition definition = 2;
+}
+
+// CreateAgentResponse holds the new draft.
+message CreateAgentResponse {
+  Agent agent = 1;
+}
+
+// UpdateAgentRequest names the agent, the version the change is based on and the fields to change.
+message UpdateAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the
+  // call fails with FailedPrecondition.
+  int32 base_version = 3;
+  // The new values. Only the fields that update_mask names are read.
+  AgentDefinition definition = 4;
+  // The AgentDefinition fields to change, by field name, for example "instructions". Required: an
+  // empty mask or an unknown name fails with InvalidArgument.
+  google.protobuf.FieldMask update_mask = 5;
+}
+
+// UpdateAgentResponse holds the agent with its new latest version.
+message UpdateAgentResponse {
+  Agent agent = 1;
 }

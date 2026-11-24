@@ -137,3 +137,12 @@ SET sandbox_cpu_request = sqlc.narg(cpu_request), sandbox_cpu_limit = sqlc.narg(
     sandbox_memory_request = sqlc.narg(memory_request), sandbox_memory_limit = sqlc.narg(memory_limit)
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: UpdateAgentProfile :one
+-- The agent's own fields that UpdateAgent changes without a new version: the display name, and the
+-- harness of an agent that was never activated (ADR 0126 section 5).
+UPDATE agents
+SET display_name = @display_name, harness = @harness
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+  AND (harness = @harness OR active_version_id IS NULL)
+RETURNING *;
