@@ -1253,7 +1253,8 @@ func markCapped(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype
 func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtype.UUID, listed []ListedTool) (SyncResult, error) {
 	var res SyncResult
 	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		// The lock keeps the count of unreviewed tools below true until this sync commits.
+		// The row lock makes two syncs of one server take turns, so the count of unreviewed tools
+		// below stays correct until this sync commits.
 		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: serverID})
 		if err != nil {
 			return err

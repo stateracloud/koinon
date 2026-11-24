@@ -57,7 +57,7 @@ func (u *mutableUpstream) called() int {
 }
 
 // pinGuard serves a tool when its sanitised text hashes to the approved hash, and leaves it out
-// otherwise. A tool that was never approved is left out too. It counts how often it was asked.
+// otherwise. A tool that was never approved waits for review (#1216). It counts how often it was asked.
 type pinGuard struct {
 	recordingGuard
 	mu       sync.Mutex
@@ -95,9 +95,13 @@ func (g *pinGuard) CheckToolList(_ context.Context, l mcpgateway.ToolList) mcpga
 			v.Left = append(v.Left, p.Name)
 			continue
 		}
-		if g.approved[p.Name] == t.Hash() {
+		want, ok := g.approved[p.Name]
+		switch {
+		case !ok:
+			v.Waiting = append(v.Waiting, p.Name)
+		case want == t.Hash():
 			v.Serve = append(v.Serve, t)
-		} else {
+		default:
 			v.Left = append(v.Left, p.Name)
 		}
 	}
@@ -145,7 +149,7 @@ var _ = Describe("pinned tool lists (#1132)", func() {
 		Expect(text(res)).To(Equal("read ran"))
 	})
 
-	It("leaves out a tool the server added since the approval, and refuses a call to it", func(ctx SpecContext) {
+	It("hides a tool the server added since the approval until an admin reviews it, and refuses a call to it (#1216)", func(ctx SpecContext) {
 		up.set("extra", "new tool")
 		s := connect(ctx, front.URL, key.Material)
 		Expect(toolNames(ctx, s)).To(ConsistOf("t_read"))
@@ -153,8 +157,16 @@ var _ = Describe("pinned tool lists (#1132)", func() {
 		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_extra"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeTrue())
-		Expect(text(res)).To(ContainSubstring("changed since an admin approved it"))
+		Expect(text(res)).To(ContainSubstring("no admin reviewed this tool yet"))
 		Expect(up.called()).To(Equal(before), "the target never saw the call")
+
+		By("an admin reviews it: it is served and runs")
+		guard.approve(mcptoolpin.Published{Name: "extra", Description: "new tool"})
+		Expect(toolNames(ctx, s)).To(ConsistOf("t_read", "t_extra"))
+		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "t_extra"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse())
+		Expect(text(res)).To(Equal("extra ran"))
 	})
 
 	It("leaves out a tool whose description changed", func(ctx SpecContext) {
@@ -230,7 +242,7 @@ var _ = Describe("pinned tool lists (#1132)", func() {
 		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_extra"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeTrue())
-		Expect(text(res)).To(ContainSubstring("changed since an admin approved it"))
+		Expect(text(res)).To(ContainSubstring("no admin reviewed this tool yet"))
 		Expect(sse.called()).To(Equal(calls))
 	})
 

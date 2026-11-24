@@ -147,3 +147,4 @@ are in [0046](0046-adr-conventions.md).
 | [0121](0121-run-evidence-export-job.md) | Run-evidence export as a chart Job | Proposed |
 | [0123](0123-a2a-external-edge.md) | External A2A edge | Proposed |
 | [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |
+| [0125](0125-hide-unreviewed-mcp-tools.md) | Hide MCP tools that no admin reviewed | Proposed (needs main: ADR number) |

@@ -468,6 +468,62 @@ var _ = Describe("Org MCP servers", func() {
 			}).WithTimeout(racescale.D(10 * time.Second)).WithPolling(500 * time.Millisecond).Should(Succeed())
 		})
 
+		It("stores at most the limit of unreviewed tools for a server that invents new names on each probe, with one audit event (#1216)", func(ctx SpecContext) {
+			s := server(ctx, org, "junk", "", nil)
+			target := slug + "-junk"
+			host, port, stop, gw := fakeGatewayServer(target)
+			DeferCleanup(stop)
+			rr := probing(ctx, host, port)
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			var sid pgtype.UUID
+			Expect(sid.Scan(s.ID)).To(Succeed())
+			count := func(sql string) int {
+				GinkgoHelper()
+				var n int
+				Expect(pool.QueryRow(ctx, sql, org, sid).Scan(&n)).To(Succeed())
+				return n
+			}
+			unreviewed := func() int {
+				return count(`SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND approved_hash IS NULL`)
+			}
+			capEvents := func() int {
+				return count(`SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_server.unreviewed_tools_capped' AND target_id = $2::uuid::text`)
+			}
+			syncEvents := func() int {
+				return count(`SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'mcp_tool.sync' AND target_id = $2::uuid::text`)
+			}
+			var listed []string
+			// probe lists 100 names the server never listed before, as a server that invents names does.
+			probe := func(i int) {
+				gw.RemoveTools(listed...)
+				listed = listed[:0]
+				for j := range 100 {
+					name := fmt.Sprintf("%s_junk_%d_%d", target, i, j)
+					listed = append(listed, name)
+					gw.AddTool(&mcp.Tool{Name: name, Description: "junk", InputSchema: json.RawMessage(`{"type":"object"}`)},
+						func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+							return &mcp.CallToolResult{}, nil
+						})
+				}
+				rr.ProbeAll(ctx)
+			}
+			for i := range 4 {
+				probe(i)
+			}
+			Expect(unreviewed()).To(Equal(mcpservers.MaxUnreviewedTools))
+			Expect(capEvents()).To(Equal(1))
+			syncs := syncEvents()
+			Expect(syncs).To(BeNumerically(">=", 3), "each probe that stored names wrote its sync event")
+
+			for i := 4; i < 12; i++ {
+				probe(i)
+			}
+			Expect(unreviewed()).To(Equal(mcpservers.MaxUnreviewedTools), "endless new names add no row")
+			Expect(capEvents()).To(Equal(1), "and no second audit event")
+			Expect(syncEvents()).To(BeNumerically("<=", syncs+1), "at most one sync event, for the stored names that went absent")
+			Expect(count(`SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND id = $2 AND unreviewed_tools_capped_at IS NOT NULL`)).To(Equal(1))
+		})
+
 		It("turns a server unhealthy after three probes with no tools, and says why", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
 			host, port, stop := fakeGateway(slug + "-wiki") // lists nothing: the gateway skipped an unreachable target
