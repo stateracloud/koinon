@@ -67,22 +67,33 @@ other pods, so its actors could overbook the node: the chart refuses it. */}}
 {{- end }}
 {{- end }}
 {{- end }}
-{{- /* The runtime class label (see metadata below): a valid label value, and no vm tier on a pool that gives no
-microVM per sandbox (ADR 0075). */}}
+{{- /* The runtime class label (see metadata below) must be a valid label value. */}}
 {{- with .Values.openshell.runtimeClassName }}
 {{- if not (regexMatch "^([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$" .) }}
 {{- fail (printf "openshell.runtimeClassName %q is not a valid label value (at most 63 characters): the WorkerPool carries it as the label koinon.dev/runtime-class" .) }}
 {{- end }}
-{{- /* The tier is the resolved one (koinon.substrateTierMap: the entry, else defaultTier). */}}
-{{- /* With neither an entry nor defaultTier the helper itself fails the render (and the preflight names the other missing values first). */}}
-{{- $tier := "" }}
-{{- if or $s.defaultTier (hasKey ($s.runtimeClassTiers | default dict) .) }}{{- $tier = index (include "koinon.substrateTierMap" $ | fromJson) . | default "" }}{{- end }}
-{{- $poolClass := index (($p.spec | default dict).sandboxClasses | default (list (dict "name" $p.sandboxClass))) 0 }}
-{{- if and (eq $tier "vm") (ne (toString (index $poolClass "name")) "microvm") }}
-{{- $src := "execution.substrate.runtimeClassTiers.%s" }}
-{{- if not (hasKey ($s.runtimeClassTiers | default dict) .) }}{{- $src = "execution.substrate.defaultTier (no runtimeClassTiers entry names %s)" }}{{- end }}
-{{- fail (printf (print $src " is vm, but the pool that serves the runtime class %q has sandboxClass %s: the vm tier needs a microVM per sandbox (ADR 0075); set execution.substrate.workerPool.sandboxClass=microvm, or map the class to hardened or dev") . . $p.sandboxClass) }}
 {{- end }}
+{{- /* No vm tier on a pool that gives no microVM per sandbox (ADR 0075). The rule: a sandbox with a runtime class is
+put only on a worker with that class label, so the tier of that class (koinon.substrateTierMap: the entry, else
+defaultTier) must be met by this pool. A sandbox with no class has no selector and can land on ANY pool, and it gets
+defaultTier; so with an empty openshell.runtimeClassName, defaultTier=vm needs this pool to be a microVM. The check sees
+only the pool that this chart renders (the class of workerPool.spec.sandboxClasses wins over workerPool.sandboxClass). */}}
+{{- $poolClasses := ($p.spec | default dict).sandboxClasses | default (list (dict "name" $p.sandboxClass)) }}
+{{- if gt (len $poolClasses) 1 }}{{- fail (printf "execution.substrate.workerPool.spec.sandboxClasses has %d entries: a WorkerPool takes exactly one sandbox class (the CRD allows at most 1)" (len $poolClasses)) }}{{- end }}
+{{- $poolClass := toString (index (index $poolClasses 0) "name") }}
+{{- $rc := .Values.openshell.runtimeClassName | default "" }}
+{{- $tier := "" }}
+{{- $src := "" }}
+{{- if $rc }}
+{{- /* With neither an entry nor defaultTier the helper itself fails the render (and the preflight names the other missing values first). */}}
+{{- if or $s.defaultTier (hasKey ($s.runtimeClassTiers | default dict) $rc) }}{{- $tier = index (include "koinon.substrateTierMap" $ | fromJson) $rc | default "" }}{{- end }}
+{{- if hasKey ($s.runtimeClassTiers | default dict) $rc }}{{- $src = printf "execution.substrate.runtimeClassTiers.%s" $rc }}{{- else }}{{- $src = printf "execution.substrate.defaultTier (no runtimeClassTiers entry names %s)" $rc }}{{- end }}
+{{- else }}
+{{- $tier = $s.defaultTier | default "" }}
+{{- $src = "execution.substrate.defaultTier (openshell.runtimeClassName is empty, so a sandbox has no worker selector and can land on any pool)" }}
+{{- end }}
+{{- if and (eq $tier "vm") (ne $poolClass "microvm") }}
+{{- fail (printf "%s is vm, but the pool has sandboxClass %s: the vm tier needs a microVM per sandbox (ADR 0075); set execution.substrate.workerPool.sandboxClass=microvm, or map the class to hardened or dev" $src $poolClass) }}
 {{- end }}
 {{- $spec := dict "workerImage" $image "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
 {{- if $tmpl }}{{- $_ := set $spec "template" $tmpl }}{{- end }}

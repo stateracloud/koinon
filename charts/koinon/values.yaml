@@ -797,9 +797,12 @@ execution:
     runtimeClassTiers: {}
     # Tier of a sandbox that names no runtime class, and of openshell.runtimeClassName when it has no
     # entry above: that class then runs at this tier whatever its name (kata included), and NOTES.txt
-    # says so. Empty means there is none. The chart refuses the vm tier here when the pool it renders
-    # (workerPool.sandboxClass, or workerPool.spec.sandboxClasses) is not microvm (ADR 0075). It cannot see a
-    # pool that you make yourself (workerPool.enabled=false or a pool outside the chart): check that one.
+    # says so. Empty means there is none. The chart refuses the vm tier when it reaches a sandbox through
+    # this value and the pool that the chart renders is not microvm (workerPool.sandboxClass, or
+    # workerPool.spec.sandboxClasses when set; ADR 0075): for openshell.runtimeClassName when it has no entry,
+    # and for a sandbox with no class (openshell.runtimeClassName empty; such a sandbox has no worker
+    # selector, so it can land on any pool). It cannot see a pool that you make yourself
+    # (workerPool.enabled=false or a pool outside the chart): check that one.
     defaultTier: ""
     # Required true with substrate: the guest image does not yet carry the guest launcher and the
     # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:

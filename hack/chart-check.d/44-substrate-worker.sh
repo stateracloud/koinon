@@ -433,6 +433,18 @@ vmtier() { "$HELM" template koinon "$CHART" -n koinon --set "$ADDRESS" "${wsub[@
 vm_dt=$(vmtier --set execution.substrate.defaultTier=vm)
 grep -Fq 'execution.substrate.defaultTier' <<<"$vm_dt" && grep -Fq 'needs a microVM' <<<"$vm_dt" || fail "defaultTier=vm on a gvisor pool must fail the render and name defaultTier"
 vm_ok=$(vmtier --set execution.substrate.defaultTier=vm --set execution.substrate.workerPool.sandboxClass=microvm)
-if grep -Fq 'needs a microVM' <<<"$vm_ok"; then fail "defaultTier=vm on a microvm pool must render"; fi
+grep -Fq 'kind: WorkerPool' <<<"$vm_ok" && ! grep -Fq 'needs a microVM' <<<"$vm_ok" || fail "defaultTier=vm on a microvm pool must render a WorkerPool"
+# A sandbox with no runtime class has no worker selector: defaultTier=vm needs the pool to be a microVM then too.
+vmnc=(--set openshell.runtimeClassName=null --set sandboxPolicy.enabled=false --set execution.substrate.defaultTier=vm)
+vm_nc=$(vmtier "${vmnc[@]}")
+grep -Fq 'openshell.runtimeClassName is empty' <<<"$vm_nc" && grep -Fq 'needs a microVM' <<<"$vm_nc" || fail "defaultTier=vm with no runtime class on a gvisor pool must fail the render"
+vm_ncok=$(vmtier "${vmnc[@]}" --set execution.substrate.workerPool.sandboxClass=microvm)
+grep -Fq 'kind: WorkerPool' <<<"$vm_ncok" && ! grep -Fq 'needs a microVM' <<<"$vm_ncok" || fail "defaultTier=vm with no runtime class on a microvm pool must render a WorkerPool"
+# One sandbox class per pool (CRD maxItems 1).
+vm_two=$(vmtier --set 'execution.substrate.workerPool.spec.sandboxClasses[0].name=gvisor' --set 'execution.substrate.workerPool.spec.sandboxClasses[1].name=microvm')
+grep -Fq 'takes exactly one sandbox class' <<<"$vm_two" || fail "two sandbox classes in one pool must fail the render"
+# The error names the class the check used when spec.sandboxClasses overrides sandboxClass.
+vm_ov=$(vmtier --set execution.substrate.defaultTier=vm --set execution.substrate.workerPool.sandboxClass=microvm --set 'execution.substrate.workerPool.spec.sandboxClasses[0].name=gvisor')
+grep -Fq 'has sandboxClass gvisor' <<<"$vm_ov" || fail "the vm error must name the class of spec.sandboxClasses when it overrides sandboxClass"
 vm_en=$(vmtier --set execution.substrate.runtimeClassTiers.kata=vm)
 grep -Fq 'runtimeClassTiers.kata is vm' <<<"$vm_en" || fail "an explicit vm entry on a gvisor pool must still fail the render"
