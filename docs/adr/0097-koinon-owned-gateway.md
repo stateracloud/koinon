@@ -807,7 +807,7 @@ claims "koinon-api cannot decrypt" on the `local` backend.
 The gateway cannot open v1: it has no KEK, by design. A job that holds the KEK does the
 move, once.
 
-0. **Gate on the driver.** The default MCP data plane is still agentgateway (`gateway.mcp.driver`), and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). Koinon's gateway is not the default before #1132. So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
+0. **Gate on the driver.** The MCP data plane is chosen by `gateway.mcp.driver`. Since #1239 the default is `koinon`; before it, the default was agentgateway. agentgateway stays the fallback, and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
 1. **Expand (slice 2 and 3).** Release N adds `gateway_recipient_keys`, the key-admin Job, the writers
    that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule needs the reverse move `keys seal-mcp --to-v1`, which needs the private gateway key. Slice 4 builds the engine only: no command runs it yet (see 12.8 item 2), so a rollback to N-1 after the first v2 write is not supported until a gateway-side command exists. Track it in a follow-up issue. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
    still reads those files (marked by the file name: `mcp-…` plaintext, `mcpv2-…` ciphertext). Nothing
@@ -827,12 +827,16 @@ move, once.
      report before the last old pod has stopped, so koinon-api also requires the gate to stay open for two
      minutes without a break (`formatgate.DefaultHold`, longer than a pod's drain and a report's TTL) before
      it seals. A rollback leaves fresh N rows for up to the TTL; the same hold covers it.
-   - agentgateway still serves the agents' MCP path while the driver is koinon, and it cannot open a sealed
-     credential. The standalone renderer leaves such a target out of agentgateway's config, so no envelope
-     goes upstream. The result is that an agent cannot reach a server with a sealed credential, and koinon-api's
-     live tool check (which goes to agentgateway) cannot list its tools, until the follow-up moves the agent MCP URL
-     and the check to koinon-gateway. Until then, an operator who needs agents to reach every server keeps `gateway.mcp.koinon.recipientKey.enabled` off:
-     with no active key koinon-api writes v1.
+   - Before #1239, agentgateway still served the agents' MCP path while the driver was koinon, and it cannot open
+     a sealed credential. The standalone renderer leaves such a target out of agentgateway's config, so no
+     envelope goes upstream. #1239 moves the agents' MCP calls (koinon-agentd's `KOINON_AGENT_MCP_URL`, and the
+     sandbox profile's `/mcp` rules on a second endpoint, koinon-gateway's Service) and koinon-api's live tool
+     check (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway. One path stays on agentgateway: the reconciler's
+     MCP prober (`internal/reconciler/mcpprobe.go`) lists tools through agentgateway's `/mcp`. agentgateway has no
+     target for a server with a sealed credential, so the probe finds no tools and marks the server unhealthy,
+     and the plan then gives no agent a grant to it. Until a follow-up moves the prober to koinon-gateway, an
+     operator who needs agents to reach every server keeps `gateway.mcp.koinon.recipientKey.enabled` off: with
+     no active key koinon-api writes v1.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.

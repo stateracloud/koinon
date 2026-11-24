@@ -13,8 +13,34 @@ yet; that is slice 3.
 
 ## Use this page when
 
-You turn on `gateway.mcp.driver=koinon`. The key is on by default with that driver
-(`gateway.mcp.koinon.recipientKey.enabled`).
+You install or upgrade with `gateway.mcp.driver=koinon`. That driver is the chart default since #1239. The
+key is on by default with that driver (`gateway.mcp.koinon.recipientKey.enabled`).
+
+## Upgrade to the koinon driver default (#1239)
+
+An install that did not set `gateway.mcp.driver` used agentgateway for MCP before #1239. After the upgrade it
+uses koinon-gateway:
+
+- koinon-api sends its approved MCP calls (`KOINON_GATEWAY_MCP_URL`) and the live check of an agent's MCP
+  tools (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway.
+- The agents send their MCP calls to koinon-gateway. koinon-agentd gives the harness
+  `KOINON_AGENT_MCP_URL`, and the OpenShell sandbox profile allows `/mcp` on koinon-gateway's Service only. The model
+  path (`/v1`) stays on agentgateway.
+- The gateway recipient key is on. When a key is active and the write gate is open, koinon-api seals new MCP
+  credentials to it (envelope v2). agentgateway cannot open v2.
+- The reconciler's MCP prober still lists tools through agentgateway. A server with a v2 credential then
+  shows as unhealthy and its tools are withdrawn from agents (ADR 0097 12.5, known limits). To keep every
+  server reachable until the prober moves, set `gateway.mcp.koinon.recipientKey.enabled=false`.
+- koinon-gateway needs `gateway.mode=standalone`. With `gateway.mode=kubernetes` the render fails until you
+  set `gateway.mcp.driver=agentgateway`.
+- koinon-gateway needs its own database login (`postgres.cnpg.existingSecrets.mcpgateway`, or the key
+  `postgres.external.keys.mcpgateway` in external mode) and, with the key on, the key-admin and re-seal logins.
+  With a KMS, the gateway key needs its own KMS key (the policies below). With AWS KMS the render fails
+  until you set `gateway.mcp.koinon.recipientKey.kms.awskms.keyId`.
+
+To keep the old path, set `gateway.mcp.driver=agentgateway`. To move back after koinon-api sealed a
+credential to v2, set each such credential again in the UI or API first: `keys seal-mcp --to-v1` refuses
+today (see below), and agentgateway leaves out a server whose credential it cannot open.
 
 ## What runs
 
