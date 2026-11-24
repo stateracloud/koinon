@@ -157,7 +157,7 @@ Order of the step:
 9. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
    object store" below.
 10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
-    namespace, which may not exist yet. The chart's own preflight runs it after `helm install`.
+    namespace, which may not exist yet. The chart's preflight hook runs it at `helm install`.
 
 `koinon-api substrate install` and `koinon-api preflight --driver substrate` give the probe pods the Secrets that
 `--probe-image-pull-secrets` names. These Secrets must exist in the probe namespace, not only in the release
@@ -203,6 +203,31 @@ The kubeconfig of the installer needs these rules:
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
   WorkerPool with all its workers ready (`status.readyReplicas`) and every sandbox class resolved.
+
+### The chart's preflight hook
+
+With `execution.driver: substrate`, the chart's pre-install and pre-upgrade hook Job runs
+`koinon-api preflight --driver substrate --substrate-probes=false`. Thus `helm install` and `helm upgrade` stop when:
+
+- the cluster runs Kubernetes below 1.37,
+- the Substrate CRDs are missing,
+- `ate-api-server` in `execution.substrate.namespace` is missing, not ready or not the pinned release,
+- `atenet-router` does not allow the atenet client.
+
+It also runs the NetworkPolicy probe in the release namespace when `preflight.networkPolicyProbe.enabled` is
+true, as with the OpenShell driver.
+
+The hook does not run the probe pods (issuer, node devices, user namespaces). These pods need a probe namespace
+with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these three checks as
+warnings. `koinon-api substrate install` runs them, and `koinon-api preflight --driver substrate` runs them
+again on request. The hook does not check the WorkerPools: at pre-install the chart's own pool does not exist
+yet.
+
+The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and on the Deployments
+`ate-api-server` and `atenet-router` by name (a ClusterRole, because Substrate's namespace may not exist yet),
+plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
+Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
+get pod logs, and create and delete NetworkPolicies.
 
 ## Service-account issuer
 
@@ -583,7 +608,7 @@ above come from the source:
 - That `--credential-provider='{"name":"k8s.io"}'` is the provider Koinon wants.
 - A full install with the new options (`--postgres-storage-class` and the others) and the in-cluster issuer
   probe on a cluster; the lab run before them stopped at the issuer probe.
-- The RBAC of the preflight ServiceAccount (issuer discovery, `kube-root-ca.crt`): chart work.
+- The chart's preflight hook with the Substrate driver on a real cluster (see "The chart's preflight hook").
 
 ### Known gaps
 

@@ -24,7 +24,7 @@ env_is KOINON_SUBSTRATE_ROUTER_ADDRESS '"atenet-router.ate-system.svc:80"' "${su
 env_is KOINON_SUBSTRATE_TOKEN_FILE '"/var/run/koinon/substrate/token"' "${sub[@]}"
 has "the ateapi token is a projected ServiceAccount token with the configured audience" 'audience: "ateapi"' "${sub[@]}" --show-only templates/deployments.yaml
 lacks "agentd does not get the OpenShell address with substrate" 'KOINON_OPENSHELL_ADDRESS' "${sub[@]}" --show-only templates/deployments.yaml
-lacks "no install preflight Job with substrate (koinon-api substrate install ran it)" 'component: preflight' "${sub[@]}"
+has "the install preflight Job runs the Substrate checks with substrate (#1089; details in 95-preflight.sh)" '- --driver=substrate' "${sub[@]}" --show-only templates/preflight.yaml
 has "the install preflight Job stays with openshell" 'component: preflight' 
 has "a CA Secret is mounted and named" 'KOINON_SUBSTRATE_CA_FILE' "${sub[@]}" --set execution.substrate.caSecret=ate-ca --show-only templates/deployments.yaml
 # openshell.address is not required with substrate, and the OpenShell-only features are refused.
