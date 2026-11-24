@@ -41,3 +41,21 @@ func (n noEgress) CreateSandbox(ctx context.Context, workspace string, spec Sand
 	spec.Policy = Policy{}
 	return n.Compute.CreateSandbox(ctx, workspace, spec)
 }
+
+// SpecID forwards to the driver when it implements [SpecIdentifier] (a driver without labels).
+func (n noEgress) SpecID(workspace string, spec SandboxSpec) (string, error) {
+	if si, ok := n.Compute.(SpecIdentifier); ok {
+		return si.SpecID(workspace, spec)
+	}
+	return "", nil
+}
+
+// IdentifiesSpecs reports whether the backend identifies a sandbox's spec by [SpecIdentifier] and
+// not by labels. The adapter answers for its driver.
+func IdentifiesSpecs(b any) bool {
+	if n, ok := b.(noEgress); ok {
+		b = n.Compute
+	}
+	_, ok := b.(SpecIdentifier)
+	return ok
+}

@@ -278,6 +278,19 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	return sandboxFrom(workspace, actor), nil
 }
 
+// SpecID implements [execution.SpecIdentifier]. Substrate objects have no labels, so the identity of
+// a sandbox's spec is the name of its template: a hash of everything in the template. Sandbox.SpecID
+// of an observed actor is the same name.
+func (d *Driver) SpecID(workspace string, spec execution.SandboxSpec) (string, error) {
+	tmpl, err := renderTemplate(workspace, spec, d.cfg)
+	if err != nil {
+		return "", fail("SpecID", execution.ErrInvalid, "%v", err)
+	}
+	return tmpl.GetMetadata().GetName(), nil
+}
+
+var _ execution.SpecIdentifier = (*Driver)(nil)
+
 // checkSpec refuses what the driver cannot carry out. Provider records and network rules belong to
 // the gateway (ADR 0097). Filesystem paths belong to the guest launcher's Landlock configuration
 // (ADR 0119, #1087), which this driver does not render yet: a driver that dropped them would run
