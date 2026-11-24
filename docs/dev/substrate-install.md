@@ -542,9 +542,9 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   the Kubernetes API server. The rule names the ports and no address, because NetworkPolicy has no peer for the API
   server that works on every CNI (ADR 0120 amendment 10, issue #1172). You do not look up an address. Check the API
   server port of your cluster (`kubectl get endpoints kubernetes -n default`) and add it when it is not 443 or 6443.
-  Only the pods of `workerNetworkPolicy.apiServerApps` (default `atelet`, `ate-controller`, `ate-api-server`), the
-  `apiOnlyApps`, the podcert controller and the otel Prometheus get the rule. `atenet-router` and `atenet-egress` do
-  not, so the actor data path has no TCP route to any address.
+  Only the pods of `workerNetworkPolicy.apiServerApps` (default `atelet`, `ate-controller`, `ate-api-server`, `atenet-router`), the
+  `apiOnlyApps`, the podcert controller and the otel Prometheus get the rule. `atenet-router` needs it (its EndpointSlice watch). `atenet-egress` does
+  not use the API server and gets no route, so the pod that carries worker traffic out has no TCP route to any address.
   The cost: a compromised control pod can open these ports to any server. This includes atelet: a TLS registry on
   port 443 is reachable at L3, and only the image rewrite and the `SandboxConfig` source limit atelet to the one image
   source. Worker pods get no such rule.

@@ -290,15 +290,13 @@ if grep -Eq 'DoesNotExist|ate.dev/worker-pool' <<<"$control"; then fail "the con
 for a in atelet ate-controller ate-api-server atenet-router atenet-egress; do
 	grep -Eq -- "- $a\$" <<<"$control" || fail "the control policy must list app $a"
 done
-if grep -Eq -- '- ports:|port: (443|6443), protocol: TCP' <<<"$control"; then fail "the control-plane policy must carry no any-address API server rule (atenet-router and atenet-egress would get it; ADR 0120 amendment 10)"; fi
+if grep -Eq -- '- ports:|port: (443|6443), protocol: TCP' <<<"$control"; then fail "the control-plane policy must carry no any-address API server rule (atenet-egress would get it; ADR 0120 amendment 10)"; fi
 apisrv=$(docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-api-server\n' <<<"$npdocs")
 apiport "the API server policy" "$apisrv"
-for a in atelet ate-controller ate-api-server; do
+for a in atelet ate-controller ate-api-server atenet-router; do
 	grep -Eq -- "- $a\$" <<<"$apisrv" || fail "the API server policy must list app $a"
 done
-for a in atenet-router atenet-egress; do
-	if grep -Eq -- "- $a\$" <<<"$apisrv"; then fail "the API server policy must not select $a (actor data path; no TCP route to any address)"; fi
-done
+if grep -Eq -- "- atenet-egress\$" <<<"$apisrv"; then fail "the API server policy must not select atenet-egress (no API server client; no TCP route to any address)"; fi
 grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$control" || fail "the control-plane policy must reach the worker namespace"
 has "the app list is configurable" '- app-x$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps={app-x}' "${np[@]}"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps=null' >/dev/null 2>"$out/sub.err"; then fail "an empty controlPlaneApps must not render"; fi

@@ -9,8 +9,12 @@
 #   1. an unfenced pod reaches a server pod on 6443 and on 8080 (the control, so the closed port below is the policy);
 #   2. the fenced pod (the label the podcert policy selects) cannot reach the server on 8080;
 #   3. the fenced pod reaches the server on 6443: the rule names ports and no address, so any address works;
-#   4. the fenced pod reaches the real API server endpoint on its port;
-#   5. the rendered policies carry no ipBlock.
+#   4. SMOKE only: the fenced pod reaches the `kubernetes` Service (ClusterIP, port 443). It does not prove the rule:
+#      the Service forwards to a node address and kindnet does not filter traffic to a node address;
+#   5. the rendered policies carry no ipBlock;
+#   6. in ate-system (substrate-networkpolicy.yaml): a pod labelled app=atenet-egress (a control-plane pod outside
+#      apiServerApps: it has no API server client) cannot reach the server on 6443, and pods labelled app=atelet and
+#      app=atenet-router (in apiServerApps: the router watches EndpointSlices) can.
 # No cluster but its own is touched: every kubectl and helm call takes the kubeconfig file of this cluster.
 # Needs docker, kind, kubectl and helm 4. KEEP_CLUSTER=1 keeps the cluster for debugging.
 
@@ -54,9 +58,16 @@ k create namespace unfenced >/dev/null
 helm template koinon "$root/charts/koinon" --namespace koinon \
 	-f "$root/charts/koinon/ci/substrate-values.yaml" \
 	--show-only templates/substrate-fence-networkpolicy.yaml >"$tmp/fence.yaml"
+helm template koinon "$root/charts/koinon" --namespace koinon \
+	-f "$root/charts/koinon/ci/substrate-values.yaml" \
+	--show-only templates/substrate-networkpolicy.yaml >"$tmp/substrate.yaml"
 if grep -q 'ipBlock' "$tmp/fence.yaml"; then fail "the fence must not name an address"; fi
 grep -q 'port: 6443, protocol: TCP' "$tmp/fence.yaml" || fail "the fence must open the API server ports"
 k apply -f "$tmp/fence.yaml" >/dev/null
+if grep -q 'ipBlock' "$tmp/substrate.yaml"; then fail "the Substrate policies must not name an address"; fi
+grep -q 'name: koinon-substrate-api-server' "$tmp/substrate.yaml" || fail "the Substrate policies must carry the API server policy"
+k create namespace ate-workers >/dev/null
+k apply -f "$tmp/substrate.yaml" >/dev/null
 
 # kindnet (kube-network-policies) enforces per packet, but a pod joins its pod-IP set a moment after it starts, so a
 # short-lived probe pod can finish before the rules apply to it (the packets bypass). Each probe pod is therefore
@@ -94,7 +105,30 @@ done
 echo "ok: the fenced pod cannot reach another port (8080)"
 [[ $(nc_rc "$fns" fenced "$sip" 6443) == 0 ]] || fail "the fenced pod must reach TCP 6443 at any address (the rule names ports, not addresses)"
 echo "ok: the fenced pod reaches TCP 6443 at an address that is not the API server"
-[[ $(nc_rc "$fns" fenced "$ep" "$port") == 0 ]] || fail "the fenced pod must reach the API server endpoint on $port"
-echo "ok: the fenced pod reaches the API server on $port with no address in the policy"
+csip=$(k get service kubernetes -n default -o jsonpath='{.spec.clusterIP}')
+[[ $(nc_rc "$fns" fenced "$csip" 443) == 0 ]] || fail "the fenced pod must reach the kubernetes Service on 443"
+echo "ok (smoke, not proof of the rule): the fenced pod reaches the kubernetes Service $csip:443"
 [[ $(nc_rc "$fns" fenced "$sip" 8080) != 0 ]] || fail "the fenced pod reached port 8080 on a second probe"
+
+# The Substrate policies of ate-system: atenet-egress is fenced by the control policy and not in apiServerApps (wait
+# until its fence applies: port 8080 closes); atelet and atenet-router are in apiServerApps.
+pod ate-system egress "app=atenet-egress"
+pod ate-system atelet "app=atelet"
+pod ate-system router "app=atenet-router"
+wait_fenced() { # wait_fenced <pod>: port 8080 closes once the fence applies to the pod
+	local ok=0
+	for _ in $(seq 1 12); do
+		if [[ $(nc_rc ate-system "$1" "$sip" 8080) != 0 ]]; then ok=1; break; fi
+	done
+	[[ $ok == 1 ]] || fail "the $1 pod can still reach port 8080: the Substrate fence does not apply"
+}
+wait_fenced egress
+[[ $(nc_rc ate-system egress "$sip" 6443) != 0 ]] || fail "a pod labelled atenet-egress must NOT reach TCP 6443 at an address outside the control plane"
+echo "ok: a pod labelled atenet-egress cannot reach the server on 6443"
+wait_fenced atelet
+[[ $(nc_rc ate-system atelet "$sip" 6443) == 0 ]] || fail "a pod labelled atelet must reach TCP 6443 (apiServerApps)"
+echo "ok: a pod labelled atelet reaches the server on 6443"
+wait_fenced router
+[[ $(nc_rc ate-system router "$sip" 6443) == 0 ]] || fail "a pod labelled atenet-router must reach TCP 6443 (apiServerApps: EndpointSlice watch)"
+echo "ok: a pod labelled atenet-router reaches the server on 6443"
 echo "PASS"

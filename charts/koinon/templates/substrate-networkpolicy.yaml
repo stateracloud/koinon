@@ -18,8 +18,8 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
   workerNetworkPolicy.controlPlaneApps (an explicit list, not "every pod without the worker label",
   which would fail open for a pod that lost its label). They talk to each other and to the worker
   namespace, resolve names and reach Koinon's gateway and API pods. The API server route is NOT in this policy: it
-  is its own policy for workerNetworkPolicy.apiServerApps only (below), so atenet-router and atenet-egress, which
-  carry actor traffic, never get a TCP route to any address. A pod with another `app` label is not
+  is its own policy for workerNetworkPolicy.apiServerApps only (below), so atenet-egress, which
+  carries worker traffic out, never gets a TCP route to any address. A pod with another `app` label is not
   selected, so it keeps the cluster default: keep the list in step with the Substrate manifests.
   Ingress comes from both namespaces and from Koinon's namespace.
   The other pods of the namespace have their own list each, so no Substrate pod is unfenced: a default-deny egress policy covers every pod of the namespace (so ate-idp-server, postgres
@@ -142,9 +142,10 @@ spec:
 {{- if not $np.apiServerApps }}{{- fail "execution.substrate.workerNetworkPolicy.apiServerApps is empty: the control plane would lose the Kubernetes API server" }}{{- end }}
 ---
 # The pods that call the Kubernetes API server (ADR 0120 amendment 10, issue 1172): TCP on apiServerPorts to any
-# address. A separate policy with its own app list, so the actor data path (atenet-router, atenet-egress) is not
-# selected: those pods have no API server client (research note 2026-11-19 R4 lists the kube API for ate-api-server,
-# the controller, atelet and k8s-credential-provider only). Egress rules add up with the control policy. The policy
+# address. A separate policy with its own app list, so atenet-egress is not selected: it has no API server client
+# (Substrate v1.0.0 b34fbee7: atenet-egress.yaml:30-38 binds no RBAC, cmd/atenet/internal/router/router.go:75-79 builds
+# no client in egress mode). atenet-router IS selected: its ingress mode watches EndpointSlices (router.go:73-95,
+# atenet-router.yaml:16-50 ServiceAccount, Role and RoleBinding). Egress rules add up with the control policy. The policy
 # lists no Ingress type.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

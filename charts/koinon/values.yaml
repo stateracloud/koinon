@@ -913,8 +913,8 @@ execution:
     # NetworkPolicies of both namespaces. No CNI-specific feature.
     # Worker namespace: worker pods may reach atenet-egress and DNS, and nothing else
     # (ADR 0120 section 2.4). Control-plane namespace: the pods whose `app` label is in
-    # controlPlaneApps may reach each other, the worker namespace, the gateway, DNS and the Kubernetes
-    # API server. A pod with another `app` label is not selected by that policy (it is not fenced),
+    # controlPlaneApps may reach each other, the worker namespace, the gateway and DNS. The Kubernetes
+    # API server ports go only to apiServerApps and apiOnlyApps (their own policies, ADR 0120 amendment 10). A pod with another `app` label is not selected by that policy (it is not fenced),
     # so keep the list in step with the Substrate manifests.
     workerNetworkPolicy:
       enabled: true
@@ -956,10 +956,17 @@ execution:
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
-      # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Not
-      # atenet-router and atenet-egress (actor data path: no API server client, and a TCP route to any address there
-      # would bypass the gateway's L7 rules at the network layer). Keep a pod out of this list unless it needs it.
-      apiServerApps: [atelet, ate-controller, ate-api-server]
+      # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Keep a
+      # pod out of this list unless it needs it. Evidence, Substrate v1.0.0 (b34fbee7):
+      #  - atenet-router DOES call it: ingress mode builds a client-go clientset for the EndpointSlice resolver
+      #    (cmd/atenet/internal/router/router.go:73-95, "Only ingress needs Kubernetes"). Its manifest has
+      #    ServiceAccount atenet-router, Role atenet-router-endpointslices (endpointslices get, list, watch) and a
+      #    RoleBinding (manifests/ate-install/atenet-router.yaml:16-50, serviceAccountName at :194), and no
+      #    automountServiceAccountToken override, so the token is mounted.
+      #  - atenet-egress does NOT: ServiceAccount only, "No RBAC is bound ... on purpose ... no Kubernetes access"
+      #    (atenet-egress.yaml:30-38, serviceAccountName at :1181), and --mode=egress builds no client
+      #    (router.go:75-79). It stays out: it carries worker traffic out and gets no TCP route to any address.
+      apiServerApps: [atelet, ate-controller, ate-api-server, atenet-router]
       # TCP ports of the Kubernetes API server. The pods that call the API server (the apiServerApps, the
       # apiOnlyApps, the podcert controller, Prometheus of otel-system) may open these ports to ANY address, and no
       # worker pod gets this route (ADR 0120 section 2.4 and amendment 10). The rule names no address because
