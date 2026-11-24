@@ -82,7 +82,8 @@ metadata:
     koinon.dev/managed-by: koinon-reconciler
 # The reconciler fills this Secret with the credential files and CA bundles of the MCP servers (mcp-<id>-<hash>,
 # mcpca-<id>-<hash>), apart from the provider keys: koinon-gateway mounts this Secret and no provider key
-# (ADR 0097 decision 5). agentgateway mounts both while agents reach MCP through it. The chart renders no data.
+# (ADR 0097 decision 5). agentgateway mounts both: it serves MCP with the agentgateway driver, and the reconciler's
+# MCP prober lists tools through it with either driver (#1239). The chart renders no data.
 type: Opaque
 ---
 apiVersion: v1

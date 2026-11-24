@@ -695,16 +695,28 @@ func describeMode(name, valuesFile string) {
 			// would otherwise kill agentd mid-drain and the leases would not be released.
 			ps := r.deployment("koinon-agentd").Spec.Template.Spec
 			var drain time.Duration
+			var agentMCP string
 			for _, c := range ps.Containers {
 				for _, e := range c.Env {
-					if e.Name == "KOINON_DRAIN_DEADLINE" {
+					switch e.Name {
+					case "KOINON_DRAIN_DEADLINE":
 						d, err := time.ParseDuration(e.Value)
 						Expect(err).NotTo(HaveOccurred())
 						drain = d
+					case "KOINON_AGENT_MCP_URL":
+						agentMCP = e.Value
 					}
 				}
 			}
 			Expect(drain).To(BeNumerically(">", 0), "koinon-agentd gets KOINON_DRAIN_DEADLINE")
+			// The agents' MCP URL (#1239): koinon-gateway's /mcp with gateway.mcp.driver=koinon, and unset with
+			// agentgateway (agentd then uses <KOINON_GATEWAY_URL>/mcp). agentd started with it above.
+			if r.deployment("koinon-mcp-gateway") != nil {
+				Expect(agentMCP).To(HavePrefix("http://koinon-mcp-gateway."), "koinon-agentd gets koinon-gateway's MCP URL")
+				Expect(agentMCP).To(HaveSuffix("/mcp"))
+			} else {
+				Expect(agentMCP).To(BeEmpty(), "koinon-agentd gets no MCP URL with the agentgateway MCP driver")
+			}
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
 			Expect(time.Duration(*ps.TerminationGracePeriodSeconds) * time.Second).To(BeNumerically(">=", drain+30*time.Second))
 		}, SpecTimeout(3*time.Minute))

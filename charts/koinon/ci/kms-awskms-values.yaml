@@ -28,3 +28,9 @@ secrets:
         # The Job runs with the recovery flag (#255); the Secret it just created has a working
         # active KEK, so it must add the KEK inactive and leave the active one alone.
         activateIfNoActive: true
+# The agentgateway MCP driver (the fallback, #1239). With the koinon driver the gateway recipient key needs an AWS
+# KMS key of its own (gateway.mcp.koinon.recipientKey.kms.awskms.keyId), and the smoke test makes none. This file
+# also keeps the fallback rendered and started in the standalone mode.
+gateway:
+  mcp:
+    driver: agentgateway

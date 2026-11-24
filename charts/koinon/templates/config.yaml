@@ -36,6 +36,9 @@ data:
       {{- if include "koinon.mcpKoinon" . }}
       # koinon-gateway opens sealed MCP credentials; with agentgateway the reconciler refuses them.
       mcpSealed: true
+      # koinon-gateway's MCP listener as sandboxes reach it: the sandbox profile allows /mcp there, and not on
+      # agentgateway (ADR 0097 decision 5, #1239).
+      mcpUrl: http://{{ include "koinon.mcpGatewayHost" . }}:{{ int .Values.gateway.mcp.koinon.port }}
       {{- end }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.

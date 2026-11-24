@@ -7,8 +7,8 @@
 # Kubernetes gateway mode (plan item G2): the chart renders no gateway of its own, only the Secret the
 # reconciler writes provider keys into; a standard NetworkPolicy selects the controller's proxy pods
 # by their gateway-name label; the reconciler may manage the agentgateway objects in the release
-# namespace and nothing cluster-wide.
-k8s=(--set gateway.mode=kubernetes)
+# namespace and nothing cluster-wide. Kubernetes mode needs the agentgateway MCP driver (#1239).
+k8s=(--set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway)
 lacks "no gateway Deployment in kubernetes mode" 'ghcr.io/agentgateway/agentgateway' "${k8s[@]}"
 has "provider keys Secret in kubernetes mode" 'name: koinon-gateway-providers$' "${k8s[@]}" --show-only templates/gateway-kubernetes.yaml
 n=$(render "${k8s[@]}" | grep -c 'secretName: koinon-gateway-providers$' || true)
@@ -29,7 +29,7 @@ has "sandboxes reach the Gateway's Service" 'http://koinon-gateway.koinon.svc.cl
 env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:4000/mcp"' "${k8s[@]}"
 has "preflight checks the agentgateway controller" '--agentgateway-controller=agentgateway$' "${k8s[@]}" --show-only templates/preflight.yaml
 has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
-env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
+env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"' --set gateway.mcp.driver=agentgateway
 # koinon-api refuses a server CA / insecureSkipVerify save when the gateway cannot render it (#278).
 env_is KOINON_GATEWAY_MODE '"kubernetes"' "${k8s[@]}"
 env_is KOINON_GATEWAY_MODE '"standalone"'

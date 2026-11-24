@@ -366,16 +366,19 @@ gateway:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-  # The MCP path (ADR 0097 step 2, issue #278). agentgateway: agentgateway serves MCP (the default, and the
-  # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
-  # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
-  # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
-  # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
-  # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
+  # The MCP path (ADR 0097 step 2, issues #278 and #1239). koinon (the default): koinon-gateway serves the
+  # MCP path as its own Deployment and Service, next to agentgateway, which keeps the LLM path. It follows the
+  # State stream of koinon-api, so it needs gateway.mode standalone. With koinon, these MCP calls go to
+  # koinon-gateway: the approved calls of koinon-api (KOINON_GATEWAY_MCP_URL), the agents' MCP calls
+  # (koinon-agentd's KOINON_AGENT_MCP_URL, and the sandbox network rule for /mcp), and koinon-api's live check
+  # of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL). The pod has its own database login
   # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
-  # Do not make this the default before issue #1132 (tools/list pinning) is closed.
+  # agentgateway: the fallback. agentgateway serves all MCP calls, as before #1239. Set it with
+  # gateway.mode kubernetes. agentgateway cannot open the credentials that koinon-api sealed to the gateway key
+  # (recipientKey below, envelope v2). `keys seal-mcp --to-v1` refuses today, so before you move back, set each
+  # such credential again in the UI or API.
   mcp:
-    driver: agentgateway
+    driver: koinon
     koinon:
       image:
         repository: gateway

@@ -265,7 +265,12 @@ spec:
     - ports:
         - port: mcp
       from:
-        # Only koinon-api calls this gateway until agents move to it (and the guard is in place).
+        # Agents' MCP calls (#1239), as for agentgateway's llm port: sandboxes reach it through their OpenShell
+        # supervisor pods; with execution.driver=substrate the actors' traffic arrives through atenet from
+        # Substrate's namespace (execution.substrate.gatewayClientNamespaceSelector).
+        - namespaceSelector:
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+        # Koinon's own pods: koinon-api sends its approved calls and its live tool check here.
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
