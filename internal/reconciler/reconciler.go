@@ -899,6 +899,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	}
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
+	// A pass that serves a server anew (or with another URL or credential) starts a new key window:
+	// koinon-gateway may refuse the new key until its State poll (issue #1260).
+	r.resetProbeKeyRetries(outcome.Probe)
 	r.probeSoon(outcome.Probe)
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {

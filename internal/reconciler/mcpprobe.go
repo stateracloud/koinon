@@ -297,6 +297,7 @@ func (r *Reconciler) probeOne(runCtx context.Context, p gatewayplan.Probe) {
 		// Only what the gateway returned: the server's credential never leaves the gateway, so the
 		// prober cannot ask the server itself why.
 		if _, changed, err := r.mcp.RecordProbe(ctx, p.Org, p.Server, false, reason, false); errors.Is(err, mcpservers.ErrNotFound) {
+			r.resetProbeKeyRetries([]gatewayplan.Probe{p}) // the server is gone: keep no count for it
 			return
 		} else if err != nil {
 			log.Warn("recording an MCP probe failed", "err", err)
@@ -355,4 +356,13 @@ func (r *Reconciler) retryRefusedKey(ctx context.Context, p gatewayplan.Probe, e
 		}
 	})
 	return true
+}
+
+// resetProbeKeyRetries forgets the refusal counts of the given servers (issue #1260).
+func (r *Reconciler) resetProbeKeyRetries(probes []gatewayplan.Probe) {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	for _, p := range probes {
+		delete(r.probeKeyRetries, p.Server)
+	}
 }

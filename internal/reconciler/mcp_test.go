@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -386,12 +387,16 @@ var _ = Describe("Org MCP servers", func() {
 			return probingWith(ctx, gw, mcpGW, 0)
 		}
 		// refusingFront answers 401, as koinon-gateway does for a probe key it does not know yet, while
-		// refuse is set; else it passes the request to the gateway at host:port. refused counts the 401s.
+		// refuse is set; else it passes the request to the gateway at host:port. refused counts the refused
+		// probes (their initialize requests).
 		refusingFront := func(host string, port int, refuse *atomic.Bool, refused *atomic.Int32) reconciler.Endpoint {
 			back := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port))})
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if refuse.Load() {
-					refused.Add(1)
+					// One initialize per probe: the client also sends other requests first.
+					if b, _ := io.ReadAll(req.Body); bytes.Contains(b, []byte(`"method":"initialize"`)) {
+						refused.Add(1)
+					}
 					http.Error(w, "refused: unknown gateway key", http.StatusUnauthorized)
 					return
 				}
@@ -478,9 +483,12 @@ var _ = Describe("Org MCP servers", func() {
 			// The pass serves the server and probes it at once: koinon-gateway does not know the key yet.
 			Expect(rr.ReconcileAll(ctx)).To(Succeed())
 			Eventually(refused.Load).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 1))
-			got, err := svc.Get(ctx, org, s.ID)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(got.HealthCheckedAt).To(BeNil(), "a refused probe key is not recorded")
+			// The retry comes after 2 s; until then the refusal must stay unrecorded.
+			Consistently(func(g Gomega) {
+				got, err := svc.Get(ctx, org, s.ID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.HealthCheckedAt).To(BeNil(), "a refused probe key is not recorded")
+			}).WithTimeout(time.Second).Should(Succeed())
 
 			// koinon-gateway read the revision: the probe queued again finds the tools.
 			refuse.Store(false)
@@ -512,7 +520,34 @@ var _ = Describe("Org MCP servers", func() {
 				g.Expect(got.HealthCheckedAt).NotTo(BeNil(), "the fourth refusal is recorded")
 			}).WithTimeout(racescale.D(15 * time.Second)).Should(Succeed())
 			// The first probe and its three retries each got a 401 before the refusal was recorded.
-			Expect(refused.Load()).To(BeNumerically(">=", 4))
+			Expect(refused.Load()).To(Equal(int32(4)))
+		})
+
+		It("starts a new count of key refusals when a pass serves the server with another URL (#1260)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			var refuse atomic.Bool
+			var refused atomic.Int32
+			refuse.Store(true)
+			front := refusingFront(host, port, &refuse, &refused)
+			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, 100*time.Millisecond)
+			runProber(ctx, rr)
+
+			// The first probe and its three retries are refused; the fourth refusal is recorded.
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			Eventually(refused.Load).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(int32(4)))
+			Consistently(refused.Load).WithTimeout(500 * time.Millisecond).Should(Equal(int32(4)))
+
+			// The operator moves the server. The pass serves it with the new URL, and koinon-gateway
+			// may again refuse the key until its State poll: the count starts again.
+			newURL := "https://mcp.example.com/wiki-moved"
+			_, err := svc.Update(ctx, org, audit.System("koinon-test:spec"), s.ID, mcpservers.Patch{URL: &newURL})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			Eventually(refused.Load).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(int32(8)))
 		})
 
 		It("records agentgateway's refusal of the probe key at once: the pass applied its keys (#1260)", func(ctx SpecContext) {
