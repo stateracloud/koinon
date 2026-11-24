@@ -121,7 +121,8 @@ func (s *leftOutSet) set(k poolKey, changed, waiting []string) {
 	if s.m == nil {
 		s.m = map[poolKey]map[string]string{}
 	}
-	set := make(map[string]string, len(changed)+len(waiting))
+	// No size hint: the lists come from a server, and a sum of two lengths is not a safe hint.
+	set := map[string]string{}
 	for _, n := range waiting {
 		set[n] = reasonToolUnreviewed
 	}
