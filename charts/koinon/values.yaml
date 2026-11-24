@@ -794,9 +794,18 @@ execution:
     guestImage: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
     # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
-    # a class that is not here cannot run one. With substrate, set this or defaultTier.
+    # a class that is not here cannot run one. With substrate, set this or defaultTier. The reconciler
+    # puts openshell.runtimeClassName on every sandbox, so that class always has a tier: its entry here
+    # wins, else defaultTier applies to it, else the render fails (issue #1245).
     runtimeClassTiers: {}
-    # Tier of a sandbox that names no runtime class. Empty means there is none.
+    # Tier of a sandbox that names no runtime class, and of openshell.runtimeClassName when it has no
+    # entry above: that class then runs at this tier whatever its name (kata included), and NOTES.txt
+    # says so. Empty means there is none. The chart refuses the vm tier when it reaches a sandbox through
+    # this value and the pool that the chart renders is not microvm (workerPool.sandboxClass, or
+    # workerPool.spec.sandboxClasses when set; ADR 0075): for openshell.runtimeClassName when it has no entry,
+    # and for a sandbox with no class (openshell.runtimeClassName empty; such a sandbox has no worker
+    # selector, so it can land on any pool). It cannot see a pool that you make yourself
+    # (workerPool.enabled=false or a pool outside the chart): check that one.
     defaultTier: ""
     # Required true with substrate: the guest image does not yet carry the guest launcher and the
     # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:

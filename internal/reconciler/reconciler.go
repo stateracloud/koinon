@@ -1502,7 +1502,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb) {
+	if r.specChanged(ws, spec, sb, hash) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
@@ -1651,6 +1651,19 @@ func (r *Reconciler) deleteSandbox(ctx context.Context, w *work, ws, name, why s
 	r.log.Info("sandbox deletion requested", append(w.logAttrs(), "name", name, "outcome", string(outcome),
 		"took", time.Since(start).Round(time.Millisecond), "err", err)...)
 	return err
+}
+
+// specChanged says whether the sandbox must be recreated because it was made from another spec.
+// A backend with labels compares the spec hash label, the supervisor image and the install mark. A
+// backend without labels (Substrate) gives the sandbox the identity it derived from the spec
+// (execution.SpecIdentifier), which the backend keeps as long as the sandbox; a failure to derive
+// it leaves the sandbox as it is, the spec error shows when the sandbox is created.
+func (r *Reconciler) specChanged(ws string, spec execution.SandboxSpec, sb execution.Sandbox, hash string) bool {
+	if execution.IdentifiesSpecs(r.backend) {
+		want, err := r.backend.(execution.SpecIdentifier).SpecID(ws, spec)
+		return err == nil && want != sb.SpecID
+	}
+	return sb.Labels[LabelSpecHash] != hash || r.supervisorChanged(sb) || r.unmarked(sb)
 }
 
 // unmarked reports a sandbox without the install label while the backend owns what it makes: it

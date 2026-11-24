@@ -412,3 +412,39 @@ for f in spec.minReadySeconds spec.revisionHistoryLimit spec.template.metadata.f
 done
 grep -Fq "matches('^[0-9a-f]{64}\$')" <<<"$cadocs" || fail "the CA stamp rule must check the format of the stamp"
 grep -Fq "variables.caMetaNew.all(k, k == 'deprecated.daemonset.template.generation'" <<<"$cadocs" || fail "the CA stamp rule must compare the annotations of the DaemonSet, except the generation mirror of the API server"
+
+# NOTES say when a runtime class runs at defaultTier (issue #1245). NOTES are printed by install, not by template.
+tier_notes() {
+	local out rc=0
+	out=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set "$ADDRESS" "${wsub[@]}" "$@" 2>&1) || rc=$?
+	if [[ $rc -ne 0 ]]; then
+		fail "helm install --dry-run=client for the Substrate tier NOTES failed: $(head -1 <<<"$out")"
+		return 0
+	fi
+	printf '%s\n' "$out"
+}
+tn_default=$(tier_notes)
+grep -Fq 'run at defaultTier' <<<"$tn_default" || fail "NOTES say the runtime class runs at defaultTier when it has no tier entry"
+tn_entry=$(tier_notes --set "execution.substrate.runtimeClassTiers.kata=hardened")
+if grep -Fq 'run at defaultTier' <<<"$tn_entry"; then fail "NOTES stay quiet when runtimeClassTiers names the runtime class"; fi
+
+# The vm tier needs a microVM pool, whether the tier comes from an entry or from defaultTier (ADR 0075, issue #1245).
+vmtier() { "$HELM" template koinon "$CHART" -n koinon --set "$ADDRESS" "${wsub[@]}" "$@" 2>&1 || true; }
+vm_dt=$(vmtier --set execution.substrate.defaultTier=vm)
+grep -Fq 'execution.substrate.defaultTier' <<<"$vm_dt" && grep -Fq 'needs a microVM' <<<"$vm_dt" || fail "defaultTier=vm on a gvisor pool must fail the render and name defaultTier"
+vm_ok=$(vmtier --set execution.substrate.defaultTier=vm --set execution.substrate.workerPool.sandboxClass=microvm)
+grep -Fq 'kind: WorkerPool' <<<"$vm_ok" && ! grep -Fq 'needs a microVM' <<<"$vm_ok" || fail "defaultTier=vm on a microvm pool must render a WorkerPool"
+# A sandbox with no runtime class has no worker selector: defaultTier=vm needs the pool to be a microVM then too.
+vmnc=(--set openshell.runtimeClassName=null --set sandboxPolicy.enabled=false --set execution.substrate.defaultTier=vm)
+vm_nc=$(vmtier "${vmnc[@]}")
+grep -Fq 'openshell.runtimeClassName is empty' <<<"$vm_nc" && grep -Fq 'needs a microVM' <<<"$vm_nc" || fail "defaultTier=vm with no runtime class on a gvisor pool must fail the render"
+vm_ncok=$(vmtier "${vmnc[@]}" --set execution.substrate.workerPool.sandboxClass=microvm)
+grep -Fq 'kind: WorkerPool' <<<"$vm_ncok" && ! grep -Fq 'needs a microVM' <<<"$vm_ncok" || fail "defaultTier=vm with no runtime class on a microvm pool must render a WorkerPool"
+# One sandbox class per pool (CRD maxItems 1).
+vm_two=$(vmtier --set 'execution.substrate.workerPool.spec.sandboxClasses[0].name=gvisor' --set 'execution.substrate.workerPool.spec.sandboxClasses[1].name=microvm')
+grep -Fq 'takes exactly one sandbox class' <<<"$vm_two" || fail "two sandbox classes in one pool must fail the render"
+# The error names the class the check used when spec.sandboxClasses overrides sandboxClass.
+vm_ov=$(vmtier --set execution.substrate.defaultTier=vm --set execution.substrate.workerPool.sandboxClass=microvm --set 'execution.substrate.workerPool.spec.sandboxClasses[0].name=gvisor')
+grep -Fq 'has sandboxClass gvisor' <<<"$vm_ov" || fail "the vm error must name the class of spec.sandboxClasses when it overrides sandboxClass"
+vm_en=$(vmtier --set execution.substrate.runtimeClassTiers.kata=vm)
+grep -Fq 'runtimeClassTiers.kata is vm' <<<"$vm_en" || fail "an explicit vm entry on a gvisor pool must still fail the render"

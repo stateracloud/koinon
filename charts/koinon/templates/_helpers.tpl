@@ -1346,10 +1346,8 @@ it carries no credentials.
 - name: KOINON_SUBSTRATE_DEFAULT_TIER
   value: {{ . | quote }}
 {{- end }}
-{{- if .Values.execution.substrate.runtimeClassTiers }}
 - name: KOINON_SUBSTRATE_RUNTIME_CLASS_TIERS
   value: {{ include "koinon.substrateTiers" . | quote }}
-{{- end }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
 {{- if .Values.execution.substrate.caSecret }}
@@ -1630,10 +1628,28 @@ releases on one cluster never render the same cluster-scoped name.
 {{- end -}}
 {{- end }}
 
+{{/* The runtime class to tier map of the substrate driver, as JSON. The reconciler puts
+openshell.runtimeClassName on every sandbox (issue #1245), and the driver gives a command no launcher
+policy for a class without a tier. So that cannot go wrong: the class has the tier of
+execution.substrate.runtimeClassTiers, or else the one of execution.substrate.defaultTier, or the
+render fails. */}}
+{{- define "koinon.substrateTierMap" -}}
+{{- $m := deepCopy (.Values.execution.substrate.runtimeClassTiers | default dict) -}}
+{{- $class := .Values.openshell.runtimeClassName -}}
+{{- if and $class (not (hasKey $m $class)) -}}
+{{- if .Values.execution.substrate.defaultTier -}}
+{{- $_ := set $m $class .Values.execution.substrate.defaultTier -}}
+{{- else -}}
+{{- fail (printf "execution.substrate.runtimeClassTiers has no entry for openshell.runtimeClassName %q, and execution.substrate.defaultTier is empty: the driver would refuse every command in the sandboxes the reconciler makes. Add runtimeClassTiers.%s or set defaultTier" $class $class) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $m -}}
+{{- end }}
+
 {{/* The runtime class to tier map of the substrate driver as "class=tier" entries, sorted by class. */}}
 {{- define "koinon.substrateTiers" -}}
 {{- $e := list -}}
-{{- range $class, $tier := .Values.execution.substrate.runtimeClassTiers -}}
+{{- range $class, $tier := (include "koinon.substrateTierMap" . | fromJson) -}}
 {{- $e = append $e (printf "%s=%s" $class $tier) -}}
 {{- end -}}
 {{- join "," $e -}}
