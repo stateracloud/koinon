@@ -437,7 +437,8 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
 
 - **The rewrite.** The driver rewrites the registry of every actor image to
   `<release>-imagecache.<namespace>.svc:5000/<host>/...` and keeps the path, the tag and the digest. atelet checks
-  the digest, so the cache needs no trust.
+  the digest, so the cache cannot change the content of an image. atelet still checks the TLS certificate of the
+  cache: see "CA trust of atelet" below.
 - **The name is part of the template hash.** A new release name, namespace or port re-hashes every actor template.
   Choose them once.
 - **TLS.** The ensure-secrets hook Job makes the Secret `<release>-imagecache-tls` (a new CA and a leaf, 10 years,
@@ -459,6 +460,10 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
     cause a second restart after that. On the first install the cache Deployment does not exist yet, so the Job cannot
     stamp it. The cache starts with the current Secret, and the first `helm upgrade` adds the stamp. That upgrade
     restarts the cache pod once.
+  - Zot (v2.1.23) also reloads its server certificate when the files of the mounted Secret change, without a
+    restart. The kubelet updates a Secret volume in about one minute, because the chart mounts it without `subPath`.
+    Thus a new leaf certificate (for example from cert-manager through `imageCache.tls.existingSecret`) reaches the
+    cache before the next `helm upgrade`. A new CA still needs `helm upgrade`: only the hook Job copies it to atelet.
   - Every route gets the same patch. The installer adds it on the kind and generic routes through the overlay. On the
     gke route the installer does not know the overlay directory of the pinned tree, so after `ate-setup` it adds the
     same volume, mount and `SSL_CERT_DIR` to the live atelet DaemonSet (one definition in `internal/imagecacheca`,
