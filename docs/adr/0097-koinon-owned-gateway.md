@@ -270,7 +270,10 @@ Scope:
   shows only the sandbox folder. This holds only because of OpenCode's defaults (it declares no
   sampling, and in ACP mode it cancels MCP elicitations), not because of Koinon, so it is an interim
   fix with its own issue (#269), exit condition: "the step 2 gateway refuses these itself"
-  (decision 5).
+  (decision 5). Exit met (#1239): koinon-gateway, the default MCP driver, refuses sampling and
+  elicitation (form and URL mode) itself and answers `roots/list` with its one fixed folder. The #254
+  spec (`test/harnesses/servermessages_test.go`) now runs against it, and `internal/mcpgateway` has a
+  spec for each refusal. Behind the agentgateway fallback, the client still decides.
 - **The usage record** (decision 3; #273) and the leakage cleanup (decision 2.5).
 - **The guard scans arguments in a canonical form** (#256): keys sorted, each value scanned on its own.
 - **Fix the `gateway.Limit` comment** (`internal/gateway/gateway.go:300-302`): a limit can be overshot

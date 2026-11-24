@@ -33,8 +33,9 @@ import (
 //
 // Not covered: that server; notifications on a call's stream; anything else on a stream that ends
 // in a guarded result. The guard cannot tell they happened; the gateway of ADR 0097 step 2 (v0.2)
-// hands it every message. Server-initiated requests are covered by the client meanwhile (#269, whose
-// exit condition is "the step 2 gateway refuses these itself"). A reply of a method the guard has no
+// hands it every message. Behind agentgateway, server-initiated requests are left to the client;
+// koinon-gateway, the default MCP driver, refuses sampling and elicitation itself and answers
+// roots/list (internal/mcpgateway, #269). A reply of a method the guard has no
 // reading for is not a gap of this kind: CheckUnseen takes both legs for it.
 
 // The turn mark (#1057). A model that calls two tools in one turn has the reply of neither when it

@@ -3,18 +3,17 @@
 package harnesses_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -23,23 +22,25 @@ import (
 	"github.com/stateracloud/koinon/internal/acp"
 	kgateway "github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
-	"github.com/stateracloud/koinon/internal/gateway/standalone"
-	"github.com/stateracloud/koinon/internal/testing/agentgatewayimage"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
-// Server-initiated MCP requests on today's path (#254, ADR 0097 step 1): an org's MCP server, behind
-// agentgateway v1.7.0 and its leak guard hook, answers a tools/call by first sending the client
-// sampling/createMessage, elicitation/create (form and URL mode) and roots/list on the call's own stream. The guard never
-// sees these (agentgateway hooks only the call and its successful result), so what keeps them from
-// the model is the client: OpenCode 2.2.0 advertises roots and elicitation and never sampling. The
-// maintainers' decision of 2026-11-06 is that sampling and elicitation are refused and roots/list
-// answers one fixed folder; until the step 2 gateway refuses them itself, these specs pin that
-// OpenCode's defaults hold it, and record what OpenCode answers to an elicitation. Read in
-// OpenCode 2.2.0's source, not yet observed: in ACP mode it cancels an MCP elicitation, and Koinon's
-// ACP client (internal/acp) declares no form elicitation (#269).
+// Server-initiated MCP requests on the default MCP path (#254, #269, ADR 0097 decision 5): an org's
+// MCP server, behind Koinon's gateway (internal/mcpgateway) and its leak guard, answers a tools/call
+// by first sending sampling/createMessage, elicitation/create (form and URL mode) and roots/list on
+// the call's own stream. The gateway advertises no sampling and no elicitation to the server. It
+// refuses both requests itself and answers roots/list itself with one fixed folder
+// (mcpgateway.RootURI). No server request goes on to the harness, so the safety does not come from
+// OpenCode's defaults. The guard sees every message of the stream, the server's requests too. These
+// specs run the koinon-opencode image against the gateway in this process, with the fake model, and
+// check that no text of a server request reaches the model.
+//
+// The agentgateway fallback driver passes these requests on to the client, so there the client
+// decides. The behaviour suite records for each driver what reaches the agent and what the guard sees
+// (internal/gateway/gatewaytest, mcpkindspec.go), so this file does not run agentgateway.
 const (
 	messagesTarget = "acme-messages"
 	messagesTool   = "server_messages"
@@ -100,11 +101,8 @@ type messagesServer struct {
 
 func newMessagesServer() *messagesServer {
 	s := &messagesServer{answers: map[string]clientAnswer{}, arrived: make(chan struct{}, 8)}
-	var lc net.ListenConfig
-	l, err := lc.Listen(context.Background(), "tcp", "0.0.0.0:0")
-	Expect(err).NotTo(HaveOccurred())
-	s.srv = &httptest.Server{Listener: l, Config: &http.Server{Handler: http.HandlerFunc(s.serve)}}
-	s.srv.Start()
+	// Only the gateway in this process calls the server, so it listens on loopback.
+	s.srv = httptest.NewServer(http.HandlerFunc(s.serve))
 	DeferCleanup(func() {
 		s.srv.CloseClientConnections()
 		s.srv.Close()
@@ -183,7 +181,7 @@ func (s *messagesServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["result"] = map[string]any{
 			"protocolVersion": version,
-			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "koinon-server-messages", "version": "0"},
 		}
 	case "tools/list":
@@ -191,14 +189,6 @@ func (s *messagesServer) serve(w http.ResponseWriter, r *http.Request) {
 			"name":        messagesTool,
 			"description": "Koinon test tool. Returns done.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
-		}}}
-	case "prompts/list":
-		// A prompt the harness announces as a command once the server is connected, so the spec
-		// knows when the tool is registered (as readyPrompt does in the contract suite).
-		resp["result"] = map[string]any{"prompts": []any{map[string]any{"name": "koinon-ready", "description": "connected"}}}
-	case "prompts/get":
-		resp["result"] = map[string]any{"messages": []any{map[string]any{
-			"role": "user", "content": map[string]any{"type": "text", "text": "connected"},
 		}}}
 	case "ping":
 		resp["result"] = map[string]any{}
@@ -281,66 +271,59 @@ wait:
 	}})
 }
 
-// runAgentgateway runs the chart's agentgateway image with the config standalone.Render writes for s,
-// reachable from the test host and from containers on host.docker.internal. It returns the base URL
-// a sandbox uses.
-func runAgentgateway(ctx context.Context, s kgateway.State, guardURL string) (sandboxURL string, logs func() string) {
+// koinonGateway is Koinon's MCP gateway (internal/mcpgateway) in this process, as koinon-gateway
+// serves it, with the guard in the process too (ADR 0097 decision 5).
+type koinonGateway struct {
+	srv    *httptest.Server
+	logs   lockedBuffer
+	listed atomic.Bool // the gateway answered an agent's tools/list
+}
+
+// runKoinonGateway serves s's MCP half on a port that containers reach on host.docker.internal.
+func runKoinonGateway(ctx context.Context, s kgateway.State, guard mcpgateway.Guard) *koinonGateway {
 	GinkgoHelper()
-	dir, err := os.MkdirTemp("", "koinon-servermessages-")
+	k := &koinonGateway{}
+	gw := mcpgateway.New(mcpgateway.Options{
+		Guard:  guard,
+		Logger: slog.New(slog.NewTextHandler(&k.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	})
+	_, err := gw.ApplyMCP(ctx, s.MCPConfig())
 	Expect(err).NotTo(HaveOccurred())
-	DeferCleanup(func() { _ = os.RemoveAll(dir) })
-	Expect(os.Chmod(dir, 0o755)).To(Succeed())
-	cfg, _, err := standalone.Render(s, standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc", GuardURL: guardURL})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(os.WriteFile(filepath.Join(dir, "config.yaml"), cfg, 0o644)).To(Succeed())
-
-	name := "koinon-agentgateway-" + randomSuffix()
-	docker(ctx, "run", "--detach", "--name", name,
-		"--add-host", "host.docker.internal:host-gateway",
-		"--volume", dir+":/cfg:ro",
-		"--publish", "4000", "--publish", "15021",
-		agentgatewayimage.Ref(), "-f", "/cfg/config.yaml")
-	DeferCleanup(func(ctx context.Context) { _ = dockerQuiet(ctx, "rm", "--force", name) })
-	logs = func() string { return dockerQuiet(context.Background(), "logs", name) }
-
-	hostPort := func(p string) int {
-		out := strings.TrimSpace(docker(ctx, "port", name, p+"/tcp"))
-		line, _, _ := strings.Cut(out, "\n")
-		_, port, err := net.SplitHostPort(line)
-		Expect(err).NotTo(HaveOccurred(), out)
-		n, err := strconv.Atoi(port)
-		Expect(err).NotTo(HaveOccurred(), out)
-		return n
-	}
-	ready := fmt.Sprintf("http://127.0.0.1:%d/healthz/ready", hostPort("15021"))
-	Eventually(func() int {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ready, nil)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return 0
+	inner := gw.Handler()
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		inner.ServeHTTP(w, r)
+		if bytes.Contains(body, []byte(`"tools/list"`)) {
+			k.listed.Store(true)
 		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
-	}).WithTimeout(racescale.D(time.Minute)).WithPolling(500*time.Millisecond).Should(Equal(http.StatusOK), func() string { return logs() })
-	return fmt.Sprintf("http://host.docker.internal:%d", hostPort("4000")), logs
+	}))
+	var lc net.ListenConfig
+	l, err := lc.Listen(ctx, "tcp", "0.0.0.0:0")
+	Expect(err).NotTo(HaveOccurred())
+	k.srv = &httptest.Server{Listener: l, Config: &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}}
+	k.srv.Start()
+	DeferCleanup(func() {
+		gw.Drain()
+		k.srv.CloseClientConnections()
+		k.srv.Close()
+	})
+	return k
 }
 
-// dockerQuiet runs docker without failing the spec, for cleanup and logs.
-func dockerQuiet(ctx context.Context, args ...string) string {
-	var out strings.Builder
-	c := exec.CommandContext(ctx, "docker", args...)
-	c.Stdout, c.Stderr = &out, &out
-	_ = c.Run()
-	return out.String()
+// sandboxURL is the gateway's MCP endpoint as a sandbox reaches it.
+func (k *koinonGateway) sandboxURL() string {
+	return fmt.Sprintf("http://host.docker.internal:%d/mcp", k.srv.Listener.Addr().(*net.TCPAddr).Port)
 }
 
-var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#254)", Ordered, func() {
+var _ = Describe("koinon-opencode and MCP server requests behind Koinon's gateway (#254, #269)", Ordered, func() {
 	var (
 		srv   *messagesServer
 		guard *gatewaytest.FakeGuard
 		gw    *gateway
+		kgw   *koinonGateway
 		h     *harness
-		logs  func() string
 	)
 	agent := kgateway.AgentRef{Org: "acme", Name: "messages"}
 	toolName := "koinon_" + messagesTarget + "_" + messagesTool
@@ -357,19 +340,18 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		k, err := kgateway.NewKey(agent)
 		Expect(err).NotTo(HaveOccurred())
 		state := kgateway.State{MCP: []kgateway.MCPTarget{{
-			Name: messagesTarget, Org: agent.Org, URL: fmt.Sprintf("http://host.docker.internal:%d/mcp", srv.port()),
+			Name: messagesTarget, Org: agent.Org, URL: fmt.Sprintf("http://127.0.0.1:%d/mcp", srv.port()),
 		}}}
 		state.AddKey(k.Key)
 		state.GrantTools(agent, kgateway.ToolGrant{Target: messagesTarget, Tools: []string{messagesTool}})
-		var agURL string
-		agURL, logs = runAgentgateway(ctx, state, guard.URL("host.docker.internal"))
+		kgw = runKoinonGateway(ctx, state, guard.Ref("127.0.0.1").Local)
 
 		gw = newGateway(fakemodel.Script{Model: contractModel, Turns: []fakemodel.Turn{
 			{When: fakemodel.When{ToolResult: fakemodel.AnyTool}, Text: messagesReply},
 			{When: fakemodel.When{UserContains: "KOINON-SERVER-MESSAGES"}, ToolCalls: []fakemodel.ToolCall{{Name: toolName}}},
 			{Text: helloReply},
 		}})
-		// The model is the in-process fake; only MCP goes through agentgateway, with the agent's key.
+		// The model is the in-process fake; only MCP goes through Koinon's gateway, with the agent's key.
 		sb := newSandbox(opencode.image(), "OPENAI_API_KEY="+k.Material)
 		bg, cancel := context.WithCancel(context.Background())
 		DeferCleanup(func() {
@@ -383,22 +365,24 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		sb.run(bg, "mkdir", "-p", workdir)
 		// koinon-opencode refuses to start without the file koinon-agentd writes first.
 		sb.write(bg, instructionsPath, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
-		h = sb.harness(bg, workdir, opencode.command(gw.url("/v1"), contractModel, agURL+"/mcp"))
+		h = sb.harness(bg, workdir, opencode.command(gw.url("/v1"), contractModel, kgw.sandboxURL()))
 	}, NodeTimeout(5*time.Minute))
 
 	AfterEach(func() {
-		if CurrentSpecReport().Failed() && logs != nil {
-			AddReportEntry("agentgateway logs", logs())
+		if CurrentSpecReport().Failed() && kgw != nil {
+			AddReportEntry("koinon gateway logs", kgw.logs.String())
 		}
 	})
 
-	It("runs the tool call through agentgateway and the guard while the server sends its requests", func(ctx SpecContext) {
+	It("runs the tool call through the gateway and shows the guard every message of the call", func(ctx SpecContext) {
 		_, err := h.conn.Initialize(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		session, err := h.conn.NewSession(ctx, workdir)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(h.client.availableCommands).WithTimeout(racescale.D(30*time.Second)).
-			Should(ContainElement("koinon:"+messagesTarget+"_koinon-ready"), "the harness never announced the server")
+		// The gateway serves no prompts, so the harness announces no command for the server; the
+		// harness listed the tools once the gateway answered its tools/list.
+		Eventually(kgw.listed.Load).WithTimeout(racescale.D(30*time.Second)).
+			Should(BeTrue(), "the harness never listed the gateway's tools")
 		time.Sleep(readySettle)
 		Expect(h.conn.SetModel(ctx, session, opencode.selectModel(contractModel))).To(Succeed())
 
@@ -407,77 +391,70 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		Expect(stop).To(Equal(acp.StopEndTurn))
 		Expect(srv.sentRequests()).To(BeTrue(), "the call reached the server")
 		Expect(guard.Requests()).To(ContainElement(HaveField("Tool", messagesTool)), "the guard passed the call")
-		// The guard saw the call and its result, never the server's requests: agentgateway hooks
-		// only those two (agentgateway#4245). This flips when the gateway hands it every message.
 		Expect(guard.Responses()).To(ContainElement(And(HaveField("Tool", messagesTool), HaveField("Body", ContainSubstring("KOINON-RESULT-MARKER")))),
-			"the guard saw the call's result, so it was asked about this stream")
-		for _, c := range append(guard.Requests(), guard.Responses()...) {
-			Expect(c.Body).NotTo(Or(ContainSubstring("KOINON-SAMPLING-MARKER"), ContainSubstring("KOINON-ELICITATION-MARKER"),
-				ContainSubstring("KOINON-ELICITATION-URL-MARKER"), ContainSubstring(elicitationURL),
-				ContainSubstring("KOINON-NOTIFICATION-MARKER")))
+			"the guard saw the call's result")
+		// The gateway shows the guard every message a server sends (ADR 0097 decision 5), the
+		// server's requests and the notification too; agentgateway showed only the call and its result.
+		for _, m := range []struct{ method, marker string }{
+			{"sampling/createMessage", "KOINON-SAMPLING-MARKER"},
+			{"elicitation/create", "KOINON-ELICITATION-MARKER"},
+			{"elicitation/create", "KOINON-ELICITATION-URL-MARKER"},
+			{"elicitation/create", elicitationURL},
+			{"roots/list", messageIDs["roots/list"]},
+			{"notifications/message", "KOINON-NOTIFICATION-MARKER"},
+		} {
+			Expect(guard.Responses()).To(ContainElement(And(HaveField("Method", m.method), HaveField("Body", ContainSubstring(m.marker)))),
+				"the guard saw %s with %q", m.method, m.marker)
+		}
+		// The gateway offers the server no sampling and no elicitation.
+		Expect(srv.initializes()).NotTo(BeEmpty())
+		for _, c := range srv.initializes() {
+			var caps map[string]json.RawMessage
+			Expect(json.Unmarshal([]byte(c), &caps)).To(Succeed(), c)
+			Expect(caps).NotTo(HaveKey("sampling"), c)
+			Expect(caps).NotTo(HaveKey("elicitation"), c)
 		}
 		AddReportEntry("initialize capabilities the server saw", srv.initializes())
 	}, SpecTimeout(3*time.Minute))
 
+	// refused checks that the gateway itself refused one server request: the error of its serverRequest
+	// (internal/mcpgateway/conn.go), not an answer of the harness.
+	refused := func(key, text string) {
+		GinkgoHelper()
+		a, ok := srv.answer(messageIDs[key])
+		Expect(ok).To(BeTrue(), "the gateway answered %s", key)
+		Expect(a.Result).To(BeEmpty(), "%s is refused, not answered", key)
+		Expect(a.Error).NotTo(BeNil(), "%s is refused, not answered", key)
+		Expect(a.Error.Code).To(Equal(-32601), a.Error.Message)
+		Expect(a.Error.Message).To(Equal(text))
+	}
+
 	It("refuses sampling", func() {
-		a, ok := srv.answer(messageIDs["sampling/createMessage"])
-		Expect(ok).To(BeTrue(), "the client answered sampling/createMessage")
-		Expect(a.Error).NotTo(BeNil(), "sampling/createMessage is refused, not answered: %s", a.Result)
-		Expect(a.Result).To(BeEmpty())
-		AddReportEntry("sampling/createMessage", fmt.Sprintf("error %d: %s", a.Error.Code, a.Error.Message))
+		refused("sampling/createMessage", "refused: the gateway offers no sampling")
 	})
 
-	It("never brings an elicitation, the sampling request or the notification to the model", func() {
+	It("refuses an elicitation in form mode and never brings it, the sampling request or the notification to the model", func() {
+		refused("elicitation/create", "refused: the gateway offers no elicitation")
 		Expect(gw.modelBodies()).NotTo(BeEmpty())
 		for _, body := range gw.modelBodies() {
 			Expect(body).NotTo(ContainSubstring("KOINON-ELICITATION-MARKER"))
 			Expect(body).NotTo(ContainSubstring("KOINON-SAMPLING-MARKER"))
 			Expect(body).NotTo(ContainSubstring("KOINON-NOTIFICATION-MARKER"))
 		}
-		// What OpenCode does with it is recorded, not prescribed beyond "not accepted": the
-		// decision of 2026-11-06 refuses elicitation, and the step 2 gateway will.
-		a, ok := srv.answer(messageIDs["elicitation/create"])
-		switch {
-		case !ok:
-			AddReportEntry("elicitation/create", fmt.Sprintf("no answer within %s (the client left it pending)", messagesWait))
-		case a.Error != nil:
-			AddReportEntry("elicitation/create", fmt.Sprintf("error %d: %s", a.Error.Code, a.Error.Message))
-		default:
-			var r struct {
-				Action string `json:"action"`
-			}
-			Expect(json.Unmarshal(a.Result, &r)).To(Succeed(), string(a.Result))
-			AddReportEntry("elicitation/create", "action "+r.Action+": "+string(a.Result))
-			Expect(r.Action).NotTo(Equal("accept"), "the client accepted the elicitation: %s", a.Result)
-		}
 	})
 
-	It("never accepts a URL-mode elicitation or brings it to the model", func() {
+	It("refuses an elicitation in URL mode and never brings it to the model", func() {
+		refused(elicitationURLKey, "refused: the gateway offers no elicitation")
 		Expect(gw.modelBodies()).NotTo(BeEmpty())
 		for _, body := range gw.modelBodies() {
 			Expect(body).NotTo(ContainSubstring("KOINON-ELICITATION-URL-MARKER"))
 			Expect(body).NotTo(ContainSubstring(elicitationURL))
 		}
-		a, ok := srv.answer(messageIDs[elicitationURLKey])
-		if !ok {
-			AddReportEntry("elicitation/create (url)", fmt.Sprintf("no answer within %s (the client left it pending)", messagesWait))
-			return
-		}
-		if a.Error != nil {
-			AddReportEntry("elicitation/create (url)", fmt.Sprintf("error %d: %s", a.Error.Code, a.Error.Message))
-			return
-		}
-		var r struct {
-			Action string `json:"action"`
-		}
-		Expect(json.Unmarshal(a.Result, &r)).To(Succeed(), string(a.Result))
-		AddReportEntry("elicitation/create (url)", "action "+r.Action+": "+string(a.Result))
-		Expect(r.Action).NotTo(Equal("accept"), "the client accepted the URL elicitation: %s", a.Result)
 	})
 
-	It("answers roots/list with the session folder only", func() {
+	It("answers roots/list with the gateway's one fixed folder", func() {
 		a, ok := srv.answer(messageIDs["roots/list"])
-		Expect(ok).To(BeTrue(), "the client answered roots/list")
+		Expect(ok).To(BeTrue(), "the gateway answered roots/list")
 		Expect(a.Error).To(BeNil())
 		var r struct {
 			Roots []struct {
@@ -487,6 +464,6 @@ var _ = Describe("koinon-opencode and MCP server requests behind agentgateway (#
 		Expect(json.Unmarshal(a.Result, &r)).To(Succeed(), string(a.Result))
 		AddReportEntry("roots/list", string(a.Result))
 		Expect(r.Roots).To(HaveLen(1), string(a.Result))
-		Expect(r.Roots[0].URI).To(Equal("file://"+workdir), string(a.Result))
+		Expect(r.Roots[0].URI).To(Equal(mcpgateway.RootURI), string(a.Result))
 	})
 })
