@@ -374,18 +374,23 @@ does today, no more (model path at parity, below).
   client information on each request, it sends its own client information, never the agent's, and trace
   baggage that goes to an org's server carries no agent ID.
   - **The fallback gateway still sends the agent header to an org's server** (maintainer decision
-    2026-11-24, #1235). agentgateway, the default MCP driver until #1239 and the fallback driver after it,
-    sends the agent header to every MCP target until step 3 deletes that path. The render does not change.
-    In Kubernetes mode, a `transformation` on the one MCP route sets the header before the target is
-    chosen, so it cannot leave out one target. A `transformation` on the Backend runs after the target's
-    credential is injected and strips the credential
-    ([research](../research/agentgateway-k8s-crds.md)), and a Backend for each org would change the
-    Kubernetes-mode shape that this ADR freezes (decision 4). In standalone mode, a policy on each target
-    (`requestHeaderModifier` or `transformations` of `LocalMcpTarget`;
+    2026-11-24, #1235). agentgateway sends the agent header to every MCP target that it calls, until step 3
+    deletes that path. The render does not change. The driver selects which calls go through
+    agentgateway. With driver `agentgateway` (the default until #1239, and the fallback after it), all MCP
+    calls go through it. With driver `koinon`, every call through koinon-gateway gets no agent header on an
+    org's server. Until #1239, an agent's own MCP calls, koinon-api's live check of an agent's tools and
+    the reconciler's probe go through agentgateway with both drivers. Thus before #1239, driver `koinon`
+    removes the header only from the calls that a human approved.
+  - The reason that the render does not change: in Kubernetes mode, a `transformation` on the one MCP
+    route sets the header before agentgateway selects the target, so it cannot leave out one target. A
+    `transformation` on the Backend runs after agentgateway injects the target's credential; the one that
+    Koinon tried stripped the credential ([research](../research/agentgateway-k8s-crds.md)). A Backend for
+    each org would change the Kubernetes-mode shape that section 4 of this ADR freezes. In standalone mode,
+    a policy on each target (`requestHeaderModifier` or `transformations` of `LocalMcpTarget`;
     [research](../research/mcp-discovery-agentgateway.md)) can probably remove the header from an org's
-    target. Koinon does not do this: the path is set for deletion, and no test proves that such a policy
-    keeps the target's credential on agentgateway v1.7.0. The operator text of the fallback driver
-    (`gateway.mcp.driver` in `charts/koinon/values.yaml`) tells an operator about this disclosure.
+    target. Koinon does not do this: step 3 deletes the path, and no test proves that such a policy keeps
+    the target's credential on agentgateway v1.7.0. The operator text of `gateway.mcp.driver` in
+    `charts/koinon/values.yaml` tells an operator about this disclosure.
   - The e2e assertions (`test/e2e/mcp_test.go`, `test/e2e/quickstart_test.go`) follow the path that each
     call uses: an agent's call, a call a human approved, and a call from a client outside the cluster. An
     org's fake server sees the agent (or Koinon's executor) on the agentgateway path, and no agent header

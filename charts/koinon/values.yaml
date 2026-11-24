@@ -373,9 +373,12 @@ gateway:
   # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
   # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
   # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
-  # Disclosure on agentgateway: it sends the agent header (X-Koinon-Agent, the org and agent ID) to every MCP
-  # server, also to a server an org registered. koinon-gateway sends it only to Koinon's own tool servers
-  # (ADR 0097 decision 5, issue #1235). Select agentgateway only if the MCP servers of each org may see this.
+  # Disclosure: agentgateway sends the agent header (X-Koinon-Agent, the org and agent ID) to every MCP server
+  # that it calls, also to a server an org registered. koinon-gateway sends it only to Koinon's own tool
+  # servers (ADR 0097 decision 5, issue #1235). Until issue #1239, an agent's own MCP calls go through
+  # agentgateway with both drivers, so an org's server sees the agent with both drivers. The driver koinon
+  # removes the header only from the calls that a human approved. With driver agentgateway, all MCP calls
+  # carry it.
   # Do not make this the default before issue #1132 (tools/list pinning) is closed.
   mcp:
     driver: agentgateway

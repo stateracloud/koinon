@@ -157,7 +157,9 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		if r.Agent == "" {
 			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
 			// it carries no credential, and it does not go
-			// through the gateway.
+			// through the gateway. An empty Agent marks it only while the prober and the live check use
+			// agentgateway. koinon-gateway sends no agent header to an org's server (#1235): a change that
+			// moves either one to koinon-gateway (#1239) must tell this check apart by its path instead.
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
 			anonymous++
 			continue
@@ -166,6 +168,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		Expect(r.ClientAuthorization).To(BeFalse(), "the gateway's own key must not reach the server: %+v", r)
 	}
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
+	// The reconciler's probe goes through agentgateway with both drivers today (#1235, #1239).
 	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 
 	By("a second server with insecureSkipVerify and no CA completes the real TLS handshake through the gateway")
