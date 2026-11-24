@@ -115,6 +115,27 @@ var _ = Describe("the MCP path", func() {
 		Expect(openLog.header(gateway.AgentHeader)).To(BeEmpty())
 	})
 
+	It("sends the agent header to a platform target (Koinon's own tool servers) only", func(ctx SpecContext) {
+		toolsLog := &upstreamLog{}
+		tools := fakeUpstream("koinon-tools", toolsLog)
+		DeferCleanup(func() { tools.CloseClientConnections(); tools.Close() })
+		cfg.MCP = append(cfg.MCP, gateway.MCPTarget{Name: "koinon-tools", URL: tools.URL + "/mcp"})
+		cfg.Tools[agentAcme] = append(cfg.Tools[agentAcme], gateway.ToolGrant{Target: "koinon-tools", Tools: []string{"read_item"}})
+		_, err := gw.ApplyMCP(ctx, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		s := connect(ctx, front.URL, keyAcme.Material)
+		_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "koinon-tools_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		// The platform target learns the agent the key check found (ADR 0097 decision 5); the org's server
+		// on the same session does not (#1235).
+		Expect(toolsLog.header(gateway.AgentHeader)).NotTo(BeEmpty())
+		Expect(toolsLog.header(gateway.AgentHeader)).To(HaveEach(agentAcme.String()))
+		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
+	})
+
 	It("refuses an unknown key, a missing key and a key outside the Authorization header", func(ctx SpecContext) {
 		do := func(h map[string]string, path string) *http.Response {
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, front.URL+path, nil)
