@@ -488,7 +488,7 @@ var _ = Describe("Org MCP servers", func() {
 				got, err := svc.Get(ctx, org, s.ID)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(got.HealthCheckedAt).To(BeNil(), "a refused probe key is not recorded")
-			}).WithTimeout(time.Second).Should(Succeed())
+			}).WithTimeout(racescale.D(time.Second)).Should(Succeed())
 
 			// koinon-gateway read the revision: the probe queued again finds the tools.
 			refuse.Store(false)
