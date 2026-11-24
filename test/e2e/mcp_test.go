@@ -173,6 +173,10 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	if probe := probeMCPPath(ctx, kubectl); probe.koinon {
 		Expect(recs).To(HaveEach(HaveField("Agent", BeEmpty())),
 			"koinon-gateway sends no agent header to an org's server, also not on the probe (#1235)")
+		// The probe did run through koinon-gateway: the server is healthy with synced tools (above), and
+		// before any agent call it saw a credentialed /mcp request, which is not the add-time check.
+		Expect(recs).To(ContainElement(SatisfyAll(HaveField("Path", "/mcp"), HaveField("Authorized", true))),
+			"the probe's requests through koinon-gateway")
 	} else {
 		Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 	}
@@ -463,7 +467,7 @@ func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 }
 
 // probeMCPPath is the MCP path of the reconciler's tool probe: koinon-gateway when the reconciler's config
-// names koinon-gateway's MCP listener (gateway.standalone.mcpUrl, set with driver koinon, #1239), else
+// names koinon-gateway's MCP listener (gateway.mcpUrl, set with driver koinon, #1239), else
 // agentgateway.
 func probeMCPPath(ctx context.Context, kubectl string) mcpPath {
 	GinkgoHelper()

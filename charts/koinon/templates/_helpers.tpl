@@ -310,7 +310,7 @@ agentgateway in both cases.
 The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
 mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
 (ADR 0097 decision 5). Standalone mode only; agentgateway mounts both (it serves MCP with the agentgateway driver,
-and the reconciler's MCP prober lists tools through it with either driver).
+and with either driver its config keeps the MCP targets whose credential it can open).
 */}}
 {{- define "koinon.gatewayMCPKeysName" -}}
 {{- include "koinon.componentName" (list . "gateway-mcp-keys") }}

@@ -211,11 +211,12 @@ type config struct {
 
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
-	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
+	// gatewayMCPURL is the MCP endpoint of the driver as koinon-api reaches it, for approved MCP calls:
+	// koinon-gateway with gateway.mcp.driver koinon, agentgateway with the fallback.
 	gatewayMCPURL string
-	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. An agent reaches MCP
-	// through agentgateway until the follow-up that moves it (ADR 0097), so the check must use the URL the agent
-	// uses, which is not always the URL of approved calls. Empty: the check uses gatewayMCPURL.
+	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. The check must use the
+	// URL the agent uses (koinon-agentd's KOINON_AGENT_MCP_URL), which the chart sets to the same driver since
+	// #1239. Empty: the check uses gatewayMCPURL.
 	gatewayMCPCheckURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
@@ -356,7 +357,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.sealMCPv2, "gateway-mcp-seal-v2", false,
 		"seal a stored MCP credential to the gateway's public key (envelope v2) when a key is active, and as v1 otherwise; set only when koinon-gateway serves every MCP path, because agentgateway reads the credential as plaintext")
 	fs.StringVar(&c.compatExpect, "compat-expect", "", "pods of each component the chart runs, as component=count pairs; with --gateway-mcp-seal-v2 a credential is sealed to the gateway key only when that many pods of every reader report that they read it, and empty keeps sealing off")
-	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
+	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "the MCP endpoint of the driver (koinon-gateway, or agentgateway with the fallback), for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
