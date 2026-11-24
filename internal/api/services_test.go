@@ -443,6 +443,7 @@ var _ = Describe("TaskService and run scheduling", func() {
 		last := got.GetEvents()[len(got.GetEvents())-1]
 		Expect(last.GetKind()).To(Equal("run.canceled"))
 		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "task ended"))
+		Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "ticket_done")) // the stored vocabulary of old events (runoutcome.ReasonTaskDone)
 		Expect(taskKinds(got)).To(ContainElement("status.changed"))
 
 		// A canceled task refuses messages; the running run of another task is untouched.

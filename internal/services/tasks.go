@@ -119,7 +119,7 @@ func enqueue(ctx context.Context, q *store.Queries, t store.Task) (*runv1alpha1.
 // createTask creates a task owned by an active agent, created by the caller, with its first
 // message and a queued run. TaskService calls it.
 func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, title, msg string) (store.Task, *runv1alpha1.Run, error) {
-	// A held install queues no new work, (ADR 0107).
+	// A held install queues no new work (ADR 0107).
 	if err := s.hold.Err(); err != nil {
 		return store.Task{}, nil, err
 	}
@@ -236,8 +236,8 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 // appendMessage adds a user message to a task and queues a run unless one is queued already. A
 // message on a completed task reopens it.
 func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string) (store.TaskEvent, *runv1alpha1.Run, error) {
-	// The message and its queued run commit together, so a held install refuses the whole call
-	// : it queues no new work (ADR 0107).
+	// The message and its queued run commit together, so a held install refuses the whole call:
+	// it queues no new work (ADR 0107).
 	if err := s.hold.Err(); err != nil {
 		return store.TaskEvent{}, nil, err
 	}

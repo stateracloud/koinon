@@ -940,13 +940,13 @@ var isolationCases = map[string]isolationCase{
 	},
 }
 
-// platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
-// takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
-// platformprices_test.go).
 // removedTicketReason covers the TicketService RPCs: the handler is gone (issue #731) and the .proto stays so its
 // field numbers stay reserved, so every call gets unimplemented before it reads any org data.
 const removedTicketReason = "TicketService has no handler (issue #731): the call is unimplemented and reads no org data"
 
+// platformPricesReason: the platform price list is install-wide data (ADR 0098), not org-owned; every RPC
+// takes no org ID and the server refuses everyone but a platform admin (the "platform price RPCs" specs in
+// platformprices_test.go).
 const platformPricesReason = "platform price list (ADR 0098): install-wide data, platform admins only; refused to " +
 	"everyone else in platformprices_test.go"
 

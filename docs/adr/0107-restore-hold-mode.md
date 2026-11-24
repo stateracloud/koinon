@@ -50,8 +50,8 @@ not yet trusted.
      would run at once, and Deny stays open), an approved call's execution (including trusted-preset calls) and an
      approval's diff; creating, re-keying, testing and listing a code-host connection and the scope read they
      queue; the code-host check of an agent's repository bindings; and **Run now** of a schedule trigger.
-     No new work is queued while held: **Run now**, `CreateTask`, a task or ticket follow-up message (it
-     stores the message and queues a run in one transaction, so the whole call is refused), `CreateTicket` and direct
+     No new work is queued while held: **Run now**, `CreateTask`, a task follow-up message (it
+     stores the message and queues a run in one transaction, so the whole call is refused), and direct
      messages are refused with the same guard, at the service layer; `CreateTriggeredTask` is the one choke point
      of every trigger fire. The declarative importer skips an
      `mcp-server` Secret whose apply would dial out (a new server or a changed URL): it logs
