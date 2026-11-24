@@ -427,3 +427,12 @@ tn_default=$(tier_notes)
 grep -Fq 'run at defaultTier' <<<"$tn_default" || fail "NOTES say the runtime class runs at defaultTier when it has no tier entry"
 tn_entry=$(tier_notes --set "execution.substrate.runtimeClassTiers.kata=hardened")
 if grep -Fq 'run at defaultTier' <<<"$tn_entry"; then fail "NOTES stay quiet when runtimeClassTiers names the runtime class"; fi
+
+# The vm tier needs a microVM pool, whether the tier comes from an entry or from defaultTier (ADR 0075, issue #1245).
+vmtier() { "$HELM" template koinon "$CHART" -n koinon --set "$ADDRESS" "${wsub[@]}" "$@" 2>&1 || true; }
+vm_dt=$(vmtier --set execution.substrate.defaultTier=vm)
+grep -Fq 'execution.substrate.defaultTier' <<<"$vm_dt" && grep -Fq 'needs a microVM' <<<"$vm_dt" || fail "defaultTier=vm on a gvisor pool must fail the render and name defaultTier"
+vm_ok=$(vmtier --set execution.substrate.defaultTier=vm --set execution.substrate.workerPool.sandboxClass=microvm)
+if grep -Fq 'needs a microVM' <<<"$vm_ok"; then fail "defaultTier=vm on a microvm pool must render"; fi
+vm_en=$(vmtier --set execution.substrate.runtimeClassTiers.kata=vm)
+grep -Fq 'runtimeClassTiers.kata is vm' <<<"$vm_en" || fail "an explicit vm entry on a gvisor pool must still fail the render"

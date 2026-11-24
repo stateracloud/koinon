@@ -73,8 +73,15 @@ microVM per sandbox (ADR 0075). */}}
 {{- if not (regexMatch "^([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$" .) }}
 {{- fail (printf "openshell.runtimeClassName %q is not a valid label value (at most 63 characters): the WorkerPool carries it as the label koinon.dev/runtime-class" .) }}
 {{- end }}
-{{- if and (eq (index ($s.runtimeClassTiers | default dict) . | default "") "vm") (ne $p.sandboxClass "microvm") }}
-{{- fail (printf "execution.substrate.runtimeClassTiers.%s is vm, but the pool that serves the runtime class %q has sandboxClass %s: the vm tier needs a microVM per sandbox (ADR 0075); set execution.substrate.workerPool.sandboxClass=microvm, or map the class to hardened or dev" . . $p.sandboxClass) }}
+{{- /* The tier is the resolved one (koinon.substrateTierMap: the entry, else defaultTier). */}}
+{{- /* With neither an entry nor defaultTier the helper itself fails the render (and the preflight names the other missing values first). */}}
+{{- $tier := "" }}
+{{- if or $s.defaultTier (hasKey ($s.runtimeClassTiers | default dict) .) }}{{- $tier = index (include "koinon.substrateTierMap" $ | fromJson) . | default "" }}{{- end }}
+{{- $poolClass := index (($p.spec | default dict).sandboxClasses | default (list (dict "name" $p.sandboxClass))) 0 }}
+{{- if and (eq $tier "vm") (ne (toString (index $poolClass "name")) "microvm") }}
+{{- $src := "execution.substrate.runtimeClassTiers.%s" }}
+{{- if not (hasKey ($s.runtimeClassTiers | default dict) .) }}{{- $src = "execution.substrate.defaultTier (no runtimeClassTiers entry names %s)" }}{{- end }}
+{{- fail (printf (print $src " is vm, but the pool that serves the runtime class %q has sandboxClass %s: the vm tier needs a microVM per sandbox (ADR 0075); set execution.substrate.workerPool.sandboxClass=microvm, or map the class to hardened or dev") . . $p.sandboxClass) }}
 {{- end }}
 {{- end }}
 {{- $spec := dict "workerImage" $image "replicas" $p.replicas "sandboxClasses" (list (dict "name" $p.sandboxClass)) }}
