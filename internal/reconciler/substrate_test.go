@@ -82,6 +82,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 					harness.OpenCode: {Image: substrateImage, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},
 				RuntimeClassName: "kata",
+				KeepWarmPerOrg:   2,
 				Logger:           slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 				Now: func() time.Time {
 					if t := now.Load(); t != nil {
