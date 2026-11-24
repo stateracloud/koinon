@@ -3,6 +3,7 @@
 package mcpgateway_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 var _ = Describe("the MCP path", func() {
@@ -24,6 +26,8 @@ var _ = Describe("the MCP path", func() {
 		cfg                         gateway.MCPConfig
 		front                       *httptest.Server
 		keyAcme, keyNoGrant, keyX   gateway.IssuedKey
+		keyExec                     gateway.IssuedKey
+		agentExec                   = gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
 		agentAcme                   = gateway.AgentRef{Org: "acme", Name: "wiki-reader"}
 		agentNone                   = gateway.AgentRef{Org: "acme", Name: "no-mcp"}
 		agentCross                  = gateway.AgentRef{Org: "acme", Name: "cross"}
@@ -46,8 +50,9 @@ var _ = Describe("the MCP path", func() {
 		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
 
 		keyAcme, keyNoGrant, keyX = mustKey(agentAcme), mustKey(agentNone), mustKey(agentCross)
+		keyExec = mustKey(agentExec)
 		cfg = gateway.MCPConfig{
-			Keys: []gateway.Key{keyAcme.Key, keyNoGrant.Key, keyX.Key},
+			Keys: []gateway.Key{keyAcme.Key, keyNoGrant.Key, keyX.Key, keyExec.Key},
 			MCPState: gateway.MCPState{
 				MCP: []gateway.MCPTarget{
 					{Name: "acme-wiki", Org: "acme", URL: acme.URL + "/mcp", CredentialHeader: "X-Api-Key", CredentialFile: writeFile("acme-key", fakeToken+"\n")},
@@ -61,6 +66,8 @@ var _ = Describe("the MCP path", func() {
 					},
 					// A grant that names another org's target does nothing.
 					agentCross: {{Target: "globex-wiki", Tools: []string{"read_item"}}},
+					// The org's executor runs the calls a human approved (gatewayplan, applyMCP).
+					agentExec: {{Target: "acme-wiki", Tools: []string{"read_item"}}},
 				},
 			},
 		}
@@ -113,6 +120,27 @@ var _ = Describe("the MCP path", func() {
 		// The agent header is for Koinon's own tool servers only: an org's server never learns the agent.
 		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
 		Expect(openLog.header(gateway.AgentHeader)).To(BeEmpty())
+	})
+
+	// Issue #38: an approved ask-tier call runs with the org's executor key (mcpservers.CallTool). The
+	// executor reaches only servers an org registered (gatewayplan). On Koinon's MCP path such a server
+	// gets no agent header, not the executor and not the agent that asked (ADR 0073 decision 13, ADR
+	// 0097 decision 5, #1235). It learns the caller only from the passport (ADR 0073 decision 12).
+	It("sends an approved call to an org's server with the credential and no agent header", func(ctx SpecContext) {
+		res, err := mcpservers.CallTool(ctx, mcpservers.CallRequest{
+			GatewayMCPURL: front.URL + "/mcp", Key: keyExec.Material, Target: "acme-wiki", Tool: "read_item",
+			Arguments: json.RawMessage(`{"text":"x"}`), Idempotency: "approval-1",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res["isError"]).To(BeFalse())
+		Expect(res["content"]).To(ContainElement(HaveKeyWithValue("text", "acme-wiki read x")))
+		Expect(acmeLog.header("X-Api-Key")).To(HaveEach(fakeToken))
+		Expect(acmeLog.header("Authorization")).To(BeEmpty(), "the executor key never goes upstream")
+		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
+		// Koinon's own audit names the executor; the approval row names the agent that asked.
+		Expect(audit.rows).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+			"Agent": Equal(agentExec), "Target": Equal("acme-wiki"), "Tool": Equal("read_item"),
+		})))
 	})
 
 	It("refuses an unknown key, a missing key and a key outside the Authorization header", func(ctx SpecContext) {
