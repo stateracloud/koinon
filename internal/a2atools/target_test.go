@@ -52,7 +52,7 @@ var _ = Describe("the built-in A2A target", func() {
 		GinkgoHelper()
 		raw, err := json.Marshal(args)
 		Expect(err).NotTo(HaveOccurred())
-		return tool.Call(context.Background(), tgt, who, name, raw)
+		return tool.Call(context.Background(), mcpgateway.StaticCredentials{}, tgt, who, name, raw)
 	}
 	ok := func(r mcpgateway.BuiltinResult) out {
 		GinkgoHelper()

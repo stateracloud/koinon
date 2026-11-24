@@ -277,6 +277,10 @@ func (s *Service) seal(org, id pgtype.UUID, value string) ([]byte, error) {
 	if value == "" {
 		return nil, nil
 	}
+	// Every path that saves a value seals it here, so a path that forgot the check still refuses it.
+	if err := mcpservers.ValidateCredentialValue(value); err != nil {
+		return nil, err
+	}
 	if s.keys == nil {
 		return nil, ErrNoKeys
 	}
@@ -417,6 +421,10 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if in.CredentialValue == "" && in.CredentialHeader != "" {
 		return RemoteAgent{}, invalid("a credential needs a value")
 	}
+	// Before the card is read: a value the gateway cannot scrub is never sent (#1221).
+	if err := mcpservers.ValidateCredentialValue(in.CredentialValue); err != nil {
+		return RemoteAgent{}, err
+	}
 	if err := mcpservers.ValidateTLSTrust(in.CardURL, in.CABundle, in.InsecureSkipVerify); err != nil {
 		return RemoteAgent{}, err
 	}
@@ -475,6 +483,11 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	}
 	if patch.Credential != nil && patch.RemoveCredential {
 		return RemoteAgent{}, invalid("set a credential or remove it, not both")
+	}
+	if patch.Credential != nil && patch.Credential.Value != nil {
+		if err := mcpservers.ValidateCredentialValue(*patch.Credential.Value); err != nil {
+			return RemoteAgent{}, err
+		}
 	}
 	// Phase 1 reads the row, checks the patch and reads the card at a new URL with no lock held: a slow
 	// agent must not hold a row lock or a connection. Phase 2 locks the row and refuses if it changed since.

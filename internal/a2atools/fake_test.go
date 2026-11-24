@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/a2aout"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/mcpgateway"
 )
 
 // fakeToken is obviously fake, as the gitleaks rule needs.
@@ -159,7 +160,7 @@ func serve(f *fakeAgent) (*httptest.Server, gateway.MCPRemoteAgent) {
 		CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: tok,
 	}
 	pin, err := a2aout.FetchCard(context.Background(), a2aout.Options{
-		Target: ra.Target("acme"), Agent: gateway.AgentRef{Org: "acme", Name: "scout"},
+		Credentials: mcpgateway.StaticCredentials{}, Target: ra.Target("acme"), Agent: gateway.AgentRef{Org: "acme", Name: "scout"},
 		Policy: policy(), RequestTimeout: 5 * time.Second, CardHash: "0000000000000000000000000000000000000000000000000000000000000000",
 	})
 	Expect(err).NotTo(HaveOccurred())

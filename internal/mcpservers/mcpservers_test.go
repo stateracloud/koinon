@@ -504,6 +504,79 @@ var _ = Describe("Service", func() {
 		})
 	})
 
+	// The gateway scrubs an opened credential only from 8 bytes (ADR 0097), so a shorter one is refused at
+	// every save (#1221). The fake values are short on purpose: 7 and 8 bytes.
+	Describe("a credential too short to scrub (#1221)", func() {
+		const short, long = "fake-07", "fake-008"
+		tooShort := func(err error) {
+			GinkgoHelper()
+			var inv *mcpservers.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
+			Expect(inv.Reason).To(Equal(mcpservers.ReasonCredentialTooShort))
+			Expect(inv.Msg).To(ContainSubstring("at least 8 bytes"))
+			Expect(inv.Msg).NotTo(ContainSubstring(short), "the message never holds the value")
+		}
+		count := func(ctx SpecContext) int {
+			GinkgoHelper()
+			l, err := svc.List(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			return len(l)
+		}
+
+		DescribeTable("the check of a value",
+			func(v string, ok bool) {
+				err := mcpservers.ValidateCredentialValue(v)
+				if ok {
+					Expect(err).NotTo(HaveOccurred())
+					return
+				}
+				tooShort(err)
+			},
+			Entry("no value: no credential", "", true),
+			Entry("7 bytes", short, false),
+			Entry("8 bytes", long, true),
+			Entry("7 bytes in spaces and a newline", "  "+short+"\n", false),
+			Entry("only spaces", "          ", false),
+			Entry("8 bytes in spaces", " "+long+"\n", true),
+			Entry("a scheme word and a 7-byte token", "Bearer "+short, false),
+			Entry("a scheme word and an 8-byte token", "Bearer "+long, true),
+		)
+
+		It("refuses 7 bytes and takes 8 when a server is created", func(ctx SpecContext) {
+			_, err := svc.Create(ctx, org, actor, user, mcpservers.Input{Name: "wiki", URL: "https://mcp.example.com/mcp", CredentialValue: short})
+			tooShort(err)
+			Expect(count(ctx)).To(BeZero(), "nothing is saved")
+			s := create(ctx, "wiki", long)
+			Expect(s.HasCredential).To(BeTrue())
+		})
+
+		It("refuses 7 bytes and takes 8 when a credential is replaced, and keeps the old one on a refusal", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			v := short
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "X-Api-Key", Value: &v}})
+			tooShort(err)
+			var env []byte
+			Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, s.ID).Scan(&env)).To(Succeed())
+			got, err := mcpservers.OpenCredential(ring, org, uuidOf(s.ID), env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("not-a-real-token"))
+
+			v = long
+			_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "X-Api-Key", Value: &v}})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("refuses 7 bytes and takes 8 from a Secret that declares a server", func(ctx SpecContext) {
+			d := mcpservers.Declared{SecretName: "s1", Version: "uid/1", Name: "wiki", URL: "https://decl.example.com/mcp", CredentialHeader: "X-Api-Key", CredentialValue: short}
+			_, err := svc.ApplyDeclared(ctx, org, d)
+			tooShort(err)
+			Expect(count(ctx)).To(BeZero(), "nothing is saved")
+			d.Version, d.CredentialValue = "uid/2", long
+			_, err = svc.ApplyDeclared(ctx, org, d)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 	Describe("declared servers", func() {
 		decl := func(secret, version, name string) mcpservers.Declared {
 			return mcpservers.Declared{

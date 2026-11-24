@@ -762,37 +762,44 @@ var _ = Describe("the gateway scrubs a tool list before the pin check (#1174)", 
 	})
 })
 
-// keyEchoBuiltin is a built-in target that opens a credential through the source the gateway gives it and
-// quotes the value in its result.
-type keyEchoBuiltin struct{ src mcpgateway.CredentialSource }
+// keyEchoBuiltin is a built-in target that opens the credential of a remote party (the target "remote", as the
+// A2A target opens the credential of a remote agent) and quotes the value in its result. With own nil it opens
+// the credential through the source the gateway gives to Call, as every built-in must. With own set it opens it
+// through a source of its own: that is the fault the specs below must catch (#1221). The gateway also opens the
+// credential of the built-in target itself ("agents") for the audit row, so the remote party has another name.
+type keyEchoBuiltin struct{ own mcpgateway.CredentialSource }
 
 func (b keyEchoBuiltin) Tools() []*mcp.Tool {
 	return []*mcp.Tool{{Name: "echo", InputSchema: map[string]any{"type": "object"}}}
 }
 
-func (b keyEchoBuiltin) Call(ctx context.Context, t gateway.MCPTarget, agent gateway.AgentRef, _ string, _ json.RawMessage) mcpgateway.BuiltinResult {
-	c, _ := b.src.Credential(ctx, t, agent)
+func (b keyEchoBuiltin) Call(ctx context.Context, creds mcpgateway.CredentialSource, t gateway.MCPTarget, agent gateway.AgentRef, _ string, _ json.RawMessage) mcpgateway.BuiltinResult {
+	if b.own != nil {
+		creds = b.own
+	}
+	c, _ := creds.Credential(ctx, gateway.MCPTarget{Name: "remote", Org: t.Org}, agent)
 	return mcpgateway.BuiltinResult{
 		Result:     &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "the remote said " + c.Value}}},
 		Credential: mcpgateway.CredentialStatic,
 	}
 }
 
-func (b keyEchoBuiltin) WrapCredentials(wrap func(mcpgateway.CredentialSource) mcpgateway.CredentialSource) mcpgateway.Builtin {
-	return keyEchoBuiltin{src: wrap(b.src)}
-}
-
-// A built-in target opens its credentials through the gateway's scrub, and its result is scrubbed before the
-// guard, the audit and the agent see it (#1174).
-var _ = Describe("the gateway scrubs what a built-in target opened (#1174)", func() {
+// A built-in target gets the gateway's recording source with each call, by construction of [mcpgateway.Builtin]:
+// it opens its credentials through the gateway's scrub, and its result is scrubbed before the guard, the audit
+// and the agent see it (#1174, #1221).
+var _ = Describe("the gateway scrubs what a built-in target opened (#1174, #1221)", func() {
 	agent := gateway.AgentRef{Org: "acme", Name: "builtin-reader"}
 
-	It("records the built-in's credential and scrubs its result before the guard sees it", func(ctx SpecContext) {
+	// callEcho runs the echo tool of b through a real gateway whose own credential source holds fakeToken for
+	// the remote party. It returns the text the agent got, the scrub and the guard.
+	callEcho := func(ctx context.Context, b mcpgateway.Builtin) (string, *mcpgateway.CredentialScrub, *recordingGuard) {
+		GinkgoHelper()
 		guard := &recordingGuard{}
 		sc := mcpgateway.NewCredentialScrub()
 		gw := mcpgateway.New(mcpgateway.Options{
 			Guard: guard, Audit: &auditLog{}, Scrub: sc,
-			Builtins: map[string]mcpgateway.Builtin{gateway.BuiltinA2A: keyEchoBuiltin{src: mapCredentials{"agents": fakeToken}}},
+			Credentials: mapCredentials{"remote": fakeToken},
+			Builtins:    map[string]mcpgateway.Builtin{gateway.BuiltinA2A: b},
 		})
 		DeferCleanup(gw.Drain)
 		mux := http.NewServeMux()
@@ -811,9 +818,31 @@ var _ = Describe("the gateway scrubs what a built-in target opened (#1174)", fun
 		s := connect(ctx, front.URL, key.Material)
 		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "agents_echo"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(text(res)).To(Equal("the remote said [redacted:secret]"))
+		return text(res), sc, guard
+	}
+
+	// expectScrubbed is the check that each built-in must pass: the gateway recorded the value that the
+	// built-in opened, for the caller's org, and scrubbed the result before the guard and the agent saw it.
+	expectScrubbed := func(got string, sc *mcpgateway.CredentialScrub, guard *recordingGuard) {
+		GinkgoHelper()
+		Expect(got).To(Equal("the remote said [redacted:secret]"))
 		Expect(sc.TextFor("acme", fakeToken)).To(Equal("[redacted:secret]"), "the value was recorded for the caller's org")
 		Expect(guard.sawText("the remote said [redacted:secret]")).To(BeTrue())
 		Expect(guard.sawText(fakeToken)).To(BeFalse(), "the guard got the scrubbed result")
+	}
+
+	It("records the built-in's credential and scrubs its result before the guard sees it", func(ctx SpecContext) {
+		expectScrubbed(callEcho(ctx, keyEchoBuiltin{}))
+	})
+
+	// A built-in that opens its credential through a source of its own, not the one that [Builtin.Call] gives
+	// it, must fail the check above. Go cannot stop a built-in from building such a source, so this check is
+	// the guard. This spec proves that this check fails for such a built-in. The A2A target has its own spec
+	// of the same kind, through the real target (internal/a2atools/gateway_test.go); a new built-in kind adds one.
+	It("fails the check for a built-in that opens its credential through a source of its own", func(ctx SpecContext) {
+		got, sc, guard := callEcho(ctx, keyEchoBuiltin{own: mapCredentials{"remote": fakeToken}})
+		failures := InterceptGomegaFailures(func() { expectScrubbed(got, sc, guard) })
+		Expect(failures).NotTo(BeEmpty(), "the check must see the value that was not recorded")
+		Expect(guard.sawText(fakeToken)).To(BeTrue(), "the value reached the guard unscrubbed")
 	})
 })

@@ -50,8 +50,13 @@ func readOnly(secret string) error {
 	return fmt.Errorf("%w (managed by the Secret %s; change it there)", ErrReadOnly, secret)
 }
 
-// InvalidError is a validation failure.
-type InvalidError struct{ Msg string }
+// InvalidError is a validation failure. Reason is optional: a fixed, machine-readable name of the failure
+// (for example "CREDENTIAL_TOO_SHORT") that the API gives with the error, so a client can tell it apart from
+// other validation failures. Empty gives none.
+type InvalidError struct {
+	Msg    string
+	Reason string
+}
 
 func (e *InvalidError) Error() string { return e.Msg }
 
