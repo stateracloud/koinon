@@ -118,7 +118,15 @@ func helmRenderWith(ctx context.Context, valuesFile string, extra ...string) *re
 				continue
 			}
 			r.Objects = append(r.Objects, obj)
-		case *corev1.ConfigMap, *corev1.Secret, *corev1.ServiceAccount,
+		case *corev1.ServiceAccount:
+			// The ServiceAccount of the default WorkerPool lives in the Substrate worker namespace (issue #1089). No
+			// Koinon component runs as it, so the smoke suite does not apply it.
+			if ns := o.GetNamespace(); ns != "" && ns != namespace {
+				r.Ignored[gvk.Kind]++
+				continue
+			}
+			r.Objects = append(r.Objects, obj)
+		case *corev1.ConfigMap, *corev1.Secret,
 			*rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding:
 			r.Objects = append(r.Objects, obj)
 		default:
