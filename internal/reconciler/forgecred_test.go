@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path"
@@ -165,9 +166,7 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 		if err == nil {
 			Expect(providers.Data).NotTo(HaveKey(base))
 		}
-		state, err := json.Marshal(mg.last())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(string(state)).NotTo(ContainSubstring("koinon_test_not-a-real-token"))
+		Expect(fmt.Sprintf("%#v", mg.last())).NotTo(ContainSubstring("koinon_test_not-a-real-token"))
 
 		// The gateway's opener reads the token from the same file.
 		dir := GinkgoT().TempDir()
