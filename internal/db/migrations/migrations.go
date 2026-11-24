@@ -99,7 +99,7 @@ var GatewayMCPServerColumns = []string{
 	"created_at", "updated_at", "kind", "exposes_untrusted_input", "exposes_private_data",
 	"code_host_connection_id", "credential_lost_at", "admin_disabled_at", "admin_disabled_by",
 	"admin_disabled_note", "admin_disabled_under_by", "admin_disabled_under_note", "ca_bundle",
-	"insecure_skip_verify",
+	"insecure_skip_verify", "show_unreviewed_tools", "unreviewed_tools_capped_at",
 }
 
 // GatewayConnectionColumns are the columns of connections the gateway may read. The guard joins

@@ -25,10 +25,12 @@ const reasonToolListUnreadable = "withheld by the leak guard: it could not read 
 //   - A tool with an approved hash and another hash changed: it is left out, and a call to it is refused.
 //     The sync records the change for review (mcpservers.SyncTools); the guard writes nothing. When the
 //     sync has not recorded that text yet, the guard wakes the prober to sync the server now (#1173).
-//   - A tool no admin approved (new, or in the ask tier of a first sync) is served as sanitised text. It
-//     sets the untrusted-input leg, and only when the server declares that leg: the leg alone never
-//     causes an approval. When the sync has not recorded that text, the guard wakes the prober too, so
-//     the tool reaches review now and not at the next probe interval.
+//   - A tool no admin approved (new, or in the ask tier of a first sync) is hidden: it is not served, and
+//     a call to it is refused (#1216, ADR 0125). When the sync has not recorded that text, the guard
+//     wakes the prober too, so the tool reaches review now and not at the next probe interval.
+//   - On a server where an admin turned on "show new tools before review", such a tool is served as
+//     sanitised text instead. It sets the untrusted-input leg, and only when the server declares that
+//     leg: the leg alone never causes an approval.
 //   - The guard never fingerprints tool text: it is reviewed configuration, not session data.
 //   - A list the guard cannot record or read keeps both legs and is withheld (fail closed).
 //
@@ -76,11 +78,18 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 		want, pinned := approved[p.Name]
 		switch {
 		case !pinned:
-			unreviewed = true
-			v.Serve = append(v.Serve, t)
 			// A tool the sync never recorded (new since the last probe), or whose unreviewed text moved
 			// since: the console cannot show it for review until the prober syncs the server.
 			unsynced = unsynced || recorded[p.Name] != t.Hash()
+			if !c.server.ShowUnreviewedTools {
+				// No admin reviewed the tool: it is hidden until one does (#1216, ADR 0125), and a call
+				// to it is refused.
+				v.Waiting = append(v.Waiting, p.Name)
+				continue
+			}
+			// An admin lets this server show new tools before the review: sanitised text.
+			unreviewed = true
+			v.Serve = append(v.Serve, t)
 		case want == t.Hash():
 			pt, err := mcptoolpin.Parse(stored[p.Name])
 			if err != nil || pt.Hash() != want {

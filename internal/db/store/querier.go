@@ -172,6 +172,8 @@ type Querier interface {
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	// koinon-reconciler, after an apply that took effect: the org's failures are over.
 	ClearGatewayProviderFailures(ctx context.Context, orgID pgtype.UUID) error
+	// The server is under the limit of unreviewed tools again (an admin reviewed some).
+	ClearMCPServerToolsCapped(ctx context.Context, arg ClearMCPServerToolsCappedParams) error
 	// Clears the org's default model when no model of that name is left (it was deleted); the old value
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
@@ -1266,6 +1268,9 @@ type Querier interface {
 	// Serializes the saves that add CA bundle bytes, so the global total checked below cannot be passed by
 	// two orgs saving at the same moment. Held until the transaction ends.
 	LockMCPCABudget(ctx context.Context) error
+	// Locks the server row until the transaction ends, so two syncs of one server run one after the other
+	// and the count of unreviewed tools a sync reads stays true until it commits (#1216).
+	LockMCPServerForToolSync(ctx context.Context, arg LockMCPServerForToolSyncParams) (McpServer, error)
 	// Serializes the stores of several replicas for the rest of the transaction.
 	LockOpenRouterCatalog(ctx context.Context) error
 	// Serialises the changes of the extra MCP hosts of the connections of one org (#240), so that one host
@@ -1320,6 +1325,9 @@ type Querier interface {
 	MarkLeakGuardEvicted(ctx context.Context, arg MarkLeakGuardEvictedParams) error
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
+	// The sync found the server at the limit of unreviewed tools. One row means the server was under the
+	// limit before: the caller writes the one audit event. Zero rows means it was marked already.
+	MarkMCPServerToolsCapped(ctx context.Context, arg MarkMCPServerToolsCappedParams) (int64, error)
 	// Tools the server did not list this time.
 	MarkMCPToolsAbsent(ctx context.Context, arg MarkMCPToolsAbsentParams) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)

@@ -152,24 +152,35 @@ func (s *Server) lookupErr(err error, what string) error {
 	return errors.New("internal error; try again later")
 }
 
-// askTools are the tools the caller may request: present, in the ask tier, within its allowance.
-func (s *Server) askTools(ctx context.Context, c caller) ([]store.McpTool, error) {
+// askTools are the tools the caller may request: present, in the ask tier, within its allowance, and
+// reviewed by an admin. waiting are the names of the tools that would be among them but that no admin
+// reviewed yet: they are hidden from the agent until an admin reviews them, unless an admin lets the
+// server show new tools (#1216, ADR 0125).
+func (s *Server) askTools(ctx context.Context, c caller) (out []store.McpTool, waiting []string, err error) {
 	if c.server.Health == store.McpHealthUnhealthy {
-		return nil, nil
+		return nil, nil, nil
 	}
 	tools, err := s.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: c.org.ID, ServerID: c.server.ID})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []store.McpTool
 	for _, t := range tools {
-		if t.Present && t.Tier == store.McpTierAsk && t.Name != StatusTool && (c.allowed.Tools == nil || slices.Contains(c.allowed.Tools, t.Name)) &&
-			mcpservers.ToolNameProblem(c.org.Slug, c.server.Name, t.Name) == "" {
-			out = append(out, t)
+		if !t.Present || t.Tier != store.McpTierAsk || t.Name == StatusTool || (c.allowed.Tools != nil && !slices.Contains(c.allowed.Tools, t.Name)) ||
+			mcpservers.ToolNameProblem(c.org.Slug, c.server.Name, t.Name) != "" {
+			continue
 		}
+		if mcpservers.Unreviewed(t) && !c.server.ShowUnreviewedTools {
+			waiting = append(waiting, t.Name)
+			continue
+		}
+		out = append(out, t)
 	}
-	return out, nil
+	return out, waiting, nil
 }
+
+// reasonToolUnreviewed refuses a call to an ask-tier tool that no admin reviewed (#1216). The agent
+// does not wait for the review: the tool is not available until it.
+const reasonToolUnreviewed = "refused: no admin reviewed this tool yet; it is not available until an admin reviews it"
 
 // Handler serves the proxy over Streamable HTTP, statelessly: each request builds the tool list it
 // answers from the database. Mount it at Path on a listener only agentgateway can reach.
@@ -187,10 +198,22 @@ func (s *Server) serverFor(r *http.Request, serverName string) *mcp.Server {
 	if err != nil {
 		return srv
 	}
-	tools, err := s.askTools(r.Context(), c)
+	tools, waiting, err := s.askTools(r.Context(), c)
 	if err != nil {
 		s.log.Error("mcp ask: list tools", "err", err)
 		return srv
+	}
+	if len(waiting) > 0 {
+		// A hidden tool is not in tools/list. A call to it gets a clear refusal, not "unknown tool", so the
+		// agent knows that it must go on without the tool and not try again.
+		srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				if r, ok := req.(*mcp.CallToolRequest); ok && method == "tools/call" && r.Params != nil && slices.Contains(waiting, r.Params.Name) {
+					return toolError(reasonToolUnreviewed)
+				}
+				return next(ctx, method, req)
+			}
+		})
 	}
 	for _, t := range tools {
 		srv.AddTool(&mcp.Tool{
@@ -253,11 +276,15 @@ func (s *Server) callTool(serverName, tool string) mcp.ToolHandler {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		tools, err := s.askTools(ctx, c)
+		tools, waiting, err := s.askTools(ctx, c)
 		if err != nil {
 			return toolError("internal error; try again later")
 		}
 		i := slices.IndexFunc(tools, func(t store.McpTool) bool { return t.Name == tool })
+		if i < 0 && slices.Contains(waiting, tool) {
+			// The list served the tool before an admin turned "show new tools" off for the server.
+			return toolError(reasonToolUnreviewed)
+		}
 		if i < 0 {
 			return toolError(fmt.Sprintf("the tool %s is not available to this agent", tool))
 		}

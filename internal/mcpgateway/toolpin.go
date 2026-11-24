@@ -41,6 +41,9 @@ type ToolListVerdict struct {
 	// Left are the names of the tools left out because their text is not the approved text. A call to
 	// one is refused.
 	Left []string
+	// Waiting are the names of the tools left out because no admin reviewed them yet (#1216). A call to
+	// one is refused.
+	Waiting []string
 	// Refuse withholds the whole list; Reason is fixed text.
 	Refuse bool
 	Reason string
@@ -60,6 +63,10 @@ const reasonToolListUnreadable = "refused: the gateway could not check the tool 
 const toolPinTTL = 30 * time.Second
 
 const reasonToolChanged = "refused: the tool changed since an admin approved it; an admin must review it again"
+
+// reasonToolUnreviewed refuses a call to a tool that no admin reviewed (#1216). It is fixed text: the
+// agent does not wait for the review.
+const reasonToolUnreviewed = "refused: no admin reviewed this tool yet; it is not available until an admin reviews it"
 
 // checkToolList runs the list check, if the guard has one. A guard that panics withholds the list.
 func (f failClosed) checkToolList(ctx context.Context, l ToolList) (v ToolListVerdict) {
@@ -86,33 +93,41 @@ const (
 	leftOverLimit  = "over_limit"
 	leftUnusable   = "unusable"
 	leftUnreadable = "unreadable"
+	leftUnreviewed = "unreviewed"
 )
 
-// leftOutSet remembers the tools each (target, agent) list left out, so a call to one is refused
-// without a call to the target. It is updated by every list and by a list_changed notification.
+// leftOutSet remembers the tools each (target, agent) list left out, with the reason a call to each
+// is refused, so a call to one is refused without a call to the target. It is updated by every list
+// and by a list_changed notification.
 type leftOutSet struct {
 	mu sync.Mutex
-	m  map[poolKey]map[string]struct{}
+	m  map[poolKey]map[string]string
 	at map[poolKey]time.Time
 }
 
-func (s *leftOutSet) set(k poolKey, names []string) {
+// set records the tools one list left out: changed names the tools whose text is not the approved
+// text (or that the gateway could not check), waiting the tools no admin reviewed yet.
+func (s *leftOutSet) set(k poolKey, changed, waiting []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.at == nil {
 		s.at = map[poolKey]time.Time{}
 	}
 	s.at[k] = time.Now()
-	if len(names) == 0 {
+	if len(changed)+len(waiting) == 0 {
 		delete(s.m, k)
 		return
 	}
 	if s.m == nil {
-		s.m = map[poolKey]map[string]struct{}{}
+		s.m = map[poolKey]map[string]string{}
 	}
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		set[n] = struct{}{}
+	set := make(map[string]string, len(changed)+len(waiting))
+	for _, n := range waiting {
+		set[n] = reasonToolUnreviewed
+	}
+	// A name in both lists (a server that lists one name twice) takes the changed reason.
+	for _, n := range changed {
+		set[n] = reasonToolChanged
 	}
 	s.m[k] = set
 }
@@ -125,11 +140,13 @@ func (s *leftOutSet) fresh(k poolKey, ttl time.Duration) bool {
 	return ok && time.Since(t) < ttl
 }
 
-func (s *leftOutSet) has(k poolKey, tool string) bool {
+// refusal returns the fixed reason a call to a tool that a list left out is refused, and false for a
+// tool the list served.
+func (s *leftOutSet) refusal(k poolKey, tool string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.m[k][tool]
-	return ok
+	r, ok := s.m[k][tool]
+	return r, ok
 }
 
 func (s *leftOutSet) forget(target string) {
@@ -221,7 +238,7 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 		// The tools an earlier list left out stay out, and the check is no longer fresh: a call checks again.
 		return nil, nil, false
 	case v.Passthrough:
-		g.left.set(key, left)
+		g.left.set(key, left, nil)
 		out := make([]*mcp.Tool, 0, len(l.Tools))
 		for _, p := range l.Tools {
 			out = append(out, byName[p.Name])
@@ -243,9 +260,13 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 		g.o.Logger.WarnContext(scrubCtx(ctx, agent), "tools/list: tool left out; it changed since it was approved",
 			"target", t.Name, "tool", logName(g.o.Scrub.TextFor(agent.Org, n)))
 	}
+	for range v.Waiting {
+		// No log line for each tool: a server can list many new names, and the name is its own text.
+		g.o.Metrics.toolLeft(leftUnreviewed)
+	}
 	left = append(left, v.Left...)
-	g.left.set(key, left)
-	return out, left, true
+	g.left.set(key, left, v.Waiting)
+	return out, append(left, v.Waiting...), true
 }
 
 // refresh lists a target again for one agent and updates the tools left out. It is what a

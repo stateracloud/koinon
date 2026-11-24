@@ -127,6 +127,20 @@ const (
 // FailureThreshold is how many probes in a row must fail before a server is unhealthy.
 const FailureThreshold = 3
 
+// MaxUnreviewedTools is the most tools that no admin reviewed which Koinon stores for one server
+// (#1216, ADR 0125). A server can list a new tool name on each tools/list. At the limit the sync stores
+// no new tool, marks the server and writes one audit event, so such a server cannot grow the table or
+// the audit log. An admin who reviews tools makes room again.
+const MaxUnreviewedTools = 256
+
+// Unreviewed reports whether no admin reviewed the tool: no admin approved any of its text. Such a tool
+// is hidden from agents until an admin reviews it, unless an admin lets its server show new tools
+// (#1216, ADR 0125). A tool an admin approved and whose text changed since is not unreviewed: the
+// gateway leaves it out by its pin (#1132).
+func Unreviewed(t store.McpTool) bool {
+	return !t.ApprovedHash.Valid
+}
+
 // Reasons a server is disabled.
 const (
 	ReasonShadowed = "shadowed by an MCP server of the same name declared in a Kubernetes Secret"
@@ -1205,6 +1219,32 @@ type SyncResult struct {
 	// Demoted are the changed tools that were in the auto tier and moved to ask.
 	Demoted []string
 	Absent  []string
+	// Capped is how many new tools the sync did not store: the server is at MaxUnreviewedTools.
+	Capped int
+}
+
+// markCapped keeps the server's mark of the limit of unreviewed tools (#1216). A sync that left new
+// tools out marks the server; only the sync that sets the mark writes the audit event, so a server
+// that lists new names without end gets one event, not one for each tool or each sync. A sync under
+// the limit that left nothing out clears the mark: an admin reviewed tools since.
+func markCapped(ctx context.Context, q *store.Queries, b audit.Batch, org pgtype.UUID, srv store.McpServer, capped, unreviewed int) error {
+	if capped == 0 {
+		if unreviewed < MaxUnreviewedTools && srv.UnreviewedToolsCappedAt.Valid {
+			return q.ClearMCPServerToolsCapped(ctx, store.ClearMCPServerToolsCappedParams{OrgID: org, ID: srv.ID})
+		}
+		return nil
+	}
+	n, err := q.MarkMCPServerToolsCapped(ctx, store.MarkMCPServerToolsCappedParams{OrgID: org, ID: srv.ID})
+	if err != nil || n == 0 {
+		return err
+	}
+	// Fixed fields only: the names the server listed are its own text and are not stored.
+	b.Org(audit.Event{
+		Org: org, Actor: audit.System("koinon-reconciler:mcp-sync"), Action: "mcp_server.unreviewed_tools_capped",
+		TargetKind: "mcp_server", TargetID: srv.ID.String(),
+		After: map[string]any{"server": srv.Name, "limit": MaxUnreviewedTools},
+	})
+	return nil
 }
 
 // SyncTools records the tools a server listed. New tools enter the ask tier, known tools whose
@@ -1213,7 +1253,8 @@ type SyncResult struct {
 func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtype.UUID, listed []ListedTool) (SyncResult, error) {
 	var res SyncResult
 	err := s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: serverID})
+		// The lock keeps the count of unreviewed tools below true until this sync commits.
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: serverID})
 		if err != nil {
 			return err
 		}
@@ -1222,8 +1263,14 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			return err
 		}
 		have := map[string]store.McpTool{}
+		// Every unreviewed row counts, present or absent: a server that lists other names each time
+		// must not make room by dropping the names it listed before.
+		unreviewed := 0
 		for _, t := range known {
 			have[t.Name] = t
+			if Unreviewed(t) {
+				unreviewed++
+			}
 		}
 		var names []string
 		for _, lt := range listed {
@@ -1268,7 +1315,11 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			legacyExtra := ok && !cur.ApprovedHash.Valid && cur.TierSetBy.Valid && !cur.ReviewReason.Valid &&
 				(pin.Title != "" || len(pin.OutputSchema) > 0 || (pin.Annotations != nil && pin.Annotations.Title != ""))
 			switch {
+			case !ok && unreviewed >= MaxUnreviewedTools:
+				// At the limit: no row, and no name in the audit. The server is marked below.
+				res.Capped++
 			case !ok:
+				unreviewed++
 				if _, err := q.InsertMCPTool(ctx, store.InsertMCPToolParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash, ReadOnlyHint: lt.ReadOnlyHint,
 					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
@@ -1321,6 +1372,9 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			if err := q.MarkMCPToolsAbsent(ctx, store.MarkMCPToolsAbsentParams{OrgID: org, ServerID: serverID, Listed: names}); err != nil {
 				return err
 			}
+		}
+		if err := markCapped(ctx, q, b, org, srv, res.Capped, unreviewed); err != nil {
+			return err
 		}
 		if len(res.New) == 0 && len(res.Changed) == 0 && len(res.Absent) == 0 {
 			return nil

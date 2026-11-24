@@ -2385,40 +2385,42 @@ type McpCallLog struct {
 }
 
 type McpServer struct {
-	OrgID                  pgtype.UUID
-	ID                     pgtype.UUID
-	Name                   string
-	Url                    string
-	Transport              McpTransport
-	CredentialHeader       pgtype.Text
-	CredentialPrefix       string
-	Credential             []byte
-	Source                 ConfigSource
-	ManagedBySecret        pgtype.Text
-	DeclaredVersion        pgtype.Text
-	RemovedAt              pgtype.Timestamptz
-	DisabledReason         pgtype.Text
-	Health                 McpHealth
-	HealthReason           pgtype.Text
-	HealthCheckedAt        pgtype.Timestamptz
-	HealthSince            pgtype.Timestamptz
-	ConsecutiveFailures    int32
-	ToolsSyncedAt          pgtype.Timestamptz
-	CreatedBy              pgtype.UUID
-	CreatedAt              pgtype.Timestamptz
-	UpdatedAt              pgtype.Timestamptz
-	Kind                   McpServerKind
-	ExposesUntrustedInput  bool
-	ExposesPrivateData     bool
-	CodeHostConnectionID   pgtype.UUID
-	CredentialLostAt       pgtype.Timestamptz
-	AdminDisabledAt        pgtype.Timestamptz
-	AdminDisabledBy        pgtype.Text
-	AdminDisabledNote      pgtype.Text
-	AdminDisabledUnderBy   pgtype.Text
-	AdminDisabledUnderNote pgtype.Text
-	CaBundle               string
-	InsecureSkipVerify     bool
+	OrgID                   pgtype.UUID
+	ID                      pgtype.UUID
+	Name                    string
+	Url                     string
+	Transport               McpTransport
+	CredentialHeader        pgtype.Text
+	CredentialPrefix        string
+	Credential              []byte
+	Source                  ConfigSource
+	ManagedBySecret         pgtype.Text
+	DeclaredVersion         pgtype.Text
+	RemovedAt               pgtype.Timestamptz
+	DisabledReason          pgtype.Text
+	Health                  McpHealth
+	HealthReason            pgtype.Text
+	HealthCheckedAt         pgtype.Timestamptz
+	HealthSince             pgtype.Timestamptz
+	ConsecutiveFailures     int32
+	ToolsSyncedAt           pgtype.Timestamptz
+	CreatedBy               pgtype.UUID
+	CreatedAt               pgtype.Timestamptz
+	UpdatedAt               pgtype.Timestamptz
+	Kind                    McpServerKind
+	ExposesUntrustedInput   bool
+	ExposesPrivateData      bool
+	CodeHostConnectionID    pgtype.UUID
+	CredentialLostAt        pgtype.Timestamptz
+	AdminDisabledAt         pgtype.Timestamptz
+	AdminDisabledBy         pgtype.Text
+	AdminDisabledNote       pgtype.Text
+	AdminDisabledUnderBy    pgtype.Text
+	AdminDisabledUnderNote  pgtype.Text
+	CaBundle                string
+	InsecureSkipVerify      bool
+	ShowUnreviewedTools     bool
+	UnreviewedToolsCappedAt pgtype.Timestamptz
 }
 
 type McpTool struct {

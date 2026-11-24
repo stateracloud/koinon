@@ -934,6 +934,7 @@ func serverOf(r store.GetServedMCPServerForGuardRow) store.McpServer {
 		CodeHostConnectionID: r.CodeHostConnectionID, CredentialLostAt: r.CredentialLostAt,
 		AdminDisabledAt: r.AdminDisabledAt, AdminDisabledBy: r.AdminDisabledBy, AdminDisabledNote: r.AdminDisabledNote,
 		AdminDisabledUnderBy: r.AdminDisabledUnderBy, AdminDisabledUnderNote: r.AdminDisabledUnderNote,
-		CaBundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify,
+		CaBundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify, ShowUnreviewedTools: r.ShowUnreviewedTools,
+		UnreviewedToolsCappedAt: r.UnreviewedToolsCappedAt,
 	}
 }
