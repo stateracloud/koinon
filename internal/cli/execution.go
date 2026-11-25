@@ -101,12 +101,15 @@ func (s SnapshotStore) objectStore() (substrate.ObjectStore, error) {
 
 // DriverConfig is the substrate driver's configuration for these settings.
 func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
-	return s.driverConfig(logger)
+	return s.driverConfig(logger, true)
 }
 
-func (s Substrate) driverConfig(logger *slog.Logger) (substrate.Config, error) {
+// driverConfig builds the driver's configuration. With readKey false it does not read the guest key
+// file: startup validation runs where the Secret is not mounted (the chart contract check), so it
+// checks only that the flag is set, and Dial reads and parses the key.
+func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
-	if s.GuestKeyFile != "" {
+	if readKey && s.GuestKeyFile != "" {
 		b, err := os.ReadFile(s.GuestKeyFile)
 		if err != nil {
 			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
@@ -224,11 +227,11 @@ func (e *Execution) Validate(openshellAddress string) error {
 		if e.Substrate.ControlAddress == "" || e.Substrate.RouterAddress == "" {
 			return errors.New("--substrate-control-address and --substrate-router-address are required with --execution-driver=substrate")
 		}
-		cfg, err := e.Substrate.driverConfig(nil)
+		cfg, err := e.Substrate.driverConfig(nil, false)
 		if err != nil {
 			return err
 		}
-		if cfg.GuestSigner == nil {
+		if strings.TrimSpace(e.Substrate.GuestKeyFile) == "" {
 			return errors.New("--substrate-guest-key-file is required with --execution-driver=substrate: without it the guest front of every actor refuses the driver's calls (issue #1309)")
 		}
 		if !e.Substrate.AllowUnhardened {
@@ -262,7 +265,7 @@ func (c *Connection) Close() error { return c.closer.Close() }
 // Dial connects to the selected driver.
 func (e Execution) Dial() (*Connection, error) {
 	if e.IsSubstrate() {
-		cfg, err := e.Substrate.driverConfig(slog.Default())
+		cfg, err := e.Substrate.driverConfig(slog.Default(), true)
 		if err != nil {
 			return nil, err
 		}

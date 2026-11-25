@@ -35,6 +35,10 @@ var _ = Describe("Execution", func() {
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-default-tier")))
 		e.Substrate.DefaultTier = "dev"
 		Expect(e.Validate("")).To(Succeed())
+		// Validate does not read the key: the startup check runs where the Secret is not mounted.
+		// Dial reads it (the next spec).
+		e.Substrate.GuestKeyFile = GinkgoT().TempDir() + "/missing"
+		Expect(e.Validate("")).To(Succeed())
 	})
 	It("refuses a tier it does not know, a malformed entry and a class listed twice", func() {
 		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
