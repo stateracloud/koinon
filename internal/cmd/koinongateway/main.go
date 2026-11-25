@@ -364,7 +364,7 @@ func run(ctx context.Context, cfg config) error {
 		keyReady = keys
 	}
 	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
-		return podReady(guardLoad, keyReady, (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
+		return podReady(guardLoad, keyReady, sc, (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
 	}, log); err != nil {
 		return err
 	}
@@ -542,14 +542,21 @@ type loadChecker interface{ Loaded() error }
 // keyReadier is the key loader's readiness (gatewaykeys.Loader.Ready).
 type keyReadier interface{ Ready() (bool, error) }
 
+// staleChecker is the State client's view of its halves (stateclient.Client.Stale): an error when a half has
+// failed to apply for longer than its bound.
+type staleChecker interface{ Stale() error }
+
 // podReady is the /readyz answer of the pod. A pod is ready when it applied a config (configured), its key
 // loader holds the keys it needs, and the leak guard reached its database. The guard opens a lazy pool
 // and retries every 2 s: a broken login would leave every org target closed behind a ready pod, and a
 // rollout would not stop. A nil guard or loader means the pod runs without one. Each later outage is not
 // checked here: the guard refuses on its own then (fail closed), and a database blip must not
 // remove every endpoint.
-func podReady(guard loadChecker, keys keyReadier, configured bool) bool {
+func podReady(guard loadChecker, keys keyReadier, state staleChecker, configured bool) bool {
 	if guard != nil && guard.Loaded() != nil {
+		return false
+	}
+	if state != nil && state.Stale() != nil {
 		return false
 	}
 	if keys != nil {

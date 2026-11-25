@@ -1209,6 +1209,25 @@ below has a test. Slice 1 holds these rules; the other gaps of #1347 follow in l
   the value against `MinDrain`, so the two cannot drift. The later fix
   is to forward upstream progress notifications on an SSE reply. Build it when an org MCP server needs calls
   longer than the call timeout. It changes the reply type and the response bound, so it needs its own slice.
+- **A copy that cannot apply a State revision turns unready, and the prober keeps its interval.** A copy whose
+  `ApplyMCP` keeps failing stays live on its old revision, and it still accepts keys revoked since. The State
+  client (`stateclient.Client.Stale`) reports a half that has failed to apply for `DefaultStaleAfter` (2
+  minutes), and `/readyz` returns 503 for that time. The copy keeps serving what it has; the rollout and the
+  Service stop trusting it. The cost: a revision that every copy refuses makes every copy unready after 2
+  minutes, so a bad config can remove all endpoints. This is accepted, because the other choice is to serve
+  revoked keys for as long as the config stays bad, and the failure shows in the log and in
+  `koinon_gateway_state_revisions_applied_total{half="mcp",result="failed"}`. On the reconciler side, the first probe of a new server
+  waits for the acks in its own goroutine, not in the prober loop, so a copy that never acks (bounded by
+  `MCPAckWait`, 1 minute) no longer stops the interval probes and the other wakes. An interval probe held back by
+  a missing ack logs a warning and counts in `koinon_reconciler_mcp_probes_skipped_total` (no labels).
+- **Accepted for v0.1: no `list_changed` and a tool list that can be partial.** The gateway is stateless
+  (`JSONResponse`, no session): it holds no stream to send `notifications/tools/list_changed` on. A tool that an
+  admin approves during an agent session shows in the next session. This fits v0.1: an agent session starts,
+  lists its tools once, and ends; no harness of v0.1 re-lists tools during a session. `tools/list` skips a target
+  that fails or that the guard holds, and logs one warning with the target name (`tools/list: target skipped`).
+  The agent sees a shorter list, not an error, which is the fail-open choice for a list (a call to a missing
+  tool still fails closed). The later fix needs a stream: a stateful mode with SSE, together with the progress
+  forwarding above. Build both when an org needs tools that change within one session.
 
 ## Alternatives considered
 

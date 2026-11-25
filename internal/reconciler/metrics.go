@@ -73,6 +73,10 @@ type Metrics struct {
 	// GatewayIDMismatch is 1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId,
 	// which leaves the sandbox admission policies matching none of its namespaces (old issue 475).
 	GatewayIDMismatch prometheus.Gauge
+	// MCPProbesSkipped counts the MCP probes held back because a live koinon-gateway copy did not ack the
+	// newest State revision (#1347). A copy whose apply keeps failing makes this grow every probe interval.
+	// No labels: no copy, org or revision is a label (ADR 0023).
+	MCPProbesSkipped prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered, for tests that
@@ -135,6 +139,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_sandbox_network_policy_errors_total",
 			Help: "Failed Applies of the sandbox default-deny NetworkPolicy (#993), by reason (forbidden, not_found or other).",
 		}, []string{"reason"}),
+		MCPProbesSkipped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_mcp_probes_skipped_total", Help: "MCP probes held back because a live koinon-gateway copy did not ack the newest State revision in time. A count that keeps growing means a copy cannot apply the revision and serves an old one; the copy turns unready after its stale bound.",
+		}),
 		GatewayIDMismatch: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_openshell_gateway_id_mismatch",
 			Help: "1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId, so the sandbox admission policies match none of its namespaces and fail open, else 0.",
@@ -164,7 +171,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
-			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch)
+			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped)
 	}
 	return m
 }
