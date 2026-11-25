@@ -119,6 +119,17 @@ var _ = Describe("Writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
 		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
+		// The data of a file that its owner cannot read is kept: the snapshot makes it readable.
+		names := map[string]bool{}
+		tr := tar.NewReader(&out)
+		for {
+			hd, err := tr.Next()
+			if err != nil {
+				break
+			}
+			names[hd.Name] = true
+		}
+		Expect(names).To(HaveKey("secret.txt"))
 	})
 
 	It("keeps a home that holds a .kopiaignore file or a cache directory marker, and restores it with its digest (issue #1090)", func() {

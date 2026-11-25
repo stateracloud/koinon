@@ -186,6 +186,12 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 			return Result{}, err
 		}
 	}
+	// The writer is not root: kopia skips, without an error, a file whose owner bits forbid a read.
+	// Make every entry readable first, so that the snapshot keeps the data and the digest below
+	// covers what the snapshot holds.
+	if err := makeReadable(home); err != nil {
+		return Result{}, fmt.Errorf("reading the home: %w", err)
+	}
 	digest, err := TreeDigest(home)
 	if err != nil {
 		return Result{}, fmt.Errorf("digesting the home: %w", err)
@@ -396,6 +402,32 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 		return nil, fmt.Errorf("connecting to the repository: %w", err)
 	}
 	return repo.Open(ctx, cfg, password, nil)
+}
+
+// makeReadable adds the owner's read bit to files and the read and search bits to directories.
+func makeReadable(dir string) error {
+	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		var add fs.FileMode
+		switch {
+		case info.IsDir():
+			add = 0o500
+		case info.Mode().IsRegular():
+			add = 0o400
+		default:
+			return nil
+		}
+		if mode := info.Mode().Perm(); mode&add != add {
+			return os.Chmod(p, mode|add)
+		}
+		return nil
+	})
 }
 
 // keepEverything returns a policy tree whose files policy skips nothing that Stage kept.
