@@ -73,7 +73,7 @@ func startLocalStack(ctx context.Context, cl *cluster, nwName string, k *kmsSett
 		testcontainers.WithWaitStrategy(wait.ForLog("Ready.").WithStartupTimeout(3*time.Minute)),
 	)
 	if ctr != nil {
-		DeferCleanup(func(context.Context) { _ = testcontainers.TerminateContainer(ctr) })
+		DeferCleanup(func(context.Context) { terminate(ctr) })
 	}
 	Expect(err).NotTo(HaveOccurred())
 	h, err := containerhost.Host(ctx, ctr)

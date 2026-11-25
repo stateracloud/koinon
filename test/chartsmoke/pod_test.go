@@ -15,11 +15,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	. "github.com/onsi/ginkgo/v2"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -237,10 +239,55 @@ func (w *workload) ExitCode(ctx context.Context) int {
 	return st.ExitCode
 }
 
-// Running reports whether the container is still running.
-func (w *workload) Running(ctx context.Context) bool {
+// runState is what a look at a container's state found.
+type runState int
+
+const (
+	// stateNotChecked: the state could not be read (the spec's context ended, or Docker did not
+	// answer). It says nothing about the container.
+	stateNotChecked runState = iota
+	stateRunning
+	stateStopped
+)
+
+// classifyState maps what Docker answered to a runState. A failed or cancelled read is "not
+// checked", never "stopped": a suite that ran out of time must not report that its Deployments
+// stopped (issue #1303).
+func classifyState(running bool, readErr, ctxErr error) runState {
+	switch {
+	case readErr != nil || ctxErr != nil:
+		return stateNotChecked
+	case running:
+		return stateRunning
+	default:
+		return stateStopped
+	}
+}
+
+// RunState reports whether the container is running, stopped, or could not be checked.
+func (w *workload) RunState(ctx context.Context) runState {
 	st, err := w.Ctr.State(ctx)
-	return err == nil && st.Running
+	return classifyState(st != nil && st.Running, err, ctx.Err())
+}
+
+// Running reports whether the container is still running. False for stopped and for not checked:
+// use RunState when the two must be told apart.
+func (w *workload) Running(ctx context.Context) bool {
+	return w.RunState(ctx) == stateRunning
+}
+
+// expectRunning fails the spec when the container is not running. It says "not checked" when the
+// state could not be read (the budget ended), and "stopped" only when Docker said so.
+func expectRunning(ctx context.Context, w *workload, format string, args ...any) {
+	GinkgoHelper()
+	msg := fmt.Sprintf(format, args...)
+	switch w.RunState(ctx) {
+	case stateRunning:
+	case stateNotChecked:
+		Fail(fmt.Sprintf("%s: not checked, the container state could not be read (the spec's context ended: %v)\n%s", w.Name, ctx.Err(), msg))
+	default:
+		Fail(fmt.Sprintf("%s: the container is stopped\n%s", w.Name, msg))
+	}
 }
 
 // portNumber resolves a probe's port, by number or by the container's port name.
@@ -285,7 +332,10 @@ func (w *workload) ProbeHTTP(ctx context.Context, pr *corev1.Probe, deadline tim
 	last := "no answer yet"
 	stop := time.Now().Add(deadline)
 	for time.Now().Before(stop) {
-		if !w.Running(ctx) {
+		switch w.RunState(ctx) {
+		case stateNotChecked:
+			return fmt.Sprintf("not checked: the container state could not be read before %s answered (%v)", url, ctx.Err())
+		case stateStopped:
 			return fmt.Sprintf("the container exited with code %d before %s answered", w.ExitCode(ctx), url)
 		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -662,11 +712,28 @@ func must(err error) {
 	}
 }
 
-// Close removes every container and Docker volume the runner created.
-func (r *runner) Close() {
-	for _, c := range r.started {
-		_ = testcontainers.TerminateContainer(c)
+// stopTimeout is the grace period of a smoke container's stop. The smoke containers hold no state to
+// drain, and Docker's default of 10 seconds per container adds up over the dozens a run starts.
+var stopTimeout = 2 * time.Second
+
+// terminate stops and removes a container with the short stop timeout. A nil container is a no-op.
+func terminate(c testcontainers.Container) {
+	_ = testcontainers.TerminateContainer(c, testcontainers.StopTimeout(stopTimeout))
+}
+
+// terminateAll terminates the containers in parallel.
+func terminateAll(cs []testcontainers.Container) {
+	var wg sync.WaitGroup
+	for _, c := range cs {
+		wg.Go(func() { terminate(c) })
 	}
+	wg.Wait()
+}
+
+// Close removes every container and Docker volume the runner created. The containers stop in
+// parallel (a volume cannot go while a container uses it, so the volumes follow).
+func (r *runner) Close() {
+	terminateAll(r.started)
 	for _, v := range r.dockerVolumes {
 		_, _ = r.docker.VolumeRemove(context.Background(), v, client.VolumeRemoveOptions{Force: true})
 	}
