@@ -141,6 +141,13 @@ gate_failures
 echo "== duplicate list entries"
 go run ./hack/chartlint "$out"/*.yaml
 
+# helm lint, helm template and kubeconform read a CEL expression as a plain string: a bad literal
+# (a YAML string where a CEL string literal belongs) passes all three and fails at helm install,
+# when the API server compiles the policy (#1313). vapcheck compiles every expression of every
+# ValidatingAdmissionPolicy of every rendered values file with the API server's CEL environment.
+echo "== ValidatingAdmissionPolicy CEL compile"
+go run ./hack/cmd/vapcheck "$out"/*.yaml
+
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
 # The CRD kinds that no catalog has (Substrate's ate.dev WorkerPool, issue #1089) are in hack/chart-check.d/schemas,
 # made from the CRDs of the pinned release: kubeconform checks them, it does not skip them.

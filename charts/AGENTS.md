@@ -16,6 +16,9 @@ The root AGENTS.md applies too; this file adds rules for `charts/`.
 
 - Run `hack/chart-check.sh`. Add an assertion for every chart behaviour you change, in the owning
   file of `hack/chart-check.d/`; a new feature adds a new file `NN-<feature>.sh`.
+- `hack/chart-check.sh` compiles every CEL expression of every rendered `ValidatingAdmissionPolicy`
+  (`hack/cmd/vapcheck`). A new policy needs no extra step, but a policy that renders only under
+  some values needs a values file in `charts/koinon/ci/` that turns it on.
 - Anything that changes how a Koinon binary starts (a flag or env var it requires, a mount, a Secret
   key, an RBAC rule) is covered by `make test-chart-smoke`; extend it when you add a component or a
   startup input (old issue 284).
