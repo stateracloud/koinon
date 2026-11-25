@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -217,27 +218,92 @@ func (r *Reconciler) gatewayAckedNow(ctx context.Context, rev int64) (bool, erro
 	return staterev.AllAcked(ctx, r.pool, rev, gwv1.Half_HALF_MCP, live)
 }
 
-// gatewayServes reports whether koinon-gateway serves State revision rev now: every live copy that
-// serves MCP acked it, or no such copy is live (agentgateway serves MCP, or koinon-gateway is down and
-// its own readiness shows that). When the revision could not be stored (rev 0), a live copy cannot
-// serve this pass's keys, so it reports false. wait bounds how long it waits for the acks.
-func (r *Reconciler) gatewayServes(ctx context.Context, rev int64, wait bool) bool {
-	if rev <= 0 {
-		live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
-		if err != nil {
-			r.log.Warn("reading the live gateway copies failed; sandbox work that needs a new key waits", "err", err)
-			return false
+// noteKeys records, for each key that revision rev serves, the first revision that held it. A key the
+// map already has keeps its earlier revision; keys rev does not serve are dropped. After a restart the
+// map starts from the latest revision, which the copies acked already when nothing changed.
+func (r *Reconciler) noteKeys(keys []gateway.Key, rev int64) {
+	r.keyRevMu.Lock()
+	defer r.keyRevMu.Unlock()
+	next := make(map[string]int64, len(keys))
+	for _, k := range keys {
+		if old, ok := r.keyRevs[k.ID]; ok && old <= rev {
+			next[k.ID] = old
+		} else {
+			next[k.ID] = rev
 		}
-		return len(live) == 0
 	}
-	if wait {
-		return r.awaitGatewayAcked(ctx, rev)
-	}
-	ok, err := r.gatewayAckedNow(ctx, rev)
+	r.keyRevs = next
+}
+
+// keyRev is the first stored revision that served key id, if one did.
+func (r *Reconciler) keyRev(id string) (int64, bool) {
+	r.keyRevMu.Lock()
+	defer r.keyRevMu.Unlock()
+	rev, ok := r.keyRevs[id]
+	return rev, ok
+}
+
+// keyGate decides which sandbox work waits until koinon-gateway serves the agent's key (D1 of
+// #1239). Only an agent with a key waits, and only while a live copy has not acked the first revision
+// that held that key: an agent with no key (inactive, archived) and an agent whose key the copies
+// already serve never wait, so a stop or a teardown is never held, and a change of the State for
+// other agents holds nobody. With no live copy (the agentgateway driver) nothing waits.
+type keyGate struct {
+	r       *Reconciler
+	live    []string
+	liveErr error
+	acked   map[int64]bool
+}
+
+func (r *Reconciler) newKeyGate(ctx context.Context) *keyGate {
+	live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
 	if err != nil {
-		r.log.Warn("reading the gateway acks failed; sandbox work waits for the acks", "err", err)
+		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a key waits", "err", err)
 	}
-	return err == nil && ok
+	return &keyGate{r: r, live: live, liveErr: err, acked: map[int64]bool{}}
+}
+
+// waits reports whether the work of w waits for koinon-gateway, and the revision it waits for (0 when
+// no stored revision holds its key yet, for example after a failed publish).
+func (g *keyGate) waits(ctx context.Context, w *work) (bool, int64) {
+	if w.key.ID == "" {
+		return false, 0
+	}
+	if g.liveErr != nil {
+		return true, 0
+	}
+	if len(g.live) == 0 {
+		return false, 0
+	}
+	rev, ok := g.r.keyRev(w.key.ID)
+	if !ok {
+		return true, 0
+	}
+	done, seen := g.acked[rev]
+	if !seen {
+		var err error
+		done, err = staterev.AllAcked(ctx, g.r.pool, rev, gwv1.Half_HALF_MCP, g.live)
+		if err != nil {
+			g.r.log.Warn("reading the gateway acks failed; sandbox work waits for the acks", "err", err)
+			done = false
+		}
+		g.acked[rev] = done
+	}
+	return !done, rev
+}
+
+// split returns the work items of idx that may go now, and those that wait with the highest revision
+// they wait for.
+func (g *keyGate) split(ctx context.Context, items []*work, idx []int) (goNow, wait []int, maxRev int64) {
+	for _, i := range idx {
+		if w, rev := g.waits(ctx, items[i]); w {
+			wait = append(wait, i)
+			maxRev = max(maxRev, rev)
+		} else {
+			goNow = append(goNow, i)
+		}
+	}
+	return goNow, wait, maxRev
 }
 
 const (

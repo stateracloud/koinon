@@ -1669,6 +1669,53 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("holds only the agent with a new key: a served key and an archive go on while a copy lags", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			c := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			rowA := sandboxRow(ctx, a.ID)
+			namesA := execution.AgentObjectNames(org.Bytes, a.ID.Bytes)
+
+			By("a new agent and an archive change the State; the copy does not ack the new revision")
+			fresh := newAgent(ctx, org, user)
+			_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: a.ID})
+			Expect(err).NotTo(HaveOccurred())
+			start := time.Now()
+			pass(ctx, r)
+			Expect(osg.Sandbox(rowA.Workspace, namesA.Sandbox)).To(BeNil(), "the archive is not held")
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateDeleted))
+			Expect(sandboxRow(ctx, c.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"), "c's key is in an acked revision")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2), "no sandbox for the fresh agent yet")
+			Expect(time.Since(start)).To(BeNumerically("<", 20*time.Second), "the pass waited at most the bounded ack wait")
+		})
+
+		It("holds a new agent while the State cannot be stored, and not an agent whose key a stored revision holds", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			failing := &flakyStateDB{DB: pool}
+			cfg.StateRevisionDB = failing
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+
+			failing.fail.Store(true)
+			fresh := newAgent(ctx, org, user)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("store the gateway state revision")))
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+		})
+
 		It("stores the revision when agentgateway cannot apply the state, so koinon-gateway still gets key changes", func(ctx SpecContext) {
 			before, err := staterev.Latest(ctx, pool)
 			Expect(err).NotTo(HaveOccurred())

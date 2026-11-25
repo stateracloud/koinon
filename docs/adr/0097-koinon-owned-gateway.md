@@ -441,9 +441,11 @@ Record (2026-11-25, #1239; the choices below are decided): with koinon-gateway a
 the stored revision is the State that koinon-gateway serves, not a record of the agentgateway Apply. The
 reconciler stores it on its own path, before the Apply and whatever the Apply does, so an agentgateway
 outage or a refused config does not freeze key revokes and grants on koinon-gateway. A failed store is
-retried in the pass and is then a pass error. Sandbox work that needs an agent's key waits until every
-live koinon-gateway copy acked the revision (the bounded wait of #1260); after the wait the agent is held
-with a message, and the next pass looks again. With no live copy (the agentgateway driver) nothing waits.
+retried in the pass and is then a pass error. The sandbox work of an agent with a key waits until every
+live koinon-gateway copy acked the first revision that held that key (the bounded wait of #1260); after
+the wait the agent is held with a message, and the next pass looks again. An agent with no key (inactive,
+archived) and an agent whose key the copies already acked never wait, so stops and teardowns go on and a
+change for other agents holds nobody. With no live copy (the agentgateway driver) nothing waits.
 
 Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
 with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener

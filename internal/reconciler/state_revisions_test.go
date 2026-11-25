@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,6 +85,19 @@ func (d stuckDB) Begin(ctx context.Context) (pgx.Tx, error) {
 	}
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+// flakyStateDB is a State store that passes to DB until fail is set, then fails at once.
+type flakyStateDB struct {
+	DB   staterev.DB
+	fail atomic.Bool
+}
+
+func (d *flakyStateDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	if d.fail.Load() {
+		return nil, errors.New("the store is down")
+	}
+	return d.DB.Begin(ctx)
 }
 
 var _ = Describe("Reconciler when the State stream store is slow or broken", func() {
