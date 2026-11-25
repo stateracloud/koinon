@@ -6,8 +6,11 @@
 
 ro_new=arn:aws:kms:eu-central-1:111122223333:key/0b1d2e3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5
 ro_old=arn:aws:kms:eu-central-1:111122223333:key/1c2d3e4f-5a6b-4c7d-8e9f-b0c1d2e3f4a5
+ro_gwkey=arn:aws:kms:eu-central-1:111122223333:key/2d3e4f5a-6b7c-4d8e-9fa0-c1d2e3f4a5b6
+# With the default MCP driver (koinon, #1239) an AWS KMS primary also needs the gateway recipient key's own
+# KMS key; it is not a KEK and gets no read-only flag.
 ro_primary=(--set secrets.kek.kms.backend=awskms --set secrets.kek.kms.awskms.region=eu-central-1
-	--set "secrets.kek.kms.awskms.keyId=$ro_new")
+	--set "secrets.kek.kms.awskms.keyId=$ro_new" --set "gateway.mcp.koinon.recipientKey.kms.awskms.keyId=$ro_gwkey")
 ro_aws=(--set secrets.kek.kms.readOnly.backend=awskms --set secrets.kek.kms.readOnly.awskms.region=eu-central-1
 	--set "secrets.kek.kms.readOnly.awskms.keyId=$ro_old")
 ro_bao=(--set secrets.kek.kms.readOnly.backend=openbao --set secrets.kek.kms.readOnly.openbao.address=https://old-bao.example:8200
