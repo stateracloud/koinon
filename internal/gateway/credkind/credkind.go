@@ -24,6 +24,9 @@ type Kind struct{ name string }
 // String returns the fixed name of the kind.
 func (k Kind) String() string { return k.name }
 
+// MarshalText returns the name, so JSON and the slog JSON handler write the name and not an empty object.
+func (k Kind) MarshalText() ([]byte, error) { return []byte(k.name), nil }
+
 // The credential kinds. A kind that ships later is listed now with its rule, so that its opener only names it. Do
 // not assign to these variables.
 var (

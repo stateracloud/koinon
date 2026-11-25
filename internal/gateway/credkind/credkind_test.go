@@ -4,6 +4,7 @@ package credkind_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -91,6 +92,24 @@ var _ = Describe("the passport shape (ADR 0073)", func() {
 			Expect(found).To(HaveLen(1), "after %q", before)
 			Expect(text[found[0][0]:found[0][1]]).To(Equal(p), "after %q", before)
 		}
+	})
+
+	It("finds each of two passports joined with no separator", func() {
+		p := fakeJWT(`{"alg":"EdDSA","typ":"koinon-passport+jwt"}`)
+		q := fakeJWT(`{"typ":"koinon-passport+jwt","alg":"EdDSA"}`)
+		text := p + q + " end"
+		found := credkind.FindPassports(text)
+		Expect(found).To(HaveLen(2))
+		Expect(found[0][0]).To(Equal(0))
+		Expect(found[0][1]).To(Equal(found[1][0]), "the first match ends where the second starts")
+		Expect(text[found[1][0]:found[1][1]]).To(Equal(q))
+	})
+
+	It("writes the name of a kind as text and in JSON", func() {
+		Expect(fmt.Sprint(credkind.Passport)).To(Equal("passport"))
+		b, err := json.Marshal(map[string]credkind.Kind{"kind": credkind.EgressBasic})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).To(Equal(`{"kind":"egress_basic"}`))
 	})
 
 	It("finds a passport whose header starts with a line break (base64 \"ew\")", func() {
