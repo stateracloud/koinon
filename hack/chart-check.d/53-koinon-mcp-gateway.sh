@@ -35,16 +35,16 @@ for p in 15020 15021; do
 done
 
 # Drain: the pod grace period is the shutdown delay, the drain timeout and 30 seconds, and the process gets the timeout.
-has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 185$' "${mcp[@]}" "${mcp_only[@]}"
-has "koinon-gateway is told the drain timeout" '--drain-timeout=150s$' "${mcp[@]}" "${mcp_only[@]}"
+has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 305$' "${mcp[@]}" "${mcp_only[@]}"
+has "koinon-gateway is told the drain timeout" '--drain-timeout=270s$' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway is told the shutdown delay" '--shutdown-delay=5s$' "${mcp[@]}" "${mcp_only[@]}"
-has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 235$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=200 "${mcp_only[@]}"
+has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 335$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=300 "${mcp_only[@]}"
 
-# A drain shorter than the call timeout (120 s) would cut each call in flight at a rollout (issue 1347).
-if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=60 >/dev/null 2>&1; then
-  fail "koinon-gateway accepts a drain timeout shorter than its call timeout"
+# A drain shorter than twice the call timeout (an approval wait and an upstream call, 120 s each) would cut each call in flight at a rollout (issue 1347).
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=200 >/dev/null 2>&1; then
+  fail "koinon-gateway accepts a drain timeout shorter than twice its call timeout"
 fi
-has "koinon-gateway accepts a drain timeout equal to its call timeout" '--drain-timeout=120s$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=120 "${mcp_only[@]}"
+has "koinon-gateway accepts a drain timeout equal to twice its call timeout" '--drain-timeout=240s$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=240 "${mcp_only[@]}"
 has "koinon-gateway readiness is /readyz" 'path: /readyz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway liveness is /healthz" 'path: /healthz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway has a PodDisruptionBudget" '^kind: PodDisruptionBudget$' "${mcp[@]}" "${mcp_only[@]}"

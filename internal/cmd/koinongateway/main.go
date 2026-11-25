@@ -138,11 +138,11 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
 	fs.DurationVar(&c.drain, "drain-timeout", defaultDrain,
-		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long; with the MCP path it must be at least the call timeout ("+mcpgateway.DefaultCallTimeout.String()+")")
+		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long; with the MCP path it must be at least "+mcpgateway.MinDrain.String()+" (the call timeout twice)")
 }
 
 // defaultDrain is the default --drain-timeout: the MCP call timeout and a margin.
-const defaultDrain = mcpgateway.DefaultCallTimeout + 30*time.Second
+const defaultDrain = mcpgateway.MinDrain + 30*time.Second
 
 // validate holds the rules between flags, which cobra's required-flag check does not know.
 func (c *config) validate() error {
@@ -179,10 +179,11 @@ func (c *config) validate() error {
 	if c.drain <= 0 {
 		return errors.New("--drain-timeout must be positive")
 	}
-	// A tool call is never retried and runs for up to the call timeout. A shorter drain cuts every call that
-	// is still running when a rollout starts (issue 1347).
-	if c.mcpPath && c.drain < mcpgateway.DefaultCallTimeout {
-		return fmt.Errorf("--drain-timeout (%s) must be at least the MCP call timeout (%s): a call in flight at SIGTERM would be cut", c.drain, mcpgateway.DefaultCallTimeout)
+	// A tool call is never retried. It may wait up to the call timeout for a person's approval and then run
+	// upstream for up to the call timeout. A shorter drain cuts a call that is still running when a rollout
+	// starts (issue 1347).
+	if c.mcpPath && c.drain < mcpgateway.MinDrain {
+		return fmt.Errorf("--drain-timeout (%s) must be at least %s (the MCP call timeout twice: approval wait and upstream call): a call in flight at SIGTERM would be cut", c.drain, mcpgateway.MinDrain)
 	}
 	return nil
 }

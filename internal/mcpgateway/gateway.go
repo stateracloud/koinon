@@ -28,12 +28,17 @@ import (
 // sees a workspace and nothing of the agent's sandbox (ADR 0097 decision 5).
 const RootURI = "file:///workspace"
 
-// Options configures a [Gateway]. The zero value of every field but Guard is usable.
-// DefaultCallTimeout is the longest an upstream call runs when Options.CallTimeout is zero. A call is never
-// retried, so the drain timeout of the process must be at least this long: a call in flight at SIGTERM then
-// finishes instead of being cut by a rollout (issue 1347).
+// DefaultCallTimeout is the longest one stage of a tool call runs when Options.CallTimeout is zero. A call
+// has two stages, each bounded by it: the guard check, which may wait for a person's approval, and the
+// upstream call. A call is never retried, so the drain timeout of the process must cover both stages
+// ([MinDrain]): a call in flight at SIGTERM then finishes instead of being cut by a rollout (issue 1347).
 const DefaultCallTimeout = 2 * time.Minute
 
+// MinDrain is the shortest drain timeout that lets a call in flight finish: one wait for approval and one
+// upstream call, each up to [DefaultCallTimeout].
+const MinDrain = 2 * DefaultCallTimeout
+
+// Options configures a [Gateway]. The zero value of every field but Guard is usable.
 type Options struct {
 	// Guard sees every message of every upstream connection. Nil means [AllowGuard]; a deployment
 	// that serves org targets sets a real one (ADR 0097: the guard fails closed).

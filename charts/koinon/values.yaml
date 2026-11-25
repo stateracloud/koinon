@@ -397,10 +397,10 @@ gateway:
       # On SIGTERM readiness turns 503 at once and the pod keeps serving for the shutdown delay, so the
       # Service and clients stop sending to it. Then it refuses new requests and lets calls in flight
       # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30. A tool call is
-      # never retried and runs for up to 120 seconds (the gateway's call timeout), so the chart refuses
-      # a drain timeout below 120 (issue 1347).
+      # never retried. It may wait up to 120 seconds for a person's approval and then run for up to 120
+      # seconds (the gateway's call timeout), so the chart refuses a drain timeout below 240 (issue 1347).
       shutdownDelaySeconds: 5
-      drainTimeoutSeconds: 150
+      drainTimeoutSeconds: 270
       podDisruptionBudget:
         maxUnavailable: 1
       resources:

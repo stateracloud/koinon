@@ -131,6 +131,9 @@ func (l *Loader) Load(ctx context.Context) error {
 	case l.good && isTransient(err):
 		l.ready, l.err = true, nil
 	default:
+		// good means "the last pass that was not a database error held every key": a key that is missing
+		// must not turn ready again on a later database error.
+		l.good = false
 		l.ready, l.err = false, err
 	}
 	return err
@@ -264,7 +267,7 @@ func (l *Loader) load(ctx context.Context) error {
 			break
 		}
 		if err := ReportLoaded(ctx, l.DB, r.KeyID, l.CopyID); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, dbError{err})
 		}
 	}
 	return errors.Join(errs...)

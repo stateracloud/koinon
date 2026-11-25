@@ -1164,17 +1164,22 @@ below has a test. Slice 1 holds these rules; the other gaps of #1347 follow in l
   broken login showed as a ready pod with every org target closed, and a rollout did not stop. A later outage
   is not checked in `/readyz`: the guard refuses on its own then (fail closed, section 2 of ADR 0120), and a
   database blip must not remove every endpoint.
-- **The drain is at least the call timeout.** A tool call is never retried and runs for up to the call timeout
-  (`mcpgateway.DefaultCallTimeout`, 2 minutes). The rule is one number: `--drain-timeout` is at least the call
-  timeout when the MCP path is on. The process refuses a smaller value at start, and the chart refuses
-  `gateway.mcp.koinon.drainTimeoutSeconds` below 120. The default is 150 s (the call timeout and 30 s), so the
-  pod grace period is 185 s with the default shutdown delay.
+- **The drain covers a call in flight.** A tool call is never retried. One request has two stages, each bounded
+  by the call timeout (`mcpgateway.DefaultCallTimeout`, 2 minutes): the guard check, which may wait for a
+  person's approval, and the upstream call. The rule is one number: `--drain-timeout` is at least twice the
+  call timeout (`mcpgateway.MinDrain`, 4 minutes) when the MCP path is on. The process refuses a smaller value
+  at start, and the chart refuses `gateway.mcp.koinon.drainTimeoutSeconds` below 240. The default is 270 s,
+  so the pod grace period is 305 s with the default shutdown delay. The grace period is only a ceiling: the
+  pod exits as soon as its calls end. A later change may end the approval waits at drain (a refusal that the
+  agent retries; nothing went upstream), and then the rule could fall to one call timeout.
 - **One bound on each upstream reply.** The Go SDK client reads a JSON reply with no limit, and it bounds one
   SSE event only (16 MiB). The pod limit is shared by all orgs, so one org's server could make both copies run
   out of memory. The gateway wraps each upstream client: a reply of type `application/json` may carry at most
   `Options.MaxResponseBytes` (default 4 MiB, `DefaultMaxResponseBytes`) in total, and one SSE event is bounded
   by the same value. A reply over the bound fails its call and logs one warning with the target name and the
-  limit. The log line has no argument and no result.
+  limit. The log line has no argument and no result. The bound is per reply, not per pod: the gateway has no
+  cap on concurrent calls or on bytes in flight yet, so many large replies at once can still exceed the pod
+  limit. A per-org concurrency cap or a budget of bytes in flight is open work.
 
 ## Alternatives considered
 

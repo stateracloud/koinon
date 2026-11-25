@@ -207,7 +207,7 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	}
 	maxEvent := int(min(maxResp, int64(mcp.DefaultMaxEventSize)))
 	if maxResp < 0 {
-		maxEvent = 0
+		maxEvent = -1 // the SDK reads a negative value as no cap; zero is its 16 MiB default
 	}
 	var inner mcp.Transport = &mcp.StreamableClientTransport{
 		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1, MaxEventSize: maxEvent,

@@ -81,12 +81,12 @@ var _ = Describe("koinon-gateway's startup", func() {
 		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--shutdown-delay", "-1s"}, nil)).NotTo(Succeed())
 	})
 
-	It("refuses a drain shorter than the MCP call timeout, and accepts it on a model-only pod", func() {
+	It("refuses a drain shorter than twice the MCP call timeout, and accepts it on a model-only pod", func() {
 		base := []string{"--state-url", stateURL, "--state-token-file", tokenFile}
-		err := cli.Check(NewRootCommand(), append(base, "--drain-timeout", "30s"), nil)
+		err := cli.Check(NewRootCommand(), append(base, "--drain-timeout", "3m"), nil)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("MCP call timeout"))
-		Expect(cli.Check(NewRootCommand(), append(base, "--drain-timeout", "2m"), nil)).To(Succeed())
+		Expect(err.Error()).To(ContainSubstring("call timeout twice"))
+		Expect(cli.Check(NewRootCommand(), append(base, "--drain-timeout", "4m"), nil)).To(Succeed())
 		Expect(cli.Check(NewRootCommand(), base, nil)).To(Succeed(), "the default drain covers a call")
 		model := append(base, "--mcp-path=false", "--model-path", "--drain-timeout", "30s")
 		Expect(cli.Check(NewRootCommand(), model, nil)).To(Succeed())
