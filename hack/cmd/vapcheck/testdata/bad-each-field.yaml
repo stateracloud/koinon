@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# One bad expression in each place the check reads: matchConditions, validations (a name no
+# variable defines, and a non-bool), messageExpression (a non-string) and auditAnnotations. The
+# return type checks are the ones of the API server.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bad-each-field
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [secrets]
+  variables:
+    - name: ok
+      expression: "'fine'"
+  matchConditions:
+    - name: bad-match
+      expression: "request.operation =="
+  validations:
+    - expression: "variables.missing == 'x'"
+    - expression: "'not a bool'"
+      messageExpression: "42"
+  auditAnnotations:
+    - key: bad
+      valueExpression: "request.nope"
+---
+# Not a policy: skipped.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: not-a-policy
+data:
+  expression: "this is not CEL"

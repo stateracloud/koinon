@@ -139,6 +139,7 @@ expect "chart" hack/chart-check.d/10-new-feature.sh
 expect "go chart chartsmoke" hack/versions.env
 expect "chart" hack/chart-check.sh
 expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
+expect "go chart" hack/cmd/vapcheck/main.go # `go run ./hack/cmd/vapcheck` (#1313)
 expect "go chart chartsmoke escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go

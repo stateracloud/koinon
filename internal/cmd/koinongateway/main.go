@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
+	"github.com/stateracloud/koinon/internal/gateway/approvalroute"
 	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
@@ -256,7 +257,15 @@ func run(ctx context.Context, cfg config) error {
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
 	var keys *gatewaykeys.Loader
 	if cfg.mcpPath && cfg.databaseURLFile != "" {
-		guard, audit, pool, err := openGuard(ctx, cfg.databaseURLFile, log, reg)
+		// A call the guard holds for a person is parked through koinon-api (#1301): koinon-api records the
+		// approval, and the gateway's database login has no right on approvals.
+		approvals, err := approvalroute.NewClient(approvalroute.ClientConfig{
+			URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) },
+		})
+		if err != nil {
+			return err
+		}
+		guard, audit, pool, err := openGuard(ctx, cfg.databaseURLFile, approvals.Approve, log, reg)
 		if err != nil {
 			return err
 		}
@@ -572,10 +581,10 @@ func (a logAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
 }
 
 // openGuard opens the gateway's database login and builds the leak guard on it, with the Postgres audit
-// writer. The guard's route stays closed (every message and call is refused) until the database has
-// answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
+// writer. approve records the approval of a call that needs a person (koinon-api's approval route).
+// The guard's route stays closed (every message and call is refused) until the database has answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
 // refusal (ADR 0120 section 2).
-func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, *pgxpool.Pool, error) {
+func openGuard(ctx context.Context, urlFile string, approve mcpguard.ApproveFunc, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, *pgxpool.Pool, error) {
 	dsn, err := readSecretFile(urlFile, "the database URL")
 	if err != nil {
 		return nil, nil, nil, err
@@ -589,7 +598,9 @@ func openGuard(ctx context.Context, urlFile string, log *slog.Logger, reg promet
 		Logger: log, Metrics: gm,
 		// Koinon's own tool servers: the code-host tools and the platform's own tools.
 		OwnTargets: append(providers.Default().IDs(), gateway.KoinonTarget),
-		// No Approve in this slice: a call that needs a person's decision is refused (fail closed).
+		// A call that needs a person's decision is parked: koinon-api records the ADR 0042 approval of
+		// the exact call. If it cannot, the call is refused (fail closed).
+		Approve: approve,
 	})
 	ga := mcpguard.NewGatewayGuard(g, log)
 	safego.Go(ctx, log, "guard-load", func(ctx context.Context) {

@@ -534,11 +534,22 @@ type MCPTarget struct {
 	Builtin string
 	// RemoteAgents are the external A2A agents of a [BuiltinA2A] target. No other target has any.
 	RemoteAgents []MCPRemoteAgent
+	// Ask makes the target Koinon's approval-gated proxy for the ask-tier tools of an org's server
+	// (internal/mcpask), not the org's server itself. It belongs to that org (Org is set: org scoping and
+	// tool pins apply as to the server), it carries no credential or TLS trust of its own, and the
+	// gateway sends it AgentHeader (see [MCPTarget.TrustsAgentHeader]).
+	Ask bool
 	// HandleKeyFile is the path, inside the gateway, of the secret that signs the task handles of a
 	// [BuiltinA2A] target (ADR 0123 decision 10). All replicas read the same file. It is a secret:
 	// only the path is public.
 	HandleKeyFile string
 }
+
+// TrustsAgentHeader says the gateway sends AgentHeader to t: t is one of Koinon's own services, which
+// trust the header because only the gateway reaches them. These are the platform targets (Org "") and
+// the ask targets ([MCPTarget.Ask]). An org's own server never gets the header: it trusts nothing of
+// Koinon's and needs no agent ID (ADR 0097 decision 5).
+func (t MCPTarget) TrustsAgentHeader() bool { return t.Org == "" || t.Ask }
 
 // Same reports whether t and o are the same config. MCPTarget is not comparable with == since a
 // built-in target holds a list.
@@ -1019,6 +1030,7 @@ func (s MCPState) validate() []error {
 			errs = append(errs, fmt.Errorf("mcp target %q: duplicate", t.Name))
 		}
 		errs = append(errs, t.validateBuiltin()...)
+		errs = append(errs, t.validateAsk()...)
 		if t.Org != "" && !orgSlug.MatchString(t.Org) {
 			errs = append(errs, fmt.Errorf("mcp target %q: org must be an org slug", t.Name))
 		}
@@ -1161,6 +1173,26 @@ func (NoUsage) ReadUsage(context.Context, time.Time) ([]UsageRecord, error) {
 const maxRemoteAgentName = 24
 
 var cardHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// validateAsk checks an ask target ([MCPTarget.Ask]): it gets the agent header, so it must be Koinon's
+// proxy of one org's server, with an upstream URL and no credential or TLS trust of its own.
+func (t MCPTarget) validateAsk() []error {
+	if !t.Ask {
+		return nil
+	}
+	bad := func(msg string) []error { return []error{fmt.Errorf("mcp target %q: %s", t.Name, msg)} }
+	switch {
+	case t.Builtin != "":
+		return bad("an ask target is not a built-in target")
+	case t.Org == "":
+		return bad("an ask target belongs to an org")
+	case t.URL == "":
+		return bad("an ask target needs the URL of the ask proxy")
+	case t.CredentialHeader != "" || t.CredentialPrefix != "" || t.CredentialFile != "" || t.CAFile != "" || t.InsecureSkipVerify:
+		return bad("an ask target has no credential or TLS trust of its own")
+	}
+	return nil
+}
 
 // validateBuiltin checks the fields of the built-in kind of t, and that no other target has them.
 func (t MCPTarget) validateBuiltin() []error {

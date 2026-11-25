@@ -408,6 +408,23 @@ export function suggestsAuto(t: Tool): boolean {
   return t.present && t.readOnlyHint && t.tier !== Tier.AUTO
 }
 
+/**
+ * waitsForReview is true for a listed tool whose current text no admin approved: a new tool, or a tool
+ * whose text changed since the last review. The gateway does not serve that text until an admin
+ * reviews it (ADR 0125, #1132).
+ */
+export function waitsForReview(t: Tool): boolean {
+  return t.present && (t.reviewReason !== '' || (t.toolHash !== '' && t.toolHash !== t.approvedHash))
+}
+
+/**
+ * absentUnreviewed is true for a tool that the server no longer lists and that no admin ever reviewed
+ * (no approved text, no tier an admin set). Reviewing the server's tools deletes such rows (#1216).
+ */
+export function absentUnreviewed(t: Tool): boolean {
+  return !t.present && t.approvedHash === '' && t.tierSetBy === ''
+}
+
 export type ToolSummary = { total: number; review: number; suggested: number; gone: number }
 
 /** summarizeTools counts what needs the admin's eyes: reviews and read-only suggestions. */

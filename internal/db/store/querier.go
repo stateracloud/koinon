@@ -41,6 +41,9 @@ type Querier interface {
 	// A tool an admin reviewed before the pin existed, and whose description and schema did not change
 	// since: the text the server publishes now is the text that was reviewed, so it is the pin (#1132).
 	AdoptMCPToolPin(ctx context.Context, arg AdoptMCPToolPinParams) error
+	// Whether the reports-to chain up from @start_id (inclusive) reaches @target_id. UNION stops on a
+	// chain that repeats, so a bad row cannot loop.
+	AgentReportsToReaches(ctx context.Context, arg AgentReportsToReachesParams) (bool, error)
 	// Only an unanswered probe is answered, once. No row: answered already, or deleted meanwhile.
 	AnswerHomeRepositoryProbe(ctx context.Context, arg AnswerHomeRepositoryProbeParams) (int64, error)
 	// AppendRunEventOnce for the run's own epoch after the control plane canceled it: the worker
@@ -353,6 +356,10 @@ type Querier interface {
 	DecideRunTraced(ctx context.Context, arg DecideRunTracedParams) (bool, error)
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
+	// An admin reviews a server's tools (#1216 point c): the rows of tools that no admin ever decided on (no
+	// approved text, no tier an admin set) and that the server no longer lists go. They are not served,
+	// and they count toward the limit of unreviewed tools (mcpservers.MaxUnreviewedTools).
+	DeleteAbsentUnreviewedMCPTools(ctx context.Context, arg DeleteAbsentUnreviewedMCPToolsParams) ([]string, error)
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteAgentRemoteAgents(ctx context.Context, arg DeleteAgentRemoteAgentsParams) error
 	// Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns
@@ -724,6 +731,8 @@ type Querier interface {
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
 	GrantPlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
+	// Whether the user (not deleted) holds any role in the org, viewer included.
+	HasOrgMembership(ctx context.Context, arg HasOrgMembershipParams) (bool, error)
 	// Whether the task already has a queued run, which will see every message
 	// appended before it starts (plan item A4).
 	HasQueuedRunForTask(ctx context.Context, arg HasQueuedRunForTaskParams) (bool, error)
@@ -861,6 +870,12 @@ type Querier interface {
 	ListAgentRunLimits(ctx context.Context, orgID pgtype.UUID) ([]ListAgentRunLimitsRow, error)
 	// Every agent's recorded USD spend since @since, for the budgets list.
 	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
+	// One page of agent cards (ADR 0126 section 4) in one query: the agents that are not archived,
+	// ordered by team (no team last), then oldest first, after the cursor when it is set. The
+	// waiting_on_you count follows the inbox rules of web/src/lib/inbox.ts (buildInbox) for the
+	// caller: @is_approver is an admin or above (approvals, an unhealthy agent), @can_answer a member
+	// or above (questions).
+	ListAgentSummaries(ctx context.Context, arg ListAgentSummariesParams) ([]ListAgentSummariesRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgentsAllowingMCPServerParams) ([]pgtype.UUID, error)
@@ -872,6 +887,8 @@ type Querier interface {
 	// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
 	// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
 	ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error)
+	// One page of the org's agents, oldest first, after the cursor (created_at, id) when it is set.
+	ListAgentsPage(ctx context.Context, arg ListAgentsPageParams) ([]Agent, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
@@ -1246,6 +1263,8 @@ type Querier interface {
 	// so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
 	LockAPITokenShare(ctx context.Context, arg LockAPITokenShareParams) (ApiToken, error)
 	LockAPITokenTree(ctx context.Context, arg LockAPITokenTreeParams) ([]pgtype.UUID, error)
+	// Serialises reports-to changes in one org, so two changes cannot make a cycle together.
+	LockAgentReportsTo(ctx context.Context, orgID pgtype.UUID) error
 	// Serialises decisions on one request.
 	LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error)
 	// TryLockAuditAnchor, waiting for the lock (an anchor made on demand).
@@ -1572,6 +1591,7 @@ type Querier interface {
 	SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmParams) (Agent, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
+	SetAgentPlacement(ctx context.Context, arg SetAgentPlacementParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
 	// The network enforcement mode observed in the sandbox's policy (ADR 0045): enforce, audit, none or
