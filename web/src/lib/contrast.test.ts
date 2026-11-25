@@ -52,13 +52,19 @@ const text: [string, string[]][] = [
   ['popover-foreground', ['popover']],
   ['attention-foreground', ['attention']],
   ['destructive-foreground', ['destructive']],
+  // Task-state badges (ADR 0126 section 3): the role colour as text on its tinted fill.
+  ['info', ['state-submitted-bg']],
+  ['link', ['state-working-bg']],
+  ['success', ['state-completed-bg']],
+  ['danger', ['state-failed-bg']],
 ]
 // Non-text parts: the control border, the focus ring and the logo parts against the grounds they sit on.
 const nonText: [string, string[]][] = [
-  ['input', ['background', 'card', 'raised']],
+  ['input', ['background', 'card', 'raised']], // also the hollow Canceled badge border
   ['ring', ['background', 'card']],
   ['primary', ['background', 'card']],
   ['logo-gold', ['background', 'card']],
+  ['input', ['card']],
 ]
 
 describe.each(Object.entries(themes))('%s theme contrast', (_name, t) => {
@@ -78,6 +84,13 @@ describe.each(Object.entries(themes))('%s theme contrast', (_name, t) => {
       })
     }
   }
+})
+
+// The inbox count badge (app-layout.tsx): the attention fill with the attention-foreground text.
+describe.each(Object.entries(themes))('%s inbox badge', (_name, t) => {
+  it('text on the attention fill is at least 4.5:1', () => {
+    expect(contrast(t['attention-foreground'], t['attention'])).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 describe('contrast()', () => {
