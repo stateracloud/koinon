@@ -117,6 +117,21 @@ jobs:
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
 
+      # goreleaser's kos pipe pulls its base image (pinned by digest, .goreleaser.yaml) and, for every image, copies
+      # its layer blobs across registries to ghcr.io. A fault of gcr.io (HTTP 500, "Too many connections" on a blob
+      # GET) would fail goreleaser, which cannot be repeated halfway (it may have created the draft release and
+      # pushed images). So the pinned base is copied to ghcr.io first, under push_retry
+      # (hack/release-base-mirror.sh), and goreleaser pulls the copy: it does not contact gcr.io. A fault that is
+      # still there after the bounded backoff fails the job here, before anything is published (#1224).
+      - name: mirror the base image of the images to ghcr.io
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}"
+          "$RUNNER_TEMP/bin/crane" auth login ghcr.io -u "$ACTOR" --password-stdin <<<"$TOKEN"
+          echo "KOINON_KOS_BASE_IMAGE=$(PATH="$RUNNER_TEMP/bin:$PATH" hack/release-base-mirror.sh "$KOINON_IMAGE_REGISTRY")" >>"$GITHUB_ENV"
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+
       - name: images and draft release
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
