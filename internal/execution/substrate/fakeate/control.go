@@ -13,7 +13,30 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
+	"github.com/stateracloud/koinon/internal/guestauth"
 )
+
+// verifierOf builds the guest front's token check from a template's environment, or nil when the
+// template has no valid keys.
+func verifierOf(tmpl *ateapiv1.ActorTemplate) *guestauth.Verifier {
+	for _, ctr := range tmpl.GetContainers() {
+		for _, e := range ctr.GetEnv() {
+			if e.GetName() != guestauth.VerifyKeysEnv {
+				continue
+			}
+			keys, err := guestauth.DecodeKeys(e.GetValue())
+			if err != nil {
+				return nil
+			}
+			v, err := guestauth.NewVerifier(keys)
+			if err != nil {
+				return nil
+			}
+			return v
+		}
+	}
+	return nil
+}
 
 // actor is an actor and its guest.
 type actor struct {
@@ -31,6 +54,9 @@ type actor struct {
 	failGets int
 
 	// the guest: it survives a suspend, as the memory of a snapshotted VM does
+	// auth is the guest front's token check (internal/guestauth, issue #1309), from the template's
+	// public keys. Nil refuses every guest call, as a front without keys does not start.
+	auth    *guestauth.Verifier
 	procs   map[string]*fproc
 	started [][]string // every command the guest was asked to start, as sent
 	files   map[string][]byte
@@ -204,6 +230,13 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 		}
 		a.sourceTag = src
 		a.snapshots = []*ateapiv1.Snapshot{proto.Clone(tag.GetStatus().GetSnapshot()).(*ateapiv1.Snapshot)}
+		// A memory snapshot holds the front's pin: the restored guest starts with the source's.
+		if v := c.tagAuth[key{k.atespace, src}]; v != nil {
+			a.auth = v.Clone()
+		}
+	}
+	if a.auth == nil {
+		a.auth = verifierOf(tmpl)
 	}
 	c.actors[k] = a
 	c.bootLocked(k, a)
@@ -401,6 +434,9 @@ func (s *controlServer) CreateTag(_ context.Context, r *ateapiv1.CreateTagReques
 		Status:      &ateapiv1.TagStatus{Snapshot: snap, ActorTemplateUid: c.templates[key{k.atespace, src.template}].GetMetadata().GetUid()},
 	}
 	c.tags[k] = t
+	if src.auth != nil {
+		c.tagAuth[k] = src.auth.Clone()
+	}
 	return proto.Clone(t).(*ateapiv1.Tag), nil
 }
 

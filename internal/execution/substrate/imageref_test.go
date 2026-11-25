@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 )
 
 const digest = "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -71,7 +72,7 @@ var _ = Describe("RequireDigest", func() {
 var _ = Describe("the actor template image", func() {
 	DescribeTable("a template needs an image pinned by digest",
 		func(image string, ok bool) {
-			_, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: image}, substrate.Config{})
+			_, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: image}, substrate.Config{GuestSigner: fakeate.Signer()})
 			if ok {
 				Expect(err).NotTo(HaveOccurred())
 				return
@@ -93,16 +94,16 @@ var _ = Describe("the actor template image", func() {
 	spec := execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest}
 
 	It("goes through the image source, with the digest kept", func() {
-		cfg := substrate.Config{ImageMirrors: map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io"}}
+		cfg := substrate.Config{GuestSigner: fakeate.Signer(), ImageMirrors: map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io"}}
 		t, err := substrate.RenderTemplateForTest("ws", spec, cfg)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.GetContainers()[0].GetImage()).To(Equal("cache.koinon.svc/ghcr.io/org/app:1" + digest))
 	})
 
 	It("re-hashes the template when the mirror name changes", func() {
-		a, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{ImageMirrors: map[string]string{"ghcr.io": "a.svc/ghcr.io"}})
+		a, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{GuestSigner: fakeate.Signer(), ImageMirrors: map[string]string{"ghcr.io": "a.svc/ghcr.io"}})
 		Expect(err).NotTo(HaveOccurred())
-		b, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{ImageMirrors: map[string]string{"ghcr.io": "b.svc/ghcr.io"}})
+		b, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{GuestSigner: fakeate.Signer(), ImageMirrors: map[string]string{"ghcr.io": "b.svc/ghcr.io"}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.GetMetadata().GetName()).NotTo(Equal(b.GetMetadata().GetName()))
 	})

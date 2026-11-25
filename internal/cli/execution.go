@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/harness"
 )
 
@@ -52,6 +53,11 @@ type Substrate struct {
 	ImageMirrors []string
 	// ImageRegistry replaces the registry host of an actor image that has no entry in ImageMirrors.
 	ImageRegistry string
+	// GuestKeyFile holds the hex seed of the Ed25519 key that signs every guest API call (issue
+	// #1309). The guest front of every actor refuses a call without a valid token, so agent code in
+	// the sandbox cannot use the guest API. The key stays in a Secret outside the sandbox; the actor
+	// template holds only the public key. Required with the substrate driver.
+	GuestKeyFile string
 	// SnapshotStore is the S3-compatible bucket that holds the snapshots. Its endpoint and bucket
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
@@ -95,11 +101,27 @@ func (s SnapshotStore) objectStore() (substrate.ObjectStore, error) {
 
 // DriverConfig is the substrate driver's configuration for these settings.
 func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
-	return s.driverConfig(logger)
+	return s.driverConfig(logger, true)
 }
 
-func (s Substrate) driverConfig(logger *slog.Logger) (substrate.Config, error) {
+// driverConfig builds the driver's configuration. With readKey false it does not read the guest key
+// file: startup validation runs where the Secret is not mounted (the chart contract check), so it
+// checks only that the flag is set, and Dial reads and parses the key.
+func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
+	if readKey && s.GuestKeyFile != "" {
+		b, err := os.ReadFile(s.GuestKeyFile)
+		if err != nil {
+			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
+		}
+		k, err := guestauth.ParseSeed(strings.TrimSpace(string(b)))
+		if err != nil {
+			return cfg, fmt.Errorf("--substrate-guest-key-file: %s: %w", s.GuestKeyFile, err)
+		}
+		if cfg.GuestSigner, err = guestauth.NewSigner(k); err != nil {
+			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
+		}
+	}
 	if s.SnapshotStore.set() {
 		o, err := s.SnapshotStore.objectStore()
 		if err != nil {
@@ -189,6 +211,7 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
 	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.GuestKeyFile, "substrate-guest-key-file", "", "file with the hex seed of the Ed25519 key that signs every guest API call (issue #1309); required with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
 }
 
@@ -204,9 +227,12 @@ func (e *Execution) Validate(openshellAddress string) error {
 		if e.Substrate.ControlAddress == "" || e.Substrate.RouterAddress == "" {
 			return errors.New("--substrate-control-address and --substrate-router-address are required with --execution-driver=substrate")
 		}
-		cfg, err := e.Substrate.driverConfig(nil)
+		cfg, err := e.Substrate.driverConfig(nil, false)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(e.Substrate.GuestKeyFile) == "" {
+			return errors.New("--substrate-guest-key-file is required with --execution-driver=substrate: without it the guest front of every actor refuses the driver's calls (issue #1309)")
 		}
 		if !e.Substrate.AllowUnhardened {
 			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the substrate overlay image (guest server and launcher, issue #1087) has no recorded run in a real actor yet")
@@ -239,7 +265,7 @@ func (c *Connection) Close() error { return c.closer.Close() }
 // Dial connects to the selected driver.
 func (e Execution) Dial() (*Connection, error) {
 	if e.IsSubstrate() {
-		cfg, err := e.Substrate.driverConfig(slog.Default())
+		cfg, err := e.Substrate.driverConfig(slog.Default(), true)
 		if err != nil {
 			return nil, err
 		}

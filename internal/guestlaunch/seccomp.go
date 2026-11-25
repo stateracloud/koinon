@@ -40,8 +40,8 @@ func knownSyscalls() map[string]bool {
 }
 
 // processAccessDeny are the calls that read another process's memory or take its descriptors. They
-// stay denied when a policy replaces the deny list: they are what keeps the guest server's vsock
-// descriptors out of the payload's reach (docs/dev/guest-launcher.md, "The vsock channel").
+// stay denied when a policy replaces the deny list: they are what keeps the guest server's
+// descriptors and memory out of the payload's reach (docs/dev/guest-launcher.md, "The guest API channel").
 var processAccessDeny = []string{"ptrace", "process_vm_readv", "process_vm_writev", "pidfd_getfd", "kcmp"}
 
 // denyList returns the sorted deny list the policy asks for, always with processAccessDeny.
@@ -69,8 +69,8 @@ func (s SeccompPolicy) denyList() []string {
 // The filter allows everything except the deny list (each denied call returns EPERM), denies
 // clone(2) with a namespace flag, and makes clone3 return ENOSYS: clone3 passes its flags in a
 // struct that seccomp cannot read, and ENOSYS is what makes glibc fall back to clone (the way
-// Docker's default profile does it). socket(AF_VSOCK) returns EPERM: the vsock channel belongs to
-// the guest server, not to the payload (docs/dev/guest-launcher.md).
+// Docker's default profile does it). socket(AF_VSOCK) returns EPERM: vsock belongs to the Kata
+// agent on the vm tier, not to the payload (docs/dev/guest-launcher.md).
 func BuildSeccomp(s SeccompPolicy) (filter []bpf.Instruction, skipped []string, err error) {
 	info, err := arch.GetInfo("")
 	if err != nil {

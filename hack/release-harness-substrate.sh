@@ -5,7 +5,7 @@
 # workflow). The image source label names the repository it runs in (hack/repo-lib.sh).
 #
 # Builds and pushes the Substrate overlay of the harness image (ADR 0119, issue #1087) for linux/amd64 and
-# linux/arm64: the released harness image plus the guest server and the guest launcher
+# linux/arm64: the released harness image plus the guest front (#1309) and the guest launcher
 # (cmd/koinon-guest-launcher/Dockerfile). Tagged <version> and, for a final release, latest, in the repository
 # <registry>/sandbox-substrate. Prints "ref=<registry>/sandbox-substrate@sha256:<hex>" for the release workflow's sign job.
 #
@@ -13,9 +13,9 @@
 #
 # The base is the digest reference of the harness image of the same release (hack/release-harness.sh prints it), so
 # the overlay never builds on a tag that can move. The overlay has no RUN step: both platforms build on one runner
-# without emulation. It needs Go (the guest launcher and the guest server are built here), git, and a buildx builder
-# with a docker login to the registry. The guest server comes from the pinned commit ATE_ENV_VERSION
-# (hack/build-env-guest.sh).
+# without emulation. It needs Go (the guest launcher and the guest front are built here), git, and a buildx builder
+# with a docker login to the registry. The guest front embeds the upstream guest server package at the version in
+# go.mod, which is the commit ATE_ENV_VERSION.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -43,7 +43,7 @@ tags=(--tag "$repo:$version")
 epoch=$(git show -s --format=%ct "$commit")
 [[ $epoch =~ ^[0-9]+$ ]] || { echo "no commit time for '$commit'" >&2; exit 1; }
 
-make guest-launcher env-guest >&2
+make guest-launcher >&2
 
 meta=$(mktemp "${TMPDIR:-/tmp}/release-harness-substrate.XXXXXX")
 trap 'rm -f "$meta"' EXIT
@@ -51,7 +51,6 @@ docker buildx build --output "type=registry,rewrite-timestamp=true" --platform "
 	--build-arg "FLAVOR_IMAGE=$base" \
 	--build-arg "SOURCE_DATE_EPOCH=$epoch" \
 	--build-context launcher=build/guest-launcher \
-	--build-context guest=build/env-guest \
 	--label org.opencontainers.image.source="https://github.com/$source_repo" \
 	--label org.opencontainers.image.version="$version" \
 	--label org.opencontainers.image.revision="$commit" \

@@ -839,12 +839,20 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
-    # The guest server image that runs in every actor (`ate-env-guest`, built by the release workflow's
-    # env-guest job from github.com/agent-substrate/env; upstream publishes none). Empty means
-    # <image.registry>/ate-env-guest:<appVersion>. A digest reference (name@sha256:...) is allowed and
-    # is the one to pin. The release's env-guest job prints the digest. The driver reads this value in #1088;
-    # nothing in the chart reads it yet.
+    # Not used. The guest server now runs inside koinon-guest-front, in the harness image's substrate
+    # overlay (issue #1309), and the chart reads no separate guest image. Kept so that existing values
+    # files still pass the schema; remove it from your values.
     guestImage: ""
+    # The Ed25519 key that signs every guest API call of the reconciler and agentd (issue #1309). The
+    # guest front in every actor refuses a call without a valid token, so agent code in the sandbox
+    # cannot use the guest API. The actor template holds only the public key; this Secret never
+    # enters a sandbox. Empty: the ensure-secrets hook Job creates <release>-substrate-guest-key once
+    # (key "key", 64 hex characters: the key's seed) and never changes it. A new key changes every
+    # actor template, so the next start re-creates every sandbox; a key rotation without that is not
+    # supported yet (#1326). Keep the Secret: with a new key, running sandboxes and memory snapshots
+    # made with the old key refuse every call.
+    guestKey:
+      existingSecret: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
     # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
     # a class that is not here cannot run one. With substrate, set this or defaultTier. The reconciler
@@ -862,8 +870,7 @@ execution:
     defaultTier: ""
     # Required true with substrate until the substrate overlay of the harness image (sandbox-substrate,
     # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
-    # the gVisor tiers keep a writable root by decision (issue #1150). Also open: the guest API listens
-    # on TCP :80 with no authentication, so agent code can start an unconfined process (issue #1309).
+    # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
     # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the

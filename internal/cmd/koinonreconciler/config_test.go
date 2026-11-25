@@ -425,13 +425,16 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 	parse := func(file, driver string) (config, error) {
 		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
 		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		// The guest API signing key (#1309), an obviously fake seed.
+		key := filepath.Join(GinkgoT().TempDir(), "guest-key")
+		Expect(os.WriteFile(key, []byte(strings.Repeat("11", 32)), 0o600)).To(Succeed())
 		env := map[string]string{
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 		}
 		return parseConfig([]string{
 			"--execution-driver=" + driver,
 			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
-			"--substrate-allow-unhardened", "--substrate-default-tier=dev",
+			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
 		}, env)
 	}
 

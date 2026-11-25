@@ -701,11 +701,27 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
 /var/run/koinon/substrate
 {{- end }}
 
-{{/* ateapi's token and CA for the components that call Agent Substrate (execution.driver=substrate). */}}
+{{/*
+The Secret with the key that signs the guest API tokens (issue #1309): key "key", the hex seed of an
+Ed25519 key. Only koinon-reconciler and koinon-agentd mount it. Never mounted into a sandbox: the
+actor template carries only the public key.
+*/}}
+{{- define "koinon.substrateGuestKeyName" -}}
+{{- .Values.execution.substrate.guestKey.existingSecret | default (include "koinon.componentName" (list . "substrate-guest-key")) }}
+{{- end }}
+
+{{- define "koinon.substrateGuestKeyFile" -}}
+/secrets/substrate-guest-key/key
+{{- end }}
+
+{{/* ateapi's token and CA, and the guest API key, for the components that call Agent Substrate (execution.driver=substrate). */}}
 {{- define "koinon.substrateVolumeMount" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
   mountPath: {{ include "koinon.substrateTokenDir" . }}
+  readOnly: true
+- name: substrate-guest-key
+  mountPath: /secrets/substrate-guest-key
   readOnly: true
 {{- if .Values.execution.substrate.caSecret }}
 - name: substrate-ca
@@ -724,6 +740,13 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
           audience: {{ required "execution.substrate.tokenAudience is required with execution.driver=substrate" .Values.execution.substrate.tokenAudience | quote }}
           expirationSeconds: 3600
           path: token
+- name: substrate-guest-key
+  secret:
+    secretName: {{ include "koinon.substrateGuestKeyName" . }}
+    defaultMode: 0440
+    items:
+      - key: key
+        path: key
 {{- if .Values.execution.substrate.caSecret }}
 - name: substrate-ca
   secret:
@@ -796,6 +819,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end -}}
 {{- if and (include "koinon.imageCache" .) (not .Values.execution.substrate.imageCache.tls.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.imageCache.tlsSecret" .) "type" "kubernetes.io/tls" "kind" "tls" "dnsNames" (include "koinon.imageCache.dnsNames" . | fromJsonArray) "labels" (fromYaml (include "koinon.generatedLabels" (list . "imagecache")))) -}}
+{{- end -}}
+{{- if and (eq (include "koinon.substrate" .) "true") (not .Values.execution.substrate.guestKey.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.substrateGuestKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
 {{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
@@ -1498,6 +1524,8 @@ it carries no credentials.
   value: {{ include "koinon.substrateTiers" . | quote }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
+- name: KOINON_SUBSTRATE_GUEST_KEY_FILE
+  value: {{ include "koinon.substrateGuestKeyFile" . | quote }}
 {{- if .Values.execution.substrate.caSecret }}
 - name: KOINON_SUBSTRATE_CA_FILE
   value: /etc/koinon/substrate-ca/ca.crt
