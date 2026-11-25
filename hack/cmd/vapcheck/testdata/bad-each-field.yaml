@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# One bad expression in each place the check reads: matchConditions, validations, messageExpression,
-# auditAnnotations and a variable that uses a name no variable defines. A non-bool validation and
-# a non-string messageExpression fail on the return type, as at the API server.
+# One bad expression in each place the check reads: matchConditions, validations (a name no
+# variable defines, and a non-bool), messageExpression (a non-string) and auditAnnotations. The
+# return type checks are the ones of the API server.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:

@@ -145,8 +145,11 @@ go run ./hack/chartlint "$out"/*.yaml
 # (a YAML string where a CEL string literal belongs) passes all three and fails at helm install,
 # when the API server compiles the policy (#1313). vapcheck compiles every expression of every
 # ValidatingAdmissionPolicy of every rendered values file with the API server's CEL environment.
+# -min-distinct: every policy template must render in at least one values file, or its CEL is not
+# checked (a policy that renders only under some values needs a charts/koinon/ci values file).
 echo "== ValidatingAdmissionPolicy CEL compile"
-go run ./hack/cmd/vapcheck "$out"/*.yaml
+policy_templates=$(cat "$CHART"/templates/*.yaml | grep -c '^kind: ValidatingAdmissionPolicy$') || true
+go run ./hack/cmd/vapcheck -min-distinct "$policy_templates" "$out"/*.yaml
 
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
 # The CRD kinds that no catalog has (Substrate's ate.dev WorkerPool, issue #1089) are in hack/chart-check.d/schemas,

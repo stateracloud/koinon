@@ -8,20 +8,28 @@
 //
 // The check follows what the API server does for a policy (plugin/policy/validating): the
 // variables first, in order, then the matchConditions, the validations, the auditAnnotations and
-// the messageExpressions, all in the stored-expression environment of the pinned k8s.io/apiserver
-// version.
+// the messageExpressions. It compiles them as the API server does when it creates a policy
+// (new-expression mode) for the oldest Kubernetes version the chart supports (minKubeVersion,
+// the kubeVersion of charts/koinon/Chart.yaml), so a CEL library that a 1.30 server lacks fails
+// here, not at helm install.
 //
-// Usage: go run ./hack/cmd/vapcheck FILE...
+// With -min-distinct N the check also fails when the files hold fewer than N distinct policy
+// names: a policy that no values file renders is not checked, and that must not pass in silence.
+//
+// Usage: go run ./hack/cmd/vapcheck [-min-distinct N] FILE...
 package main
 
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	"k8s.io/apimachinery/pkg/util/version"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
@@ -29,27 +37,36 @@ import (
 	"k8s.io/apiserver/pkg/cel/environment"
 )
 
+// Keep in step with kubeVersion in charts/koinon/Chart.yaml.
+var minKubeVersion = version.MajorMinor(1, 30)
+
 const policyKind = "ValidatingAdmissionPolicy"
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: vapcheck FILE...")
+	minDistinct := flag.Int("min-distinct", 0, "fail when the files hold fewer distinct policy names")
+	flag.Parse()
+	if flag.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "usage: vapcheck [-min-distinct N] FILE...")
 		os.Exit(2)
 	}
 	problems, policies := 0, 0
-	for _, path := range os.Args[1:] {
+	names := map[string]bool{}
+	for _, path := range flag.Args() {
 		f, err := os.Open(path) // #nosec G304 G703 -- chart-check passes its own rendered files
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
 			os.Exit(2)
 		}
-		n, errs, err := Check(f)
+		n, errs, found, err := scan(f)
 		_ = f.Close()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
 			os.Exit(2)
 		}
 		policies += n
+		for _, name := range found {
+			names[name] = true
+		}
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "%s: %s\n", path, e)
 		}
@@ -59,26 +76,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%d CEL expression(s) do not compile\n", problems)
 		os.Exit(1)
 	}
-	fmt.Printf("vapcheck: %d ValidatingAdmissionPolicy object(s) compile\n", policies)
+	if len(names) < *minDistinct {
+		fmt.Fprintf(os.Stderr, "vapcheck: %d distinct policy name(s) rendered, expected at least %d: a policy that no values file renders is not checked\n", len(names), *minDistinct)
+		os.Exit(1)
+	}
+	fmt.Printf("vapcheck: %d ValidatingAdmissionPolicy object(s), %d distinct, compile\n", policies, len(names))
 }
 
 // Check reads a stream of YAML documents, compiles every ValidatingAdmissionPolicy in it and
 // returns the number of policies and one message per expression that does not compile. The error
 // is for input it cannot read.
 func Check(r io.Reader) (policies int, problems []string, err error) {
+	policies, problems, _, err = scan(r)
+	return policies, problems, err
+}
+
+func scan(r io.Reader) (policies int, problems []string, names []string, err error) {
 	dec := utilyaml.NewYAMLOrJSONDecoder(r, 4096)
 	for {
 		var raw map[string]any
 		if err := dec.Decode(&raw); err != nil {
 			if errors.Is(err, io.EOF) {
-				return policies, problems, nil
+				return policies, problems, names, nil
 			}
-			return policies, problems, err
+			return policies, problems, names, err
 		}
 		if raw == nil {
 			continue
 		}
-		if kind, _ := raw["kind"].(string); kind != policyKind {
+		apiVersion, _ := raw["apiVersion"].(string)
+		if kind, _ := raw["kind"].(string); kind != policyKind || !strings.HasPrefix(apiVersion, "admissionregistration.k8s.io/") {
 			continue
 		}
 		// v1, v1beta1 and v1alpha1 share the fields that hold CEL, so one type reads them all.
@@ -88,9 +115,10 @@ func Check(r io.Reader) (policies int, problems []string, err error) {
 			err = json.Unmarshal(b, &p)
 		}
 		if err != nil {
-			return policies, problems, fmt.Errorf("%s: %w", policyKind, err)
+			return policies, problems, names, fmt.Errorf("%s: %w", policyKind, err)
 		}
 		policies++
+		names = append(names, p.Name)
 		problems = append(problems, compilePolicy(&p)...)
 	}
 }
@@ -106,9 +134,9 @@ func compilePolicy(p *admissionregistrationv1.ValidatingAdmissionPolicy) []strin
 	hasParam := p.Spec.ParamKind != nil
 	withAuthorizer := cel.OptionalVariableDeclarations{HasParams: hasParam, HasAuthorizer: true}
 	withoutAuthorizer := cel.OptionalVariableDeclarations{HasParams: hasParam, HasAuthorizer: false}
-	mode := environment.StoredExpressions
+	mode := environment.NewExpressions
 
-	c, err := cel.NewCompositedCompiler(environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion()))
+	c, err := cel.NewCompositedCompiler(environment.MustBaseEnvSet(minKubeVersion))
 	if err != nil {
 		return []string{fmt.Sprintf("%s %q: cannot build the CEL environment: %v", policyKind, p.Name, err)}
 	}

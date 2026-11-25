@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The optional CEL variables: authorizer is declared for validations and not for messageExpression;
+# params is declared only with a paramKind. This policy has a paramKind, so params is fine, and the
+# one failure is authorizer in the messageExpression.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: declarations
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [secrets]
+  validations:
+    - expression: "authorizer.group('').resource('secrets').check('get').allowed() || params.data == null"
+      messageExpression: "string(authorizer.group('').resource('secrets').check('get').allowed())"
+---
+# Another API group with the same kind: skipped.
+apiVersion: example.com/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: other-group
+spec:
+  expression: "this is not CEL"

@@ -60,6 +60,24 @@ var _ = Describe("Check", func() {
 		Expect(problems).To(HaveLen(5))
 	})
 
+	It("compiles for the oldest Kubernetes version the chart supports", func() {
+		_, problems := check("newer-library.yaml")
+		Expect(problems).To(HaveLen(1))
+		Expect(problems[0]).To(ContainSubstring("undeclared reference"))
+	})
+
+	It("declares authorizer and params as the API server does", func() {
+		n, problems := check("declarations.yaml")
+		Expect(n).To(Equal(1)) // the policy of another API group is skipped
+		Expect(problems).To(HaveLen(1))
+		Expect(problems[0]).To(ContainSubstring("spec.validations[0].messageExpression"))
+		Expect(problems[0]).To(ContainSubstring("authorizer"))
+
+		_, problems = check("params-without-kind.yaml")
+		Expect(problems).To(HaveLen(1))
+		Expect(problems[0]).To(ContainSubstring("params"))
+	})
+
 	It("reads input that is not YAML as an error", func() {
 		_, _, err := Check(strings.NewReader("a: [unterminated"))
 		Expect(err).To(HaveOccurred())
