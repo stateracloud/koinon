@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Kind proof (`make test-fence-kind`; manual, not in CI; the chart check in hack/chart-check.sh is the render-only
-# part). Proof for issue #1172 (ADR 0120 amendment 10): a pod behind the Substrate fence reaches the Kubernetes API server
+# Kind proof (`make test-fence-kind`; the e2e-kind workflow runs it after the quickstart; the chart check in
+# hack/chart-check.sh is the render-only part). Proof for issue #1172 (ADR 0120 amendment 10): a pod behind the Substrate fence reaches the Kubernetes API server
 # through the chart's ports-only egress rule, with NO address listed, and cannot reach another port.
 #
 # It makes its own throwaway kind cluster (default CNI, kindnet, which enforces NetworkPolicy on kind v0.33),
