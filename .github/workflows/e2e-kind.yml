@@ -399,6 +399,13 @@ jobs:
         if: always()
         run: test/e2e/kind/down.sh
 
+      # The Substrate fence proof (#1172): its own throwaway kind cluster, made after the quickstart cluster is gone, so
+      # two clusters never share the runner. It deletes its cluster on exit.
+      - name: Fence proof (kind, API server ports rule)
+        if: success() && (inputs.suite || 'go') == 'go'
+        timeout-minutes: 10
+        run: test/e2e/kind/apiserver-egress.sh
+
       # Stop the caches (they run as root and still write) and make their storage readable before it is saved.
       - name: Stop the pull-through caches
         if: success() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && steps.kindproxy.outputs.cache-hit != 'true'
