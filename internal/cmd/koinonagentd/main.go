@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
@@ -73,6 +74,13 @@ type config struct {
 	s3Endpoint, s3Region string
 	s3Bucket             string
 
+	// The actor token (ADR 0120 1.2, #1086 part C2): the file with the hex Ed25519 seed that signs
+	// it (a mounted Secret), the key ID and issuer the gateway checks. With --egress-url, git of a
+	// run on a code-host connection goes through the gateway's egress listener.
+	actorTokenKeyFile string
+	actorTokenKeyID   string
+	actorTokenIssuer  string
+
 	// restoreHold keeps the process from claiming or driving any run (issue #462).
 	restoreHold bool
 }
@@ -97,6 +105,12 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
 		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1 and <url>/mcp")
+	fs.StringVar(&c.pool.EgressURL, "egress-url", "",
+		"the gateway's egress listener as sandboxes reach it (for example http://koinon-mcp-gateway.koinon.svc:8081); git of runs on a code-host connection goes to <url>/egress/<host>/ with a short-lived actor token; empty: git uses the driver's egress. Requires --actor-token-key-file")
+	fs.StringVar(&c.actorTokenKeyFile, "actor-token-key-file", "",
+		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key seed, mounted read-only); required with --egress-url")
+	fs.StringVar(&c.actorTokenKeyID, "actor-token-key-id", "k1", "key ID of --actor-token-key-file; the gateway reads the public key as <key-id>.pub")
+	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "koinon-agentd", "issuer of actor tokens; the gateway's --actor-token-issuer must match")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
@@ -182,6 +196,17 @@ func (c *config) validate() error {
 			return err
 		}
 	}
+	if (c.pool.EgressURL == "") != (c.actorTokenKeyFile == "") {
+		return errors.New("--egress-url and --actor-token-key-file are required together: the gateway's egress listener refuses requests without an actor token")
+	}
+	if c.pool.EgressURL != "" {
+		if err := agentd.CheckEgressURL(c.pool.EgressURL); err != nil {
+			return fmt.Errorf("--egress-url: %w", err)
+		}
+		if c.actorTokenKeyID == "" || c.actorTokenIssuer == "" {
+			return errors.New("--actor-token-key-id and --actor-token-issuer must not be empty with --egress-url")
+		}
+	}
 	if c.checkpoints && (c.pool.SavedWorkURL == "" || c.savedWorkKeyFile == "") {
 		return errors.New("--saved-work-url and --saved-work-key-file are required with --checkpoints: koinon-api hands out the repository passwords")
 	}
@@ -249,6 +274,15 @@ func run(ctx context.Context, cfg config) error {
 			// The live check of an agent's MCP tools (old issue 488) asks koinon-api, which holds the
 			// agent's gateway key; koinon-agentd never does.
 			cfg.pool.MCPTools = mcpcheck.Remote{HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL, Key: cfg.pool.SavedWorkKey}
+		}
+	}
+	if cfg.actorTokenKeyFile != "" {
+		key, err := actortoken.LoadSeedKey(cfg.actorTokenKeyFile)
+		if err != nil {
+			return fmt.Errorf("--actor-token-key-file: %w", err)
+		}
+		if cfg.pool.ActorTokens, err = actortoken.NewMinter(cfg.actorTokenIssuer, cfg.actorTokenKeyID, key); err != nil {
+			return fmt.Errorf("actor tokens: %w", err)
 		}
 	}
 	if cfg.checkpoints {

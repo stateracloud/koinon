@@ -125,21 +125,30 @@ func (c *Config) checkEgress() error {
 	if c.ActorTokens == nil || c.EgressURL == "" {
 		return errors.New("agentd: ActorTokens and EgressURL go together")
 	}
-	u, err := url.Parse(c.EgressURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("agentd: EgressURL must be an http or https URL, got %q", c.EgressURL)
-	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" || u.Opaque != "" {
-		// The URL is written into the sandbox's git configuration.
-		return errors.New("agentd: EgressURL must not carry user info, a path, a query or a fragment")
-	}
-	if strings.ContainsAny(c.EgressURL, "\"\\\n\r\t ") {
-		return errors.New("agentd: EgressURL must not hold quotes, backslashes or white space")
+	if err := CheckEgressURL(c.EgressURL); err != nil {
+		return err
 	}
 	c.EgressURL = strings.TrimRight(c.EgressURL, "/")
 	setDefault(&c.ActorTokenRefresh, DefaultActorTokenRefresh)
 	if c.ActorTokenRefresh*3 > actorTokenTTL {
 		return fmt.Errorf("agentd: with an EgressURL, ActorTokenRefresh must be at most %s", actorTokenTTL/3)
+	}
+	return nil
+}
+
+// CheckEgressURL checks that s is a plain http or https base URL that holds nothing a guest must not
+// see: it is written into the sandbox's git configuration. koinon-agentd checks its flag with it at
+// start, before it reads any key.
+func CheckEgressURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("agentd: EgressURL must be an http or https URL, got %q", s)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" || u.Opaque != "" || u.ForceQuery {
+		return errors.New("agentd: EgressURL must not carry user info, a path, a query or a fragment")
+	}
+	if strings.ContainsAny(s, "\"\\\n\r\t ") {
+		return errors.New("agentd: EgressURL must not hold quotes, backslashes or white space")
 	}
 	return nil
 }

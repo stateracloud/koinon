@@ -62,7 +62,7 @@ type Spec struct {
 	Type corev1.SecretType `json:"type"`
 	// Username is written under the key "username".
 	Username string `json:"username"`
-	// Kind is empty for a username and a password, or KindAES256Key for a hex key.
+	// Kind is empty for a username and a password, or one of the Kind constants.
 	Kind string `json:"kind,omitempty"`
 	// DNSNames are the names of the certificate of a KindTLS Secret.
 	DNSNames []string          `json:"dnsNames,omitempty"`
@@ -88,7 +88,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
-		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken && sp.Kind != KindTLS {
+		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken && sp.Kind != KindTLS && sp.Kind != KindEd25519Key {
 			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
 		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
@@ -103,6 +103,13 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case err == nil && sp.Kind == KindTLS:
 			if cerr := checkTLSData(existing.Data, sp.DNSNames, time.Now()); cerr != nil {
 				return results, fmt.Errorf("the Secret %s/%s exists but is not a usable TLS Secret: %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
+			}
+			results = append(results, Result{Name: sp.Name})
+			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+			continue
+		case err == nil && sp.Kind == KindEd25519Key:
+			if cerr := checkEd25519Data(existing.Data); cerr != nil {
+				return results, fmt.Errorf("the Secret %s/%s exists but %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
 			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
@@ -144,6 +151,10 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case KindTLS:
 			if data, err = newTLSData(sp.DNSNames, time.Now()); err != nil {
 				return results, fmt.Errorf("the Secret spec %s: %w", sp.Name, err)
+			}
+		case KindEd25519Key:
+			if data, err = newEd25519Data(); err != nil {
+				return results, err
 			}
 		case KindAES256Key, KindBearerToken:
 			b := make([]byte, 32)
