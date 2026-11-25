@@ -127,6 +127,27 @@ join_kind_net() {
     { echo "cannot connect $1 to the $KIND_NET network" >&2; return 1; }
 }
 
+# host_reaches_registry: host 127.0.0.1:$REG_PORT reaches the container that start just ran (#1350). Another
+# runtime or process can hold the port (two container runtimes on a Mac): /v2/ then answers, but from another
+# registry, and ko pushes the images there. The marker is an upload session: the host opens it over HTTP and
+# the Docker daemon reads it back from the container's storage. Only this container has that directory.
+# It waits about 1 s, then returns 1.
+host_reaches_registry() {
+  local _ loc id
+  for _ in 1 2 3 4 5; do
+    loc=$(curl -sS --max-time 2 -X POST -D - -o /dev/null "http://127.0.0.1:${REG_PORT}/v2/koinon-port-check/blobs/uploads/" 2>/dev/null |
+      tr -d '\r' | sed -n 's/^[Ll]ocation: *//p') || loc=
+    id=${loc##*/}
+    id=${id%%\?*}
+    if [[ -n $id ]] && docker exec "$REG_NAME" ls "/var/lib/registry/docker/registry/v2/repositories/koinon-port-check/_uploads/$id" >/dev/null 2>&1; then
+      curl -sS --max-time 2 -X DELETE "http://127.0.0.1:${REG_PORT}/v2/koinon-port-check/blobs/uploads/$id" >/dev/null 2>&1 || true
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
 cmd_start() {
   local t0 h c
   t0=$(date +%s)
@@ -145,6 +166,11 @@ cmd_start() {
   for c in $(all_names); do join_kind_net "$c"; done
   for _ in $(seq 60); do
     if curl -fsS --max-time 2 "http://127.0.0.1:${REG_PORT}/v2/" >/dev/null 2>&1; then
+      host_reaches_registry || {
+        echo "127.0.0.1:${REG_PORT} answers, but it is not the $REG_NAME container that start just ran. Another process or container runtime holds port ${REG_PORT}, so pushes would go to the wrong registry." >&2
+        echo "Check who holds it (lsof -nP -iTCP:${REG_PORT} -sTCP:LISTEN), stop it, or set KIND_REGISTRY_PORT to a free port and run registry.sh stop --force." >&2
+        return 1
+      }
       echo "-- registry: localhost:${REG_PORT} up, caches: ${PROXY_HOSTS:-none}: $(( $(date +%s) - t0 ))s"
       return 0
     fi
