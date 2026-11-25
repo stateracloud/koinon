@@ -8,6 +8,11 @@
 //
 //	GET /_fake/info            {"owner", "version", "login", "repositories"}  (never the token)
 //	GET /_fake/repos/{repo}    the repository's state: branches, pulls, comments, write calls
+//	GET /_fake/git             every git smart HTTP request: method, path, service, status and
+//	                           whether it carried an Authorization header (never the header)
+//
+// With -tls-cert-file and -tls-key-file it serves HTTPS, as a real Gitea behind TLS: the gateway's
+// egress listener sends a credential only over HTTPS (ADR 0120, #1086 part C2).
 //
 // The fake keeps its repositories as bare git repositories in the temporary directory and runs
 // the git binary, so the image it runs in needs git (with git-http-backend) and a writable
@@ -25,6 +30,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,7 +47,13 @@ func main() {
 	login := flag.String("login", fakegitea.DefaultLogin, "the login the token authenticates as")
 	version := flag.String("gitea-version", "28.2.0", "version GET /api/v1/version reports")
 	bearer := flag.Bool("allow-bearer", false, "also accept Authorization: Bearer <token>")
+	certFile := flag.String("tls-cert-file", "", "serve HTTPS with this certificate (PEM); needs -tls-key-file")
+	keyFile := flag.String("tls-key-file", "", "the key of -tls-cert-file (PEM)")
 	flag.Parse()
+	if (*certFile == "") != (*keyFile == "") {
+		slog.Error("koinon-fakegitea: -tls-cert-file and -tls-key-file go together")
+		os.Exit(2)
+	}
 
 	f := fakegitea.NewUnstarted()
 	defer f.Close()
@@ -74,7 +86,9 @@ func main() {
 			"pulls": s.Pulls, "comments": s.Comments, "calls": s.Calls,
 		})
 	})
-	mux.Handle("/", f.Handler)
+	git := &gitLog{}
+	mux.Handle("GET /_fake/git", git)
+	mux.Handle("/", git.record(f.Handler))
 
 	srv := &http.Server{Addr: *addr, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -86,8 +100,12 @@ func main() {
 		_ = srv.Shutdown(shutdown)
 	}()
 	slog.Info("starting koinon-fakegitea", "version", project.Version, "addr", *addr,
-		"owner", f.Owner, "repositories", names)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		"owner", f.Owner, "repositories", names, "tls", *certFile != "")
+	serve := srv.ListenAndServe
+	if *certFile != "" {
+		serve = func() error { return srv.ListenAndServeTLS(*certFile, *keyFile) }
+	}
+	if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("koinon-fakegitea failed", "err", err)
 		f.Close()
 		os.Exit(1) //nolint:gocritic // Close was called on the line above
@@ -117,4 +135,51 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// gitRequest is one git smart HTTP request the fake served. Auth says whether the request carried
+// an Authorization header; the header itself is never kept.
+type gitRequest struct {
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+	Service string `json:"service,omitempty"`
+	Status  int    `json:"status"`
+	Auth    bool   `json:"auth"`
+}
+
+// gitLog keeps the git smart HTTP requests in arrival order (at most maxGitRequests), so the e2e
+// test can see that a clone reached the fake with a credential it accepted.
+type gitLog struct {
+	mu   sync.Mutex
+	reqs []gitRequest
+}
+
+const maxGitRequests = 1000
+
+// record serves h and keeps each request to a path under /{owner}/{repo}.git/.
+func (g *gitLog) record(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		h.ServeHTTP(rec, r)
+		if !strings.Contains(r.URL.Path, ".git/") {
+			return
+		}
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if len(g.reqs) == maxGitRequests {
+			g.reqs = g.reqs[1:]
+		}
+		g.reqs = append(g.reqs, gitRequest{
+			Method: r.Method, Path: r.URL.Path, Service: r.URL.Query().Get("service"),
+			Status: rec.status, Auth: r.Header.Get("Authorization") != "",
+		})
+	})
+}
+
+// ServeHTTP answers GET /_fake/git with the requests kept.
+func (g *gitLog) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	g.mu.Lock()
+	out := append([]gitRequest{}, g.reqs...)
+	g.mu.Unlock()
+	writeJSON(w, out)
 }

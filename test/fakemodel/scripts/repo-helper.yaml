@@ -29,6 +29,31 @@ turns:
       inputTokens: 1600
       cachedInputTokens: 1400
       outputTokens: 18
+  # The clone through koinon-gateway's egress listener (#1086 part C2): the agent runs git in its sandbox,
+  # which holds no credential. agentd's git configuration sends the clone to <gateway>/egress/<host>/ with the
+  # actor token, and the gateway attaches the Gitea read token. The e2e reads the fake Gitea's record of the
+  # clone; the agent's answer only ends the run. The tool is OpenCode's shell tool.
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "egress clone"
+      toolResult: bash
+    text: I cloned koinon-demo/hello. I made no other change.
+    usage:
+      inputTokens: 1400
+      cachedInputTokens: 1250
+      outputTokens: 14
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "egress clone"
+    toolCalls:
+      - name: bash
+        arguments:
+          command: git clone https://fakegitea.koinon-e2e-fakes.svc/koinon-demo/hello.git /tmp/egress-clone && git -C /tmp/egress-clone log -1 --format=%H
+          description: Clone koinon-demo/hello
+    usage:
+      inputTokens: 1300
+      cachedInputTokens: 1200
+      outputTokens: 40
   # A denied approval ends the resumed run. The outcome line carries the target, so this turn comes before the
   # "mcp:tracker" turn below.
   - when:
