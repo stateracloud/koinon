@@ -26,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
@@ -43,6 +44,7 @@ type fakeMCPRecord struct {
 	MCPMethod           string `json:"mcpMethod"`
 	Authorized          bool   `json:"authorized"`
 	Agent               string `json:"agent"`
+	UserAgent           string `json:"userAgent"`
 	ClientAuthorization bool   `json:"clientAuthorization"`
 	Tool                string `json:"tool"`
 	Args                string `json:"args"`
@@ -157,9 +159,12 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	anonymous := 0
 	for _, r := range recs {
 		if r.Path == "/oauth-mcp" {
-			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
-			// it carries no credential, and it does not go through the gateway. Its path tells it apart: an
-			// empty agent header does not, because koinon-gateway sends none to an org's server (#1235).
+			Expect(r.UserAgent).To(Equal(mcpservers.PreflightUserAgent), "only the add-time check asks the OAuth server: %+v", r)
+		}
+		if r.UserAgent == mcpservers.PreflightUserAgent {
+			// koinon-api's add-time check (the refused "oauthy" server, and each added server): direct, it
+			// carries no credential, and it does not go through the gateway. Its User-Agent tells it apart:
+			// an empty agent header does not, because koinon-gateway sends none to an org's server (#1235).
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
 			Expect(r.Agent).To(BeEmpty(), "the add-time check does not go through the gateway: %+v", r)
 			anonymous++
