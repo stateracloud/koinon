@@ -150,7 +150,7 @@ func isTransient(err error) bool {
 	if err == nil {
 		return false
 	}
-	if j, ok := err.(interface{ Unwrap() []error }); ok { //nolint:errorlint // errors.Join
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, e := range j.Unwrap() {
 			if !isTransient(e) {
 				return false

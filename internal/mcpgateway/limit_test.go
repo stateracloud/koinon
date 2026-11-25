@@ -17,7 +17,7 @@ import (
 
 var _ = Describe("the bound on an upstream reply", func() {
 	const limit = 1024
-	read := func(contentType, body string, chunked bool) (string, error, int) {
+	read := func(contentType, body string, chunked bool) (string, int, error) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", contentType)
 			if !chunked {
@@ -30,32 +30,32 @@ var _ = Describe("the bound on an upstream reply", func() {
 		c := &http.Client{Transport: mcpgateway.LimitTransport(http.DefaultTransport, limit, func() { n++ })}
 		resp, err := c.Get(srv.URL)
 		if err != nil {
-			return "", err, n
+			return "", n, err
 		}
 		defer func() { _ = resp.Body.Close() }()
 		b, err := io.ReadAll(resp.Body)
-		return string(b), err, n
+		return string(b), n, err
 	}
 	It("passes a reply of exactly the limit", func() {
-		b, err, n := read("application/json", strings.Repeat("x", limit), false)
+		b, n, err := read("application/json", strings.Repeat("x", limit), false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(b).To(HaveLen(limit))
 		Expect(n).To(BeZero())
 	})
 	It("refuses a reply whose Content-Length is over the limit, before it reads the body", func() {
-		_, err, n := read("application/json", strings.Repeat("x", limit+1), false)
+		_, n, err := read("application/json", strings.Repeat("x", limit+1), false)
 		Expect(err).To(MatchError(mcpgateway.ErrResponseTooLarge))
 		Expect(n).To(Equal(1))
 	})
 	It("cuts a reply with no Content-Length at the limit", func() {
 		// 64 KiB over a handler with no Content-Length is sent chunked.
-		b, err, n := read("application/json", strings.Repeat("x", 64<<10), true)
+		b, n, err := read("application/json", strings.Repeat("x", 64<<10), true)
 		Expect(err).To(MatchError(mcpgateway.ErrResponseTooLarge))
 		Expect(len(b)).To(BeNumerically("<=", limit))
 		Expect(n).To(Equal(1))
 	})
 	It("leaves a stream to the per-event bound of the SDK", func() {
-		b, err, n := read("text/event-stream", strings.Repeat("data: x\n\n", 1000), false)
+		b, n, err := read("text/event-stream", strings.Repeat("data: x\n\n", 1000), false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(b)).To(BeNumerically(">", limit))
 		Expect(n).To(BeZero())
