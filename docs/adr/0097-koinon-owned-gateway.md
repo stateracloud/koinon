@@ -1184,9 +1184,11 @@ below has a test. Slice 1 holds these rules; the other gaps of #1347 follow in l
   one JSON reply (`JSONResponse`). It sends nothing while the upstream call runs, and a tool call that runs
   longer than the call timeout (2 minutes) fails. A client that resets its timeout on progress gets no help
   from the gateway. The harness config therefore sets the OpenCode request timeout of the `koinon` MCP server
-  (`timeout`, in ms, in `harnesses/opencode/etc/koinon/opencode/opencode.jsonc`) above the call timeout. The
-  OpenCode default is 60 s, so without this value the client gives up first. A spec in `internal/mcpgateway`
-  reads the config and checks the value against `DefaultCallTimeout`, so the two cannot drift. The later fix
+  (`timeout`, in ms, in `harnesses/opencode/etc/koinon/opencode/opencode.jsonc`) to 270 s, at or above
+  `MinDrain` (4 minutes), because one call has two stages (approval wait and upstream call). A client that
+  gives up earlier would leave the write running while the agent sees an error. The OpenCode default is 60 s,
+  so without this value the client gives up first. A spec in `internal/mcpgateway` reads the config and checks
+  the value against `MinDrain`, so the two cannot drift. The later fix
   is to forward upstream progress notifications on an SSE reply. Build it when an org MCP server needs calls
   longer than the call timeout. It changes the reply type and the response bound, so it needs its own slice.
 
