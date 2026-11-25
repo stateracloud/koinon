@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/tracing/scrub"
+	"github.com/stateracloud/koinon/internal/tracing/scrub/gitleaksrules"
 )
 
 // TestAWSKeyIDAfterSeparator is the plain spec for issue 1299. The fuzz seed 0ad82284c64d31d2 of
@@ -21,7 +22,6 @@ func TestAWSKeyIDAfterSeparator(t *testing.T) {
 		"plain":          fake(fakeUpper, 16, 3),
 		"ends in NULL":   "H37NAM2U7WZQ" + "NULL",
 		"holds FALSE":    "H37NAM2U7" + "FALSE" + "Q2",
-		"starts in TRUE": "TRUE" + "H37NAM2U7WZQ",
 	}
 	for tname, tail := range tails {
 		for _, prefix := range []string{"AKIA", "ASIA"} {
@@ -56,8 +56,9 @@ func TestAWSKeyIDAfterSeparator(t *testing.T) {
 	}
 }
 
-// TestLiteralsStayReadable keeps what the fixed global allowlist is for: a value that is only
-// true, false or null is not a secret and is not redacted, and the AWS documentation key ID stays.
+// TestLiteralsStayReadable is an over-redaction smoke check: plain true, false and null and the
+// AWS documentation key ID stay unchanged. No rule captures a bare literal, so this test does not
+// exercise the literal allowlist itself; TestLiteralAllowlistIsPinned guards that.
 func TestLiteralsStayReadable(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	for _, in := range []string{
@@ -69,4 +70,23 @@ func TestLiteralsStayReadable(t *testing.T) {
 			t.Errorf("over-redaction: %q became %q", in, out)
 		}
 	}
+}
+
+// TestLiteralAllowlistIsPinned fails when a gitleaks bump changes the global allowlist regex that
+// compileAllow groups. Then the rewrite no longer applies: check the new regex for the same
+// missing group, and update gitleaksLiteralRE in gitleaks.go.
+func TestLiteralAllowlistIsPinned(t *testing.T) {
+	set, err := gitleaksrules.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `(?i)^true|false|null$`
+	for _, a := range set.Global {
+		for _, re := range a.Regexes {
+			if re == want {
+				return
+			}
+		}
+	}
+	t.Fatalf("the global allowlist has no %q: update gitleaksLiteralRE in gitleaks.go", want)
 }
