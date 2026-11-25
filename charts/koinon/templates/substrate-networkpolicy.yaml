@@ -102,8 +102,11 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
-        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database.
-        {{- range (list "gateway" "api") }}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database. With
+        # gateway.mcp.driver=koinon also koinon-gateway's MCP pods: the actors' MCP calls go there (#1239).
+        {{- $targets := list "gateway" "api" }}
+        {{- if include "koinon.mcpKoinon" . }}{{ $targets = append $targets "mcp-gateway" }}{{ end }}
+        {{- range $targets }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}

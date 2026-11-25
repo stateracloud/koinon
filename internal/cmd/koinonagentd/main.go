@@ -96,7 +96,9 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
-		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1 and <url>/mcp")
+		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1, and <url>/mcp unless --agent-mcp-url is set")
+	fs.StringVar(&c.pool.MCPURL, "agent-mcp-url", "",
+		"the MCP URL harnesses get, as sandboxes reach it (koinon-gateway's /mcp with gateway.mcp.driver=koinon); empty: <gateway-url>/mcp")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
@@ -169,6 +171,11 @@ func (c *config) validate() error {
 	}
 	if c.pool.GatewayURL == "" {
 		return errors.New("--gateway-url is required")
+	}
+	if c.pool.MCPURL != "" {
+		if err := agentd.CheckSandboxURL("--agent-mcp-url", c.pool.MCPURL); err != nil {
+			return err
+		}
 	}
 	if c.pool.OwnerID == "" {
 		h, err := os.Hostname()

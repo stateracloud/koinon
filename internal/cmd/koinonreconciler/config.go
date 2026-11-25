@@ -48,8 +48,11 @@ type config struct {
 	sandboxLimitRange     bool
 	sandboxLimitRangeName string
 
-	gatewayMode        project.GatewayMode
-	gatewayURL         string
+	gatewayMode project.GatewayMode
+	gatewayURL  string
+	// gatewayMCPURL is koinon-gateway's MCP listener as sandboxes reach it (gateway.mcp.driver=koinon):
+	// the sandbox profile allows /mcp there and not on agentgateway. Empty: agentgateway serves /mcp.
+	gatewayMCPURL      string
 	gatewayConfigMap   string
 	gatewayDeployment  string
 	gatewayStatsURL    string
@@ -111,9 +114,23 @@ type config struct {
 // gatewayEndpoint parses the agentgateway URL into the host and port the provider profile
 // binds the key to.
 func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
-	u, err := url.Parse(c.gatewayURL)
+	return endpointOf("--gateway-url", c.gatewayURL)
+}
+
+// mcpGatewayEndpoint parses koinon-gateway's MCP URL (gateway.mcp.driver=koinon) into the host and port
+// the provider profile allows /mcp on. Empty: the zero Endpoint, and agentgateway serves /mcp.
+func (c *config) mcpGatewayEndpoint() (reconciler.Endpoint, error) {
+	if c.gatewayMCPURL == "" {
+		return reconciler.Endpoint{}, nil
+	}
+	return endpointOf("--gateway-mcp-url", c.gatewayMCPURL)
+}
+
+// endpointOf parses an http(s)://host[:port] URL, named flag in errors, into a host and a port.
+func endpointOf(flag, raw string) (reconciler.Endpoint, error) {
+	u, err := url.Parse(raw)
 	if err != nil {
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url: %w", err)
+		return reconciler.Endpoint{}, fmt.Errorf("%s: %w", flag, err)
 	}
 	port := u.Port()
 	switch {
@@ -123,11 +140,11 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 	case u.Scheme == "http":
 		port = "80"
 	default:
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url %q: want http(s)://host[:port]", c.gatewayURL)
+		return reconciler.Endpoint{}, fmt.Errorf("%s %q: want http(s)://host[:port]", flag, raw)
 	}
 	p, err := strconv.ParseUint(port, 10, 16)
 	if err != nil || u.Hostname() == "" {
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url %q: want http(s)://host[:port]", c.gatewayURL)
+		return reconciler.Endpoint{}, fmt.Errorf("%s %q: want http(s)://host[:port]", flag, raw)
 	}
 	return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}, nil
 }

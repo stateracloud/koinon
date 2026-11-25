@@ -229,7 +229,7 @@ func (r *runner) waitCommand(ctx context.Context, conn *acp.Conn, command string
 			return errors.New("the connection ended")
 		case <-t.C:
 			return &failure{reason: fmt.Sprintf("Koinon's MCP tools did not become available: the harness did not "+
-				"announce %q within %s of starting the session (is agentgateway's MCP route reachable from the sandbox?)",
+				"announce %q within %s of starting the session (is the MCP gateway reachable from the sandbox, and does it serve the readiness prompt?)",
 				command, timeout)}
 		case <-ctx.Done():
 			return ctx.Err()
@@ -506,7 +506,7 @@ func (r *runner) execute(ctx context.Context) error {
 	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
 	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
 	cmd, err := launchCommand(agent.Harness, endpoints{
-		ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker,
+		ModelBaseURL: gw + "/v1", Model: model, MCPURL: cfg.MCPURL, Format: format, CacheMarker: marker,
 		Thinking: thinkMode, SessionID: sessionID, Retry: retryPolicyOf(r.p.cfg), CompactionTokens: facts.CompactionTokens,
 	})
 	if err != nil {

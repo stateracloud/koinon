@@ -33,7 +33,7 @@ has "held gateway config keeps the readiness listener" "readinessAddr: '\[::\]:1
 held_mounts=$(render "${gw[@]}" --set restoreHold=true | grep -c -E -- '^            name: koinon-gateway-config-held$' || true)
 [[ $held_mounts == 1 ]] || fail "held gateway Deployment mounts the held config once, got $held_mounts"
 lacks "held gateway Deployment does not mount the reconciler's config" '^            name: koinon-gateway-config$' "${gw[@]}" --set restoreHold=true
-lacks "kubernetes gateway mode renders no held gateway config" 'koinon-gateway-config-held' --set gateway.mode=kubernetes --set restoreHold=true
+lacks "kubernetes gateway mode renders no held gateway config" 'koinon-gateway-config-held' --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --set restoreHold=true
 
 # The held name keeps its "-held" suffix when the fullname is long enough for the 63-character cut to
 # apply (issue #530): 48 characters would make it equal the reconciler's koinon-gateway-config name.

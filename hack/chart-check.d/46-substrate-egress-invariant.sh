@@ -36,12 +36,13 @@ toless_policies() {
 
 # These policies of ci/substrate-values.yaml carry a destination-less egress rule, each on purpose:
 #   koinon-gateway            the gateway's DNS rule (also on main)
-#   koinon-substrate-otel-prometheus     Prometheus of otel-system: the API server ports
+#   koinon-mcp-gateway        koinon-gateway's DNS rule (the MCP path, the default driver since #1239)
+#   koinon-substrate-otel-prometheus    Prometheus of otel-system: the API server ports
 #   koinon-substrate-podcert-controller  the certificate controller: the API server ports
 #   koinon-substrate-api-server          atelet, ate-controller, ate-api-server, atenet-router: the API server ports
 #   koinon-substrate-api-only            k8s-credential-provider: the API server ports
 # Check the names of the chart against this list with the render of the file.
-expected=$'koinon-gateway\nkoinon-substrate-api-only\nkoinon-substrate-api-server\nkoinon-substrate-otel-prometheus\nkoinon-substrate-podcert-controller'
+expected=$'koinon-gateway\nkoinon-mcp-gateway\nkoinon-substrate-api-only\nkoinon-substrate-api-server\nkoinon-substrate-otel-prometheus\nkoinon-substrate-podcert-controller'
 got=$(toless_policies <"$out/substrate-values.yaml")
 [[ $got == "$expected" ]] || fail "the NetworkPolicies with an egress rule without a destination differ from the expected set (a rule with ports and no to opens them to ANY address; ADR 0120 amendment 10). Expected: $(tr '\n' ' ' <<<"$expected")| got: $(tr '\n' ' ' <<<"$got")"
 # The workers policy has no such rule at all, and neither has the control policy (atenet-egress is selected by it).

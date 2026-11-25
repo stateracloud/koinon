@@ -5,19 +5,31 @@
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 mcp=(--set gateway.mcp.driver=koinon)
+fb=(--set gateway.mcp.driver=agentgateway)
 mcp_only=(--show-only templates/gateway-koinon-mcp.yaml)
 
-# Default: agentgateway serves MCP, and nothing of koinon-gateway renders (the fallback is the default).
-lacks "no koinon-gateway pods by default" 'component: mcp-gateway'
-env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
+# Default (ADR 0097 decision 5, #1239): koinon-gateway serves every MCP path. koinon-api sends approved MCP calls
+# and the live check of an agent's MCP tools there, the agents' harness reaches it, and the LLM path stays on
+# agentgateway.
+has "koinon-gateway pods render by default" 'component: mcp-gateway' "${mcp_only[@]}"
+for driver in default koinon; do
+  args=()
+  [ "$driver" = default ] || args=("${mcp[@]}")
+  env_is KOINON_GATEWAY_MCP_URL '"http://koinon-mcp-gateway.koinon.svc.cluster.local:8080/mcp"' "${args[@]}"
+  env_is KOINON_GATEWAY_MCP_CHECK_URL '"http://koinon-mcp-gateway.koinon.svc.cluster.local:8080/mcp"' "${args[@]}"
+  env_is KOINON_AGENT_MCP_URL '"http://koinon-mcp-gateway.koinon.svc.cluster.local:8080/mcp"' "${args[@]}"
+  env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080"' "${args[@]}"
+  has "the reconciler is told koinon-gateway's MCP listener ($driver)" 'mcpUrl: http://koinon-mcp-gateway.koinon.svc.cluster.local:8080$' "${args[@]}" --show-only templates/config.yaml
+done
+has "agentgateway still renders as the LLM path" 'ghcr.io/agentgateway/agentgateway'
 
-# Selected: koinon-api sends approved MCP calls to koinon-gateway's Service, and the LLM path stays.
-env_is KOINON_GATEWAY_MCP_URL '"http://koinon-mcp-gateway.koinon.svc.cluster.local:8080/mcp"' "${mcp[@]}"
-env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080"' "${mcp[@]}"
-# The live check of an agent's MCP tools stays on the URL the agent uses (agentgateway's) while agents have not moved.
-env_is KOINON_GATEWAY_MCP_CHECK_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"' "${mcp[@]}"
-env_is KOINON_GATEWAY_MCP_CHECK_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
-has "agentgateway still renders as the LLM path" 'ghcr.io/agentgateway/agentgateway' "${mcp[@]}"
+# The fallback (gateway.mcp.driver=agentgateway): agentgateway serves MCP as before, and nothing of koinon-gateway
+# renders. agentd sets no MCP URL, so the harness takes <gateway URL>/mcp.
+lacks "no koinon-gateway pods with the fallback" 'component: mcp-gateway' "${fb[@]}"
+env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"' "${fb[@]}"
+env_is KOINON_GATEWAY_MCP_CHECK_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"' "${fb[@]}"
+lacks "agentd sets no MCP URL with the fallback" 'KOINON_AGENT_MCP_URL' "${fb[@]}" --show-only templates/deployments.yaml
+lacks "the reconciler is told no MCP listener with the fallback" 'mcpUrl' "${fb[@]}" --show-only templates/config.yaml
 
 # Two replicas, rolling without a gap, spread over nodes.
 has "koinon-gateway runs two replicas" '^  replicas: 2$' "${mcp[@]}" "${mcp_only[@]}"
@@ -64,20 +76,22 @@ has "koinon-gateway mounts the MCP credentials Secret" 'secretName: koinon-gatew
 has "koinon-gateway mounts the MCP credentials read-only" 'mountPath: /secrets/mcp$' "${mcp[@]}" "${mcp_only[@]}"
 n=$(render "${mcp[@]}" "${mcp_only[@]}" | grep -c 'automountServiceAccountToken: false' || true)
 [ "$n" = 2 ] || fail "koinon-gateway mounts a service account token ($n of 2 places say false)"
-# agentgateway mounts both Secrets while agents reach MCP through it.
+# agentgateway mounts both Secrets: it serves MCP with the fallback, and with either driver its config keeps the
+# MCP targets whose credential it can open (the reconciler renders one State for both gateways).
 has "agentgateway mounts the provider keys" 'secretName: koinon-gateway-providers$' --show-only templates/gateway-standalone.yaml
 has "agentgateway mounts the MCP credentials" 'secretName: koinon-gateway-mcp-keys$' --show-only templates/gateway-standalone.yaml
+has "agentgateway mounts the MCP credentials with the fallback" 'secretName: koinon-gateway-mcp-keys$' "${fb[@]}" --show-only templates/gateway-standalone.yaml
 has "the reconciler is told the MCP credentials Secret" 'mcpKeysSecret: koinon-gateway-mcp-keys$' --show-only templates/config.yaml
 has "the reconciler is told the MCP credentials directory" 'mcpKeysDir: /secrets/mcp$' --show-only templates/config.yaml
-lacks "the reconciler serves no sealed credential by default" 'mcpSealed' --show-only templates/config.yaml
-has "the reconciler serves sealed credentials with the koinon driver" 'mcpSealed: true$' "${mcp[@]}" --show-only templates/config.yaml
+lacks "the reconciler serves no sealed credential with the fallback" 'mcpSealed' "${fb[@]}" --show-only templates/config.yaml
+has "the reconciler serves sealed credentials by default" 'mcpSealed: true$' --show-only templates/config.yaml
 # The database login (cnpg mode): its own role, a member of koinon_gateway only, with a Secret of its own.
 has "koinon-gateway database role koinon_mcpgateway" 'name: koinon_mcpgateway$' "${mcp[@]}" --show-only templates/postgres-cnpg.yaml
 has "koinon-gateway database role is a member of koinon_gateway only" 'inRoles: \[koinon_gateway\]$' "${mcp[@]}" --show-only templates/postgres-cnpg.yaml
 has "the group role koinon_gateway is created" 'CREATE ROLE koinon_gateway NOLOGIN$' --show-only templates/postgres-cnpg.yaml
-lacks "no koinon_mcpgateway role by default" 'koinon_mcpgateway' --show-only templates/postgres-cnpg.yaml
+lacks "no koinon_mcpgateway role with the fallback" 'koinon_mcpgateway' "${fb[@]}" --show-only templates/postgres-cnpg.yaml
 has "the database login has a generated Secret" 'koinon-db-mcpgateway' "${mcp[@]}" --show-only templates/ensure-secrets.yaml
-lacks "no database login Secret by default" 'koinon-db-mcpgateway' --show-only templates/ensure-secrets.yaml
+lacks "no database login Secret with the fallback" 'koinon-db-mcpgateway' "${fb[@]}" --show-only templates/ensure-secrets.yaml
 has "koinon-gateway reads the database URL from a file" '--database-url-file=/etc/koinon/mcp-db/url$' "${mcp[@]}" "${mcp_only[@]}"
 has "the database URL has no password" 'url: "postgres://koinon_mcpgateway@koinon-pg-rw.koinon.svc:5432/koinon\?sslmode=verify-full&sslrootcert=/etc/koinon/db-ca/ca.crt"$' "${mcp[@]}" "${mcp_only[@]}"
 has "the password comes from the login Secret" 'name: koinon-db-mcpgateway$' "${mcp[@]}" "${mcp_only[@]}"
@@ -105,12 +119,28 @@ netpol_doc() {
 }
 api_np=$(netpol_doc koinon-api "${mcp[@]}")
 grep -q 'component: mcp-gateway$' <<<"$api_np" || fail "the State stream port of koinon-api does not admit koinon-gateway"
-api_off=$(netpol_doc koinon-api)
+api_off=$(netpol_doc koinon-api "${fb[@]}")
 if grep -q 'component: mcp-gateway$' <<<"$api_off"; then fail "the State stream port admits koinon-gateway when it is not selected"; fi
+[ -z "$(netpol_doc koinon-mcp-gateway "${fb[@]}")" ] || fail "koinon-gateway has a NetworkPolicy with the fallback"
 mcp_np=$(netpol_doc koinon-mcp-gateway "${mcp[@]}")
 [ -n "$mcp_np" ] || fail "koinon-gateway has no NetworkPolicy of its own"
 grep -q '10.0.0.0/8' <<<"$mcp_np" || fail "koinon-gateway egress does not carve out the private ranges"
-if grep -q 'openshell.ai/managed-by' <<<"$mcp_np"; then fail "koinon-gateway admits sandbox namespaces before agents use it"; fi
+# The agents reach the MCP port as they reach agentgateway's: from the sandbox namespaces (OpenShell), or from
+# Substrate's namespace through atenet. Koinon's own pods (koinon-api) reach it too.
+mcp_ing=$(awk '/^  ingress:/{f=1} f' <<<"$mcp_np")
+grep -q 'openshell.ai/managed-by' <<<"$mcp_ing" || fail "koinon-gateway does not admit the sandbox namespaces"
+grep -q 'app.kubernetes.io/instance: koinon$' <<<"$mcp_ing" || fail "koinon-gateway does not admit Koinon's own pods"
+if grep -q 'ipBlock' <<<"$mcp_ing"; then fail "koinon-gateway ingress admits an ipBlock"; fi
+sub_ing=$(awk '/^  ingress:/{f=1} f' <<<"$(netpol_doc koinon-mcp-gateway --set execution.driver=substrate \
+  --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 \
+  --set execution.substrate.tokenAudience=ateapi --set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev \
+  --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)")
+grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"
+# Substrate: the control plane's egress reaches koinon-gateway's MCP pods by default, and not with the fallback.
+sub_np=$(render -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml)
+grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
+sub_fb=$(render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" --show-only templates/substrate-networkpolicy.yaml)
+if grep -q 'component: mcp-gateway$' <<<"$sub_fb"; then fail "the Substrate control plane egress reaches koinon-gateway with the fallback"; fi
 grep -q 'port: 8081$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the tools port of koinon-api"
 grep -q 'cnpg.io/cluster: koinon-pg$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the Postgres pods"
 grep -q 'port: 5432$' <<<"$mcp_np" || fail "koinon-gateway egress does not name the Postgres port"
@@ -124,12 +154,16 @@ if grep -q 'component: mcp-gateway$' <<<"$(awk '/- port: guard/{f=1} f&&n++<12' 
 
 # The post-upgrade grants hook waits for the gateway role when the driver is on, and only then.
 has "the grants hook waits for the gateway role" '"--wait-gateway-role"' "${mcp[@]}" --set postgres.mode=cnpg --show-only templates/install-audit-grants.yaml
-lacks "the grants hook does not wait for the gateway role by default" 'wait-gateway-role' --set postgres.mode=cnpg --show-only templates/install-audit-grants.yaml
+lacks "the grants hook does not wait for the gateway role with the fallback" 'wait-gateway-role' "${fb[@]}" --set postgres.mode=cnpg --show-only templates/install-audit-grants.yaml
 
-# The switch needs standalone mode: kubernetes mode is frozen.
-if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mode=kubernetes >/dev/null 2>&1; then
-  fail "gateway.mcp.driver=koinon renders with gateway.mode=kubernetes"
-fi
+# The koinon driver needs standalone mode: kubernetes mode is frozen. Kubernetes mode renders with the fallback.
+for args in "" "${mcp[*]}"; do
+  # shellcheck disable=SC2086
+  if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" $args --set gateway.mode=kubernetes >/dev/null 2>&1; then
+    fail "gateway.mcp.driver=koinon renders with gateway.mode=kubernetes ('$args')"
+  fi
+done
+render "${fb[@]}" --set gateway.mode=kubernetes >/dev/null || fail "gateway.mode=kubernetes does not render with gateway.mcp.driver=agentgateway"
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" --set gateway.mcp.driver=other >/dev/null 2>&1; then
   fail "gateway.mcp.driver accepts an unknown driver"
 fi

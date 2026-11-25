@@ -100,11 +100,12 @@ func refuse(w http.ResponseWriter, status int, text string) {
 	http.Error(w, text, status)
 }
 
-// serverFor builds the server of one request. It registers no tool: its middleware answers
-// tools/list and tools/call from the agent's view of the targets.
+// serverFor builds the server of one request. It registers no tool and no prompt: its middleware
+// answers tools/list and tools/call from the agent's view of the targets, and prompts/list and
+// prompts/get with the readiness prompt only (prompts.go).
 func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "koinon-gateway", Version: "0"}, &mcp.ServerOptions{
-		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
+		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}, Prompts: &mcp.PromptCapabilities{}},
 		Logger:       g.o.Logger,
 	})
 	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -121,6 +122,14 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad tools/call"}
 				}
 				return g.o.Scrub.Result(agent.Org, g.callTool(ctx, agent, r.Params)), nil
+			case "prompts/list":
+				return g.listPrompts(ctx, agent), nil
+			case "prompts/get":
+				r, ok := req.(*mcp.GetPromptRequest)
+				if !ok {
+					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad prompts/get"}
+				}
+				return g.getPrompt(ctx, agent, r.Params)
 			}
 			return next(ctx, method, req)
 		}

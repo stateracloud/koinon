@@ -15,7 +15,9 @@ for c in api reconciler; do
 done
 
 # One replica: no budget (it would block every node drain). Two or more: one pod unavailable at a time.
-pdb() { render "$@" | awk 'BEGIN{RS="\n---\n"} /kind: PodDisruptionBudget/'; }
+# The agentgateway MCP driver: koinon-gateway (the default driver) has a budget of its own, checked in
+# 53-koinon-mcp-gateway.sh.
+pdb() { render --set gateway.mcp.driver=agentgateway "$@" | awk 'BEGIN{RS="\n---\n"} /kind: PodDisruptionBudget/'; }
 [[ -z $(pdb) ]] || fail "no PodDisruptionBudget with agentd.replicas=1"
 pdb2=$(pdb --set agentd.replicas=2)
 grep -q 'maxUnavailable: 1' <<<"$pdb2" || fail "agentd PodDisruptionBudget with replicas=2 sets maxUnavailable 1"

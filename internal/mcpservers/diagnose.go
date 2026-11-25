@@ -93,6 +93,7 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 	if err != nil {
 		return Diagnosis{Reason: "the URL cannot be requested"}
 	}
+	req.Header.Set("User-Agent", PreflightUserAgent)
 	resp, err := client.Do(req)
 	if err != nil {
 		if certificateProblem(err) {
@@ -156,6 +157,10 @@ func networkReason(err error) string {
 	}
 	return "network error"
 }
+
+// PreflightUserAgent is the User-Agent of the add-time check. The check goes to the server directly,
+// with no credential, so a server's logs (and the e2e fake) can tell it apart from the gateway's calls.
+const PreflightUserAgent = "koinon-preflight"
 
 // OAuthPreflight is a Preflight that refuses servers that need per-user OAuth, and servers whose
 // certificate does not verify. An unreachable server, or one that rejects the credential, is not refused here: it may be declared before it runs, and the

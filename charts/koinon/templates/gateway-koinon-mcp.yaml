@@ -21,7 +21,7 @@ key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 */ -}}
 {{- if include "koinon.mcpKoinon" . }}
 {{- if ne .Values.gateway.mode "standalone" }}
-{{- fail "gateway.mcp.driver=koinon needs gateway.mode=standalone: koinon-gateway reads the Secret the standalone reconciler fills, and kubernetes mode is frozen (ADR 0097 decision 4)" }}
+{{- fail "gateway.mcp.driver=koinon (the default) needs gateway.mode=standalone: koinon-gateway reads the Secret the standalone reconciler fills, and kubernetes mode is frozen (ADR 0097 decision 4). With gateway.mode=kubernetes set gateway.mcp.driver=agentgateway" }}
 {{- end }}
 {{- $name := include "koinon.componentName" (list . "mcp-gateway") }}
 {{- $m := .Values.gateway.mcp.koinon }}

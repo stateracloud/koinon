@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,7 @@ import (
 )
 
 var _ = Describe("Reconciler and the State stream", func() {
-	It("stores the applied state as a revision, only when it changed, and still applies as before", func(ctx SpecContext) {
+	It("stores the state as a revision, only when it changed, and still applies as before", func(ctx SpecContext) {
 		osg := fakegateway.New()
 		conn, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -86,6 +87,19 @@ func (d stuckDB) Begin(ctx context.Context) (pgx.Tx, error) {
 	return nil, ctx.Err()
 }
 
+// flakyStateDB is a State store that passes to DB until fail is set, then fails at once.
+type flakyStateDB struct {
+	DB   staterev.DB
+	fail atomic.Bool
+}
+
+func (d *flakyStateDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	if d.fail.Load() {
+		return nil, errors.New("the store is down")
+	}
+	return d.DB.Begin(ctx)
+}
+
 var _ = Describe("Reconciler when the State stream store is slow or broken", func() {
 	newR := func(ctx SpecContext, mg *fakeModelGateway, db staterev.DB) *reconciler.Reconciler {
 		osg := fakegateway.New()
@@ -108,13 +122,13 @@ var _ = Describe("Reconciler when the State stream store is slow or broken", fun
 	}
 
 	for name, db := range map[string]stuckDB{"fails": {err: errors.New("the store is down")}, "blocks": {}} {
-		It("still ends the pass with the Apply done when the publish "+name, func(ctx SpecContext) {
+		It("reports a pass error, retried, and still ends the pass with the Apply done when the publish "+name, func(ctx SpecContext) {
 			mg := &fakeModelGateway{}
 			r := newR(ctx, mg, db)
 			org, user := newOrg(ctx)
 			newAgentWithConfig(ctx, org, user, `{"instructions":"help"}`)
 			start := time.Now()
-			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("store the gateway state revision")))
 			Expect(mg.last().Keys).NotTo(BeEmpty(), "the gateway was applied")
 			Expect(time.Since(start)).To(BeNumerically("<", 30*time.Second))
 		}, SpecTimeout(2*time.Minute))

@@ -68,7 +68,7 @@ var _ = Describe("the MCP path", func() {
 				},
 				Tools: map[gateway.AgentRef][]gateway.ToolGrant{
 					agentAcme: {
-						{Target: "acme-wiki", Tools: []string{"read_item", "write_item", "fail", "roots", "sample", "log"}},
+						{Target: "acme-wiki", Tools: []string{"read_item", "write_item", "fail", "roots", "sample", "elicit", "log"}},
 						{Target: "acme-open", Tools: []string{"read_item"}},
 					},
 					// A grant that names another org's target does nothing.
@@ -85,7 +85,7 @@ var _ = Describe("the MCP path", func() {
 
 	It("lists only the granted tools of the targets the agent's org may see, with the target as prefix", func(ctx SpecContext) {
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyAcme.Material))).To(ConsistOf(
-			"acme-wiki_read_item", "acme-wiki_write_item", "acme-wiki_fail", "acme-wiki_roots", "acme-wiki_sample", "acme-wiki_log",
+			"acme-wiki_read_item", "acme-wiki_write_item", "acme-wiki_fail", "acme-wiki_roots", "acme-wiki_sample", "acme-wiki_elicit", "acme-wiki_log",
 			"acme-open_read_item"))
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyNoGrant.Material))).To(BeEmpty())
 		Expect(toolNames(ctx, connect(ctx, front.URL, keyX.Material))).To(BeEmpty())
@@ -128,6 +128,24 @@ var _ = Describe("the MCP path", func() {
 		// The agent header is for Koinon's own tool servers only: an org's server never learns the agent.
 		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
 		Expect(openLog.header(gateway.AgentHeader)).To(BeEmpty())
+	})
+
+	It("sends the agent header to a platform target (Koinon's own tool servers) only", func(ctx SpecContext) {
+		// One session, two targets: the gateway decides the header per target, not per session.
+		cfg.Tools[agentAcme] = append(cfg.Tools[agentAcme], gateway.ToolGrant{Target: "koinon-tools", Tools: []string{"read_item"}})
+		_, err := gw.ApplyMCP(ctx, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		s := connect(ctx, front.URL, keyAcme.Material)
+		_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "koinon-tools_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_read_item", Arguments: map[string]any{"text": "x"}})
+		Expect(err).NotTo(HaveOccurred())
+		// The platform target learns the agent the key check found (ADR 0097 decision 5); the org's server
+		// on the same session does not (#1235).
+		Expect(platformLog.header(gateway.AgentHeader)).NotTo(BeEmpty())
+		Expect(platformLog.header(gateway.AgentHeader)).To(HaveEach(agentAcme.String()))
+		Expect(acmeLog.header(gateway.AgentHeader)).To(BeEmpty())
 	})
 
 	// Issue #38: an approved ask-tier call runs with the org's executor key (mcpservers.CallTool). The
@@ -197,7 +215,14 @@ var _ = Describe("the MCP path", func() {
 		s := connect(ctx, front.URL, keyAcme.Material)
 		_, err := s.ListResources(ctx, nil)
 		Expect(err).To(HaveOccurred())
-		_, err = s.ListPrompts(ctx, nil)
+	})
+
+	It("lists no prompt when the config has no readiness target, and refuses every prompt name", func(ctx SpecContext) {
+		s := connect(ctx, front.URL, keyAcme.Material)
+		res, err := s.ListPrompts(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Prompts).To(BeEmpty())
+		_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPromptExposed})
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -219,6 +244,34 @@ var _ = Describe("the MCP path", func() {
 			return append([]mcpgateway.Violation(nil), guard.violations...)
 		}).Should(ContainElement(mcpgateway.ViolationSampling))
 		Expect(guard.sawText("canary-sampling")).To(BeTrue())
+	})
+
+	It("refuses elicitation in form and URL mode, reports it to the guard and still shows the guard the request", func(ctx SpecContext) {
+		s := connect(ctx, front.URL, keyAcme.Material)
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-wiki_elicit"})
+		Expect(err).NotTo(HaveOccurred())
+		var answers []string
+		for _, c := range res.Content {
+			answers = append(answers, c.(*mcp.TextContent).Text)
+		}
+		// The target gets the gateway's own refusal for each mode, not an answer.
+		Expect(answers).To(HaveExactElements(
+			And(HavePrefix("form: "), ContainSubstring("refused: the gateway offers no elicitation")),
+			And(HavePrefix("url: "), ContainSubstring("refused: the gateway offers no elicitation"))))
+		Eventually(func() int {
+			guard.mu.Lock()
+			defer guard.mu.Unlock()
+			n := 0
+			for _, v := range guard.violations {
+				if v == mcpgateway.ViolationElicitation {
+					n++
+				}
+			}
+			return n
+		}).Should(Equal(2), "one violation for each mode")
+		Expect(guard.sawText("canary-elicit-form")).To(BeTrue())
+		Expect(guard.sawText("canary-elicit-url")).To(BeTrue())
+		Expect(guard.sawText(elicitURL)).To(BeTrue())
 	})
 
 	It("shows the guard every message kind: results, errors, notifications and server requests", func(ctx SpecContext) {

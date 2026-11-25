@@ -9,6 +9,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpgateway"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/mcptoolpin"
 )
 
@@ -64,6 +65,17 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 			stored[r.Name] = r.ApprovedJson
 		}
 	}
+	if c.ask {
+		v, unreviewed := askToolList(l, rows, c.server.ShowUnreviewedTools)
+		if unreviewed && c.server.ExposesUntrustedInput {
+			legs := Legs{UntrustedInput: true}
+			if _, err := a.g.record(ctx, c, legs, nil); err != nil {
+				return a.unreadableList(ctx, agent, l.Target, err)
+			}
+			a.g.metrics.legs(legs)
+		}
+		return v
+	}
 	var (
 		v          mcpgateway.ToolListVerdict
 		unreviewed bool
@@ -118,6 +130,63 @@ func (a *GatewayGuard) CheckToolList(ctx context.Context, l mcpgateway.ToolList)
 		a.g.metrics.legs(legs)
 	}
 	return v
+}
+
+// askToolList decides the list of a server's ask target: the approval proxy (package mcpask), which
+// offers the server's ask-tier tools. Each tool there has Koinon's fixed note before the server's text
+// (mcpservers.AskToolNote), so its text never hashes to the approved hash. The guard serves the approved
+// text of the server's row with the note, and so the model sees only approved text, as on the server's
+// own target. A tool that is not in the ask tier, not present, not reviewed or changed since the review
+// is left out, as the proxy does (#1216). On a server where an admin lets new tools show before the
+// review, an unreviewed tool is served as the proxy listed it, sanitised, and unreviewed is true: the
+// caller sets the untrusted-input leg, as on the server's own target. The status tool is Koinon's own
+// and is served as listed. The proxy also checks the agent's allowance and the tier on every call.
+func askToolList(l mcpgateway.ToolList, rows []store.McpTool, showUnreviewed bool) (v mcpgateway.ToolListVerdict, unreviewed bool) {
+	byName := make(map[string]store.McpTool, len(rows))
+	for _, r := range rows {
+		byName[r.Name] = r
+	}
+	for _, p := range l.Tools {
+		if p.Name == mcpservers.AskStatusTool {
+			t, _, err := mcptoolpin.Normalise(p)
+			if err != nil {
+				v.Left = append(v.Left, p.Name)
+				continue
+			}
+			v.Serve = append(v.Serve, t)
+			continue
+		}
+		r, ok := byName[p.Name]
+		switch {
+		case !ok || !r.Present || r.Tier != store.McpTierAsk:
+			v.Left = append(v.Left, p.Name)
+			continue
+		case mcpservers.Unreviewed(r) && showUnreviewed:
+			t, _, err := mcptoolpin.Normalise(p)
+			if err != nil {
+				v.Left = append(v.Left, p.Name)
+				continue
+			}
+			unreviewed = true
+			v.Serve = append(v.Serve, t)
+			continue
+		case mcpservers.Unreviewed(r):
+			v.Waiting = append(v.Waiting, p.Name)
+			continue
+		case mcpservers.PendingChange(r):
+			v.Left = append(v.Left, p.Name)
+			continue
+		}
+		pt, err := mcptoolpin.Parse(r.ApprovedJson)
+		if err != nil || pt.Hash() != r.ApprovedHash.String {
+			// The stored text is not the text that was approved: nothing of it is served.
+			v.Left = append(v.Left, p.Name)
+			continue
+		}
+		pt.Description = mcpservers.AskToolNote + pt.Description
+		v.Serve = append(v.Serve, pt)
+	}
+	return v, unreviewed
 }
 
 // unreadableList withholds the list and keeps both legs on the session: the guard could not tell what

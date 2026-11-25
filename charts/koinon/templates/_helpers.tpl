@@ -302,18 +302,31 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- end }}
 
 {{/*
-The URL koinon-api uses for its live check of an agent's MCP tools. An agent still reaches MCP through
-agentgateway while the driver is koinon (ADR 0097), so the check goes to the URL the agent uses, and not
-to koinon-gateway, which serves koinon-api's approved calls (koinon.gatewayMCPURL).
+The URL koinon-api uses for its live check of an agent's MCP tools: the gateway that serves the agents'
+MCP path (koinon.agentMCPURL as koinon-api reaches it). With driver koinon that is koinon-gateway
+(koinon.gatewayMCPURL); with agentgateway it is agentgateway's /mcp (ADR 0097 decision 5, #1239).
 */}}
 {{- define "koinon.gatewayMCPCheckURL" -}}
-{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- include "koinon.gatewayMCPURL" . -}}
+{{- end }}
+
+{{/*
+The MCP URL an agent's harness gets (koinon-agentd's KOINON_AGENT_MCP_URL). Only with driver koinon:
+koinon-gateway's /mcp. With agentgateway the chart sets nothing, and koinon-agentd uses <KOINON_GATEWAY_URL>/mcp
+as before (agentd.gatewayURL can name another agentgateway address). The model path (/v1) stays on
+agentgateway in both cases.
+*/}}
+{{- define "koinon.agentMCPURL" -}}
+{{- if include "koinon.mcpKoinon" . -}}
+{{- include "koinon.gatewayMCPURL" . -}}
+{{- end -}}
 {{- end }}
 
 {{/*
 The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
 mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
-(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both while agents reach MCP through it.
+(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both (it serves MCP with the agentgateway driver,
+and with either driver its config keeps the MCP targets whose credential it can open).
 */}}
 {{- define "koinon.gatewayMCPKeysName" -}}
 {{- include "koinon.componentName" (list . "gateway-mcp-keys") }}
@@ -399,7 +412,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ include "koinon.gatewayMCPURL" . | quote }}
-# The live check of an agent's MCP tools uses the MCP URL the agent uses: agentgateway's, also when koinon-gateway serves the approved calls.
+# The live check of an agent's MCP tools uses the gateway the agents use: koinon-gateway with driver koinon, else agentgateway.
 - name: KOINON_GATEWAY_MCP_CHECK_URL
   value: {{ include "koinon.gatewayMCPCheckURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
@@ -407,8 +420,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ .Values.gateway.mode | quote }}
 {{- if include "koinon.mcpKoinon" . }}
 # koinon-api seals a stored MCP credential to the gateway's public key once a key is active (ADR 0097 decision
-# 12.5 step 0). With agentgateway it seals v1, which agentgateway can read. agentgateway still serves the
-# agents' MCP path with this driver and leaves a sealed target out of its config (see the ADR known limits).
+# 12.5 step 0). With this driver koinon-gateway serves every MCP path of the agents and of koinon-api, and
+# opens v2. With agentgateway koinon-api seals v1, which agentgateway can read. agentgateway leaves a sealed
+# target out of its config; with this driver the reconciler's MCP prober lists tools through koinon-gateway.
 - name: KOINON_GATEWAY_MCP_SEAL_V2
   value: "true"
 # Sealing starts only when this many pods of every component report that they read the sealed format
@@ -1548,6 +1562,11 @@ it carries no credentials.
 {{- end }}
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with include "koinon.agentMCPURL" . }}
+{{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}
+- name: KOINON_AGENT_MCP_URL
   value: {{ . | quote }}
 {{- end }}
 - name: KOINON_WORKERS

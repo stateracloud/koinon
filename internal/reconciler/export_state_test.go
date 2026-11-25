@@ -9,4 +9,6 @@ import (
 )
 
 // PublishState runs the State stream publish of one pass on s.
-func (r *Reconciler) PublishState(ctx context.Context, s gateway.State) { r.publishState(ctx, s) }
+func (r *Reconciler) PublishState(ctx context.Context, s gateway.State) {
+	_, _ = r.publishState(ctx, s)
+}

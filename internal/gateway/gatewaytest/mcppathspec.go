@@ -24,6 +24,7 @@ func RegisterMCP(env Env) {
 	mcpPathSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
+	readyPromptSpec(env)
 	guardSpec(env)
 	leakCanarySpec(env)
 	mcpKindSpec(env)

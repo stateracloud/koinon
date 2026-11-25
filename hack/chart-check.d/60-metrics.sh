@@ -25,7 +25,7 @@ gwsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /app
 [ "$gwsvc" = "1 1" ] || fail "Services matching the gateway ServiceMonitor (count, of which the gateway Service with a stats port): $gwsvc, want 1 1"
 gwsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: gateway\n/ {n++} END{print n+0}')
 [ "$gwsel" = 1 ] || fail "gateway ServiceMonitor must select app.kubernetes.io/component=gateway"
-smk=("${sm[@]}" --set gateway.mode=kubernetes)
+smk=("${sm[@]}" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway)
 lacks "no PodMonitor in standalone mode" 'kind: PodMonitor' "${sm[@]}"
 pm=(--api-versions monitoring.coreos.com/v1/PodMonitor)
 n=$(render "${smk[@]}" "${pm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
@@ -35,7 +35,7 @@ n=$(render "${smk[@]}" "${pm[@]}" | grep -c '^kind: PodMonitor$' || true)
 has "PodMonitor selects the proxy pods" 'gateway.networking.k8s.io/gateway-name: koinon-gateway$' "${smk[@]}" "${pm[@]}" --show-only templates/metrics.yaml
 has "PodMonitor scrapes the stats port" 'portNumber: 15020$' "${smk[@]}" "${pm[@]}" --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
 if render "${smk[@]}" >/dev/null 2>&1; then fail "kubernetes mode with the ServiceMonitor CRD but no PodMonitor CRD must fail"; fi
-n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true --set gateway.mode=kubernetes | grep -c '^kind: PodMonitor$' || true)
+n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway | grep -c '^kind: PodMonitor$' || true)
 [ "$n" = 1 ] || fail "$n PodMonitors with skipCapabilityCheck, want 1"
 has "ServiceMonitor interval and labels" 'interval: "30s"' "${sm[@]}" --set metrics.serviceMonitor.interval=30s --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
 has "ServiceMonitor extra labels" 'release: prom$' "${sm[@]}" --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml

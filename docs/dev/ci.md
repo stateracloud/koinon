@@ -228,7 +228,9 @@ not see what the chart really passes (old issue 284).
 
 The sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`) is tested by the
 escape suite: `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`
-(`make test-admission`). Its OpenShell cases run in two places on kind:
+(`make test-admission`). The Substrate qualification of an isolation tier (issue #1092) needs a cluster with
+Agent Substrate and is not in CI: [escape-substrate.md](escape-substrate.md) (`make test-escape-substrate`).
+The OpenShell cases of the suite run in two places on kind:
 
 - **In the kind e2e** (#109), against the chart install, where `sandboxPolicy` is enabled
   (`test/e2e/kind/koinon-values.yaml`): `run.sh` calls `test/e2e/escape-openshell.sh` after the Go driver

@@ -77,6 +77,22 @@ func eventOf(evs []store.RunEvent, kind string) []store.RunEvent {
 }
 
 var _ = Describe("Pool", func() {
+	// gateway.mcp.driver=koinon (ADR 0097 decision 5, #1239): the harness gets koinon-gateway's MCP URL,
+	// and the model path stays on agentgateway.
+	It("hands the harness the MCP URL of its own setting, and the model URL of the gateway URL", func(ctx SpecContext) {
+		const mcpURL = "http://koinon-mcp-gateway.koinon.test:8080/mcp"
+		e := newEnv(ctx, harness.OpenCode)
+		t := e.task(ctx, markPermit+" please")
+		r := e.enqueue(ctx, t)
+		e.pool("agentd-mcp", func(c *agentd.Config) { c.MCPURL = mcpURL })
+
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(HaveLen(1))
+		Expect(args[0]).To(ContainElements("--model-base-url", gatewayURL+"/v1", "--mcp-url", mcpURL))
+		Expect(args[0]).NotTo(ContainElement(gatewayURL + "/mcp"))
+	})
+
 	It("drives a task's first run: new session, prompt, updates, permissions, end_turn", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, markPermit+" please")
@@ -929,6 +945,15 @@ var _ = Describe("New", func() {
 		Expect(err).To(HaveOccurred())
 		_, err = agentd.New(db, nil, agentd.Config{OwnerID: "x", GatewayURL: "gw:8080"})
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("refuses an MCP URL with credentials or without a scheme", func() {
+		_, err := agentd.New(db, nil, agentd.Config{OwnerID: "x", GatewayURL: gatewayURL, MCPURL: "http://user:pw@mcp:8080/mcp"})
+		Expect(err).To(MatchError(ContainSubstring("MCPURL must not carry user info")))
+		_, err = agentd.New(db, nil, agentd.Config{OwnerID: "x", GatewayURL: gatewayURL, MCPURL: "http://mcp:8080/mcp#k"})
+		Expect(err).To(MatchError(ContainSubstring("MCPURL")))
+		_, err = agentd.New(db, nil, agentd.Config{OwnerID: "x", GatewayURL: gatewayURL, MCPURL: "mcp:8080/mcp"})
+		Expect(err).To(MatchError(ContainSubstring("MCPURL must be an http or https URL")))
 	})
 
 	It("wants a checkpoint Timeout shorter than the checkpoint Lease", func() {

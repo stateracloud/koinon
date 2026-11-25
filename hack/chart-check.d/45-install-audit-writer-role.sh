@@ -56,7 +56,9 @@ lacks "an external database render has no CNPG group role" 'koinon_install_audit
 # CNPG creates the group role only after the pre-upgrade migrate Job, so a post-upgrade hook (Argo CD:
 # PostSync) runs `koinon-api migrate --grants-only` as the migration role and waits for the role.
 grants=(--show-only templates/install-audit-grants.yaml)
-g=$(render "${grants[@]}")
+# The agentgateway MCP driver: with the koinon driver (the default) the hook also waits for the gateway role
+# (53-koinon-mcp-gateway.sh).
+g=$(render "${grants[@]}" --set gateway.mcp.driver=agentgateway)
 for want in \
 	'^    helm\.sh/hook: post-upgrade$' \
 	'^    helm\.sh/hook-delete-policy: before-hook-creation,hook-succeeded$' \
