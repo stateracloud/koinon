@@ -10100,9 +10100,28 @@
     {
       "name": "koinon.gateway.v1alpha1",
       "files": [
+        "koinon/gateway/v1alpha1/approval.proto",
         "koinon/gateway/v1alpha1/state.proto"
       ],
       "services": [
+        {
+          "name": "GatewayApprovalService",
+          "fullName": "koinon.gateway.v1alpha1.GatewayApprovalService",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "GatewayApprovalService is the approval route of Koinon's own gateway (ADR 0097 decision 2.3, #1301):\nwhen the leak guard in koinon-gateway holds a call for a person, the gateway asks koinon-api to record\nthe ADR 0042 approval of that exact call. koinon-api owns the approval tables; the gateway's database\nlogin has no right on them. It is internal: only a gateway copy calls it, on the listener of the State\nstream and with the same token.\n\nkoinon-api does not trust the names in the request: it reads the org, the agent, the server, the\nagent's allowance and the published tool itself, and refuses a call that does not match them.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "RequestApproval",
+              "description": "RequestApproval records the approval request for exactly this call, or returns the one already\nrecorded for the same call in the same run. The gateway refuses the call with the returned text\n(the agent reads \"approval requested: id=...\"); Koinon's executor sends it once a person approves.\nAny error fails the call closed.",
+              "requestType": "koinon.gateway.v1alpha1.RequestApprovalRequest",
+              "responseType": "koinon.gateway.v1alpha1.RequestApprovalResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        },
         {
           "name": "GatewayStateService",
           "fullName": "koinon.gateway.v1alpha1.GatewayStateService",
@@ -11127,6 +11146,87 @@
               "oneof": "",
               "deprecated": false,
               "description": "agents are the names of the Koinon agents that may call this remote agent."
+            }
+          ]
+        },
+        {
+          "name": "RequestApprovalRequest",
+          "fullName": "koinon.gateway.v1alpha1.RequestApprovalRequest",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug of the calling agent, as the agent identity names it."
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent_id is the calling agent's id (a UUID)."
+            },
+            {
+              "name": "server_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "server_id is the id (a UUID) of the org's MCP server that the call addresses."
+            },
+            {
+              "name": "tool",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool is the name of the published tool."
+            },
+            {
+              "name": "arguments",
+              "number": 5,
+              "type": "bytes",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "arguments is the call's JSON arguments object, as the agent sent it."
+            },
+            {
+              "name": "risk",
+              "number": 6,
+              "type": "bytes",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "risk is the leak guard's reading of the call as a JSON object (reasons, sink class, destination,\nlegs, match): what the approval card shows. It never holds a credential."
+            }
+          ]
+        },
+        {
+          "name": "RequestApprovalResponse",
+          "fullName": "koinon.gateway.v1alpha1.RequestApprovalResponse",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "text",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "text is what the agent reads, for example \"approval requested: id=...\"."
             }
           ]
         },

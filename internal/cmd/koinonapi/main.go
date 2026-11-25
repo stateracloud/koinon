@@ -74,6 +74,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
+	"github.com/stateracloud/koinon/internal/gateway/approvalroute"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
@@ -959,9 +960,18 @@ func serve(ctx context.Context, cfg config) error {
 			return err
 		}
 		safego.Go(bgCtx, slog.Default(), "gateway-state-stream", stateSrv.Run)
+		// The approval route of Koinon's gateway (#1301): the leak guard in koinon-gateway asks here for the
+		// approval of a call it holds for a person. koinon-api records it with the agentgateway path's code;
+		// the gateway's database login has no right on approvals. Same listener and token as the stream.
+		approvalSrv, err := approvalroute.NewServer(approvalroute.ServerConfig{
+			DB: pool, Approve: asm.Ask.RequestApproval, Auth: gwAuth, Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), traceRouter.Mount()); err != nil {
+			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), approvalSrv.Mount(), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

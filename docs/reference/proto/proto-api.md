@@ -2420,7 +2420,22 @@ Tier is a scope's risk tier (ADR 0008).
 
 ## koinon.gateway.v1alpha1
 
-Files: `koinon/gateway/v1alpha1/state.proto`
+Files: `koinon/gateway/v1alpha1/approval.proto`, `koinon/gateway/v1alpha1/state.proto`
+
+### Service GatewayApprovalService
+
+GatewayApprovalService is the approval route of Koinon's own gateway (ADR 0097 decision 2.3, #1301):
+when the leak guard in koinon-gateway holds a call for a person, the gateway asks koinon-api to record
+the ADR 0042 approval of that exact call. koinon-api owns the approval tables; the gateway's database
+login has no right on them. It is internal: only a gateway copy calls it, on the listener of the State
+stream and with the same token.
+
+koinon-api does not trust the names in the request: it reads the org, the agent, the server, the
+agent's allowance and the published tool itself, and refuses a call that does not match them.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| RequestApproval | `koinon.gateway.v1alpha1.RequestApprovalRequest` | `koinon.gateway.v1alpha1.RequestApprovalResponse` | - | RequestApproval records the approval request for exactly this call, or returns the one already recorded for the same call in the same run. The gateway refuses the call with the returned text (the agent reads "approval requested: id=..."); Koinon's executor sends it once a person approves. Any error fails the call closed. |
 
 ### Service GatewayStateService
 
@@ -2648,6 +2663,23 @@ RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decis
 | insecure_skip_verify | 8 | `bool` | singular |  |  |
 | card_hash | 9 | `string` | singular |  | card_hash is the pin: the SHA-256 of the canonical agent card, in hex. |
 | agents | 10 | `string` | repeated |  | agents are the names of the Koinon agents that may call this remote agent. |
+
+### Message RequestApprovalRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  | org is the org slug of the calling agent, as the agent identity names it. |
+| agent_id | 2 | `string` | singular |  | agent_id is the calling agent's id (a UUID). |
+| server_id | 3 | `string` | singular |  | server_id is the id (a UUID) of the org's MCP server that the call addresses. |
+| tool | 4 | `string` | singular |  | tool is the name of the published tool. |
+| arguments | 5 | `bytes` | singular |  | arguments is the call's JSON arguments object, as the agent sent it. |
+| risk | 6 | `bytes` | singular |  | risk is the leak guard's reading of the call as a JSON object (reasons, sink class, destination, legs, match): what the approval card shows. It never holds a credential. |
+
+### Message RequestApprovalResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| text | 1 | `string` | singular |  | text is what the agent reads, for example "approval requested: id=...". |
 
 ### Message StateUpdate
 
