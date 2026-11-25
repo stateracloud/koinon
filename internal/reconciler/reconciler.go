@@ -554,6 +554,17 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	return err
 }
 
+// Close stops the pending key-settle wake-ups (notifySelf, #249) and keeps later passes from
+// scheduling more. Each one is a timer that sends a NOTIFY on the shared reconcile channel
+// ProviderKeySettle after a pass wrote a key file, so a reconciler that is dropped without Close
+// wakes whichever leader holds the lock then, long after its own work ended (#1074). Run calls it
+// when it returns; a caller that only uses ReconcileAll calls it when it is done. Close is safe to
+// call more than once, and a pass after it still converges: the next wake-up or resync picks up
+// the end of a settle.
+func (r *Reconciler) Close() {
+	r.plan.Close()
+}
+
 // reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
 // A pass loads the state, runs the gateway step (plan, Apply, recordServed) and hands each agent's
 // sandbox work to q; it does not wait for that work. The returned batch holds the work of this pass.
