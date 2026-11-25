@@ -17,10 +17,13 @@ package stateserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,9 +69,10 @@ type Store interface {
 // store has it; a Store without it records nothing.
 type CopyTracker interface {
 	// Touch says the copy holds a stream now. It is called at connect and at the poll interval.
-	Touch(ctx context.Context, copyID string) error
-	// Forget says the copy's stream ended.
-	Forget(ctx context.Context, copyID string) error
+	// streamID names this stream; servesMCP says whether the copy acks the MCP half.
+	Touch(ctx context.Context, copyID, streamID string, servesMCP bool) error
+	// Forget says the stream ended; the copy stays if it reconnected on another stream.
+	Forget(ctx context.Context, copyID, streamID string) error
 }
 
 // NewPGStore returns the Store over the gateway_state_* tables.
@@ -89,12 +93,12 @@ func (s pgStore) Ack(ctx context.Context, copyID string, revision int64, half gw
 	return err
 }
 
-func (s pgStore) Touch(ctx context.Context, copyID string) error {
-	return staterev.TouchCopy(ctx, s.db, copyID)
+func (s pgStore) Touch(ctx context.Context, copyID, streamID string, servesMCP bool) error {
+	return staterev.TouchCopy(ctx, s.db, copyID, streamID, servesMCP)
 }
 
-func (s pgStore) Forget(ctx context.Context, copyID string) error {
-	return staterev.ForgetCopy(ctx, s.db, copyID)
+func (s pgStore) Forget(ctx context.Context, copyID, streamID string) error {
+	return staterev.ForgetCopy(ctx, s.db, copyID, streamID)
 }
 
 // PoolNotify returns a Config.Notify that LISTENs on the publish channel over a connection taken out
@@ -305,15 +309,19 @@ func (h rpcHandler) StreamState(ctx context.Context, req *gwv1.StreamStateReques
 	touch := func() {}
 	var beat <-chan time.Time
 	if tr, ok := s.cfg.Store.(CopyTracker); ok {
+		var nonce [12]byte
+		_, _ = rand.Read(nonce[:])
+		streamID := hex.EncodeToString(nonce[:])
+		servesMCP := len(req.GetHalves()) == 0 || slices.Contains(req.GetHalves(), gwv1.Half_HALF_MCP)
 		touch = func() {
-			if err := tr.Touch(ctx, req.GetCopyId()); err != nil && ctx.Err() == nil {
+			if err := tr.Touch(ctx, req.GetCopyId(), streamID, servesMCP); err != nil && ctx.Err() == nil {
 				s.log.Warn("recording a live gateway copy failed", "err", err)
 			}
 		}
 		defer func() {
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			if err := tr.Forget(fctx, req.GetCopyId()); err != nil {
+			if err := tr.Forget(fctx, req.GetCopyId(), streamID); err != nil {
 				s.log.Warn("removing a live gateway copy failed; it goes stale on its own", "err", err)
 			}
 		}()

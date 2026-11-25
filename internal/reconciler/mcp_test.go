@@ -456,11 +456,11 @@ var _ = Describe("Org MCP servers", func() {
 				DeferCleanup(g.stop)
 				copies := []string{"koinon-gateway-a/boot1", "koinon-gateway-b/boot1"}
 				for _, c := range copies {
-					Expect(staterev.TouchCopy(ctx, pool, c)).To(Succeed())
+					Expect(staterev.TouchCopy(ctx, pool, c, "test-stream", true)).To(Succeed())
 				}
 				DeferCleanup(func() {
 					for _, c := range copies {
-						_ = staterev.ForgetCopy(context.Background(), pool, c)
+						_ = staterev.ForgetCopy(context.Background(), pool, c, "test-stream")
 					}
 				})
 				rr := probing(ctx, g.host, g.port, fast)
@@ -488,8 +488,8 @@ var _ = Describe("Org MCP servers", func() {
 				g := newKeyedGW(slug+"-wiki", "read")
 				DeferCleanup(g.stop)
 				const copyID = "koinon-gateway-a/boot2"
-				Expect(staterev.TouchCopy(ctx, pool, copyID)).To(Succeed())
-				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID) })
+				Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
 				// The first reconciler stored the revision and then went away before any probe.
 				first := probing(ctx, g.host, g.port, fast)
 				Expect(first.ReconcileAll(ctx)).To(Succeed())
@@ -510,6 +510,19 @@ var _ = Describe("Org MCP servers", func() {
 				Expect(g.refused.Load()).To(BeZero())
 			})
 
+			It("does not wait for a live copy that serves only the model half", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				g.keyed.Store(true)
+				DeferCleanup(g.stop)
+				Expect(staterev.TouchCopy(ctx, pool, "model-only/boot1", "test-stream", false)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "model-only/boot1", "test-stream") })
+				rr := probing(ctx, g.host, g.port, fast)
+				runProber(rr)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+			})
+
 			It("ignores a copy that stopped touching its row: only live copies must ack", func(ctx SpecContext) {
 				s := server(ctx, org, "wiki", "", nil)
 				g := newKeyedGW(slug+"-wiki", "read")
@@ -518,7 +531,7 @@ var _ = Describe("Org MCP servers", func() {
 				// A copy that died: its row is old. It never acks, and must not hold the probe.
 				_, err := pool.Exec(ctx, "INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ('dead/boot0', now() - interval '10 minutes')")
 				Expect(err).NotTo(HaveOccurred())
-				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "dead/boot0") })
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "dead/boot0", "") })
 				rr := probing(ctx, g.host, g.port, fast)
 				runProber(rr)
 				Expect(rr.ReconcileAll(ctx)).To(Succeed())

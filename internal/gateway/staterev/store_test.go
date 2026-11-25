@@ -206,19 +206,30 @@ var _ = Describe("Publisher and acks", Ordered, func() {
 
 	Describe("live copies", func() {
 		It("lists a copy that touched its row, drops one that is stale or ended, and one touch is one row", func(ctx SpecContext) {
-			Expect(staterev.TouchCopy(ctx, pool, "copy-1")).To(Succeed())
-			Expect(staterev.TouchCopy(ctx, pool, "copy-1")).To(Succeed())
-			Expect(staterev.TouchCopy(ctx, pool, "copy-2")).To(Succeed())
-			Expect(staterev.TouchCopy(ctx, pool, "")).NotTo(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1", "s1", true)).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1", "s1", true)).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-2", "s2", true)).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-model", "s3", false)).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "", "s", true)).NotTo(Succeed())
 			_, err := pool.Exec(ctx, "INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ('copy-old', now() - interval '5 minutes')")
 			Expect(err).NotTo(HaveOccurred())
-			live, err := staterev.LiveCopies(ctx, pool, 0)
+			live, err := staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MODEL)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(live).To(Equal([]string{"copy-1", "copy-2"}))
+			Expect(live).To(Equal([]string{"copy-1", "copy-2", "copy-model"}))
+			live, _ = staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MCP)
+			Expect(live).To(Equal([]string{"copy-1", "copy-2"}), "a copy that does not serve MCP is not asked for its MCP ack")
 
-			Expect(staterev.ForgetCopy(ctx, pool, "copy-1")).To(Succeed())
-			live, _ = staterev.LiveCopies(ctx, pool, 0)
+			Expect(staterev.ForgetCopy(ctx, pool, "copy-1", "s1")).To(Succeed())
+			live, _ = staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MCP)
 			Expect(live).To(Equal([]string{"copy-2"}))
+		})
+
+		It("keeps a copy that reconnected when its old stream ends", func(ctx SpecContext) {
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1", "old", true)).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1", "new", true)).To(Succeed())
+			Expect(staterev.ForgetCopy(ctx, pool, "copy-1", "old")).To(Succeed())
+			live, _ := staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MCP)
+			Expect(live).To(Equal([]string{"copy-1"}))
 		})
 	})
 

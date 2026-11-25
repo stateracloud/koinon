@@ -2099,8 +2099,10 @@ type GatewayStateAck struct {
 }
 
 type GatewayStateCopy struct {
-	CopyID   string
-	LastSeen pgtype.Timestamptz
+	CopyID    string
+	LastSeen  pgtype.Timestamptz
+	ServesMcp bool
+	StreamID  string
 }
 
 type GatewayStateRevision struct {

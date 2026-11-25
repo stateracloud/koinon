@@ -45,16 +45,19 @@ VALUES (@org_slug, @agent, @target, @tool, @outcome, @verdict, @credential_kind,
 
 -- name: TouchGatewayStateCopy :exec
 -- A gateway copy holds the State stream open: it is live now.
-INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES (@copy_id, now())
-ON CONFLICT (copy_id) DO UPDATE SET last_seen = now();
+INSERT INTO gateway_state_copies (copy_id, last_seen, serves_mcp, stream_id) VALUES (@copy_id, now(), @serves_mcp, @stream_id)
+ON CONFLICT (copy_id) DO UPDATE SET last_seen = now(), serves_mcp = EXCLUDED.serves_mcp, stream_id = EXCLUDED.stream_id;
 
 -- name: DeleteGatewayStateCopy :exec
-DELETE FROM gateway_state_copies WHERE copy_id = @copy_id;
+-- Only the stream that touched the row last removes it.
+DELETE FROM gateway_state_copies WHERE copy_id = @copy_id AND stream_id = @stream_id;
 
 -- name: ListLiveGatewayStateCopies :many
 -- The copies seen within @max_age_seconds (the database clock, so replicas need no common clock).
+-- With @mcp_only, only the copies that serve the MCP half.
 SELECT copy_id FROM gateway_state_copies
 WHERE last_seen > now() - make_interval(secs => @max_age_seconds::int)
+  AND (NOT @mcp_only::bool OR serves_mcp)
 ORDER BY copy_id;
 
 -- name: PruneGatewayStateCopies :execrows

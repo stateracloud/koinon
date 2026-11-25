@@ -304,11 +304,9 @@ type Reconciler struct {
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
-	probeMu  sync.Mutex
-	probeDue []gatewayplan.Probe
-	// probeDueRev is the highest State revision whose MCP half the queued probes wait for (0: none).
-	probeDueRev int64
-	probeWake   chan struct{}
+	probeMu   sync.Mutex
+	probeDue  []dueProbe
+	probeWake chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time

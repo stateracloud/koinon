@@ -47,11 +47,17 @@ func (q *Queries) CountGatewayCopiesAcked(ctx context.Context, arg CountGatewayC
 }
 
 const deleteGatewayStateCopy = `-- name: DeleteGatewayStateCopy :exec
-DELETE FROM gateway_state_copies WHERE copy_id = $1
+DELETE FROM gateway_state_copies WHERE copy_id = $1 AND stream_id = $2
 `
 
-func (q *Queries) DeleteGatewayStateCopy(ctx context.Context, copyID string) error {
-	_, err := q.db.Exec(ctx, deleteGatewayStateCopy, copyID)
+type DeleteGatewayStateCopyParams struct {
+	CopyID   string
+	StreamID string
+}
+
+// Only the stream that touched the row last removes it.
+func (q *Queries) DeleteGatewayStateCopy(ctx context.Context, arg DeleteGatewayStateCopyParams) error {
+	_, err := q.db.Exec(ctx, deleteGatewayStateCopy, arg.CopyID, arg.StreamID)
 	return err
 }
 
@@ -126,12 +132,19 @@ func (q *Queries) InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogPara
 const listLiveGatewayStateCopies = `-- name: ListLiveGatewayStateCopies :many
 SELECT copy_id FROM gateway_state_copies
 WHERE last_seen > now() - make_interval(secs => $1::int)
+  AND (NOT $2::bool OR serves_mcp)
 ORDER BY copy_id
 `
 
+type ListLiveGatewayStateCopiesParams struct {
+	MaxAgeSeconds int32
+	McpOnly       bool
+}
+
 // The copies seen within @max_age_seconds (the database clock, so replicas need no common clock).
-func (q *Queries) ListLiveGatewayStateCopies(ctx context.Context, maxAgeSeconds int32) ([]string, error) {
-	rows, err := q.db.Query(ctx, listLiveGatewayStateCopies, maxAgeSeconds)
+// With @mcp_only, only the copies that serve the MCP half.
+func (q *Queries) ListLiveGatewayStateCopies(ctx context.Context, arg ListLiveGatewayStateCopiesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listLiveGatewayStateCopies, arg.MaxAgeSeconds, arg.McpOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -209,12 +222,18 @@ func (q *Queries) PruneGatewayStateRevisions(ctx context.Context, arg PruneGatew
 }
 
 const touchGatewayStateCopy = `-- name: TouchGatewayStateCopy :exec
-INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ($1, now())
-ON CONFLICT (copy_id) DO UPDATE SET last_seen = now()
+INSERT INTO gateway_state_copies (copy_id, last_seen, serves_mcp, stream_id) VALUES ($1, now(), $2, $3)
+ON CONFLICT (copy_id) DO UPDATE SET last_seen = now(), serves_mcp = EXCLUDED.serves_mcp, stream_id = EXCLUDED.stream_id
 `
 
+type TouchGatewayStateCopyParams struct {
+	CopyID    string
+	ServesMcp bool
+	StreamID  string
+}
+
 // A gateway copy holds the State stream open: it is live now.
-func (q *Queries) TouchGatewayStateCopy(ctx context.Context, copyID string) error {
-	_, err := q.db.Exec(ctx, touchGatewayStateCopy, copyID)
+func (q *Queries) TouchGatewayStateCopy(ctx context.Context, arg TouchGatewayStateCopyParams) error {
+	_, err := q.db.Exec(ctx, touchGatewayStateCopy, arg.CopyID, arg.ServesMcp, arg.StreamID)
 	return err
 }

@@ -178,17 +178,20 @@ var _ = Describe("the gateway State stream", Ordered, func() {
 		_, c, _ := serve(stateserver.Config{PollInterval: 50 * time.Millisecond})
 		sctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		st, err := c.StreamState(sctx, &gwv1.StreamStateRequest{CopyId: "copy-live"})
+		st, err := c.StreamState(sctx, &gwv1.StreamStateRequest{CopyId: "copy-live", Halves: []gwv1.Half{gwv1.Half_HALF_MODEL}})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(st.Close)
 		_, err = receive(ctx, st)
 		Expect(err).NotTo(HaveOccurred())
 		live := func() []string {
-			ids, err := staterev.LiveCopies(ctx, pool, 0)
+			ids, err := staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MODEL)
 			Expect(err).NotTo(HaveOccurred())
 			return ids
 		}
 		Eventually(live).WithTimeout(5 * time.Second).Should(Equal([]string{"copy-live"}))
+		mcpLive, err := staterev.LiveCopies(ctx, pool, 0, gwv1.Half_HALF_MCP)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mcpLive).To(BeEmpty(), "a copy that serves only the model half is not asked to ack the MCP half")
 		// The beat keeps last_seen moving while the stream is open.
 		var first, later time.Time
 		Expect(pool.QueryRow(ctx, "SELECT last_seen FROM gateway_state_copies WHERE copy_id = 'copy-live'").Scan(&first)).To(Succeed())
