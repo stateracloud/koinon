@@ -364,7 +364,10 @@ does today, no more (model path at parity, below).
   MCP path sets an equivalent, Koinon-named header after the key check, and NetworkPolicy keeps the tool
   servers reachable only from the gateway. Without it the tools break when the default driver changes.
 - **An org's MCP server gets no agent header** (maintainer decision 2026-11-24, #1235). Koinon's MCP path
-  sets the agent header only on a platform target (Koinon's own tool servers, `Org ""`;
+  sets the agent header only on Koinon's own services: a platform target (Koinon's own tool servers, `Org ""`)
+  and an ask target (Koinon's approval proxy for the ask-tier tools of an org's server, `internal/mcpask`;
+  #1315). The gateway plan alone marks an ask target (`MCPTarget.Ask`); it keeps the org, for org scoping and
+  tool pins, and carries no credential (`gateway.MCPTarget.TrustsAgentHeader`,
   `internal/mcpgateway/credential.go`). It never sends it to a server an org registered, and there is no
   opt-in for it. An org's server trusts nothing of Koinon's, and the agent ID is internal data. A plain
   header can be forged: server owners would build access checks on it, and a signed credential later

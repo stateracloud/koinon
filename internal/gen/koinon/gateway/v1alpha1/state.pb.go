@@ -1156,6 +1156,9 @@ type MCPTarget struct {
 	RemoteAgents []*RemoteAgent `protobuf:"bytes,11,rep,name=remote_agents,json=remoteAgents,proto3" json:"remote_agents,omitempty"`
 	// handle_key_file holds the key that signs the task and context handles of the built-in target.
 	HandleKeyFile string `protobuf:"bytes,12,opt,name=handle_key_file,json=handleKeyFile,proto3" json:"handle_key_file,omitempty"`
+	// ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask).
+	// The gateway sends it the agent header; an org's own server never gets that header.
+	Ask           bool `protobuf:"varint,13,opt,name=ask,proto3" json:"ask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1272,6 +1275,13 @@ func (x *MCPTarget) GetHandleKeyFile() string {
 		return x.HandleKeyFile
 	}
 	return ""
+}
+
+func (x *MCPTarget) GetAsk() bool {
+	if x != nil {
+		return x.Ask
+	}
+	return false
 }
 
 // RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
@@ -1900,7 +1910,7 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x06models\x18\x02 \x03(\tR\x06models\"\x83\x01\n" +
 	"\bMCPState\x12<\n" +
 	"\atargets\x18\x01 \x03(\v2\".koinon.gateway.v1alpha1.MCPTargetR\atargets\x129\n" +
-	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xb0\x03\n" +
+	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xc2\x03\n" +
 	"\tMCPTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x10\n" +
@@ -1914,7 +1924,8 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\abuiltin\x18\n" +
 	" \x01(\tR\abuiltin\x12I\n" +
 	"\rremote_agents\x18\v \x03(\v2$.koinon.gateway.v1alpha1.RemoteAgentR\fremoteAgents\x12&\n" +
-	"\x0fhandle_key_file\x18\f \x01(\tR\rhandleKeyFile\"\xcf\x02\n" +
+	"\x0fhandle_key_file\x18\f \x01(\tR\rhandleKeyFile\x12\x10\n" +
+	"\x03ask\x18\r \x01(\bR\x03ask\"\xcf\x02\n" +
 	"\vRemoteAgent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x19\n" +

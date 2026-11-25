@@ -2573,6 +2573,7 @@ where the target's own CA bundle (public certificates) is mounted, empty for the
 | builtin | 10 | `string` | singular |  | builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123). |
 | remote_agents | 11 | `koinon.gateway.v1alpha1.RemoteAgent` | repeated |  |  |
 | handle_key_file | 12 | `string` | singular |  | handle_key_file holds the key that signs the task and context handles of the built-in target. |
+| ask | 13 | `bool` | singular |  | ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask). The gateway sends it the agent header; an org's own server never gets that header. |
 
 ### Message Model
 
