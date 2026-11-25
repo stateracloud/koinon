@@ -392,6 +392,10 @@ snapshot store. The kopia checkpoint path on Substrate is a lab trial that the m
   link's target; no times and no owners) and records it in `home_checkpoints.content_digest`
   (migration 00109). Koinon's database holds the record, so a write to the bucket cannot change the
   record too.
+- The writer is not root, and kopia skips a file that its owner cannot read. So the writer first adds the
+  owner read bit to every staged file (and the read and search bits to every directory): a file that its
+  owner cannot read is restored with the owner read bit set. If kopia still skips or cannot read an entry,
+  the checkpoint fails with an error that names the path, and no digest is recorded.
 - A restore stages the snapshot, recomputes the digest and compares it with the record. A mismatch
   returns `checkpoint.ErrDigestMismatch` before the first byte goes into the sandbox. The restore then
   follows the rules of HC1: it tries the next older checkpoint, and when none restores, the run fails and

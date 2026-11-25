@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kopia/kopia/fs/localfs"
@@ -189,7 +190,7 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 	// The writer is not root: kopia skips, without an error, a file whose owner bits forbid a read.
 	// Make every entry readable first, so that the snapshot keeps the data and the digest below
 	// covers what the snapshot holds.
-	if err := makeReadable(home); err != nil {
+	if err := prepareHome(home); err != nil {
 		return Result{}, fmt.Errorf("reading the home: %w", err)
 	}
 	digest, err := TreeDigest(home)
@@ -229,6 +230,11 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		}
 		if man.IncompleteReason != "" {
 			return fmt.Errorf("the snapshot is incomplete: %s", man.IncompleteReason)
+		}
+		// A checkpoint must not lose data without a signal: an entry that kopia skipped or could not
+		// read fails it, and no snapshot is saved, so no digest is recorded.
+		if err := skippedEntries(man); err != nil {
+			return err
 		}
 		man.Tags = m.tags()
 		if id, err = snapshot.SaveSnapshot(ctx, wr, man); err != nil {
@@ -404,8 +410,33 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 	return repo.Open(ctx, cfg, password, nil)
 }
 
+// prepareHome is makeReadable; a test replaces it.
+var prepareHome = makeReadable
+
+// skippedEntries returns an error that names the entries kopia could not read or skipped on an error.
+func skippedEntries(man *snapshot.Manifest) error {
+	if man.RootEntry == nil || man.RootEntry.DirSummary == nil {
+		return nil
+	}
+	ds := man.RootEntry.DirSummary
+	if ds.FatalErrorCount+ds.IgnoredErrorCount == 0 {
+		return nil
+	}
+	var paths []string
+	for _, e := range ds.FailedEntries {
+		paths = append(paths, fmt.Sprintf("%q (%s)", e.EntryPath, e.Error))
+	}
+	return fmt.Errorf("the checkpoint is not saved: kopia could not read %d entries of the home: %s",
+		ds.FatalErrorCount+ds.IgnoredErrorCount, strings.Join(paths, ", "))
+}
+
 // makeReadable adds the owner's read bit to files and the read and search bits to directories.
 func makeReadable(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -423,10 +454,15 @@ func makeReadable(dir string) error {
 		default:
 			return nil
 		}
-		if mode := info.Mode().Perm(); mode&add != add {
-			return os.Chmod(p, mode|add)
+		mode := info.Mode().Perm()
+		if mode&add == add {
+			return nil
 		}
-		return nil
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		return root.Chmod(rel, mode|add)
 	})
 }
 

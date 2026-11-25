@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	kfs "github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/object"
 	. "github.com/onsi/ginkgo/v2"
@@ -130,6 +131,26 @@ var _ = Describe("Writer", func() {
 			names[hd.Name] = true
 		}
 		Expect(names).To(HaveKey("secret.txt"))
+	})
+
+	It("names the entries kopia could not read (issue #1090)", func() {
+		Expect(checkpoint.SkippedEntries(0, 0)).To(Succeed())
+		err := checkpoint.SkippedEntries(1, 1, kfs.EntryWithError{EntryPath: "locked/secret.txt", Error: "permission denied"})
+		Expect(err).To(MatchError(ContainSubstring("locked/secret.txt")))
+		Expect(err).To(MatchError(ContainSubstring("2 entries")))
+	})
+
+	It("fails the checkpoint, and saves no snapshot, when an entry stays unreadable (issue #1090)", func() {
+		if os.Geteuid() == 0 {
+			Skip("root reads every file, so nothing stays unreadable")
+		}
+		checkpoint.SkipMakeReadable()
+		pw := "koinon_test_not-a-real-token"
+		_, err := w.Backup(ctx, prefix, pw, home(entry{name: "./secret.txt", body: "shh", mode: 0o200}), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).To(MatchError(ContainSubstring("secret.txt")))
+		snaps, err := w.Snapshots(ctx, prefix, pw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(BeEmpty())
 	})
 
 	It("keeps a home that holds a .kopiaignore file or a cache directory marker, and restores it with its digest (issue #1090)", func() {
