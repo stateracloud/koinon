@@ -110,15 +110,7 @@ check "the registry image is pinned by digest" grep -q 'registry:3@sha256:[0-9a-
 # #1350: start checks that host 127.0.0.1:5001 reaches the registry container it just ran.
 check "start opens a marker upload on the host port" grep -q '^curl .*-X POST .*127.0.0.1:5001/v2/koinon-port-check/blobs/uploads/' "$STATE/calls.log"
 check "start reads the marker back through the daemon" grep -q '^docker exec kind-registry ls /var/lib/registry/.*/koinon-port-check/_uploads/' "$STATE/calls.log"
-check "start removes the marker upload" grep -q '^curl .*-X DELETE .*koinon-port-check/blobs/uploads/' "$STATE/calls.log"
-touch "$STATE/otherport"
-t0=$(date +%s)
-if "$reg" start >"$tmp/other.out" 2>&1; then rc=0; else rc=$?; fi
-check "start fails when another registry holds the host port" test "$rc" != 0
-check "the failure names the port and what to check" bash -c "grep -q '127.0.0.1:5001 answers, but it is not the kind-registry container' '$tmp/other.out' && grep -q 'lsof -nP -iTCP:5001' '$tmp/other.out'"
-check "the failure comes in about a second" test "$(( $(date +%s) - t0 ))" -le 3
-rm "$STATE/otherport"
-
+check "start removes the marker upload, with the _state of its Location" grep -q '^curl .*-X DELETE .*koinon-port-check/blobs/uploads/[^ ]*?_state=' "$STATE/calls.log"
 # #956: the containers join the kind network at start, before any push; attach has nothing to connect, because
 # a `docker network connect` in the middle of a push makes the published port refuse it.
 check "start creates the kind network" grep -q '^docker network create .* kind$' "$STATE/calls.log"
@@ -174,6 +166,16 @@ check "stop --force stops them anyway" bash -c "'$reg' stop --force && grep -q '
 rm "$STATE/clusters"
 : >"$STATE/calls.log"
 check "stop with no cluster left removes the registry and the caches" bash -c "'$reg' stop && grep -q '^docker rm -f kind-registry kind-proxy-ghcr-io kind-proxy-registry-k8s-io' '$STATE/calls.log'"
+
+touch "$STATE/otherport"
+rm -f "$STATE/calls.log"
+t0=$(date +%s)
+if "$reg" start >"$tmp/other.out" 2>&1; then rc=0; else rc=$?; fi
+check "start fails when another registry holds the host port" test "$rc" != 0
+check "the failure names the port and what to check" bash -c "grep -q '127.0.0.1:5001 answers, but it is not the kind-registry container' '$tmp/other.out' && grep -q 'lsof -nP -iTCP:5001' '$tmp/other.out'"
+check "the failure comes in about a second" test "$(( $(date +%s) - t0 ))" -le 3
+check "a failed start does not report the registry up" bash -c "! grep -q 'registry: localhost' '$tmp/other.out'"
+rm "$STATE/otherport"
 
 ((fail == 0)) || exit 1
 echo "kind-registry-test: all passed"

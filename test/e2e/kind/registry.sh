@@ -140,7 +140,7 @@ host_reaches_registry() {
     id=${loc##*/}
     id=${id%%\?*}
     if [[ -n $id ]] && docker exec "$REG_NAME" ls "/var/lib/registry/docker/registry/v2/repositories/koinon-port-check/_uploads/$id" >/dev/null 2>&1; then
-      curl -sS --max-time 2 -X DELETE "http://127.0.0.1:${REG_PORT}/v2/koinon-port-check/blobs/uploads/$id" >/dev/null 2>&1 || true
+      curl -sS --max-time 2 -X DELETE "$loc" >/dev/null 2>&1 || true
       return 0
     fi
     sleep 0.2
@@ -168,7 +168,7 @@ cmd_start() {
     if curl -fsS --max-time 2 "http://127.0.0.1:${REG_PORT}/v2/" >/dev/null 2>&1; then
       host_reaches_registry || {
         echo "127.0.0.1:${REG_PORT} answers, but it is not the $REG_NAME container that start just ran. Another process or container runtime holds port ${REG_PORT}, so pushes would go to the wrong registry." >&2
-        echo "Check who holds it (lsof -nP -iTCP:${REG_PORT} -sTCP:LISTEN), stop it, or set KIND_REGISTRY_PORT to a free port and run registry.sh stop --force." >&2
+        echo "Check who holds it (lsof -nP -iTCP:${REG_PORT} -sTCP:LISTEN), stop it, or run registry.sh stop --force (it also stops the registries of other lanes) and then start again with KIND_REGISTRY_PORT=<free port>." >&2
         return 1
       }
       echo "-- registry: localhost:${REG_PORT} up, caches: ${PROXY_HOSTS:-none}: $(( $(date +%s) - t0 ))s"
