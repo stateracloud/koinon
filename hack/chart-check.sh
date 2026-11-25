@@ -76,8 +76,9 @@ for f in "${value_files[@]}"; do
 done
 
 # The shipped defaults must lint and render as they are (driver substrate, #1093): no OpenShell input.
-"$HELM" lint --strict "$CHART" >/dev/null
-"$HELM" template koinon "$CHART" --namespace koinon >"$out/defaults-substrate.yaml"
+# allowUnhardened stays false by default (ADR 0120; docs/dev/guest-launcher.md, Open items): the operator sets it.
+"$HELM" lint --strict "$CHART" --set execution.substrate.allowUnhardened=true >/dev/null
+"$HELM" template koinon "$CHART" --namespace koinon --set execution.substrate.allowUnhardened=true >"$out/defaults-substrate.yaml"
 
 # Assertions on rendered output: render with --set flags, then grep.
 # The default driver is substrate (#1093). The OpenShell assertions keep working until #1094 removes the

@@ -11,13 +11,19 @@ sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=a
 
 # Substrate is the default (#1093): the shipped values render with no flag at all, with the Substrate
 # addresses of a default install, the gvisor pool tier (hardened, never vm) and no OpenShell input.
-default_out=$(render_default)
+# allowUnhardened is false by default and the render names it (the maintainer decides when it goes).
+if render_default >/dev/null 2>"$out/def.err"; then fail "the shipped defaults must not render without allowUnhardened"; fi
+hit 'allowUnhardened' "$out/def.err" || fail "the default-install error must name execution.substrate.allowUnhardened"
+default_out=$(render_default --set execution.substrate.allowUnhardened=true)
 hit 'driver: substrate' <<<"$default_out" || fail "the default driver is substrate"
 hit 'controlAddress: "api.ate-system.svc.cluster.local:443"' <<<"$default_out" || fail "the default control address is the in-cluster ateapi"
 hit 'defaultTier: "hardened"' <<<"$default_out" || fail "the default tier fits the default gvisor pool (not vm)"
 hit -e '- name: gvisor' <<<"$default_out" || fail "the default worker pool is gvisor"
 if hit 'KOINON_OPENSHELL_ADDRESS' <<<"$default_out"; then fail "the default driver gives no OpenShell address to any component"; fi
 if hit -E 'sandbox-default-deny|sandbox-networkpolicy' <<<"$default_out"; then fail "no OpenShell sandbox NetworkPolicy writer with the default driver"; fi
+# OpenShell fails closed: without the default-deny NetworkPolicy writer (ADR 0045) the chart refuses to render.
+if render --set sandboxNetworkPolicy.enabled=false >/dev/null 2>"$out/os.err"; then fail "openshell with sandboxNetworkPolicy off must not render"; fi
+hit 'sandboxNetworkPolicy.enabled=true' "$out/os.err" || fail "the openshell error must name sandboxNetworkPolicy.enabled"
 # The OpenShell driver stays selectable until #1094: it needs its address, TLS choice and three features on.
 # The openshell ci values file (charts/koinon/ci/openshell-values.yaml) keeps the driver in the preflight and smoke renders.
 has "the openshell driver is still selectable" 'driver: openshell' --show-only templates/config.yaml

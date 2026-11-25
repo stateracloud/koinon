@@ -1435,7 +1435,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). Open items that the flag acknowledges are listed in docs/dev/guest-launcher.md (Open items 2, 4 and 7: probe results not recorded, payload runs as root, writable root on the gVisor tiers without Landlock)" }}
 {{- end }}
 {{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
 {{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
@@ -1453,6 +1453,9 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail (printf "%s.enabled acts on OpenShell's namespaces and pods: set it to false with execution.driver=substrate" $k) }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if and (ne (include "koinon.substrate" .) "true") (not .Values.sandboxNetworkPolicy.enabled) .Values.sandboxPolicy.enabled }}
+{{- fail "execution.driver=openshell with sandboxPolicy.enabled needs sandboxNetworkPolicy.enabled=true (and, for the full OpenShell setup, sandboxObserver.enabled=true and sandboxLimitRange.enabled=true): the default-deny NetworkPolicy of ADR 0045 is applied only when it is on. Substrate is the default driver; the three values default to false for it" }}
 {{- end }}
 {{- if and (ne (include "koinon.substrate" .) "true") (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
 {{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}

@@ -28,3 +28,8 @@ harnesses:
       repository: sandbox
       tag: ""
       digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
+execution:
+  substrate:
+    allowUnhardened: true

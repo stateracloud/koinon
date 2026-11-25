@@ -28,7 +28,7 @@ var shards = map[string][]string{
 	},
 	"external": {
 		"checkpoints", "checkpoints-readonly", "external-mcp-koinon", "external-operator-secrets",
-		"external-restore-hold", "substrate",
+		"external-restore-hold", "openshell", "substrate",
 	},
 	"kms": {"kms-awskms", "kms-openbao", "kms-openbao-mcp-koinon"},
 }
