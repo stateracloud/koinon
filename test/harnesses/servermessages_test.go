@@ -3,19 +3,17 @@
 package harnesses_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -274,9 +272,8 @@ wait:
 // koinonGateway is Koinon's MCP gateway (internal/mcpgateway) in this process, as koinon-gateway
 // serves it, with the guard in the process too (ADR 0097 decision 5).
 type koinonGateway struct {
-	srv    *httptest.Server
-	logs   lockedBuffer
-	listed atomic.Bool // the gateway answered an agent's tools/list
+	srv  *httptest.Server
+	logs lockedBuffer
 }
 
 // runKoinonGateway serves s's MCP half on a port that containers reach on host.docker.internal.
@@ -291,14 +288,7 @@ func runKoinonGateway(ctx context.Context, s kgateway.State, guard mcpgateway.Gu
 	Expect(err).NotTo(HaveOccurred())
 	inner := gw.Handler()
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		inner.ServeHTTP(w, r)
-		if bytes.Contains(body, []byte(`"tools/list"`)) {
-			k.listed.Store(true)
-		}
-	}))
+	mux.Handle("/mcp", inner)
 	var lc net.ListenConfig
 	l, err := lc.Listen(ctx, "tcp", "0.0.0.0:0")
 	Expect(err).NotTo(HaveOccurred())
@@ -312,6 +302,17 @@ func runKoinonGateway(ctx context.Context, s kgateway.State, guard mcpgateway.Gu
 	return k
 }
 
+// readyServer is Koinon's MCP server as far as the readiness prompt goes: it publishes
+// kgateway.ReadyPrompt and no tool.
+func readyServer() *httptest.Server {
+	s := mcp.NewServer(&mcp.Implementation{Name: "koinon-ready", Version: "0"}, nil)
+	s.AddPrompt(&mcp.Prompt{Name: kgateway.ReadyPrompt, Description: "Koinon's tools are connected."},
+		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: "Koinon's tools are connected."}}}}, nil
+		})
+	return httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil))
+}
+
 // sandboxURL is the gateway's MCP endpoint as a sandbox reaches it.
 func (k *koinonGateway) sandboxURL() string {
 	return fmt.Sprintf("http://host.docker.internal:%d/mcp", k.srv.Listener.Addr().(*net.TCPAddr).Port)
@@ -319,11 +320,12 @@ func (k *koinonGateway) sandboxURL() string {
 
 var _ = Describe("koinon-opencode and MCP server requests behind Koinon's gateway (#254, #269)", Ordered, func() {
 	var (
-		srv   *messagesServer
-		guard *gatewaytest.FakeGuard
-		gw    *gateway
-		kgw   *koinonGateway
-		h     *harness
+		srv     *messagesServer
+		guard   *gatewaytest.FakeGuard
+		gw      *gateway
+		kgw     *koinonGateway
+		h       *harness
+		session acp.SessionID
 	)
 	agent := kgateway.AgentRef{Org: "acme", Name: "messages"}
 	toolName := "koinon_" + messagesTarget + "_" + messagesTool
@@ -339,9 +341,13 @@ var _ = Describe("koinon-opencode and MCP server requests behind Koinon's gatewa
 
 		k, err := kgateway.NewKey(agent)
 		Expect(err).NotTo(HaveOccurred())
-		state := kgateway.State{MCP: []kgateway.MCPTarget{{
-			Name: messagesTarget, Org: agent.Org, URL: fmt.Sprintf("http://127.0.0.1:%d/mcp", srv.port()),
-		}}}
+		ready := readyServer()
+		DeferCleanup(func() { ready.CloseClientConnections(); ready.Close() })
+		state := kgateway.State{MCP: []kgateway.MCPTarget{
+			{Name: messagesTarget, Org: agent.Org, URL: fmt.Sprintf("http://127.0.0.1:%d/mcp", srv.port())},
+			// Koinon's MCP server publishes the readiness prompt; the gateway serves it to every key.
+			{Name: kgateway.ReadyTarget, URL: ready.URL + "/mcp"},
+		}}
 		state.AddKey(k.Key)
 		state.GrantTools(agent, kgateway.ToolGrant{Target: messagesTarget, Tools: []string{messagesTool}})
 		kgw = runKoinonGateway(ctx, state, guard.Ref("127.0.0.1").Local)
@@ -374,15 +380,20 @@ var _ = Describe("koinon-opencode and MCP server requests behind Koinon's gatewa
 		}
 	})
 
-	It("runs the tool call through the gateway and shows the guard every message of the call", func(ctx SpecContext) {
+	// koinon-agentd waits for this command before the first prompt (ADR 0052): a gateway that does not
+	// serve the readiness prompt fails every run (#1239).
+	// The harness announces its commands in a session; the next spec prompts in this one.
+	It("announces Koinon's ready command through the gateway", func(ctx SpecContext) {
 		_, err := h.conn.Initialize(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		session, err := h.conn.NewSession(ctx, workdir)
+		session, err = h.conn.NewSession(ctx, workdir)
 		Expect(err).NotTo(HaveOccurred())
-		// The gateway serves no prompts, so the harness announces no command for the server; the
-		// harness listed the tools once the gateway answered its tools/list.
-		Eventually(kgw.listed.Load).WithTimeout(racescale.D(30*time.Second)).
-			Should(BeTrue(), "the harness never listed the gateway's tools")
+		Eventually(h.client.availableCommands).WithTimeout(racescale.D(30*time.Second)).
+			Should(ContainElement("koinon:"+kgateway.ReadyPromptExposed), "the harness never announced the gateway's readiness prompt")
+	})
+
+	It("runs the tool call through the gateway and shows the guard every message of the call", func(ctx SpecContext) {
+		// As koinon-agentd does: the first prompt comes readySettle after the ready command.
 		time.Sleep(readySettle)
 		Expect(h.conn.SetModel(ctx, session, opencode.selectModel(contractModel))).To(Succeed())
 

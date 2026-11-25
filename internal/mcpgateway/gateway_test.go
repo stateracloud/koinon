@@ -215,7 +215,14 @@ var _ = Describe("the MCP path", func() {
 		s := connect(ctx, front.URL, keyAcme.Material)
 		_, err := s.ListResources(ctx, nil)
 		Expect(err).To(HaveOccurred())
-		_, err = s.ListPrompts(ctx, nil)
+	})
+
+	It("lists no prompt when the config has no readiness target, and refuses every prompt name", func(ctx SpecContext) {
+		s := connect(ctx, front.URL, keyAcme.Material)
+		res, err := s.ListPrompts(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Prompts).To(BeEmpty())
+		_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPromptExposed})
 		Expect(err).To(HaveOccurred())
 	})
 

@@ -229,7 +229,7 @@ func (r *runner) waitCommand(ctx context.Context, conn *acp.Conn, command string
 			return errors.New("the connection ended")
 		case <-t.C:
 			return &failure{reason: fmt.Sprintf("Koinon's MCP tools did not become available: the harness did not "+
-				"announce %q within %s of starting the session (is agentgateway's MCP route reachable from the sandbox?)",
+				"announce %q within %s of starting the session (is the MCP gateway reachable from the sandbox, and does it serve the readiness prompt?)",
 				command, timeout)}
 		case <-ctx.Done():
 			return ctx.Err()
