@@ -146,5 +146,5 @@ data:
     harnesses:
       {{- range $harness, $f := .Values.harnesses }}
       {{ $harness }}:
-        image: {{ include "koinon.image" (list $ $f.image) }}
+        image: {{ include "koinon.harnessImage" (list $ $f.image) }}
       {{- end }}

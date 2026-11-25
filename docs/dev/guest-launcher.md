@@ -8,7 +8,7 @@
 
 `koinon-guest-launcher` (`cmd/koinon-guest-launcher`, `internal/guestlaunch`) hardens a Substrate
 guest and then starts the agent (ADR 0119, 0120 section 4, issue #1087). It is a static Go binary in
-the substrate overlay image (`make harness-substrate-<harness>`, `make harnesses-substrate` for all). The OpenShell driver does not use it.
+the substrate overlay image (`make harness-substrate-<harness>`, `make harnesses-substrate` for all). The overlay also carries the Substrate guest server `ate-env-guest`, which is the image ENTRYPOINT and so the actor's process (`make env-guest`). The release publishes it as `sandbox-substrate:<version>` (`hack/release-harness-substrate.sh`). The OpenShell driver does not use it.
 
 ## How it is invoked: an exec prefix
 
@@ -22,8 +22,8 @@ koinon-guest-launcher --policy /etc/koinon/guest-launcher/<policy of the tier> -
 
 `harness.Descriptor.LauncherPrefix(tier)` returns the part before `<EntryScript>`; the driver
 (#1088) prepends it. An unknown tier gets no prefix (the driver must not start the guest). OpenShell
-paths ignore it. The overlay image keeps the same line as its ENTRYPOINT, as a
-default only: it alone does not harden a ProcessService exec.
+paths ignore it. The overlay image's ENTRYPOINT is the guest server (`ate-env-guest -workspace /sandbox`), not the
+launcher: the guest server is the actor's process and the launcher only ever runs as this prefix.
 
 ```
 koinon-guest-launcher [--policy FILE] [--check] -- COMMAND [ARG...]
@@ -127,11 +127,16 @@ fails closed through `policy-vm.json`, another tier records the gap). Each Subst
 
 Tracked on #1087 until the maintainer files separate issues:
 
-1. Flavor images carry the launcher only. The guest server image `ate-env-guest` has no public build:
-   Koinon builds it from the Substrate source and pins it by digest (ADR 0061 image rules). That needs the
-   upstream source and a registry, and waits for the lab (see the PR body of #1087). The driver
-   applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
+1. The substrate overlay of the harness image carries the guest server and the launcher
+   (`cmd/koinon-guest-launcher/Dockerfile`). The guest server is built from the pinned upstream commit
+   (`ATE_ENV_VERSION`, `hack/build-env-guest.sh`), because upstream publishes no image. The release builds the overlay on the
+   released harness image (`harness-substrate` job, `hack/release-harness-substrate.sh`, repository `sandbox-substrate`) and with
+   `execution.driver=substrate` the chart's default harness repository is `sandbox-substrate`. The separate `ate-env-guest`
+   image of the release stays for the rootfs-image mode of upstream (the guest mounted into an unmodified image); the driver does not use it yet.
+   The overlay runs as root (the guest server listens on port 80 and starts the payload), the launcher hardens the payload.
+   The driver applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
+   `execution.substrate.allowUnhardened` stays required until they are (see the PR body of #1087).
 3. Read-only root on the gVisor tiers: decided against for now. See "gVisor tiers" above and issue #1150
    (review at each Substrate update).
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with

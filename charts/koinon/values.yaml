@@ -744,7 +744,9 @@ github:
 # .Chart.AppVersion. Every entry becomes a harness the reconciler can run; an agent whose harness
 # has no entry is reported as a reconcile error. Remove an entry to turn that harness off.
 # With execution.driver=substrate, every entry needs image.digest (sha256:<64 hex digits>): the
-# reconciler refuses to start with a harness image that is not pinned by digest (issue #1192).
+# reconciler refuses to start with a harness image that is not pinned by digest (issue #1192). With
+# substrate, the default repository "sandbox" becomes "sandbox-substrate" (the harness image with the guest
+# server and the guest launcher, issue #1087), so the digest is the one of that image; a repository you set is used as it is.
 harnesses:
   opencode:
     image:
@@ -814,8 +816,8 @@ execution:
     # selector, so it can land on any pool). It cannot see a pool that you make yourself
     # (workerPool.enabled=false or a pool outside the chart): check that one.
     defaultTier: ""
-    # Required true with substrate: the guest image does not yet carry the guest launcher and the
-    # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:
+    # Required true with substrate until the substrate overlay of the harness image (sandbox-substrate,
+    # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
     # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
