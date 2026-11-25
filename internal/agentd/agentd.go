@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runlimits"
@@ -185,6 +186,18 @@ type Config struct {
 	// http://koinon-gateway.koinon.svc:8080. Harnesses get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
+	// ActorTokens, when set, sends git of every run whose agent has a code-host connection through
+	// the gateway's egress prefix at EgressURL (ADR 0097, #1086 part C2): agentd mints each run's
+	// actor identity token with it, outside the guest (actortoken.go). Nil keeps git on the
+	// execution driver's own egress.
+	ActorTokens *actortoken.Minter
+	// EgressURL is the gateway's egress listener as sandboxes reach it, for example
+	// http://koinon-mcp-gateway.koinon.svc:8081. Required with ActorTokens; it must not carry
+	// credentials, a path, a query or a fragment.
+	EgressURL string
+	// ActorTokenRefresh is how often a live run writes a new actor token. Default
+	// DefaultActorTokenRefresh; it must be under a third of the token's lifetime.
+	ActorTokenRefresh time.Duration
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
 	// otherwise the org's stored default model is used (old issue 256).
 	DefaultModel string
@@ -229,6 +242,9 @@ func (c *Config) defaults() error {
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		// Arguments are visible in the sandbox: never put credentials there.
 		return errors.New("agentd: GatewayURL must not carry user info, a query or a fragment")
+	}
+	if err := c.checkEgress(); err != nil {
+		return err
 	}
 	setDefault(&c.Workers, 8)
 	setDefault(&c.Lease, 30*time.Second)

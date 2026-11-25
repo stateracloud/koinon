@@ -174,6 +174,10 @@ type runner struct {
 	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
 	// requests resolve their paths in it.
 	sbWorkspace, sbName string
+	// egress is set by writeGitConfig when git of this run goes through the gateway's egress
+	// prefix with an actor token (actortoken.go); orgSlug is the token's org, read once.
+	egress  bool
+	orgSlug string
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -622,6 +626,9 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
 		return r.execErr(ctx, "write the git configuration", err)
+	}
+	if r.egress {
+		defer r.keepActorToken(ctx, workspace, sandbox)()
 	}
 
 	var stderr tail

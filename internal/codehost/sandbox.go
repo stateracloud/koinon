@@ -46,3 +46,74 @@ func GitConfig(loc connectors.Location, hasCA bool) []byte {
 	}
 	return []byte(b.String())
 }
+
+// The egress prefix of the Koinon gateway (ADR 0097, #1086 part C2). When the gateway serves the
+// forge routes, git in the sandbox reaches the code host through <gateway>/egress/<host>/ and sends
+// the actor identity token there. koinon-agentd mints the token outside the guest and writes it to
+// SandboxEgressToken, which is outside the home: the home is checkpointed, and the token must never
+// be in a checkpoint (ADR 0120 sections 1 and 5). The token lives 300 to 3600 seconds, and agentd
+// writes a new one before the old one ends.
+const (
+	// SandboxEgressDir holds the token file. It is not under /sandbox.
+	SandboxEgressDir = "/tmp/.koinon-egress"
+	// SandboxEgressToken is the git configuration that carries the actor token. SandboxGitConfig
+	// includes it; git ignores an include that does not exist.
+	SandboxEgressToken = SandboxEgressDir + "/token.gitconfig"
+	// ActorTokenHeader is the header that carries the actor token (route.TokenHeader).
+	//nolint:gosec // a header name, not a credential
+	ActorTokenHeader = "Koinon-Actor-Token"
+)
+
+// EgressPrefix returns the gateway URL that git uses for the code host at loc: base is the gateway's
+// egress listener (http://host:port, no trailing slash).
+func EgressPrefix(base string, loc connectors.Location) string {
+	return strings.TrimRight(base, "/") + "/egress/" + loc.Web.Authority() + "/"
+}
+
+// EgressGitConfig renders what SandboxGitConfig adds when git goes through the gateway: the include
+// of the token file, the URL rewrite of the code host to the gateway prefix, and an empty credential
+// helper for the gateway, so no helper is asked for a credential that only the gateway holds. It holds
+// nothing secret.
+func EgressGitConfig(base string, loc connectors.Location) []byte {
+	var b strings.Builder
+	b.WriteString("# Git reaches the code host through the Koinon gateway, which attaches the credential.\n")
+	b.WriteString("[include]\n")
+	b.WriteString("\tpath = " + SandboxEgressToken + "\n")
+	b.WriteString("[url \"" + EgressPrefix(base, loc) + "\"]\n")
+	b.WriteString("\tinsteadOf = https://" + loc.Web.Authority() + "/\n")
+	b.WriteString("[credential \"" + strings.TrimRight(base, "/") + "/egress/\"]\n")
+	b.WriteString("\thelper =\n")
+	return []byte(b.String())
+}
+
+// EgressTokenGitConfig renders SandboxEgressToken: the actor token as an extra header that git sends
+// only to the gateway's egress prefix. ok is false for a token that is not a compact JWS (three
+// base64url parts), so a value can never add a line to the file.
+func EgressTokenGitConfig(base, token string) (cfg []byte, ok bool) {
+	if !compactJWS(token) {
+		return nil, false
+	}
+	var b strings.Builder
+	b.WriteString("# Rendered by koinon-agentd; the actor token is short-lived and replaced before it ends.\n")
+	b.WriteString("[http \"" + strings.TrimRight(base, "/") + "/egress/\"]\n")
+	b.WriteString("\textraHeader = " + ActorTokenHeader + ": " + token + "\n")
+	return []byte(b.String()), true
+}
+
+func compactJWS(s string) bool {
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, c := range p {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
