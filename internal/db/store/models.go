@@ -1820,6 +1820,9 @@ type Agent struct {
 	SandboxMemoryRequest pgtype.Text
 	SandboxMemoryLimit   pgtype.Text
 	KeepWarmGranted      bool
+	Team                 string
+	ReportsToAgentID     pgtype.UUID
+	ReportsToUserID      pgtype.UUID
 }
 
 type AgentBudget struct {

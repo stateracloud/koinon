@@ -43,6 +43,8 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		Status:           agentStatusToProto[a.Status],
 		Flavor:           flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
 		Harness:          a.Harness,
+		Team:             a.Team,
+		ReportsTo:        reportsToProto(a),
 		TemplateId:       idString(a.TemplateID),
 		LatestVersion:    a.LatestVersion,
 		CreatedAt:        tsProto(a.CreatedAt),
@@ -223,36 +225,6 @@ func (s *Server) GetAgent(ctx context.Context, req *agentv1alpha1.GetAgentReques
 		return nil, s.dbError(err, "agent")
 	}
 	return &agentv1alpha1.GetAgentResponse{Agent: out}, nil
-}
-
-// ListAgents implements AgentService.
-func (s *Server) ListAgents(ctx context.Context, req *agentv1alpha1.ListAgentsRequest) (*agentv1alpha1.ListAgentsResponse, error) {
-	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
-	if err != nil {
-		return nil, err
-	}
-	agents, err := s.q.ListAgents(ctx, c.org)
-	if err != nil {
-		return nil, s.dbError(err, "agents")
-	}
-	res := &agentv1alpha1.ListAgentsResponse{}
-	slugs := map[pgtype.UUID]string{}
-	rows, err := s.q.ListArchivedAgentSandboxes(ctx, c.org)
-	if err != nil {
-		return nil, s.dbError(err, "agents")
-	}
-	archived := map[pgtype.UUID]pgtype.Timestamptz{}
-	for _, r := range rows {
-		archived[r.AgentID] = r.ArchivedAt
-	}
-	for _, a := range agents {
-		v, err := s.agentView(ctx, s.q, a, slugs, archived)
-		if err != nil {
-			return nil, s.dbError(err, "agent")
-		}
-		res.Agents = append(res.Agents, v)
-	}
-	return res, nil
 }
 
 // ActivateAgent implements AgentService: an admin or owner activates the

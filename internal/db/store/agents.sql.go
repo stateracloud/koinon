@@ -19,7 +19,7 @@ WHERE agents.org_id = $3 AND agents.id = $4
   AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM $1
     AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = $3 AND nv.id = $1)
       > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type ActivateAgentParams struct {
@@ -67,15 +67,43 @@ func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (A
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
+}
+
+const agentReportsToReaches = `-- name: AgentReportsToReaches :one
+WITH RECURSIVE up(id) AS (
+    SELECT $2::uuid
+    UNION
+    SELECT a.reports_to_agent_id FROM agents a JOIN up ON a.org_id = $3 AND a.id = up.id
+    WHERE a.reports_to_agent_id IS NOT NULL
+)
+SELECT EXISTS (SELECT 1 FROM up WHERE up.id = $1::uuid)::bool
+`
+
+type AgentReportsToReachesParams struct {
+	TargetID pgtype.UUID
+	StartID  pgtype.UUID
+	OrgID    pgtype.UUID
+}
+
+// Whether the reports-to chain up from @start_id (inclusive) reaches @target_id. UNION stops on a
+// chain that repeats, so a bad row cannot loop.
+func (q *Queries) AgentReportsToReaches(ctx context.Context, arg AgentReportsToReachesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, agentReportsToReaches, arg.TargetID, arg.StartID, arg.OrgID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agents
 SET status = 'archived', archived_at = now()
 WHERE org_id = $1 AND id = $2 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type ArchiveAgentParams struct {
@@ -113,6 +141,9 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -121,7 +152,7 @@ const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (org_id, display_name, harness, template_id, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type CreateAgentParams struct {
@@ -173,6 +204,9 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -219,7 +253,7 @@ func (q *Queries) CreateAgentVersion(ctx context.Context, arg CreateAgentVersion
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id FROM agents
 WHERE org_id = $1 AND id = $2
 `
 
@@ -258,12 +292,15 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
 
 const getAgentForUpdate = `-- name: GetAgentForUpdate :one
-SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id FROM agents
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -304,6 +341,9 @@ func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdatePa
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -331,6 +371,26 @@ func (q *Queries) GetAgentVersion(ctx context.Context, arg GetAgentVersionParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const hasOrgMembership = `-- name: HasOrgMembership :one
+SELECT EXISTS (
+    SELECT 1 FROM org_memberships om JOIN users u ON u.id = om.user_id AND u.deleted_at IS NULL
+    WHERE om.org_id = $1 AND om.user_id = $2
+)::bool
+`
+
+type HasOrgMembershipParams struct {
+	OrgID  pgtype.UUID
+	UserID pgtype.UUID
+}
+
+// Whether the user (not deleted) holds any role in the org, viewer included.
+func (q *Queries) HasOrgMembership(ctx context.Context, arg HasOrgMembershipParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOrgMembership, arg.OrgID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const listActiveAgentVersions = `-- name: ListActiveAgentVersions :many
@@ -452,6 +512,185 @@ func (q *Queries) ListAgentActivationsAllOrgs(ctx context.Context) ([]ListAgentA
 	return items, nil
 }
 
+const listAgentSummaries = `-- name: ListAgentSummaries :many
+SELECT a.id, a.display_name, a.status, a.harness, a.model AS model_setting, a.team, a.created_at,
+       a.unhealthy_at, a.reports_to_agent_id, pa.display_name AS reports_to_agent_name,
+       ru.id AS reports_to_user_id, ru.display_name AS reports_to_user_name,
+       lv.config AS latest_config, av.config AS active_config, coalesce(ab.daily_limit::text, '')::text AS own_daily_limit,
+       coalesce(lr.state::text, '')::text AS last_run_state, lr.at AS last_run_at,
+       (SELECT count(*) FROM runs r
+        WHERE r.org_id = a.org_id AND r.agent_id = a.id AND r.state IN ('starting', 'running'))::int AS running_runs,
+       sp.cost_usd AS spent_today, sp.input_tokens AS input_tokens_today, sp.cache_read_tokens AS cache_read_tokens_today,
+       (CASE WHEN $1::bool THEN
+          (SELECT count(*) FROM approval_requests ap
+           WHERE ap.org_id = a.org_id AND ap.agent_id = a.id AND ap.status = 'pending')
+          + (CASE WHEN a.unhealthy_at IS NOT NULL THEN 1 ELSE 0 END)
+        ELSE 0 END
+        + CASE WHEN $2::bool THEN
+          (SELECT count(*) FROM questions qn
+           JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+           JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                      AND qr.user_id = $3 AND qr.removed_at IS NULL
+           WHERE qn.org_id = a.org_id AND qn.agent_id = a.id AND qn.state = 'open' AND r.state = 'parked')
+        ELSE 0 END
+        + (SELECT count(*) FROM tasks t
+           WHERE t.org_id = a.org_id AND t.agent_id = a.id AND t.state = 'input_required'
+             AND t.created_by_user_id = $3
+             -- An approval covers its task, whoever may decide it.
+             AND NOT EXISTS (SELECT 1 FROM approval_requests ap
+                             WHERE ap.org_id = t.org_id AND ap.task_id = t.id AND ap.status = 'pending')
+             -- A question the caller may answer covers its task (counted above).
+             AND NOT ($2::bool AND EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                            AND qr.user_id = $3 AND qr.removed_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'))
+             -- A task that waits on other people's answer is not the caller's item
+             -- (ListQuestionWaitersForTasks).
+             AND (NOT EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
+                 JOIN users wu ON wu.id = qr.user_id AND wu.deleted_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'
+                   AND EXISTS (SELECT 1 FROM org_memberships om
+                               WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
+               OR EXISTS (
+                 SELECT 1 FROM questions qn
+                 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+                 JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                                            AND qr.user_id = $3 AND qr.removed_at IS NULL
+                 JOIN users wu ON wu.id = qr.user_id AND wu.deleted_at IS NULL
+                 WHERE qn.org_id = t.org_id AND qn.task_id = t.id AND qn.state = 'open' AND r.state = 'parked'
+                   AND EXISTS (SELECT 1 FROM org_memberships om
+                               WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member')))))::int AS waiting_on_you
+FROM agents a
+LEFT JOIN agents pa ON pa.org_id = a.org_id AND pa.id = a.reports_to_agent_id
+LEFT JOIN users ru ON ru.id = a.reports_to_user_id AND ru.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.org_id = a.org_id AND om.user_id = ru.id)
+LEFT JOIN agent_versions lv ON lv.org_id = a.org_id AND lv.agent_id = a.id AND lv.version = a.latest_version
+LEFT JOIN agent_versions av ON av.org_id = a.org_id AND av.id = a.active_version_id
+LEFT JOIN agent_budgets ab ON ab.org_id = a.org_id AND ab.agent_id = a.id
+LEFT JOIN LATERAL (
+    SELECT r.state, coalesce(r.finished_at, r.started_at, r.created_at)::timestamptz AS at
+    FROM runs r
+    WHERE r.org_id = a.org_id AND r.agent_id = a.id
+    ORDER BY r.created_at DESC, r.id DESC
+    LIMIT 1
+) lr ON true
+CROSS JOIN LATERAL (
+    SELECT coalesce(sum(s.cost_usd), 0)::text AS cost_usd,
+           coalesce(sum(s.input_tokens), 0)::bigint AS input_tokens,
+           coalesce(sum(s.cache_read_tokens), 0)::bigint AS cache_read_tokens
+    FROM spend_entries s
+    WHERE s.org_id = a.org_id AND s.agent_id = a.id AND s.occurred_at >= $4
+) sp
+WHERE a.org_id = $5 AND a.status <> 'archived'
+  AND ($6::timestamptz IS NULL
+       OR (a.team = '', a.team, a.created_at, a.id)
+          > ($7::bool, $8::text, $6::timestamptz, $9::uuid))
+ORDER BY a.team = '', a.team, a.created_at, a.id
+LIMIT $10
+`
+
+type ListAgentSummariesParams struct {
+	IsApprover     bool
+	CanAnswer      bool
+	UserID         pgtype.UUID
+	DayStart       pgtype.Timestamptz
+	OrgID          pgtype.UUID
+	AfterCreatedAt pgtype.Timestamptz
+	AfterNoTeam    pgtype.Bool
+	AfterTeam      pgtype.Text
+	AfterID        pgtype.UUID
+	PageSize       int32
+}
+
+type ListAgentSummariesRow struct {
+	ID                   pgtype.UUID
+	DisplayName          string
+	Status               AgentStatus
+	Harness              string
+	ModelSetting         pgtype.Text
+	Team                 string
+	CreatedAt            pgtype.Timestamptz
+	UnhealthyAt          pgtype.Timestamptz
+	ReportsToAgentID     pgtype.UUID
+	ReportsToAgentName   pgtype.Text
+	ReportsToUserID      pgtype.UUID
+	ReportsToUserName    pgtype.Text
+	LatestConfig         []byte
+	ActiveConfig         []byte
+	OwnDailyLimit        string
+	LastRunState         string
+	LastRunAt            pgtype.Timestamptz
+	RunningRuns          int32
+	SpentToday           string
+	InputTokensToday     int64
+	CacheReadTokensToday int64
+	WaitingOnYou         int32
+}
+
+// One page of agent cards (ADR 0126 section 4) in one query: the agents that are not archived,
+// ordered by team (no team last), then oldest first, after the cursor when it is set. The
+// waiting_on_you count follows the inbox rules of web/src/lib/inbox.ts (buildInbox) for the
+// caller: @is_approver is an admin or above (approvals, an unhealthy agent), @can_answer a member
+// or above (questions).
+func (q *Queries) ListAgentSummaries(ctx context.Context, arg ListAgentSummariesParams) ([]ListAgentSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSummaries,
+		arg.IsApprover,
+		arg.CanAnswer,
+		arg.UserID,
+		arg.DayStart,
+		arg.OrgID,
+		arg.AfterCreatedAt,
+		arg.AfterNoTeam,
+		arg.AfterTeam,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentSummariesRow
+	for rows.Next() {
+		var i ListAgentSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.Status,
+			&i.Harness,
+			&i.ModelSetting,
+			&i.Team,
+			&i.CreatedAt,
+			&i.UnhealthyAt,
+			&i.ReportsToAgentID,
+			&i.ReportsToAgentName,
+			&i.ReportsToUserID,
+			&i.ReportsToUserName,
+			&i.LatestConfig,
+			&i.ActiveConfig,
+			&i.OwnDailyLimit,
+			&i.LastRunState,
+			&i.LastRunAt,
+			&i.RunningRuns,
+			&i.SpentToday,
+			&i.InputTokensToday,
+			&i.CacheReadTokensToday,
+			&i.WaitingOnYou,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentVersions = `-- name: ListAgentVersions :many
 SELECT org_id, id, agent_id, version, config, created_by, created_at FROM agent_versions
 WHERE org_id = $1 AND agent_id = $2
@@ -492,7 +731,7 @@ func (q *Queries) ListAgentVersions(ctx context.Context, arg ListAgentVersionsPa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted FROM agents
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id FROM agents
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -533,6 +772,9 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 			&i.SandboxMemoryRequest,
 			&i.SandboxMemoryLimit,
 			&i.KeepWarmGranted,
+			&i.Team,
+			&i.ReportsToAgentID,
+			&i.ReportsToUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -544,11 +786,93 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 	return items, nil
 }
 
+const listAgentsPage = `-- name: ListAgentsPage :many
+SELECT org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id FROM agents
+WHERE org_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (created_at, id) > ($2::timestamptz, $3::uuid))
+ORDER BY created_at, id
+LIMIT $4
+`
+
+type ListAgentsPageParams struct {
+	OrgID          pgtype.UUID
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	PageSize       int32
+}
+
+// One page of the org's agents, oldest first, after the cursor (created_at, id) when it is set.
+func (q *Queries) ListAgentsPage(ctx context.Context, arg ListAgentsPageParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsPage,
+		arg.OrgID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Agent
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.DisplayName,
+			&i.Status,
+			&i.Harness,
+			&i.TemplateID,
+			&i.ActiveVersionID,
+			&i.LatestVersion,
+			&i.Epoch,
+			&i.CreatedBy,
+			&i.ActivatedBy,
+			&i.ActivatedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnhealthyAt,
+			&i.UnhealthyReason,
+			&i.ResumedAt,
+			&i.Model,
+			&i.Thinking,
+			&i.KeepWarm,
+			&i.SandboxCpuRequest,
+			&i.SandboxCpuLimit,
+			&i.SandboxMemoryRequest,
+			&i.SandboxMemoryLimit,
+			&i.KeepWarmGranted,
+			&i.Team,
+			&i.ReportsToAgentID,
+			&i.ReportsToUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAgentReportsTo = `-- name: LockAgentReportsTo :exec
+SELECT pg_advisory_xact_lock(hashtextextended('agent-reports-to:' || ($1::uuid)::text, 0))
+`
+
+// Serialises reports-to changes in one org, so two changes cannot make a cycle together.
+func (q *Queries) LockAgentReportsTo(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockAgentReportsTo, orgID)
+	return err
+}
+
 const returnAgentToDraft = `-- name: ReturnAgentToDraft :one
 UPDATE agents
 SET status = 'draft'
 WHERE org_id = $1 AND id = $2 AND status = 'active'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type ReturnAgentToDraftParams struct {
@@ -588,6 +912,9 @@ func (q *Queries) ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraft
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -596,7 +923,7 @@ const setAgentKeepWarm = `-- name: SetAgentKeepWarm :one
 UPDATE agents
 SET keep_warm = $1, keep_warm_granted = keep_warm_granted AND $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type SetAgentKeepWarmParams struct {
@@ -638,6 +965,9 @@ func (q *Queries) SetAgentKeepWarm(ctx context.Context, arg SetAgentKeepWarmPara
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -646,7 +976,7 @@ const setAgentModel = `-- name: SetAgentModel :one
 UPDATE agents
 SET model = $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type SetAgentModelParams struct {
@@ -686,6 +1016,67 @@ func (q *Queries) SetAgentModel(ctx context.Context, arg SetAgentModelParams) (A
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
+	)
+	return i, err
+}
+
+const setAgentPlacement = `-- name: SetAgentPlacement :one
+UPDATE agents
+SET team = $1, reports_to_agent_id = $2, reports_to_user_id = $3
+WHERE org_id = $4 AND id = $5
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
+`
+
+type SetAgentPlacementParams struct {
+	Team             string
+	ReportsToAgentID pgtype.UUID
+	ReportsToUserID  pgtype.UUID
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+}
+
+func (q *Queries) SetAgentPlacement(ctx context.Context, arg SetAgentPlacementParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, setAgentPlacement,
+		arg.Team,
+		arg.ReportsToAgentID,
+		arg.ReportsToUserID,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Harness,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
+		&i.KeepWarm,
+		&i.SandboxCpuRequest,
+		&i.SandboxCpuLimit,
+		&i.SandboxMemoryRequest,
+		&i.SandboxMemoryLimit,
+		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -695,7 +1086,7 @@ UPDATE agents
 SET sandbox_cpu_request = $1, sandbox_cpu_limit = $2,
     sandbox_memory_request = $3, sandbox_memory_limit = $4
 WHERE org_id = $5 AND id = $6 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type SetAgentSandboxResourcesParams struct {
@@ -746,6 +1137,9 @@ func (q *Queries) SetAgentSandboxResources(ctx context.Context, arg SetAgentSand
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -754,7 +1148,7 @@ const setAgentThinking = `-- name: SetAgentThinking :one
 UPDATE agents
 SET thinking = $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type SetAgentThinkingParams struct {
@@ -794,6 +1188,9 @@ func (q *Queries) SetAgentThinking(ctx context.Context, arg SetAgentThinkingPara
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -822,7 +1219,7 @@ UPDATE agents
 SET display_name = $1, harness = $2
 WHERE org_id = $3 AND id = $4 AND status <> 'archived'
   AND (harness = $2 OR active_version_id IS NULL)
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type UpdateAgentProfileParams struct {
@@ -869,6 +1266,9 @@ func (q *Queries) UpdateAgentProfile(ctx context.Context, arg UpdateAgentProfile
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
