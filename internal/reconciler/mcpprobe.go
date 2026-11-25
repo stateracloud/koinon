@@ -218,19 +218,45 @@ func (r *Reconciler) gatewayAckedNow(ctx context.Context, rev int64) (bool, erro
 	return staterev.AllAcked(ctx, r.pool, rev, gwv1.Half_HALF_MCP, live)
 }
 
+// keyIssued records a key issued in this process: until a stored revision holds it, its agent waits
+// while a live copy exists.
+func (r *Reconciler) keyIssued(id string) {
+	r.keyRevMu.Lock()
+	defer r.keyRevMu.Unlock()
+	if r.pendingKeys == nil {
+		r.pendingKeys = map[string]bool{}
+	}
+	r.pendingKeys[id] = true
+}
+
+// keyPending reports whether key id was issued in this process and no stored revision holds it yet.
+func (r *Reconciler) keyPending(id string) bool {
+	r.keyRevMu.Lock()
+	defer r.keyRevMu.Unlock()
+	return r.pendingKeys[id]
+}
+
 // noteKeys records, for each key that revision rev serves, the first revision that held it. A key the
-// map already has keeps its earlier revision; keys rev does not serve are dropped. After a restart the
-// map starts from the latest revision, which the copies acked already when nothing changed.
+// map already has keeps its earlier revision; keys rev does not serve are dropped. On the first call
+// after a start the map cannot say which revision first held a key, so every key not issued in this
+// process is recorded as 0: it was served before the start and never waits. A key issued in this
+// process is recorded with rev, and is no longer pending.
 func (r *Reconciler) noteKeys(keys []gateway.Key, rev int64) {
 	r.keyRevMu.Lock()
 	defer r.keyRevMu.Unlock()
+	first := r.keyRevs == nil
 	next := make(map[string]int64, len(keys))
 	for _, k := range keys {
-		if old, ok := r.keyRevs[k.ID]; ok && old <= rev {
+		old, ok := r.keyRevs[k.ID]
+		switch {
+		case ok && old <= rev:
 			next[k.ID] = old
-		} else {
+		case first && !r.pendingKeys[k.ID]:
+			next[k.ID] = 0
+		default:
 			next[k.ID] = rev
 		}
+		delete(r.pendingKeys, k.ID)
 	}
 	r.keyRevs = next
 }
@@ -244,40 +270,47 @@ func (r *Reconciler) keyRev(id string) (int64, bool) {
 }
 
 // keyGate decides which sandbox work waits until koinon-gateway serves the agent's key (D1 of
-// #1239). Only an agent with a key waits, and only while a live copy has not acked the first revision
-// that held that key: an agent with no key (inactive, archived) and an agent whose key the copies
-// already serve never wait, so a stop or a teardown is never held, and a change of the State for
-// other agents holds nobody. With no live copy (the agentgateway driver) nothing waits.
+// #1239). An agent waits only when it has a key that koinon-gateway is to serve (served: its limit is
+// valid) and a live copy has not acked the first revision that held that key. A key that no recorded
+// revision holds (the publish failed) waits only when this process issued it (keyPending). So an agent with no
+// key (inactive, archived), a key the copies already serve and a key gateway.State drops never wait: a
+// stop or a teardown is never held, and a change of the State for other agents holds nobody. With no
+// live copy (the agentgateway driver) nothing waits.
 type keyGate struct {
 	r       *Reconciler
+	served  map[string]bool
 	live    []string
 	liveErr error
 	acked   map[int64]bool
 }
 
-func (r *Reconciler) newKeyGate(ctx context.Context) *keyGate {
+func (r *Reconciler) newKeyGate(ctx context.Context, served map[string]bool) *keyGate {
 	live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
 	if err != nil {
-		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a key waits", "err", err)
+		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a new key waits", "err", err)
 	}
-	return &keyGate{r: r, live: live, liveErr: err, acked: map[int64]bool{}}
+	return &keyGate{r: r, served: served, live: live, liveErr: err, acked: map[int64]bool{}}
 }
 
 // waits reports whether the work of w waits for koinon-gateway, and the revision it waits for (0 when
-// no stored revision holds its key yet, for example after a failed publish).
+// no recorded revision holds its key, for example after a failed publish).
 func (g *keyGate) waits(ctx context.Context, w *work) (bool, int64) {
-	if w.key.ID == "" {
+	id := w.key.ID
+	if id == "" || !g.served[id] {
 		return false, 0
 	}
 	if g.liveErr != nil {
-		return true, 0
+		return g.r.keyPending(id), 0
 	}
 	if len(g.live) == 0 {
 		return false, 0
 	}
-	rev, ok := g.r.keyRev(w.key.ID)
+	rev, ok := g.r.keyRev(id)
 	if !ok {
-		return true, 0
+		return g.r.keyPending(id), 0
+	}
+	if rev == 0 {
+		return false, 0
 	}
 	done, seen := g.acked[rev]
 	if !seen {

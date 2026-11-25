@@ -445,7 +445,9 @@ retried in the pass and is then a pass error. The sandbox work of an agent with 
 live koinon-gateway copy acked the first revision that held that key (the bounded wait of #1260); after
 the wait the agent is held with a message, and the next pass looks again. An agent with no key (inactive,
 archived) and an agent whose key the copies already acked never wait, so stops and teardowns go on and a
-change for other agents holds nobody. With no live copy (the agentgateway driver) nothing waits.
+change for other agents holds nobody. With no live copy (the agentgateway driver) nothing waits. After
+a restart the reconciler does not know which revision first held an old key, so only the keys it issued
+since the start wait; the keys of the first stored revision count as served.
 
 Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
 with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener

@@ -1696,6 +1696,29 @@ var _ = Describe("Reconciler", func() {
 			Expect(time.Since(start)).To(BeNumerically("<", 20*time.Second), "the pass waited at most the bounded ack wait")
 		})
 
+		It("does not hold a key served before a restart while a copy lags behind the latest revision", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+			fresh := newAgent(ctx, org, user)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway"), "the copy lags")
+
+			By("a new reconciler, with an empty key map, still idle-stops a")
+			coolDown(ctx, org, a.ID)
+			r2 := newReconciler()
+			advance(11 * time.Minute)
+			pass(ctx, r2)
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "a's work was not held")
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+		})
+
 		It("holds a new agent while the State cannot be stored, and not an agent whose key a stored revision holds", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			failing := &flakyStateDB{DB: pool}

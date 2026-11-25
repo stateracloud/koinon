@@ -310,11 +310,13 @@ type Reconciler struct {
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
 	probeMu sync.Mutex
-	// keyRevs maps each served key ID to the first State revision that held it (keyGate).
-	keyRevMu  sync.Mutex
-	keyRevs   map[string]int64
-	probeDue  []dueProbe
-	probeWake chan struct{}
+	// keyRevs maps each served key ID to the first State revision that held it, and pendingKeys holds
+	// the keys issued since the start that no stored revision holds yet (keyGate).
+	keyRevMu    sync.Mutex
+	keyRevs     map[string]int64
+	pendingKeys map[string]bool
+	probeDue    []dueProbe
+	probeWake   chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -883,6 +885,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	}
 	// The State stream first, on its own path (D3 of #1239): koinon-gateway serves the MCP half from
 	// it, whatever the agentgateway Apply below does.
+	// servedKeys are the keys koinon-gateway is to serve (keyGate).
+	servedKeys := map[string]bool{}
+	servedState, _ := plan.State.WithoutInvalidLimits()
+	for _, k := range servedState.Keys {
+		servedKeys[k.ID] = true
+	}
 	stateRev, pubErr := r.publishState(ctx, plan.State)
 	if pubErr != nil {
 		errs = append(errs, pubErr)
@@ -893,7 +901,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// concurrently with it. An agent with a new key is queued after the Apply, as before. The pass
 	// never waits for the queue: a slow call for one agent holds only that agent. koinon-gateway must
 	// serve the key too: an early agent whose key the live copies have not acked waits with the others.
-	early, deferred, _ := r.newKeyGate(ctx).split(ctx, items, plan.Early)
+	early, deferred, _ := r.newKeyGate(ctx, servedKeys).split(ctx, items, plan.Early)
 	r.submit(q, b, workOf(items, early), workspaces)
 
 	var res gatewayplan.ApplyResult
@@ -983,12 +991,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// MCP call carries it. The wait is bounded (MCPAckWait) and happens only when an agent waits; after
 	// it those agents are held, and the next pass looks again.
 	run := append(append([]int(nil), outcome.Run...), deferred...)
-	if _, wait, maxRev := r.newKeyGate(ctx).split(ctx, items, run); len(wait) > 0 {
+	if _, wait, maxRev := r.newKeyGate(ctx, servedKeys).split(ctx, items, run); len(wait) > 0 {
 		if maxRev > 0 {
 			r.awaitGatewayAcked(ctx, maxRev)
 		}
 		var held []int
-		run, held, _ = r.newKeyGate(ctx).split(ctx, items, run)
+		run, held, _ = r.newKeyGate(ctx, servedKeys).split(ctx, items, run)
 		for _, w := range workOf(items, held) {
 			r.log.Warn("koinon-gateway does not serve the agent's key yet; its sandbox work waits", w.logAttrs()...)
 			r.recordMessage(ctx, w, errors.New("waiting for koinon-gateway to serve the agent's key"))
@@ -1322,6 +1330,7 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 	}
 	w.sb = sb
 	r.plan.KeyIssued(issued.ID)
+	r.keyIssued(issued.ID)
 	r.log.Info("issued agentgateway key", append(w.logAttrs(), "key_id", issued.ID, "reason", reason)...)
 	return issued.Key, issued.Material, nil
 }
