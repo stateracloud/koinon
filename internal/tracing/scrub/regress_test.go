@@ -328,10 +328,12 @@ func alwaysShapes(w string) []shape {
 	}
 }
 
-var separators = []string{" ", "\n", "\t", ",", ";", "=", ":", "\"", "'", "/", "(", "{", "[", "&", "?", "%3D", "%2F", `\n`, `\t`, `\"`, `\/`,
+var separators = []string{
+	" ", "\n", "\t", ",", ";", "=", ":", "\"", "'", "/", "(", "{", "[", "&", "?", "%3D", "%2F", `\n`, `\t`, `\"`, `\/`,
 	// Appended after the first release: corpus files hold an index. Two characters in a row, as in
 	// the input of issue 1103 (a quote, then a bracket).
-	`"[`, `["`, `{"`, `("`, `'[`, `":"`, `",`}
+	`"[`, `["`, `{"`, `("`, `'[`, `":"`, `",`,
+}
 
 // wrap puts the planted text into a wrapper, the ways content reaches the scrubber.
 func wrap(kind int, sep, text string) string {

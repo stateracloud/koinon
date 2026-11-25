@@ -498,7 +498,10 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 			return 0, 0, false // password = getPassword(): code, not an ini line
 		}
 		jsonKey := strings.ContainsAny(sep[:idx], "\"'") // {"token": false, "n": 1}: a delimiter ends a bare value
-		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve) && !(jsonKey && strings.IndexByte(",;}]", in[ve]) >= 0); ve++ {
+		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve); ve++ {
+			if jsonKey && strings.IndexByte(",;}]", in[ve]) >= 0 {
+				break
+			}
 		}
 		if strings.IndexByte(in[vs:ve], '(') >= 0 {
 			return 0, 0, false // password=getPassword(): a call
