@@ -314,6 +314,7 @@ script-skip - hack/preflight-test.sh
 script-skip - hack/release-gate-test.sh
 script-skip - hack/release-drill-wait-test.sh
 script-skip - hack/release-test-images-test.sh
+script-skip - hack/release-base-mirror-test.sh
 script-skip - hack/ci-skip-heavy-test.sh
 script-skip - hack/claim_test.sh
 script-skip - hack/migrate-lint.sh
