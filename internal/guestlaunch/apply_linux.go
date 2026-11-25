@@ -42,7 +42,7 @@ func Exec(p Policy, argv, env []string, log *slog.Logger) error {
 	runtime.LockOSThread()
 
 	// No descriptor above stderr reaches the payload: a socket the guest server left open without
-	// CLOEXEC (its vsock channel among them) would otherwise pass into the payload with the exec.
+	// CLOEXEC (its listener and connections among them) would otherwise pass into the payload with the exec.
 	if err := closeInheritedFds(); err != nil {
 		return err
 	}

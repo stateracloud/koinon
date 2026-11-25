@@ -57,11 +57,23 @@ architectures the filter library knows: a name none has fails `Validate`; a name
 architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`,
 `process_vm_writev`, `pidfd_getfd` and `kcmp` stay denied when a policy replaces `seccomp.deny`.
 
-### The vsock channel
+### The guest API channel
 
-The vsock channel belongs to the guest server, not to the payload. The guest server runs outside the
-launcher and keeps its own vsock sockets; the payload runs as uid 0 until the non-root gap closes, so
-uid alone does not keep it out. Each way to a socket the payload did not create is closed:
+The driver reaches the guest server over the pod network, not over vsock: gRPC (`ProcessService`,
+`FileSystemService`) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
+which selects the actor by the `ate-target-actor` header and removes that header before it forwards
+the call. The upstream guest server (`ate-env-guest` at `ATE_ENV_VERSION`) listens on `:80` on all
+interfaces and has no authentication. The payload runs in the same network namespace in both tiers,
+so it can reach that listener on `127.0.0.1:80` or on the pod address and start a process that the
+launcher did not harden. This gap is open: issue
+[#1309](https://github.com/stateracloud/koinon/issues/1309) puts a Koinon front with a per-sandbox
+credential on the listener. Until it is closed, the chart requires `allowUnhardened: true` for the
+Substrate driver. On the `vm` tier, vsock belongs to the Kata agent, not to the guest server; the
+seccomp rule below keeps the payload away from it.
+
+The guest server's own process, descriptors and sockets belong to it, not to the payload. The guest
+server runs outside the launcher; the payload runs as uid 0 until the non-root gap closes, so uid
+alone does not keep it out. Each way to a socket the payload did not create is closed:
 
 | Way | Control |
 | --- | --- |

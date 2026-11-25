@@ -94,7 +94,7 @@ func blockedAny(name string, err error, detail string) {
 }
 
 // fdChecks are the ways a payload could get a socket it did not create (docs/dev/guest-launcher.md,
-// "The vsock channel").
+// "The guest API channel").
 func fdChecks() {
 	_, err := unix.FcntlInt(inheritedFd, unix.F_GETFD, 0)
 	blockedAny("inherited_fd", err, "fd 7 left open without CLOEXEC before the launcher")
