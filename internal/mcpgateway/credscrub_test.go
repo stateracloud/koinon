@@ -781,7 +781,7 @@ func (b keyEchoBuiltin) Call(ctx context.Context, creds mcpgateway.ScrubbedSourc
 	c, _ := src.Credential(ctx, gateway.MCPTarget{Name: "remote", Org: t.Org}, agent)
 	return mcpgateway.BuiltinResult{
 		Result:     &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "the remote said " + c.Value}}},
-		Credential: mcpgateway.CredentialStatic,
+		Credential: mcpgateway.CredentialStatic.String(),
 	}
 }
 

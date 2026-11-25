@@ -55,7 +55,7 @@ func (g *Gateway) callBuiltin(ctx context.Context, agent gateway.AgentRef, t gat
 	// A built-in can quote a credential it opened. The result is scrubbed with the values of the org as it
 	// enters, so the guard, the audit and the agent see one text.
 	r.Result = g.o.Scrub.Result(agent.Org, r.Result)
-	row.CredKind = CredentialNone
+	row.CredKind = CredentialNone.String()
 	if r.Credential != "" {
 		row.CredKind = r.Credential
 	}

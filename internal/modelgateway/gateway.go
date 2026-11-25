@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -53,6 +54,10 @@ type Options struct {
 	Logger *slog.Logger
 	// KeyTTL is how long a provider key file is cached. Zero means 30 seconds.
 	KeyTTL time.Duration
+	// Scrub, when set, gets each provider key the gateway reads, with its kind and the provider's org, before
+	// it is sent, so the scrubbed logger and spans mask it. The binary passes the Record of the gateway's
+	// credential scrub, which reads the rule of the kind from the one list (credkind, #1221).
+	Scrub func(kind credkind.Kind, org string, values ...string)
 	// Now is the clock. Nil means time.Now.
 	Now func() time.Time
 }
@@ -287,6 +292,11 @@ func (g *Gateway) providerKey(p gateway.Provider) (string, error) {
 		return "", err
 	}
 	v := strings.TrimSpace(string(b))
+	// The key is recorded before it is cached, so no request sends a key that the scrub does not know. A
+	// cached key was recorded when it was read; the scrub keeps it for a day after that (ADR 0097).
+	if g.o.Scrub != nil && v != "" {
+		g.o.Scrub(credkind.ProviderKey, p.Org, v)
+	}
 	g.mu.Lock()
 	g.keys[p.APIKeyFile] = cachedKey{val: v, at: now}
 	g.mu.Unlock()
