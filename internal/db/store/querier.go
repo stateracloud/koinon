@@ -373,6 +373,8 @@ type Querier interface {
 	DeleteExpiredGitHubLinkFlows(ctx context.Context, arg DeleteExpiredGitHubLinkFlowsParams) error
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	// Only the stream that touched the row last removes it.
+	DeleteGatewayStateCopy(ctx context.Context, arg DeleteGatewayStateCopyParams) error
 	DeleteGitHubAppSetup(ctx context.Context, arg DeleteGitHubAppSetupParams) (int64, error)
 	DeleteGitHubUserLink(ctx context.Context, arg DeleteGitHubUserLinkParams) (GithubUserLink, error)
 	// Removing a mapping cascades to the memberships it granted.
@@ -1008,6 +1010,9 @@ type Querier interface {
 	// KEK fingerprints (old issue 591, ADR 0085 decision 12): what each key-encryption key was when a process
 	// first loaded it. No key material.
 	ListKEKFingerprints(ctx context.Context) ([]KekFingerprint, error)
+	// The copies seen within @max_age_seconds (the database clock, so replicas need no common clock).
+	// With @mcp_only, only the copies that serve the MCP half.
+	ListLiveGatewayStateCopies(ctx context.Context, arg ListLiveGatewayStateCopiesParams) ([]string, error)
 	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
 	// The servers whose code-host connection is the one being deleted, locked so the delete can audit the
 	// unlink the foreign key (ON DELETE SET NULL) is about to do.
@@ -1420,6 +1425,7 @@ type Querier interface {
 	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
 	// models the state no longer serves are removed.
 	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
+	PruneGatewayStateCopies(ctx context.Context, maxAgeSeconds int32) (int64, error)
 	// Keeps the newest @keep revisions and drops any older than @max_age_seconds; never the newest one.
 	// Their acks go with them.
 	PruneGatewayStateRevisions(ctx context.Context, arg PruneGatewayStateRevisionsParams) (int64, error)
@@ -1780,6 +1786,8 @@ type Querier interface {
 	TaskLockHeld(ctx context.Context, arg TaskLockHeldParams) (pgtype.Bool, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
+	// A gateway copy holds the State stream open: it is live now.
+	TouchGatewayStateCopy(ctx context.Context, arg TouchGatewayStateCopyParams) error
 	// The sanitised content is unchanged; the report columns still follow what the server published, so a
 	// row synced before they existed gets its values on the next sync.
 	TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error

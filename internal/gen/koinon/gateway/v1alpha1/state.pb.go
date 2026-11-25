@@ -78,7 +78,10 @@ type StreamStateRequest struct {
 	// copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),
 	// 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
 	// an ack under a reused id would count for a process that has not loaded the revision.
-	CopyId        string `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	CopyId string `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	// halves lists the halves this copy serves, and so acks. Empty means both (a client from before
+	// this field). The reconciler waits only for copies that serve a half.
+	Halves        []Half `protobuf:"varint,2,rep,packed,name=halves,proto3,enum=koinon.gateway.v1alpha1.Half" json:"halves,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -118,6 +121,13 @@ func (x *StreamStateRequest) GetCopyId() string {
 		return x.CopyId
 	}
 	return ""
+}
+
+func (x *StreamStateRequest) GetHalves() []Half {
+	if x != nil {
+		return x.Halves
+	}
+	return nil
 }
 
 type AckRevisionRequest struct {
@@ -1806,9 +1816,10 @@ var File_koinon_gateway_v1alpha1_state_proto protoreflect.FileDescriptor
 
 const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\n" +
-	"#koinon/gateway/v1alpha1/state.proto\x12\x17koinon.gateway.v1alpha1\"-\n" +
+	"#koinon/gateway/v1alpha1/state.proto\x12\x17koinon.gateway.v1alpha1\"d\n" +
 	"\x12StreamStateRequest\x12\x17\n" +
-	"\acopy_id\x18\x01 \x01(\tR\x06copyId\"|\n" +
+	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x125\n" +
+	"\x06halves\x18\x02 \x03(\x0e2\x1d.koinon.gateway.v1alpha1.HalfR\x06halves\"|\n" +
 	"\x12AckRevisionRequest\x12\x17\n" +
 	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\x03R\brevision\x121\n" +
@@ -2007,39 +2018,40 @@ var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	nil,                         // 24: koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
 }
 var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
-	0,  // 0: koinon.gateway.v1alpha1.AckRevisionRequest.half:type_name -> koinon.gateway.v1alpha1.Half
-	6,  // 1: koinon.gateway.v1alpha1.StateUpdate.keys:type_name -> koinon.gateway.v1alpha1.Key
-	7,  // 2: koinon.gateway.v1alpha1.StateUpdate.model:type_name -> koinon.gateway.v1alpha1.ModelState
-	16, // 3: koinon.gateway.v1alpha1.StateUpdate.mcp:type_name -> koinon.gateway.v1alpha1.MCPState
-	21, // 4: koinon.gateway.v1alpha1.StateUpdate.egress:type_name -> koinon.gateway.v1alpha1.EgressState
-	5,  // 5: koinon.gateway.v1alpha1.Key.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	8,  // 6: koinon.gateway.v1alpha1.ModelState.limits:type_name -> koinon.gateway.v1alpha1.AgentLimit
-	10, // 7: koinon.gateway.v1alpha1.ModelState.providers:type_name -> koinon.gateway.v1alpha1.Provider
-	15, // 8: koinon.gateway.v1alpha1.ModelState.models:type_name -> koinon.gateway.v1alpha1.AgentModels
-	5,  // 9: koinon.gateway.v1alpha1.AgentLimit.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	9,  // 10: koinon.gateway.v1alpha1.AgentLimit.limit:type_name -> koinon.gateway.v1alpha1.Limit
-	11, // 11: koinon.gateway.v1alpha1.Provider.models:type_name -> koinon.gateway.v1alpha1.Model
-	12, // 12: koinon.gateway.v1alpha1.Model.thinking:type_name -> koinon.gateway.v1alpha1.Thinking
-	13, // 13: koinon.gateway.v1alpha1.Model.price:type_name -> koinon.gateway.v1alpha1.Price
-	14, // 14: koinon.gateway.v1alpha1.Price.tiers:type_name -> koinon.gateway.v1alpha1.PriceTier
-	5,  // 15: koinon.gateway.v1alpha1.AgentModels.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	17, // 16: koinon.gateway.v1alpha1.MCPState.targets:type_name -> koinon.gateway.v1alpha1.MCPTarget
-	19, // 17: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
-	18, // 18: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
-	5,  // 19: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	20, // 20: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
-	23, // 21: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
-	22, // 22: koinon.gateway.v1alpha1.EgressState.credentials:type_name -> koinon.gateway.v1alpha1.EgressCredential
-	24, // 23: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
-	1,  // 24: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
-	2,  // 25: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
-	4,  // 26: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
-	3,  // 27: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
-	26, // [26:28] is the sub-list for method output_type
-	24, // [24:26] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	0,  // 0: koinon.gateway.v1alpha1.StreamStateRequest.halves:type_name -> koinon.gateway.v1alpha1.Half
+	0,  // 1: koinon.gateway.v1alpha1.AckRevisionRequest.half:type_name -> koinon.gateway.v1alpha1.Half
+	6,  // 2: koinon.gateway.v1alpha1.StateUpdate.keys:type_name -> koinon.gateway.v1alpha1.Key
+	7,  // 3: koinon.gateway.v1alpha1.StateUpdate.model:type_name -> koinon.gateway.v1alpha1.ModelState
+	16, // 4: koinon.gateway.v1alpha1.StateUpdate.mcp:type_name -> koinon.gateway.v1alpha1.MCPState
+	21, // 5: koinon.gateway.v1alpha1.StateUpdate.egress:type_name -> koinon.gateway.v1alpha1.EgressState
+	5,  // 6: koinon.gateway.v1alpha1.Key.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	8,  // 7: koinon.gateway.v1alpha1.ModelState.limits:type_name -> koinon.gateway.v1alpha1.AgentLimit
+	10, // 8: koinon.gateway.v1alpha1.ModelState.providers:type_name -> koinon.gateway.v1alpha1.Provider
+	15, // 9: koinon.gateway.v1alpha1.ModelState.models:type_name -> koinon.gateway.v1alpha1.AgentModels
+	5,  // 10: koinon.gateway.v1alpha1.AgentLimit.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	9,  // 11: koinon.gateway.v1alpha1.AgentLimit.limit:type_name -> koinon.gateway.v1alpha1.Limit
+	11, // 12: koinon.gateway.v1alpha1.Provider.models:type_name -> koinon.gateway.v1alpha1.Model
+	12, // 13: koinon.gateway.v1alpha1.Model.thinking:type_name -> koinon.gateway.v1alpha1.Thinking
+	13, // 14: koinon.gateway.v1alpha1.Model.price:type_name -> koinon.gateway.v1alpha1.Price
+	14, // 15: koinon.gateway.v1alpha1.Price.tiers:type_name -> koinon.gateway.v1alpha1.PriceTier
+	5,  // 16: koinon.gateway.v1alpha1.AgentModels.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	17, // 17: koinon.gateway.v1alpha1.MCPState.targets:type_name -> koinon.gateway.v1alpha1.MCPTarget
+	19, // 18: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
+	18, // 19: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
+	5,  // 20: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	20, // 21: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
+	23, // 22: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
+	22, // 23: koinon.gateway.v1alpha1.EgressState.credentials:type_name -> koinon.gateway.v1alpha1.EgressCredential
+	24, // 24: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
+	1,  // 25: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
+	2,  // 26: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
+	4,  // 27: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
+	3,  // 28: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
+	27, // [27:29] is the sub-list for method output_type
+	25, // [25:27] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_koinon_gateway_v1alpha1_state_proto_init() }

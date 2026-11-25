@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
+	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
 	"github.com/stateracloud/koinon/internal/safego"
@@ -61,10 +63,34 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 			// A pass applied servers that were not served before (or with another URL or credential):
 			// list them now, so a new server turns healthy in seconds instead of at the next tick.
 			if due := r.takeProbeDue(); len(due) > 0 {
-				safego.Do(r.log, "mcp-probe", func() { r.probeEach(ctx, due) })
+				// A wake (rev 0) needs no ack: it probes a server that is already served. The first
+				// probe of a new or changed server waits until every live koinon-gateway copy that
+				// serves MCP acked the MCP half of the State revision that holds it (ADR 0097
+				// decision 2.1, #1260): before that a copy can still refuse the probe key, and the
+				// refusal would be recorded as a failure.
+				var now, held []gatewayplan.Probe
+				var rev int64
+				for _, d := range due {
+					if d.rev == 0 {
+						now = append(now, d.probe)
+					} else {
+						held = append(held, d.probe)
+						rev = max(rev, d.rev)
+					}
+				}
+				if len(now) > 0 {
+					safego.Do(r.log, "mcp-probe", func() { r.probeEach(ctx, now) })
+				}
+				if len(held) > 0 {
+					safego.Do(r.log, "mcp-probe", func() {
+						if r.awaitGatewayAcked(ctx, rev) {
+							r.probeEach(ctx, held)
+						} // else held back, not recorded; the interval probe waits for the ack too
+					})
+				}
 			}
 		case <-t.C:
-			safego.Do(r.log, "mcp-probe", func() { r.ProbeAll(ctx) })
+			safego.Do(r.log, "mcp-probe", func() { r.probeTick(ctx) })
 		}
 	}
 }
@@ -74,13 +100,35 @@ func (r *Reconciler) ProbeAll(ctx context.Context) {
 	r.probeEach(ctx, r.plan.Probes())
 }
 
-// probeSoon queues probes for the prober to run now.
-func (r *Reconciler) probeSoon(probes []gatewayplan.Probe) {
+// probeTick is the interval probe. It does not start while a live copy still has to ack the newest
+// stored State revision: a server whose key arrived in that revision would get a 401 that is
+// recorded as a failure (#1260). The next tick tries again.
+func (r *Reconciler) probeTick(ctx context.Context) {
+	if latest, err := staterev.Latest(ctx, r.pool); err == nil && latest != nil {
+		if ok, err := r.gatewayAckedNow(ctx, latest.GetRevision()); err == nil && !ok {
+			r.log.Debug("MCP interval probe skipped: not every gateway copy acked the newest State revision", "revision", latest.GetRevision())
+			return
+		}
+	}
+	r.ProbeAll(ctx)
+}
+
+// dueProbe is a queued probe with the State revision whose MCP half it waits for (0: none).
+type dueProbe struct {
+	probe gatewayplan.Probe
+	rev   int64
+}
+
+// probeSoon queues probes for the prober to run now, after every live koinon-gateway copy acked the
+// MCP half of State revision rev (0: do not wait).
+func (r *Reconciler) probeSoon(probes []gatewayplan.Probe, rev int64) {
 	if len(probes) == 0 {
 		return
 	}
 	r.probeMu.Lock()
-	r.probeDue = append(r.probeDue, probes...)
+	for _, p := range probes {
+		r.probeDue = append(r.probeDue, dueProbe{probe: p, rev: rev})
+	}
 	r.probeMu.Unlock()
 	select {
 	case r.probeWakeChan() <- struct{}{}:
@@ -144,15 +192,69 @@ func (r *Reconciler) wakeProbe(ctx context.Context, payload string) {
 	}
 	r.probeAsked[server] = now
 	r.probeMu.Unlock()
-	r.probeSoon([]gatewayplan.Probe{probe})
+	r.probeSoon([]gatewayplan.Probe{probe}, 0)
 }
 
-func (r *Reconciler) takeProbeDue() []gatewayplan.Probe {
+func (r *Reconciler) takeProbeDue() []dueProbe {
 	r.probeMu.Lock()
 	defer r.probeMu.Unlock()
 	due := r.probeDue
 	r.probeDue = nil
 	return due
+}
+
+// gatewayAckedNow reports whether every live gateway copy that serves MCP acked the MCP half of rev.
+// No such copy counts as acked: nothing registered one (another gateway driver, or the gateway is
+// down), and a down gateway must still show as a failed probe.
+func (r *Reconciler) gatewayAckedNow(ctx context.Context, rev int64) (bool, error) {
+	live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
+	if err != nil {
+		return false, err
+	}
+	if len(live) == 0 {
+		return true, nil
+	}
+	return staterev.AllAcked(ctx, r.pool, rev, gwv1.Half_HALF_MCP, live)
+}
+
+const (
+	// DefaultMCPAckWait is how long the first probe of a server waits for the gateway copies to ack.
+	DefaultMCPAckWait = time.Minute
+	// DefaultMCPAckPoll is how often the acks are read while it waits.
+	DefaultMCPAckPoll = time.Second
+)
+
+// awaitGatewayAcked waits until every live koinon-gateway copy acked the MCP half of State revision
+// rev (staterev.AllAcked), and reports whether the probe may start (gatewayAckedNow says when none
+// has to ack). It returns true at once when rev is 0. It returns false when ctx ends or the wait runs out; the probe is then not recorded.
+func (r *Reconciler) awaitGatewayAcked(ctx context.Context, rev int64) bool {
+	if rev <= 0 {
+		return true
+	}
+	wait, poll := r.cfg.MCPAckWait, r.cfg.MCPAckPoll
+	if wait <= 0 {
+		wait = DefaultMCPAckWait
+	}
+	if poll <= 0 {
+		poll = DefaultMCPAckPoll
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	for {
+		if ok, err := r.gatewayAckedNow(ctx, rev); err != nil {
+			r.log.Warn("reading the gateway acks failed; the MCP probe waits", "err", err)
+		} else if ok {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			r.log.Warn("not every gateway copy acked the MCP state; the MCP probe is held back until the next interval", "revision", rev)
+			return false
+		case <-time.After(poll):
+		}
+	}
 }
 
 func (r *Reconciler) probeWakeChan() chan struct{} {

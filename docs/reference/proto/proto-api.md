@@ -2667,6 +2667,7 @@ so neither half is a copy of them.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | copy_id | 1 | `string` | singular |  | copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce), 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and an ack under a reused id would count for a process that has not loaded the revision. |
+| halves | 2 | `koinon.gateway.v1alpha1.Half` | repeated |  | halves lists the halves this copy serves, and so acks. Empty means both (a client from before this field). The reconciler waits only for copies that serve a half. |
 
 ### Message Thinking
 

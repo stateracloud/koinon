@@ -7,7 +7,7 @@ import { Composer } from '@/components/composer'
 import { RunStatus } from '@/components/run-status'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/status-badge'
 import { ApprovalView } from '@/components/approval-view'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TaskService, TaskState, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
@@ -16,7 +16,7 @@ import { useMemberNames } from '@/hooks/use-member-names'
 import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
 import { isReplyThread, noDirectMessagesText, takesDirectMessages } from '@/lib/direct-message'
-import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
+import { isEnded, runFinished, runStateLabel } from '@/lib/labels'
 
 export type ChatPanelProps = {
   orgId: string
@@ -86,7 +86,7 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
     <section aria-label={`Thread: ${task.title}`} className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">{task.title}</h3>
-        <Badge variant="secondary">{stateLabel(state)}</Badge>
+        <StatusBadge state={state} />
         {agentName && <span className="text-muted-foreground text-sm">{agentName}</span>}
         <Link to="/tasks/$taskId" params={{ taskId: task.id }} className="text-muted-foreground ml-auto text-sm hover:underline">
           Open task
