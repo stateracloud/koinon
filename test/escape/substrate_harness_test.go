@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package escape_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
+)
+
+// The Substrate qualification harness (issue #1092). KOINON_ESCAPE_DRIVER=substrate points the suite at
+// a real Agent Substrate and builds the driver the reconciler runs, from these variables. Nothing here
+// runs on the OpenShell driver, and none of it needs a Kubernetes client: the driver speaks to ateapi
+// and to the atenet router only.
+//
+//	KOINON_ESCAPE_SUBSTRATE_CONTROL        ateapi host:port (required)
+//	KOINON_ESCAPE_SUBSTRATE_ROUTER         atenet router host:port (required)
+//	KOINON_ESCAPE_SUBSTRATE_CA             CA file of ateapi's certificate (default: system roots)
+//	KOINON_ESCAPE_SUBSTRATE_SERVER_NAME    name checked against ateapi's certificate
+//	KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE     ServiceAccount token (ateapi audience) sent as bearer token
+//	KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE hex seed of the Ed25519 guest-API key the actor template trusts
+//	                                       (required; the same key as --substrate-guest-key-file)
+//	KOINON_ESCAPE_SUBSTRATE_IMAGE          actor image with sh and python3 on its PATH, built on the
+//	                                       sandbox-substrate overlay (guest front and launcher) (required)
+//	KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS  the Substrate runtime class of the tier under test, for
+//	                                       example the gVisor class of the install (required)
+//	KOINON_ESCAPE_TIER                     the isolation tier of that class: hardened (default), vm or dev
+//	KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS  comma-separated host=target entries, as --substrate-image-mirrors
+//	KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY registry that replaces the host of an image with no mirror entry
+//	KOINON_ESCAPE_SUBSTRATE_WORKSPACE      the atespace of org A (default koinon-escape)
+//	KOINON_ESCAPE_SUBSTRATE_OTHER_WORKSPACE the atespace of org B for the cross-org spec (default
+//	                                       koinon-escape-other)
+//	KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT, _REGION, _BUCKET, _ACCESS_KEY_FILE, _SECRET_KEY_FILE
+//	                                       the snapshot bucket (read-only key), as --substrate-snapshot-*;
+//	                                       the restore spec needs them, and fails closed without
+//
+// The actor needs the sandbox-substrate overlay: the driver puts the guest launcher in front of every
+// command, so an image without it cannot run a probe.
+
+// substrateEnvNames are the variables the qualifying run must set; the harness fails, never skips, when
+// a driver run lacks one, because a skipped qualification reads as a pass.
+var substrateEnvNames = []string{
+	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER", "KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE",
+	"KOINON_ESCAPE_SUBSTRATE_IMAGE", "KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS",
+}
+
+// missingSubstrateEnv names the required variables that are empty.
+func missingSubstrateEnv(get func(string) string) []string {
+	var missing []string
+	for _, n := range substrateEnvNames {
+		if strings.TrimSpace(get(n)) == "" {
+			missing = append(missing, n)
+		}
+	}
+	return missing
+}
+
+// substrateRig is the driver and the names a Substrate run uses.
+type substrateRig struct {
+	driver                    *substrate.Driver
+	workspace, otherWorkspace string
+	image, class              string
+	tier                      harness.Tier
+	snapshots                 bool
+}
+
+// rig is the one rig of the run; the suite's BeforeSuite sets it when KOINON_ESCAPE_DRIVER=substrate.
+var rig *substrateRig
+
+// splitList splits a comma-separated list and drops empty entries.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// buildSubstrate builds the driver from the environment: the same settings type the binaries use, so
+// the run qualifies the code path the reconciler takes.
+func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, error) {
+	if m := missingSubstrateEnv(get); len(m) > 0 {
+		return nil, nil, fmt.Errorf("KOINON_ESCAPE_DRIVER=substrate needs %s", strings.Join(m, ", "))
+	}
+	tier := harness.Tier(get("KOINON_ESCAPE_TIER"))
+	if tier == "" {
+		tier = harness.TierHardened
+	}
+	class := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS"))
+	s := cli.Substrate{
+		ControlAddress:    get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
+		RouterAddress:     get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
+		CAFile:            get("KOINON_ESCAPE_SUBSTRATE_CA"),
+		ServerName:        get("KOINON_ESCAPE_SUBSTRATE_SERVER_NAME"),
+		BearerTokenFile:   get("KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE"),
+		RuntimeClassTiers: []string{class + "=" + string(tier)},
+		ImageMirrors:      splitList(get("KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS")),
+		ImageRegistry:     get("KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY"),
+		GuestKeyFile:      get("KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE"),
+		SnapshotStore: cli.SnapshotStore{
+			Endpoint:      get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT"),
+			Region:        get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_REGION"),
+			Bucket:        get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_BUCKET"),
+			AccessKeyFile: get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ACCESS_KEY_FILE"),
+			SecretKeyFile: get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_SECRET_KEY_FILE"),
+		},
+	}
+	cfg, err := s.DriverConfig(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+	if err != nil {
+		return nil, nil, err
+	}
+	d, err := substrate.Dial(substrate.Endpoint{
+		ControlAddr: s.ControlAddress, RouterAddr: s.RouterAddress,
+		CAFile: s.CAFile, ServerName: s.ServerName, BearerTokenFile: s.BearerTokenFile,
+	}, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	other := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_OTHER_WORKSPACE"))
+	if other == "" {
+		other = "koinon-escape-other"
+	}
+	ws := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_WORKSPACE"))
+	if ws == "" {
+		ws = "koinon-escape"
+	}
+	return d, &substrateRig{
+		driver: d, workspace: ws, otherWorkspace: other, image: get("KOINON_ESCAPE_SUBSTRATE_IMAGE"),
+		class: class, tier: tier, snapshots: s.SnapshotStore.Endpoint != "",
+	}, nil
+}
+
+// The suite builds the rig once and starts the shared probe sandbox of org A. A parallel run builds
+// one per process, which is fine: the driver holds connections and no state of the run. A run that
+// names the Substrate driver and cannot build it is a failed qualification, never a skip.
+var _ = BeforeSuite(func(ctx SpecContext) {
+	if escapeDriver() != "substrate" {
+		return
+	}
+	d, r, err := buildSubstrate(os.Getenv)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(d.Close)
+	for _, ws := range []string{r.workspace, r.otherWorkspace} {
+		_, err := d.EnsureWorkspace(ctx, ws, nil)
+		Expect(err).NotTo(HaveOccurred(), ws)
+	}
+	rig = r
+	probeSandbox = r.sandbox(ctx, r.workspace, fmt.Sprintf("kesa-%d", suffix()))
+	substrateProbe = r.probe
+}, NodeTimeout(8*time.Minute))
+
+// useSubstrate skips a spec that is not applicable on the OpenShell driver, and fails one that needs
+// the rig when a Substrate run has none.
+func useSubstrate(why string) {
+	GinkgoHelper()
+	if escapeDriver() != "substrate" {
+		Skip("not applicable on the OpenShell driver: " + why)
+	}
+	Expect(rig).NotTo(BeNil(), "KOINON_ESCAPE_DRIVER=substrate, but the rig was not built")
+}
+
+// probeProgram is the program the probe runs: the checks, then testdata/probe.py.
+func probeProgram(checks []check) string {
+	GinkgoHelper()
+	cfg, err := json.Marshal(checks)
+	Expect(err).NotTo(HaveOccurred())
+	return fmt.Sprintf("import json\nCHECKS = json.loads(bytes.fromhex(%q))\n%s", hex.EncodeToString(cfg), probeScript)
+}
+
+// sandboxSpec is a sleeping sandbox of the rig's tier.
+func (r *substrateRig) sandboxSpec(name string) execution.SandboxSpec {
+	return execution.SandboxSpec{
+		Name: name, Image: r.image, RuntimeClassName: r.class, Command: []string{"sleep", "infinity"},
+	}
+}
+
+// sandbox creates a sandbox in workspace, deletes it when the container ends, and waits until it is
+// ready. It returns the sandbox name.
+func (r *substrateRig) sandbox(ctx context.Context, workspace, name string) string {
+	GinkgoHelper()
+	_, err := r.driver.CreateSandbox(ctx, workspace, r.sandboxSpec(name))
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func(ctx context.Context) error {
+		_, err := r.driver.DeleteSandbox(ctx, workspace, name)
+		return err
+	})
+	Eventually(func(g Gomega) {
+		sb, err := r.driver.GetSandbox(ctx, workspace, name)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(sb.Phase).To(Equal(execution.PhaseReady), "%s: %s", sb.Reason, sb.Message)
+	}).WithContext(ctx).WithTimeout(racescale.D(5 * time.Minute)).WithPolling(2 * time.Second).Should(Succeed())
+	return name
+}
+
+// exec runs a command in a sandbox through the driver (the launcher of the tier goes in front of it)
+// and returns its output and exit code.
+func (r *substrateRig) exec(ctx context.Context, workspace, name, stdin string, command ...string) (string, string, int) {
+	GinkgoHelper()
+	var stderr bytes.Buffer
+	p, err := r.driver.Exec(ctx, workspace, name, execution.ExecRequest{Command: command, Stderr: &stderr})
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = p.Close() }()
+	go func() {
+		_, _ = io.WriteString(p.Stdin(), stdin)
+		_ = p.Stdin().Close()
+	}()
+	out, err := io.ReadAll(p.Stdout())
+	if err != nil && !errors.Is(err, io.EOF) {
+		Expect(err).NotTo(HaveOccurred(), stderr.String())
+	}
+	code, err := p.Wait()
+	Expect(err).NotTo(HaveOccurred(), stderr.String())
+	return string(out), stderr.String(), code
+}
+
+// probeIn runs checks in the named sandbox of workspace and returns each check's result by id.
+func (r *substrateRig) probeIn(ctx context.Context, workspace, name string, checks ...check) map[string]any {
+	GinkgoHelper()
+	out, stderr, code := r.exec(ctx, workspace, name, probeProgram(checks), "python3", "-")
+	Expect(code).To(Equal(0), stderr)
+	var res map[string]any
+	Expect(json.Unmarshal([]byte(out), &res)).To(Succeed(), out)
+	return res
+}
+
+// probeSandbox is the shared sandbox of org A that the actor probe runs in. A spec container that
+// wants its own sandbox calls rig.sandbox.
+var probeSandbox string
+
+// probe runs checks in the shared probe sandbox; it is substrateProbe.
+func (r *substrateRig) probe(ctx context.Context, checks ...check) map[string]any {
+	GinkgoHelper()
+	return r.probeIn(ctx, r.workspace, probeSandbox, checks...)
+}
+
+// requireSnapshots skips a spec that needs the snapshot bucket, and fails it under
+// KOINON_REQUIRE=substrate-snapshots.
+func requireSnapshots() {
+	GinkgoHelper()
+	if rig.snapshots {
+		return
+	}
+	testenv.Require(testenv.Var("substrate-snapshots", "KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT"))
+}
+
+// notApplicable starts the message of a Skip that is not a missing precondition: the threat does not
+// exist on this tier or driver. The report keeps it apart from a skipped spec.
+const notApplicable = "not applicable on "

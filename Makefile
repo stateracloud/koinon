@@ -272,6 +272,11 @@ test-escape: ## Run the escape suite's OpenShell cases against a gateway you poi
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
+.PHONY: test-escape-substrate
+test-escape-substrate: ## Qualify one Substrate isolation tier (default hardened = gVisor) on a cluster you point it at (KOINON_ESCAPE_SUBSTRATE_*; runbook: docs/dev/escape-substrate.md)
+	KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:-escape-cluster-ips,host-kernel} \
+		$(GO) test -count=1 -v -timeout 45m ./test/escape/ -ginkgo.label-filter=substrate -ginkgo.timeout=40m
+
 .PHONY: test-escape-kind
 test-escape-kind: ## Run the escape suite's OpenShell cases on the kind-koinon-dev gateway (after make dev-kind-up; runc, Kata cases skip; the kind e2e runs them against the chart install)
 	CLUSTER=$(DEV_KIND_CLUSTER) test/escape/kind.sh

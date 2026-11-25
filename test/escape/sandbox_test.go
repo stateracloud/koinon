@@ -105,10 +105,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	// probe runs checks in the sandbox and returns each check's result by id.
 	probeIn := func(ctx context.Context, sandbox string, checks ...check) map[string]any {
 		GinkgoHelper()
-		cfg, err := json.Marshal(checks)
-		Expect(err).NotTo(HaveOccurred())
-		script := fmt.Sprintf("import json\nCHECKS = json.loads(bytes.fromhex(%q))\n%s", hex.EncodeToString(cfg), probeScript)
-		out, stderr, code := g.exec(ctx, sandbox, script, "python3", "-")
+		out, stderr, code := g.exec(ctx, sandbox, probeProgram(checks), "python3", "-")
 		Expect(code).To(Equal(0), stderr)
 		var res map[string]any
 		Expect(json.Unmarshal([]byte(out), &res)).To(Succeed(), out)
@@ -444,16 +441,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(8*time.Minute))
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
-		res := probe(ctx,
-			check{"id": "status", "op": "status"},
-			check{"id": "setuid", "op": "syscall", "name": "setuid0"},
-		)
-		st := res["status"].(map[string]any)
-		Expect(st).To(HaveKeyWithValue("CapEff", MatchRegexp(`^0+$`)))
-		Expect(st).To(HaveKeyWithValue("CapPrm", MatchRegexp(`^0+$`)))
-		Expect(st).To(HaveKeyWithValue("NoNewPrivs", "1"))
-		Expect(st).To(HaveKeyWithValue("Seccomp", "2"), "seccomp filter mode")
-		Expect(res["setuid"]).To(Equal("EPERM"))
+		expectNoPrivileges(ctx, probe)
 	}, NodeTimeout(2*time.Minute))
 
 	// The writes go to places file permissions allow (sticky, world-writable directories), so
@@ -461,70 +449,13 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	// and raw sockets fail for want of capabilities as well as by seccomp; the spec above
 	// checks both are in force, and this one checks the operations really fail.
 	It("denies writes outside Landlock's read-write list, and privileged syscalls", func(ctx SpecContext) {
-		res := probe(ctx,
-			check{"id": "shm", "op": "write", "path": "/dev/shm/koinon-escape"},
-			check{"id": "vartmp", "op": "write", "path": "/var/tmp/koinon-escape"},
-			check{"id": "tmp", "op": "write", "path": "/tmp/koinon-escape"},
-			check{"id": "shm mode", "op": "mode", "path": "/dev/shm"},
-			check{"id": "vartmp mode", "op": "mode", "path": "/var/tmp"},
-			check{"id": "mount", "op": "syscall", "name": "mount"},
-			check{"id": "unshare user", "op": "syscall", "name": "unshare_user"},
-			check{"id": "unshare mount", "op": "syscall", "name": "unshare_mount"},
-			check{"id": "bpf", "op": "syscall", "name": "bpf"},
-			check{"id": "keyctl", "op": "syscall", "name": "keyctl"},
-			check{"id": "add_key", "op": "syscall", "name": "add_key"},
-			check{"id": "perf", "op": "syscall", "name": "perf_event_open"},
-			check{"id": "raw packet", "op": "syscall", "name": "raw_packet"},
-			check{"id": "raw inet", "op": "syscall", "name": "raw_inet"},
-		)
-		Expect(res["tmp"]).To(Equal("ok"), "control: /tmp is writable")
-		for _, id := range []string{"shm", "vartmp"} {
-			Expect(res[id+" mode"]).To(Equal("1777"), "control: "+id+" is sticky and world-writable, so only Landlock stops the write")
-			Expect(res[id]).To(BeElementOf("EACCES", "EPERM"), id)
-		}
-		for _, id := range []string{"mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {
-			Expect(res[id]).To(BeElementOf("EPERM", "EACCES"), id)
-		}
-		for _, id := range []string{"raw packet", "raw inet"} {
-			Expect(res[id]).To(BeElementOf("EPERM", "EACCES", "EPROTONOSUPPORT", "EAFNOSUPPORT"), id)
-		}
+		expectWritesDenied(ctx, probe)
 	}, NodeTimeout(2*time.Minute))
 
 	// The guest agent is PID 1 (the OpenShell supervisor; the Substrate guest launcher's agent) and the
 	// guest server is whatever listens inside the guest for control calls. Both belong to the platform.
 	It("cannot reach the guest agent or guest server as the agent user", func(ctx SpecContext) {
-		checks := []check{
-			{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
-			{"id": "mem", "op": "syscall", "name": "proc1_mem"},
-			{"id": "visible", "op": "read", "path": "/proc/1/status"},
-		}
-		// Unix sockets of the guest server, when the driver has them (comma-separated paths).
-		sockets := []string{}
-		for _, s := range strings.Split(os.Getenv("KOINON_ESCAPE_GUEST_SOCKETS"), ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				sockets = append(sockets, s)
-				checks = append(checks, check{"id": "unix " + s, "op": "unix", "path": s})
-			}
-		}
-		// The Substrate guest server answers on vsock: the agent user must not open the socket family.
-		vsock := os.Getenv("KOINON_ESCAPE_GUEST_VSOCK") != ""
-		if vsock {
-			checks = append(checks, check{"id": "vsock", "op": "syscall", "name": "vsock"})
-		}
-		if len(sockets) == 0 && !vsock {
-			GinkgoWriter.Println("guest server half: not applicable here, set KOINON_ESCAPE_GUEST_SOCKETS or KOINON_ESCAPE_GUEST_VSOCK on a driver that has one")
-		}
-		res := probe(ctx, checks...)
-		if vsock {
-			Expect(res["vsock"]).To(BeElementOf("EPERM", "EACCES", "EAFNOSUPPORT"))
-		}
-		Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
-		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
-		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
-		for _, s := range sockets {
-			// ENOENT fails too: a mistyped path must not pass for a fence.
-			Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM"), "the guest server socket %s accepted the agent user, or does not exist", s)
-		}
+		expectGuestAgentClosed(ctx, probe, os.Getenv("KOINON_ESCAPE_GUEST_VSOCK") != "")
 	}, NodeTimeout(2*time.Minute))
 
 	// A manual release gate (ADR 0045): a maintainer cluster's dev profile may run sandboxes under
@@ -539,6 +470,105 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(k["hypervisor"]).To(BeTrue(), "the guest sees a hypervisor")
 	}, NodeTimeout(2*time.Minute))
 })
+
+// probeFunc runs probe checks in the sandbox under test and returns each check's result by id. The
+// OpenShell and Substrate specs share the threat checks below through it, so a threat has one spec
+// body whatever the driver (issue #1092).
+type probeFunc func(ctx context.Context, checks ...check) map[string]any
+
+// expectNoPrivileges: the agent has no capabilities, no_new_privs and a seccomp filter.
+func expectNoPrivileges(ctx context.Context, probe probeFunc) {
+	GinkgoHelper()
+	res := probe(ctx,
+		check{"id": "status", "op": "status"},
+		check{"id": "setuid", "op": "syscall", "name": "setuid0"},
+	)
+	st := res["status"].(map[string]any)
+	Expect(st).To(HaveKeyWithValue("CapEff", MatchRegexp(`^0+$`)))
+	Expect(st).To(HaveKeyWithValue("CapPrm", MatchRegexp(`^0+$`)))
+	Expect(st).To(HaveKeyWithValue("NoNewPrivs", "1"))
+	Expect(st).To(HaveKeyWithValue("Seccomp", "2"), "seccomp filter mode")
+	Expect(res["setuid"]).To(Equal("EPERM"))
+}
+
+// expectWritesDenied: the writes go to places file permissions allow (sticky, world-writable
+// directories), so only Landlock's read-write list (/tmp, /dev/null, the workdir) stops them. The
+// syscalls and raw sockets fail for want of capabilities as well as by seccomp; expectNoPrivileges
+// checks both are in force, and this checks the operations really fail.
+func expectWritesDenied(ctx context.Context, probe probeFunc) {
+	GinkgoHelper()
+	res := probe(ctx,
+		check{"id": "shm", "op": "write", "path": "/dev/shm/koinon-escape"},
+		check{"id": "vartmp", "op": "write", "path": "/var/tmp/koinon-escape"},
+		check{"id": "tmp", "op": "write", "path": "/tmp/koinon-escape"},
+		check{"id": "shm mode", "op": "mode", "path": "/dev/shm"},
+		check{"id": "vartmp mode", "op": "mode", "path": "/var/tmp"},
+	)
+	Expect(res["tmp"]).To(Equal("ok"), "control: /tmp is writable")
+	for _, id := range []string{"shm", "vartmp"} {
+		Expect(res[id+" mode"]).To(Equal("1777"), "control: "+id+" is sticky and world-writable, so only Landlock stops the write")
+		Expect(res[id]).To(BeElementOf("EACCES", "EPERM"), id)
+	}
+	expectSyscallsDenied(ctx, probe)
+}
+
+// expectSyscallsDenied: privileged syscalls and raw sockets fail. They need no Landlock, so a tier
+// without it still has to pass them.
+func expectSyscallsDenied(ctx context.Context, probe probeFunc) {
+	GinkgoHelper()
+	res := probe(ctx,
+		check{"id": "mount", "op": "syscall", "name": "mount"},
+		check{"id": "unshare user", "op": "syscall", "name": "unshare_user"},
+		check{"id": "unshare mount", "op": "syscall", "name": "unshare_mount"},
+		check{"id": "bpf", "op": "syscall", "name": "bpf"},
+		check{"id": "keyctl", "op": "syscall", "name": "keyctl"},
+		check{"id": "add_key", "op": "syscall", "name": "add_key"},
+		check{"id": "perf", "op": "syscall", "name": "perf_event_open"},
+		check{"id": "raw packet", "op": "syscall", "name": "raw_packet"},
+		check{"id": "raw inet", "op": "syscall", "name": "raw_inet"},
+	)
+	for _, id := range []string{"mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {
+		Expect(res[id]).To(BeElementOf("EPERM", "EACCES"), id)
+	}
+	for _, id := range []string{"raw packet", "raw inet"} {
+		Expect(res[id]).To(BeElementOf("EPERM", "EACCES", "EPROTONOSUPPORT", "EAFNOSUPPORT"), id)
+	}
+}
+
+// expectGuestAgentClosed: the guest agent is PID 1 (the OpenShell supervisor; the Substrate guest
+// launcher's agent) and the guest server is whatever listens inside the guest for control calls. Both
+// belong to the platform. vsock says whether to check that the agent user cannot open an AF_VSOCK
+// socket, the Substrate guest server's channel.
+func expectGuestAgentClosed(ctx context.Context, probe probeFunc, vsock bool) {
+	GinkgoHelper()
+	checks := []check{
+		{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
+		{"id": "mem", "op": "syscall", "name": "proc1_mem"},
+		{"id": "visible", "op": "read", "path": "/proc/1/status"},
+	}
+	// Unix sockets of the guest server, when the driver has them (comma-separated paths).
+	sockets := splitList(os.Getenv("KOINON_ESCAPE_GUEST_SOCKETS"))
+	for _, s := range sockets {
+		checks = append(checks, check{"id": "unix " + s, "op": "unix", "path": s})
+	}
+	if vsock {
+		checks = append(checks, check{"id": "vsock", "op": "syscall", "name": "vsock"})
+	}
+	if len(sockets) == 0 && !vsock {
+		GinkgoWriter.Println("guest server half: not applicable here, set KOINON_ESCAPE_GUEST_SOCKETS or KOINON_ESCAPE_GUEST_VSOCK on a driver that has one")
+	}
+	res := probe(ctx, checks...)
+	if vsock {
+		Expect(res["vsock"]).To(BeElementOf("EPERM", "EACCES", "EAFNOSUPPORT"))
+	}
+	Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
+	Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
+	Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
+	for _, s := range sockets {
+		// ENOENT fails too: a mistyped path must not pass for a fence.
+		Expect(res["unix "+s]).To(BeElementOf("EACCES", "EPERM"), "the guest server socket %s accepted the agent user, or does not exist", s)
+	}
+}
 
 const driverOpenShell = "openshell"
 

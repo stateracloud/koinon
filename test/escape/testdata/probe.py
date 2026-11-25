@@ -12,6 +12,7 @@ import errno
 import json
 import os
 import platform
+import re
 import socket
 import sys
 
@@ -101,8 +102,11 @@ SKIP = ("/proc", "/sys", "/dev")
 def scan(c):
     """Paths whose content holds any of the needles: every readable file under the roots
     (Landlock hides "/" itself, so the suite names them) outside /proc, /sys and /dev, plus the
-    environment and command line of every other process."""
-    needles = [bytes.fromhex(n) for n in c["needles"]]
+    environment and command line of every other process. A check may also give "pattern", a
+    regular expression: a file whose content matches it is found too (a JWT shape, for example).
+    The result names paths only, never the matched bytes."""
+    needles = [bytes.fromhex(n) for n in c.get("needles", ())]
+    pattern = re.compile(c["pattern"].encode()) if c.get("pattern") else None
     found, files = [], 0
 
     def check(path):
@@ -113,7 +117,7 @@ def scan(c):
         except OSError:
             return
         files += 1
-        if any(n in data for n in needles):
+        if any(n in data for n in needles) or (pattern and pattern.search(data)):
             found.append(path)
 
     seen = set()
@@ -216,6 +220,11 @@ def syscall(c):
         return sysresult(libc.syscall(NR["add_key"], b"user", b"k", b"v", 1, -2))
     if n == "perf_event_open":
         return sysresult(libc.syscall(NR["perf_event_open"], None, 0, -1, -1, 0))
+    if n == "landlock_abi":
+        # landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION): the ABI number, or the errno
+        # name (ENOSYS in gVisor, which has no Landlock; EOPNOTSUPP when it is disabled).
+        rc = libc.syscall(444, None, 0, 1)
+        return rc if rc >= 0 else sysresult(rc)
     if n == "setuid0":
         return sysresult(libc.setuid(0))
     if n == "ptrace_pid1":
