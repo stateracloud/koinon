@@ -200,6 +200,32 @@ else
 	done < <(awk '/^[^[:space:]]/ { in_o = ($0 ~ /^baseImageOverrides:/); next } in_o && /^[[:space:]]+[^[:space:]]+:[[:space:]]*[^[:space:]]/ { sub(/^[^:]*:[[:space:]]*/, ""); print }' <<<"$ko_body")
 fi
 
+# 8. The goreleaser kos base and the mirror (#1224): hack/base-images/Dockerfile is what Dependabot updates, so
+# .goreleaser.yaml's base_image and .ko.yaml's default base must be the digests it names (a tag in the release
+# path made one registry fault fail the release).
+mirror=hack/base-images/Dockerfile
+gr=.goreleaser.yaml
+if [[ ! -f $mirror ]]; then
+	fail "$mirror is missing: it is the file Dependabot reads to update the base images (#1224)"
+elif [[ ! -f $gr ]]; then
+	fail "$gr is missing"
+else
+	mirror_ref() { sed -n "s/^FROM[[:space:]]*\\([^[:space:]]*\\)[[:space:]]*AS[[:space:]]*$1\$/\\1/p" "$mirror" | head -1; }
+	m_ko=$(mirror_ref ko-default | sed -E 's/:[A-Za-z0-9._-]+@/@/')
+	m_kos=$(mirror_ref goreleaser-kos)
+	[[ $m_kos =~ ^gcr\.io/distroless/static:nonroot@sha256:[0-9a-f]{64}$ ]] || fail "$mirror: goreleaser-kos is '${m_kos:-<missing>}', want gcr.io/distroless/static:nonroot@sha256:<64 hex>"
+	[[ $m_ko =~ ^cgr\.dev/chainguard/static@sha256:[0-9a-f]{64}$ ]] || fail "$mirror: ko-default is '${m_ko:-<missing>}', want cgr.dev/chainguard/static:latest@sha256:<64 hex>"
+	[[ -z ${default_ref:-} || $m_ko == "$default_ref" ]] || fail "$ko defaultBaseImage ($default_ref) differs from $mirror ($m_ko)"
+	# Every kos base_image of goreleaser is that one pinned image.
+	# The value is the pinned ref itself or an envOrDefault template whose default is the pinned ref (the release
+	# workflow overrides it with a copy in ghcr.io, hack/release-base-mirror.sh); the default is what is compared.
+	kos_refs=$(sed -n 's/^[[:space:]]*base_image:[[:space:]]*//p' "$gr" | sed -e 's/[[:space:]]#.*$//' -e 's/^.*envOrDefault[[:space:]]*\\*"[A-Z_]*\\*"[[:space:]]*\\*"\([^"\\]*\).*$/\1/' -e "s/[\"']//g" -e 's/[[:space:]]*$//')
+	[[ -n $kos_refs ]] || fail "$gr: no kos base_image"
+	while IFS= read -r ref; do
+		[[ -z $ref || $ref == "$m_kos" ]] || fail "$gr: base_image '$ref' is not the pinned '$m_kos' of $mirror (re-pin: crane digest gcr.io/distroless/static:nonroot)"
+	done <<<"$kos_refs"
+fi
+
 if ((fails > 0)); then
 	echo "versions-check: $fails mismatches. Fix the copy, or bump hack/versions.env with its checksums (CONTRIBUTING.md, 'Tool versions')." >&2
 	exit 1

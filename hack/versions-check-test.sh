@@ -27,7 +27,9 @@ fresh() { # a copy of the inputs, echoes its path
 	cp "$repo/hack/versions.env" "$repo/hack/govulncheck.sh" "$w/hack/"
 	cp "$repo/hack/e2e-toolchain/Dockerfile" "$w/hack/e2e-toolchain/"
 	cp "$repo"/.github/workflows/*.yml "$w/.github/workflows/"
-	cp "$repo/CONTRIBUTING.md" "$w/"
+	cp "$repo/CONTRIBUTING.md" "$repo/.goreleaser.yaml" "$w/"
+	mkdir -p "$w/hack/base-images"
+	cp "$repo/hack/base-images/Dockerfile" "$w/hack/base-images/"
 	# The fixture's .ko.yaml is the real one with a digest pin for the default base when the real file has none yet
 	# (a digest the lane could not read, #1224): the checker is tested on the form, not on this digest.
 	if grep -q '^defaultBaseImage:' "$repo/.ko.yaml"; then
@@ -276,6 +278,23 @@ expect_fail ".ko.yaml: a quoted key with a tag" "$w" "baseImageOverrides entry"
 w=$(fresh)
 rm "$w/.ko.yaml"
 expect_fail ".ko.yaml: missing" "$w" ".ko.yaml is missing"
+
+# The goreleaser kos base and the Dependabot mirror (#1224)
+w=$(fresh)
+subst "$w/.goreleaser.yaml" "static:nonroot@sha256:" "static:nonroot:"
+expect_fail ".goreleaser.yaml: base_image default as a tag" "$w" "is not the pinned"
+w=$(fresh)
+subst "$w/hack/base-images/Dockerfile" "gcr.io/distroless/static:nonroot@sha256:8" "gcr.io/distroless/static:nonroot@sha256:9"
+expect_fail ".goreleaser.yaml: base_image differs from the mirror" "$w" "is not the pinned"
+w=$(fresh)
+subst "$w/hack/base-images/Dockerfile" "cgr.dev/chainguard/static:latest@sha256:8" "cgr.dev/chainguard/static:latest@sha256:9"
+expect_fail ".ko.yaml: default base differs from the mirror" "$w" "differs from hack/base-images/Dockerfile"
+w=$(fresh)
+rm "$w/hack/base-images/Dockerfile"
+expect_fail "mirror Dockerfile missing" "$w" "hack/base-images/Dockerfile is missing"
+w=$(fresh)
+grep -v '^[[:space:]]*base_image:' "$w/.goreleaser.yaml" >"$w/gr.new" && mv "$w/gr.new" "$w/.goreleaser.yaml"
+expect_fail ".goreleaser.yaml: no base_image" "$w" "no kos base_image"
 
 # dep-age-check fails (no network needed) for a *_VERSION with no tool_repo entry
 w=$(mktemp -d "$tmp/dep.XXXXXX") || exit 1

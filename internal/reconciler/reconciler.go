@@ -108,6 +108,11 @@ type Config struct {
 	// StateRevisionDB, when set, replaces the pool for storing State stream revisions. For tests of
 	// a slow or failing store.
 	StateRevisionDB staterev.DB
+	// MCPAckWait is how long the first probe of a new or changed MCP server waits for every live
+	// koinon-gateway copy to ack the State revision (#1260); zero means DefaultMCPAckWait. MCPAckPoll
+	// is how often it reads the acks; zero means DefaultMCPAckPoll.
+	MCPAckWait time.Duration
+	MCPAckPoll time.Duration
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
@@ -304,7 +309,7 @@ type Reconciler struct {
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
 	probeMu   sync.Mutex
-	probeDue  []gatewayplan.Probe
+	probeDue  []dueProbe
 	probeWake chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
@@ -432,7 +437,11 @@ const statePublishTimeout = 5 * time.Second
 // counted and never holds the pass back: the Apply below is what serves the state. The state is the
 // one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
 // gateway that follows the stream serves what the agentgateway drivers serve.
-func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
+//
+// It returns the stored revision that holds the state (the new one, or the latest when nothing
+// changed), or 0 when nothing was stored. A probe of a new MCP server waits for the ack of this
+// revision (#1260).
+func (r *Reconciler) publishState(ctx context.Context, s gateway.State) int64 {
 	// Its own short deadline: a slow database must not hold the pass.
 	ctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
 	defer cancel()
@@ -441,12 +450,13 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
 		r.log.Warn("storing the gateway state revision failed; the gateway is applied as before", "err", err)
-		return
+		return 0
 	}
 	if p.Changed {
 		r.m.StateRevisions.Inc()
 		r.log.Debug("gateway state revision stored", "revision", p.Revision)
 	}
+	return p.Revision
 }
 
 // notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
@@ -860,8 +870,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// Record what was applied. A gateway that took nothing (unreachable, whole config refused) has
 	// nothing to record; a partial rejection still left the rest live.
 	var applyRej *gateway.RejectedError
+	var stateRev int64
 	if applyErr == nil || errors.As(applyErr, &applyRej) {
-		r.publishState(ctx, plan.State)
+		stateRev = r.publishState(ctx, plan.State)
 	}
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
@@ -899,7 +910,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	}
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
-	r.probeSoon(outcome.Probe)
+	r.probeSoon(outcome.Probe, stateRev)
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()

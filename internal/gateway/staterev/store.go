@@ -198,3 +198,45 @@ func AllAcked(ctx context.Context, db store.DBTX, revision int64, half gwv1.Half
 	}
 	return n == int64(len(ids)), nil
 }
+
+// LiveCopyMaxAge is how long after its last touch a gateway copy still counts as live. A copy touches
+// its row at the stream's poll interval (5 s by default), so this allows several missed beats.
+const LiveCopyMaxAge = 30 * time.Second
+
+// TouchCopy records that copy holds the State stream streamID open now, and whether it serves the MCP
+// half.
+func TouchCopy(ctx context.Context, db store.DBTX, copyID, streamID string, servesMCP bool) error {
+	if copyID == "" {
+		return errors.New("staterev: touch without a copy id")
+	}
+	if err := store.New(db).TouchGatewayStateCopy(ctx, store.TouchGatewayStateCopyParams{CopyID: copyID, ServesMcp: servesMCP, StreamID: streamID}); err != nil {
+		return fmt.Errorf("staterev: touch copy: %w", err)
+	}
+	return nil
+}
+
+// ForgetCopy removes copy from the live set: its stream streamID ended. A copy that reconnected since
+// (its row belongs to another stream) stays.
+func ForgetCopy(ctx context.Context, db store.DBTX, copyID, streamID string) error {
+	if err := store.New(db).DeleteGatewayStateCopy(ctx, store.DeleteGatewayStateCopyParams{CopyID: copyID, StreamID: streamID}); err != nil {
+		return fmt.Errorf("staterev: forget copy: %w", err)
+	}
+	return nil
+}
+
+// LiveCopies returns the copies that touched their row within maxAge (LiveCopyMaxAge when zero) and
+// serve half (HALF_MCP: only the copies that ack it; any other value: all). Rows of copies that died
+// without a clean end are removed after they pass ten times that bound.
+func LiveCopies(ctx context.Context, db store.DBTX, maxAge time.Duration, half gwv1.Half) ([]string, error) {
+	if maxAge <= 0 {
+		maxAge = LiveCopyMaxAge
+	}
+	q := store.New(db)
+	secs := int32(maxAge / time.Second)
+	ids, err := q.ListLiveGatewayStateCopies(ctx, store.ListLiveGatewayStateCopiesParams{MaxAgeSeconds: secs, McpOnly: half == gwv1.Half_HALF_MCP})
+	if err != nil {
+		return nil, fmt.Errorf("staterev: list live copies: %w", err)
+	}
+	_, _ = q.PruneGatewayStateCopies(ctx, secs*10)
+	return ids, nil
+}

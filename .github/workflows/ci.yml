@@ -87,7 +87,7 @@ jobs:
           persist-credentials: false
       # hack/ci-changes.sh asks `go list` for the packages the harnesses suite builds.
       - id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -924,6 +924,7 @@ jobs:
       - run: hack/board-test.sh
       - run: hack/release-drill-wait-test.sh
       - run: hack/release-test-images-test.sh
+      - run: hack/release-base-mirror-test.sh
       - run: hack/release-harness-test.sh
       - run: hack/ko-ref-test.sh
       - run: hack/route-guard-test.sh
