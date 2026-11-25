@@ -142,6 +142,11 @@
           "Authorization": "Bearer {env:KOINON_MODEL_KEY}"
         },
         "oauth": false,
+        // Request timeout in ms. OpenCode's default is shorter than the gateway's call timeout
+        // (mcpgateway.DefaultCallTimeout, 2 minutes), and v0.1 sends no progress notifications, so a
+        // long tool call would fail on the client first. Keep it above the call timeout; a Go spec
+        // (internal/mcpgateway, TestOpenCodeTimeout) checks it. ADR 0097 section 14.
+        "timeout": 150000,
         // Tools reach the model one by one as koinon_<tool>, not through OpenCode's code mode.
         "codemode": false
       }
