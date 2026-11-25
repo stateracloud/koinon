@@ -353,6 +353,10 @@ type Querier interface {
 	DecideRunTraced(ctx context.Context, arg DecideRunTracedParams) (bool, error)
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
+	// An admin reviews a server's tools (#1216 point c): the rows of tools that no admin ever decided on (no
+	// approved text, no tier an admin set) and that the server no longer lists go. They are not served,
+	// and they count toward the limit of unreviewed tools (mcpservers.MaxUnreviewedTools).
+	DeleteAbsentUnreviewedMCPTools(ctx context.Context, arg DeleteAbsentUnreviewedMCPToolsParams) ([]string, error)
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteAgentRemoteAgents(ctx context.Context, arg DeleteAgentRemoteAgentsParams) error
 	// Removes the row when it holds no continuation override either (SetAgentContinuationLimits owns

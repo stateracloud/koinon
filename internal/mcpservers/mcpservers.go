@@ -255,6 +255,9 @@ type Server struct {
 	// forget, ADR 0085 decision 13): the server is not served until the credential is entered again.
 	// CredentialHeader and CredentialPrefix are kept.
 	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	// UnreviewedToolsCappedAt is set while the server is at MaxUnreviewedTools: the sync stores no new
+	// tool of it until an admin reviews tools (ReviewAllTools makes room).
+	UnreviewedToolsCappedAt *time.Time `json:"unreviewedToolsCappedAt,omitempty"`
 	// AdminDisabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5).
 	AdminDisabled *outward.Disabled `json:"adminDisabled,omitempty"`
 	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
@@ -427,7 +430,7 @@ func toServer(r store.McpServer) Server {
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
 		CABundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify,
-		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
+		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), UnreviewedToolsCappedAt: timePtr(r.UnreviewedToolsCappedAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,
@@ -1224,6 +1227,120 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 		return Tool{}, mapErr(err)
 	}
 	return toTool(out), nil
+}
+
+// SeenTool names a tool and the hash of its text (Tool.ToolHash) as an admin read it.
+type SeenTool struct {
+	Name     string
+	ToolHash string
+}
+
+// ReviewAllResult says what ReviewAllTools changed.
+type ReviewAllResult struct {
+	// Reviewed are the tools it approved, as they are now.
+	Reviewed []Tool
+	// Removed is how many absent rows that no admin reviewed it deleted.
+	Removed int
+}
+
+// maxReviewAll bounds one ReviewAllTools request. It is far above what a server can have waiting: at
+// most MaxUnreviewedTools new tools and the changed tools an admin reviewed before.
+const maxReviewAll = 4 * MaxUnreviewedTools
+
+// waitingNow reports whether a tool's current text waits for an admin: the sync flagged a change, or no
+// admin approved the text the sync recorded last.
+func waitingNow(t store.McpTool) bool {
+	return t.ReviewReason.Valid || (t.ToolHash.Valid && t.ToolHash.String != t.ApprovedHash.String)
+}
+
+// ReviewAllTools reviews the waiting tools of one server in one step (#1216 point c, ADR 0125). For each
+// tool in seen it approves the text the sync recorded last, as AcknowledgeReview does, without changing
+// the tier. Each hash must be the one stored: a tool whose text changed since the admin read it, or that
+// the server no longer lists, is ErrToolChanged and nothing changes. A tool in seen that waits for nothing
+// is left as it is. Then it deletes the rows of tools that no admin ever reviewed and that the server no
+// longer lists: they are not served and they count toward MaxUnreviewedTools. When that makes room, the
+// server's mark of the limit goes.
+func (s *Service) ReviewAllTools(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID string, seen []SeenTool) (ReviewAllResult, error) {
+	sid, err := parseID(serverID)
+	if err != nil {
+		return ReviewAllResult{}, err
+	}
+	if len(seen) > maxReviewAll {
+		return ReviewAllResult{}, invalid("tools must name at most %d tools", maxReviewAll)
+	}
+	var res ReviewAllResult
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+		// The server lock makes a sync of the server wait, so the rows read here stay as they are.
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
+		if err != nil {
+			return err
+		}
+		done := map[string]bool{}
+		for _, st := range seen {
+			if done[st.Name] {
+				continue
+			}
+			done[st.Name] = true
+			cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: st.Name})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrToolChanged
+			}
+			if err != nil {
+				return err
+			}
+			if !cur.Present {
+				return ErrToolChanged
+			}
+			if !waitingNow(cur) {
+				continue
+			}
+			if st.ToolHash == "" && cur.ToolHash.Valid {
+				return invalid("toolHash of %s is required: the hash of the tool text you reviewed", st.Name)
+			}
+			if err := checkApproval(cur, st.ToolHash); err != nil {
+				return err
+			}
+			out, err := q.AcknowledgeMCPToolReview(ctx, store.AcknowledgeMCPToolReviewParams{OrgID: org, ServerID: sid, Name: st.Name})
+			if err != nil {
+				return err
+			}
+			b.Org(audit.Event{
+				Org: org, Actor: actor, Action: "mcp_tool.review", TargetKind: "mcp_tool", TargetID: serverID + "/" + st.Name,
+				After: map[string]any{"server": srv.Name, "tool": st.Name, "tier": string(out.Tier), "approvedHash": out.ApprovedHash.String, "reviewAll": true},
+			})
+			res.Reviewed = append(res.Reviewed, toTool(out))
+		}
+		removed, err := q.DeleteAbsentUnreviewedMCPTools(ctx, store.DeleteAbsentUnreviewedMCPToolsParams{OrgID: org, ServerID: sid})
+		if err != nil {
+			return err
+		}
+		res.Removed = len(removed)
+		if res.Removed > 0 {
+			// The count only: the names are the server's own text (as for mcp_server.unreviewed_tools_capped).
+			b.Org(audit.Event{
+				Org: org, Actor: actor, Action: "mcp_server.unreviewed_tools_removed", TargetKind: "mcp_server", TargetID: serverID,
+				After: map[string]any{"server": srv.Name, "removed": res.Removed},
+			})
+		}
+		if !srv.UnreviewedToolsCappedAt.Valid {
+			return nil
+		}
+		rows, err := q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org, ServerID: sid})
+		if err != nil {
+			return err
+		}
+		unreviewed := 0
+		for _, t := range rows {
+			if neverReviewed(t) {
+				unreviewed++
+			}
+		}
+		return markCapped(ctx, q, b, org, srv, 0, unreviewed)
+	})
+	if err != nil {
+		return ReviewAllResult{}, mapErr(err)
+	}
+	return res, nil
 }
 
 // ListedTool is a tool as a server published it.

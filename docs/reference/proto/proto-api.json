@@ -11366,6 +11366,15 @@
               "deprecated": false
             },
             {
+              "name": "ReviewAllTools",
+              "description": "ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the\ntext of each tool in the request at the hash the admin saw, without changing its tier, as\nAcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no\nlonger lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of\ntools that no admin ever reviewed and that the server no longer lists: they are not served, and they\ncount toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and\nmcp_server.unreviewed_tools_removed once.",
+              "requestType": "koinon.mcpserver.v1alpha1.ReviewAllToolsRequest",
+              "responseType": "koinon.mcpserver.v1alpha1.ReviewAllToolsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentServers",
               "description": "SetAgentServers replaces the servers an agent may use.",
               "requestType": "koinon.mcpserver.v1alpha1.SetAgentServersRequest",
@@ -11792,6 +11801,69 @@
           ]
         },
         {
+          "name": "ReviewAllToolsRequest",
+          "fullName": "koinon.mcpserver.v1alpha1.ReviewAllToolsRequest",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "server_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tools",
+              "number": 3,
+              "type": "koinon.mcpserver.v1alpha1.ToolReview",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tools are the waiting tools the admin saw, each with the hash of the text the admin saw. A tool that\ndoes not wait for review is left as it is. Empty only deletes the absent rows."
+            }
+          ]
+        },
+        {
+          "name": "ReviewAllToolsResponse",
+          "fullName": "koinon.mcpserver.v1alpha1.ReviewAllToolsResponse",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "tools",
+              "number": 1,
+              "type": "koinon.mcpserver.v1alpha1.Tool",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tools are the tools the call approved, as they are now."
+            },
+            {
+              "name": "removed",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "removed is how many absent rows that no admin reviewed the call deleted."
+            }
+          ]
+        },
+        {
           "name": "Server",
           "fullName": "koinon.mcpserver.v1alpha1.Server",
           "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
@@ -12031,6 +12103,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but\nthe server's identity is not checked and its credential can be sent to an impostor. https only; never\nset together with ca_bundle."
+            },
+            {
+              "name": "unreviewed_tools_capped_at",
+              "number": 27,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unreviewed_tools_capped_at is set while the server is at the limit of tools that no admin reviewed\n(256, ADR 0125): the sync stores no new tool of it. Reviewing its tools (ReviewAllTools) makes room.\nUnset otherwise."
             }
           ]
         },
@@ -12580,6 +12661,33 @@
               "oneof": "",
               "deprecated": false,
               "description": "approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When\ntool_hash differs, the text is pending: the gateway does not serve it until an admin approves it."
+            }
+          ]
+        },
+        {
+          "name": "ToolReview",
+          "fullName": "koinon.mcpserver.v1alpha1.ToolReview",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "ToolReview names a tool and the text of it that the admin saw.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "tool",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool_hash",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_hash is the Tool.tool_hash the admin reviewed. Required."
             }
           ]
         },

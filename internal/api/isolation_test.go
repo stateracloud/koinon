@@ -827,6 +827,11 @@ var isolationCases = map[string]isolationCase{
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
 		},
 	},
+	mcpserverv1alpha1connect.McpServerServiceReviewAllToolsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.ReviewAllTools(ctx, &mcpserverv1alpha1.ReviewAllToolsRequest{OrgId: org, ServerId: f.mcpServer, Tools: []*mcpserverv1alpha1.ToolReview{{Tool: f.mcpTool}}})
+		},
+	},
 	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

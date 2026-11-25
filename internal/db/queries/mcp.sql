@@ -305,6 +305,15 @@ SET review_reason = NULL,
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 
+-- name: DeleteAbsentUnreviewedMCPTools :many
+-- An admin reviews a server's tools (#1216 point c): the rows of tools that no admin ever decided on (no
+-- approved text, no tier an admin set) and that the server no longer lists go. They are not served,
+-- and they count toward the limit of unreviewed tools (mcpservers.MaxUnreviewedTools).
+DELETE FROM mcp_tools
+WHERE org_id = @org_id AND server_id = @server_id AND NOT present
+  AND approved_hash IS NULL AND tier_set_by IS NULL
+RETURNING name;
+
 -- name: ListAgentMCPServers :many
 SELECT * FROM agent_mcp_servers
 WHERE org_id = @org_id

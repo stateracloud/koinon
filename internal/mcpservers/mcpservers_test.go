@@ -984,6 +984,63 @@ var _ = Describe("Service", func() {
 					org, sid).Scan(&never)).To(Succeed())
 				Expect(never).To(Equal(mcpservers.MaxUnreviewedTools), "the legacy row takes no place of a new tool")
 			})
+
+			It("reviews the waiting tools at the hashes the admin saw and deletes the absent rows no admin reviewed, which makes room (#1216 point c)", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				// kept is a tool an admin reviewed; it goes absent with the rest and must stay.
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("kept", "Kept", false)})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "kept", mcpserverstest.PinOf(ctx, svc, org, s.ID, "kept"))
+				Expect(err).NotTo(HaveOccurred())
+				for i := range 3 {
+					_, err = svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+				}
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+
+				// What the admin sees: the present tools that wait, with their hashes.
+				rows, err := pool.Query(ctx, `SELECT name, tool_hash FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND present AND approved_hash IS NULL ORDER BY name`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				var seen []mcpservers.SeenTool
+				for rows.Next() {
+					var st mcpservers.SeenTool
+					Expect(rows.Scan(&st.Name, &st.ToolHash)).To(Succeed())
+					seen = append(seen, st)
+				}
+				Expect(rows.Err()).NotTo(HaveOccurred())
+				Expect(seen).To(HaveLen(mcpservers.MaxUnreviewedTools - 200))
+
+				By("a hash that is not the stored one refuses the whole action")
+				stale := append([]mcpservers.SeenTool{}, seen...)
+				stale[0].ToolHash = "koinon_test_not-the-stored-hash"
+				_, err = svc.ReviewAllTools(ctx, org, actor, s.ID, stale)
+				Expect(err).To(MatchError(mcpservers.ErrToolChanged))
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools), "nothing changed")
+				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+
+				By("the hashes the admin saw approve those tools and delete the absent rows no admin reviewed")
+				res, err := svc.ReviewAllTools(ctx, org, actor, s.ID, seen)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Reviewed).To(HaveLen(len(seen)))
+				Expect(res.Removed).To(Equal(200))
+				Expect(unreviewedRows(ctx, s)).To(BeZero())
+				Expect(cappedAt(ctx, s).Valid).To(BeFalse())
+				var kept int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND name = 'kept'`, org, sid).Scan(&kept)).To(Succeed())
+				Expect(kept).To(Equal(1), "a reviewed absent tool stays")
+				var tier string
+				Expect(pool.QueryRow(ctx, `SELECT tier FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND name = 'junk_2_0'`, org, sid).Scan(&tier)).To(Succeed())
+				Expect(tier).To(Equal(mcpservers.TierAsk), "the tier does not change")
+				Expect(events(ctx, "mcp_server.unreviewed_tools_removed")).To(HaveLen(1))
+				Expect(string(events(ctx, "mcp_server.unreviewed_tools_removed")[0].Summary)).NotTo(ContainSubstring("junk_"))
+
+				By("the server has room for new tools again")
+				res2, err := svc.SyncTools(ctx, org, sid, round(3))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res2.Capped).To(BeZero())
+				Expect(res2.New).To(HaveLen(100))
+			})
 		})
 
 		Describe("a tool whose text changes while it waits for review (#1216)", func() {

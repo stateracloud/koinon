@@ -2739,6 +2739,7 @@ be set here. Credentials are write-only; they are never returned.
 | GetAgentServers | `koinon.mcpserver.v1alpha1.GetAgentServersRequest` | `koinon.mcpserver.v1alpha1.GetAgentServersResponse` | - | GetAgentServers returns the servers an agent may use. |
 | ListServers | `koinon.mcpserver.v1alpha1.ListServersRequest` | `koinon.mcpserver.v1alpha1.ListServersResponse` | - |  |
 | ListTools | `koinon.mcpserver.v1alpha1.ListToolsRequest` | `koinon.mcpserver.v1alpha1.ListToolsResponse` | - | ListTools returns the tools of one server, or of all the org's servers when server_id is empty. |
+| ReviewAllTools | `koinon.mcpserver.v1alpha1.ReviewAllToolsRequest` | `koinon.mcpserver.v1alpha1.ReviewAllToolsResponse` | - | ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the text of each tool in the request at the hash the admin saw, without changing its tier, as AcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no longer lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of tools that no admin ever reviewed and that the server no longer lists: they are not served, and they count toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and mcp_server.unreviewed_tools_removed once. |
 | SetAgentServers | `koinon.mcpserver.v1alpha1.SetAgentServersRequest` | `koinon.mcpserver.v1alpha1.SetAgentServersResponse` | - | SetAgentServers replaces the servers an agent may use. |
 | SetServerClass | `koinon.mcpserver.v1alpha1.SetServerClassRequest` | `koinon.mcpserver.v1alpha1.SetServerClassResponse` | - | SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it carries. It works for declared servers too, which the declaring Secret does not describe. Audited as mcp_server.data_class.set. |
 | SetToolSink | `koinon.mcpserver.v1alpha1.SetToolSinkRequest` | `koinon.mcpserver.v1alpha1.SetToolSinkResponse` | - | SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The request names the content hash of the tool the admin reviewed; if the server republished the tool since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to the default, audited as mcp_tool.declaration.reset. |
@@ -2840,6 +2841,21 @@ No fields.
 | --- | --- | --- | --- | --- | --- |
 | tools | 1 | `koinon.mcpserver.v1alpha1.Tool` | repeated |  |  |
 
+### Message ReviewAllToolsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| server_id | 2 | `string` | singular |  |  |
+| tools | 3 | `koinon.mcpserver.v1alpha1.ToolReview` | repeated |  | tools are the waiting tools the admin saw, each with the hash of the text the admin saw. A tool that does not wait for review is left as it is. Empty only deletes the absent rows. |
+
+### Message ReviewAllToolsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| tools | 1 | `koinon.mcpserver.v1alpha1.Tool` | repeated |  | tools are the tools the call approved, as they are now. |
+| removed | 2 | `int32` | singular |  | removed is how many absent rows that no admin reviewed the call deleted. |
+
 ### Message Server
 
 Server is a remote MCP server of the org. It never holds the credential.
@@ -2872,6 +2888,7 @@ Server is a remote MCP server of the org. It never holds the credential.
 | admin_disabled | 24 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
 | ca_bundle | 25 | `string` | singular |  | ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is trusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the public roots. It is public (certificates only). |
 | insecure_skip_verify | 26 | `bool` | singular |  | insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but the server's identity is not checked and its credential can be sent to an impostor. https only; never set together with ca_bundle. |
+| unreviewed_tools_capped_at | 27 | `google.protobuf.Timestamp` | singular |  | unreviewed_tools_capped_at is set while the server is at the limit of tools that no admin reviewed (256, ADR 0125): the sync stores no new tool of it. Reviewing its tools (ReviewAllTools) makes room. Unset otherwise. |
 
 ### Message ServerClass
 
@@ -2983,6 +3000,15 @@ ServerClass is what a server declares it exposes (ADR 0084 decision 8).
 | tool_hash | 19 | `string` | singular |  | tool_hash is the hash of the tool text the server published last, as the gateway pins it: every member the model sees (name, title, description, annotations, input and output schema), sanitised. An approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty before the first sync that recorded it. |
 | tool_json | 20 | `string` | singular |  | tool_json is that text, as JSON. The console shows it before an admin approves it. |
 | approved_hash | 21 | `string` | singular |  | approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When tool_hash differs, the text is pending: the gateway does not serve it until an admin approves it. |
+
+### Message ToolReview
+
+ToolReview names a tool and the text of it that the admin saw.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| tool | 1 | `string` | singular |  |  |
+| tool_hash | 2 | `string` | singular |  | tool_hash is the Tool.tool_hash the admin reviewed. Required. |
 
 ### Message ToolSink
 

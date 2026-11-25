@@ -49,6 +49,14 @@ service McpServerService {
   rpc SetToolSink(SetToolSinkRequest) returns (SetToolSinkResponse);
   // AcknowledgeToolReview clears a tool's review flag without changing its tier.
   rpc AcknowledgeToolReview(AcknowledgeToolReviewRequest) returns (AcknowledgeToolReviewResponse);
+  // ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the
+  // text of each tool in the request at the hash the admin saw, without changing its tier, as
+  // AcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no
+  // longer lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of
+  // tools that no admin ever reviewed and that the server no longer lists: they are not served, and they
+  // count toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and
+  // mcp_server.unreviewed_tools_removed once.
+  rpc ReviewAllTools(ReviewAllToolsRequest) returns (ReviewAllToolsResponse);
 
   // GetAgentServers returns the servers an agent may use.
   rpc GetAgentServers(GetAgentServersRequest) returns (GetAgentServersResponse) {
@@ -127,6 +135,10 @@ message Server {
   // the server's identity is not checked and its credential can be sent to an impostor. https only; never
   // set together with ca_bundle.
   bool insecure_skip_verify = 26;
+  // unreviewed_tools_capped_at is set while the server is at the limit of tools that no admin reviewed
+  // (256, ADR 0125): the sync stores no new tool of it. Reviewing its tools (ReviewAllTools) makes room.
+  // Unset otherwise.
+  google.protobuf.Timestamp unreviewed_tools_capped_at = 27;
 }
 
 // ServerClass is what a server declares it exposes (ADR 0084 decision 8).
@@ -337,6 +349,28 @@ message AcknowledgeToolReviewRequest {
 
 message AcknowledgeToolReviewResponse {
   Tool tool = 1;
+}
+
+// ToolReview names a tool and the text of it that the admin saw.
+message ToolReview {
+  string tool = 1;
+  // tool_hash is the Tool.tool_hash the admin reviewed. Required.
+  string tool_hash = 2;
+}
+
+message ReviewAllToolsRequest {
+  string org_id = 1;
+  string server_id = 2;
+  // tools are the waiting tools the admin saw, each with the hash of the text the admin saw. A tool that
+  // does not wait for review is left as it is. Empty only deletes the absent rows.
+  repeated ToolReview tools = 3;
+}
+
+message ReviewAllToolsResponse {
+  // tools are the tools the call approved, as they are now.
+  repeated Tool tools = 1;
+  // removed is how many absent rows that no admin reviewed the call deleted.
+  int32 removed = 2;
 }
 
 message GetAgentServersRequest {
