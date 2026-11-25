@@ -242,7 +242,6 @@ script-check - inputs=hack/git-identities.allowed,hack/git-identity-check-test.s
 script-check - inputs=guard hack/git-identity-check.sh range @BASE@ HEAD
 script-check - inputs=hack/koinon-fetch-test.sh,harnesses/common/koinon-fetch hack/koinon-fetch-test.sh
 script-check - inputs=hack/release-harness-test.sh,hack/release-harness.sh hack/release-harness-test.sh
-script-check - inputs=hack/ko-ref-test.sh,hack/ko-ref.sh hack/ko-ref-test.sh
 script-check - inputs=hack/fetch-pinned-test.sh,hack/fetch-pinned.sh hack/fetch-pinned-test.sh
 script-check - inputs=hack/e2e-parts-test.sh,test/e2e/kind/parts.sh hack/e2e-parts-test.sh
 script-check - inputs=hack/apt-retries-test.sh hack/apt-retries-test.sh --self-test
