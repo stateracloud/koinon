@@ -75,6 +75,7 @@ data:
         imageRegistry: {{ . | quote }}
         {{- end }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
+        guestKeyFile: {{ include "koinon.substrateGuestKeyFile" . | quote }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt
         {{- end }}

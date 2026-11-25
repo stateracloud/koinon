@@ -555,9 +555,9 @@ var substrateProbe func(ctx context.Context, checks ...check) map[string]any
 // platform may call them (ADR 0120 section 3.3); the actor never. OpenShell has neither, so the
 // specs skip on that driver.
 var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
-	It("cannot call ateapi or atelet", func(ctx SpecContext) {
+	needProbe := func(why string) {
 		if escapeDriver() == driverOpenShell {
-			Skip("not applicable on the OpenShell driver: it has no ateapi or atelet")
+			Skip("not applicable on the OpenShell driver: " + why)
 		}
 		if substrateProbe == nil {
 			if testenv.Required(os.Getenv(testenv.RequireVar), "substrate-driver") {
@@ -565,6 +565,10 @@ var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
 			}
 			Skip("the Substrate driver does not exist yet (issue #1088)")
 		}
+	}
+
+	It("cannot call ateapi or atelet", func(ctx SpecContext) {
+		needProbe("it has no ateapi or atelet")
 		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
 		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
 		checks := make([]check, 0, len(ts))
@@ -576,5 +580,35 @@ var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
 			// Refused by the guest's fence, like every other denial in this suite.
 			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM"), c["id"])
 		}
+	}, NodeTimeout(2*time.Minute))
+
+	// The guest API starts processes as the guest's user. Only the guest front (issue #1309) may
+	// listen where the actor can reach it, and it refuses a call without the driver's token. The
+	// upstream guest server has no socket of its own.
+	It("cannot start a process through the guest API on loopback", func(ctx SpecContext) {
+		needProbe("OpenShell has no guest API")
+		port, err := strconv.Atoi(envOr("KOINON_ESCAPE_GUEST_PORT", "80"))
+		Expect(err).NotTo(HaveOccurred(), "KOINON_ESCAPE_GUEST_PORT")
+		marker := "/tmp/koinon-escape-guest-api"
+		res := substrateProbe(ctx,
+			check{
+				"id": "call", "op": "grpc_h2c", "host": "127.0.0.1", "port": port,
+				"path": "/ateenv.v1alpha.ProcessService/StartProcess", "command": []string{"/bin/sh", "-c", "touch " + marker},
+			},
+			check{"id": "marker", "op": "read", "path": marker},
+			check{"id": "listeners", "op": "listeners"},
+		)
+		// A refusal is trailers-only: one HEADERS frame that ends the stream, and no DATA.
+		Expect(res["call"]).To(Equal([]any{"HEADERS+END_STREAM"}), "the guest front must answer the call with a refusal")
+		Expect(res["marker"]).To(Equal("ENOENT"), "the process must not start")
+		allowed := []any{float64(port)}
+		if extra := os.Getenv("KOINON_ESCAPE_GUEST_LISTEN_ALLOW"); extra != "" {
+			for _, p := range strings.Split(extra, ",") {
+				n, err := strconv.Atoi(strings.TrimSpace(p))
+				Expect(err).NotTo(HaveOccurred(), "KOINON_ESCAPE_GUEST_LISTEN_ALLOW")
+				allowed = append(allowed, float64(n))
+			}
+		}
+		Expect(res["listeners"]).To(HaveEach(BeElementOf(allowed...)), "only the guest front may listen in the sandbox")
 	}, NodeTimeout(2*time.Minute))
 })

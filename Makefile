@@ -151,31 +151,34 @@ harness-opencode: ## Build the OpenCode harness image (koinon/sandbox:dev-<hash>
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) $(call harness_cache,opencode) $(harness_secret) $$base_args \
 		--build-context common=harnesses/common --tag koinon/sandbox:$(call harness_tag,opencode) harnesses/opencode
 
-# The substrate overlay (ADR 0119, issue #1087): the harness image plus koinon-guest-launcher as its
-# entrypoint wrapper. Only the substrate driver uses it; the OpenShell images above do not change.
+# The substrate overlay (ADR 0119, issue #1087): the harness image plus koinon-guest-front as its
+# entrypoint (the guest API, #1309) and koinon-guest-launcher as the exec prefix of every command. Only the
+# substrate driver uses it; the OpenShell images above do not change.
 .PHONY: guest-launcher
-guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
+guest-launcher: ## Build the static guest front and guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
 	for arch in amd64 arm64; do \
 		mkdir -p build/guest-launcher/linux-$$arch && \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
-			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
+		for cmd in koinon-guest-launcher koinon-guest-front; do \
+			CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
+				-o build/guest-launcher/linux-$$arch/$$cmd ./cmd/$$cmd || exit 1; \
+		done; \
 	done
 
-# The Substrate guest server, from the commit ATE_ENV_VERSION of hack/versions.env (upstream publishes no image).
+# The upstream Substrate guest server, from the commit ATE_ENV_VERSION of hack/versions.env (upstream publishes no
+# image). The overlay does not use it: its guest API is koinon-guest-front (#1309).
 .PHONY: env-guest
 env-guest: ## Build the static Substrate guest server (ate-env-guest) for linux/amd64 and linux/arm64 into build/env-guest
 	hack/build-env-guest.sh build/env-guest
 
 # One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES.
-# The overlay carries the guest server and the launcher, and its ENTRYPOINT is the guest server. The harness entry script
+# The overlay carries the guest front and the launcher, and its ENTRYPOINT is the guest front. The harness entry script
 # (ADR 0048) is started by the driver through the guest, behind the launcher prefix. A later harness gets an overlay with no Makefile change.
 SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
 .PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%
-$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher env-guest ## Build a harness image with the guest server and launcher (koinon/sandbox:<tag>-substrate)
+$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest front and launcher (koinon/sandbox:<tag>-substrate)
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
 		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,$*) \
 		--build-context launcher=build/guest-launcher \
-		--build-context guest=build/env-guest \
 		--tag koinon/sandbox:$(call harness_tag,$*)-substrate cmd/koinon-guest-launcher
 
 .PHONY: harnesses-substrate

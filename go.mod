@@ -24,6 +24,7 @@ require (
 	connectrpc.com/connect/v2 v2.0.2
 	filippo.io/age v1.3.2
 	github.com/a2aproject/a2a-go/v2 v2.8.0
+	github.com/agent-substrate/env v0.0.11-0.20261014192238-1c08a7a578af
 	github.com/charmbracelet/fang v1.0.0
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coreos/go-oidc/v3 v3.21.0

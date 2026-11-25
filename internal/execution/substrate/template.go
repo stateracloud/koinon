@@ -3,16 +3,19 @@
 package substrate
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
+	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -62,8 +65,10 @@ func first(a, b string) string {
 
 // renderTemplate builds the ActorTemplate for a spec. It is a pure function of the spec and the
 // driver's config, and its name is a hash of everything in it, so two sandboxes with equal specs
-// share a template and a changed spec makes a new one. The template carries no environment
-// variable: the guest sees no secret (ADR 0119, no credentials in the guest).
+// share a template and a changed spec makes a new one. The template's one environment variable is
+// the public key set that the guest front verifies the driver's tokens with (issue #1309); a public
+// key is not a secret, so the guest still holds none (ADR 0119, ADR 0120 section 1). It fails
+// without Config.GuestSigner: a template without keys would start a guest that refuses every call.
 func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*ateapiv1.ActorTemplate, error) {
 	if spec.Name == "" {
 		return nil, errors.New("sandbox name is empty")
@@ -79,6 +84,10 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if err != nil {
 		return nil, err
 	}
+	keys, err := verifyKeys(cfg)
+	if err != nil {
+		return nil, err
+	}
 	// The node agent pulls from one image source: the registry of the reference is rewritten to it,
 	// and the digest is kept (issue #1170). The rewritten reference is what the hash covers.
 	image := RewriteImage(spec.Image, cfg.ImageRegistry, cfg.ImageMirrors)
@@ -88,6 +97,7 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 			Name:    AgentContainer,
 			Image:   image,
 			Command: spec.Command,
+			Env:     []*ateapiv1.EnvVar{{Name: guestauth.VerifyKeysEnv, Value: keys}},
 		}},
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
 			StorageLocation:   cfg.SnapshotStorageLocation,
@@ -103,10 +113,25 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		t.WorkerSelector = &ateapiv1.Selector{MatchLabels: map[string]string{RuntimeClassSelector: spec.RuntimeClassName}}
 	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v1\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d", workspace, image, spec.Command, cpu, mem,
-		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity)
+	_, _ = fmt.Fprintf(h, "v2\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s", workspace, image, spec.Command, cpu, mem,
+		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
+}
+
+// verifyKeys returns the value of guestauth.VerifyKeysEnv: the signer's public key first, then
+// Config.GuestVerifyKeys without repeats.
+func verifyKeys(cfg Config) (string, error) {
+	if cfg.GuestSigner == nil {
+		return "", errors.New("no guest API signing key (issue #1309)")
+	}
+	keys := []ed25519.PublicKey{cfg.GuestSigner.PublicKey()}
+	for _, k := range cfg.GuestVerifyKeys {
+		if !slices.ContainsFunc(keys, func(have ed25519.PublicKey) bool { return have.Equal(k) }) {
+			keys = append(keys, k)
+		}
+	}
+	return guestauth.EncodeKeys(keys...), nil
 }
 
 // IsDerivedTemplate reports whether a template name was made by the driver, for the cleanup that a

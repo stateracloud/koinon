@@ -26,6 +26,16 @@ has "the ateapi token is a projected ServiceAccount token with the configured au
 lacks "agentd does not get the OpenShell address with substrate" 'KOINON_OPENSHELL_ADDRESS' "${sub[@]}" --show-only templates/deployments.yaml
 has "the install preflight Job runs the Substrate checks with substrate (#1089; details in 95-preflight.sh)" '- --driver=substrate' "${sub[@]}" --show-only templates/preflight.yaml
 has "the install preflight Job stays with openshell" 'component: preflight' 
+# The guest API signing key (#1309): the ensure-secrets Job makes it once, the reconciler config and
+# agentd's env name the file, and both components mount the Secret. No sandbox template sees it.
+has "the guest key file is in the reconciler config" 'guestKeyFile: "/secrets/substrate-guest-key/key"' "${sub[@]}" --show-only templates/config.yaml
+env_is KOINON_SUBSTRATE_GUEST_KEY_FILE '"/secrets/substrate-guest-key/key"' "${sub[@]}"
+has "the guest key Secret is mounted by name" 'secretName: koinon-substrate-guest-key' "${sub[@]}" --show-only templates/deployments.yaml
+has "the ensure-secrets Job makes the guest key with substrate" '\\"kind\\":\\"ed25519-key\\"' "${sub[@]}" --show-only templates/ensure-secrets.yaml
+lacks "no guest key Secret is made with the default driver" 'ed25519-key' --show-only templates/ensure-secrets.yaml
+lacks "an existing guest key Secret is not made" 'ed25519-key' "${sub[@]}" --set execution.substrate.guestKey.existingSecret=my-guest-key --show-only templates/ensure-secrets.yaml
+has "an existing guest key Secret is mounted" 'secretName: my-guest-key' "${sub[@]}" --set execution.substrate.guestKey.existingSecret=my-guest-key --show-only templates/deployments.yaml
+lacks "no guest key with the default driver" 'substrate-guest-key' --show-only templates/deployments.yaml
 has "a CA Secret is mounted and named" 'KOINON_SUBSTRATE_CA_FILE' "${sub[@]}" --set execution.substrate.caSecret=ate-ca --show-only templates/deployments.yaml
 # openshell.address is not required with substrate, and the OpenShell-only features are refused.
 "$HELM" template koinon "$CHART" --namespace koinon "${sub[@]}" >/dev/null 2>&1 || fail "substrate must render without openshell.address and TLS"

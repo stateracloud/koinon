@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/imagecacheca"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
@@ -214,6 +215,13 @@ func describeMode(name, valuesFile string) {
 						Expect(cl.Secret(ctx, name)).NotTo(BeNil(), name)
 						Expect(cl.Secret(ctx, name).Data).To(HaveKey("token"), name)
 					}
+				}
+				// With the substrate driver: the key that signs the guest API tokens (issue #1309), a hex
+				// Ed25519 seed under "key" that the reconciler and agentd read at start.
+				if generated["koinon-substrate-guest-key"] {
+					Expect(cl.Secret(ctx, "koinon-substrate-guest-key")).NotTo(BeNil())
+					_, err := guestauth.ParseSeed(string(cl.Secret(ctx, "koinon-substrate-guest-key").Data["key"]))
+					Expect(err).NotTo(HaveOccurred())
 				}
 			}
 		}, SpecTimeout(5*time.Minute))

@@ -253,6 +253,87 @@ def rawsock40(family):
         return err_name(e)
 
 
+def _varint(n):
+    out = b""
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out += bytes([b | 0x80])
+        else:
+            return out + bytes([b])
+
+
+def _hpack_literal(name, value):
+    # Literal header field without indexing, new name, no Huffman coding (RFC 7541 6.2.2).
+    n, v = name.encode(), value.encode()
+    assert len(n) < 127 and len(v) < 127
+    return b"\x00" + bytes([len(n)]) + n + bytes([len(v)]) + v
+
+
+def _frame(kind, flags, stream, payload):
+    return len(payload).to_bytes(3, "big") + bytes([kind, flags]) + stream.to_bytes(4, "big") + payload
+
+
+def grpc_h2c(c):
+    """One gRPC call over cleartext HTTP/2 with no token: the guest front must refuse it.
+
+    The result lists the frame types the server sent on stream 1 and on stream 0 (GOAWAY), so the
+    spec can tell a refusal (a single HEADERS frame with END_STREAM: trailers-only) from an answer
+    (DATA) and from a request the server could not parse (RST_STREAM or GOAWAY)."""
+    msg = b"".join(bytes([0x0A]) + _varint(len(a.encode())) + a.encode() for a in c["command"])
+    body = b"\x00" + len(msg).to_bytes(4, "big") + msg
+    headers = b"".join(_hpack_literal(k, v) for k, v in [
+        (":method", "POST"), (":scheme", "http"), (":path", c["path"]), (":authority", c["host"]),
+        ("content-type", "application/grpc"), ("te", "trailers")])
+    try:
+        s = socket.create_connection((c["host"], c["port"]), timeout=5)
+    except OSError as e:
+        return err_name(e)
+    frames = []
+    try:
+        s.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + _frame(4, 0, 0, b"")
+                  + _frame(1, 0x4, 1, headers) + _frame(0, 0x1, 1, body))
+        buf = b""
+        while True:
+            while len(buf) >= 9 and len(buf) >= 9 + int.from_bytes(buf[:3], "big"):
+                n, kind, flags = int.from_bytes(buf[:3], "big"), buf[3], buf[4]
+                stream = int.from_bytes(buf[5:9], "big") & 0x7FFFFFFF
+                buf = buf[9 + n:]
+                if kind == 4 and not flags & 0x1:
+                    s.sendall(_frame(4, 0x1, 0, b""))  # ack the server's SETTINGS
+                names = {0: "DATA", 1: "HEADERS", 3: "RST_STREAM", 7: "GOAWAY"}
+                if stream == 1 or kind == 7:
+                    frames.append(names.get(kind, str(kind)) + ("+END_STREAM" if kind in (0, 1) and flags & 0x1 else ""))
+                    if kind in (0, 1) and flags & 0x1 or kind in (3, 7):
+                        return frames
+            chunk = s.recv(65536)
+            if not chunk:
+                frames.append("EOF")
+                return frames
+            buf += chunk
+    except OSError as e:
+        frames.append(err_name(e))
+        return frames
+    finally:
+        s.close()
+
+
+def listeners(_):
+    """The local TCP ports in LISTEN state (IPv4 and IPv6)."""
+    ports = set()
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path) as f:
+                for line in f.readlines()[1:]:
+                    fields = line.split()
+                    if fields[3] == "0A":
+                        ports.add(int(fields[1].rsplit(":", 1)[1], 16))
+        except OSError:
+            pass
+    return sorted(ports)
+
+
 def kernel(_):
     with open("/proc/cpuinfo") as f:
         hypervisor = any(l.startswith("flags") and " hypervisor" in l for l in f)
@@ -260,5 +341,6 @@ def kernel(_):
 
 
 OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel}
+       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
+       "grpc_h2c": grpc_h2c, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

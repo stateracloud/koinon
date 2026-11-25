@@ -719,6 +719,15 @@
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
+            "guestKey": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                }
+              }
+            },
             "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
             "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},

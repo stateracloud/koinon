@@ -8,12 +8,12 @@
 
 `koinon-guest-launcher` (`cmd/koinon-guest-launcher`, `internal/guestlaunch`) hardens a Substrate
 guest and then starts the agent (ADR 0119, 0120 section 4, issue #1087). It is a static Go binary in
-the substrate overlay image (`make harness-substrate-<harness>`, `make harnesses-substrate` for all). The overlay also carries the Substrate guest server `ate-env-guest`, which is the image ENTRYPOINT and so the actor's process (`make env-guest`). The release publishes it as `sandbox-substrate:<version>` (`hack/release-harness-substrate.sh`). The OpenShell driver does not use it.
+the substrate overlay image (`make harness-substrate-<harness>`, `make harnesses-substrate` for all). The overlay also carries the guest front `koinon-guest-front` (`cmd/koinon-guest-front`, `internal/guestfront`, #1309), which is the image ENTRYPOINT and so the actor's process. The front embeds the upstream Substrate guest server (the package `github.com/agent-substrate/env/guest` at the commit in `go.mod`, unchanged) and serves its API behind a credential check. The release publishes it as `sandbox-substrate:<version>` (`hack/release-harness-substrate.sh`). The OpenShell driver does not use it.
 
 ## How it is invoked: an exec prefix
 
 Substrate has no exec in its control API. The substrate driver runs the harness over the in-guest
-ProcessService, so the process is a child of the guest server and never of the image ENTRYPOINT.
+ProcessService, so the process is a child of the guest server (in the guest front) and never of the harness ENTRYPOINT.
 Every substrate-driver Exec of a harness, the ACP launch in particular, is therefore:
 
 ```
@@ -22,8 +22,8 @@ koinon-guest-launcher --policy /etc/koinon/guest-launcher/<policy of the tier> -
 
 `harness.Descriptor.LauncherPrefix(tier)` returns the part before `<EntryScript>`; the driver
 (#1088) prepends it. An unknown tier gets no prefix (the driver must not start the guest). OpenShell
-paths ignore it. The overlay image's ENTRYPOINT is the guest server (`ate-env-guest -workspace /sandbox`), not the
-launcher: the guest server is the actor's process and the launcher only ever runs as this prefix.
+paths ignore it. The overlay image's ENTRYPOINT is the guest front (`koinon-guest-front -workspace /sandbox`), not the
+launcher: the guest front is the actor's process and the launcher only ever runs as this prefix.
 
 ```
 koinon-guest-launcher [--policy FILE] [--check] -- COMMAND [ARG...]
@@ -59,17 +59,32 @@ architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`
 
 ### The guest API channel
 
-The driver reaches the guest server over the pod network, not over vsock: gRPC (`ProcessService`,
+The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService`,
 `FileSystemService`) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
 which selects the actor by the `ate-target-actor` header and removes that header before it forwards
-the call. The upstream guest server (`ate-env-guest` at `ATE_ENV_VERSION`) listens on `:80` on all
-interfaces and has no authentication. The payload runs in the same network namespace in both tiers,
-so it can reach that listener on `127.0.0.1:80` or on the pod address and start a process that the
-launcher did not harden. This gap is open: issue
-[#1309](https://github.com/stateracloud/koinon/issues/1309) puts a Koinon front with a per-sandbox
-credential on the listener. Until it is closed, the chart requires
-`execution.substrate.allowUnhardened` for the Substrate driver. On the `vm` tier, vsock belongs to the Kata agent, not to the guest server; the
-seccomp rule below keeps the payload away from it.
+the call. The payload runs in the same network namespace in both tiers, so it can reach port 80 on
+`127.0.0.1` or on the pod address. The upstream guest server has no authentication, so the guest
+front owns the only listener (ADR 0120 section 4.7, issue #1309):
+
+- The front embeds the upstream server in its own process. The upstream server opens no socket.
+- Every call needs the header `x-koinon-guest-auth`: an Ed25519 JWS (`internal/guestauth`) that the
+  driver signs for each call. It lives 60 seconds and its audience is `koinon-guest:<atespace>/<actor>`.
+  A call without a valid token gets gRPC status `Unauthenticated` (HTTP 401 over HTTP/1) and reaches no
+  handler. `/readyz` is open.
+- The actor template carries the public keys in `KOINON_GUEST_VERIFY_KEYS`. The front reads them and
+  removes the variable before it serves. The private key is the Secret `<release>-substrate-guest-key`
+  (made by the ensure-secrets Job, or `execution.substrate.guestKey.existingSecret`), mounted only in
+  agentd and the reconciler (`--substrate-guest-key-file`). Without it the driver makes no template.
+- The front pins the audience of the first call it accepts and refuses every other audience. A sandbox
+  restored from a memory snapshot has its source's pin in memory: the driver adds the claim
+  `koinon_prev` with the source actor, and the front moves the pin only when that claim names the old
+  pin. Before a memory snapshot the driver calls `koinon.guestfront.v1.Front/Bind`, so the pin is the
+  snapshot's actor and one step of lineage is enough.
+- The escape suite (`test/escape`, "Substrate actor") calls `StartProcess` on loopback from the
+  sandbox and expects a refusal, no process, and no other listener.
+
+On the `vm` tier, vsock belongs to the Kata agent, not to the guest server; the seccomp rule below
+keeps the payload away from it.
 
 The guest server's own process, descriptors and sockets belong to it, not to the payload. The guest
 server runs outside the launcher; the payload runs as uid 0 until the non-root gap closes, so uid
@@ -139,13 +154,13 @@ fails closed through `policy-vm.json`, another tier records the gap). Each Subst
 
 Tracked on #1087 until the maintainer files separate issues:
 
-1. The substrate overlay of the harness image carries the guest server and the launcher
-   (`cmd/koinon-guest-launcher/Dockerfile`). The guest server is built from the pinned upstream commit
-   (`ATE_ENV_VERSION`, `hack/build-env-guest.sh`), because upstream publishes no image. The release builds the overlay on the
+1. The substrate overlay of the harness image carries the guest front and the launcher
+   (`cmd/koinon-guest-launcher/Dockerfile`). The guest front embeds the upstream guest server of the
+   commit in `go.mod`; a test keeps `ATE_ENV_VERSION` (`hack/build-env-guest.sh`) on the same commit. The release builds the overlay on the
    released harness image (`harness-substrate` job, `hack/release-harness-substrate.sh`, repository `sandbox-substrate`) and with
    `execution.driver=substrate` the chart's default harness repository is `sandbox-substrate`. The separate `ate-env-guest`
    image of the release stays for the rootfs-image mode of upstream (the guest mounted into an unmodified image); the driver does not use it yet.
-   The overlay runs as root (the guest server listens on port 80 and starts the payload), the launcher hardens the payload.
+   The overlay runs as root (the guest front listens on port 80 and starts the payload), the launcher hardens the payload.
    The driver applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.
    `execution.substrate.allowUnhardened` stays required until they are (see the PR body of #1087).
@@ -153,8 +168,8 @@ Tracked on #1087 until the maintainer files separate issues:
    (review at each Substrate update).
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
    every other control applied; `require` still fails closed.
-5. The guest API on TCP `:80` has no authentication (#1309, see "The guest server channel"). Pending
-   escape probe (ADR 0119 P-C): a loopback `StartProcess` from agent code is refused (#1309).
+5. Rotation of the guest API signing key is not supported yet (#1326): the front accepts a list of keys, but
+   the chart and the driver have one key.
 
 ## Tests
 

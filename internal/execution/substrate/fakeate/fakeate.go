@@ -30,6 +30,7 @@ import (
 
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	ateenvv1alpha "github.com/stateracloud/koinon/internal/gen/substrate/ateenv/v1alpha"
+	"github.com/stateracloud/koinon/internal/guestauth"
 )
 
 type key struct{ atespace, name string }
@@ -47,6 +48,7 @@ type Cluster struct {
 	templates map[key]*ateapiv1.ActorTemplate
 	actors    map[key]*actor
 	tags      map[key]*ateapiv1.Tag
+	tagAuth   map[key]*guestauth.Verifier // the guest front's state in a tag's memory snapshot
 	resumes   map[key]int
 	calls     map[string]int
 	holds     map[key]*getHold
@@ -65,6 +67,7 @@ func New() *Cluster {
 		templates: map[key]*ateapiv1.ActorTemplate{},
 		actors:    map[key]*actor{},
 		tags:      map[key]*ateapiv1.Tag{},
+		tagAuth:   map[key]*guestauth.Verifier{},
 		resumes:   map[key]int{},
 		calls:     map[string]int{},
 		holds:     map[key]*getHold{},
@@ -78,11 +81,13 @@ func New() *Cluster {
 // each. Stop shuts both down.
 func (c *Cluster) Start() (control, router *grpc.ClientConn, err error) {
 	c.ctlLis, c.routerLn = bufconn.Listen(1<<20), bufconn.Listen(1<<20)
-	c.ctl, c.rtr = grpc.NewServer(), grpc.NewServer()
+	c.ctl = grpc.NewServer()
+	c.rtr = grpc.NewServer(grpc.UnaryInterceptor(c.checkUnary), grpc.StreamInterceptor(c.checkStream))
 	ateapiv1.RegisterControlServer(c.ctl, &controlServer{c: c})
 	g := &guestServer{c: c}
 	ateenvv1alpha.RegisterProcessServiceServer(c.rtr, g)
 	ateenvv1alpha.RegisterFileSystemServiceServer(c.rtr, g)
+	c.rtr.RegisterService(&frontService, g)
 	go func() { _ = c.ctl.Serve(c.ctlLis) }()
 	go func() { _ = c.rtr.Serve(c.routerLn) }()
 	dial := func(l *bufconn.Listener) (*grpc.ClientConn, error) {

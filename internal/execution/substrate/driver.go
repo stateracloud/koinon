@@ -29,6 +29,7 @@ package substrate
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	ateenvv1alpha "github.com/stateracloud/koinon/internal/gen/substrate/ateenv/v1alpha"
+	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/harness"
 )
 
@@ -100,6 +102,13 @@ type Config struct {
 	DrainTimeout time.Duration
 	// Logger gets one line per suspend that a late router request undid. Nil uses slog.Default().
 	Logger *slog.Logger
+	// GuestSigner signs every guest API call (internal/guestauth, issue #1309). Required: without it
+	// every template render and every guest call fails with [execution.ErrFailedPrecondition]. Its
+	// private key stays in the control plane; templates carry only the public key.
+	GuestSigner *guestauth.Signer
+	// GuestVerifyKeys are more public keys that templates give the guest front next to the signer's,
+	// for a key rotation. They are part of the template hash.
+	GuestVerifyKeys []ed25519.PublicKey
 }
 
 func (c Config) withDefaults() Config {
@@ -129,8 +138,10 @@ type Driver struct {
 	control ateapiv1.ControlClient
 	process ateenvv1alpha.ProcessServiceClient
 	files   ateenvv1alpha.FileSystemServiceClient
+	router  grpc.ClientConnInterface // signs every call (signedConn)
 	cfg     Config
 	closers []io.Closer
+	lineage lineages
 
 	mu    sync.Mutex
 	gates map[key]*gate
@@ -158,17 +169,22 @@ func (k key) String() string { return k.atespace + "/" + k.actor }
 
 // New returns a driver on existing connections: control reaches ateapi, router reaches the atenet
 // router. The caller owns both.
+//
+// Every call through router carries a token from cfg.GuestSigner (issue #1309).
 func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
-	return &Driver{
+	d := &Driver{
 		control:    ateapiv1.NewControlClient(control),
-		process:    ateenvv1alpha.NewProcessServiceClient(router),
-		files:      ateenvv1alpha.NewFileSystemServiceClient(router),
 		cfg:        cfg.withDefaults(),
 		gates:      map[key]*gate{},
 		owed:       map[key]bool{},
 		tiers:      map[key]harness.Tier{},
+		lineage:    lineages{m: map[string]lineage{}},
 		resuspends: newResuspends(),
 	}
+	d.router = signedConn{cc: router, d: d}
+	d.process = ateenvv1alpha.NewProcessServiceClient(d.router)
+	d.files = ateenvv1alpha.NewFileSystemServiceClient(d.router)
+	return d
 }
 
 // Suspend outcomes, the only values of the outcome label of koinon_substrate_resuspends_total.
@@ -219,7 +235,8 @@ func (d *Driver) Close() error {
 	return errors.Join(errs...)
 }
 
-// route adds the target-actor header, which the router needs to find the guest.
+// route adds the target-actor header, which the router needs to find the guest. The signing
+// connection adds the token for the same actor.
 func route(ctx context.Context, k key) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, TargetActorHeader, k.String())
 }
@@ -257,6 +274,9 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	if err := checkSpec(op, spec); err != nil {
 		return execution.Sandbox{}, err
 	}
+	if err := d.requireSigner(op); err != nil {
+		return execution.Sandbox{}, err
+	}
 	tmpl, err := renderTemplate(workspace, spec, d.cfg)
 	if err != nil {
 		return execution.Sandbox{}, fail(op, execution.ErrInvalid, "%v", err)
@@ -284,6 +304,9 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 // a sandbox's spec is the name of its template: a hash of everything in the template. Sandbox.SpecID
 // of an observed actor is the same name.
 func (d *Driver) SpecID(workspace string, spec execution.SandboxSpec) (string, error) {
+	if err := d.requireSigner("SpecID"); err != nil {
+		return "", err
+	}
 	tmpl, err := renderTemplate(workspace, spec, d.cfg)
 	if err != nil {
 		return "", fail("SpecID", execution.ErrInvalid, "%v", err)
@@ -355,6 +378,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 		unpause()
 		d.forget(k)
 		d.setOwed(k, false)
+		d.forgetLineage(k)
 		return execution.DeleteAbsent, nil
 	case err != nil:
 		return "", execution.GRPCError(op, err)
@@ -364,6 +388,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	unpause()
 	d.forget(k)
 	d.setOwed(k, false)
+	d.forgetLineage(k)
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}
@@ -493,6 +518,18 @@ func (d *Driver) requireRunning(ctx context.Context, op string, k key) error {
 	}
 	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
 		return fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not ready", k, phaseOf(actor))
+	}
+	if err := d.learn(ctx, k, actor); err != nil {
+		return execution.GRPCError(op, err)
+	}
+	return nil
+}
+
+// requireSigner fails closed without a guest API signing key: a sandbox could not be used, because
+// its guest front refuses every unsigned call (issue #1309).
+func (d *Driver) requireSigner(op string) error {
+	if d.cfg.GuestSigner == nil {
+		return fail(op, execution.ErrFailedPrecondition, "no guest API signing key (issue #1309)")
 	}
 	return nil
 }

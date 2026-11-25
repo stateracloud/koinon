@@ -125,6 +125,18 @@ ADR 0119 phase 1 gateway routes for OpenShell exist.
    root with a reduced capability set and the same controls (see Open questions).
 6. Org isolation does not rely on the guest controls. The boundary between two orgs is the VM or
    sandbox boundary plus the actor identity and the rules of sections 1 and 2.
+7. The guest API is closed to agent code (decision of 2026-11-25, issue
+   [#1309](https://github.com/stateracloud/koinon/issues/1309)). This applies rule 3.3 to Substrate in every
+   tier. The upstream guest server has no socket that the payload can reach: the Koinon guest front
+   (`koinon-guest-front`) embeds it, unchanged, and owns the only listener in the pod. The front refuses a
+   call without a valid credential and starts no process for it. The credential is an Ed25519 JWS that
+   agentd and the reconciler sign for each call. Its lifetime is 60 seconds and its audience is the actor.
+   The actor template carries only the public key. The private key stays in a Kubernetes Secret outside
+   the sandbox, and the front removes the key variable from its environment before it starts. The front
+   pins the audience of the first call that it accepts. It moves the pin only on a signed claim that names
+   the old pin (a restore from a snapshot). Koinon carries no Substrate patch for this: the front imports
+   the upstream guest package of the commit in `go.mod`. The escape suite proves the rule: a process in
+   the sandbox calls `StartProcess` on loopback, and the call fails.
 
 ### 5. Snapshots (D5)
 
