@@ -15,6 +15,7 @@ package koinongateway
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -94,6 +95,9 @@ type config struct {
 	actorTokenKeysDir string
 	// egressRoutesFile holds the platform routes (no org, no credential). Empty: no platform route.
 	egressRoutesFile string
+	// egressCAFile is a PEM bundle of extra roots that verify the egress upstreams, added to the system
+	// roots: a forge with a private CA (ADR 0062). Empty: the system roots only.
+	egressCAFile string
 	// namespace is Koinon's namespace, and egressAllowedHosts the internal hosts the platform allows:
 	// the URL policy that the egress dialer applies to every upstream address.
 	namespace          string
@@ -130,6 +134,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"directory of the Ed25519 public keys that check actor tokens, one <key id>.pub PEM file each (a mounted ConfigMap or Secret)")
 	fs.StringVar(&c.egressRoutesFile, "egress-routes-file", "",
 		"JSON file of the platform egress routes, which every org may use: no org and no credential. Empty: only the routes of Koinon state")
+	fs.StringVar(&c.egressCAFile, "egress-ca-file", "",
+		"PEM file of extra CA roots, added to the system roots, that verify the egress upstreams (a forge with a private CA). Empty: the system roots only")
 	fs.StringVar(&c.namespace, "namespace", "", "Koinon's namespace: the egress routes never reach a Service in it")
 	fs.StringSliceVar(&c.egressAllowedHosts, "egress-allowed-hosts", nil,
 		"internal hosts (names, IPs or CIDRs, optionally with a port) that the egress routes may reach although they are internal")
@@ -463,9 +469,14 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 	}
 	// GatewayDialContext resolves each route host once, as an absolute name, and refuses Koinon's own
 	// namespace by name and internal addresses by address.
+	roots, err := egressRoots(cfg.egressCAFile)
+	if err != nil {
+		return nil, nil, err
+	}
 	policy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: cfg.egressAllowedHosts}
 	eg, err := egress.New(egress.Options{
 		Verifier: ver,
+		RootCAs:  roots,
 		Dial:     policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
 		Metrics:  egress.NewMetrics(reg),
 		Log:      log,
@@ -489,6 +500,27 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 	}
 	log.Info("egress routes loaded", "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
 	return eg, st, nil
+}
+
+// egressRoots is the system roots plus the certificates of the PEM file at path, or nil (the system
+// roots) when path is empty. A file without a certificate stops the start: the operator named it for
+// a reason.
+func egressRoots(path string) (*x509.CertPool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	pem, err := os.ReadFile(path) //nolint:gosec // an operator's flag
+	if err != nil {
+		return nil, fmt.Errorf("--egress-ca-file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("--egress-ca-file: %s holds no PEM certificate", path)
+	}
+	return pool, nil
 }
 
 // serveEgress starts the egress listener of eg, and returns nil when eg is nil. The listener's end is
