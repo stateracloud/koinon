@@ -17,10 +17,13 @@ package stateserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +64,17 @@ type Store interface {
 	Ack(ctx context.Context, copyID string, revision int64, half gwv1.Half) error
 }
 
+// CopyTracker is the optional part of a Store that records which gateway copies hold a stream open,
+// so the reconciler knows which copies must ack a revision before it probes (#1260). The Postgres
+// store has it; a Store without it records nothing.
+type CopyTracker interface {
+	// Touch says the copy holds a stream now. It is called at connect and at the poll interval.
+	// streamID names this stream; servesMCP says whether the copy acks the MCP half.
+	Touch(ctx context.Context, copyID, streamID string, servesMCP bool) error
+	// Forget says the stream ended; the copy stays if it reconnected on another stream.
+	Forget(ctx context.Context, copyID, streamID string) error
+}
+
 // NewPGStore returns the Store over the gateway_state_* tables.
 func NewPGStore(db store.DBTX) Store { return pgStore{db} }
 
@@ -77,6 +91,14 @@ func (s pgStore) Ack(ctx context.Context, copyID string, revision int64, half gw
 		return ErrUnknownRevision
 	}
 	return err
+}
+
+func (s pgStore) Touch(ctx context.Context, copyID, streamID string, servesMCP bool) error {
+	return staterev.TouchCopy(ctx, s.db, copyID, streamID, servesMCP)
+}
+
+func (s pgStore) Forget(ctx context.Context, copyID, streamID string) error {
+	return staterev.ForgetCopy(ctx, s.db, copyID, streamID)
 }
 
 // PoolNotify returns a Config.Notify that LISTENs on the publish channel over a connection taken out
@@ -281,6 +303,33 @@ func (h rpcHandler) StreamState(ctx context.Context, req *gwv1.StreamStateReques
 		sent    int64
 		hasSent bool
 	)
+	// The live set: the copy is live while it holds this stream. A failed touch is logged and the
+	// stream goes on: a stale row only makes the reconciler wait for the ack of fewer copies, and the
+	// next beat repairs it.
+	touch := func() {}
+	var beat <-chan time.Time
+	if tr, ok := s.cfg.Store.(CopyTracker); ok {
+		var nonce [12]byte
+		_, _ = rand.Read(nonce[:])
+		streamID := hex.EncodeToString(nonce[:])
+		servesMCP := len(req.GetHalves()) == 0 || slices.Contains(req.GetHalves(), gwv1.Half_HALF_MCP)
+		touch = func() {
+			if err := tr.Touch(ctx, req.GetCopyId(), streamID, servesMCP); err != nil && ctx.Err() == nil {
+				s.log.Warn("recording a live gateway copy failed", "err", err)
+			}
+		}
+		defer func() {
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := tr.Forget(fctx, req.GetCopyId(), streamID); err != nil {
+				s.log.Warn("removing a live gateway copy failed; it goes stale on its own", "err", err)
+			}
+		}()
+		t := time.NewTicker(s.cfg.PollInterval)
+		defer t.Stop()
+		beat = t.C
+	}
+	touch()
 	for {
 		cur, changed := s.view() // the channel first: a change after this read closes it
 		if cur != nil && (!hasSent || cur.GetRevision() != sent) {
@@ -292,6 +341,8 @@ func (h rpcHandler) StreamState(ctx context.Context, req *gwv1.StreamStateReques
 		}
 		select {
 		case <-changed:
+		case <-beat:
+			touch()
 		case <-s.stopped:
 			return connect.NewError(connect.CodeUnavailable, "koinon-api is shutting down")
 		case <-ctx.Done():

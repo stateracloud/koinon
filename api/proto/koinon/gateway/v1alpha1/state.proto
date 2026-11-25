@@ -33,6 +33,9 @@ message StreamStateRequest {
   // 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
   // an ack under a reused id would count for a process that has not loaded the revision.
   string copy_id = 1;
+  // halves lists the halves this copy serves, and so acks. Empty means both (a client from before
+  // this field). The reconciler waits only for copies that serve a half.
+  repeated Half halves = 2;
 }
 
 // Half is one of the two paths a gateway copy serves.

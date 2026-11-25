@@ -2098,6 +2098,13 @@ type GatewayStateAck struct {
 	AckedAt  pgtype.Timestamptz
 }
 
+type GatewayStateCopy struct {
+	CopyID    string
+	LastSeen  pgtype.Timestamptz
+	ServesMcp bool
+	StreamID  string
+}
+
 type GatewayStateRevision struct {
 	Revision  int64
 	Snapshot  []byte

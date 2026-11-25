@@ -199,7 +199,14 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) session(ctx context.Context) (int, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := c.api.StreamState(ctx, &gwv1.StreamStateRequest{CopyId: c.cfg.CopyID})
+	req := &gwv1.StreamStateRequest{CopyId: c.cfg.CopyID}
+	if c.cfg.Model != nil {
+		req.Halves = append(req.Halves, gwv1.Half_HALF_MODEL)
+	}
+	if c.cfg.MCP != nil {
+		req.Halves = append(req.Halves, gwv1.Half_HALF_MCP)
+	}
+	stream, err := c.api.StreamState(ctx, req)
 	if err != nil {
 		c.cfg.Metrics.Connects.WithLabelValues(connectFailed).Inc()
 		return 0, false, err
