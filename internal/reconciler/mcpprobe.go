@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
@@ -240,8 +241,9 @@ func (r *Reconciler) keyPending(id string) bool {
 // map already has keeps its earlier revision; keys rev does not serve are dropped. On the first call
 // after a start the map cannot say which revision first held a key, so every key not issued in this
 // process is recorded as 0: it was served before the start and never waits. A key issued in this
-// process is recorded with rev, and is no longer pending.
-func (r *Reconciler) noteKeys(keys []gateway.Key, rev int64) {
+// process is recorded with rev, and is no longer pending. A pending key that the full State (all, with
+// the keys of invalid limits) no longer holds was replaced or deleted, and is dropped.
+func (r *Reconciler) noteKeys(keys []gateway.Key, rev int64, all []gateway.Key) {
 	r.keyRevMu.Lock()
 	defer r.keyRevMu.Unlock()
 	first := r.keyRevs == nil
@@ -259,6 +261,15 @@ func (r *Reconciler) noteKeys(keys []gateway.Key, rev int64) {
 		delete(r.pendingKeys, k.ID)
 	}
 	r.keyRevs = next
+	inState := make(map[string]bool, len(all))
+	for _, k := range all {
+		inState[k.ID] = true
+	}
+	for id := range r.pendingKeys {
+		if !inState[id] {
+			delete(r.pendingKeys, id)
+		}
+	}
 }
 
 // keyRev is the first stored revision that served key id, if one did.
@@ -272,10 +283,11 @@ func (r *Reconciler) keyRev(id string) (int64, bool) {
 // keyGate decides which sandbox work waits until koinon-gateway serves the agent's key (D1 of
 // #1239). An agent waits only when it has a key that koinon-gateway is to serve (served: its limit is
 // valid) and a live copy has not acked the first revision that held that key. A key that no recorded
-// revision holds (the publish failed) waits only when this process issued it (keyPending). So an agent with no
-// key (inactive, archived), a key the copies already serve and a key gateway.State drops never wait: a
-// stop or a teardown is never held, and a change of the State for other agents holds nobody. With no
-// live copy (the agentgateway driver) nothing waits.
+// revision holds (the publish failed) waits only when this process issued it (keyPending). So an agent
+// that is not active (a draft keeps its key), an agent with no key (archived), a key the copies already
+// serve and a key gateway.State drops never wait: a stop or a teardown is never held, and a change of
+// the State for other agents holds nobody. With no live copy (the agentgateway driver) nothing waits.
+// When the copy list cannot be read, every key first held by a revision stored since the start waits.
 type keyGate struct {
 	r       *Reconciler
 	served  map[string]bool
@@ -287,7 +299,7 @@ type keyGate struct {
 func (r *Reconciler) newKeyGate(ctx context.Context, served map[string]bool) *keyGate {
 	live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
 	if err != nil {
-		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a new key waits", "err", err)
+		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a key issued since the start waits", "err", err)
 	}
 	return &keyGate{r: r, served: served, live: live, liveErr: err, acked: map[int64]bool{}}
 }
@@ -296,16 +308,17 @@ func (r *Reconciler) newKeyGate(ctx context.Context, served map[string]bool) *ke
 // no recorded revision holds its key, for example after a failed publish).
 func (g *keyGate) waits(ctx context.Context, w *work) (bool, int64) {
 	id := w.key.ID
-	if id == "" || !g.served[id] {
+	if id == "" || !g.served[id] || w.agent.Status != store.AgentStatusActive {
 		return false, 0
 	}
+	rev, ok := g.r.keyRev(id)
 	if g.liveErr != nil {
-		return g.r.keyPending(id), 0
+		// Fail closed: without the copy list, a key issued since the start waits.
+		return g.r.keyPending(id) || (ok && rev > 0), rev
 	}
 	if len(g.live) == 0 {
 		return false, 0
 	}
-	rev, ok := g.r.keyRev(id)
 	if !ok {
 		return g.r.keyPending(id), 0
 	}

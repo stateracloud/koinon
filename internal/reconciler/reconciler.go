@@ -438,7 +438,8 @@ func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
 }
 
 // statePublishTimeout bounds one attempt of publishState; statePublishAttempts and
-// statePublishBackoff are its retries inside the pass.
+// statePublishBackoff are its retries inside the pass. On a stuck database a pass waits up to about
+// 16.5 s (three attempts and the backoff) before the store is a pass error.
 const (
 	statePublishTimeout  = 5 * time.Second
 	statePublishAttempts = 3
@@ -478,7 +479,7 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, 
 				r.m.StateRevisions.Inc()
 				r.log.Debug("gateway state revision stored", "revision", p.Revision)
 			}
-			r.noteKeys(served.Keys, p.Revision)
+			r.noteKeys(served.Keys, p.Revision, s.Keys)
 			return p.Revision, nil
 		}
 		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)

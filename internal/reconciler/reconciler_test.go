@@ -1719,6 +1719,20 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
 		})
 
+		It("does not hold the work of an agent that went back to draft while a copy lags", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).Message).To(ContainSubstring("waiting for koinon-gateway"), "the copy lags")
+
+			By("a draft keeps its key in the State, but its work does not wait for the copy")
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: a.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(osg.Calls("CreateSandbox")).To(BeZero())
+		})
+
 		It("holds a new agent while the State cannot be stored, and not an agent whose key a stored revision holds", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			failing := &flakyStateDB{DB: pool}

@@ -443,9 +443,10 @@ reconciler stores it on its own path, before the Apply and whatever the Apply do
 outage or a refused config does not freeze key revokes and grants on koinon-gateway. A failed store is
 retried in the pass and is then a pass error. The sandbox work of an agent with a key waits until every
 live koinon-gateway copy acked the first revision that held that key (the bounded wait of #1260); after
-the wait the agent is held with a message, and the next pass looks again. An agent with no key (inactive,
-archived) and an agent whose key the copies already acked never wait, so stops and teardowns go on and a
-change for other agents holds nobody. With no live copy (the agentgateway driver) nothing waits. After
+the wait the agent is held with a message, and the next pass looks again. An agent that is not active (a draft
+keeps its key), an agent with no key (archived) and an agent whose key the copies already acked never
+wait, so stops and teardowns go on and a change for other agents holds nobody. When the list of live
+copies cannot be read, the gate fails closed. With no live copy (the agentgateway driver) nothing waits. After
 a restart the reconciler does not know which revision first held an old key, so only the keys it issued
 since the start wait; the keys of the first stored revision count as served.
 
