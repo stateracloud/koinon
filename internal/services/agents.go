@@ -5,7 +5,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -245,7 +244,10 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	var out *agentv1alpha1.Agent
 	restarting := 0
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
-		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		// The row lock makes the version check and the activation one step: a concurrent
+		// UpdateAgent or SetAgentTriggers either commits first, and the check then fails, or
+		// waits, so the version that an admin reviewed is the version that runs.
+		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}
@@ -359,18 +361,8 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 	var out *agentv1alpha1.Agent
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// A person who is asked must be a member who can answer (member or higher).
-		for i, t := range triggers {
-			if t.Notify == nil || t.Notify.Kind != templates.NotifyUser {
-				continue
-			}
-			m, err := q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org, Ident: t.Notify.User})
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && m.Role == store.OrgRoleViewer) {
-				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Sprintf("triggers[%d]: notify: %s is not a member who can answer questions", i, t.Notify.User))
-			}
-			if err != nil {
-				return err
-			}
+		if err := checkNotifyMembers(ctx, q, c.org, triggers); err != nil {
+			return err
 		}
 		// The row lock makes the base_version check and the new version one step: a concurrent
 		// proposal waits, then fails the check against the version this one created.

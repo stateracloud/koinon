@@ -28,10 +28,14 @@ func TestColumnsListEveryBinding(t *testing.T) {
 	for _, c := range keyscli.Columns {
 		known[c] = true
 	}
+	for _, c := range keyscli.Transient {
+		g.Expect(known).NotTo(HaveKey(c), "%s.%s is in Columns and in Transient", c.Table, c.Column)
+		known[c] = true
+	}
 	found := bindings(g, filepath.Join("..", ".."))
 	g.Expect(found).NotTo(BeEmpty(), "the scan found no bindings; it no longer matches the code")
 	for where, c := range found {
-		g.Expect(known).To(HaveKey(c), "%s binds %s.%s, which keyscli.Columns does not list", where, c.Table, c.Column)
+		g.Expect(known).To(HaveKey(c), "%s binds %s.%s, which keyscli.Columns (or keyscli.Transient) does not list", where, c.Table, c.Column)
 	}
 }
 

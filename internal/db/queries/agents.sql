@@ -260,3 +260,12 @@ UPDATE agents
 SET team = @team, reports_to_agent_id = sqlc.narg(reports_to_agent_id), reports_to_user_id = sqlc.narg(reports_to_user_id)
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
+
+-- name: UpdateAgentProfile :one
+-- The agent's own fields that UpdateAgent changes without a new version: the display name, and the
+-- harness of an agent that was never activated (ADR 0126 section 5).
+UPDATE agents
+SET display_name = @display_name, harness = @harness
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+  AND (harness = @harness OR active_version_id IS NULL)
+RETURNING *;

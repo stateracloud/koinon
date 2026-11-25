@@ -212,6 +212,27 @@ message ToolGrant {
 // route file. A route that fails to load closes all org routes; it never opens one.
 message EgressState {
   repeated EgressRoute routes = 1;
+  // credentials say where the gateway reads each credential that a route names, and how it sends it
+  // (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable).
+  repeated EgressCredential credentials = 2;
+}
+
+// EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
+// 0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the
+// value. The envelope is bound to the org ID and the agent ID in the file name.
+message EgressCredential {
+  // name is the name that the routes give in their credential field.
+  string name = 1;
+  // org is the org slug and agent the agent's name at the gateway: the routes that name the
+  // credential must have the same org and agent.
+  string org = 2;
+  string agent = 3;
+  string file = 4;
+  // scheme is how the value goes upstream in the Authorization header: "basic" (base64 of
+  // user ":" value) or "bearer".
+  string scheme = 5;
+  // user is the user name of the basic scheme, for example "x-access-token" for a forge token.
+  string user = 6;
 }
 
 // EgressRoute is one org route (gateway route.Route). It names a credential, never its value.

@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/stateracloud/koinon/internal/apiassembly"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -204,6 +205,23 @@ var isolationCases = map[string]isolationCase{
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	agentv1alpha1connect.AgentServiceCreateAgentProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.agents.CreateAgent(ctx, &agentv1alpha1.CreateAgentRequest{OrgId: org, Definition: &agentv1alpha1.AgentDefinition{
+				DisplayName: "Blank", Instructions: "Answer questions.",
+			}})
+		},
+	},
+	agentv1alpha1connect.AgentServiceUpdateAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.UpdateAgent(ctx, &agentv1alpha1.UpdateAgentRequest{
+				OrgId: org, AgentId: f.agent.GetId(), BaseVersion: f.agent.GetLatestVersion(),
+				Definition: &agentv1alpha1.AgentDefinition{DisplayName: "Renamed"},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}},
+			})
 		},
 	},
 
