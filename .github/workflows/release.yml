@@ -94,7 +94,7 @@ jobs:
           persist-credentials: false # GoReleaser talks to the API with GITHUB_TOKEN; nothing is pushed with git
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written
@@ -311,7 +311,7 @@ jobs:
           want="  github.com/agent-substrate/env/cmd/ate-env-guest: bash:${ATE_ENV_BASE_VERSION}@sha256:${ATE_ENV_BASE_SHA256_AMD64}"
           [[ $(grep -v '^[[:space:]]*#' "$RUNNER_TEMP/env-src/.ko.yaml" | grep -v '^[[:space:]]*$' | grep -vx 'baseImageOverrides:') == "$want" ]] \
             || { echo "the env source's .ko.yaml does not name exactly the base image of hack/versions.env (ATE_ENV_BASE_*)" >&2; exit 1; }
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: ${{ runner.temp }}/env-src/go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written
@@ -367,7 +367,7 @@ jobs:
           persist-credentials: false # the job never uses git auth
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written

@@ -116,7 +116,7 @@ jobs:
 
       # The rule asks `go list` which packages the binaries build. A pull request reads only its labels (#572).
       - if: github.event_name != 'pull_request'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
@@ -195,7 +195,7 @@ jobs:
 
       # cache: false, and an explicit cache with a fallback prefix: a new go.sum still starts from
       # the last build cache (main saves one per go.sum), which is most of the ko and driver builds.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -486,7 +486,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       # zizmor: ignore[cache-poisoning] tag trigger; job publishes nothing
         with:
           go-version-file: go.mod
@@ -533,7 +533,7 @@ jobs:
       - name: Tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
