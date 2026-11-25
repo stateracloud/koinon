@@ -924,6 +924,7 @@ jobs:
       - run: hack/board-test.sh
       - run: hack/release-drill-wait-test.sh
       - run: hack/release-test-images-test.sh
+      - run: hack/release-base-mirror-test.sh
       - run: hack/release-harness-test.sh
       - run: hack/ko-ref-test.sh
       - run: hack/route-guard-test.sh
