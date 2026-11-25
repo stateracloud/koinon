@@ -91,11 +91,16 @@ func mustRead(cfg agentconfig.Config) reconciler.GitHubRead {
 }
 
 // fixedTokens mints the same fake token for any connection, so no request leaves the test for
-// a connection's own host.
+// a connection's own host. Like the real client, which caches a token until it nears expiry, it
+// returns the same expiry on every call: the reconciler names a token by its expiry, to the second
+// (tokenRevision), so a new expiry on each call resealed the token whenever two passes fell in
+// different seconds, and a spec that compares two passes failed at random.
 type fixedTokens struct{}
 
+var fixedTokenExpiry = time.Now().Add(24 * time.Hour)
+
 func (fixedTokens) ReadToken(_ context.Context, _ store.Connection, scope codehost.Scope) (codehost.Token, error) {
-	return codehost.NewToken("koinon_test_not-a-real-token", time.Now().Add(time.Hour), scope.Repositories), nil
+	return codehost.NewToken("koinon_test_not-a-real-token", fixedTokenExpiry, scope.Repositories), nil
 }
 
 var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server connection", func() {
