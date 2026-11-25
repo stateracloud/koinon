@@ -29,6 +29,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/guestfront"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 var _ = Describe("KeysFromEnv", func() {
@@ -82,7 +83,7 @@ var _ = Describe("Front", func() {
 		go func() { done <- f.Serve(ctx, lis) }()
 		DeferCleanup(func() {
 			cancel()
-			Eventually(done, 15*time.Second).Should(Receive(BeNil()))
+			Eventually(done, racescale.D(15*time.Second)).Should(Receive(BeNil()))
 		})
 		conn, err = grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		Expect(err).NotTo(HaveOccurred())
@@ -124,7 +125,7 @@ var _ = Describe("Front", func() {
 	It("starts a process with a valid token and then refuses another sandbox's token", func() {
 		ok := filepath.Join(ws, "ok")
 		Expect(start(with(self, ""), ok)).To(Succeed())
-		Eventually(func() error { _, err := os.Stat(ok); return err }, 5*time.Second).Should(Succeed())
+		Eventually(func() error { _, err := os.Stat(ok); return err }, racescale.D(5*time.Second)).Should(Succeed())
 		denied := filepath.Join(ws, "other")
 		Expect(status.Code(start(with(other, ""), denied))).To(Equal(codes.Unauthenticated))
 	})
