@@ -238,14 +238,24 @@ test-admission: ## Run the escape suite's admission policy cases against envtest
 # budget below. CHART_SMOKE_SHARD picks one (core, external or kms; the groups are in
 # test/chartsmoke/shard_test.go); empty runs every mode serially, which needs about three budgets.
 CHART_SMOKE_SHARD ?=
+# Without a shard the run is serial and gets a longer budget (it took 13 minutes in a lane VM).
+ifneq ($(filter-out all,$(CHART_SMOKE_SHARD)),)
+CHART_SMOKE_BUDGET ?= 15m
+CHART_SMOKE_GO_TIMEOUT ?= 20m
+CHART_SMOKE_LABEL = -$(CHART_SMOKE_SHARD)
+else
+CHART_SMOKE_BUDGET ?= 25m
+CHART_SMOKE_GO_TIMEOUT ?= 30m
+CHART_SMOKE_LABEL =
+endif
 
 .PHONY: test-chart-smoke
 test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go). One shard of the install modes: CHART_SMOKE_SHARD=core|external|kms (default: all, serial)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
-		KOINON_CHARTSMOKE_SHARD="$(CHART_SMOKE_SHARD)" KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
-		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(if $(CHART_SMOKE_SHARD),-$(CHART_SMOKE_SHARD)) -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
+		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(CHART_SMOKE_LABEL)-expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
 		exit $$rc; }
 
 .PHONY: test-escape

@@ -17,8 +17,8 @@ import (
 // shard, so each shard has its own time budget.
 const shardEnv = "KOINON_CHARTSMOKE_SHARD"
 
-// shards groups the install modes (the charts/koinon/ci/<mode>-values.yaml names). Each group is
-// about five modes, with the KMS modes (which start an extra container each) together. Every mode
+// shards groups the install modes (the charts/koinon/ci/<mode>-values.yaml names). The KMS
+// modes, which start an extra container each, are together in one smaller group. Every mode
 // is in exactly one group: TestShardsCoverEveryMode fails for a new values file that is in none, so
 // a mode never drops out of CI without a message.
 var shards = map[string][]string{

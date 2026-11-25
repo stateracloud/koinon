@@ -270,12 +270,6 @@ func (w *workload) RunState(ctx context.Context) runState {
 	return classifyState(st != nil && st.Running, err, ctx.Err())
 }
 
-// Running reports whether the container is still running. False for stopped and for not checked:
-// use RunState when the two must be told apart.
-func (w *workload) Running(ctx context.Context) bool {
-	return w.RunState(ctx) == stateRunning
-}
-
 // expectRunning fails the spec when the container is not running. It says "not checked" when the
 // state could not be read (the budget ended), and "stopped" only when Docker said so.
 func expectRunning(ctx context.Context, w *workload, format string, args ...any) {
