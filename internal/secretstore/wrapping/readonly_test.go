@@ -75,8 +75,10 @@ var _ = Describe("the read-only wrapping key (issue 688)", func() {
 	})
 
 	oldBao := []string{"--openbao-address=https://bao.example:8200", "--openbao-key=koinon-kek-old", "--openbao-role=koinon-api"}
-	readOnlyBao := []string{"--read-only-kek-backend=openbao", "--read-only-openbao-address=https://bao.example:8200",
-		"--read-only-openbao-key=koinon-kek-old", "--read-only-openbao-role=koinon-api"}
+	readOnlyBao := []string{
+		"--read-only-kek-backend=openbao", "--read-only-openbao-address=https://bao.example:8200",
+		"--read-only-openbao-key=koinon-kek-old", "--read-only-openbao-role=koinon-api",
+	}
 	newAWS := []string{"--kek-backend=awskms", "--awskms-region=eu-central-1", "--awskms-key-id=alias/koinon-kek-new"}
 
 	build := func(ctx context.Context, role wrapping.Role, args ...string) secretstore.Wrappers {
@@ -233,8 +235,10 @@ var _ = Describe("the read-only wrapping key (issue 688)", func() {
 		Expect(logs.String()).To(ContainSubstring("read-only-openbao-key"))
 		Expect(logs.String()).NotTo(ContainSubstring("koinon-kek-old"))
 
-		for _, leak := range []string{string(kek), base64.StdEncoding.EncodeToString(kek), hex.EncodeToString(kek),
-			base64.StdEncoding.EncodeToString(s.Wrapped), "not-a-real-key"} {
+		for _, leak := range []string{
+			string(kek), base64.StdEncoding.EncodeToString(kek), hex.EncodeToString(kek),
+			base64.StdEncoding.EncodeToString(s.Wrapped), "not-a-real-key",
+		} {
 			Expect(logs.String()).NotTo(ContainSubstring(leak))
 			Expect(loadErr.Error()).NotTo(ContainSubstring(leak))
 			Expect(installErr.Error()).NotTo(ContainSubstring(leak))
