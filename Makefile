@@ -255,7 +255,7 @@ test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containe
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
 		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
-		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(CHART_SMOKE_LABEL)-expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(CHART_SMOKE_LABEL) -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
 		exit $$rc; }
 
 .PHONY: test-escape
