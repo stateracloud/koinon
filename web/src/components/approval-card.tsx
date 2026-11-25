@@ -222,7 +222,7 @@ function SavedWork({ call: w, ciPaths, ciFoldCase }: { call: SavedWorkCall; ciPa
         Koinon saved this uncommitted work from a sandbox that had to be recreated. Nothing is pushed until you approve. It goes to a new branch, never the default branch.
       </p>
       {ciHit.length > 0 && (
-        <p role="note" className="rounded-md border border-amber-600 p-3" data-testid="workflow-warning">
+        <p role="note" className="rounded-md border border-warning p-3" data-testid="workflow-warning">
           This work changes files under {ciHit.join(', ')}, where this code host runs CI. The host may refuse the push of workflow files with this connection. A pushed branch can also start existing
           workflows that run on push, and those can use the repository&apos;s secrets, so read these files before you approve.
         </p>
@@ -336,7 +336,7 @@ function McpToolInfo({ call, stale }: { call: McpCall; stale: boolean }) {
         </Alert>
       )}
       {call.reviewReason && (
-        <p role="note" className="rounded-md border border-amber-500/60 bg-amber-500/5 p-2">
+        <p role="note" className="rounded-md border border-warning bg-attention/5 p-2">
           {call.reviewReason}
         </p>
       )}
@@ -356,7 +356,7 @@ function LeakGuardNote({ guard }: { guard: LeakGuard }) {
   const legs = [guard.untrustedInput && 'untrusted input', guard.privateData && 'private data'].filter(Boolean)
   const destination = Object.entries(guard.destination)
   return (
-    <section aria-label="Leak guard" data-testid="leak-guard" className="rounded-md border border-amber-500/60 bg-amber-500/5 p-2">
+    <section aria-label="Leak guard" data-testid="leak-guard" className="rounded-md border border-warning bg-attention/5 p-2">
       <h4 className="mb-1 font-semibold">Held by the leak guard</h4>
       <p>
         This session holds <span data-testid="leak-guard-legs">{legs.length ? legs.join(' and ') : 'no leg'}</span>
@@ -392,7 +392,7 @@ function McpArguments({ json }: { json: string }) {
 function RiskSummary({ items }: { items: readonly RiskItem[] }) {
   const flagged = items.filter((i) => i.flagged)
   return (
-    <section aria-label="Push and run risk" className={cn('rounded-md border p-3', flagged.length ? 'border-amber-500/60 bg-amber-500/5' : 'bg-muted/30')}>
+    <section aria-label="Push and run risk" className={cn('rounded-md border p-3', flagged.length ? 'border-warning bg-attention/5' : 'bg-muted/30')}>
       <h4 className="mb-1 text-sm font-semibold">{flagged.length ? 'Check before approving' : 'No push-and-run risk found'}</h4>
       <p className="text-muted-foreground mb-2 text-xs">
         Approving lets Koinon push this branch and open the pull request; CI may run it with the repository’s secrets before anyone reviews it on GitHub.
@@ -401,7 +401,7 @@ function RiskSummary({ items }: { items: readonly RiskItem[] }) {
         {items.map((i) => (
           <li key={i.key} data-risk={i.key} data-flagged={i.flagged} className="flex gap-2">
             {i.flagged ? (
-              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
             ) : (
               <CircleCheck aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
             )}
@@ -561,8 +561,8 @@ function UnifiedDiff({ path, text }: { path: string; text: string }) {
             data-line={kind}
             className={cn(
               'block px-2 whitespace-pre',
-              kind === 'add' && 'bg-emerald-500/15',
-              kind === 'del' && 'bg-red-500/15',
+              kind === 'add' && 'bg-success/15',
+              kind === 'del' && 'bg-danger/15',
               (kind === 'hunk' || kind === 'note') && 'text-muted-foreground',
             )}
           >

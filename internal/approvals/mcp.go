@@ -70,6 +70,11 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	if tool.Tier == store.McpTierNever {
 		return nil, permanent("an admin has since moved %s of %s to the never tier", row.Tool, name)
 	}
+	if mcpservers.Unreviewed(tool) && !srv.ShowUnreviewedTools {
+		// The request was recorded before tools were hidden until review, or while an admin let the
+		// server show new tools. The tool is hidden now: the call does not run (#1216 point f, ADR 0125).
+		return nil, permanent("no admin reviewed %s of %s yet; it is not available until an admin reviews it", row.Tool, name)
+	}
 	allowed, err := s.q.GetAgentMCPServer(ctx, store.GetAgentMCPServerParams{OrgID: row.OrgID, AgentID: row.AgentID, ServerID: srv.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, permanent("the agent is no longer allowed to use the server %s", name)

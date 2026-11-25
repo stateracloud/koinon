@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/stateracloud/koinon/internal/apiassembly"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -136,6 +137,17 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.ListAgents(ctx, &agentv1alpha1.ListAgentsRequest{OrgId: org})
 		},
 	},
+	agentv1alpha1connect.AgentServiceListAgentSummariesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.agents.ListAgentSummaries(ctx, &agentv1alpha1.ListAgentSummariesRequest{OrgId: org})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentPlacementProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentPlacement(ctx, &agentv1alpha1.SetAgentPlacementRequest{OrgId: org, AgentId: f.agent.GetId(), Team: "isolation"})
+		},
+	},
 	agentv1alpha1connect.AgentServiceActivateAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
@@ -193,6 +205,23 @@ var isolationCases = map[string]isolationCase{
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	agentv1alpha1connect.AgentServiceCreateAgentProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.agents.CreateAgent(ctx, &agentv1alpha1.CreateAgentRequest{OrgId: org, Definition: &agentv1alpha1.AgentDefinition{
+				DisplayName: "Blank", Instructions: "Answer questions.",
+			}})
+		},
+	},
+	agentv1alpha1connect.AgentServiceUpdateAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.UpdateAgent(ctx, &agentv1alpha1.UpdateAgentRequest{
+				OrgId: org, AgentId: f.agent.GetId(), BaseVersion: f.agent.GetLatestVersion(),
+				Definition: &agentv1alpha1.AgentDefinition{DisplayName: "Renamed"},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}},
+			})
 		},
 	},
 
@@ -809,6 +838,11 @@ var isolationCases = map[string]isolationCase{
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
 		},
 	},
+	mcpserverv1alpha1connect.McpServerServiceReviewAllToolsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.ReviewAllTools(ctx, &mcpserverv1alpha1.ReviewAllToolsRequest{OrgId: org, ServerId: f.mcpServer, Tools: []*mcpserverv1alpha1.ToolReview{{Tool: f.mcpTool}}})
+		},
+	},
 	remoteagentv1alpha1connect.RemoteAgentServiceCreateRemoteAgentProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
@@ -1005,6 +1039,11 @@ var isolationExempt = map[string]string{
 	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure: "records a gateway copy's confirmation of an " +
 		"install-wide revision (ADR 0097); served by internal/gateway/stateserver behind the gateway's bearer token, " +
 		"not on this API; the request names the copy, not an org",
+	gatewayv1alpha1connect.GatewayApprovalServiceRequestApprovalProcedure: "the gateway's approval route (ADR 0097, " +
+		"#1301); served by internal/gateway/approvalroute on the internal listener, not on this API: only a holder of " +
+		"the gateway's bearer token reaches it (approvalroute_test.go refuses a wrong token before any row is read). " +
+		"The request names an org, but koinon-api reads the agent, server, allowance and tool inside that org itself " +
+		"and refuses a call that does not match them",
 }
 
 var _ = Describe("org isolation", func() {

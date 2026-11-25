@@ -68,6 +68,7 @@ func richState() gateway.State {
 	s.MCP = []gateway.MCPTarget{
 		{Name: "wiki", URL: "http://wiki/mcp", Org: "acme", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/creds/wiki", CAFile: "/creds/wiki-ca", InsecureSkipVerify: true},
 		{Name: "docs", URL: "http://docs/sse", SSE: true},
+		{Name: "wiki-ask", URL: "http://koinon-api/mcp-ask/wiki", Org: "acme", Ask: true},
 	}
 	s.GrantTools(agentA, gateway.ToolGrant{Target: "wiki", Tools: []string{"search", "read"}}, gateway.ToolGrant{Target: "docs", All: true})
 	s.EgressRoutes = []route.Route{
@@ -84,6 +85,10 @@ func richState() gateway.State {
 			Name: "org/zeta/shared", Class: route.ClassRegistry, Org: "zeta", Host: "registry.npmjs.org",
 			Methods: []string{"HEAD", "GET"}, PathPrefixes: []string{"/b", "/a"}, QueryKeys: []string{"z", "y"},
 		},
+	}
+	s.EgressCredentials = []route.Credential{
+		{Name: "org/zeta/agent/gamma/codehost", Org: "zeta", Agent: "gamma", File: "/keys/forgev2-z", Scheme: route.SchemeBearer},
+		{Name: "org/acme/agent/alpha/codehost", Org: "acme", Agent: "alpha", File: "/keys/forgev2-a", Scheme: route.SchemeBasic, User: "x-access-token"},
 	}
 	return s
 }
@@ -105,14 +110,32 @@ var _ = Describe("Snapshot", func() {
 		Expect(back.EgressRoutes[0]).To(Equal(s.EgressRoutes[0]))
 		Expect(back.EgressRoutes[1]).To(Equal(s.EgressRoutes[1]))
 		Expect(back.EgressRoutes[2].Methods).To(Equal([]string{"GET", "HEAD"}))
+		// Sorted by name.
+		Expect(back.EgressCredentials).To(Equal([]route.Credential{s.EgressCredentials[1], s.EgressCredentials[0]}))
 	})
 
 	It("carries no egress half for a State without egress routes", func() {
 		s := richState()
 		s.EgressRoutes = nil
+		s.EgressCredentials = nil
 		u := staterev.Snapshot(s)
 		Expect(u.GetEgress()).To(BeNil())
 		Expect(staterev.FromProto(u).EgressRoutes).To(BeEmpty())
+	})
+
+	It("carries the egress credentials without routes", func() {
+		s := richState()
+		s.EgressRoutes = nil
+		u := staterev.Snapshot(s)
+		Expect(u.GetEgress().GetCredentials()).To(HaveLen(2))
+		Expect(staterev.FromProto(u).EgressCredentials).To(HaveLen(2))
+	})
+
+	It("differs when an egress credential changes", func() {
+		a := richState()
+		b := richState()
+		b.EgressCredentials[1].File = "/keys/forgev2-b"
+		Expect(proto.Equal(staterev.Snapshot(a), staterev.Snapshot(b))).To(BeFalse())
 	})
 
 	It("sorts the egress routes, so their order never makes a new revision", func() {
@@ -183,6 +206,8 @@ var _ = Describe("secret material", func() {
 		"Keys[].Agent.Name", "Keys[].Agent.Org", "Keys[].Hash", "Keys[].ID",
 		"Limits{}.Amount", "Limits{}.Generation", "Limits{}.Unit", "Limits{}.Window", "Limits{}~Name", "Limits{}~Org",
 		"MCP[].Builtin", "MCP[].HandleKeyFile",
+		// The ask target flag (#1315), reviewed 2026-11-25: it says the target is Koinon's mcpask proxy.
+		"MCP[].Ask",
 		"MCP[].RemoteAgents[].Agents[]", "MCP[].RemoteAgents[].CAFile", "MCP[].RemoteAgents[].CardHash", "MCP[].RemoteAgents[].CardURL",
 		"MCP[].RemoteAgents[].CredentialFile", "MCP[].RemoteAgents[].CredentialHeader", "MCP[].RemoteAgents[].CredentialPrefix",
 		"MCP[].RemoteAgents[].ID", "MCP[].RemoteAgents[].InsecureSkipVerify", "MCP[].RemoteAgents[].Name",
@@ -205,6 +230,10 @@ var _ = Describe("secret material", func() {
 		"EgressRoutes[].Deny", "EgressRoutes[].Host", "EgressRoutes[].Methods[]", "EgressRoutes[].Name",
 		"EgressRoutes[].Org", "EgressRoutes[].PathPrefixes[]", "EgressRoutes[].Paths[]", "EgressRoutes[].Port",
 		"EgressRoutes[].QueryKeys[]", "EgressRoutes[].QueryValues{}", "EgressRoutes[].QueryValues{}~key",
+		// The egress credentials (#1086 part C), reviewed 2026-11-24. File is the path of a sealed
+		// envelope that only the gateway key opens; the other fields name and scope it.
+		"EgressCredentials[].Agent", "EgressCredentials[].File", "EgressCredentials[].Name",
+		"EgressCredentials[].Org", "EgressCredentials[].Scheme", "EgressCredentials[].User",
 	}
 
 	It("lists every leaf field of State, so a new field is reviewed", func() {

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The gateway key guard of charts/koinon/templates/kek-guard.yaml as it renders today: the writer
+# variable is `toJson $gwAdmin | quote`, a CEL string literal inside a YAML string.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: koinon-koinon-gateway-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [secrets]
+  variables:
+    - name: writer
+      expression: "\"system:serviceaccount:koinon:koinon-key-admin\""
+    - name: terminating
+      expression: "has(namespaceObject.status) && has(namespaceObject.status.phase) && namespaceObject.status.phase == 'Terminating'"
+  validations:
+    - expression: "(request.operation == 'DELETE' && variables.terminating) || request.userInfo.username == variables.writer"
+      reason: Forbidden
+      messageExpression: "'only the gateway key-admin Job may write the Secret, not ' + request.userInfo.username"

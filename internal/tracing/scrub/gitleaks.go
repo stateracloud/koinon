@@ -281,6 +281,16 @@ func compileGitleaks() *glSet {
 	return g
 }
 
+// gitleaksLiteralRE is the global allowlist regex of the pinned set that lacks a group around its
+// alternatives. Upstream writes `(?i)^true|false|null$`, which Go reads as three alternatives:
+// starts with "true", contains "false", ends with "null". A secret that ends in "NULL" (or holds
+// "false" anywhere) was dropped as a literal, whatever rule matched it: a real AWS key ID
+// AKIA…NULL stayed in the trace (issue 1299). The intent is the whole value being a literal.
+const (
+	gitleaksLiteralRE      = `(?i)^true|false|null$`
+	gitleaksLiteralREFixed = `(?i)^(?:true|false|null)$`
+)
+
 func compileAllow(a gitleaksrules.Allowlist) (glAllow, bool) {
 	out := glAllow{and: a.MatchCondition == "AND", target: a.RegexTarget}
 	// A trace has no path and no commit. In an AND allowlist such a criterion can never hold, so
@@ -289,6 +299,9 @@ func compileAllow(a gitleaksrules.Allowlist) (glAllow, bool) {
 		out.never = true
 	}
 	for _, s := range a.Regexes {
+		if s == gitleaksLiteralRE {
+			s = gitleaksLiteralREFixed
+		}
 		re, err := regexp.Compile(s)
 		if err != nil {
 			return out, false

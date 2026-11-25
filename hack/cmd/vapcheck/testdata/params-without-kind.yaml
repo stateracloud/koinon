@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# params without a paramKind is not declared: it must fail.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: params-without-kind
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [secrets]
+  validations:
+    - expression: "params.data == null"

@@ -109,6 +109,73 @@ func TestChartContract(t *testing.T) {
 	}
 }
 
+// TestChartReadOnlyKey proves the read-only second wrapping key of a key move reaches the pods that
+// hold a keyring (issue 1298): koinon-api, the reconciler and the key-admin Job get the KOINON_READ_ONLY_*
+// settings of the values, koinon-agentd gets none, and the real startup check of each binary accepts
+// them (TestChartContract runs it for every values file, these two included).
+func TestChartReadOnlyKey(t *testing.T) {
+	testenv.RequireT(t, testenv.BinaryNamed("helm", envOr("HELM", "helm")))
+	for _, tc := range []struct {
+		values  string
+		backend string
+		want    map[string]string
+	}{
+		{"kms-awskms-values.yaml", "awskms", map[string]string{"KOINON_READ_ONLY_AWSKMS_KEY_ID": "alias/koinon-kek-old"}},
+		{"kms-openbao-values.yaml", "openbao", map[string]string{"KOINON_READ_ONLY_OPENBAO_KEY": "koinon-kek-old", "KOINON_READ_ONLY_OPENBAO_ADDRESS": "https://openbao:8443"}},
+	} {
+		t.Run(tc.values, func(t *testing.T) {
+			r := helmRender(t.Context(), filepath.Join(chartDir, "ci", tc.values))
+			envOf := func(c corev1.Container) map[string]string {
+				env := map[string]string{}
+				for _, e := range c.Env {
+					env[e.Name] = e.Value
+				}
+				return env
+			}
+			check := func(where string, c corev1.Container) {
+				env := envOf(c)
+				if env["KOINON_READ_ONLY_KEK_BACKEND"] != tc.backend {
+					t.Errorf("%s: KOINON_READ_ONLY_KEK_BACKEND = %q, want %q", where, env["KOINON_READ_ONLY_KEK_BACKEND"], tc.backend)
+				}
+				for k, v := range tc.want {
+					if env[k] != v {
+						t.Errorf("%s: %s = %q, want %q", where, k, env[k], v)
+					}
+				}
+				if env["KOINON_KEK_BACKEND"] != tc.backend {
+					t.Errorf("%s: the primary %q is not set next to the read-only key", where, env["KOINON_KEK_BACKEND"])
+				}
+			}
+			for _, name := range []string{"koinon-api", "koinon-reconciler"} {
+				d := r.deployment(name)
+				if d == nil {
+					t.Fatalf("no Deployment %s", name)
+				}
+				check(name, d.Spec.Template.Spec.Containers[0])
+			}
+			if d := r.deployment("koinon-agentd"); d != nil {
+				for k := range envOf(d.Spec.Template.Spec.Containers[0]) {
+					if strings.HasPrefix(k, "KOINON_READ_ONLY_") {
+						t.Errorf("koinon-agentd holds no keyring but gets %s", k)
+					}
+				}
+			}
+			jobs := 0
+			for _, j := range r.Jobs {
+				for _, c := range j.Spec.Template.Spec.Containers {
+					if slices.Contains(c.Args, "key-admin") {
+						jobs++
+						check("Job "+j.Name, c)
+					}
+				}
+			}
+			if jobs == 0 {
+				t.Errorf("%s renders no key-admin Job", tc.values)
+			}
+		})
+	}
+}
+
 // podContainer is a rendered container and where it runs.
 type podContainer struct {
 	corev1.Container

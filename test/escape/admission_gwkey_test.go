@@ -22,7 +22,7 @@ import (
 )
 
 // The gateway-key guard (ADR 0097 decision 12, issue #1151), as `helm template` renders
-// templates/kek-guard.yaml with the default MCP driver (koinon, #1239), against a real API server
+// templates/kek-guard.yaml with the MCP driver koinon (the guard renders only with it), against a real API server
 // (envtest). The API server compiles the CEL, so a policy that does not compile fails here, not
 // only at install. Every identity holds cluster-admin through RBAC, so only the policy decides.
 var _ = Describe("gateway key guard policy", Label("escape", "admission"), Ordered, ContinueOnFailure, func() {
@@ -60,14 +60,14 @@ var _ = Describe("gateway key guard policy", Label("escape", "admission"), Order
 		testenv.Require(testenv.Envtest)
 		// Only this policy: the KEK guard and the reconciler fence of the same template have their own specs.
 		policies, bindings := renderAdmission(ctx, "koinon", ns, "templates/kek-guard.yaml", nil,
-			"--set", "secrets.kek.guard.enabled=false")
+			"--set", "secrets.kek.guard.enabled=false", "--set", "gateway.mcp.driver=koinon")
 		var policy *admissionv1.ValidatingAdmissionPolicy
 		for _, p := range policies {
 			if strings.HasSuffix(p.Name, "-gateway-key-guard") {
 				policy = p
 			}
 		}
-		Expect(policy).NotTo(BeNil(), "the default render has the gateway key guard")
+		Expect(policy).NotTo(BeNil(), "the render with driver koinon has the gateway key guard")
 		Expect(policy.Spec.MatchConstraints.ResourceRules[0].ResourceNames).To(Equal([]string{keySecret}))
 		var binding *admissionv1.ValidatingAdmissionPolicyBinding
 		for _, b := range bindings {

@@ -33,6 +33,9 @@ message StreamStateRequest {
   // 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
   // an ack under a reused id would count for a process that has not loaded the revision.
   string copy_id = 1;
+  // halves lists the halves this copy serves, and so acks. Empty means both (a client from before
+  // this field). The reconciler waits only for copies that serve a half.
+  repeated Half halves = 2;
 }
 
 // Half is one of the two paths a gateway copy serves.
@@ -179,6 +182,9 @@ message MCPTarget {
   repeated RemoteAgent remote_agents = 11;
   // handle_key_file holds the key that signs the task and context handles of the built-in target.
   string handle_key_file = 12;
+  // ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask).
+  // The gateway sends it the agent header; an org's own server never gets that header.
+  bool ask = 13;
 }
 
 // RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
@@ -212,6 +218,27 @@ message ToolGrant {
 // route file. A route that fails to load closes all org routes; it never opens one.
 message EgressState {
   repeated EgressRoute routes = 1;
+  // credentials say where the gateway reads each credential that a route names, and how it sends it
+  // (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable).
+  repeated EgressCredential credentials = 2;
+}
+
+// EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
+// 0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the
+// value. The envelope is bound to the org ID and the agent ID in the file name.
+message EgressCredential {
+  // name is the name that the routes give in their credential field.
+  string name = 1;
+  // org is the org slug and agent the agent's name at the gateway: the routes that name the
+  // credential must have the same org and agent.
+  string org = 2;
+  string agent = 3;
+  string file = 4;
+  // scheme is how the value goes upstream in the Authorization header: "basic" (base64 of
+  // user ":" value) or "bearer".
+  string scheme = 5;
+  // user is the user name of the basic scheme, for example "x-access-token" for a forge token.
+  string user = 6;
 }
 
 // EgressRoute is one org route (gateway route.Route). It names a credential, never its value.

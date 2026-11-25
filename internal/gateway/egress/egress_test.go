@@ -4,11 +4,14 @@ package egress_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -27,6 +30,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/faketls"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
@@ -350,7 +354,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(logs.String()).NotTo(ContainSubstring("attacker-text"))
 		})
 
-		It("closes a route that names a credential until the gateway can attach it", func() {
+		It("closes a route whose credential is not in the State", func() {
 			resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/private.git/info/refs", token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
 			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("credential_unavailable"))
@@ -428,8 +432,8 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 
 		It("merges the org routes with the platform routes", func() {
 			st := egress.StateRoutes{Gateway: gw, Platform: platform()}
-			Expect(st.ApplyEgress(context.Background(), []route.Route{agentRoute("forge-0", false), agentRoute("forge-1", true)})).To(Succeed())
-			// A route with a credential is enforced but refused until the gateway can attach it (part C).
+			Expect(st.ApplyEgress(context.Background(), gateway.EgressState{EgressRoutes: []route.Route{agentRoute("forge-0", false), agentRoute("forge-1", true)}})).To(Succeed())
+			// A route whose credential is not in the State is enforced and refused.
 			resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/new.git/info/refs?service=git-upload-pack", token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
 			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("credential_unavailable"))
@@ -453,7 +457,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 				r := agentRoute("forge-0", false)
 				r.Credential = ""
 				mut(&r)
-				Expect(st.ApplyEgress(context.Background(), []route.Route{r})).NotTo(Succeed())
+				Expect(st.ApplyEgress(context.Background(), gateway.EgressState{EgressRoutes: []route.Route{r}})).NotTo(Succeed())
 				resp := do("GET", "/egress/"+authority(forgeHost)+"/acme/new.git/info/refs", token(minter, acme), nil)
 				Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
 				// The routes of the test's own table are gone too: the platform table alone serves.
@@ -472,7 +476,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			st := egress.StateRoutes{Gateway: gw}
 			r := agentRoute("forge-0", false)
 			r.Org = ""
-			Expect(st.ApplyEgress(context.Background(), []route.Route{r})).NotTo(Succeed())
+			Expect(st.ApplyEgress(context.Background(), gateway.EgressState{EgressRoutes: []route.Route{r}})).NotTo(Succeed())
 			resp := do("GET", "/egress/"+authority(regHost)+"/left-pad", token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
 			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("no_table"))
@@ -484,6 +488,220 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			b.Name, b.Org = "org/globex/agent/builder/forge-0", "globex"
 			_, err := egress.Merge(platform(), []route.Route{a, b})
 			Expect(err).To(MatchError(ContainSubstring("two orgs")))
+		})
+	})
+
+	Context("credentials (#1086 part C)", func() {
+		const value = "koinon_test_not-a-real-token"
+		var (
+			opener *fakeOpener
+			st     egress.StateRoutes
+			cred   route.Credential
+		)
+		credRoute := func() route.Route {
+			return route.Route{
+				Name: "org/acme/agent/builder/forge-0", Class: route.ClassForge, Org: "acme", Agent: "builder",
+				Host: forgeHost, Port: port, Methods: []string{"GET"}, Paths: []string{"/acme/new.git/**"},
+				AnyQuery: true, Credential: "org/acme/agent/builder/codehost",
+			}
+		}
+		plainRoute := func() route.Route {
+			r := credRoute()
+			r.Name, r.Paths, r.Credential = "org/acme/agent/builder/forge-1", []string{"/acme/open.git/**"}, ""
+			return r
+		}
+		path := func(p string) string { return "/egress/" + authority(forgeHost) + p }
+		basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+value))
+		var scrubbed []string
+
+		BeforeEach(func() {
+			opener = &fakeOpener{values: map[string]string{"/keys/forgev2-builder": value}}
+			scrubbed = nil
+			var err error
+			gw, err = egress.New(egress.Options{
+				Verifier: ver,
+				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+				},
+				RootCAs: rootsOf(upstream), Metrics: metrics, Log: slog.New(slog.NewJSONHandler(logs, nil)),
+				Credentials: opener,
+				Scrub:       func(_ string, v ...string) { scrubbed = append(scrubbed, v...) },
+			})
+			Expect(err).NotTo(HaveOccurred())
+			gwSrv = httptest.NewServer(gw.Handler())
+			DeferCleanup(gwSrv.Close)
+			st = egress.StateRoutes{Gateway: gw}
+			cred = route.Credential{
+				Name: "org/acme/agent/builder/codehost", Org: "acme", Agent: "builder",
+				File: "/keys/forgev2-builder", Scheme: route.SchemeBasic, User: "x-access-token",
+			}
+		})
+
+		apply := func(c ...route.Credential) {
+			Expect(st.ApplyEgress(context.Background(), gateway.EgressState{
+				EgressRoutes: []route.Route{credRoute(), plainRoute()}, EgressCredentials: c,
+			})).To(Succeed())
+		}
+
+		It("attaches the credential on the route that names it, and only there", func() {
+			apply(cred)
+			resp := do("GET", path("/acme/new.git/info/refs?service=git-upload-pack"), token(minter, acme),
+				http.Header{"Authorization": {"Bearer koinon_test_guest-value"}})
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			resp = do("GET", path("/acme/open.git/info/refs"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			calls := upstreamCalls()
+			Expect(calls).To(HaveLen(2))
+			Expect(calls[0].Header.Values("Authorization")).To(Equal([]string{basic}))
+			Expect(calls[1].Header.Values("Authorization")).To(BeEmpty())
+			Expect(count("forge", "allowed")).To(Equal(2.0))
+			Expect(scrubbed).To(ContainElements(value, basic))
+			Expect(logs.String()).NotTo(ContainSubstring(value))
+		})
+
+		It("sends a bearer credential as a bearer token", func() {
+			cred.Scheme, cred.User = route.SchemeBearer, ""
+			apply(cred)
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(upstreamCalls()[0].Header.Get("Authorization")).To(Equal("Bearer " + value))
+		})
+
+		It("never serves the credential to another agent of the org", func() {
+			apply(cred)
+			other := actortoken.Actor{Org: "acme", Agent: "reviewer"}
+			resp := do("GET", path("/acme/new.git/info/refs"), token(minter, other), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
+			Expect(upstreamCalls()).To(BeEmpty())
+			Expect(opener.calls).To(BeZero())
+		})
+
+		DescribeTable("refuses the route with credential_unavailable and reaches no upstream",
+			func(setup func()) {
+				setup()
+				resp := do("GET", path("/acme/new.git/info/refs"), token(minter, acme), nil)
+				Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+				Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("credential_unavailable"))
+				Expect(upstreamCalls()).To(BeEmpty())
+				Expect(count("forge", "credential_unavailable")).To(Equal(1.0))
+				Expect(logs.String()).NotTo(ContainSubstring(value))
+			},
+			Entry("no credential in the State", func() { apply() }),
+			Entry("a file that cannot be opened", func() {
+				cred.File = "/keys/missing"
+				apply(cred)
+			}),
+			Entry("a value too short to scrub", func() {
+				opener.values[cred.File] = "short"
+				apply(cred)
+			}),
+		)
+
+		It("refuses a credential of another agent at apply, and serves the platform routes alone", func() {
+			cred.Agent = "reviewer"
+			err := st.ApplyEgress(context.Background(), gateway.EgressState{
+				EgressRoutes: []route.Route{credRoute()}, EgressCredentials: []route.Credential{cred},
+			})
+			Expect(err).To(MatchError(ContainSubstring("serves its own agent only")))
+			resp := do("GET", path("/acme/new.git/info/refs"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("no_table"))
+		})
+
+		It("masks the credential in the response headers and the body, also across reads", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Echo", "token="+value)
+				w.Header().Set("X-Auth", basic)
+				fl := w.(http.Flusher)
+				_, _ = io.WriteString(w, "a "+value[:10])
+				fl.Flush()
+				_, _ = io.WriteString(w, value[10:]+" b "+strings.Repeat("x", 70000)+value+" end")
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			b, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).NotTo(ContainSubstring(value))
+			Expect(string(b)).To(HavePrefix("a " + strings.Repeat("*", len(value)) + " b "))
+			Expect(string(b)).To(HaveSuffix(strings.Repeat("*", len(value)) + " end"))
+			Expect(resp.Header.Get("X-Echo")).To(Equal("token=" + strings.Repeat("*", len(value))))
+			Expect(resp.Header.Get("X-Auth")).NotTo(ContainSubstring(basic[6:]))
+		})
+
+		It("asks for a body it can scan, and refuses an encoded one", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, r *http.Request) {
+				// The transport asks for gzip itself; a guest value never reaches the upstream.
+				Expect(r.Header.Get("Accept-Encoding")).To(Equal("gzip"))
+				w.Header().Set("Content-Encoding", "br")
+				_, _ = io.WriteString(w, "opaque")
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), http.Header{"Accept-Encoding": {"br"}})
+			Expect(resp.StatusCode).To(Equal(http.StatusBadGateway))
+			Expect(count("forge", "upstream_error")).To(Equal(1.0))
+			Expect(count("forge", "allowed")).To(Equal(0.0))
+		})
+
+		It("decodes a gzip body and masks it", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Encoding", "gzip")
+				zw := gzip.NewWriter(w)
+				_, _ = io.WriteString(zw, "echo "+value)
+				_ = zw.Close()
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			b, _ := io.ReadAll(resp.Body)
+			Expect(string(b)).To(Equal("echo " + strings.Repeat("*", len(value))))
+		})
+
+		It("masks the credential in a trailer, whose value arrives after the body", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Trailer", "X-Echo-Trailer")
+				_, _ = io.WriteString(w, "body")
+				w.Header().Set("X-Echo-Trailer", "token="+value)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			b, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(b)).To(Equal("body"))
+			Expect(resp.Trailer.Get("X-Echo-Trailer")).To(Equal("token=" + strings.Repeat("*", len(value))))
+		})
+
+		It("masks the credential in a trailer the upstream did not declare", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, "body")
+				w.(http.Flusher).Flush()
+				w.Header().Set(http.TrailerPrefix+"X-Late", "token="+value)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			_, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.Trailer.Get("X-Late")).To(Equal("token=" + strings.Repeat("*", len(value))))
+		})
+
+		It("passes a response with no body, whatever its Content-Encoding says", func() {
+			apply(cred)
+			answer = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Encoding", "br")
+				w.WriteHeader(http.StatusNotModified)
+			}
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusNotModified))
+			Expect(count("forge", "upstream_error")).To(Equal(0.0))
+		})
+
+		It("keeps the credential set and the table together: a new revision drops the old credential", func() {
+			apply(cred)
+			apply()
+			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
+			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("credential_unavailable"))
 		})
 	})
 
@@ -504,3 +722,28 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 		}
 	})
 })
+
+// fakeOpener returns a fixed value per file.
+type fakeOpener struct {
+	mu     sync.Mutex
+	values map[string]string
+	calls  int
+}
+
+func (f *fakeOpener) Open(c route.Credential) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	v, ok := f.values[c.File]
+	if !ok {
+		return "", &egress.OpenError{Reason: "open", Err: errors.New("no such file")}
+	}
+	return v, nil
+}
+
+// rootsOf trusts the CA of the test upstream.
+func rootsOf(s *httptest.Server) *x509.CertPool {
+	p := x509.NewCertPool()
+	p.AddCert(s.Certificate())
+	return p
+}

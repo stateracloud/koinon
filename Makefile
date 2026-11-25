@@ -161,15 +161,21 @@ guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm
 			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
 	done
 
-# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES. The entry script
-# is /usr/local/bin/koinon-<name> (ADR 0048). A later harness gets an overlay with no Makefile change.
+# The Substrate guest server, from the commit ATE_ENV_VERSION of hack/versions.env (upstream publishes no image).
+.PHONY: env-guest
+env-guest: ## Build the static Substrate guest server (ate-env-guest) for linux/amd64 and linux/arm64 into build/env-guest
+	hack/build-env-guest.sh build/env-guest
+
+# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES.
+# The overlay carries the guest server and the launcher, and its ENTRYPOINT is the guest server. The harness entry script
+# (ADR 0048) is started by the driver through the guest, behind the launcher prefix. A later harness gets an overlay with no Makefile change.
 SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
 .PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%
-$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest launcher (koinon/sandbox:<tag>-substrate)
+$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher env-guest ## Build a harness image with the guest server and launcher (koinon/sandbox:<tag>-substrate)
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
 		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,$*) \
-		--build-arg ENTRY_SCRIPT=/usr/local/bin/koinon-$* \
 		--build-context launcher=build/guest-launcher \
+		--build-context guest=build/env-guest \
 		--tag koinon/sandbox:$(call harness_tag,$*)-substrate cmd/koinon-guest-launcher
 
 .PHONY: harnesses-substrate
@@ -209,6 +215,10 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	STORIES=1 test/e2e/run.sh
 
+.PHONY: test-fence-kind
+test-fence-kind: ## Prove the Substrate fence on its own throwaway kind cluster (API server ports rule; needs Docker, kind, helm 4; KEEP_CLUSTER=1 keeps it)
+	test/e2e/kind/apiserver-egress.sh
+
 .PHONY: test-e2e-web
 test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install on kind koinon-e1 (KEEP=1 keeps the cluster)
 	SUITE=web test/e2e/run.sh
@@ -230,13 +240,28 @@ test-admission: ## Run the escape suite's admission policy cases against envtest
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest,substrate-policy} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
+# The install modes run in shards (issue #1303): CI runs one process per shard, each with the 15 minute
+# budget below. CHART_SMOKE_SHARD picks one (core, external or kms; the groups are in
+# test/chartsmoke/shard_test.go); empty runs every mode serially, which needs about three budgets.
+CHART_SMOKE_SHARD ?=
+# Without a shard the run is serial and gets a longer budget (it took 13 minutes in a lane VM).
+ifneq ($(filter-out all,$(CHART_SMOKE_SHARD)),)
+CHART_SMOKE_BUDGET ?= 15m
+CHART_SMOKE_GO_TIMEOUT ?= 20m
+CHART_SMOKE_LABEL = -$(CHART_SMOKE_SHARD)
+else
+CHART_SMOKE_BUDGET ?= 25m
+CHART_SMOKE_GO_TIMEOUT ?= 30m
+CHART_SMOKE_LABEL =
+endif
+
 .PHONY: test-chart-smoke
-test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go)
+test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go). One shard of the install modes: CHART_SMOKE_SHARD=core|external|kms (default: all, serial)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
-		KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
-		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
+		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(CHART_SMOKE_LABEL) -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
 		exit $$rc; }
 
 .PHONY: test-escape

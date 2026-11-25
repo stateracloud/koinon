@@ -61,6 +61,16 @@ const (
 	AgentServiceRunAgentTriggerProcedure = "/koinon.agent.v1alpha1.AgentService/RunAgentTrigger"
 	// AgentServiceArchiveAgentProcedure is the procedure name of the AgentService's ArchiveAgent RPC.
 	AgentServiceArchiveAgentProcedure = "/koinon.agent.v1alpha1.AgentService/ArchiveAgent"
+	// AgentServiceListAgentSummariesProcedure is the procedure name of the AgentService's
+	// ListAgentSummaries RPC.
+	AgentServiceListAgentSummariesProcedure = "/koinon.agent.v1alpha1.AgentService/ListAgentSummaries"
+	// AgentServiceSetAgentPlacementProcedure is the procedure name of the AgentService's
+	// SetAgentPlacement RPC.
+	AgentServiceSetAgentPlacementProcedure = "/koinon.agent.v1alpha1.AgentService/SetAgentPlacement"
+	// AgentServiceCreateAgentProcedure is the procedure name of the AgentService's CreateAgent RPC.
+	AgentServiceCreateAgentProcedure = "/koinon.agent.v1alpha1.AgentService/CreateAgent"
+	// AgentServiceUpdateAgentProcedure is the procedure name of the AgentService's UpdateAgent RPC.
+	AgentServiceUpdateAgentProcedure = "/koinon.agent.v1alpha1.AgentService/UpdateAgent"
 )
 
 var (
@@ -166,6 +176,35 @@ var (
 			Procedure:  AgentServiceArchiveAgentProcedure,
 		}
 	})
+	agentServiceListAgentSummariesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("ListAgentSummaries"),
+			Procedure:        AgentServiceListAgentSummariesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	agentServiceSetAgentPlacementSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("SetAgentPlacement"),
+			Procedure:  AgentServiceSetAgentPlacementProcedure,
+		}
+	})
+	agentServiceCreateAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("CreateAgent"),
+			Procedure:  AgentServiceCreateAgentProcedure,
+		}
+	})
+	agentServiceUpdateAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("UpdateAgent"),
+			Procedure:  AgentServiceUpdateAgentProcedure,
+		}
+	})
 )
 
 // AgentServiceClient is a client for the koinon.agent.v1alpha1.AgentService service.
@@ -175,7 +214,7 @@ type AgentServiceClient interface {
 	CreateAgentFromTemplate(context.Context, *v1alpha1.CreateAgentFromTemplateRequest) (*v1alpha1.CreateAgentFromTemplateResponse, error)
 	// GetAgent returns one agent. Viewers and above.
 	GetAgent(context.Context, *v1alpha1.GetAgentRequest) (*v1alpha1.GetAgentResponse, error)
-	// ListAgents returns the org's agents, oldest first. Viewers and above.
+	// ListAgents returns one page of the org's agents, oldest first. Viewers and above.
 	ListAgents(context.Context, *v1alpha1.ListAgentsRequest) (*v1alpha1.ListAgentsResponse, error)
 	// ActivateAgent activates a draft, or moves an active agent to its newer proposed version
 	// (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
@@ -228,6 +267,30 @@ type AgentServiceClient interface {
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
+	// ListAgentSummaries returns one page of the org's agents that are not archived, as cards
+	// (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what
+	// waits on the caller. The page comes from one database query. Ordered by team (agents with no
+	// team last), then oldest first. Viewers and above.
+	ListAgentSummaries(context.Context, *v1alpha1.ListAgentSummariesRequest) (*v1alpha1.ListAgentSummariesResponse, error)
+	// SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent
+	// parent must be an agent of the same org that is not archived, and must not make a cycle; a
+	// person must be a member of the org. Audited as agent.placement.set. Admins and owners only.
+	SetAgentPlacement(context.Context, *v1alpha1.SetAgentPlacementRequest) (*v1alpha1.SetAgentPlacementResponse, error)
+	// CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section
+	// 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The
+	// result is a draft: it does not run, and its grants and triggers have no effect, until an admin
+	// or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the
+	// platform's blank-agent default; admins change it with BudgetService. Audited. Members and above.
+	CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error)
+	// UpdateAgent changes the fields that update_mask names. A change to a version field
+	// (instructions, model, grants, triggers, run_limits) adds a new version with everything else
+	// carried over from the latest one. On an active agent the new version is proposed: the agent
+	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
+	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
+	// before the first activation, within the template's allowed harnesses, and adds a version, so
+	// an activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners
+	// update any agent of the org; a member updates only a draft that they created.
+	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
 
 // NewAgentServiceClient constructs a client for the koinon.agent.v1alpha1.AgentService service.
@@ -243,7 +306,7 @@ type AgentServiceHandler interface {
 	CreateAgentFromTemplate(context.Context, *v1alpha1.CreateAgentFromTemplateRequest) (*v1alpha1.CreateAgentFromTemplateResponse, error)
 	// GetAgent returns one agent. Viewers and above.
 	GetAgent(context.Context, *v1alpha1.GetAgentRequest) (*v1alpha1.GetAgentResponse, error)
-	// ListAgents returns the org's agents, oldest first. Viewers and above.
+	// ListAgents returns one page of the org's agents, oldest first. Viewers and above.
 	ListAgents(context.Context, *v1alpha1.ListAgentsRequest) (*v1alpha1.ListAgentsResponse, error)
 	// ActivateAgent activates a draft, or moves an active agent to its newer proposed version
 	// (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
@@ -296,6 +359,30 @@ type AgentServiceHandler interface {
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
+	// ListAgentSummaries returns one page of the org's agents that are not archived, as cards
+	// (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what
+	// waits on the caller. The page comes from one database query. Ordered by team (agents with no
+	// team last), then oldest first. Viewers and above.
+	ListAgentSummaries(context.Context, *v1alpha1.ListAgentSummariesRequest) (*v1alpha1.ListAgentSummariesResponse, error)
+	// SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent
+	// parent must be an agent of the same org that is not archived, and must not make a cycle; a
+	// person must be a member of the org. Audited as agent.placement.set. Admins and owners only.
+	SetAgentPlacement(context.Context, *v1alpha1.SetAgentPlacementRequest) (*v1alpha1.SetAgentPlacementResponse, error)
+	// CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section
+	// 5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The
+	// result is a draft: it does not run, and its grants and triggers have no effect, until an admin
+	// or owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the
+	// platform's blank-agent default; admins change it with BudgetService. Audited. Members and above.
+	CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error)
+	// UpdateAgent changes the fields that update_mask names. A change to a version field
+	// (instructions, model, grants, triggers, run_limits) adds a new version with everything else
+	// carried over from the latest one. On an active agent the new version is proposed: the agent
+	// keeps running its active version, with its approved grants and triggers, until ActivateAgent
+	// activates the new one (ADR 0066). display_name changes the agent at once; harness changes only
+	// before the first activation, within the template's allowed harnesses, and adds a version, so
+	// an activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners
+	// update any agent of the org; a member updates only a draft that they created.
+	UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error)
 }
 
 // RegisterAgentServiceHandler registers svc as the koinon.agent.v1alpha1.AgentService
@@ -317,6 +404,10 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceSetAgentSandboxResourcesSpec(), Handler: adapter.setAgentSandboxResources},
 		connect.Method{Spec: agentServiceRunAgentTriggerSpec(), Handler: adapter.runAgentTrigger},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
+		connect.Method{Spec: agentServiceListAgentSummariesSpec(), Handler: adapter.listAgentSummaries},
+		connect.Method{Spec: agentServiceSetAgentPlacementSpec(), Handler: adapter.setAgentPlacement},
+		connect.Method{Spec: agentServiceCreateAgentSpec(), Handler: adapter.createAgent},
+		connect.Method{Spec: agentServiceUpdateAgentSpec(), Handler: adapter.updateAgent},
 	)
 }
 
@@ -377,6 +468,22 @@ func (UnimplementedAgentServiceHandler) RunAgentTrigger(context.Context, *v1alph
 
 func (UnimplementedAgentServiceHandler) ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.ArchiveAgent is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) ListAgentSummaries(context.Context, *v1alpha1.ListAgentSummariesRequest) (*v1alpha1.ListAgentSummariesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.ListAgentSummaries is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) SetAgentPlacement(context.Context, *v1alpha1.SetAgentPlacementRequest) (*v1alpha1.SetAgentPlacementResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.SetAgentPlacement is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) CreateAgent(context.Context, *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.CreateAgent is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) UpdateAgent(context.Context, *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.UpdateAgent is not implemented")
 }
 
 type agentServiceClient struct {
@@ -490,6 +597,38 @@ func (c *agentServiceClient) RunAgentTrigger(ctx context.Context, req *v1alpha1.
 func (c *agentServiceClient) ArchiveAgent(ctx context.Context, req *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error) {
 	var res v1alpha1.ArchiveAgentResponse
 	if err := c.client.CallUnary(ctx, agentServiceArchiveAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) ListAgentSummaries(ctx context.Context, req *v1alpha1.ListAgentSummariesRequest) (*v1alpha1.ListAgentSummariesResponse, error) {
+	var res v1alpha1.ListAgentSummariesResponse
+	if err := c.client.CallUnary(ctx, agentServiceListAgentSummariesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) SetAgentPlacement(ctx context.Context, req *v1alpha1.SetAgentPlacementRequest) (*v1alpha1.SetAgentPlacementResponse, error) {
+	var res v1alpha1.SetAgentPlacementResponse
+	if err := c.client.CallUnary(ctx, agentServiceSetAgentPlacementSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) CreateAgent(ctx context.Context, req *v1alpha1.CreateAgentRequest) (*v1alpha1.CreateAgentResponse, error) {
+	var res v1alpha1.CreateAgentResponse
+	if err := c.client.CallUnary(ctx, agentServiceCreateAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) UpdateAgent(ctx context.Context, req *v1alpha1.UpdateAgentRequest) (*v1alpha1.UpdateAgentResponse, error) {
+	var res v1alpha1.UpdateAgentResponse
+	if err := c.client.CallUnary(ctx, agentServiceUpdateAgentSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -659,6 +798,54 @@ func (h agentServiceHandler) archiveAgent(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.ArchiveAgent(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) listAgentSummaries(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListAgentSummariesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListAgentSummaries(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) setAgentPlacement(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentPlacementRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentPlacement(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) createAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.CreateAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CreateAgent(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) updateAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.UpdateAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.UpdateAgent(ctx, &req)
 	if err != nil {
 		return err
 	}

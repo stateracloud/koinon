@@ -30,10 +30,13 @@ names what needs the upstream project's rights and what still works from a fork.
 | `e2e-bisect.sh` | the upstream CI's token |
 | `drill-issue.sh` | the upstream CI's token |
 | `release-gate.sh` | nothing: it only reads (the release workflow runs it) |
+| `release-base-mirror.sh` | the release registry (the release workflow runs it before GoReleaser) |
 | `release-drill-wait.sh` | nothing: it only reads (the release workflow runs it) |
 | `push-retry-lib.sh` | sourced by the two test-image scripts and `test/e2e/kind/images.sh`: retries a registry push or `ko build` on GHCR's DENIED (#950) or a short registry fault such as a cgr.dev HTTP 500 (#1224), with a bounded backoff |
 | `release-test-images.sh` | the release registry (the release workflow runs it; `rt1-fixtures-build.sh` does the fixtures) |
 | `release-harness.sh` | the release registry (`release-flavor.sh` is a link to it) |
+| `release-harness-substrate.sh` | the release registry (the release workflow runs it after `release-harness.sh`) |
+| `build-env-guest.sh` | a local directory (`build/env-guest`): it clones the public Substrate env source and builds two static binaries; no registry, no token |
 | `spike/teardown.sh` | the maintainers' spike infrastructure |
 
 ## Which repository and board

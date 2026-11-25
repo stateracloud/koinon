@@ -357,6 +357,26 @@ type Service struct {
 // New returns a Service on pool.
 func New(pool *pgxpool.Pool, rv prices.Resolver) *Service { return &Service{pool: pool, prices: rv} }
 
+// CheckChoice applies Set's rules to a model a person names for an agent version (a blank agent's
+// form, UpdateAgent): it returns the stored form ("" for the default) or an *InvalidError when the
+// name is too long or the org does not serve and price the model.
+func (s *Service) CheckChoice(ctx context.Context, q *store.Queries, org pgtype.UUID, model string, at time.Time) (string, error) {
+	want := Normalize(model)
+	if len(want) > 200 {
+		return "", &InvalidError{Msg: "the model name is longer than 200 characters"}
+	}
+	if want == "" {
+		return "", nil
+	}
+	var u *UnusableError
+	if err := Check(ctx, s.prices, q, org, want, at); errors.As(err, &u) {
+		return "", &InvalidError{Msg: u.Error() + "; pick a model the org serves and has a price for"}
+	} else if err != nil {
+		return "", err
+	}
+	return want, nil
+}
+
 // Set sets the agent's model; "default" or "" clears it. The model must pass Check. The change and
 // its audit event, with the old and new value, commit together. Setting the value it already has
 // is not a change and writes no event. It returns the updated agent.
@@ -376,13 +396,8 @@ func (s *Service) Set(ctx context.Context, org, agent pgtype.UUID, actor audit.A
 		if cur.Status == store.AgentStatusArchived {
 			return &InvalidError{Msg: "the agent is archived"}
 		}
-		if want != "" {
-			var u *UnusableError
-			if err := Check(ctx, s.prices, q, org, want, at); errors.As(err, &u) {
-				return &InvalidError{Msg: u.Error() + "; pick a model the org serves and has a price for"}
-			} else if err != nil {
-				return err
-			}
+		if _, err := s.CheckChoice(ctx, q, org, want, at); err != nil {
+			return err
 		}
 		if cur.Model.String == want {
 			out = cur

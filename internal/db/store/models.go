@@ -1820,6 +1820,9 @@ type Agent struct {
 	SandboxMemoryRequest pgtype.Text
 	SandboxMemoryLimit   pgtype.Text
 	KeepWarmGranted      bool
+	Team                 string
+	ReportsToAgentID     pgtype.UUID
+	ReportsToUserID      pgtype.UUID
 }
 
 type AgentBudget struct {
@@ -2096,6 +2099,13 @@ type GatewayStateAck struct {
 	Revision int64
 	Half     string
 	AckedAt  pgtype.Timestamptz
+}
+
+type GatewayStateCopy struct {
+	CopyID    string
+	LastSeen  pgtype.Timestamptz
+	ServesMcp bool
+	StreamID  string
 }
 
 type GatewayStateRevision struct {

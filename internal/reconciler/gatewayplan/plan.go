@@ -43,6 +43,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/forgecredfile"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -72,10 +73,25 @@ type Agent struct {
 	// Egress are the agent's org egress routes (#1086 part B): its forge grants and its registry
 	// rule. Only an active agent's routes go into the state.
 	Egress []route.Route
+	// Forge is the sealed code-host credential that the agent's forge routes name (#1086 part C), nil
+	// when it has none. Only an active agent's credential goes into the state.
+	Forge *ForgeCredential
 	// Limit is the agent's budget net of spend; LimitErr is set instead when it could not be computed.
 	// Only agents with a key are looked at.
 	Limit    *gateway.Limit
 	LimitErr error
+}
+
+// ForgeCredential is an agent's sealed code-host token (#1086 part C): the gateway opens the file and
+// sends the token on the agent's forge routes. The plan never sees the value.
+type ForgeCredential struct {
+	// Name is the credential name the agent's forge routes give.
+	Name string
+	// File is the sealed envelope's data key in the key store (forgecredfile.SealedName); its content
+	// is in Input.EgressFiles.
+	File string
+	// Scheme and User say how the gateway sends the value (route.Credential).
+	Scheme, User string
 }
 
 // Provider is a provider the pass serves.
@@ -147,6 +163,8 @@ type Input struct {
 	// MCP are the orgs' servers and their credential files.
 	MCP      []MCPServer
 	MCPFiles map[string][]byte
+	// EgressFiles are the agents' sealed forge credential files, by data key.
+	EgressFiles map[string][]byte
 	// LedgerEnforcesBudgets is set when the gateway cannot enforce a limit itself (Kubernetes mode:
 	// the ledger revokes the key at zero), so a limit that fails closed is zero.
 	LedgerEnforcesBudgets bool
@@ -253,6 +271,8 @@ type Planner struct {
 	// appliedMCPSig is what each served MCP server was last applied as (its URL, transport and
 	// credential file); a server whose signature is new or changed is probed at once (old issue 226).
 	appliedMCPSig map[string]string
+	// appliedForge is the file each egress credential (by name) was last applied with.
+	appliedForge map[string]string
 	// probeKeys are the prober's keys, in memory only; probes are the servers the last applied state
 	// lets the prober list.
 	probeKeys map[gateway.AgentRef]gateway.IssuedKey
@@ -372,6 +392,7 @@ func (p *Planner) Begin(in Input) *Draft {
 	}
 	maps.Copy(d.Files, in.ProviderFiles)
 	maps.Copy(d.Files, in.MCPFiles)
+	maps.Copy(d.Files, in.EgressFiles)
 	return d
 }
 
@@ -415,6 +436,9 @@ func (d *Draft) Settle(ctx context.Context, written []string, present map[string
 	servers, keepMCP = p.settleMCP(servers, in.MCPFiles, settling)
 	pl.servers = servers
 	maps.Copy(pl.Keep, keepMCP)
+	var keepForge map[string]bool
+	pl.State.EgressCredentials, keepForge = p.settleForge(in.Agents, in.EgressFiles, settling, present)
+	maps.Copy(pl.Keep, keepForge)
 	probes, err := pl.applyMCP(ctx, lk)
 	if err != nil {
 		return nil, err
@@ -477,6 +501,7 @@ func (pl *Plan) Applied(res ApplyResult) Outcome {
 		pl.p.recordApplied(pl.providers, pl.State, res.Rejections)
 		out.Served = pl.served(res.Rejections)
 		out.Probe = pl.p.recordAppliedMCP(pl.servers, pl.probes)
+		pl.p.recordAppliedForge(pl.State.EgressCredentials)
 	}
 	for _, i := range pl.Late {
 		if res.Failed || pl.p.KeyNotLive(pl.in.Agents[i].Key.ID) {
@@ -758,6 +783,72 @@ func (p *Planner) settleMCP(servers []*MCPServer, files map[string][]byte, settl
 	return out, keep
 }
 
+// settleForge returns the egress credentials of the active agents and the data keys to keep. A credential
+// whose new file is still reaching the gateway pod keeps its previously applied file, else (after a
+// restart of the reconciler) a file that the key store still holds, in both cases only a file of the
+// same family (the same agent and scope, forgecredfile.Family); without one it is left out, and its routes fail closed (503 credential_unavailable) until the file has arrived.
+func (p *Planner) settleForge(agents []Agent, files map[string][]byte, settling, present map[string]bool) ([]route.Credential, map[string]bool) {
+	keep := map[string]bool{}
+	for name := range files {
+		keep[name] = true
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []route.Credential
+	for _, a := range agents {
+		if !a.Active || a.Forge == nil {
+			continue
+		}
+		f := a.Forge
+		file := f.File
+		if settling[file] {
+			family, _ := forgecredfile.FamilyOf(file)
+			prev := p.appliedForge[f.Name]
+			if family == "" || !strings.HasPrefix(prev, family) {
+				// A file of another scope (connection, grant or host) is never served in its place.
+				prev = presentForgeFile(family, file, present)
+			}
+			if prev == "" {
+				p.log.Info("a new forge credential is still reaching the gateway; the agent's forge routes wait for it", "org", a.Ref.Org, "agent", a.Ref.Name)
+				continue
+			}
+			file = prev
+			keep[prev] = true
+		}
+		out = append(out, route.Credential{
+			Name: f.Name, Org: a.Ref.Org, Agent: a.Ref.Name, File: path.Join(p.mcpKeyDir(), file), Scheme: f.Scheme, User: f.User,
+		})
+	}
+	return out, keep
+}
+
+// presentForgeFile returns a file of the same family as file (the same agent and scope), other than
+// file, that the key store holds: the last name in sort order, so the choice is stable. Its token may be
+// older, but it was minted for the same agent, connection, grant and hosts.
+func presentForgeFile(family, file string, present map[string]bool) string {
+	if family == "" {
+		return ""
+	}
+	best := ""
+	for name, ok := range present {
+		if ok && name != file && strings.HasPrefix(name, family) && name > best {
+			best = name
+		}
+	}
+	return best
+}
+
+// recordAppliedForge remembers the file each egress credential was applied with.
+func (p *Planner) recordAppliedForge(creds []route.Credential) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	next := make(map[string]string, len(creds))
+	for _, c := range creds {
+		next[c.Name] = path.Base(c.File)
+	}
+	p.appliedForge = next
+}
+
 // keysLive records that the applied state carries its keys.
 func (p *Planner) keysLive(s gateway.State, rejected []gateway.Rejection) {
 	p.mu.Lock()
@@ -850,9 +941,11 @@ func (p *Planner) mcpKeyDir() string {
 }
 
 // IsMCPFile reports whether a key file name is an MCP server's credential or CA bundle (mcp-..., mcpv2-...,
-// mcpca-...), as the reconciler names them. A provider key file is named by a UUID and a hash, so the names never collide.
+// mcpca-...) or an agent's sealed forge credential (forgev2-..., #1086 part C), as the reconciler names
+// them: koinon-gateway mounts these, never a provider key. A provider key file is named by a UUID and a hash, so the names never collide.
 func IsMCPFile(name string) bool {
-	return strings.HasPrefix(name, mcpcredfile.PlainPrefix) || strings.HasPrefix(name, mcpcredfile.SealedPrefix) || strings.HasPrefix(name, "mcpca-")
+	return strings.HasPrefix(name, mcpcredfile.PlainPrefix) || strings.HasPrefix(name, mcpcredfile.SealedPrefix) ||
+		strings.HasPrefix(name, "mcpca-") || forgecredfile.IsSealed(name)
 }
 
 func (s *MCPServer) target() string { return mcpservers.TargetName(s.Org.Slug, s.Name) }
@@ -981,7 +1074,7 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 	for _, s := range pl.servers {
 		state.MCP = append(state.MCP, p.mcpTarget(s))
 		if at := mcpservers.AskTargetName(s.Org.Slug, s.Name); askTarget[at] {
-			state.MCP = append(state.MCP, gateway.MCPTarget{Name: at, URL: strings.TrimRight(p.cfg.MCPAskURL, "/") + "/" + s.Name, Org: s.Org.Slug})
+			state.MCP = append(state.MCP, gateway.MCPTarget{Name: at, URL: strings.TrimRight(p.cfg.MCPAskURL, "/") + "/" + s.Name, Org: s.Org.Slug, Ask: true})
 		}
 		// The prober's key: it lists the server's tools through the gateway, as an agent would.
 		ref := s.probeAgent()

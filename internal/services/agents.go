@@ -5,7 +5,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -44,6 +43,8 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		Status:           agentStatusToProto[a.Status],
 		Flavor:           flavorProto(a.Harness), //nolint:staticcheck // deprecated field, still set for older clients
 		Harness:          a.Harness,
+		Team:             a.Team,
+		ReportsTo:        reportsToProto(a),
 		TemplateId:       idString(a.TemplateID),
 		LatestVersion:    a.LatestVersion,
 		CreatedAt:        tsProto(a.CreatedAt),
@@ -226,36 +227,6 @@ func (s *Server) GetAgent(ctx context.Context, req *agentv1alpha1.GetAgentReques
 	return &agentv1alpha1.GetAgentResponse{Agent: out}, nil
 }
 
-// ListAgents implements AgentService.
-func (s *Server) ListAgents(ctx context.Context, req *agentv1alpha1.ListAgentsRequest) (*agentv1alpha1.ListAgentsResponse, error) {
-	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
-	if err != nil {
-		return nil, err
-	}
-	agents, err := s.q.ListAgents(ctx, c.org)
-	if err != nil {
-		return nil, s.dbError(err, "agents")
-	}
-	res := &agentv1alpha1.ListAgentsResponse{}
-	slugs := map[pgtype.UUID]string{}
-	rows, err := s.q.ListArchivedAgentSandboxes(ctx, c.org)
-	if err != nil {
-		return nil, s.dbError(err, "agents")
-	}
-	archived := map[pgtype.UUID]pgtype.Timestamptz{}
-	for _, r := range rows {
-		archived[r.AgentID] = r.ArchivedAt
-	}
-	for _, a := range agents {
-		v, err := s.agentView(ctx, s.q, a, slugs, archived)
-		if err != nil {
-			return nil, s.dbError(err, "agent")
-		}
-		res.Agents = append(res.Agents, v)
-	}
-	return res, nil
-}
-
 // ActivateAgent implements AgentService: an admin or owner activates the
 // draft's latest version and so approves the grants it proposes (ADR 0020), or moves an active
 // agent to its newer proposed version (ADR 0066).
@@ -273,7 +244,10 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	var out *agentv1alpha1.Agent
 	restarting := 0
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
-		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		// The row lock makes the version check and the activation one step: a concurrent
+		// UpdateAgent or SetAgentTriggers either commits first, and the check then fails, or
+		// waits, so the version that an admin reviewed is the version that runs.
+		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}
@@ -387,18 +361,8 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 	var out *agentv1alpha1.Agent
 	err = s.inAuditTx(ctx, func(q *store.Queries, b audit.Batch) error {
 		// A person who is asked must be a member who can answer (member or higher).
-		for i, t := range triggers {
-			if t.Notify == nil || t.Notify.Kind != templates.NotifyUser {
-				continue
-			}
-			m, err := q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org, Ident: t.Notify.User})
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && m.Role == store.OrgRoleViewer) {
-				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Sprintf("triggers[%d]: notify: %s is not a member who can answer questions", i, t.Notify.User))
-			}
-			if err != nil {
-				return err
-			}
+		if err := checkNotifyMembers(ctx, q, c.org, triggers); err != nil {
+			return err
 		}
 		// The row lock makes the base_version check and the new version one step: a concurrent
 		// proposal waits, then fails the check against the version this one created.

@@ -33,6 +33,15 @@
               "deprecated": false
             },
             {
+              "name": "CreateAgent",
+              "description": "CreateAgent creates a draft agent without a template: the \"Blank agent\" form (ADR 0126 section\n5). The definition goes through the checks a template and CreateAgentFromTemplate apply. The\nresult is a draft: it does not run, and its grants and triggers have no effect, until an admin\nor owner activates it with ActivateAgent (ADR 0020). Its daily spend limit starts at the\nplatform's blank-agent default; admins change it with BudgetService. Audited. Members and above.",
+              "requestType": "koinon.agent.v1alpha1.CreateAgentRequest",
+              "responseType": "koinon.agent.v1alpha1.CreateAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "CreateAgentFromTemplate",
               "description": "CreateAgentFromTemplate creates a draft agent from a template. Members\nand above.",
               "requestType": "koinon.agent.v1alpha1.CreateAgentFromTemplateRequest",
@@ -69,8 +78,17 @@
               "deprecated": false
             },
             {
+              "name": "ListAgentSummaries",
+              "description": "ListAgentSummaries returns one page of the org's agents that are not archived, as cards\n(ADR 0126 section 4): the state, the team, \"reports to\", the runs, today's spend and what\nwaits on the caller. The page comes from one database query. Ordered by team (agents with no\nteam last), then oldest first. Viewers and above.",
+              "requestType": "koinon.agent.v1alpha1.ListAgentSummariesRequest",
+              "responseType": "koinon.agent.v1alpha1.ListAgentSummariesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListAgents",
-              "description": "ListAgents returns the org's agents, oldest first. Viewers and above.",
+              "description": "ListAgents returns one page of the org's agents, oldest first. Viewers and above.",
               "requestType": "koinon.agent.v1alpha1.ListAgentsRequest",
               "responseType": "koinon.agent.v1alpha1.ListAgentsResponse",
               "clientStreaming": false,
@@ -114,6 +132,15 @@
               "deprecated": false
             },
             {
+              "name": "SetAgentPlacement",
+              "description": "SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent\nparent must be an agent of the same org that is not archived, and must not make a cycle; a\nperson must be a member of the org. Audited as agent.placement.set. Admins and owners only.",
+              "requestType": "koinon.agent.v1alpha1.SetAgentPlacementRequest",
+              "responseType": "koinon.agent.v1alpha1.SetAgentPlacementResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentSandboxResources",
               "description": "SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left\nempty so the template's value and then the platform default apply. A value outside the\nplatform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the\nmodel it is a setting of the agent, not a new version; a change recreates the sandbox at the\nnext run (the size is part of the sandbox spec hash). Audited, with the old and the new\noverride. Admins and owners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest",
@@ -136,6 +163,15 @@
               "description": "SetAgentTriggers proposes a new version with the given triggers (everything else carried over\nfrom the latest version). The triggers fire nothing until ActivateAgent activates that\nversion; an active agent keeps running its active version meanwhile. Audited. Admins and\nowners only.",
               "requestType": "koinon.agent.v1alpha1.SetAgentTriggersRequest",
               "responseType": "koinon.agent.v1alpha1.SetAgentTriggersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "UpdateAgent",
+              "description": "UpdateAgent changes the fields that update_mask names. A change to a version field\n(instructions, model, grants, triggers, run_limits) adds a new version with everything else\ncarried over from the latest one. On an active agent the new version is proposed: the agent\nkeeps running its active version, with its approved grants and triggers, until ActivateAgent\nactivates the new one (ADR 0066). display_name changes the agent at once; harness changes only\nbefore the first activation, within the template's allowed harnesses, and adds a version, so\nan activation of the version reviewed before the change fails. Audited, with the old and the new values. Admins and owners\nupdate any agent of the org; a member updates only a draft that they created.",
+              "requestType": "koinon.agent.v1alpha1.UpdateAgentRequest",
+              "responseType": "koinon.agent.v1alpha1.UpdateAgentResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -474,6 +510,303 @@
               "oneof": "",
               "deprecated": false,
               "description": "The name of the harness the agent runs on (ADR 0112), for example \"opencode\". Fixed when the\nagent is created."
+            },
+            {
+              "name": "team",
+              "number": 29,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The agent's team label (SetAgentPlacement); empty for no team."
+            },
+            {
+              "name": "reports_to",
+              "number": 30,
+              "type": "koinon.agent.v1alpha1.AgentReportsTo",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
+            }
+          ]
+        },
+        {
+          "name": "AgentDefinition",
+          "fullName": "koinon.agent.v1alpha1.AgentDefinition",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "AgentDefinition is what a person sets on an agent without a template, and what UpdateAgent\nchanges.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "display_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "1 to 200 characters."
+            },
+            {
+              "name": "instructions",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Markdown instructions for the agent. Required."
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A model the org serves and has a price for; empty or \"default\" follows the org default."
+            },
+            {
+              "name": "harness",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A harness by name (ADR 0112); empty picks the platform's default harness."
+            },
+            {
+              "name": "grants",
+              "number": 5,
+              "type": "koinon.template.v1alpha1.Grant",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The grants the agent proposes, one per connector type, each with its connection and targets\nin connection_id and repositories. A grant names a connector type, scopes that the type has,\nand a preset. targets_min and targets_max are ignored. ActivateAgent approves them."
+            },
+            {
+              "name": "triggers",
+              "number": 6,
+              "type": "koinon.template.v1alpha1.Trigger",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The complete list of triggers. They fire nothing until ActivateAgent activates the version."
+            },
+            {
+              "name": "run_limits",
+              "number": 7,
+              "type": "koinon.template.v1alpha1.RunLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The limits of one run; a zero or empty value takes the platform default."
+            }
+          ]
+        },
+        {
+          "name": "AgentReportsTo",
+          "fullName": "koinon.agent.v1alpha1.AgentReportsTo",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "target",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "user_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "target",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored\nin SetAgentPlacement."
+            }
+          ]
+        },
+        {
+          "name": "AgentSummary",
+          "fullName": "koinon.agent.v1alpha1.AgentSummary",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "AgentSummary is what an agent card shows (ADR 0126 section 4).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "status",
+              "number": 3,
+              "type": "koinon.agent.v1alpha1.AgentStatus",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "harness",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The agent's own model setting, else the model of its latest version."
+            },
+            {
+              "name": "team",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reports_to",
+              "number": 7,
+              "type": "koinon.agent.v1alpha1.AgentReportsTo",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Unset for nobody. A person who is no longer a member of the org does not show."
+            },
+            {
+              "name": "created_at",
+              "number": 8,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "unhealthy_at",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Set while the agent is unhealthy (ADR 0054)."
+            },
+            {
+              "name": "last_run_state",
+              "number": 10,
+              "type": "koinon.run.v1alpha1.RunState",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The state of the agent's newest run; unspecified when it has no run."
+            },
+            {
+              "name": "last_run_at",
+              "number": 11,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "When the newest run finished, else started, else was queued."
+            },
+            {
+              "name": "running_runs",
+              "number": 12,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "How many runs of the agent start or run now."
+            },
+            {
+              "name": "spent_today_usd",
+              "number": 13,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "USD spent today (from day_start), as a decimal string."
+            },
+            {
+              "name": "daily_limit_usd",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The agent's daily limit in USD; empty when it has none."
+            },
+            {
+              "name": "input_tokens_today",
+              "number": 15,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Input tokens today (they include cache reads) and the cache reads among them. The cache read\nshare is cache_read_tokens_today / input_tokens_today."
+            },
+            {
+              "name": "cache_read_tokens_today",
+              "number": 16,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "next_scheduled_at",
+              "number": 17,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The next due time of the active version's schedule triggers (ADR 0066); unset when none. The\nrun starts up to 30 seconds after it (the scheduler's jitter)."
+            },
+            {
+              "name": "waiting_on_you",
+              "number": 18,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The inbox items of the caller for this agent: approvals the caller may decide, questions the\ncaller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin."
             }
           ]
         },
@@ -599,6 +932,51 @@
           "fullName": "koinon.agent.v1alpha1.CreateAgentFromTemplateResponse",
           "file": "koinon/agent/v1alpha1/agent.proto",
           "description": "CreateAgentFromTemplateResponse holds the new draft.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateAgentRequest",
+          "fullName": "koinon.agent.v1alpha1.CreateAgentRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "CreateAgentRequest names the org and the definition of the new draft.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "definition",
+              "number": 2,
+              "type": "koinon.agent.v1alpha1.AgentDefinition",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "CreateAgentResponse",
+          "fullName": "koinon.agent.v1alpha1.CreateAgentResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "CreateAgentResponse holds the new draft.",
           "deprecated": false,
           "fields": [
             {
@@ -838,10 +1216,10 @@
           ]
         },
         {
-          "name": "ListAgentsRequest",
-          "fullName": "koinon.agent.v1alpha1.ListAgentsRequest",
+          "name": "ListAgentSummariesRequest",
+          "fullName": "koinon.agent.v1alpha1.ListAgentSummariesRequest",
           "file": "koinon/agent/v1alpha1/agent.proto",
-          "description": "ListAgentsRequest names the org.",
+          "description": "ListAgentSummariesRequest names the org and the page.",
           "deprecated": false,
           "fields": [
             {
@@ -852,6 +1230,96 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "page_size",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is 50 by default and at most 200."
+            },
+            {
+              "name": "page_token",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page."
+            }
+          ]
+        },
+        {
+          "name": "ListAgentSummariesResponse",
+          "fullName": "koinon.agent.v1alpha1.ListAgentSummariesResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "ListAgentSummariesResponse lists one page of agent cards.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agents",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.AgentSummary",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            },
+            {
+              "name": "day_start",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The start of today (UTC) for the spend and token fields."
+            }
+          ]
+        },
+        {
+          "name": "ListAgentsRequest",
+          "fullName": "koinon.agent.v1alpha1.ListAgentsRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "ListAgentsRequest names the org and the page.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "page_size",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is 500 by default and at most 500."
+            },
+            {
+              "name": "page_token",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page."
             }
           ]
         },
@@ -859,7 +1327,7 @@
           "name": "ListAgentsResponse",
           "fullName": "koinon.agent.v1alpha1.ListAgentsResponse",
           "file": "koinon/agent/v1alpha1/agent.proto",
-          "description": "ListAgentsResponse lists the org's agents.",
+          "description": "ListAgentsResponse lists one page of the org's agents.",
           "deprecated": false,
           "fields": [
             {
@@ -870,6 +1338,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
             }
           ]
         },
@@ -1279,6 +1756,69 @@
           ]
         },
         {
+          "name": "SetAgentPlacementRequest",
+          "fullName": "koinon.agent.v1alpha1.SetAgentPlacementRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "team",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "At most 64 characters, no control characters. Spaces at the ends are removed."
+            },
+            {
+              "name": "reports_to",
+              "number": 4,
+              "type": "koinon.agent.v1alpha1.AgentReportsTo",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetAgentPlacementResponse",
+          "fullName": "koinon.agent.v1alpha1.SetAgentPlacementResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "SetAgentPlacementResponse holds the agent as GetAgent would return it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "SetAgentSandboxResourcesRequest",
           "fullName": "koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest",
           "file": "koinon/agent/v1alpha1/agent.proto",
@@ -1527,6 +2067,78 @@
               "oneof": "",
               "deprecated": false,
               "description": "What a UI shows about the setting: \"this model always thinks; your off setting doesn't apply\"\nwhen off_overridden, empty otherwise."
+            }
+          ]
+        },
+        {
+          "name": "UpdateAgentRequest",
+          "fullName": "koinon.agent.v1alpha1.UpdateAgentRequest",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "UpdateAgentRequest names the agent, the version the change is based on and the fields to change.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "base_version",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the\ncall fails with FailedPrecondition."
+            },
+            {
+              "name": "definition",
+              "number": 4,
+              "type": "koinon.agent.v1alpha1.AgentDefinition",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The new values. Only the fields that update_mask names are read."
+            },
+            {
+              "name": "update_mask",
+              "number": 5,
+              "type": "google.protobuf.FieldMask",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The AgentDefinition fields to change, by field name, for example \"instructions\". Required: an\nempty mask or an unknown name fails with InvalidArgument."
+            }
+          ]
+        },
+        {
+          "name": "UpdateAgentResponse",
+          "fullName": "koinon.agent.v1alpha1.UpdateAgentResponse",
+          "file": "koinon/agent/v1alpha1/agent.proto",
+          "description": "UpdateAgentResponse holds the agent with its new latest version.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "agent",
+              "number": 1,
+              "type": "koinon.agent.v1alpha1.Agent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         }
@@ -9488,9 +10100,28 @@
     {
       "name": "koinon.gateway.v1alpha1",
       "files": [
+        "koinon/gateway/v1alpha1/approval.proto",
         "koinon/gateway/v1alpha1/state.proto"
       ],
       "services": [
+        {
+          "name": "GatewayApprovalService",
+          "fullName": "koinon.gateway.v1alpha1.GatewayApprovalService",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "GatewayApprovalService is the approval route of Koinon's own gateway (ADR 0097 decision 2.3, #1301):\nwhen the leak guard in koinon-gateway holds a call for a person, the gateway asks koinon-api to record\nthe ADR 0042 approval of that exact call. koinon-api owns the approval tables; the gateway's database\nlogin has no right on them. It is internal: only a gateway copy calls it, on the listener of the State\nstream and with the same token.\n\nkoinon-api does not trust the names in the request: it reads the org, the agent, the server, the\nagent's allowance and the published tool itself, and refuses a call that does not match them.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "RequestApproval",
+              "description": "RequestApproval records the approval request for exactly this call, or returns the one already\nrecorded for the same call in the same run. The gateway refuses the call with the returned text\n(the agent reads \"approval requested: id=...\"); Koinon's executor sends it once a person approves.\nAny error fails the call closed.",
+              "requestType": "koinon.gateway.v1alpha1.RequestApprovalRequest",
+              "responseType": "koinon.gateway.v1alpha1.RequestApprovalResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        },
         {
           "name": "GatewayStateService",
           "fullName": "koinon.gateway.v1alpha1.GatewayStateService",
@@ -9673,6 +10304,69 @@
           ]
         },
         {
+          "name": "EgressCredential",
+          "fullName": "koinon.gateway.v1alpha1.EgressCredential",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR\n0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the\nvalue. The envelope is bound to the org ID and the agent ID in the file name.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "name is the name that the routes give in their credential field."
+            },
+            {
+              "name": "org",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug and agent the agent's name at the gateway: the routes that name the\ncredential must have the same org and agent."
+            },
+            {
+              "name": "agent",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "file",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "scheme",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "scheme is how the value goes upstream in the Authorization header: \"basic\" (base64 of\nuser \":\" value) or \"bearer\"."
+            },
+            {
+              "name": "user",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "user is the user name of the basic scheme, for example \"x-access-token\" for a forge token."
+            }
+          ]
+        },
+        {
           "name": "EgressRoute",
           "fullName": "koinon.gateway.v1alpha1.EgressRoute",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -9822,6 +10516,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "credentials",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.EgressCredential",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "credentials say where the gateway reads each credential that a route names, and how it sends it\n(#1086 part C). A route whose credential is not here is refused (503 credential_unavailable)."
             }
           ]
         },
@@ -10047,6 +10750,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "handle_key_file holds the key that signs the task and context handles of the built-in target."
+            },
+            {
+              "name": "ask",
+              "number": 13,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask).\nThe gateway sends it the agent header; an org's own server never gets that header."
             }
           ]
         },
@@ -10438,6 +11150,87 @@
           ]
         },
         {
+          "name": "RequestApprovalRequest",
+          "fullName": "koinon.gateway.v1alpha1.RequestApprovalRequest",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug of the calling agent, as the agent identity names it."
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent_id is the calling agent's id (a UUID)."
+            },
+            {
+              "name": "server_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "server_id is the id (a UUID) of the org's MCP server that the call addresses."
+            },
+            {
+              "name": "tool",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool is the name of the published tool."
+            },
+            {
+              "name": "arguments",
+              "number": 5,
+              "type": "bytes",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "arguments is the call's JSON arguments object, as the agent sent it."
+            },
+            {
+              "name": "risk",
+              "number": 6,
+              "type": "bytes",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "risk is the leak guard's reading of the call as a JSON object (reasons, sink class, destination,\nlegs, match): what the approval card shows. It never holds a credential."
+            }
+          ]
+        },
+        {
+          "name": "RequestApprovalResponse",
+          "fullName": "koinon.gateway.v1alpha1.RequestApprovalResponse",
+          "file": "koinon/gateway/v1alpha1/approval.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "text",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "text is what the agent reads, for example \"approval requested: id=...\"."
+            }
+          ]
+        },
+        {
           "name": "StateUpdate",
           "fullName": "koinon.gateway.v1alpha1.StateUpdate",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -10506,6 +11299,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),\n1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and\nan ack under a reused id would count for a process that has not loaded the revision."
+            },
+            {
+              "name": "halves",
+              "number": 2,
+              "type": "koinon.gateway.v1alpha1.Half",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "halves lists the halves this copy serves, and so acks. Empty means both (a client from before\nthis field). The reconciler waits only for copies that serve a half."
             }
           ]
         },
@@ -11078,6 +11880,15 @@
               "deprecated": false
             },
             {
+              "name": "ReviewAllTools",
+              "description": "ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the\ntext of each tool in the request at the hash the admin saw, without changing its tier, as\nAcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no\nlonger lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of\ntools that no admin ever reviewed and that the server no longer lists: they are not served, and they\ncount toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and\nmcp_server.unreviewed_tools_removed once.",
+              "requestType": "koinon.mcpserver.v1alpha1.ReviewAllToolsRequest",
+              "responseType": "koinon.mcpserver.v1alpha1.ReviewAllToolsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetAgentServers",
               "description": "SetAgentServers replaces the servers an agent may use.",
               "requestType": "koinon.mcpserver.v1alpha1.SetAgentServersRequest",
@@ -11504,6 +12315,69 @@
           ]
         },
         {
+          "name": "ReviewAllToolsRequest",
+          "fullName": "koinon.mcpserver.v1alpha1.ReviewAllToolsRequest",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "server_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tools",
+              "number": 3,
+              "type": "koinon.mcpserver.v1alpha1.ToolReview",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tools are the waiting tools the admin saw, each with the hash of the text the admin saw. A tool that\ndoes not wait for review is left as it is. Empty only deletes the absent rows."
+            }
+          ]
+        },
+        {
+          "name": "ReviewAllToolsResponse",
+          "fullName": "koinon.mcpserver.v1alpha1.ReviewAllToolsResponse",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "tools",
+              "number": 1,
+              "type": "koinon.mcpserver.v1alpha1.Tool",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tools are the tools the call approved, as they are now."
+            },
+            {
+              "name": "removed",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "removed is how many absent rows that no admin reviewed the call deleted."
+            }
+          ]
+        },
+        {
           "name": "Server",
           "fullName": "koinon.mcpserver.v1alpha1.Server",
           "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
@@ -11743,6 +12617,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but\nthe server's identity is not checked and its credential can be sent to an impostor. https only; never\nset together with ca_bundle."
+            },
+            {
+              "name": "unreviewed_tools_capped_at",
+              "number": 27,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unreviewed_tools_capped_at is set while the server is at the limit of tools that no admin reviewed\n(256, ADR 0125): the sync stores no new tool of it. Reviewing its tools (ReviewAllTools) makes room.\nUnset otherwise."
             }
           ]
         },
@@ -12292,6 +13175,33 @@
               "oneof": "",
               "deprecated": false,
               "description": "approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When\ntool_hash differs, the text is pending: the gateway does not serve it until an admin approves it."
+            }
+          ]
+        },
+        {
+          "name": "ToolReview",
+          "fullName": "koinon.mcpserver.v1alpha1.ToolReview",
+          "file": "koinon/mcpserver/v1alpha1/mcpserver.proto",
+          "description": "ToolReview names a tool and the text of it that the admin saw.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "tool",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool_hash",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "tool_hash is the Tool.tool_hash the admin reviewed. Required."
             }
           ]
         },

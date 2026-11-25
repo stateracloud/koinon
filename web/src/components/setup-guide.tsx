@@ -56,7 +56,7 @@ export function SetupGuideSteps({ steps, renderFields, results = [] }: SetupGuid
               <ul className="grid gap-1 text-sm" aria-label={`Checks for ${s.title}`}>
                 {stepResults.map((r) => (
                   <li key={r.check} className="flex items-start gap-2" data-ok={r.ok}>
-                    {r.ok ? <CircleCheck aria-hidden className="mt-0.5 size-4 text-green-600" /> : <CircleX aria-hidden className="text-destructive mt-0.5 size-4" />}
+                    {r.ok ? <CircleCheck aria-hidden className="mt-0.5 size-4 text-success" /> : <CircleX aria-hidden className="text-destructive mt-0.5 size-4" />}
                     <span>
                       <span className="font-medium">{r.ok ? 'Passed' : 'Failed'}</span>
                       {r.message && `: ${r.message}`} <span className="text-muted-foreground font-mono text-xs">({r.check})</span>

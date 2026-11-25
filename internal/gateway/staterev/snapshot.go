@@ -67,7 +67,7 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 		s.MCP = append(s.MCP, gateway.MCPTarget{
 			Name: t.GetName(), URL: t.GetUrl(), SSE: t.GetSse(), Org: t.GetOrg(),
 			CredentialHeader: t.GetCredentialHeader(), CredentialPrefix: t.GetCredentialPrefix(), CredentialFile: t.GetCredentialFile(), CAFile: t.GetCaFile(), InsecureSkipVerify: t.GetInsecureSkipVerify(),
-			Builtin: t.GetBuiltin(), HandleKeyFile: t.GetHandleKeyFile(), RemoteAgents: remoteAgentsFromProto(t.GetRemoteAgents()),
+			Builtin: t.GetBuiltin(), HandleKeyFile: t.GetHandleKeyFile(), RemoteAgents: remoteAgentsFromProto(t.GetRemoteAgents()), Ask: t.GetAsk(),
 		})
 	}
 	for _, at := range u.GetMcp().GetTools() {
@@ -88,13 +88,18 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 			AnyQuery: r.GetAnyQuery(), Deny: r.GetDeny(), Credential: r.GetCredential(),
 		})
 	}
+	for _, c := range u.GetEgress().GetCredentials() {
+		s.EgressCredentials = append(s.EgressCredentials, route.Credential{
+			Name: c.GetName(), Org: c.GetOrg(), Agent: c.GetAgent(), File: c.GetFile(), Scheme: c.GetScheme(), User: c.GetUser(),
+		})
+	}
 	return s
 }
 
-// egressToProto returns the egress half, or nil when it has no route, so a State without org
-// routes gives the same message as before the half existed.
+// egressToProto returns the egress half, or nil when it has no route and no credential, so a State
+// without org routes gives the same message as before the half existed.
 func egressToProto(e gateway.EgressState) *gwv1.EgressState {
-	if len(e.EgressRoutes) == 0 {
+	if len(e.EgressRoutes) == 0 && len(e.EgressCredentials) == 0 {
 		return nil
 	}
 	out := &gwv1.EgressState{}
@@ -108,6 +113,12 @@ func egressToProto(e gateway.EgressState) *gwv1.EgressState {
 		})
 	}
 	slices.SortFunc(out.Routes, func(a, b *gwv1.EgressRoute) int { return cmp.Compare(a.GetName(), b.GetName()) })
+	for _, c := range e.EgressCredentials {
+		out.Credentials = append(out.Credentials, &gwv1.EgressCredential{
+			Name: c.Name, Org: c.Org, Agent: c.Agent, File: c.File, Scheme: c.Scheme, User: c.User,
+		})
+	}
+	slices.SortFunc(out.Credentials, func(a, b *gwv1.EgressCredential) int { return cmp.Compare(a.GetName(), b.GetName()) })
 	return out
 }
 
@@ -252,7 +263,7 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 			// The path of the target's public CA bundle.
 			CaFile: t.CAFile, InsecureSkipVerify: t.InsecureSkipVerify,
 			// The built-in target: the paths of its key and credentials, and the pin of each card.
-			Builtin: t.Builtin, HandleKeyFile: t.HandleKeyFile, RemoteAgents: remoteAgentsToProto(t.RemoteAgents),
+			Builtin: t.Builtin, HandleKeyFile: t.HandleKeyFile, RemoteAgents: remoteAgentsToProto(t.RemoteAgents), Ask: t.Ask,
 		})
 	}
 	slices.SortFunc(out.Targets, func(a, b *gwv1.MCPTarget) int {

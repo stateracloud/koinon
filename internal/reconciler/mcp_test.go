@@ -7,12 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -34,7 +31,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
+	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
@@ -368,53 +367,24 @@ var _ = Describe("Org MCP servers", func() {
 			host, port, stop, _ = fakeGatewayServer(target, tools...)
 			return host, port, stop
 		}
-		probingWith := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint, keyRetryAfter time.Duration) *reconciler.Reconciler {
+		probing := func(ctx SpecContext, host string, port int, opts ...func(*reconciler.Config)) *reconciler.Reconciler {
 			osg := fakegateway.New()
 			cc, err := osg.Start()
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
-			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			cfg := reconciler.Config{
 				KeepWarmPerOrg: 2,
 				Prices:         prices.NewResolver(pricing.Embedded()),
-				Gateway:        gw, MCPGateway: mcpGW, Keys: ring, MCPProbeKeyRetryAfter: keyRetryAfter,
+				Gateway:        reconciler.Endpoint{Host: host, Port: uint32(port)}, Keys: ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
-			})
+			}
+			for _, o := range opts {
+				o(&cfg)
+			}
+			rr, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			return rr
-		}
-		probingVia := func(ctx SpecContext, gw, mcpGW reconciler.Endpoint) *reconciler.Reconciler {
-			return probingWith(ctx, gw, mcpGW, 0)
-		}
-		// refusingFront answers 401, as koinon-gateway does for a probe key it does not know yet, while
-		// refuse is set; else it passes the request to the gateway at host:port. refused counts the refused
-		// probes (their initialize requests).
-		refusingFront := func(host string, port int, refuse *atomic.Bool, refused *atomic.Int32) reconciler.Endpoint {
-			back := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(port))})
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if refuse.Load() {
-					// One initialize per probe: the client also sends other requests first.
-					if b, _ := io.ReadAll(req.Body); bytes.Contains(b, []byte(`"method":"initialize"`)) {
-						refused.Add(1)
-					}
-					http.Error(w, "refused: unknown gateway key", http.StatusUnauthorized)
-					return
-				}
-				back.ServeHTTP(w, req)
-			}))
-			DeferCleanup(func() { ts.CloseClientConnections(); ts.Close() })
-			u, _ := url.Parse(ts.URL)
-			p, _ := strconv.Atoi(u.Port())
-			return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}
-		}
-		runProber := func(ctx SpecContext, rr *reconciler.Reconciler) {
-			pctx, cancel := context.WithCancel(ctx)
-			done := make(chan struct{})
-			go func() { defer close(done); rr.RunProber(pctx) }() // the default tick is a minute
-			DeferCleanup(func() { cancel(); <-done })
-		}
-		probing := func(ctx SpecContext, host string, port int) *reconciler.Reconciler {
-			return probingVia(ctx, reconciler.Endpoint{Host: host, Port: uint32(port)}, reconciler.Endpoint{})
 		}
 		tiers := func(ctx SpecContext, s mcpservers.Server) map[string]mcpservers.Tool {
 			GinkgoHelper()
@@ -426,6 +396,173 @@ var _ = Describe("Org MCP servers", func() {
 			}
 			return out
 		}
+
+		Context("with koinon-gateway copies that ack the State revision (#1260)", func() {
+			// keyedGateway answers 401 until a copy has the probe key (srv.keyed), as koinon-gateway does
+			// before the State stream brought the key. It counts the requests it refused.
+			type keyedGW struct {
+				host    string
+				port    int
+				stop    func()
+				keyed   atomic.Bool
+				refused atomic.Int64
+				seen    atomic.Int64
+			}
+			newKeyedGW := func(target string, tools ...string) *keyedGW {
+				g := &keyedGW{}
+				srv := mcp.NewServer(&mcp.Implementation{Name: "fake-gateway", Version: "0"}, nil)
+				for _, t := range tools {
+					srv.AddTool(&mcp.Tool{Name: target + "_" + t, Description: "does " + t, InputSchema: json.RawMessage(`{"type":"object"}`)},
+						func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+							return &mcp.CallToolResult{}, nil
+						})
+				}
+				inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					g.seen.Add(1)
+					if !g.keyed.Load() {
+						g.refused.Add(1)
+						http.Error(w, "unauthorized", http.StatusUnauthorized)
+						return
+					}
+					inner.ServeHTTP(w, r)
+				}))
+				u, _ := url.Parse(ts.URL)
+				g.host = u.Hostname()
+				g.port, _ = strconv.Atoi(u.Port())
+				g.stop = func() { ts.CloseClientConnections(); go ts.Close() }
+				return g
+			}
+			fast := func(c *reconciler.Config) {
+				c.MCPAckPoll = racescale.D(50 * time.Millisecond)
+				c.MCPAckWait = racescale.D(20 * time.Second)
+			}
+			healthOf := func(ctx SpecContext, id string) string {
+				GinkgoHelper()
+				got, err := svc.Get(ctx, org, id)
+				Expect(err).NotTo(HaveOccurred())
+				return got.Health
+			}
+			runProber := func(rr *reconciler.Reconciler) {
+				pctx, cancel := context.WithCancel(context.Background())
+				done := make(chan struct{})
+				go func() { defer close(done); rr.RunProber(pctx) }()
+				DeferCleanup(func() { cancel(); <-done })
+			}
+
+			It("probes a new server only after every live gateway copy acked the MCP half, and records no 401", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				DeferCleanup(g.stop)
+				copies := []string{"koinon-gateway-a/boot1", "koinon-gateway-b/boot1"}
+				for _, c := range copies {
+					Expect(staterev.TouchCopy(ctx, pool, c, "test-stream", true)).To(Succeed())
+				}
+				DeferCleanup(func() {
+					for _, c := range copies {
+						_ = staterev.ForgetCopy(context.Background(), pool, c, "test-stream")
+					}
+				})
+				rr := probing(ctx, g.host, g.port, fast)
+				runProber(rr)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed())
+				latest, err := staterev.Latest(ctx, pool)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(latest).NotTo(BeNil())
+
+				// Copy a acks the MCP half; copy b has not. The gateway is not probed.
+				Expect(staterev.Ack(ctx, pool, copies[0], latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				Expect(staterev.Ack(ctx, pool, copies[1], latest.Revision, gwv1.Half_HALF_MODEL)).To(Succeed(), "the model half does not count")
+				Consistently(g.seen.Load).WithTimeout(racescale.D(1500 * time.Millisecond)).Should(BeZero())
+
+				// Copy b acks: its key arrived, and the first probe lists the tools.
+				g.keyed.Store(true)
+				Expect(staterev.Ack(ctx, pool, copies[1], latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+				Expect(tiers(ctx, s)).To(HaveKey("read"))
+				Expect(g.refused.Load()).To(BeZero(), "no probe got a 401, so none was recorded as a failure")
+			})
+
+			It("waits the same after a reconciler restart: a second reconciler probes a changed server after the acks", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				DeferCleanup(g.stop)
+				const copyID = "koinon-gateway-a/boot2"
+				Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
+				// The first reconciler stored the revision and then went away before any probe.
+				first := probing(ctx, g.host, g.port, fast)
+				Expect(first.ReconcileAll(ctx)).To(Succeed())
+				latest, err := staterev.Latest(ctx, pool)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(latest).NotTo(BeNil())
+
+				// The new reconciler (fresh in-memory state) applies the state again: the revision is the
+				// stored one, the copy has not acked it, and the prober holds back.
+				second := probing(ctx, g.host, g.port, fast)
+				runProber(second)
+				Expect(second.ReconcileAll(ctx)).To(Succeed())
+				Consistently(g.seen.Load).WithTimeout(racescale.D(1500 * time.Millisecond)).Should(BeZero())
+
+				// The second pass may have stored a newer revision (the state can differ): the probe waits for
+				// the newest one, so the copy acks that.
+				newest, err := staterev.Latest(ctx, pool)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(newest.Revision).To(BeNumerically(">=", latest.Revision))
+				g.keyed.Store(true)
+				Expect(staterev.Ack(ctx, pool, copyID, newest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+				Expect(g.refused.Load()).To(BeZero())
+			})
+
+			It("does not wait for a live copy that serves only the model half", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				g.keyed.Store(true)
+				DeferCleanup(g.stop)
+				Expect(staterev.TouchCopy(ctx, pool, "model-only/boot1", "test-stream", false)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "model-only/boot1", "test-stream") })
+				rr := probing(ctx, g.host, g.port, fast)
+				runProber(rr)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+			})
+
+			It("ignores a copy that stopped touching its row: only live copies must ack", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				g.keyed.Store(true)
+				DeferCleanup(g.stop)
+				// A copy that died: its row is old. It never acks, and must not hold the probe.
+				_, err := pool.Exec(ctx, "INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ('dead/boot0', now() - interval '10 minutes')")
+				Expect(err).NotTo(HaveOccurred())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "dead/boot0", "") })
+				rr := probing(ctx, g.host, g.port, fast)
+				runProber(rr)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+			})
+		})
+
+		It("lists tools through koinon-gateway, not agentgateway, when koinon-gateway serves /mcp (#1239)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			// agentgateway lists nothing for the server, as it does for a target whose credential is
+			// sealed to the gateway key (ADR 0097 decision 12).
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			rr := probing(ctx, agwHost, agwPort, func(c *reconciler.Config) {
+				c.MCPGateway = reconciler.Endpoint{Host: host, Port: uint32(port)}
+			})
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			rr.ProbeAll(ctx)
+
+			Expect(tiers(ctx, s)).To(HaveKey("read"))
+			after, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Health).To(Equal("healthy"))
+		})
 
 		It("syncs the tools a server lists into the ask tier and marks the server healthy", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
@@ -445,127 +582,6 @@ var _ = Describe("Org MCP servers", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(after.Health).To(Equal("healthy"))
 			Expect(after.ToolsSyncedAt).NotTo(BeNil())
-		})
-
-		It("lists tools through koinon-gateway, not agentgateway, when koinon-gateway serves /mcp (#1239)", func(ctx SpecContext) {
-			s := server(ctx, org, "wiki", "", nil)
-			// agentgateway lists nothing for the server, as it does for a target whose credential is
-			// sealed to the gateway key (ADR 0097 decision 12).
-			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
-			DeferCleanup(stopAgw)
-			host, port, stop := fakeGateway(slug+"-wiki", "read")
-			DeferCleanup(stop)
-			rr := probingVia(ctx,
-				reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)},
-				reconciler.Endpoint{Host: host, Port: uint32(port)})
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			rr.ProbeAll(ctx)
-
-			Expect(tiers(ctx, s)).To(HaveKey("read"))
-			after, err := svc.Get(ctx, org, s.ID)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(after.Health).To(Equal("healthy"))
-		})
-
-		It("does not record a probe that koinon-gateway refused for its key, and probes again after the State poll (#1260)", func(ctx SpecContext) {
-			s := server(ctx, org, "wiki", "", nil)
-			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
-			DeferCleanup(stopAgw)
-			host, port, stop := fakeGateway(slug+"-wiki", "read")
-			DeferCleanup(stop)
-			var refuse atomic.Bool
-			var refused atomic.Int32
-			refuse.Store(true)
-			front := refusingFront(host, port, &refuse, &refused)
-			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, racescale.D(2*time.Second))
-			runProber(ctx, rr)
-
-			// The pass serves the server and probes it at once: koinon-gateway does not know the key yet.
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			Eventually(refused.Load).WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 1))
-			// The retry comes after 2 s; until then the refusal must stay unrecorded.
-			Consistently(func(g Gomega) {
-				got, err := svc.Get(ctx, org, s.ID)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(got.HealthCheckedAt).To(BeNil(), "a refused probe key is not recorded")
-			}).WithTimeout(racescale.D(time.Second)).Should(Succeed())
-
-			// koinon-gateway read the revision: the probe queued again finds the tools.
-			refuse.Store(false)
-			Eventually(func(g Gomega) {
-				got, err := svc.Get(ctx, org, s.ID)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(got.Health).To(Equal("healthy"))
-			}).WithTimeout(racescale.D(15 * time.Second)).Should(Succeed())
-			Expect(tiers(ctx, s)).To(HaveKey("read"))
-		})
-
-		It("records koinon-gateway's refusal of the probe key after three probes queued again (#1260)", func(ctx SpecContext) {
-			s := server(ctx, org, "wiki", "", nil)
-			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
-			DeferCleanup(stopAgw)
-			host, port, stop := fakeGateway(slug+"-wiki", "read")
-			DeferCleanup(stop)
-			var refuse atomic.Bool
-			var refused atomic.Int32
-			refuse.Store(true)
-			front := refusingFront(host, port, &refuse, &refused)
-			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, 100*time.Millisecond)
-			runProber(ctx, rr)
-
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			Eventually(func(g Gomega) {
-				got, err := svc.Get(ctx, org, s.ID)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(got.HealthCheckedAt).NotTo(BeNil(), "the fourth refusal is recorded")
-			}).WithTimeout(racescale.D(15 * time.Second)).Should(Succeed())
-			// The first probe and its three retries each got a 401 before the refusal was recorded.
-			Expect(refused.Load()).To(Equal(int32(4)))
-		})
-
-		It("starts a new count of key refusals when a pass serves the server with another URL (#1260)", func(ctx SpecContext) {
-			s := server(ctx, org, "wiki", "", nil)
-			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
-			DeferCleanup(stopAgw)
-			host, port, stop := fakeGateway(slug+"-wiki", "read")
-			DeferCleanup(stop)
-			var refuse atomic.Bool
-			var refused atomic.Int32
-			refuse.Store(true)
-			front := refusingFront(host, port, &refuse, &refused)
-			rr := probingWith(ctx, reconciler.Endpoint{Host: agwHost, Port: uint32(agwPort)}, front, 100*time.Millisecond)
-			runProber(ctx, rr)
-
-			// The first probe and its three retries are refused; the fourth refusal is recorded.
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			Eventually(refused.Load).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(int32(4)))
-			Consistently(refused.Load).WithTimeout(500 * time.Millisecond).Should(Equal(int32(4)))
-
-			// The operator moves the server. The pass serves it with the new URL, and koinon-gateway
-			// may again refuse the key until its State poll: the count starts again.
-			newURL := "https://mcp.example.com/wiki-moved"
-			_, err := svc.Update(ctx, org, audit.System("koinon-test:spec"), s.ID, mcpservers.Patch{URL: &newURL})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			Eventually(refused.Load).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(int32(8)))
-		})
-
-		It("records agentgateway's refusal of the probe key at once: the pass applied its keys (#1260)", func(ctx SpecContext) {
-			s := server(ctx, org, "wiki", "", nil)
-			host, port, stop := fakeGateway(slug+"-wiki", "read")
-			DeferCleanup(stop)
-			var refuse atomic.Bool
-			var refused atomic.Int32
-			refuse.Store(true)
-			front := refusingFront(host, port, &refuse, &refused)
-			rr := probingWith(ctx, front, reconciler.Endpoint{}, 100*time.Millisecond)
-			Expect(rr.ReconcileAll(ctx)).To(Succeed())
-			rr.ProbeAll(ctx)
-
-			Expect(refused.Load()).To(BeNumerically(">=", 1))
-			got, err := svc.Get(ctx, org, s.ID)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(got.HealthCheckedAt).NotTo(BeNil(), "the refusal is recorded at once")
 		})
 
 		It("probes a newly served server right after the pass that applied it, not at the next tick (old issue 226)", func(ctx SpecContext) {

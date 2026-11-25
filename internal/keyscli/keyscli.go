@@ -42,6 +42,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/forgecredfile"
 	"github.com/stateracloud/koinon/internal/installid"
 	"github.com/stateracloud/koinon/internal/kekhealth"
 	"github.com/stateracloud/koinon/internal/mcpservers"
@@ -88,6 +89,14 @@ var Columns = []Column{
 	// Run-trace destination credentials (ADR 0074): the org's, and the platform's single row.
 	{Table: tracedest.DestinationsTable, Column: tracedest.CredentialsColumn},
 	{Table: tracedest.PlatformTable, Column: tracedest.CredentialsColumn},
+}
+
+// Transient lists bindings whose envelopes no table stores, so they are not in Columns and the key
+// commands have no rows of them to read, rewrap or retire. An agent's forge token (#1086 part C,
+// ADR 0097) is minted from its connection and sealed at once to the gateway's recipient key, never to
+// a KEK; the reconciler seals it again when the recipient key changes, so no rotation strands it.
+var Transient = []Column{
+	{Table: forgecredfile.AgentsTable, Column: forgecredfile.TokenColumn},
 }
 
 // singleton is the platform's one-row table: it has no org_id or id, and its binding names the org
@@ -603,6 +612,15 @@ func (t *Tool) reachability(ctx context.Context, ks KeySet) {
 		_, _ = fmt.Fprintf(t.Out, "WARNING: the key-wrapping key of the active KEK %s (%s) is unreachable: %v. Values wrapped by it cannot be opened until it answers.\n", ks.Active, active, err)
 	} else {
 		_, _ = fmt.Fprintf(t.Out, "The key-wrapping key of the active KEK %s (%s) is reachable.\n", ks.Active, active)
+	}
+	if t.Wrappers.OnReadOnlyKey(active) {
+		add := "add a KEK with the key-admin Job (secrets.kek.kms.keyAdmin.addKey)"
+		if t.Wrappers.Primary().Backend() == secretstore.BackendLocal {
+			add = "add a KEK with keys add (the primary key is local, so there is no key-admin Job)" // the Job needs a KMS
+		}
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is still wrapped only by the read-only key (%s), not by the primary key. "+
+			"Finish the key move: %s, then keys activate, keys rewrap and keys retire. "+
+			"Remove the read-only key from the values only after that (%s).\n", ks.Active, active, add, project.SecretKeysDocURL)
 	}
 	if active.Backend == secretstore.BackendLocal && t.Wrappers.Primary().Backend() != secretstore.BackendLocal {
 		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is a local key but a KMS (%s) is configured. Ask the key-admin Job to add a KEK, then activate it.\n", ks.Active, t.Wrappers.Primary().Backend())

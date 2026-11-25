@@ -60,7 +60,7 @@ var platformJobs = map[string]struct{ report string }{
 }
 
 var _ = Describe("Rendered startup", Label("chartsmoke"), func() {
-	for _, vf := range valuesFiles() {
+	for _, vf := range selectedValuesFiles() {
 		describeMode(strings.TrimSuffix(filepath.Base(vf), "-values.yaml"), vf)
 	}
 })
@@ -89,7 +89,7 @@ func describeMode(name, valuesFile string) {
 				postgres.WithDatabase("koinon"), postgres.WithUsername("koinon"), postgres.WithPassword(dbSecretPassword),
 				postgres.BasicWaitStrategies(), network.WithNetwork([]string{"postgres"}, nw))
 			if pg != nil {
-				DeferCleanup(func(ctx context.Context) { _ = testcontainers.TerminateContainer(pg) })
+				DeferCleanup(func(ctx context.Context) { terminate(pg) })
 			}
 			Expect(err).NotTo(HaveOccurred())
 			dbURL, err = pg.ConnectionString(ctx, "sslmode=disable")
@@ -535,7 +535,7 @@ func describeMode(name, valuesFile string) {
 				Expect(err).NotTo(HaveOccurred(), stmt)
 			}
 			for _, w := range ready["koinon-api"] {
-				Expect(w.Ctr.Stop(ctx, nil)).To(Succeed())
+				Expect(w.Ctr.Stop(ctx, &stopTimeout)).To(Succeed())
 			}
 			ready["koinon-api"] = startDeployment(ctx, rn, r, "koinon-api")
 			api := ready["koinon-api"][0]
@@ -565,7 +565,7 @@ func describeMode(name, valuesFile string) {
 			By("the next scheduled tick runs in the configured mode")
 			Eventually(func(ctx context.Context) string { return api.Logs(ctx) }).WithContext(ctx).WithTimeout(90 * time.Second).WithPolling(2 * time.Second).
 				Should(ContainSubstring("runs in the configured mode"))
-			Expect(api.Running(ctx)).To(BeTrue(), "koinon-api still serves; logs:\n%s", api.Logs(ctx))
+			expectRunning(ctx, api, "koinon-api still serves; logs:\n%s", api.Logs(ctx))
 		}, SpecTimeout(4*time.Minute))
 
 		// An upgrade, in cnpg mode, of a cluster initialised before ADR 0100 (#328): the pre-upgrade
@@ -750,7 +750,7 @@ func describeMode(name, valuesFile string) {
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
 			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
-			Expect(w.Running(ctx)).To(BeTrue(), "still running; logs:\n%s", w.Logs(ctx))
+			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
 			Expect(*ps.TerminationGracePeriodSeconds).To(BeNumerically(">=", 60))
@@ -781,7 +781,7 @@ func describeMode(name, valuesFile string) {
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
 			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
-			Expect(w.Running(ctx)).To(BeTrue(), "still running; logs:\n%s", w.Logs(ctx))
+			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
 			Expect(*ps.TerminationGracePeriodSeconds).To(BeNumerically(">=", 60))
@@ -792,7 +792,7 @@ func describeMode(name, valuesFile string) {
 			for name, ws := range ready {
 				for _, w := range ws {
 					logs := w.Logs(ctx)
-					Expect(w.Running(ctx)).To(BeTrue(), "%s (%s) stopped within %s of being ready (exit code %d); logs:\n%s", w.Name, name, settleTime, w.ExitCode(ctx), logs)
+					expectRunning(ctx, w, "%s (%s) stopped within %s of being ready (exit code %d); logs:\n%s", w.Name, name, settleTime, w.ExitCode(ctx), logs)
 					// No restarts happen here, so a running container has restart count 0.
 					Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"),
 						"%s was denied by the API server: the chart's RBAC lacks a rule; logs:\n%s", w.Name, logs)
@@ -931,7 +931,7 @@ func startDeployment(ctx context.Context, rn *runner, r *rendered, name string) 
 			probe := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("metrics")}}}
 			Expect(w.ProbeHTTP(ctx, probe, probeDeadline)).To(BeEmpty(), "%s /metrics; logs:\n%s", w.Name, w.Logs(ctx))
 		}
-		Expect(w.Running(ctx)).To(BeTrue(), "%s is still running; logs:\n%s", w.Name, w.Logs(ctx))
+		expectRunning(ctx, w, "%s is still running; logs:\n%s", w.Name, w.Logs(ctx))
 	}
 	return started
 }

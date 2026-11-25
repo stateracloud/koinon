@@ -367,7 +367,10 @@ does today, no more (model path at parity, below).
   MCP path sets an equivalent, Koinon-named header after the key check, and NetworkPolicy keeps the tool
   servers reachable only from the gateway. Without it the tools break when the default driver changes.
 - **An org's MCP server gets no agent header** (maintainer decision 2026-11-24, #1235). Koinon's MCP path
-  sets the agent header only on a platform target (Koinon's own tool servers, `Org ""`;
+  sets the agent header only on Koinon's own services: a platform target (Koinon's own tool servers, `Org ""`)
+  and an ask target (Koinon's approval proxy for the ask-tier tools of an org's server, `internal/mcpask`;
+  #1315). The gateway plan alone marks an ask target (`MCPTarget.Ask`); it keeps the org, for org scoping and
+  tool pins, and carries no credential (`gateway.MCPTarget.TrustsAgentHeader`,
   `internal/mcpgateway/credential.go`). It never sends it to a server an org registered, and there is no
   opt-in for it. An org's server trusts nothing of Koinon's, and the agent ID is internal data. A plain
   header can be forged: server owners would build access checks on it, and a signed credential later
@@ -514,6 +517,32 @@ connection's base URL, which an org admin sets: an allowed CIDR (`--egress-allow
 too when it resolves into the CIDR. Known limit: the route model refuses an encoded slash in every path,
 also the npm CLI's spelling of a scoped package (`/@scope%2fname`); that needs a change of its own before
 npm traffic goes through the gateway.
+
+Record (2026-11-24, #1086 part C1): the gateway attaches the forge credential. The reconciler mints the
+agent's code-host token (read-only, as for the OpenShell provider record) and seals it at once to the
+gateway's recipient key (envelope v2, decision 12). The binding is the org ID, the table `agents`, the agent
+ID and the column `forge_token`; no column stores the token. The file is `forgev2-<org ID>-<agent ID>-<8 hex
+of the scope>-<8 hex of the envelope>` (`internal/forgecredfile`) in the MCP key Secret, which only
+koinon-gateway mounts, never in the provider keys. The scope is the connection, the repositories, the
+permissions and the forge hosts of the routes that send the token. The reconciler keeps the envelope in
+memory while the scope, the token revision and the key ID stay the same, so an unchanged token keeps its
+file. A new file waits for the key settle time; in that time the credential keeps its last applied file,
+else (after a restart) a file that the Secret still holds, in both cases only a file of the same agent and
+scope, else it is left out. So a token is never sent to a host or a connection it was not minted for. The State gets an add-only list `EgressState.credentials`: name,
+org, agent, file, scheme and user, never a value. The gateway refuses the whole org half when a credential is
+named twice or when a route names a credential of another org or agent. It opens the file on each request
+of a credentialed route and checks that the agent ID in the file name is the route's agent. It sends the
+value only to the matched route's upstream, as `Authorization: Basic` with the user `x-access-token` (GitHub
+and Gitea take a token this way). It asks for an identity body (`Accept-Encoding` removed) and refuses a
+response with another encoding (502). It masks the value and its Basic pair in the response headers,
+trailers, body (also across reads) and upstream error text, and it adds both to the log scrubber. Every
+failure fails closed with 503 `credential_unavailable`, with a fixed reason in the log and the
+`koinon_gateway_credential_open_failures_total` metric. The reconciler seals only when koinon-gateway
+serves the MCP path (`gateway.mcp.driver=koinon`): a gateway that does not read the list refuses the route
+with 503, so no format gate is needed. Part C2 (the actor token outside the guest for both drivers, the git
+prefix in the guest, the egress listener in the chart and a kind e2e) and part C3 (drop the OpenShell
+transition profile) follow. Prior art: Fly.io's Tokenizer, the MCP credential path of decision 12
+(`mcpgateway.StaticCredentials`, the credential scrubber).
 
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need

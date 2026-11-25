@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	harnessdesc "github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
 )
 
 // The gateway's org egress routes (#1086 part B, ADR 0097 step 2) come from the same rules as the
@@ -143,20 +144,21 @@ func exactQuery(q map[string]string) (map[string]string, error) {
 	return out, nil
 }
 
-// agentEgress returns the org egress routes of the active agent w. A fault leaves the agent with no
-// route, which closes its gateway egress and opens nothing; it is logged, and the sandbox still
-// gets its OpenShell rules from ensureSandbox.
-func (r *Reconciler) agentEgress(ctx context.Context, w *work) []route.Route {
+// agentEgress returns the org egress routes of the active agent w, and the sealed code-host credential
+// its forge routes name (#1086 part C). A fault leaves the agent with no route, which closes its gateway
+// egress and opens nothing; it is logged, and the sandbox still gets its OpenShell rules from
+// ensureSandbox. A credential that cannot be sealed leaves the routes without it: they fail closed.
+func (r *Reconciler) agentEgress(ctx context.Context, w *work) ([]route.Route, *gatewayplan.ForgeCredential, []byte) {
 	ref := agentRef(w.org, w.agent.ID)
 	baseURL, err := r.baseURLOf(ctx, w)
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil
+		return nil, nil, nil
 	}
 	read, hasRead, err := GitHubReadAccessAt(w.cfg, baseURL)
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil
+		return nil, nil, nil
 	}
 	var forge []execution.Endpoint
 	if hasRead {
@@ -165,7 +167,16 @@ func (r *Reconciler) agentEgress(ctx context.Context, w *work) []route.Route {
 	routes, err := EgressRoutes(ref, forge, PluginInstallsOn(w.cfg, w.agent.Harness))
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil
+		return nil, nil, nil
 	}
-	return routes
+	if !hasRead {
+		return routes, nil, nil
+	}
+	cred, file, err := r.forgeCredential(ctx, w, read, routes)
+	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
+		r.log.Error("the agent's forge routes have no credential; they fail closed", "org", w.org.Slug, "agent", ref.Name, "err", err)
+		return routes, nil, nil
+	}
+	return routes, cred, file
 }

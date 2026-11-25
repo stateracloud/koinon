@@ -55,7 +55,6 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
-	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
@@ -96,9 +95,6 @@ const (
 	DefaultLeaderPingTimeout = 4 * time.Second
 	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
 	DefaultMCPProbeInterval = 60 * time.Second
-	// DefaultMCPProbeKeyRetryAfter is the State poll interval of koinon-gateway
-	// (stateserver.DefaultPollInterval): by then the gateway has read the revision with the new probe key.
-	DefaultMCPProbeKeyRetryAfter = stateserver.DefaultPollInterval
 )
 
 // Endpoint is a host and port.
@@ -112,6 +108,11 @@ type Config struct {
 	// StateRevisionDB, when set, replaces the pool for storing State stream revisions. For tests of
 	// a slow or failing store.
 	StateRevisionDB staterev.DB
+	// MCPAckWait is how long the first probe of a new or changed MCP server waits for every live
+	// koinon-gateway copy to ack the State revision (#1260); zero means DefaultMCPAckWait. MCPAckPoll
+	// is how often it reads the acks; zero means DefaultMCPAckPoll.
+	MCPAckWait time.Duration
+	MCPAckPoll time.Duration
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
@@ -136,6 +137,10 @@ type Config struct {
 	// MCPSealed is true when koinon-gateway serves every MCP path (gateway.mcp.driver=koinon). Only then does the
 	// reconciler serve a sealed (v2) credential: agentgateway would send the envelope upstream as the key.
 	MCPSealed bool
+	// ForgeRecipient is the gateway key the reconciler seals an agent's code-host token to, for the
+	// agent's forge routes at koinon-gateway (#1086 part C, ADR 0097 decision 12). Nil delivers no forge
+	// credential: those routes fail closed (503 credential_unavailable).
+	ForgeRecipient RecipientKeys
 	// Prices finds the price of each served model; required (prices.NewResolver).
 	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
@@ -159,9 +164,6 @@ type Config struct {
 	// MCPProbeInterval is the time between health probes of each org MCP server. Default
 	// DefaultMCPProbeInterval.
 	MCPProbeInterval time.Duration
-	// MCPProbeKeyRetryAfter is the wait before the prober asks koinon-gateway again after it refused a
-	// probe key (401). Default DefaultMCPProbeKeyRetryAfter. Used only with MCPGateway set (issue #1260).
-	MCPProbeKeyRetryAfter time.Duration
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
@@ -268,6 +270,9 @@ type Reconciler struct {
 	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// forgeSeals is the sealed code-host token of each agent (under mu), so an unchanged token keeps its
+	// file name between passes.
+	forgeSeals map[agentKey]forgeSeal
 	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
@@ -305,15 +310,12 @@ type Reconciler struct {
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
 	probeMu   sync.Mutex
-	probeDue  []gatewayplan.Probe
+	probeDue  []dueProbe
 	probeWake chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
 	probeHeld  map[pgtype.UUID]bool
-	// probeKeyRetries counts, per server, the probes in a row that koinon-gateway refused for the probe
-	// key and that were queued again, not recorded (issue #1260). Under probeMu.
-	probeKeyRetries map[pgtype.UUID]int
 }
 
 // New returns a Reconciler.
@@ -347,9 +349,6 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
-	}
-	if cfg.MCPProbeKeyRetryAfter == 0 {
-		cfg.MCPProbeKeyRetryAfter = DefaultMCPProbeKeyRetryAfter
 	}
 	if cfg.LeaderHeartbeat <= 0 {
 		cfg.LeaderHeartbeat = DefaultLeaderHeartbeat
@@ -415,7 +414,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	wake := func() { notifySelf(pool, cfg.Logger) }
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
-		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, draftGitHubDropped: map[string]bool{},
+		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
 		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
 		plan: gatewayplan.New(gatewayplan.Config{
@@ -442,7 +441,11 @@ const statePublishTimeout = 5 * time.Second
 // counted and never holds the pass back: the Apply below is what serves the state. The state is the
 // one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
 // gateway that follows the stream serves what the agentgateway drivers serve.
-func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
+//
+// It returns the stored revision that holds the state (the new one, or the latest when nothing
+// changed), or 0 when nothing was stored. A probe of a new MCP server waits for the ack of this
+// revision (#1260).
+func (r *Reconciler) publishState(ctx context.Context, s gateway.State) int64 {
 	// Its own short deadline: a slow database must not hold the pass.
 	ctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
 	defer cancel()
@@ -451,12 +454,13 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) {
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
 		r.log.Warn("storing the gateway state revision failed; the gateway is applied as before", "err", err)
-		return
+		return 0
 	}
 	if p.Changed {
 		r.m.StateRevisions.Inc()
 		r.log.Debug("gateway state revision stored", "revision", p.Revision)
 	}
+	return p.Revision
 }
 
 // notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
@@ -487,6 +491,10 @@ type work struct {
 	tools []gateway.ToolGrant
 	// egress are the org egress routes of an active agent (egressroutes.go).
 	egress []route.Route
+	// forge is the sealed code-host credential that egress names, and forgeFile its envelope; nil
+	// when the agent has none.
+	forge     *gatewayplan.ForgeCredential
+	forgeFile []byte
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -761,11 +769,17 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		live[agentKey{w.org.ID, w.agent.ID}] = true
 	}
 	r.releaseRecreatesExcept(live, q.Busy)
+	r.pruneForgeSeals(live)
 	agents := make([]gatewayplan.Agent, len(items))
+	egressFiles := map[string][]byte{}
 	for i, w := range items {
+		if w.forge != nil {
+			egressFiles[w.forge.File] = w.forgeFile
+		}
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
 			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
+			Forge: w.forge,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -792,7 +806,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	draft := r.plan.Begin(gatewayplan.Input{
 		Now: now, Orgs: orgRefs, Agents: agents,
 		Providers: served.providers, ProviderFiles: served.files, ModelIDs: served.modelIDs,
-		MCP: mcpServed.servers, MCPFiles: mcpServed.files, LedgerEnforcesBudgets: ledgerEnforces, Allowances: allowances,
+		MCP: mcpServed.servers, MCPFiles: mcpServed.files, EgressFiles: egressFiles, LedgerEnforcesBudgets: ledgerEnforces, Allowances: allowances,
 	})
 	// An agent whose budget cannot be computed fails closed (its last pushed limit, or zero) and is
 	// reported; it never stops the pass for the other agents and orgs.
@@ -860,8 +874,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// Record what was applied. A gateway that took nothing (unreachable, whole config refused) has
 	// nothing to record; a partial rejection still left the rest live.
 	var applyRej *gateway.RejectedError
+	var stateRev int64
 	if applyErr == nil || errors.As(applyErr, &applyRej) {
-		r.publishState(ctx, plan.State)
+		stateRev = r.publishState(ctx, plan.State)
 	}
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
@@ -899,10 +914,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	}
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
-	// A pass that serves a server anew (or with another URL or credential) starts a new key window:
-	// koinon-gateway may refuse the new key until its State poll (issue #1260).
-	r.resetProbeKeyRetries(outcome.Probe)
-	r.probeSoon(outcome.Probe)
+	r.probeSoon(outcome.Probe, stateRev)
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -1198,7 +1210,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
-		w.egress = r.agentEgress(ctx, w)
+		w.egress, w.forge, w.forgeFile = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err

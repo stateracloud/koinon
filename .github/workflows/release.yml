@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Release (plan item REL1, ADR 0027, docs/dev/releasing.md). A pushed tag vX.Y.Z or vX.Y.Z-rc.N
-# publishes the three Go images, the OpenCode harness image (ADR 0059), the Substrate guest image `ate-env-guest` (#1087) and the OCI Helm chart to
+# publishes the three Go images, the OpenCode harness image (ADR 0059), its Substrate overlay `sandbox-substrate` (#1087), the Substrate guest image `ate-env-guest` (#1087) and the OCI Helm chart to
 # ghcr.io/<owner>/<repo> (ghcr.io/stateracloud/koinon) and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
 # retested for the gate: it only checks that the tagged commit is on main and that the required CI
 # checks succeeded on it. For every tag, rc or final, that includes the restore drill (ADR 0109, #1039): the push of the tag
@@ -94,7 +94,7 @@ jobs:
           persist-credentials: false # GoReleaser talks to the API with GITHUB_TOKEN; nothing is pushed with git
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written
@@ -116,6 +116,21 @@ jobs:
         run: |
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+
+      # goreleaser's kos pipe pulls its base image (pinned by digest, .goreleaser.yaml) and, for every image, copies
+      # its layer blobs across registries to ghcr.io. A fault of gcr.io (HTTP 500, "Too many connections" on a blob
+      # GET) would fail goreleaser, which cannot be repeated halfway (it may have created the draft release and
+      # pushed images). So the pinned base is copied to ghcr.io first, under push_retry
+      # (hack/release-base-mirror.sh), and goreleaser pulls the copy: it does not contact gcr.io. A fault that is
+      # still there after the bounded backoff fails the job here, before anything is published (#1224).
+      - name: mirror the base image of the images to ghcr.io
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}"
+          "$RUNNER_TEMP/bin/crane" auth login ghcr.io -u "$ACTOR" --password-stdin <<<"$TOKEN"
+          echo "KOINON_KOS_BASE_IMAGE=$(PATH="$RUNNER_TEMP/bin:$PATH" hack/release-base-mirror.sh "$KOINON_IMAGE_REGISTRY")" >>"$GITHUB_ENV"
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
 
       - name: images and draft release
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
@@ -277,6 +292,54 @@ jobs:
           hack/release-harness.sh --merge "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" \
             "$(<harness-digests/amd64)" "$(<harness-digests/arm64)" >>"$GITHUB_OUTPUT"
 
+  # The Substrate overlay of the harness image (`sandbox-substrate`, ADR 0119, ADR 0016, #1087): the released harness
+  # image (by digest, from the `harness` job) plus the Substrate guest server and the guest launcher. Both are built
+  # here (hack/build-env-guest.sh clones the pinned env commit; make guest-launcher) and the overlay has no RUN step, so
+  # one runner builds linux/amd64 and linux/arm64 without emulation. The chart uses it as the default harness
+  # image with execution.driver=substrate. Signed by `sign`.
+  harness-substrate:
+    name: harness-substrate
+    needs: harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # pushes the image
+    outputs:
+      ref: ${{ steps.build.outputs.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false # a release never restores a cache that a pull request or branch build could have written
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          cache-binary: false # a release job publishes artifacts: nothing to restore (zizmor cache-poisoning)
+      - name: log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: build and push sandbox-substrate
+        id: build
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          HARNESS_REF: ${{ needs.harness.outputs.ref }}
+        # The env source needs the go version of its own go.mod: GOTOOLCHAIN=auto fetches it when the repository's is older.
+        run: |
+          set -euo pipefail
+          . hack/push-retry-lib.sh
+          out=$(push_retry hack/release-harness-substrate.sh "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" "$HARNESS_REF")
+          echo "$out" >>"$GITHUB_OUTPUT"
+
   # The Substrate guest server image (`ate-env-guest`, ADR 0119, #1087). Upstream (github.com/agent-substrate/env)
   # publishes no image, so it is built here from a clone at the commit ATE_ENV_VERSION (hack/versions.env) with ko,
   # as upstream builds it, and pushed under the release registry with the release version as tag. linux/amd64 only
@@ -311,7 +374,7 @@ jobs:
           want="  github.com/agent-substrate/env/cmd/ate-env-guest: bash:${ATE_ENV_BASE_VERSION}@sha256:${ATE_ENV_BASE_SHA256_AMD64}"
           [[ $(grep -v '^[[:space:]]*#' "$RUNNER_TEMP/env-src/.ko.yaml" | grep -v '^[[:space:]]*$' | grep -vx 'baseImageOverrides:') == "$want" ]] \
             || { echo "the env source's .ko.yaml does not name exactly the base image of hack/versions.env (ATE_ENV_BASE_*)" >&2; exit 1; }
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: ${{ runner.temp }}/env-src/go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written
@@ -367,7 +430,7 @@ jobs:
           persist-credentials: false # the job never uses git auth
       - name: tool versions (hack/versions.env)
         run: hack/versions-env.sh >> "$GITHUB_ENV"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # a release never restores a cache that a pull request or branch build could have written
@@ -441,7 +504,7 @@ jobs:
   # Keyless cosign signing and SBOM attestations. Off unless RELEASE_SIGNING is 'true'.
   sign:
     name: sign
-    needs: [release, harness, env-guest]
+    needs: [release, harness, harness-substrate, env-guest]
     if: vars.RELEASE_SIGNING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -476,11 +539,14 @@ jobs:
         env:
           CHART_REF: ${{ needs.release.outputs.chart_ref }}
           HARNESS_REF: ${{ needs.harness.outputs.ref }}
+          HARNESS_SUBSTRATE_REF: ${{ needs.harness-substrate.outputs.ref }}
           ENV_GUEST_REF: ${{ needs.env-guest.outputs.ref }}
         run: |
           cosign sign --yes "$CHART_REF"
           # The harness's SBOM is BuildKit's attestation in the registry, so it is only signed here.
           cosign sign --yes "$HARNESS_REF"
+          # sandbox-substrate: the same, BuildKit's attestation in the registry, so it is only signed.
+          cosign sign --yes "$HARNESS_SUBSTRATE_REF"
           # ate-env-guest: ko's SPDX SBOM (one file, from the env-guest job) is attested to the signed image.
           cosign sign --yes "$ENV_GUEST_REF"
           sboms=(env-guest-sbom/*.spdx.json)

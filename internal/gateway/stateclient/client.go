@@ -29,7 +29,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/gateway"
-	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1/gatewayv1alpha1connect"
@@ -94,9 +93,10 @@ type Config struct {
 	Log          *slog.Logger
 }
 
-// EgressApplier installs the org egress routes of a revision (egress.StateRoutes).
+// EgressApplier installs the org egress routes of a revision and the credentials they name
+// (egress.StateRoutes).
 type EgressApplier interface {
-	ApplyEgress(ctx context.Context, routes []route.Route) error
+	ApplyEgress(ctx context.Context, e gateway.EgressState) error
 }
 
 // Client keeps one gateway copy in step with the State stream.
@@ -199,7 +199,14 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) session(ctx context.Context) (int, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := c.api.StreamState(ctx, &gwv1.StreamStateRequest{CopyId: c.cfg.CopyID})
+	req := &gwv1.StreamStateRequest{CopyId: c.cfg.CopyID}
+	if c.cfg.Model != nil {
+		req.Halves = append(req.Halves, gwv1.Half_HALF_MODEL)
+	}
+	if c.cfg.MCP != nil {
+		req.Halves = append(req.Halves, gwv1.Half_HALF_MCP)
+	}
+	stream, err := c.api.StreamState(ctx, req)
 	if err != nil {
 		c.cfg.Metrics.Connects.WithLabelValues(connectFailed).Inc()
 		return 0, false, err
@@ -248,20 +255,20 @@ func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 		}))
 	}
 	if c.cfg.Egress != nil {
-		c.egress(ctx, u.GetRevision(), state.EgressRoutes)
+		c.egress(ctx, u.GetRevision(), state.EgressState)
 	}
 	return ackErr
 }
 
 // egress applies the org egress routes of every revision, also a replayed one: the apply is cheap
 // and idempotent. A failure does not end the session, because a replay carries the same routes.
-func (c *Client) egress(ctx context.Context, rev int64, routes []route.Route) {
+func (c *Client) egress(ctx context.Context, rev int64, e gateway.EgressState) {
 	actx, cancel := context.WithTimeout(ctx, c.cfg.ApplyTimeout)
 	defer cancel()
-	if err := c.cfg.Egress.ApplyEgress(actx, routes); err != nil {
+	if err := c.cfg.Egress.ApplyEgress(actx, e); err != nil {
 		c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultFailed).Inc()
 		c.log.Error("the org egress routes of a State revision were refused; the platform routes alone are served",
-			"revision", rev, "routes", len(routes), "err", err)
+			"revision", rev, "routes", len(e.EgressRoutes), "credentials", len(e.EgressCredentials), "err", err)
 		return
 	}
 	c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultOK).Inc()

@@ -215,9 +215,14 @@ commit that names the break.
 
 `hack/chart-check.sh` runs lint, every mode rendered, render assertions and kubeconform; any `FAIL`
 from an assertion (at any shell level) makes it exit non-zero, which `hack/chart-check-test.sh`
-(the `scripts` job) proves with planted failures. Anything that changes how a Koinon binary starts
+(the `scripts` job) proves with planted failures. It also compiles every CEL expression of every
+rendered `ValidatingAdmissionPolicy` (variables, matchConditions, validations, messageExpressions,
+auditAnnotations) with the API server's CEL environment (`hack/cmd/vapcheck`, no cluster): lint and
+kubeconform read an expression as a plain string, so a bad CEL literal would otherwise fail only at
+`helm install` (#1313). Anything that changes how a Koinon binary starts
 (a flag or env var it requires, a mount, a Secret key, an RBAC rule) is covered by
-`make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers);
+`make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers; the install modes run in shards, `make test-chart-smoke CHART_SMOKE_SHARD=core|external|kms`, each with its own 15 minute budget, and a new `charts/koinon/ci/*-values.yaml` must be added to a shard in `test/chartsmoke/shard_test.go`);
+`make test-fence-kind` (`test/e2e/kind/apiserver-egress.sh`: a throwaway kind cluster proves that the Substrate fence lets a control pod reach the API server by port and nothing else; the `e2e-kind` job runs it after the quickstart, #1172);
 extend it when you add a component or a startup input, since a unit test of the flag parser does
 not see what the chart really passes (old issue 284).
 

@@ -23,6 +23,15 @@ secrets:
           api: arn:aws:iam::000000000000:role/koinon-api-decrypt
           reconciler: arn:aws:iam::000000000000:role/koinon-reconciler-decrypt
           keyAdmin: arn:aws:iam::000000000000:role/koinon-key-admin-encrypt
+      # A key move (issue 688, 1298): the old key is the read-only second key. koinon-api, the reconciler
+      # and the key-admin Job start with the --read-only-* flags; the smoke test never calls the old key.
+      readOnly:
+        backend: awskms
+        awskms:
+          region: us-east-1
+          keyId: alias/koinon-kek-old
+          endpoint: https://localstack:4566
+          stsEndpoint: https://localstack:4566
       keyAdmin:
         addKey: smoke-added-kek
         # The Job runs with the recovery flag (#255); the Secret it just created has a working

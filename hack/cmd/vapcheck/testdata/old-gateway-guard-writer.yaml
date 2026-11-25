@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The gateway key guard as PR 1304 found it: the template line was
+#   expression: {{ $gwAdmin | quote }}
+# which renders a YAML string, not a CEL string literal. The API server refuses this policy
+# ("compilation failed: Syntax error: mismatched input ':'"); helm lint and kubeconform accept it
+# (issue 1313). A fixture, not a revert of the chart.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: koinon-koinon-gateway-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [secrets]
+  variables:
+    - name: writer
+      expression: "system:serviceaccount:koinon:koinon-key-admin"
+    - name: terminating
+      expression: "has(namespaceObject.status) && has(namespaceObject.status.phase) && namespaceObject.status.phase == 'Terminating'"
+  validations:
+    - expression: "(request.operation == 'DELETE' && variables.terminating) || request.userInfo.username == variables.writer"
+      reason: Forbidden

@@ -78,7 +78,10 @@ type StreamStateRequest struct {
 	// copy_id names one process incarnation of a gateway copy (for example pod UID plus a boot nonce),
 	// 1 to 253 characters. A copy must never reuse it after a restart: acks are recorded under it, and
 	// an ack under a reused id would count for a process that has not loaded the revision.
-	CopyId        string `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	CopyId string `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	// halves lists the halves this copy serves, and so acks. Empty means both (a client from before
+	// this field). The reconciler waits only for copies that serve a half.
+	Halves        []Half `protobuf:"varint,2,rep,packed,name=halves,proto3,enum=koinon.gateway.v1alpha1.Half" json:"halves,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -118,6 +121,13 @@ func (x *StreamStateRequest) GetCopyId() string {
 		return x.CopyId
 	}
 	return ""
+}
+
+func (x *StreamStateRequest) GetHalves() []Half {
+	if x != nil {
+		return x.Halves
+	}
+	return nil
 }
 
 type AckRevisionRequest struct {
@@ -1146,6 +1156,9 @@ type MCPTarget struct {
 	RemoteAgents []*RemoteAgent `protobuf:"bytes,11,rep,name=remote_agents,json=remoteAgents,proto3" json:"remote_agents,omitempty"`
 	// handle_key_file holds the key that signs the task and context handles of the built-in target.
 	HandleKeyFile string `protobuf:"bytes,12,opt,name=handle_key_file,json=handleKeyFile,proto3" json:"handle_key_file,omitempty"`
+	// ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask).
+	// The gateway sends it the agent header; an org's own server never gets that header.
+	Ask           bool `protobuf:"varint,13,opt,name=ask,proto3" json:"ask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1262,6 +1275,13 @@ func (x *MCPTarget) GetHandleKeyFile() string {
 		return x.HandleKeyFile
 	}
 	return ""
+}
+
+func (x *MCPTarget) GetAsk() bool {
+	if x != nil {
+		return x.Ask
+	}
+	return false
 }
 
 // RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decision 9).
@@ -1498,8 +1518,11 @@ func (x *ToolGrant) GetAll() bool {
 // EgressState is the org routes of the egress listener. The gateway merges them with its platform
 // route file. A route that fails to load closes all org routes; it never opens one.
 type EgressState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Routes        []*EgressRoute         `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Routes []*EgressRoute         `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
+	// credentials say where the gateway reads each credential that a route names, and how it sends it
+	// (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable).
+	Credentials   []*EgressCredential `protobuf:"bytes,2,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1541,6 +1564,106 @@ func (x *EgressState) GetRoutes() []*EgressRoute {
 	return nil
 }
 
+func (x *EgressState) GetCredentials() []*EgressCredential {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
+}
+
+// EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
+// 0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the
+// value. The envelope is bound to the org ID and the agent ID in the file name.
+type EgressCredential struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the name that the routes give in their credential field.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// org is the org slug and agent the agent's name at the gateway: the routes that name the
+	// credential must have the same org and agent.
+	Org   string `protobuf:"bytes,2,opt,name=org,proto3" json:"org,omitempty"`
+	Agent string `protobuf:"bytes,3,opt,name=agent,proto3" json:"agent,omitempty"`
+	File  string `protobuf:"bytes,4,opt,name=file,proto3" json:"file,omitempty"`
+	// scheme is how the value goes upstream in the Authorization header: "basic" (base64 of
+	// user ":" value) or "bearer".
+	Scheme string `protobuf:"bytes,5,opt,name=scheme,proto3" json:"scheme,omitempty"`
+	// user is the user name of the basic scheme, for example "x-access-token" for a forge token.
+	User          string `protobuf:"bytes,6,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressCredential) Reset() {
+	*x = EgressCredential{}
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressCredential) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressCredential) ProtoMessage() {}
+
+func (x *EgressCredential) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressCredential.ProtoReflect.Descriptor instead.
+func (*EgressCredential) Descriptor() ([]byte, []int) {
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *EgressCredential) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EgressCredential) GetOrg() string {
+	if x != nil {
+		return x.Org
+	}
+	return ""
+}
+
+func (x *EgressCredential) GetAgent() string {
+	if x != nil {
+		return x.Agent
+	}
+	return ""
+}
+
+func (x *EgressCredential) GetFile() string {
+	if x != nil {
+		return x.File
+	}
+	return ""
+}
+
+func (x *EgressCredential) GetScheme() string {
+	if x != nil {
+		return x.Scheme
+	}
+	return ""
+}
+
+func (x *EgressCredential) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
 // EgressRoute is one org route (gateway route.Route). It names a credential, never its value.
 type EgressRoute struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1573,7 +1696,7 @@ type EgressRoute struct {
 
 func (x *EgressRoute) Reset() {
 	*x = EgressRoute{}
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1585,7 +1708,7 @@ func (x *EgressRoute) String() string {
 func (*EgressRoute) ProtoMessage() {}
 
 func (x *EgressRoute) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1598,7 +1721,7 @@ func (x *EgressRoute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EgressRoute.ProtoReflect.Descriptor instead.
 func (*EgressRoute) Descriptor() ([]byte, []int) {
-	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{21}
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EgressRoute) GetName() string {
@@ -1703,9 +1826,10 @@ var File_koinon_gateway_v1alpha1_state_proto protoreflect.FileDescriptor
 
 const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\n" +
-	"#koinon/gateway/v1alpha1/state.proto\x12\x17koinon.gateway.v1alpha1\"-\n" +
+	"#koinon/gateway/v1alpha1/state.proto\x12\x17koinon.gateway.v1alpha1\"d\n" +
 	"\x12StreamStateRequest\x12\x17\n" +
-	"\acopy_id\x18\x01 \x01(\tR\x06copyId\"|\n" +
+	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x125\n" +
+	"\x06halves\x18\x02 \x03(\x0e2\x1d.koinon.gateway.v1alpha1.HalfR\x06halves\"|\n" +
 	"\x12AckRevisionRequest\x12\x17\n" +
 	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\x03R\brevision\x121\n" +
@@ -1786,7 +1910,7 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\x06models\x18\x02 \x03(\tR\x06models\"\x83\x01\n" +
 	"\bMCPState\x12<\n" +
 	"\atargets\x18\x01 \x03(\v2\".koinon.gateway.v1alpha1.MCPTargetR\atargets\x129\n" +
-	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xb0\x03\n" +
+	"\x05tools\x18\x02 \x03(\v2#.koinon.gateway.v1alpha1.AgentToolsR\x05tools\"\xc2\x03\n" +
 	"\tMCPTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x10\n" +
@@ -1800,7 +1924,8 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\abuiltin\x18\n" +
 	" \x01(\tR\abuiltin\x12I\n" +
 	"\rremote_agents\x18\v \x03(\v2$.koinon.gateway.v1alpha1.RemoteAgentR\fremoteAgents\x12&\n" +
-	"\x0fhandle_key_file\x18\f \x01(\tR\rhandleKeyFile\"\xcf\x02\n" +
+	"\x0fhandle_key_file\x18\f \x01(\tR\rhandleKeyFile\x12\x10\n" +
+	"\x03ask\x18\r \x01(\bR\x03ask\"\xcf\x02\n" +
 	"\vRemoteAgent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x19\n" +
@@ -1820,9 +1945,17 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\tToolGrant\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x14\n" +
 	"\x05tools\x18\x02 \x03(\tR\x05tools\x12\x10\n" +
-	"\x03all\x18\x03 \x01(\bR\x03all\"K\n" +
+	"\x03all\x18\x03 \x01(\bR\x03all\"\x98\x01\n" +
 	"\vEgressState\x12<\n" +
-	"\x06routes\x18\x01 \x03(\v2$.koinon.gateway.v1alpha1.EgressRouteR\x06routes\"\xe6\x03\n" +
+	"\x06routes\x18\x01 \x03(\v2$.koinon.gateway.v1alpha1.EgressRouteR\x06routes\x12K\n" +
+	"\vcredentials\x18\x02 \x03(\v2).koinon.gateway.v1alpha1.EgressCredentialR\vcredentials\"\x8e\x01\n" +
+	"\x10EgressCredential\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
+	"\x03org\x18\x02 \x01(\tR\x03org\x12\x14\n" +
+	"\x05agent\x18\x03 \x01(\tR\x05agent\x12\x12\n" +
+	"\x04file\x18\x04 \x01(\tR\x04file\x12\x16\n" +
+	"\x06scheme\x18\x05 \x01(\tR\x06scheme\x12\x12\n" +
+	"\x04user\x18\x06 \x01(\tR\x04user\"\xe6\x03\n" +
 	"\vEgressRoute\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05class\x18\x02 \x01(\tR\x05class\x12\x10\n" +
@@ -1867,7 +2000,7 @@ func file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_gateway_v1alpha1_state_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(Half)(0),                   // 0: koinon.gateway.v1alpha1.Half
 	(*StreamStateRequest)(nil),  // 1: koinon.gateway.v1alpha1.StreamStateRequest
@@ -1891,42 +2024,45 @@ var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(*AgentTools)(nil),          // 19: koinon.gateway.v1alpha1.AgentTools
 	(*ToolGrant)(nil),           // 20: koinon.gateway.v1alpha1.ToolGrant
 	(*EgressState)(nil),         // 21: koinon.gateway.v1alpha1.EgressState
-	(*EgressRoute)(nil),         // 22: koinon.gateway.v1alpha1.EgressRoute
-	nil,                         // 23: koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
+	(*EgressCredential)(nil),    // 22: koinon.gateway.v1alpha1.EgressCredential
+	(*EgressRoute)(nil),         // 23: koinon.gateway.v1alpha1.EgressRoute
+	nil,                         // 24: koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
 }
 var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
-	0,  // 0: koinon.gateway.v1alpha1.AckRevisionRequest.half:type_name -> koinon.gateway.v1alpha1.Half
-	6,  // 1: koinon.gateway.v1alpha1.StateUpdate.keys:type_name -> koinon.gateway.v1alpha1.Key
-	7,  // 2: koinon.gateway.v1alpha1.StateUpdate.model:type_name -> koinon.gateway.v1alpha1.ModelState
-	16, // 3: koinon.gateway.v1alpha1.StateUpdate.mcp:type_name -> koinon.gateway.v1alpha1.MCPState
-	21, // 4: koinon.gateway.v1alpha1.StateUpdate.egress:type_name -> koinon.gateway.v1alpha1.EgressState
-	5,  // 5: koinon.gateway.v1alpha1.Key.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	8,  // 6: koinon.gateway.v1alpha1.ModelState.limits:type_name -> koinon.gateway.v1alpha1.AgentLimit
-	10, // 7: koinon.gateway.v1alpha1.ModelState.providers:type_name -> koinon.gateway.v1alpha1.Provider
-	15, // 8: koinon.gateway.v1alpha1.ModelState.models:type_name -> koinon.gateway.v1alpha1.AgentModels
-	5,  // 9: koinon.gateway.v1alpha1.AgentLimit.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	9,  // 10: koinon.gateway.v1alpha1.AgentLimit.limit:type_name -> koinon.gateway.v1alpha1.Limit
-	11, // 11: koinon.gateway.v1alpha1.Provider.models:type_name -> koinon.gateway.v1alpha1.Model
-	12, // 12: koinon.gateway.v1alpha1.Model.thinking:type_name -> koinon.gateway.v1alpha1.Thinking
-	13, // 13: koinon.gateway.v1alpha1.Model.price:type_name -> koinon.gateway.v1alpha1.Price
-	14, // 14: koinon.gateway.v1alpha1.Price.tiers:type_name -> koinon.gateway.v1alpha1.PriceTier
-	5,  // 15: koinon.gateway.v1alpha1.AgentModels.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	17, // 16: koinon.gateway.v1alpha1.MCPState.targets:type_name -> koinon.gateway.v1alpha1.MCPTarget
-	19, // 17: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
-	18, // 18: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
-	5,  // 19: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
-	20, // 20: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
-	22, // 21: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
-	23, // 22: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
-	1,  // 23: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
-	2,  // 24: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
-	4,  // 25: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
-	3,  // 26: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
-	25, // [25:27] is the sub-list for method output_type
-	23, // [23:25] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	0,  // 0: koinon.gateway.v1alpha1.StreamStateRequest.halves:type_name -> koinon.gateway.v1alpha1.Half
+	0,  // 1: koinon.gateway.v1alpha1.AckRevisionRequest.half:type_name -> koinon.gateway.v1alpha1.Half
+	6,  // 2: koinon.gateway.v1alpha1.StateUpdate.keys:type_name -> koinon.gateway.v1alpha1.Key
+	7,  // 3: koinon.gateway.v1alpha1.StateUpdate.model:type_name -> koinon.gateway.v1alpha1.ModelState
+	16, // 4: koinon.gateway.v1alpha1.StateUpdate.mcp:type_name -> koinon.gateway.v1alpha1.MCPState
+	21, // 5: koinon.gateway.v1alpha1.StateUpdate.egress:type_name -> koinon.gateway.v1alpha1.EgressState
+	5,  // 6: koinon.gateway.v1alpha1.Key.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	8,  // 7: koinon.gateway.v1alpha1.ModelState.limits:type_name -> koinon.gateway.v1alpha1.AgentLimit
+	10, // 8: koinon.gateway.v1alpha1.ModelState.providers:type_name -> koinon.gateway.v1alpha1.Provider
+	15, // 9: koinon.gateway.v1alpha1.ModelState.models:type_name -> koinon.gateway.v1alpha1.AgentModels
+	5,  // 10: koinon.gateway.v1alpha1.AgentLimit.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	9,  // 11: koinon.gateway.v1alpha1.AgentLimit.limit:type_name -> koinon.gateway.v1alpha1.Limit
+	11, // 12: koinon.gateway.v1alpha1.Provider.models:type_name -> koinon.gateway.v1alpha1.Model
+	12, // 13: koinon.gateway.v1alpha1.Model.thinking:type_name -> koinon.gateway.v1alpha1.Thinking
+	13, // 14: koinon.gateway.v1alpha1.Model.price:type_name -> koinon.gateway.v1alpha1.Price
+	14, // 15: koinon.gateway.v1alpha1.Price.tiers:type_name -> koinon.gateway.v1alpha1.PriceTier
+	5,  // 16: koinon.gateway.v1alpha1.AgentModels.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	17, // 17: koinon.gateway.v1alpha1.MCPState.targets:type_name -> koinon.gateway.v1alpha1.MCPTarget
+	19, // 18: koinon.gateway.v1alpha1.MCPState.tools:type_name -> koinon.gateway.v1alpha1.AgentTools
+	18, // 19: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
+	5,  // 20: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
+	20, // 21: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
+	23, // 22: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
+	22, // 23: koinon.gateway.v1alpha1.EgressState.credentials:type_name -> koinon.gateway.v1alpha1.EgressCredential
+	24, // 24: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
+	1,  // 25: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
+	2,  // 26: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
+	4,  // 27: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
+	3,  // 28: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
+	27, // [27:29] is the sub-list for method output_type
+	25, // [25:27] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_koinon_gateway_v1alpha1_state_proto_init() }
@@ -1940,7 +2076,7 @@ func file_koinon_gateway_v1alpha1_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_gateway_v1alpha1_state_proto_rawDesc), len(file_koinon_gateway_v1alpha1_state_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   23,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
