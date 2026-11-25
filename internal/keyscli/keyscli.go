@@ -613,6 +613,11 @@ func (t *Tool) reachability(ctx context.Context, ks KeySet) {
 	} else {
 		_, _ = fmt.Fprintf(t.Out, "The key-wrapping key of the active KEK %s (%s) is reachable.\n", ks.Active, active)
 	}
+	if t.Wrappers.OnReadOnlyKey(active) {
+		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is still wrapped only by the read-only key (%s), not by the primary key. "+
+			"Finish the key move: add a KEK with the key-admin Job (secrets.kek.kms.keyAdmin.addKey), then keys activate, keys rewrap and keys retire. "+
+			"Remove the read-only key from the values only after that (%s).\n", ks.Active, active, project.SecretKeysDocURL)
+	}
 	if active.Backend == secretstore.BackendLocal && t.Wrappers.Primary().Backend() != secretstore.BackendLocal {
 		_, _ = fmt.Fprintf(t.Out, "WARNING: the active KEK %s is a local key but a KMS (%s) is configured. Ask the key-admin Job to add a KEK, then activate it.\n", ks.Active, t.Wrappers.Primary().Backend())
 	}

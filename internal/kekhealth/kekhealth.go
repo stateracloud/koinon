@@ -179,6 +179,15 @@ func (m *Monitor) Observe(ctx context.Context, l secretstore.Loaded) {
 			log.Warn("the active key-encryption key is a local one but a KMS is configured: run keys add and keys activate with the key-admin Job", "kek", l.Active)
 		}
 	}
+	if m.Wrappers.OnReadOnlyKey(active) {
+		// After a key move: the active KEK is still wrapped by the old key, which only unwraps.
+		if m.throttle("read-only-active", warnEvery) {
+			log.Warn("the active key-encryption key is still wrapped only by the read-only key: finish the key move (add a KEK with the key-admin Job, activate it, rewrap, retire the old ones) before you remove the read-only key ("+project.SecretKeysDocURL+")",
+				"kek", l.Active, "wrapped_by", active.String())
+		}
+	} else {
+		m.clearThrottle("read-only-active")
+	}
 	if m.Recorder == nil || l.Err != nil {
 		return
 	}
