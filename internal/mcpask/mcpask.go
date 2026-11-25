@@ -243,9 +243,8 @@ func (s *Server) serverFor(r *http.Request, serverName string) *mcp.Server {
 	}
 	for _, t := range tools {
 		srv.AddTool(&mcp.Tool{
-			Name: t.Name,
-			Description: "Needs human approval: returns \"approval requested: id=...\" at once and your run pauses; once approved, " +
-				"Koinon calls the server exactly as given and you get the result when the run resumes. " + t.Description,
+			Name:        t.Name,
+			Description: mcpservers.AskToolNote + t.Description,
 			InputSchema: json.RawMessage(t.InputSchema),
 		}, s.callTool(serverName, t.Name))
 	}

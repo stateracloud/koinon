@@ -4,12 +4,16 @@
 # Chart assertions: wrapping the KEKs with a KMS and the key-admin Job (ADR 0085 decision 12, old issue 416).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
+# These assertions are about the KEK. The gateway recipient key (on by default with the koinon MCP driver,
+# #1239) has a key-admin Job of its own, with the same component label; its checks are in 53-koinon-mcp-gateway.sh
+# and the gateway key checks. So the gateway key is off here.
+nogwkey=(--set gateway.mcp.koinon.recipientKey.enabled=false)
 kms=(--set secrets.kek.kms.backend=openbao --set secrets.kek.kms.openbao.address=https://bao.example:8200
-	--set secrets.kek.kms.openbao.key=koinon-kek)
+	--set secrets.kek.kms.openbao.key=koinon-kek "${nogwkey[@]}")
 ka=(--show-only templates/key-admin.yaml)
 
 # Local is the default: no Job, no KMS settings, koinon-api creates the KEK Secret as before.
-lacks "no key-admin objects with the local KEK" 'koinon-key-admin'
+lacks "no key-admin objects with the local KEK" 'koinon-key-admin' "${nogwkey[@]}"
 lacks "no KMS env with the local KEK" 'KOINON_KEK_BACKEND|KOINON_OPENBAO_'
 env_is KOINON_KEK_CREATE '"true"'
 
@@ -60,7 +64,7 @@ l1=$(job_name "${long[@]}") l2=$(job_name "${long[@]}" --set secrets.kek.kms.key
 # The Job accepts no connections, as the migrate Job.
 np=$(render --show-only templates/networkpolicy.yaml "${kms[@]}")
 grep -A20 '^  name: koinon-key-admin$' <<<"$np" | hit 'policyTypes: \[Ingress\]' || fail "key-admin NetworkPolicy denies ingress"
-lacks "no key-admin NetworkPolicy with the local KEK" 'name: koinon-key-admin$' --show-only templates/networkpolicy.yaml
+lacks "no key-admin NetworkPolicy with the local KEK" 'name: koinon-key-admin$' "${nogwkey[@]}" --show-only templates/networkpolicy.yaml
 
 # The services decrypt only: each signs in as its own role, and koinon-api no longer creates the
 # KEK Secret (only the Job can wrap its first KEK).

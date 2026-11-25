@@ -60,13 +60,18 @@ const (
 // OpenShell adds a provider profile's endpoints to the sandbox's network allowlist (spike
 // steps 5 and 7), so the sandbox policy itself needs no rule for it.
 func (r *Reconciler) profile(harness string, f Harness) execution.ProviderProfile {
-	return GatewayProfile(harness, f, r.cfg.Gateway, len(r.cfg.ToolServers) > 0)
+	return GatewayProfile(harness, f, r.cfg.Gateway, r.cfg.MCPGateway, len(r.cfg.ToolServers) > 0)
 }
 
 // GatewayProfile is the profile the reconciler renders for harness, with agentgateway at gw and
-// the /mcp route allowed when tools is set. Exported for the escape suite, which attaches the
+// the /mcp route allowed when tools is set: on mcp when it is set (koinon-gateway serves the agents'
+// MCP path, gateway.mcp.driver=koinon), else on gw. Exported for the escape suite, which attaches the
 // same profile to a sandbox on a real gateway.
-func GatewayProfile(harness string, f Harness, gw Endpoint, tools bool) execution.ProviderProfile {
+//
+// The one credential of the profile (the agent's gateway key) goes to every endpoint of the profile,
+// so the harness's bearer placeholder reaches koinon-gateway too, which authenticates the same agent
+// keys. Both endpoints are inspected at L7 and enforced; no other path of either is open.
+func GatewayProfile(harness string, f Harness, gw, mcp Endpoint, tools bool) execution.ProviderProfile {
 	// One route per model format (ADR 0069 decision 6), from the same table the gateway renders:
 	// the same host, credential and enforcement. The profile is per harness, so adding a model changes
 	// nothing here. Anything else on the gateway (/v1/messages/count_tokens included) stays closed.
@@ -74,14 +79,31 @@ func GatewayProfile(harness string, f Harness, gw Endpoint, tools bool) executio
 	for _, p := range gateway.RoutePaths() {
 		allow = append(allow, execution.L7Rule{Method: "POST", Path: p})
 	}
-	if tools {
-		// MCP Streamable HTTP on agentgateway's /mcp route (agentd passes <gateway>/mcp to
-		// the harness): POST for messages, GET for the server stream, DELETE to end the
-		// session. Which tools are callable is agentgateway's CEL allowlist.
-		allow = append(allow,
-			execution.L7Rule{Method: "POST", Path: "/mcp"},
-			execution.L7Rule{Method: "GET", Path: "/mcp"},
-			execution.L7Rule{Method: "DELETE", Path: "/mcp"})
+	// MCP Streamable HTTP on the gateway's /mcp route (agentd passes that URL to the harness): POST for
+	// messages, GET for the server stream, DELETE to end the session. Which tools are callable is the
+	// gateway's grant list.
+	mcpRules := []execution.L7Rule{
+		{Method: "POST", Path: "/mcp"},
+		{Method: "GET", Path: "/mcp"},
+		{Method: "DELETE", Path: "/mcp"},
+	}
+	ownMCP := mcp.Host != "" && mcp.Port != 0
+	if tools && !ownMCP {
+		allow = append(allow, mcpRules...)
+	}
+	endpoints := []execution.Endpoint{{
+		Host:     gw.Host,
+		Port:     gw.Port,
+		Protocol: "rest",
+		Allow:    allow,
+	}}
+	if tools && ownMCP {
+		endpoints = append(endpoints, execution.Endpoint{
+			Host:     mcp.Host,
+			Port:     mcp.Port,
+			Protocol: "rest",
+			Allow:    mcpRules,
+		})
 	}
 	return execution.ProviderProfile{
 		ID:          profilePrefix + harness,
@@ -95,13 +117,8 @@ func GatewayProfile(harness string, f Harness, gw Endpoint, tools bool) executio
 			AuthStyle:  "bearer",
 			HeaderName: "authorization",
 		}},
-		Endpoints: []execution.Endpoint{{
-			Host:     gw.Host,
-			Port:     gw.Port,
-			Protocol: "rest",
-			Allow:    allow,
-		}},
-		Binaries: slices.Clone(f.Binaries),
+		Endpoints: endpoints,
+		Binaries:  slices.Clone(f.Binaries),
 	}
 }
 

@@ -88,6 +88,14 @@ var _ = Describe("koinon-agentd's startup", func() {
 		})).To(Succeed())
 	})
 
+	It("takes the agents' MCP URL from a flag or the environment, and refuses one that carries credentials (#1239)", func() {
+		Expect(start(map[string]string{"KOINON_AGENT_MCP_URL": "http://koinon-mcp-gateway.koinon.svc:8080/mcp"})).To(Succeed())
+		Expect(start(nil, "--agent-mcp-url", "http://koinon-mcp-gateway.koinon.svc:8080/mcp")).To(Succeed())
+		Expect(start(map[string]string{"KOINON_AGENT_MCP_URL": "http://user:pw@mcp:8080/mcp"})).To(MatchError(ContainSubstring("--agent-mcp-url must not carry user info")))
+		Expect(start(map[string]string{"KOINON_AGENT_MCP_URL": "http://mcp:8080/mcp?key=x"})).To(MatchError(ContainSubstring("--agent-mcp-url")))
+		Expect(start(nil, "--agent-mcp-url", "mcp:8080")).To(MatchError(ContainSubstring("--agent-mcp-url must be an http or https URL")))
+	})
+
 	It("takes the drain deadline from a flag or the environment, and refuses one that does not parse (ADR 0085)", func() {
 		Expect(start(map[string]string{"KOINON_DRAIN_DEADLINE": "2m"})).To(Succeed())
 		Expect(start(nil, "--drain-deadline", "90s")).To(Succeed())

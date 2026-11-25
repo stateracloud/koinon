@@ -221,6 +221,12 @@ var (
 // server tool of this name is not offered in the ask tier.
 const AskStatusTool = "get_approval_status"
 
+// AskToolNote starts the description of each ask-tier tool that the approval proxy (package mcpask)
+// offers. It is Koinon's own fixed text. The gateway's tool-list check adds it to the approved text of
+// the tool, so the agent sees the same text through either driver.
+const AskToolNote = "Needs human approval: returns \"approval requested: id=...\" at once and your run pauses; once approved, " +
+	"Koinon calls the server exactly as given and you get the result when the run resumes. "
+
 // AskSuffix ends the name of the gateway target that offers a server's ask-tier tools.
 const AskSuffix = "-ask"
 

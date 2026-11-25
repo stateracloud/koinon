@@ -114,6 +114,7 @@ func Register(env Env) {
 	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
+	readyPromptSpec(env)
 	guardSpec(env)
 	leakCanarySpec(env)
 	usageSpec(env)
@@ -622,21 +623,6 @@ func llmSpec(env Env) {
 			res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "github_get_approval_status"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsError).To(BeFalse())
-		})
-
-		It("lists the readiness prompt to every agent, and no other prompt", func(ctx SpecContext) {
-			for _, key := range []string{keyA.Material, keyB.Material} {
-				s, err := mcpSession(ctx, key)
-				Expect(err).NotTo(HaveOccurred())
-				res, err := s.ListPrompts(ctx, nil)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPromptExposed)))
-				_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPromptExposed})
-				Expect(err).NotTo(HaveOccurred())
-				_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: "github_hidden_prompt"})
-				Expect(err).To(HaveOccurred())
-				_ = s.Close()
-			}
 		})
 
 		It("tells the target which agent calls, overwriting a client-supplied header", func(ctx SpecContext) {

@@ -145,7 +145,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		gwBinaries := append(slices.Clone(reconciler.DefaultBinaries[harness.OpenCode]), "/usr/bin/curl")
 		key := reconciler.GatewayProfile(harness.OpenCode,
 			reconciler.Harness{Binaries: gwBinaries},
-			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
+			reconciler.Endpoint{Host: gwHost, Port: 4000}, reconciler.Endpoint{}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
 			Name: keyRecord, Profile: key, Credentials: map[string]string{reconciler.GatewayKeyEnvVar: gatewayKey},

@@ -544,6 +544,26 @@ var _ = Describe("Org MCP servers", func() {
 			})
 		})
 
+		It("lists tools through koinon-gateway, not agentgateway, when koinon-gateway serves /mcp (#1239)", func(ctx SpecContext) {
+			s := server(ctx, org, "wiki", "", nil)
+			// agentgateway lists nothing for the server, as it does for a target whose credential is
+			// sealed to the gateway key (ADR 0097 decision 12).
+			agwHost, agwPort, stopAgw := fakeGateway(slug + "-wiki")
+			DeferCleanup(stopAgw)
+			host, port, stop := fakeGateway(slug+"-wiki", "read")
+			DeferCleanup(stop)
+			rr := probing(ctx, agwHost, agwPort, func(c *reconciler.Config) {
+				c.MCPGateway = reconciler.Endpoint{Host: host, Port: uint32(port)}
+			})
+			Expect(rr.ReconcileAll(ctx)).To(Succeed())
+			rr.ProbeAll(ctx)
+
+			Expect(tiers(ctx, s)).To(HaveKey("read"))
+			after, err := svc.Get(ctx, org, s.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after.Health).To(Equal("healthy"))
+		})
+
 		It("syncs the tools a server lists into the ask tier and marks the server healthy", func(ctx SpecContext) {
 			s := server(ctx, org, "wiki", "", nil)
 			host, port, stop := fakeGateway(slug+"-wiki", "read", "write")

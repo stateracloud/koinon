@@ -193,8 +193,11 @@ var _ = Describe("Leak guard exfiltration", Label("escape", "openshell", "leakgu
 		url = fmt.Sprintf("http://%s:%d/mcp", host, port)
 
 		binaries := append(slices.Clone(reconciler.DefaultBinaries[harness.OpenCode]), "/usr/bin/curl")
+		// One gateway serves /mcp here (the host the runner names), so the profile carries the /mcp rules on
+		// that endpoint, the shape of gateway.mcp.driver=agentgateway. The koinon driver's shape (a second
+		// endpoint for /mcp) has its unit spec in internal/reconciler.
 		profile := reconciler.GatewayProfile(harness.OpenCode, reconciler.Harness{Binaries: binaries},
-			reconciler.Endpoint{Host: host, Port: uint32(port)}, true)
+			reconciler.Endpoint{Host: host, Port: uint32(port)}, reconciler.Endpoint{}, true)
 		profile.ID = fmt.Sprintf("koinon-escape-mcp-%d", n)
 		g.provider(ctx, execution.Provider{
 			Name: record, Profile: profile, Credentials: map[string]string{reconciler.GatewayKeyEnvVar: envOr("KOINON_ESCAPE_MCP_KEY", "")},

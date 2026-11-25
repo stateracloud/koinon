@@ -26,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/mcpguard"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/test/e2e/e2eclient"
 	"github.com/stateracloud/koinon/test/scenarios"
 )
@@ -39,9 +40,11 @@ const (
 
 type fakeMCPRecord struct {
 	Method              string `json:"method"`
+	Path                string `json:"path"`
 	MCPMethod           string `json:"mcpMethod"`
 	Authorized          bool   `json:"authorized"`
 	Agent               string `json:"agent"`
+	UserAgent           string `json:"userAgent"`
 	ClientAuthorization bool   `json:"clientAuthorization"`
 	Tool                string `json:"tool"`
 	Args                string `json:"args"`
@@ -155,14 +158,15 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(recs).NotTo(BeEmpty())
 	anonymous := 0
 	for _, r := range recs {
-		if r.Agent == "" {
-			// koinon-api's add-time OAuth check (the refused "oauthy" server, on the plain port): direct, and
-			// it carries no credential, and it does not go
-			// through the gateway. An empty Agent marks it only while the prober and the live check use
-			// agentgateway. koinon-gateway sends no agent header to an org's server (#1235): a change that
-			// moves either one to koinon-gateway must tell this check apart by its path instead (#1239 does
-			// not move the prober).
+		if r.Path == "/oauth-mcp" {
+			Expect(r.UserAgent).To(Equal(mcpservers.PreflightUserAgent), "only the add-time check asks the OAuth server: %+v", r)
+		}
+		if r.UserAgent == mcpservers.PreflightUserAgent {
+			// koinon-api's add-time check (the refused "oauthy" server, and each added server): direct, it
+			// carries no credential, and it does not go through the gateway. Its User-Agent tells it apart:
+			// an empty agent header does not, because koinon-gateway sends none to an org's server (#1235).
 			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
+			Expect(r.Agent).To(BeEmpty(), "the add-time check does not go through the gateway: %+v", r)
 			anonymous++
 			continue
 		}
@@ -170,8 +174,18 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		Expect(r.ClientAuthorization).To(BeFalse(), "the gateway's own key must not reach the server: %+v", r)
 	}
 	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
-	// The reconciler's probe goes through agentgateway with both drivers, also after #1239 (#1235).
-	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
+	// The reconciler's probe lists the tools through koinon-gateway with driver koinon, and through
+	// agentgateway with the fallback (#1239). Only agentgateway sends the probe agent's header (#1235).
+	if probe := probeMCPPath(ctx, kubectl); probe.koinon {
+		Expect(recs).To(HaveEach(HaveField("Agent", BeEmpty())),
+			"koinon-gateway sends no agent header to an org's server, also not on the probe (#1235)")
+		// The probe did run through koinon-gateway: the server is healthy with synced tools (above), and
+		// before any agent call it saw a credentialed /mcp request, which is not the add-time check.
+		Expect(recs).To(ContainElement(SatisfyAll(HaveField("Path", "/mcp"), HaveField("Authorized", true))),
+			"the probe's requests through koinon-gateway")
+	} else {
+		Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
+	}
 
 	By("a second server with insecureSkipVerify and no CA completes the real TLS handshake through the gateway")
 	// The fake's certificate is signed by a per-run CA that is in no root store, so only the skipped
@@ -194,7 +208,14 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		g.Expect(s.Health).To(Equal("healthy"), s.HealthReason)
 		g.Expect(s.ToolsSyncedAt).NotTo(BeNil())
 	}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-	Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
+	if probe := probeMCPPath(ctx, kubectl); probe.koinon {
+		// koinon-gateway sends no agent header (#1235). The healthy server with synced tools shows the
+		// probe's handshake passed; the fake also saw new credentialed /mcp requests from the gateway.
+		Expect(len(credentialedMCP(fakeMCPRequests(ctx, fake)))).To(BeNumerically(">", len(credentialedMCP(recs))),
+			"the scratch probe's requests through koinon-gateway")
+	} else {
+		Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
+	}
 
 	By("an admin confirms read_item as auto and write_item as ask, and allows the agent")
 	setToolTierE2E(ctx, admin, srv.ID, "read_item", "auto")
@@ -368,12 +389,15 @@ func leakGuardExfilE2E(ctx context.Context, admin func(context.Context, string, 
 	// The same attack from a real sandbox (test/escape, label leakguard): the install is guarded and both
 	// tools are auto right now, which is why the suite runs from here and not as a job of its own (#348).
 	// test/e2e/run.sh sets the hook when ESCAPE_MCP=1.
+	// The sandbox dials the install's MCP path: koinon-gateway with driver koinon (the sandbox profile allows
+	// /mcp only there), agentgateway with the fallback (#1239).
 	if hook := os.Getenv("KOINON_E2E_ESCAPE_HOOK"); hook != "" {
 		By("the same attack from a sandbox is stopped too (test/escape, label leakguard)")
+		path := installMCPPath(ctx, os.Getenv("KOINON_E2E_KUBECTL"))
 		cmd := exec.CommandContext(ctx, hook)
 		cmd.Env = append(os.Environ(),
-			"KOINON_ESCAPE_MCP_HOST=koinon-gateway.koinon.svc.cluster.local",
-			"KOINON_ESCAPE_MCP_PORT=8080",
+			"KOINON_ESCAPE_MCP_HOST="+strings.TrimPrefix(path.service, "svc/")+".koinon.svc.cluster.local",
+			"KOINON_ESCAPE_MCP_PORT="+path.port,
 			fmt.Sprintf("KOINON_ESCAPE_MCP_KEY=%s", key),
 			"KOINON_ESCAPE_MCP_RECEIVER_URL="+fake,
 			"KOINON_ESCAPE_MCP_RECEIVER_CA="+os.Getenv("KOINON_E2E_FAKEMCP_CA"),
@@ -442,7 +466,7 @@ func installMCPPath(ctx context.Context, kubectl string) mcpPath {
 
 // agentMCPPath is the MCP path an agent in a sandbox uses. koinon-agentd gives the agent its MCP URL from
 // its environment, so the path is koinon-gateway exactly when one of those values names the
-// koinon-mcp-gateway Service. Until #1239 moves the agent's MCP URL, it is agentgateway for every driver.
+// koinon-mcp-gateway Service: with driver koinon the chart sets KOINON_AGENT_MCP_URL to it (#1239).
 func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 	GinkgoHelper()
 	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
@@ -453,6 +477,19 @@ func agentMCPPath(ctx context.Context, kubectl string) mcpPath {
 		return mcpPath{koinon: true}
 	}
 	return mcpPath{}
+}
+
+// probeMCPPath is the MCP path of the reconciler's tool probe: koinon-gateway when the reconciler's config
+// names koinon-gateway's MCP listener (gateway.mcpUrl, set with driver koinon, #1239), else
+// agentgateway.
+func probeMCPPath(ctx context.Context, kubectl string) mcpPath {
+	GinkgoHelper()
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "configmap", "koinon-config",
+		"-o", "jsonpath={.data}").CombinedOutput()
+	Expect(err).NotTo(HaveOccurred(), "kubectl get configmap koinon-config: %s", out)
+	Expect(strings.TrimSpace(string(out))).NotTo(BeEmpty(), "the data of configmap koinon-config")
+	return mcpPath{koinon: strings.Contains(string(out), "mcpUrl: http://koinon-mcp-gateway.")}
 }
 
 // approvedCallMCPPath is the MCP path of a call a human approved: koinon-api makes it to
@@ -524,24 +561,40 @@ func setToolSinkE2E(ctx context.Context, admin func(context.Context, string, str
 }
 
 // guardDecisions reads koinon_api_mcp_guard_decisions_total for one decision, reason and sink class from
-// koinon-api, where the leak guard runs behind the default gateway driver (agentgateway) with one
-// replica. The counter has fixed labels (ADR 0023), so the e2e compares it before and after a task.
+// the processes that run the leak guard on the agent's MCP path. The counter has fixed labels (ADR 0023),
+// so the e2e compares it before and after a task.
 func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass string) float64 {
 	GinkgoHelper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, "deploy/koinon-api", "9090")+"/metrics", nil)
-	Expect(err).NotTo(HaveOccurred())
-	res, err := http.DefaultClient.Do(req)
-	Expect(err).NotTo(HaveOccurred())
-	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
-	Expect(err).NotTo(HaveOccurred())
+	// The guard counts its decisions in the process that runs it: koinon-api behind agentgateway, and
+	// each koinon-mcp-gateway pod with driver koinon (#1239). A call goes to one pod, so the sum counts it once.
+	targets := []string{"deploy/koinon-api"}
+	port := "9090"
+	if agentMCPPath(ctx, kubectl).koinon {
+		out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "pods", "-l", "app.kubernetes.io/component=mcp-gateway",
+			"--field-selector=status.phase=Running", "-o", "name").CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), "kubectl get pods koinon-mcp-gateway: %s", out)
+		targets = strings.Fields(string(out))
+		Expect(targets).NotTo(BeEmpty(), "a running koinon-mcp-gateway pod")
+		port = "15020"
+	}
 	re := regexp.MustCompile(`(?m)^koinon_api_mcp_guard_decisions_total\{decision="` + regexp.QuoteMeta(decision) +
 		`",reason="` + regexp.QuoteMeta(reason) + `",sink_class="` + regexp.QuoteMeta(sinkClass) + `"\} (\S+)$`)
-	m := re.FindSubmatch(b)
-	Expect(m).NotTo(BeNil(), "koinon-api exports the guard's decisions for %s/%s/%s", decision, reason, sinkClass)
-	n, err := strconv.ParseFloat(string(m[1]), 64)
-	Expect(err).NotTo(HaveOccurred())
-	return n
+	var sum float64
+	for _, t := range targets {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, t, port)+"/metrics", nil)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		b, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		Expect(err).NotTo(HaveOccurred())
+		m := re.FindSubmatch(b)
+		Expect(m).NotTo(BeNil(), "%s exports the guard's decisions for %s/%s/%s", t, decision, reason, sinkClass)
+		n, err := strconv.ParseFloat(string(m[1]), 64)
+		Expect(err).NotTo(HaveOccurred())
+		sum += n
+	}
+	return sum
 }
 
 // setToolTierE2E sets a tool's tier as the console does (e2eclient.SetToolTier): an unreviewed tool stays
@@ -553,4 +606,15 @@ func setToolTierE2E(ctx context.Context, admin func(context.Context, string, str
 		return code, b, nil
 	}, serverID, tool, tier)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// credentialedMCP returns the /mcp requests that carried the credential and are not the add-time check.
+func credentialedMCP(recs []fakeMCPRecord) []fakeMCPRecord {
+	var out []fakeMCPRecord
+	for _, r := range recs {
+		if r.Path == "/mcp" && r.Authorized && r.UserAgent != mcpservers.PreflightUserAgent {
+			out = append(out, r)
+		}
+	}
+	return out
 }

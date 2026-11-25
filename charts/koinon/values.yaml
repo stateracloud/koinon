@@ -369,23 +369,24 @@ gateway:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-  # The MCP path (ADR 0097 step 2, issue #278). agentgateway: agentgateway serves MCP (the default, and the
-  # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
-  # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
-  # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
-  # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
-  # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
+  # The MCP path (ADR 0097 step 2, issues #278 and #1239). koinon (the default): koinon-gateway serves the
+  # MCP path as its own Deployment and Service, next to agentgateway, which keeps the LLM path. It follows the
+  # State stream of koinon-api, so it needs gateway.mode standalone. With koinon, these MCP calls go to
+  # koinon-gateway: the approved calls of koinon-api (KOINON_GATEWAY_MCP_URL), the agents' MCP calls
+  # (koinon-agentd's KOINON_AGENT_MCP_URL, and the sandbox network rule for /mcp), and koinon-api's live check
+  # of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL). The pod has its own database login
   # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
-  # Disclosure: agentgateway sends the agent header (X-Koinon-Agent, the org and agent ID) to every MCP server
-  # that it calls, also to a server an org registered. koinon-gateway sends it only to Koinon's own tool
-  # servers (ADR 0097 decision 5, issue #1235). Until issue #1239, an agent's own MCP calls go through
-  # agentgateway with both drivers, so an org's server sees the agent with both drivers. Until then, the driver
-  # koinon removes the header only from the calls that a human approved. With driver agentgateway, all MCP
-  # calls carry it. The reconciler's probe goes through agentgateway with both drivers; issue #1239 does not
-  # move it. Its header names a probe agent, not a real agent.
-  # Do not make this the default before issue #1132 (tools/list pinning) is closed.
+  # agentgateway: the fallback. agentgateway serves all MCP calls, as before #1239. Set it with
+  # gateway.mode kubernetes. agentgateway cannot open the credentials that koinon-api sealed to the gateway key
+  # (recipientKey below, envelope v2). `keys seal-mcp --to-v1` refuses today, so before you move back, set each
+  # such credential again in the UI or API.
+  # Disclosure: koinon-gateway sends the agent header (X-Koinon-Agent, the org and agent ID) only to Koinon's
+  # own tool servers, never to a server an org registered (ADR 0097 decision 5, issue #1235). With driver
+  # koinon, an agent's own MCP calls, the calls that a human approved and the reconciler's probe all go through
+  # koinon-gateway, so an org's server never sees the header. agentgateway sends the header to every MCP
+  # server that it calls: with driver agentgateway, an org's server sees the agent on every call.
   mcp:
-    driver: agentgateway
+    driver: koinon
     koinon:
       image:
         repository: gateway
@@ -439,7 +440,9 @@ gateway:
             # automatic token). Empty is the API server's default audience.
             audience: ""
           awskms:
-            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). It MUST differ from
+            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). Required when the key's KMS
+            # is awskms: with the default driver (koinon) and recipientKey on, the render fails until you set it.
+            # It MUST differ from
             # secrets.kek.kms.awskms.keyId. Policies: the gateway role kms:Decrypt on it; the key-admin role
             # kms:Encrypt and kms:Decrypt. With IRSA set both ARNs, the chart puts each on its ServiceAccount.
             keyId: ""
