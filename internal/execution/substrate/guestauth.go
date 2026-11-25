@@ -5,6 +5,7 @@ package substrate
 import (
 	"context"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -132,10 +133,25 @@ func (d *Driver) isBound(k key, uid string) bool {
 // memory snapshot: a restore of the snapshot then names this actor in koinon_prev, whatever the
 // actor itself was restored from. A guest without the front (an image from before issue #1309)
 // answers Unimplemented and would accept unsigned calls from agent code: the driver refuses it.
+// Like startProcess, it retries while the guest is not reachable yet (Unavailable): an actor that
+// was just started or resumed runs before its front listens. It does not wait on the gate, because
+// SnapshotSandbox calls it while it holds the gate closed.
 func (d *Driver) bind(ctx context.Context, op string, k key, uid string) error {
 	bctx, cancel := context.WithTimeout(ctx, d.cfg.GuestReadyTimeout)
 	defer cancel()
-	err := d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{})
+	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
+	delay := d.cfg.PollInterval
+	var err error
+	for {
+		err = d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{})
+		if status.Code(err) != codes.Unavailable || time.Now().After(deadline) {
+			break
+		}
+		if sleep(bctx, delay) != nil {
+			break // the deadline or the caller ended the wait: report the last guest error
+		}
+		delay = min(delay*2, 8*d.cfg.PollInterval)
+	}
 	if status.Code(err) == codes.Unimplemented {
 		return fail(op, execution.ErrFailedPrecondition,
 			"sandbox %s: the guest does not check guest API tokens; the image has no koinon-guest-front (issue #1309)", k)

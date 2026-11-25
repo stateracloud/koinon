@@ -134,6 +134,9 @@ var _ = Describe("the guest API token", func() {
 	})
 
 	It("binds a restored sandbox that no call reached before a snapshot of it while suspended", func(ctx SpecContext) {
+		// A resume returns before the guest listens: Bind must wait for it, not fail Unavailable.
+		latency = 50 * time.Millisecond
+		DeferCleanup(func() { latency = 0 })
 		d, cl := newDriver()
 		ready(ctx, d, "a")
 		snap, err := d.SnapshotSandbox(ctx, ws, "a")

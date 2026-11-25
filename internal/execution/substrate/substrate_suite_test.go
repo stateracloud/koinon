@@ -35,10 +35,14 @@ var noSigner bool
 // unguarded makes newDriver start a fake Substrate whose guest has no guest front.
 var unguarded bool
 
+// latency is the boot and resume time of the fake's actors (fakeate.Cluster.Latency; zero is 1 ms).
+var latency time.Duration
+
 // newDriver starts a fake Substrate and returns a driver on it, with the workspace made.
 func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	cl := fakeate.New()
 	cl.Unguarded = unguarded
+	cl.Latency = latency
 	control, router, err := cl.Start()
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(cl.Stop)
