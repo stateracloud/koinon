@@ -163,3 +163,6 @@ func WorkingWithDataSaved(tools ...string) string { return workingWithDataFor(to
 
 // ToolName is the name a tool call is traced under.
 var ToolName = toolName
+
+// WriteActorTokenScript is the script that writes the actor token file in the sandbox.
+const WriteActorTokenScript = writeActorTokenScript

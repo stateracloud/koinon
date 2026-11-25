@@ -141,7 +141,7 @@ spec:
             {{- if $egress }}
             # The egress listener (#1086 part C2): the forge routes of the State stream, behind the actor token.
             - --egress-addr=:{{ int $eg.port }}
-            - --actor-token-issuer={{ $eg.actorToken.issuer }}
+            - {{ printf "--actor-token-issuer=%s" $eg.actorToken.issuer | quote }}
             - --actor-token-keys-dir=/etc/koinon/actor-token-keys
             {{- with concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
             - --egress-allowed-hosts={{ join "," . }}

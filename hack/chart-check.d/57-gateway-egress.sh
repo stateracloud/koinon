@@ -30,7 +30,7 @@ fi
 
 # The gateway: its own listener and Service port, the issuer, the namespace for the dialer, and the public key only.
 has "the gateway serves the egress listener" '--egress-addr=:8081$' "${eg[@]}" "${eg_gw[@]}"
-has "the gateway checks the actor token issuer" '--actor-token-issuer=koinon-agentd$' "${eg[@]}" "${eg_gw[@]}"
+has "the gateway checks the actor token issuer" '--actor-token-issuer=koinon-agentd"$' "${eg[@]}" "${eg_gw[@]}"
 has "the gateway reads the actor token keys" '--actor-token-keys-dir=/etc/koinon/actor-token-keys$' "${eg[@]}" "${eg_gw[@]}"
 has "the gateway is told its namespace" 'fieldPath: metadata.namespace$' "${eg[@]}" "${eg_gw[@]}"
 has "the egress Service port" 'targetPort: egress$' "${eg[@]}" "${eg_gw[@]}"
@@ -69,3 +69,9 @@ has "the reconciler is told the egress URL" 'egressUrl: http://koinon-mcp-gatewa
 # Network: sandboxes reach the egress port (as agentgateway's llm port), the MCP port stays koinon-api's only.
 has "sandboxes may reach the egress port" '^        - port: egress$' "${eg[@]}" --show-only templates/networkpolicy.yaml
 lacks "no egress port in the network policy by default" 'port: egress$' --set gateway.mcp.driver=koinon --show-only templates/networkpolicy.yaml
+
+# Substrate: the worker namespace reaches koinon-gateway's MCP pods on the egress port only, and only with the listener on.
+has "Substrate workers reach the egress port" 'port: 8081, protocol: TCP}$' "${wsub[@]}" "${eg[@]}" \
+  --show-only templates/substrate-networkpolicy.yaml
+lacks "Substrate workers do not reach koinon-gateway's MCP pods by default" 'component: mcp-gateway$' "${wsub[@]}" \
+  --set gateway.mcp.driver=koinon --show-only templates/substrate-networkpolicy.yaml

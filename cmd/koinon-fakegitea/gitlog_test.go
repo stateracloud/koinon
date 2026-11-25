@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 )
 
@@ -32,6 +33,10 @@ var _ = Describe("the git request record (#1086 part C2)", func() {
 			return w.Code
 		}
 		Expect(serve("", "")).To(Equal(http.StatusUnauthorized))
+		// A request with an actor token header: the record keeps only that it was there.
+		r := httptest.NewRequest(http.MethodGet, "/koinon-demo/hello.git/info/refs?service=git-upload-pack", nil)
+		r.Header.Set(route.TokenHeader, "koinon_test_not-a-real-token")
+		h.ServeHTTP(httptest.NewRecorder(), r)
 		Expect(serve(fakegitea.DefaultLogin, fakegitea.DefaultToken)).To(Equal(http.StatusOK))
 		// Not a git path: not kept.
 		w := httptest.NewRecorder()
@@ -40,10 +45,12 @@ var _ = Describe("the git request record (#1086 part C2)", func() {
 		w = httptest.NewRecorder()
 		g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_fake/git", nil))
 		Expect(w.Body.String()).NotTo(ContainSubstring(fakegitea.DefaultToken))
+		Expect(w.Body.String()).NotTo(ContainSubstring("koinon_test_not-a-real-token"))
 		var got []gitRequest
 		Expect(json.Unmarshal(w.Body.Bytes(), &got)).To(Succeed())
 		Expect(got).To(Equal([]gitRequest{
 			{Method: http.MethodGet, Path: "/koinon-demo/hello.git/info/refs", Service: "git-upload-pack", Status: http.StatusUnauthorized},
+			{Method: http.MethodGet, Path: "/koinon-demo/hello.git/info/refs", Service: "git-upload-pack", Status: http.StatusUnauthorized, ActorToken: true},
 			{Method: http.MethodGet, Path: "/koinon-demo/hello.git/info/refs", Service: "git-upload-pack", Status: http.StatusOK, Auth: true},
 		}))
 	})

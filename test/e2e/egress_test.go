@@ -43,7 +43,7 @@ const (
 type fakeGitRequest struct {
 	Method, Path, Service string
 	Status                int
-	Auth                  bool
+	Auth, ActorToken      bool
 }
 
 // fakeGiteaGit reads the fake Gitea's git requests through the API server's service proxy, so the suite
@@ -121,7 +121,7 @@ func egressCloneE2E(ctx context.Context, c *e2eclient.Client, org string) {
 	})
 	Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), "events: %v", kinds)
 
-	By("the fake Gitea served the clone's git-upload-pack with a credential it accepted")
+	By("the fake Gitea served the clone's git-upload-pack with a credential it accepted, and without the actor token")
 	got := fakeGiteaGit(ctx, kubectl)
 	Expect(len(got)).To(BeNumerically(">=", before))
 	clone := got[before:]
@@ -131,5 +131,6 @@ func egressCloneE2E(ctx context.Context, c *e2eclient.Client, org string) {
 	for _, r := range clone {
 		Expect(r.Path).To(HavePrefix("/"+fakeGiteaRepo+".git/"), "git reached only the bound repository")
 		Expect(r.Service).NotTo(Equal("git-receive-pack"), "the agent pushed nothing")
+		Expect(r.ActorToken).To(BeFalse(), "the gateway removes the actor token: the request came through it")
 	}
 }

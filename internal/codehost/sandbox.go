@@ -51,8 +51,10 @@ func GitConfig(loc connectors.Location, hasCA bool) []byte {
 // forge routes, git in the sandbox reaches the code host through <gateway>/egress/<host>/ and sends
 // the actor identity token there. koinon-agentd mints the token outside the guest and writes it to
 // SandboxEgressToken, which is outside the home: the home is checkpointed, and the token must never
-// be in a checkpoint (ADR 0120 sections 1 and 5). The token lives 300 to 3600 seconds, and agentd
-// writes a new one before the old one ends.
+// be in a home checkpoint (ADR 0120 sections 1 and 5). agentd refuses a token directory that is a
+// symbolic link, so the guest cannot send the file into the home. A memory snapshot of the whole
+// guest would hold the token; no production path takes one today. The token lives 300 to 3600
+// seconds, and agentd writes a new one before the old one ends.
 const (
 	// SandboxEgressDir holds the token file. It is not under /sandbox.
 	SandboxEgressDir = "/tmp/.koinon-egress"
@@ -100,6 +102,12 @@ func EgressTokenGitConfig(base, token string) (cfg []byte, ok bool) {
 	return []byte(b.String()), true
 }
 
+// notBase64URL reports a rune outside the unpadded base64url alphabet.
+func notBase64URL(c rune) bool {
+	return (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_'
+}
+
+// compactJWS reports whether s is three non-empty base64url parts, so it cannot add a line to a git config.
 func compactJWS(s string) bool {
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
@@ -109,10 +117,8 @@ func compactJWS(s string) bool {
 		if p == "" {
 			return false
 		}
-		for _, c := range p {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-				return false
-			}
+		if strings.IndexFunc(p, notBase64URL) >= 0 {
+			return false
 		}
 	}
 	return true

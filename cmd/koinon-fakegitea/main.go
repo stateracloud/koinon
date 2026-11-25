@@ -34,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 )
@@ -138,13 +139,15 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 // gitRequest is one git smart HTTP request the fake served. Auth says whether the request carried
-// an Authorization header; the header itself is never kept.
+// an Authorization header, and ActorToken whether it carried koinon-gateway's actor token header
+// (the gateway removes it, so a request through the gateway never has it). No header value is kept.
 type gitRequest struct {
-	Method  string `json:"method"`
-	Path    string `json:"path"`
-	Service string `json:"service,omitempty"`
-	Status  int    `json:"status"`
-	Auth    bool   `json:"auth"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Service    string `json:"service,omitempty"`
+	Status     int    `json:"status"`
+	Auth       bool   `json:"auth"`
+	ActorToken bool   `json:"actorToken"`
 }
 
 // gitLog keeps the git smart HTTP requests in arrival order (at most maxGitRequests), so the e2e
@@ -172,6 +175,7 @@ func (g *gitLog) record(h http.Handler) http.Handler {
 		g.reqs = append(g.reqs, gitRequest{
 			Method: r.Method, Path: r.URL.Path, Service: r.URL.Query().Get("service"),
 			Status: rec.status, Auth: r.Header.Get("Authorization") != "",
+			ActorToken: r.Header.Get(route.TokenHeader) != "",
 		})
 	})
 }

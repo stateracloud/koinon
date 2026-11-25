@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package agentd_test
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/agentd"
+)
+
+// The token script runs in a real shell: the guest owns /tmp, so a link it plants at the token
+// directory must not send the token into the home (#1086 part C2).
+var _ = Describe("the actor token write script", func() {
+	run := func(dir, file, in string) (string, error) {
+		cmd := exec.Command("/bin/sh", "-c", agentd.WriteActorTokenScript, "sh", dir, file)
+		cmd.Stdin = strings.NewReader(in)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	It("writes the file in a new private directory and replaces it on the next write", func() {
+		dir := filepath.Join(GinkgoT().TempDir(), ".koinon-egress")
+		file := filepath.Join(dir, "token.gitconfig")
+		out, err := run(dir, file, "first")
+		Expect(err).NotTo(HaveOccurred(), out)
+		out, err = run(dir, file, "second")
+		Expect(err).NotTo(HaveOccurred(), out)
+		Expect(os.ReadFile(file)).To(BeEquivalentTo("second"))
+		st, err := os.Stat(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Mode().Perm()).To(Equal(os.FileMode(0o700)))
+		left, err := filepath.Glob(filepath.Join(dir, ".git.*"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(left).To(BeEmpty(), "no temporary file is left")
+	})
+
+	It("refuses a token directory that is a symbolic link, and writes nothing through it", func() {
+		root := GinkgoT().TempDir()
+		home := filepath.Join(root, "sandbox")
+		Expect(os.Mkdir(home, 0o700)).To(Succeed())
+		dir := filepath.Join(root, ".koinon-egress")
+		Expect(os.Symlink(home, dir)).To(Succeed())
+		out, err := run(dir, filepath.Join(dir, "token.gitconfig"), "koinon_test_not-a-real-token")
+		Expect(err).To(HaveOccurred())
+		Expect(out).To(ContainSubstring("is not a plain directory"))
+		entries, err := os.ReadDir(home)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(entries).To(BeEmpty(), "the home holds no token")
+	})
+
+	It("refuses a token directory that is a file", func() {
+		dir := filepath.Join(GinkgoT().TempDir(), ".koinon-egress")
+		Expect(os.WriteFile(dir, nil, 0o600)).To(Succeed())
+		out, err := run(dir, filepath.Join(dir, "token.gitconfig"), "koinon_test_not-a-real-token")
+		Expect(err).To(HaveOccurred())
+		Expect(out).To(ContainSubstring("is not a plain directory"))
+	})
+})

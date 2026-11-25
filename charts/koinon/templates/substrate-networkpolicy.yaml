@@ -102,11 +102,8 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
-        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database. With the
-        # egress listener on (#1086 part C2), also koinon-gateway's MCP pods, which serve git to the forge routes.
-        {{- $koinonApps := list "gateway" "api" }}
-        {{- if include "koinon.egressListener" . }}{{- $koinonApps = append $koinonApps "mcp-gateway" }}{{- end }}
-        {{- range $koinonApps }}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database.
+        {{- range list "gateway" "api" }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
@@ -121,6 +118,19 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
+{{- if include "koinon.egressListener" . }}
+    # With the egress listener on (#1086 part C2): koinon-gateway's MCP pods, on the egress port only. They serve
+    # git to the forge routes; their MCP and stats ports stay closed to the sandboxes.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 14 }}
+      ports:
+        - {port: {{ .Values.gateway.mcp.koinon.egress.port }}, protocol: TCP}
+{{- end }}
 {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
 {{- end }}

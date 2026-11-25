@@ -25,7 +25,7 @@ import (
 // driver's exec, which both drivers serve the same way. The token names the org (its slug, as the
 // gateway routes do), the agent (its ID, the gateway agent name) and the run. It lives
 // actorTokenTTL and is written again every Config.ActorTokenRefresh, so it never ends while the run
-// is live. It is written outside the home (codehost.SandboxEgressToken), so no checkpoint holds it,
+// is live. It is written outside the home (codehost.SandboxEgressToken), so no home checkpoint holds it,
 // and it is removed when the run ends. It is never logged.
 
 // actorTokenTTL is the lifetime of each token: well inside 300 to 3600 seconds (ADR 0120 1.2), and
@@ -34,6 +34,9 @@ const actorTokenTTL = 15 * time.Minute
 
 // DefaultActorTokenRefresh is how often a live run writes a new actor token.
 const DefaultActorTokenRefresh = 5 * time.Minute
+
+// actorTokenWriteTimeout bounds each write and the final remove of the token file.
+const actorTokenWriteTimeout = 30 * time.Second
 
 // egressGit reports whether git of a run on code host h goes through the gateway.
 func (r *runner) egressGit(h codeHost) bool {
@@ -68,7 +71,7 @@ func (r *runner) writeActorToken(ctx context.Context, workspace, sandbox string)
 		return fmt.Errorf("mint the actor token: the minter returned a token that is not a compact JWS")
 	}
 	_, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox,
-		[]string{"/bin/sh", "-c", writeGitScript, "sh", codehost.SandboxEgressDir, codehost.SandboxEgressToken}, cfg)
+		[]string{"/bin/sh", "-c", writeActorTokenScript, "sh", codehost.SandboxEgressDir, codehost.SandboxEgressToken}, cfg)
 	if err != nil {
 		return err
 	}
@@ -77,6 +80,14 @@ func (r *runner) writeActorToken(ctx context.Context, workspace, sandbox string)
 	}
 	return nil
 }
+
+// writeActorTokenScript is writeGitScript for the token file, which is outside the home. The guest
+// can write to /tmp, so the script refuses a $1 that is a symbolic link or not a directory: a link
+// planted before the run could otherwise send each token into the checkpointed home.
+const writeActorTokenScript = `# ` + gitConfigMarker + `
+umask 077
+if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then echo "$1 is not a plain directory" >&2; exit 1; fi
+mkdir -p -- "$1" && [ ! -L "$1" ] && t=$(mktemp "$1/.git.XXXXXX") && cat > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
 
 // removeActorTokenScript removes the token file. It never fails the caller: the token ends anyway.
 const removeActorTokenScript = `# ` + gitConfigMarker + `
@@ -99,15 +110,19 @@ func (r *runner) keepActorToken(ctx context.Context, workspace, sandbox string) 
 				return
 			case <-t.C:
 			}
-			if err := r.writeActorToken(tctx, workspace, sandbox); err != nil && tctx.Err() == nil {
+			// The write is not cancelled with tctx: stop waits for it, so a write in flight can never
+			// land after the remove below.
+			wctx, done := context.WithTimeout(context.WithoutCancel(tctx), actorTokenWriteTimeout)
+			if err := r.writeActorToken(wctx, workspace, sandbox); err != nil {
 				r.log.Warn("refresh the actor token", "err", err)
 			}
+			done()
 		}
 	})
 	return func() {
 		cancel()
 		wg.Wait()
-		rctx, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		rctx, done := context.WithTimeout(context.WithoutCancel(ctx), actorTokenWriteTimeout)
 		defer done()
 		if _, code, _, err := r.sandboxExec(rctx, workspace, sandbox,
 			[]string{"/bin/sh", "-c", removeActorTokenScript, "sh", codehost.SandboxEgressDir, codehost.SandboxEgressToken}, nil); err != nil || code != 0 {
