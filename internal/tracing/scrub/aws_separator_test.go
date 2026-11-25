@@ -19,9 +19,9 @@ import (
 func TestAWSKeyIDAfterSeparator(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	tails := map[string]string{
-		"plain":          fake(fakeUpper, 16, 3),
-		"ends in NULL":   "H37NAM2U7WZQ" + "NULL",
-		"holds FALSE":    "H37NAM2U7" + "FALSE" + "Q2",
+		"plain":        fake(fakeUpper, 16, 3),
+		"ends in NULL": "H37NAM2U7WZQ" + "NULL",
+		"holds FALSE":  "H37NAM2U7" + "FALSE" + "Q2",
 	}
 	for tname, tail := range tails {
 		for _, prefix := range []string{"AKIA", "ASIA"} {
