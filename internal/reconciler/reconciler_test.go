@@ -101,6 +101,8 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, gw,
 			reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())
+		// No key-settle wake-up outlives the spec (#1074).
+		DeferCleanup(r.Close)
 		return r
 	}
 	newReconciler := func() *reconciler.Reconciler { return newReconcilerWith(mg) }
@@ -1344,19 +1346,47 @@ var _ = Describe("Reconciler", func() {
 		done := make(chan error, 1)
 		go func() { done <- r.Run(runCtx) }()
 		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
+		// The leader LISTENs before its first pass, so from here on it sees every NOTIFY.
 		Eventually(applies.Load).WithTimeout(racescale.D(10*time.Second)).Should(BeNumerically(">=", 1), "the leader's first pass")
-		// The leader's first pass writes sandbox rows, and a row write can NOTIFY: a second pass may follow
-		// after the 200 ms debounce (#994: the count was 2 where this spec expected 1). Wait until no pass
-		// has come for three debounce periods, and count from there, so that only a wake of the ledger's own
-		// can add a pass between the two requests.
-		var settled int64
-		Eventually(func() bool {
-			before := applies.Load()
-			time.Sleep(racescale.D(600 * time.Millisecond))
-			settled = applies.Load()
-			return settled == before
-		}).WithTimeout(racescale.D(30*time.Second)).Should(BeTrue(), "the leader's own passes end")
 		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
+
+		// The spec does not count passes: any NOTIFY on the reconcile channel starts one, and not
+		// only the ledger sends them (a key-settle timer of an earlier spec's reconciler did, #1074).
+		// It reads the channel itself instead. Postgres delivers the notifications of committed
+		// transactions in commit order, so a marker sent after a request committed arrives after every
+		// NOTIFY of that request: what the ledger sent is known exactly, without a quiet period.
+		watch, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		// Closed, not returned to the pool: the LISTEN ends with the connection.
+		DeferCleanup(func() { _ = watch.Conn().Close(context.Background()); watch.Release() })
+		_, err = watch.Exec(ctx, "LISTEN "+reconciler.NotifyChannel)
+		Expect(err).NotTo(HaveOccurred())
+		orgPayload := execution.UUIDString(org.Bytes)
+		marks := 0
+		// notifiedOrg sends a marker and reads the channel up to it. It reports whether a NOTIFY for
+		// this org came before the marker. The marker also wakes the leader: a wake that is not the
+		// ledger's, which the counting spec of #1074 failed on.
+		notifiedOrg := func() bool {
+			GinkgoHelper()
+			marks++
+			mark := fmt.Sprintf("spec-marker-%d", marks)
+			_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", reconciler.NotifyChannel, mark)
+			Expect(err).NotTo(HaveOccurred())
+			found := false
+			for {
+				wctx, wcancel := context.WithTimeout(ctx, racescale.D(10*time.Second))
+				n, err := watch.Conn().WaitForNotification(wctx)
+				wcancel()
+				Expect(err).NotTo(HaveOccurred(), "the marker comes back")
+				switch n.Payload {
+				case mark:
+					return found
+				case orgPayload:
+					found = true
+				}
+			}
+		}
+		notifiedOrg() // what came before the first request does not count
 
 		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
 		entry := func(cost string) ledger.Entry {
@@ -1365,12 +1395,13 @@ var _ = Describe("Reconciler", func() {
 				Agent: gateway.AgentRef{Org: slug, Name: agent.ID.String()}, InputTokens: 1, OutputTokens: 1, Time: time.Now(),
 			}
 		}
-		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
 		Expect(err).NotTo(HaveOccurred())
 		// The ingest below the limit sends no NOTIFY (ledger/ingest.go: only a reserve change or an
-		// enforce crossing does), so no pass can run between the two requests. If a later change adds
-		// a wake, this check fails instead of the measured window silently changing.
-		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(settled), "no pass runs below the limit")
+		// enforce crossing does). If a later change adds one, this check fails instead of the measured
+		// window silently changing.
+		Expect(notifiedOrg()).To(BeFalse(), "the request below the limit does not wake the reconciler")
+		// The marker's wake runs a pass that reads the ledger after this request: it must keep the key.
 		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
 
 		By("the request that reaches the limit")
@@ -1380,6 +1411,8 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(revokedAt.Load).WithTimeout(racescale.D(10*time.Second)).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
 		revoked := *revokedAt.Load()
+		// Read after the revoke, so the marker's own wake is not in the measured window.
+		Expect(notifiedOrg()).To(BeTrue(), "the request that reaches the limit sent the NOTIFY")
 
 		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
 		AddReportEntry("budget overshoot window", fmt.Sprintf("ledger transaction %s + NOTIFY and reconcile pass %s = %s from the crossing request to the revoke", ledgerTx, reconcilePass, total))

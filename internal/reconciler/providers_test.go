@@ -581,6 +581,10 @@ var _ = Describe("Provider delivery", func() {
 					Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
 				})
 				Expect(err).NotTo(HaveOccurred())
+				// Each pass that writes a key file starts a real one-minute settle timer that ends in a
+				// NOTIFY on the reconcile channel. Without Close it fires into a later spec of this
+				// process and wakes that spec's leader (#1074).
+				DeferCleanup(r.Close)
 				return r
 			}
 			r = newR()

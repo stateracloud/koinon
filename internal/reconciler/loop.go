@@ -42,7 +42,7 @@ const (
 // connection) is retried after a short backoff with jitter (retryDelay), not after
 // ResyncInterval, so a database failover leaves no long gap without a leader.
 func (r *Reconciler) Run(ctx context.Context) error {
-	defer r.plan.Close()
+	defer r.Close()
 	safego.Go(ctx, r.log, "mcp-prober", func(ctx context.Context) { r.RunProber(ctx) })
 	failures := 0
 	for {
