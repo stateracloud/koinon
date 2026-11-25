@@ -87,7 +87,9 @@ blk check-gateway-key
 # The gateway recipient key (gateway.mcp.driver=koinon only): its Secret is backed up next to the KEK, readable by
 # its owner only. Compared by a digest of the data, so no key reaches this log.
 GWKEY=koinon-gateway-recipient-key
-gwdigest() { "${K[@]}" -n "$NS" get secret "$GWKEY" -o go-template='{{range $k, $v := .data}}{{$k}}={{$v}};{{end}}' | sha256sum; }
+# shellcheck disable=SC2016 # a go-template: $k and $v are template variables, not shell ones
+gwdata='{{range $k, $v := .data}}{{$k}}={{$v}};{{end}}'
+gwdigest() { "${K[@]}" -n "$NS" get secret "$GWKEY" -o go-template="$gwdata" | sha256sum; }
 gwon=0
 if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   gwon=1
@@ -95,7 +97,7 @@ if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   [[ -s $gwfile ]] || fail "the install has a gateway key Secret and backup-gateway-key wrote no file"
   [[ $(stat -c %a "$gwfile") == 600 ]] || fail "the gateway key backup is readable by others: $(stat -c %a "$gwfile")"
   gw_before=$(gwdigest)
-  backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template='{{range $k, $v := .data}}{{$k}}={{$v}};{{end}}' | sha256sum)
+  backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template="$gwdata" | sha256sum)
   [[ $backup_digest == "$gw_before" ]] || fail "the gateway key backup differs from the Secret"
 elif [[ -e $work/koinon-gateway-key-backup.yaml ]]; then
   fail "backup-gateway-key wrote a file on an install without a gateway key Secret"
