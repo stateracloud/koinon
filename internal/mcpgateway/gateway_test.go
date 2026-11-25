@@ -153,7 +153,7 @@ var _ = Describe("the MCP path", func() {
 		defer audit.mu.Unlock()
 		Expect(audit.rows).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Agent": Equal(agentExec), "Target": Equal("acme-wiki"), "Tool": Equal("read_item"),
-			"Outcome": Equal(mcpgateway.OutcomeOK), "CredKind": Equal(mcpgateway.CredentialStatic),
+			"Outcome": Equal(mcpgateway.OutcomeOK), "CredKind": Equal(string(mcpgateway.CredentialStatic)),
 		})))
 	})
 
@@ -263,11 +263,11 @@ var _ = Describe("the MCP path", func() {
 		Expect(audit.rows).To(HaveLen(3))
 		Expect(audit.rows[0]).To(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 			"Agent": Equal(agentAcme), "Target": Equal("acme-wiki"), "Tool": Equal("read_item"),
-			"Outcome": Equal(mcpgateway.OutcomeOK), "CredKind": Equal(mcpgateway.CredentialStatic),
+			"Outcome": Equal(mcpgateway.OutcomeOK), "CredKind": Equal(string(mcpgateway.CredentialStatic)),
 		}))
 		Expect(audit.rows[1].Outcome).To(Equal(mcpgateway.OutcomeToolError))
 		Expect(audit.rows[2].Outcome).To(Equal(mcpgateway.OutcomeRefusedGrant))
-		Expect(audit.rows[2].CredKind).To(Equal(mcpgateway.CredentialNone))
+		Expect(audit.rows[2].CredKind).To(Equal(string(mcpgateway.CredentialNone)))
 		for _, r := range audit.rows {
 			Expect(r).NotTo(WithTransform(func(r mcpgateway.AuditRow) string { return r.Verdict + r.Tool + r.Target }, ContainSubstring("canary")))
 			Expect(r).NotTo(WithTransform(func(r mcpgateway.AuditRow) string { return r.Verdict }, ContainSubstring(fakeToken)))

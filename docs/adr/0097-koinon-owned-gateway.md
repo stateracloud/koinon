@@ -951,8 +951,7 @@ move, once.
        counts these, so an operator sees a cap that is too low for the credentials in use.
      - **Threat scope.** The scrub is a backstop for a target that echoes its credential by accident. It does not
        stop a target that hides the value on purpose (hex, a hash, a split over two fields): that target already
-       holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
-       own issue. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
+       holds the credential. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
        its org's audit row of a call changes. Only a reader of that org's audit can see this. Each call of a built-in
        target gets the gateway's recording source as an argument of `Builtin.Call`. Its type is `ScrubbedSource`,
        which only `CredentialScrub.Source` can make (its field is not exported). The outbound clients
@@ -964,6 +963,24 @@ move, once.
        built-in can make a scrub of its own (`NewCredentialScrub`) and send through it, and it can read a source of
        its own and quote the value or send it with an HTTP client of its own. The card read in koinon-api has no gateway scrub: it uses a scrub
        for that read only. That value is the one the admin saves, and the read does not log it.
+     - **Kinds** (maintainer decision 2026-11-25, #1221). The scrub covers every credential kind the gateway sends
+       upstream, the per-agent kinds too. `internal/gateway/credkind` is the one list: each kind is a constant of
+       type `credkind.Kind` with one rule. Each opener gives its values to `CredentialScrub.Record` with its kind:
+       the MCP path through `ScrubbedSource` (`Credential.Kind`), the egress path (ADR 0120) and the model path
+       (provider keys). The rules:
+       - **By value**: MCP static, MCP sign-in (ADR 0096), egress bearer and Basic, provider key. The value goes to
+         the value set of its org, as above. A sign-in token keeps the fixed 24 hours after its last open, not its
+         expiry: a longer life only over-scrubs, and one value per server and refresh stays well under the caps.
+       - **By shape**: the passport (ADR 0073). One passport for each run, audience and scope, with a life of
+         minutes, would fill the caps and push out the values of the org. So the scrub does not store it. From the
+         first passport it opens, the gateway removes every JWT with the typ `koinon-passport+jwt` from every
+         text, in every org. A JWT of another typ stays. A passport in a form the shape does not match (base64 of
+         the whole header, a split) is not removed: the threat scope above applies.
+       - **No value**: `none` and `error` carry no value.
+       A kind that is not in the list, or no kind, is scrubbed by value, and a value given with a by-shape kind
+       that does not have the shape, or with a no-value kind, goes to the value set too: a new kind is covered by
+       default. A spec reads the kind constants from the source and fails when one has no rule, or when code
+       outside the package makes a kind of its own.
      - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
        in it until the next rebuild. That rebuild runs at the next change at least one second later, and with traffic
        at most one minute later. Until then the value can only over-scrub a process record. A removal marks a value

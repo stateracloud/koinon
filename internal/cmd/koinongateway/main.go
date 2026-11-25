@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/usagewire"
@@ -241,7 +242,7 @@ func run(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	// The egress keys and routes load before any listener starts: a bad key directory or route file
 	// stops the start, not a gateway that is half up.
-	eg, egState, err := newEgress(cfg, reg, log, credScrub.AddFor)
+	eg, egState, err := newEgress(cfg, reg, log, credScrub.Record)
 	if err != nil {
 		return err
 	}
@@ -294,6 +295,8 @@ func run(ctx context.Context, cfg config) error {
 		})
 		mg = modelgateway.New(modelgateway.Options{
 			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: otel.Tracer("koinon-gateway"), Logger: log,
+			// Each provider key the model path reads goes into the scrub of every log line and span (#1221).
+			Scrub: credScrub.Record,
 		})
 		modelHalf = mg
 		// A dropped record is a lost charge: both numbers are visible to an operator (ADR 0023: no labels).
@@ -449,7 +452,7 @@ func run(ctx context.Context, cfg config) error {
 // newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
 // returns nil when it does not. It loads the actor token keys and the platform routes, and returns
 // the applier that merges the org routes of each State revision with them.
-func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub func(org string, values ...string)) (*egress.Gateway, *egress.StateRoutes, error) {
+func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub func(kind credkind.Kind, org string, values ...string)) (*egress.Gateway, *egress.StateRoutes, error) {
 	if cfg.egressAddr == "" {
 		return nil, nil, nil
 	}

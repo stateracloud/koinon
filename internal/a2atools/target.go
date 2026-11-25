@@ -139,7 +139,7 @@ func (t *Target) Call(ctx context.Context, creds mcpgateway.ScrubbedSource, tgt 
 	case ToolCancelTask:
 		res = in.cancel(ctx)
 	}
-	res.Credential = cred
+	res.Credential = string(cred)
 	return res
 }
 

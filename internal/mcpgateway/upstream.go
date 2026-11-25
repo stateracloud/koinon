@@ -242,7 +242,7 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 		credKind = c.Kind
 	}
 	gt := &guardTransport{
-		inner: inner, guard: g.g, target: t.Name, org: t.Org, cred: credKind, agent: key.agent,
+		inner: inner, guard: g.g, target: t.Name, org: t.Org, cred: string(credKind), agent: key.agent,
 		timeout: g.o.CallTimeout, log: g.o.Logger, metrics: g.o.Metrics,
 	}
 	s, err := client.Connect(sctx, gt, nil)

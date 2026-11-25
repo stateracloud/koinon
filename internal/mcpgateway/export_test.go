@@ -21,3 +21,9 @@ func ScrubEvict(t *atomic.Int64, at int64) bool { return evict(t, at) }
 
 // UseScrubMetrics sets the counters and the logger of s, as New does.
 func UseScrubMetrics(s *CredentialScrub, m *Metrics, log *slog.Logger) { s.use(m, log) }
+
+// AddFor records values for org by value, as an opener of a by-value kind does. Specs of the value set use it.
+func (s *CredentialScrub) AddFor(org string, values ...string) { s.addFor(org, values...) }
+
+// Add records values for no org by value.
+func (s *CredentialScrub) Add(values ...string) { s.addFor("", values...) }

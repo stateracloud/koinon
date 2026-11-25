@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/tracing/scrub"
 )
 
@@ -36,6 +37,11 @@ import (
 // dummy), and the encoded forms NewSecrets adds (JSON-escaped, URL-encoded, base64). A value shorter than
 // [scrub.MinSecretLen] is not matched: it would redact ordinary words. Such a value is counted and logged once
 // for each org and target, so an operator sees it.
+//
+// Kinds. It covers every credential kind the gateway sends upstream (#1221): each opener gives its values with
+// their kind to [CredentialScrub.Record], and the rule of each kind comes from one list, [credkind]. A kind with
+// many short-lived values (the passport, ADR 0073) is matched by its shape in every text instead of by value. A
+// kind that is not in the list is matched by value.
 //
 // The scrub is a backstop for a target that echoes its credential by accident. It is not a defence against a
 // target that hides the value on purpose (hex, a split over two fields, a hash): such a target already holds the
@@ -92,6 +98,9 @@ type scrubSets struct {
 	allBuilt time.Time
 	// allDirty is set when a value was removed after all was built: the next rebuild drops it.
 	allDirty bool
+	// shapes is set once a value of a [credkind.ByShape] kind was recorded. From then on every text is scrubbed
+	// of the shapes of those kinds too, in every scope. It is never cleared.
+	shapes bool
 }
 
 var emptySecrets = scrub.NewSecrets()
@@ -104,40 +113,67 @@ const (
 // orgRedactor returns the matcher of org, or an empty one.
 func (ss *scrubSets) orgRedactor(org string) redactor {
 	if o, ok := ss.byOrg[org]; ok {
-		return redactor{o.secrets}
+		return redactor{sets: []*scrub.Secrets{o.secrets}, shapes: ss.shapes}
 	}
-	return redactor{emptySecrets}
+	return redactor{sets: []*scrub.Secrets{emptySecrets}, shapes: ss.shapes}
 }
 
 // allRedactor returns the matchers of every org: all, then the orgs not yet in all.
 func (ss *scrubSets) allRedactor() redactor {
-	r := make(redactor, 0, 1+len(ss.pending))
-	r = append(r, ss.all)
+	r := redactor{sets: make([]*scrub.Secrets, 0, 1+len(ss.pending)), shapes: ss.shapes}
+	r.sets = append(r.sets, ss.all)
 	for _, org := range ss.pending {
 		if o, ok := ss.byOrg[org]; ok {
-			r = append(r, o.secrets)
+			r.sets = append(r.sets, o.secrets)
 		}
 	}
 	return r
 }
 
-// redactor applies one or more matchers in turn.
-type redactor []*scrub.Secrets
+// redactor applies one or more matchers in turn, then the shapes of the [credkind.ByShape] kinds when shapes is set.
+type redactor struct {
+	sets   []*scrub.Secrets
+	shapes bool
+}
 
 func (r redactor) Redact(in string) string {
-	for _, s := range r {
+	for _, s := range r.sets {
 		in = s.Redact(in)
+	}
+	if r.shapes {
+		in = redactShapes(in)
 	}
 	return in
 }
 
 func (r redactor) empty() bool {
-	for _, s := range r {
+	if r.shapes {
+		return false
+	}
+	for _, s := range r.sets {
 		if s.Len() > 0 {
 			return false
 		}
 	}
 	return true
+}
+
+// redactShapes replaces each passport in in (ADR 0073: a JWT of the passport typ) with the secret marker. A JWT
+// of another typ is kept: the shape alone is not proof of a credential.
+func redactShapes(in string) string {
+	found := credkind.FindPassports(in)
+	if len(found) == 0 {
+		return in
+	}
+	var b strings.Builder
+	last := 0
+	for _, f := range found {
+		b.WriteString(in[last:f[0]])
+		b.WriteString(scrub.Replacement(scrub.KindSecret))
+		last = f[1]
+	}
+	b.WriteString(in[last:])
+	return b.String()
 }
 
 type scrubOrgKey struct{}
@@ -221,13 +257,52 @@ func (s *CredentialScrub) maxValues() int {
 	return 8192
 }
 
-// Add records opened credential values for no org: they are scrubbed from process telemetry, and from the
-// texts of the org "".
-func (s *CredentialScrub) Add(values ...string) { s.AddFor("", values...) }
+// Record records the values of one credential of kind that a call of an agent of org opened. It is the one entry
+// of every opener: the MCP path (through [CredentialScrub.Source]), the egress path and the model path. The scrub
+// reads the rule of kind from the one list ([credkind.Lookup]), so a new kind is covered by default (#1221):
+//
+//   - [credkind.ByValue], and a kind that is not in the list: the values go to the value set of org.
+//   - [credkind.ByShape]: the scrub removes the shape of the kind from every text from now on. A value that does
+//     not have the shape goes to the value set all the same, so a wrong kind never loses a value.
+//   - [credkind.NoValue]: such a kind carries no value. A value given with it goes to the value set all the same.
+//
+// The org "" is for values of no org: they are scrubbed from process telemetry and from the texts of the org "".
+func (s *CredentialScrub) Record(kind credkind.Kind, org string, values ...string) {
+	if r, _ := credkind.Lookup(kind); r.Scrub == credkind.ByShape {
+		s.enableShapes()
+		var rest []string
+		for _, v := range values {
+			if v != "" && !credkind.IsPassport(v) {
+				rest = append(rest, v)
+			}
+		}
+		values = rest
+	}
+	if len(values) > 0 {
+		s.addFor(org, values...)
+	}
+}
 
-// AddFor records credential values that a call of an agent of org opened. Each value also adds the token after a
-// known auth scheme ([scrub.AuthParts]). Values shorter than [scrub.MinSecretLen] are ignored.
-func (s *CredentialScrub) AddFor(org string, values ...string) {
+// enableShapes turns on the shape rules for every later text. It costs one lock, once.
+func (s *CredentialScrub) enableShapes() {
+	if s.sets.Load().shapes {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ss := s.sets.Load()
+	if ss.shapes {
+		return
+	}
+	next := *ss
+	next.shapes = true
+	s.sets.Store(&next)
+}
+
+// addFor records credential values for org by value. Each value also adds the token after a known auth scheme
+// ([scrub.AuthParts]). Values shorter than [scrub.MinSecretLen] are ignored. Callers outside this file use
+// [CredentialScrub.Record], which applies the rule of the kind.
+func (s *CredentialScrub) addFor(org string, values ...string) {
 	var parts []string
 	for _, v := range values {
 		for _, p := range scrub.AuthParts(v) {
@@ -255,7 +330,7 @@ func (s *CredentialScrub) AddFor(org string, values ...string) {
 	// than the values other calls opened meanwhile, or a cap would remove them first.
 	now = s.now()
 	ss := s.sets.Load()
-	next := &scrubSets{byOrg: maps.Clone(ss.byOrg), all: ss.all, pending: slices.Clone(ss.pending), allBuilt: ss.allBuilt, allDirty: ss.allDirty}
+	next := &scrubSets{byOrg: maps.Clone(ss.byOrg), all: ss.all, pending: slices.Clone(ss.pending), allBuilt: ss.allBuilt, allDirty: ss.allDirty, shapes: ss.shapes}
 	changed := map[string]bool{}
 	removed := false
 	if len(parts) > 0 {
@@ -572,7 +647,9 @@ func (r *recordingSource) Credential(ctx context.Context, t gateway.MCPTarget, a
 	c, err := r.src.Credential(ctx, t, agent)
 	if c.Value != "" {
 		token := strings.TrimSpace(strings.TrimPrefix(c.Value, t.CredentialPrefix))
-		r.s.AddFor(agent.Org, c.Value, token)
+		// The kind picks the rule from the one list; a source that sets no kind, or a kind that is not in the
+		// list, is scrubbed by value (#1221).
+		r.s.Record(c.Kind, agent.Org, c.Value, token)
 		if len(token) < scrub.MinSecretLen {
 			r.s.short(agent.Org, t.Name)
 		}

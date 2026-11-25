@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/forgecredfile"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -130,6 +131,8 @@ func headerSafe(v string) bool {
 // attached is a credential ready for one request: the header value and the strings that must never
 // come back to the guest.
 type attached struct {
+	// kind names the credential kind for the scrub (credkind, #1221).
+	kind    credkind.Kind
 	header  string
 	needles [][]byte
 }
@@ -145,9 +148,9 @@ func attach(c route.Credential, value string) (attached, error) {
 	switch c.Scheme {
 	case route.SchemeBasic:
 		pair := base64.StdEncoding.EncodeToString([]byte(c.User + ":" + value))
-		return attached{header: "Basic " + pair, needles: needles(value, pair)}, nil
+		return attached{kind: credkind.EgressBasic, header: "Basic " + pair, needles: needles(value, pair)}, nil
 	case route.SchemeBearer:
-		return attached{header: "Bearer " + value, needles: needles(value)}, nil
+		return attached{kind: credkind.EgressBearer, header: "Bearer " + value, needles: needles(value)}, nil
 	}
 	return attached{}, &OpenError{Reason: gatewaykeys.ReasonFormat, Err: secretstore.ErrUnsupportedFormat}
 }

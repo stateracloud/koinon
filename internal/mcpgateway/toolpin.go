@@ -227,9 +227,9 @@ func (g *Gateway) vetted(ctx context.Context, t gateway.MCPTarget, agent gateway
 		byName[x.Name] = x
 	}
 	if c, err := g.creds.Credential(ctx, t, agent); err == nil {
-		l.Credential = c.Kind
+		l.Credential = string(c.Kind)
 	} else {
-		l.Credential = CredentialError
+		l.Credential = string(CredentialError)
 	}
 	v := g.g.checkToolList(ctx, l)
 	switch {
