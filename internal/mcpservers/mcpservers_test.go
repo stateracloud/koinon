@@ -985,6 +985,40 @@ var _ = Describe("Service", func() {
 				Expect(never).To(Equal(mcpservers.MaxUnreviewedTools), "the legacy row takes no place of a new tool")
 			})
 
+			It("serializes a review and a tier change with a sync of the same server, so a sync never writes over an approval it did not read (#1216)", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("search", "Search", true), tool("create", "Create", false)})
+				Expect(err).NotTo(HaveOccurred())
+				searchPin := mcpserverstest.PinOf(ctx, svc, org, s.ID, "search")
+				createPin := mcpserverstest.PinOf(ctx, svc, org, s.ID, "create")
+				// A sync holds the server row (LockMCPServerForToolSync) until it commits.
+				sync, err := pool.Begin(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				defer func() { _ = sync.Rollback(ctx) }()
+				_, err = sync.Exec(ctx, `SELECT 1 FROM mcp_servers WHERE org_id = $1 AND id = $2 FOR NO KEY UPDATE`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+
+				done := make(chan error, 2)
+				go func() {
+					defer GinkgoRecover()
+					_, err := svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", searchPin)
+					done <- err
+				}()
+				go func() {
+					defer GinkgoRecover()
+					_, err := svc.SetTier(ctx, org, actor, s.ID, "create", "never", createPin)
+					done <- err
+				}()
+				Consistently(done, "500ms").ShouldNot(Receive(), "an approval waits for the sync that holds the server")
+				Expect(sync.Rollback(ctx)).To(Succeed())
+				for range 2 {
+					var got error
+					Eventually(done, "10s").Should(Receive(&got))
+					Expect(got).NotTo(HaveOccurred())
+				}
+			})
+
 			It("reviews the waiting tools at the hashes the admin saw and deletes the absent rows no admin reviewed, which makes room (#1216 point c)", func(ctx SpecContext) {
 				s := create(ctx, "junk", "")
 				sid := uuidOf(s.ID)
@@ -1018,6 +1052,13 @@ var _ = Describe("Service", func() {
 				Expect(err).To(MatchError(mcpservers.ErrToolChanged))
 				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools), "nothing changed")
 				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
+
+				By("a name given twice refuses the whole action, whatever its second hash")
+				twice := append(append([]mcpservers.SeenTool{}, seen...), mcpservers.SeenTool{Name: seen[0].Name, ToolHash: "koinon_test_not-the-stored-hash"})
+				_, err = svc.ReviewAllTools(ctx, org, actor, s.ID, twice)
+				var inv *mcpservers.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), "got %v", err)
+				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools), "nothing changed")
 
 				By("the hashes the admin saw approve those tools and delete the absent rows no admin reviewed")
 				res, err := svc.ReviewAllTools(ctx, org, actor, s.ID, seen)

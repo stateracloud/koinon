@@ -1163,7 +1163,9 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 	}
 	var out store.McpTool
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
+		// The server lock comes before the tool lock, as in SyncTools: a sync reads the rows of the server
+		// without a row lock, so an approval that did not wait for it could be written over (#1216).
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
 		}
@@ -1202,7 +1204,9 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 	}
 	var out store.McpTool
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
+		// The server lock comes before the tool lock, as in SyncTools: a sync reads the rows of the server
+		// without a row lock, so an approval that did not wait for it could be written over (#1216).
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
 		}
@@ -1278,7 +1282,7 @@ func (s *Service) ReviewAllTools(ctx context.Context, org pgtype.UUID, actor aud
 		done := map[string]bool{}
 		for _, st := range seen {
 			if done[st.Name] {
-				continue
+				return invalid("tools names %s more than once", st.Name)
 			}
 			done[st.Name] = true
 			cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: st.Name})
