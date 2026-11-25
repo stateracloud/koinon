@@ -66,7 +66,13 @@ kos:
     build: koinon-api
     repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud/koinon\" }}/api"]
     bare: true
-    base_image: gcr.io/distroless/static:nonroot
+    # Pinned by digest (#1224): a tag makes each build ask the registry, and one fault of it fails the release.
+    # The release workflow copies the pinned base to the release registry first (hack/release-base-mirror.sh, under
+    # push_retry) and sets KOINON_KOS_BASE_IMAGE to the copy, so GoReleaser does not contact gcr.io: the blobs are
+    # mounted inside ghcr.io. The default is the pinned gcr.io image, for local dry runs.
+    # hack/base-images/Dockerfile is the file Dependabot updates; hack/versions-check.sh keeps the three in step.
+    # Re-pin with: crane digest gcr.io/distroless/static:nonroot
+    base_image: "{{ envOrDefault \"KOINON_KOS_BASE_IMAGE\" \"gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5\" }}"
     platforms: [linux/amd64, linux/arm64]
     tags:
       - "{{ .Version }}"
