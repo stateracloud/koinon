@@ -69,6 +69,22 @@ var _ = Describe("Diagnose", func() {
 		Expect(d.Status).To(Equal(http.StatusTemporaryRedirect))
 	})
 
+	It("names itself with the preflight User-Agent, on both transports, and sends no credential", func() {
+		for _, tr := range []string{mcpservers.TransportStreamableHTTP, mcpservers.TransportSSE} {
+			var ua, auth string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ua, auth = r.UserAgent(), r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			DeferCleanup(srv.Close)
+			u, _ := url.Parse(srv.URL)
+			mcpservers.Diagnose(context.Background(), catalog.URLPolicy{AllowedHosts: []string{u.Host}},
+				mcpservers.PreflightRequest{URL: srv.URL + "/mcp", Transport: tr})
+			Expect(ua).To(Equal(mcpservers.PreflightUserAgent), tr)
+			Expect(auth).To(BeEmpty())
+		}
+	})
+
 	It("refuses to dial an address the policy denies", func() {
 		srv := httptest.NewServer(http.NotFoundHandler())
 		DeferCleanup(srv.Close)

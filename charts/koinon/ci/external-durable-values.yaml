@@ -11,6 +11,9 @@ postgres:
     secretName: koinon-db
 gateway:
   mode: kubernetes
+  # koinon-gateway, the default MCP driver, needs standalone mode: kubernetes mode keeps agentgateway.
+  mcp:
+    driver: agentgateway
 networkPolicy:
   enabled: false
 sandboxPolicy:

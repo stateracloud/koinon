@@ -181,11 +181,10 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
     The remote agent is disabled. The remote agent is unhealthy. The remote agent is in another
     org. The refusal text is fixed. It names no URL and no card text.
 
-    **Where it runs.** Only `internal/mcpgateway` runs the built-in target. The charts default to
-    the `agentgateway` MCP driver, and the koinon gateway does not become the default before #1132
-    closes (decision 11). So the feature works when `mcp.driver` is `koinon`. With another driver
-    the reconciler does not serve the built-in target and reports why. No default install has the
-    tools until #1132 closes.
+    **Where it runs.** Only `internal/mcpgateway` runs the built-in target. So the feature works when
+    `mcp.driver` is `koinon`. Since #1239 that is the chart default; when this ADR was written, the
+    default was the `agentgateway` MCP driver. With the `agentgateway` driver (the fallback) the
+    reconciler does not serve the built-in target and reports why.
 
     **How the gateway gets its data.** The gateway reads no database. The reconciler pushes it in
     `gateway.MCPConfig`. `MCPTarget` gets the field `Builtin` (the value `a2a`). `MCPState.validate`
@@ -260,8 +259,7 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
       still fail the check at the gateway. It cannot make an admin accept a card that the gateway
       did not see.
     - **Not in this decision.** A tool for each skill of a card needs a pin of `tools/list`
-      ([#1132](https://github.com/stateracloud/koinon/issues/1132)) first. The koinon gateway MCP
-      path does not become the default before that issue closes. This ADR does not touch
+      ([#1132](https://github.com/stateracloud/koinon/issues/1132)) first. This ADR does not touch
       `tools/list` handling.
 12. **A reply is an untrusted tool result.** The text of a remote agent (a reply or a question) is
     the result of the tool call. It has the same leg handling as the result of any other tool.
@@ -311,8 +309,8 @@ agent, a state, and a timeline of events. A message to an agent starts a direct-
   _(inferred)_
 - Negative: a built-in row in `mcp_servers` means that code which writes servers must skip it
   (decision 10). _(inferred)_
-- Negative: the tools work only with `mcp.driver: koinon`, so no default install has them until
-  #1132 closes (decision 10).
+- Negative: the tools work only with `mcp.driver: koinon` (the default since #1239), so an install
+  with the `agentgateway` fallback does not have them (decision 10).
 - Negative: the gateway builds a card fetch for each client, so a call to a new session costs one
   more request. _(inferred)_
 - Negative: the client polls. A long task costs one `GetTask` per interval.

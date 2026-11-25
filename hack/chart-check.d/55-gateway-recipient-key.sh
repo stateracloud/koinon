@@ -11,9 +11,12 @@ gkey_only=(--show-only templates/gateway-recipient-key.yaml)
 gmcp_only=(--show-only templates/gateway-koinon-mcp.yaml)
 gkeyg=templates/kek-guard.yaml
 
-# Off by default (the agentgateway MCP driver): nothing of the gateway key renders, and no login.
-lacks "no gateway key objects by default" 'gateway-recipient-key|gateway-key-admin|gwkeyadmin|gateway-key-guard'
-lacks "no gateway key logins in the cluster without the koinon MCP driver" 'koinon_gwkeyadmin|koinon_reseal'
+# On by default (the koinon MCP driver is the default since #1239). Off with the agentgateway MCP driver (the
+# fallback): nothing of the gateway key renders, and no login.
+gfb=(--set gateway.mcp.driver=agentgateway)
+has "gateway key objects by default" '^  name: koinon-gateway-key-admin$' "${gkey_only[@]}"
+lacks "no gateway key objects with the agentgateway MCP driver" 'gateway-recipient-key|gateway-key-admin|gwkeyadmin|gateway-key-guard' "${gfb[@]}"
+lacks "no gateway key logins in the cluster without the koinon MCP driver" 'koinon_gwkeyadmin|koinon_reseal' "${gfb[@]}"
 lacks "no gateway key objects with the switch off" 'gateway-key-admin|gateway-key-guard|recipient-key-dir' "${gk[@]}" \
 	--set gateway.mcp.koinon.recipientKey.enabled=false
 
@@ -143,11 +146,12 @@ grep -Fq 'custody kms' <<<"$notes_kms" || fail "NOTES report custody kms with a 
 # koinon-api seals MCP credentials to the gateway key (envelope v2) only when the koinon MCP driver is on. The
 # agentgateway driver reads plaintext files, so it keeps v1 (ADR 0097 decision 12, 12.5 step 0).
 env_is KOINON_GATEWAY_MCP_SEAL_V2 '"true"' "${gk[@]}"
-lacks "koinon-api seals v1 with the agentgateway MCP driver" 'KOINON_GATEWAY_MCP_SEAL_V2' --show-only templates/deployments.yaml
+env_is KOINON_GATEWAY_MCP_SEAL_V2 '"true"'
+lacks "koinon-api seals v1 with the agentgateway MCP driver" 'KOINON_GATEWAY_MCP_SEAL_V2' "${gfb[@]}" --show-only templates/deployments.yaml
 # The write gate counts the pods that must report the sealed format (ADR 0097 12.5 step 1, internal/formatgate).
 env_is KOINON_COMPAT_EXPECT '"api=1,reconciler=1,gateway=2"' "${gk[@]}"
 env_is KOINON_COMPAT_EXPECT '"api=3,reconciler=2,gateway=4"' "${gk[@]}" --set api.replicas=3 --set reconciler.replicas=2 --set gateway.mcp.koinon.replicas=4
-lacks "no replica expectation with the agentgateway MCP driver" 'KOINON_COMPAT_EXPECT' --show-only templates/deployments.yaml
+lacks "no replica expectation with the agentgateway MCP driver" 'KOINON_COMPAT_EXPECT' "${gfb[@]}" --show-only templates/deployments.yaml
 
 # The re-seal Job (slice 4): off by default, and it needs a rotationId.
 gres_only=(--show-only templates/gateway-reseal.yaml)

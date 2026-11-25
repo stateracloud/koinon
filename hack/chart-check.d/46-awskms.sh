@@ -6,7 +6,10 @@
 
 awskms_key=arn:aws:kms:eu-central-1:111122223333:key/0b1d2e3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5
 awskms=(--set secrets.kek.kms.backend=awskms --set secrets.kek.kms.awskms.region=eu-central-1
-	--set "secrets.kek.kms.awskms.keyId=$awskms_key")
+	--set "secrets.kek.kms.awskms.keyId=$awskms_key"
+	# These assertions are about the KEK; the gateway recipient key (on by default with the koinon MCP driver,
+	# #1239) needs an AWS KMS key of its own and has its own checks.
+	--set gateway.mcp.koinon.recipientKey.enabled=false)
 awskms_irsa=(--set secrets.kek.kms.awskms.roleArns.api=arn:aws:iam::111122223333:role/koinon-api-decrypt
 	--set secrets.kek.kms.awskms.roleArns.reconciler=arn:aws:iam::111122223333:role/koinon-reconciler-decrypt
 	--set secrets.kek.kms.awskms.roleArns.keyAdmin=arn:aws:iam::111122223333:role/koinon-key-admin-encrypt)

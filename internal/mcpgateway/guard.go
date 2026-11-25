@@ -354,16 +354,17 @@ func (AllowGuard) Inspect(context.Context, Message) Verdict { return Verdict{} }
 
 // AllowedMethods are the JSON-RPC methods the gateway forwards and accepts (ADR 0097 decision 5).
 // Any other method is refused. The two lists are the methods an agent may send to the gateway, and
-// the methods the gateway sends to a target.
+// the methods the gateway sends to a target. The prompt methods serve the readiness prompt only
+// (prompts.go).
 var (
 	// AgentMethods are the methods an agent may send to the gateway.
 	AgentMethods = []string{
-		"initialize", "ping", "tools/list", "tools/call",
+		"initialize", "ping", "tools/list", "tools/call", "prompts/list", "prompts/get",
 		"notifications/initialized", "notifications/cancelled",
 	}
 	// UpstreamRequests are the methods the gateway sends to a target.
 	UpstreamRequests = []string{
-		"initialize", "ping", "tools/list", "tools/call",
+		"initialize", "ping", "tools/list", "tools/call", "prompts/list", "prompts/get",
 		"notifications/initialized", "notifications/cancelled",
 	}
 	// UpstreamPushes are the methods a target may send to the gateway: notifications it may push

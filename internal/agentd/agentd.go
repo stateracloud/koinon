@@ -40,6 +40,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,8 +184,13 @@ type Config struct {
 	ownRetryLayer bool
 	// GatewayURL is agentgateway's base URL as sandboxes reach it, for example
 	// http://koinon-gateway.koinon.svc:8080. Harnesses get <GatewayURL>/v1 for models and
-	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
+	// <GatewayURL>/mcp for tools, unless MCPURL is set. Required; it must not carry credentials.
 	GatewayURL string
+	// MCPURL is the MCP URL harnesses get, as sandboxes reach it, for example
+	// http://koinon-mcp-gateway.koinon.svc:8080/mcp when koinon-gateway serves the agents' MCP path
+	// (gateway.mcp.driver=koinon, ADR 0097 decision 5). Empty: <GatewayURL>/mcp. It must not carry
+	// credentials. The model path stays <GatewayURL>/v1.
+	MCPURL string
 	// DefaultModel is the model of agents whose version names none, or "default", when set;
 	// otherwise the org's stored default model is used (old issue 256).
 	DefaultModel string
@@ -215,6 +221,20 @@ type Config struct {
 	Metrics *Metrics
 }
 
+// CheckSandboxURL checks a URL agentd passes to a harness as an argument: http or https with a host,
+// and no user info, query or fragment, because arguments are visible in the sandbox and must never
+// carry credentials.
+func CheckSandboxURL(name, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("agentd: %s must be an http or https URL, got %q", name, raw)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("agentd: %s must not carry user info, a query or a fragment", name)
+	}
+	return nil
+}
+
 func (c *Config) defaults() error {
 	if c.OwnerID == "" {
 		return errors.New("agentd: OwnerID is required")
@@ -222,13 +242,13 @@ func (c *Config) defaults() error {
 	if c.GatewayURL == "" {
 		return errors.New("agentd: GatewayURL is required")
 	}
-	u, err := url.Parse(c.GatewayURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("agentd: GatewayURL must be an http or https URL, got %q", c.GatewayURL)
+	if err := CheckSandboxURL("GatewayURL", c.GatewayURL); err != nil {
+		return err
 	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		// Arguments are visible in the sandbox: never put credentials there.
-		return errors.New("agentd: GatewayURL must not carry user info, a query or a fragment")
+	if c.MCPURL == "" {
+		c.MCPURL = strings.TrimSuffix(c.GatewayURL, "/") + "/mcp"
+	} else if err := CheckSandboxURL("MCPURL", c.MCPURL); err != nil {
+		return err
 	}
 	setDefault(&c.Workers, 8)
 	setDefault(&c.Lease, 30*time.Second)

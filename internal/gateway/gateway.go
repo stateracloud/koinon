@@ -272,9 +272,12 @@ func IsSystemAgent(a AgentRef) bool { return a.Name == ModelCheckAgentName }
 // authenticated key list and get it.
 const ReadyPrompt = "koinon-ready"
 
-// ReadyPromptExposed is the prompt as agents see it: agentgateway prefixes every prompt and tool with
-// the name of its target (prefixMode always), and Koinon's MCP server is the "github" target.
-const ReadyPromptExposed = "github_" + ReadyPrompt
+// ReadyTarget is the platform MCP target that publishes ReadyPrompt: Koinon's MCP server.
+const ReadyTarget = "github"
+
+// ReadyPromptExposed is the prompt as agents see it: both drivers prefix every prompt and tool with
+// the name of its target (agentgateway's prefixMode always), and Koinon's MCP server is ReadyTarget.
+const ReadyPromptExposed = ReadyTarget + "_" + ReadyPrompt
 
 // KoinonTarget is the MCP target of Koinon's own agent tools (ask_user, plan item TK3), offered to
 // every active agent; the agent sees "koinon_ask_user". The tool server is koinon-api's.

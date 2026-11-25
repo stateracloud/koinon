@@ -40,20 +40,22 @@ done
 has "the hook ensures the gateway session key" 'aes256-key' --show-only templates/ensure-secrets.yaml
 has "the gateway reads SESSION_KEY from the generated Secret" 'name: SESSION_KEY' --show-only templates/gateway-standalone.yaml
 has "SESSION_KEY comes from the Secret's key" 'name: koinon-gateway-session-key$' --show-only templates/gateway-standalone.yaml
-lacks "the hook leaves the session key out in kubernetes mode" 'gateway-session-key' --set gateway.mode=kubernetes --show-only templates/ensure-secrets.yaml
-lacks "no SESSION_KEY in kubernetes mode" 'SESSION_KEY' --set gateway.mode=kubernetes
+lacks "the hook leaves the session key out in kubernetes mode" 'gateway-session-key' --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --show-only templates/ensure-secrets.yaml
+lacks "no SESSION_KEY in kubernetes mode" 'SESSION_KEY' --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway
 has "an existing session key Secret is referenced" 'name: mine-session$' --set gateway.standalone.sessionKey.existingSecret=mine-session --show-only templates/gateway-standalone.yaml
 lacks "an existing session key Secret is not ensured" 'gateway-session-key' --set gateway.standalone.sessionKey.existingSecret=mine-session --show-only templates/ensure-secrets.yaml
 # (d) With every Secret supplied there is no hook Job, and the given names are referenced.
 own=(--set gateway.standalone.sessionKey.existingSecret=mine-session --set bootstrapAdmin.existingSecret=mine-admin
 	--set api.otlpToken.existingSecret=mine-otlp --set api.otlpTracesToken.existingSecret=mine-otlp-traces
 	--set installMark.existingSecret=mine-mark --set postgres.cnpg.existingSecrets.migrate=mine-migrate --set postgres.cnpg.existingSecrets.api=mine-api
-	--set postgres.cnpg.existingSecrets.reconciler=mine-reconciler --set postgres.cnpg.existingSecrets.agentd=mine-agentd)
+	--set postgres.cnpg.existingSecrets.reconciler=mine-reconciler --set postgres.cnpg.existingSecrets.agentd=mine-agentd
+	--set postgres.cnpg.existingSecrets.mcpgateway=mine-mcpgateway --set postgres.cnpg.existingSecrets.gwkeyadmin=mine-gwkeyadmin
+	--set postgres.cnpg.existingSecrets.reseal=mine-reseal)
 if render "${own[@]}" --show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
 	fail "the ensure-secrets hook renders although every Secret is supplied"
 fi
 lacks "no ensure-secrets Job with existing Secrets" 'ensure-secrets' "${own[@]}"
-for name in mine-migrate mine-api mine-reconciler mine-agentd; do
+for name in mine-migrate mine-api mine-reconciler mine-agentd mine-mcpgateway mine-gwkeyadmin; do
 	has "$name is referenced" "name: $name\$" "${own[@]}"
 done
 lacks "the generated role Secret names are unused with existing Secrets" 'koinon-db-' "${own[@]}"
@@ -102,6 +104,8 @@ deployment() {
 }
 for mode in standalone kubernetes; do
 	m=(--set gateway.mode=$mode)
+	# Kubernetes mode needs the agentgateway MCP driver (#1239).
+	[ "$mode" = standalone ] || m+=(--set gateway.mcp.driver=agentgateway)
 	api=$(deployment api "${m[@]}")
 	agentd=$(deployment agentd "${m[@]}")
 	[ -n "$api" ] && [ -n "$agentd" ] || fail "could not pick the koinon-api and koinon-agentd Deployments in $mode mode"

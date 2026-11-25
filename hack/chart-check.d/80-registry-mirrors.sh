@@ -15,14 +15,16 @@ agw=ghcr.io/agentgateway/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d
 pg=ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
 # (a) nothing set: every reference is the upstream one, unchanged.
 want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.7 ghcr.io/stateracloud/koinon/sandbox:0.0.0 \
-	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 | sort -u)
+	ghcr.io/stateracloud/koinon/agentd:0.0.0 ghcr.io/stateracloud/koinon/api:0.0.0 ghcr.io/stateracloud/koinon/reconciler:0.0.0 \
+	ghcr.io/stateracloud/koinon/gateway:0.0.0 | sort -u)
 [[ $(image_refs) == "$want" ]] || fail "default image references changed: $(image_refs | tr '\n' ' ')"
 # The public repository's packages (#167): none of the old private-repository names may come back.
 image_refs | hit -E -- 'stateracloud/(koinon-|flavor-opencode)' && fail "an old package name is rendered: $(image_refs | tr '\n' ' ')"
 # (b) imageRegistry replaces every host and keeps path, tag and digest.
 want=$(printf '%s\n' "art.example.com/proxy/${agw#ghcr.io/}" "art.example.com/proxy/${pg#ghcr.io/}" art.example.com/proxy/nvidia/openshell/supervisor:0.1.7 \
 	art.example.com/proxy/stateracloud/koinon/sandbox:0.0.0 art.example.com/proxy/stateracloud/koinon/agentd:0.0.0 \
-	art.example.com/proxy/stateracloud/koinon/api:0.0.0 art.example.com/proxy/stateracloud/koinon/reconciler:0.0.0 | sort -u)
+	art.example.com/proxy/stateracloud/koinon/api:0.0.0 art.example.com/proxy/stateracloud/koinon/reconciler:0.0.0 \
+	art.example.com/proxy/stateracloud/koinon/gateway:0.0.0 | sort -u)
 [[ $(image_refs --set global.imageRegistry=art.example.com/proxy) == "$want" ]] ||
 	fail "global.imageRegistry did not rewrite every image: $(image_refs --set global.imageRegistry=art.example.com/proxy | tr '\n' ' ')"
 # (c) the map wins for its host; imageRegistry rewrites the others (the CNPG image is on another upstream here).
@@ -77,10 +79,11 @@ pull_args=(--set 'global.imagePullSecrets[0]=regcred' --set 'global.imagePullSec
 rendered=$(render "${pull_args[@]}")
 pods=$(grep -cE '^ *(containers|initContainers):' <<<"$rendered" || true)
 withsecrets=$(grep -cE '^ +imagePullSecrets:$' <<<"$rendered" || true)
-# Deployments (api, reconciler, agentd, gateway), the migrate, migrate-grants (cnpg mode, ADR 0100),
-# ensure-secrets, preflight and restore-release-check Jobs: 9 pod specs; the CNPG Cluster has its own imagePullSecrets (spec level).
-[[ $withsecrets == 10 ]] || fail "imagePullSecrets on $withsecrets objects, want 10 (9 pod specs and the CNPG Cluster); pod specs: $pods"
-[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 10 ]] || fail "regcred must appear once per object, de-duplicated within the list"
+# Deployments (api, reconciler, agentd, gateway, mcp-gateway), the migrate, migrate-grants (cnpg mode, ADR 0100),
+# ensure-secrets, preflight, restore-release-check and gateway key Jobs: 11 pod specs; the CNPG Cluster has its own
+# imagePullSecrets (spec level).
+[[ $withsecrets == 12 ]] || fail "imagePullSecrets on $withsecrets objects, want 12 (11 pod specs and the CNPG Cluster); pod specs: $pods"
+[[ $(grep -c -- '- name: regcred$' <<<"$rendered") == 12 ]] || fail "regcred must appear once per object, de-duplicated within the list"
 has "pull secrets reach the preflight probe pods" '--probe-image-pull-secrets=regcred,other$' "${pull_args[@]}"
 # The removed top-level list fails the render and names the replacement (issue 1024); it is not silently ignored.
 if res=$(render --set 'imagePullSecrets[0].name=old' 2>&1); then fail "the removed top-level imagePullSecrets must fail the render"

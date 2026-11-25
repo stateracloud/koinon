@@ -5,6 +5,9 @@ openshell:
   insecure: true
 gateway:
   mode: kubernetes
+  # koinon-gateway, the default MCP driver, needs standalone mode: kubernetes mode keeps agentgateway.
+  mcp:
+    driver: agentgateway
 postgres:
   cnpg:
     instances: 3

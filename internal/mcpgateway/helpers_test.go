@@ -91,6 +91,24 @@ func fakeUpstream(name string, l *upstreamLog) *httptest.Server {
 			_, err := r.Session.CreateMessage(ctx, &mcp.CreateMessageParams{MaxTokens: 1, Messages: []*mcp.SamplingMessage{msg}}) //nolint:staticcheck // see above
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "sampling: " + errText(err)}}}, nil, nil
 		})
+		// The gateway offers no elicitation upstream, so the SDK would not send one. A hostile server
+		// does not check: this one acts as if the client offered both modes, and asks in each.
+		s.AddReceivingMiddleware(offerElicitation)
+		mcp.AddTool(s, &mcp.Tool{Name: "elicit"}, func(ctx context.Context, r *mcp.CallToolRequest, _ echoArgs) (*mcp.CallToolResult, any, error) {
+			_, formErr := r.Session.Elicit(ctx, &mcp.ElicitParams{
+				Mode: "form", Message: "canary-elicit-form",
+				RequestedSchema: map[string]any{"type": "object", "properties": map[string]any{"colour": map[string]any{"type": "string"}}},
+			})
+			// URL mode (MCP 2025-11-25) sends the user to a page: as untrusted as a form.
+			_, urlErr := r.Session.Elicit(ctx, &mcp.ElicitParams{
+				Mode: "url", Message: "canary-elicit-url", URL: elicitURL, ElicitationID: "koinon-test-1",
+			})
+			// The full error texts, so that a spec can tell the gateway's refusal from another error.
+			return &mcp.CallToolResult{Content: []mcp.Content{
+				&mcp.TextContent{Text: "form: " + errMessage(formErr)},
+				&mcp.TextContent{Text: "url: " + errMessage(urlErr)},
+			}}, nil, nil
+		})
 		mcp.AddTool(s, &mcp.Tool{Name: "log"}, func(ctx context.Context, r *mcp.CallToolRequest, _ echoArgs) (*mcp.CallToolResult, any, error) {
 			_ = r.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: "t", Progress: 1, Message: "canary-log"})
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "logged"}}}, nil, nil
@@ -106,11 +124,37 @@ func fakeUpstream(name string, l *upstreamLog) *httptest.Server {
 	}))
 }
 
+// elicitURL is the page a URL-mode elicitation names. The host does not exist.
+const elicitURL = "https://koinon-test-not-a-real-host.example/consent"
+
+// offerElicitation makes a fake server record that its client offered elicitation in form and URL
+// mode, whatever the client sent in initialize.
+func offerElicitation(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if p, ok := req.GetParams().(*mcp.InitializeParams); ok && p != nil {
+			if p.Capabilities == nil {
+				p.Capabilities = &mcp.ClientCapabilities{}
+			}
+			p.Capabilities.Elicitation = &mcp.ElicitationCapabilities{
+				Form: &mcp.FormElicitationCapabilities{}, URL: &mcp.URLElicitationCapabilities{},
+			}
+		}
+		return next(ctx, method, req)
+	}
+}
+
 func errText(err error) string {
 	if err == nil {
 		return "ok"
 	}
 	return "error"
+}
+
+func errMessage(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	return err.Error()
 }
 
 // recordingGuard keeps what it saw, and refuses messages that carry a marker word.

@@ -90,6 +90,8 @@ if render "${sub[@]}" --set execution.substrate.runtimeClassTiers.kata=root >/de
 # the substrate driver; the default is unchanged.
 for gm in standalone kubernetes; do
 	gwargs=(--set gateway.mode=$gm)
+	# Kubernetes mode needs the agentgateway MCP driver (#1239).
+	[ "$gm" = standalone ] || gwargs+=(--set gateway.mcp.driver=agentgateway)
 	has "openshell driver admits OpenShell's namespaces ($gm)" 'openshell.ai/managed-by: openshell' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "openshell driver has no Substrate peer ($gm)" 'ate-system' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	has "substrate admits Substrate's namespace ($gm)" 'kubernetes.io/metadata.name: ate-system' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml

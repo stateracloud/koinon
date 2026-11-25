@@ -7,7 +7,7 @@
 # koinon-api serves the guard on its own port and Service; the reconciler renders that Service's
 # address into every org MCP route's mcpGuardrails (failClosed). Without the address the gateway
 # refuses every org MCP call, so the chart must always pass it.
-k8s=(--set gateway.mode=kubernetes)
+k8s=(--set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway)
 has "koinon-api serves the leak guard" '"--guard-addr", ":8083"' --show-only templates/deployments.yaml
 has "koinon-api passes the byte threshold" '"--leak-guard-byte-cap", "16384"' --show-only templates/deployments.yaml
 has "api.leakGuardByteCap is used" '"--leak-guard-byte-cap", "4096"' --set api.leakGuardByteCap=4096 --show-only templates/deployments.yaml
@@ -29,7 +29,7 @@ from=$(guard_from)
 grep -q 'app.kubernetes.io/component: gateway$' <<<"$from" || fail "the guard port admits the standalone gateway"
 from=$(guard_from "${k8s[@]}")
 grep -q 'gateway.networking.k8s.io/gateway-name: koinon-gateway$' <<<"$from" || fail "the guard port admits the controller's proxy (gateway.mode=kubernetes)"
-for args in "" "gateway.mode=kubernetes"; do
+for args in "" "gateway.mode=kubernetes,gateway.mcp.driver=agentgateway"; do
 	from=$(guard_from ${args:+--set "$args"})
 	n=$(grep -c -- '- podSelector:' <<<"$from" || true)
 	[ "$n" = 1 ] || fail "the guard port admits $n pod selectors with '$args', want the gateway's only"

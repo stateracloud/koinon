@@ -44,13 +44,10 @@ for f in "${value_files[@]}"; do
 		for absent in '--openshell-address' '--runtime-class=' '--agent-sandbox-' 'sandboxes.agents.x-k8s.io' 'runtimeclasses' 'configmaps' 'openshell-tls'; do
 			if grep -qF -- "$absent" <<<"$rendered"; then echo "$name: Substrate preflight hook has OpenShell '$absent'" >&2; exit 1; fi
 		done
-		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment. Only a values
-		# file that allows kubernetes mode (the MCP gateway values need standalone) can show it.
-		if [[ $name == substrate-values ]]; then
-			kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --show-only templates/preflight.yaml)
-			grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
-				{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
-		fi
+		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment.
+		kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --show-only templates/preflight.yaml)
+		grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
+			{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
 	elif [[ $name != values && $name != openshell-values ]]; then
 		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
